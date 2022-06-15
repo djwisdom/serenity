@@ -57,7 +57,7 @@ ThrowCompletionOr<PlainYearMonth*> to_temporal_year_month(GlobalObject& global_o
         auto field_names = TRY(calendar_fields(global_object, *calendar, { "month"sv, "monthCode"sv, "year"sv }));
 
         // d. Let fields be ? PrepareTemporalFields(item, fieldNames, «»).
-        auto* fields = TRY(prepare_temporal_fields(global_object, item_object, field_names, {}));
+        auto* fields = TRY(prepare_temporal_fields(global_object, item_object, field_names, Vector<StringView> {}));
 
         // e. Return ? CalendarYearMonthFromFields(calendar, fields, options).
         return calendar_year_month_from_fields(global_object, *calendar, *fields, options);
@@ -103,27 +103,30 @@ ThrowCompletionOr<ISOYearMonth> regulate_iso_year_month(GlobalObject& global_obj
         if (!AK::is_within_range<i32>(year))
             return vm.throw_completion<RangeError>(global_object, ErrorType::TemporalInvalidPlainYearMonth);
 
-        // a. Return ! ConstrainISOYearMonth(year, month).
-        return constrain_iso_year_month(year, month);
-    }
+        // a. Set month to the result of clamping month between 1 and 12.
+        month = clamp(month, 1, 12);
 
-    // 4. If overflow is "reject", then
-    if (overflow == "reject"sv) {
+        // b. Return the Record { [[Year]]: year, [[Month]]: month }.
+        return ISOYearMonth { .year = static_cast<i32>(year), .month = static_cast<u8>(month), .reference_iso_day = 0 };
+    }
+    // 4. Else,
+    else {
+        // a. Assert: overflow is "reject".
+        VERIFY(overflow == "reject"sv);
+
         // IMPLEMENTATION DEFINED: This is an optimization that allows us to treat these doubles as normal integers from this point onwards.
         // This does not change the exposed behavior as the call to IsValidISOMonth and subsequent call to CreateTemporalDateTime will check
         // that these values are valid ISO values (for years: -273975 - 273975, for months: 1 - 12) all of which are subsets of this check.
         if (!AK::is_within_range<i32>(year) || !AK::is_within_range<u8>(month))
             return vm.throw_completion<RangeError>(global_object, ErrorType::TemporalInvalidPlainYearMonth);
 
-        // a. If ! IsValidISOMonth(month) is false, throw a RangeError exception.
+        // b. If ! IsValidISOMonth(month) is false, throw a RangeError exception.
         if (!is_valid_iso_month(month))
             return vm.throw_completion<RangeError>(global_object, ErrorType::TemporalInvalidPlainYearMonth);
 
-        // b. Return the Record { [[Year]]: year, [[Month]]: month }.
+        // c. Return the Record { [[Year]]: year, [[Month]]: month }.
         return ISOYearMonth { .year = static_cast<i32>(year), .month = static_cast<u8>(month), .reference_iso_day = 0 };
     }
-
-    VERIFY_NOT_REACHED();
 }
 
 // 9.5.3 IsValidISOMonth ( month ), https://tc39.es/proposal-temporal/#sec-temporal-isvalidisomonth
@@ -176,28 +179,14 @@ ISOYearMonth balance_iso_year_month(double year, double month)
     // 2. Set year to year + floor((month - 1) / 12).
     year += floor((month - 1) / 12);
 
-    // 3. Set month to (month - 1) modulo 12 + 1.
+    // 3. Set month to ((month - 1) modulo 12) + 1.
     month = modulo(month - 1, 12) + 1;
 
     // 4. Return the Record { [[Year]]: year, [[Month]]: month }.
     return ISOYearMonth { .year = static_cast<i32>(year), .month = static_cast<u8>(month), .reference_iso_day = 0 };
 }
 
-// 9.5.6 ConstrainISOYearMonth ( year, month ), https://tc39.es/proposal-temporal/#sec-temporal-constrainisoyearmonth
-ISOYearMonth constrain_iso_year_month(double year, double month)
-{
-    // 1. Assert: year and month are integers.
-    VERIFY(year == trunc(year) && month == trunc(month));
-
-    // 2. Set month to the result of clamping month between 1 and 12.
-    month = clamp(month, 1, 12);
-
-    // 3. Return the Record { [[Year]]: year, [[Month]]: month }.
-    // NOTE: `year` is known to be in the i32 range.
-    return ISOYearMonth { .year = static_cast<i32>(year), .month = static_cast<u8>(month), .reference_iso_day = 0 };
-}
-
-// 9.5.7 CreateTemporalYearMonth ( isoYear, isoMonth, calendar, referenceISODay [ , newTarget ] ), https://tc39.es/proposal-temporal/#sec-temporal-createtemporalyearmonth
+// 9.5.6 CreateTemporalYearMonth ( isoYear, isoMonth, calendar, referenceISODay [ , newTarget ] ), https://tc39.es/proposal-temporal/#sec-temporal-createtemporalyearmonth
 ThrowCompletionOr<PlainYearMonth*> create_temporal_year_month(GlobalObject& global_object, i32 iso_year, u8 iso_month, Object& calendar, u8 reference_iso_day, FunctionObject const* new_target)
 {
     auto& vm = global_object.vm();
@@ -228,7 +217,7 @@ ThrowCompletionOr<PlainYearMonth*> create_temporal_year_month(GlobalObject& glob
     return object;
 }
 
-// 9.5.8 TemporalYearMonthToString ( yearMonth, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-temporalyearmonthtostring
+// 9.5.7 TemporalYearMonthToString ( yearMonth, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-temporalyearmonthtostring
 ThrowCompletionOr<String> temporal_year_month_to_string(GlobalObject& global_object, PlainYearMonth& year_month, StringView show_calendar)
 {
     // 1. Assert: Type(yearMonth) is Object.
@@ -257,7 +246,7 @@ ThrowCompletionOr<String> temporal_year_month_to_string(GlobalObject& global_obj
     return String::formatted("{}{}", result, calendar_string);
 }
 
-// 9.5.9 DifferenceTemporalPlainYearMonth ( operation, yearMonth, other, options ), https://tc39.es/proposal-temporal/#sec-temporal-differencetemporalplainyearmonth
+// 9.5.8 DifferenceTemporalPlainYearMonth ( operation, yearMonth, other, options ), https://tc39.es/proposal-temporal/#sec-temporal-differencetemporalplainyearmonth
 ThrowCompletionOr<Duration*> difference_temporal_plain_year_month(GlobalObject& global_object, DifferenceOperation operation, PlainYearMonth& year_month, Value other_value, Value options_value)
 {
     auto& vm = global_object.vm();
@@ -316,7 +305,7 @@ ThrowCompletionOr<Duration*> difference_temporal_plain_year_month(GlobalObject& 
     auto field_names = TRY(calendar_fields(global_object, calendar, { "monthCode"sv, "year"sv }));
 
     // 16. Let otherFields be ? PrepareTemporalFields(other, fieldNames, «»).
-    auto* other_fields = TRY(prepare_temporal_fields(global_object, *other, field_names, {}));
+    auto* other_fields = TRY(prepare_temporal_fields(global_object, *other, field_names, Vector<StringView> {}));
 
     // 17. Perform ! CreateDataPropertyOrThrow(otherFields, "day", 1𝔽).
     MUST(other_fields->create_data_property_or_throw(vm.names.day, Value(1)));
@@ -325,7 +314,7 @@ ThrowCompletionOr<Duration*> difference_temporal_plain_year_month(GlobalObject& 
     auto* other_date = TRY(calendar_date_from_fields(global_object, calendar, *other_fields));
 
     // 19. Let thisFields be ? PrepareTemporalFields(yearMonth, fieldNames, «»).
-    auto* this_fields = TRY(prepare_temporal_fields(global_object, year_month, field_names, {}));
+    auto* this_fields = TRY(prepare_temporal_fields(global_object, year_month, field_names, Vector<StringView> {}));
 
     // 20. Perform ! CreateDataPropertyOrThrow(thisFields, "day", 1𝔽).
     MUST(this_fields->create_data_property_or_throw(vm.names.day, Value(1)));
@@ -334,7 +323,7 @@ ThrowCompletionOr<Duration*> difference_temporal_plain_year_month(GlobalObject& 
     auto* this_date = TRY(calendar_date_from_fields(global_object, calendar, *this_fields));
 
     // 22. Let untilOptions be ? MergeLargestUnitOption(options, largestUnit).
-    auto* until_options = TRY(merge_largest_unit_option(global_object, options, *largest_unit));
+    auto* until_options = TRY(merge_largest_unit_option(global_object, *options, *largest_unit));
 
     // 23. Let result be ? CalendarDateUntil(calendar, thisDate, otherDate, untilOptions).
     auto* duration = TRY(calendar_date_until(global_object, calendar, this_date, other_date, *until_options));
@@ -351,7 +340,7 @@ ThrowCompletionOr<Duration*> difference_temporal_plain_year_month(GlobalObject& 
     return MUST(create_temporal_duration(global_object, sign * result.years, sign * result.months, 0, 0, 0, 0, 0, 0, 0, 0));
 }
 
-// 9.5.10 AddDurationToOrSubtractDurationFromPlainYearMonth ( operation, yearMonth, temporalDurationLike, options ), https://tc39.es/proposal-temporal/#sec-temporal-addtemporalplainyearmonth
+// 9.5.9 AddDurationToOrSubtractDurationFromPlainYearMonth ( operation, yearMonth, temporalDurationLike, options ), https://tc39.es/proposal-temporal/#sec-temporal-addtemporalplainyearmonth
 ThrowCompletionOr<PlainYearMonth*> add_duration_to_or_subtract_duration_from_plain_year_month(GlobalObject& global_object, ArithmeticOperation operation, PlainYearMonth& year_month, Value temporal_duration_like, Value options_value)
 {
     auto& vm = global_object.vm();
@@ -384,7 +373,7 @@ ThrowCompletionOr<PlainYearMonth*> add_duration_to_or_subtract_duration_from_pla
     auto field_names = TRY(calendar_fields(global_object, calendar, { "monthCode"sv, "year"sv }));
 
     // 7. Let fields be ? PrepareTemporalFields(yearMonth, fieldNames, «»).
-    auto* fields = TRY(prepare_temporal_fields(global_object, year_month, field_names, {}));
+    auto* fields = TRY(prepare_temporal_fields(global_object, year_month, field_names, Vector<StringView> {}));
 
     // 8. Set sign to ! DurationSign(duration.[[Years]], duration.[[Months]], duration.[[Weeks]], balanceResult.[[Days]], 0, 0, 0, 0, 0, 0).
     auto sign = duration_sign(duration.years, duration.months, duration.weeks, balance_result.days, 0, 0, 0, 0, 0, 0);
@@ -420,12 +409,12 @@ ThrowCompletionOr<PlainYearMonth*> add_duration_to_or_subtract_duration_from_pla
     // 15. Let entries be ? EnumerableOwnPropertyNames(options, key+value).
     auto entries = TRY(options->enumerable_own_property_names(Object::PropertyKind::KeyAndValue));
 
-    // 16. For each element nextEntry of entries, do
-    for (auto& next_entry : entries) {
-        auto key = MUST(next_entry.as_array().get_without_side_effects(0).to_property_key(global_object));
-        auto value = next_entry.as_array().get_without_side_effects(1);
+    // 16. For each element entry of entries, do
+    for (auto& entry : entries) {
+        auto key = MUST(entry.as_array().get_without_side_effects(0).to_property_key(global_object));
+        auto value = entry.as_array().get_without_side_effects(1);
 
-        // a. Perform ! CreateDataPropertyOrThrow(optionsCopy, nextEntry[0], nextEntry[1]).
+        // a. Perform ! CreateDataPropertyOrThrow(optionsCopy, entry[0], entry[1]).
         MUST(options_copy->create_data_property_or_throw(key, value));
     }
 
@@ -433,7 +422,7 @@ ThrowCompletionOr<PlainYearMonth*> add_duration_to_or_subtract_duration_from_pla
     auto* added_date = TRY(calendar_date_add(global_object, calendar, date, *duration_to_add, options));
 
     // 18. Let addedDateFields be ? PrepareTemporalFields(addedDate, fieldNames, «»).
-    auto* added_date_fields = TRY(prepare_temporal_fields(global_object, *added_date, field_names, {}));
+    auto* added_date_fields = TRY(prepare_temporal_fields(global_object, *added_date, field_names, Vector<StringView> {}));
 
     // 19. Return ? CalendarYearMonthFromFields(calendar, addedDateFields, optionsCopy).
     return calendar_year_month_from_fields(global_object, calendar, *added_date_fields, options_copy);
