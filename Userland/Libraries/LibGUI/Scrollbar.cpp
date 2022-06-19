@@ -276,7 +276,11 @@ void Scrollbar::on_automatic_scrolling_timer_fired()
         }
         return;
     }
-    m_gutter_click_state = GutterClickState::NotPressed;
+    if (m_gutter_click_state != GutterClickState::NotPressed) {
+        m_gutter_click_state = GutterClickState::NotPressed;
+        update();
+        return;
+    }
 }
 
 void Scrollbar::mousedown_event(MouseEvent& event)
@@ -303,7 +307,7 @@ void Scrollbar::mousedown_event(MouseEvent& event)
     if (event.shift()) {
         scroll_to_position(event.position());
         m_pressed_component = component_at_position(event.position());
-        VERIFY(m_pressed_component == Component::Scrubber);
+        return;
     }
     if (m_pressed_component == Component::Scrubber) {
         m_scrub_start_value = value();

@@ -28,15 +28,9 @@ enable_ccache() {
     if [ "${USE_CCACHE:-true}" = "true" ] && command -v ccache &>/dev/null; then
         ccache_tooldir="${SERENITY_BUILD_DIR}/ccache"
         mkdir -p "$ccache_tooldir"
-        if [ "$SERENITY_TOOLCHAIN" = "Clang" ]; then
-            for tool in clang clang++; do
-                ln -sf "$(command -v ccache)" "${ccache_tooldir}/$tool"
-            done
-        else
-            for tool in gcc g++ c++; do
-                ln -sf "$(command -v ccache)" "${ccache_tooldir}/${SERENITY_ARCH}-pc-serenity-${tool}"
-            done
-        fi
+        for tool in cc clang gcc c++ clang++ g++; do
+            ln -sf "$(command -v ccache)" "${ccache_tooldir}/${SERENITY_ARCH}-pc-serenity-${tool}"
+        done
         export PATH="${ccache_tooldir}:$PATH"
     fi
 }
@@ -52,6 +46,7 @@ host_env() {
     export READELF="${HOST_READELF}"
     export OBJCOPY="${HOST_OBJCOPY}"
     export STRIP="${HOST_STRIP}"
+    export CXXFILT="${HOST_CXXFILT}"
     export PKG_CONFIG_DIR="${HOST_PKG_CONFIG_DIR}"
     export PKG_CONFIG_SYSROOT_DIR="${HOST_PKG_CONFIG_SYSROOT_DIR}"
     export PKG_CONFIG_LIBDIR="${HOST_PKG_CONFIG_LIBDIR}"
@@ -727,6 +722,7 @@ do_dev() {
         pushd "$git_repo"
         if [ ! -d "$git_repo/.git" ]; then
             git init .
+            git config core.autocrlf false
             git add --all --force
             git commit -a -m 'Initial import'
         fi
@@ -809,14 +805,14 @@ do_dev() {
     )
 
     [ -d "$git_repo" ] && [ ! -d "$workdir" ] && {
-        git clone "$git_repo" "$workdir"
+        git clone --config core.autocrlf=false "$git_repo" "$workdir"
     }
 
     [ -d "$workdir/.git" ] || {
         >&2 echo "$workdir does not appear to be a git repository, if you did this manually, you're on your own"
         if prompt_yes_no "Otherwise, press 'y' to remove that directory and clone it again"; then
             rm -fr "$workdir"
-            git clone "$git_repo" "$workdir"
+            git clone --config core.autocrlf=false "$git_repo" "$workdir"
         else
             exit 1
         fi

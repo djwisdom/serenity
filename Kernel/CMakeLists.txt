@@ -26,8 +26,6 @@ set(KERNEL_SOURCES
     Bus/PCI/API.cpp
     Bus/PCI/Device.cpp
     Bus/PCI/Initializer.cpp
-    Bus/PCI/SysFSPCI.cpp
-    Bus/USB/SysFSUSB.cpp
     Bus/USB/UHCI/UHCIController.cpp
     Bus/USB/UHCI/UHCIRootHub.cpp
     Bus/USB/USBConfiguration.cpp
@@ -144,16 +142,30 @@ set(KERNEL_SOURCES
     FileSystem/Plan9FileSystem.cpp
     FileSystem/ProcFS.cpp
     FileSystem/SysFS.cpp
-    FileSystem/SysFSComponent.cpp
+    FileSystem/SysFS/Component.cpp
+    FileSystem/SysFS/Registry.cpp
+    FileSystem/SysFS/RootDirectory.cpp
+    FileSystem/SysFS/Subsystems/Bus/PCI/BusDirectory.cpp
+    FileSystem/SysFS/Subsystems/Bus/PCI/DeviceAttribute.cpp
+    FileSystem/SysFS/Subsystems/Bus/PCI/DeviceDirectory.cpp
+    FileSystem/SysFS/Subsystems/Bus/USB/BusDirectory.cpp
+    FileSystem/SysFS/Subsystems/Bus/USB/DeviceInformation.cpp
+    FileSystem/SysFS/Subsystems/Bus/Directory.cpp
+    FileSystem/SysFS/Subsystems/Devices/BlockDevicesDirectory.cpp
+    FileSystem/SysFS/Subsystems/Devices/CharacterDevicesDirectory.cpp
+    FileSystem/SysFS/Subsystems/Devices/DeviceComponent.cpp
+    FileSystem/SysFS/Subsystems/Devices/Directory.cpp
+    FileSystem/SysFS/Subsystems/Firmware/BIOS/Component.cpp
+    FileSystem/SysFS/Subsystems/Firmware/BIOS/Directory.cpp
+    FileSystem/SysFS/Subsystems/Firmware/Directory.cpp
+    FileSystem/SysFS/Subsystems/Firmware/PowerStateSwitch.cpp
     FileSystem/TmpFS.cpp
     FileSystem/VirtualFileSystem.cpp
+    Firmware/BIOS.cpp
     Firmware/ACPI/Initialize.cpp
     Firmware/ACPI/Parser.cpp
     Firmware/Hypervisor/VMWareBackdoor.cpp
     Firmware/MultiProcessor/Parser.cpp
-    Firmware/BIOS.cpp
-    Firmware/PowerStateSwitch.cpp
-    Firmware/SysFSFirmware.cpp
     FutexQueue.cpp
     Interrupts/APIC.cpp
     Interrupts/GenericInterruptHandler.cpp

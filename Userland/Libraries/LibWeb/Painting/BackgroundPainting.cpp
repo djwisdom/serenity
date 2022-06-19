@@ -154,10 +154,10 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
             // where round() is a function that returns the nearest natural number
             // (integer greater than zero).
             if (layer.repeat_x == CSS::Repeat::Round) {
-                image_rect.set_width(background_positioning_area.width() / background_positioning_area.width() / image_rect.width());
+                image_rect.set_width(background_positioning_area.width() / roundf(background_positioning_area.width() / image_rect.width()));
             }
             if (layer.repeat_y == CSS::Repeat::Round) {
-                image_rect.set_height(background_positioning_area.height() / background_positioning_area.height() / image_rect.height());
+                image_rect.set_height(background_positioning_area.height() / roundf(background_positioning_area.height() / image_rect.height()));
             }
 
             // If background-repeat is round for one dimension only and if background-size is auto
@@ -261,13 +261,18 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
 
         float initial_image_x = image_rect.x();
         float image_y = image_rect.y();
+        Optional<Gfx::IntRect> last_int_image_rect;
+
         while (image_y < clip_rect.bottom()) {
             image_rect.set_y(image_y);
 
             float image_x = initial_image_x;
             while (image_x < clip_rect.right()) {
                 image_rect.set_x(image_x);
-                painter.draw_scaled_bitmap(image_rect.to_rounded<int>(), image, image.rect(), 1.0f, Gfx::Painter::ScalingMode::BilinearBlend);
+                auto int_image_rect = image_rect.to_rounded<int>();
+                if (int_image_rect != last_int_image_rect)
+                    painter.draw_scaled_bitmap(int_image_rect, image, image.rect(), 1.0f, Gfx::Painter::ScalingMode::BilinearBlend);
+                last_int_image_rect = int_image_rect;
                 if (!repeat_x)
                     break;
                 image_x += x_step;
