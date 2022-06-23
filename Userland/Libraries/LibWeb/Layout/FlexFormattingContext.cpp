@@ -14,6 +14,7 @@
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/FlexFormattingContext.h>
 #include <LibWeb/Layout/InitialContainingBlock.h>
+#include <LibWeb/Layout/ReplacedBox.h>
 #include <LibWeb/Layout/TextNode.h>
 
 namespace Web::Layout {
@@ -70,6 +71,10 @@ void FlexFormattingContext::run(Box const& run_box, LayoutMode layout_mode)
 
     // 3. Determine the flex base size and hypothetical main size of each item
     for (auto& flex_item : m_flex_items) {
+        if (flex_item.box.is_replaced_box()) {
+            // FIXME: Get rid of prepare_for_replaced_layout() and make replaced elements figure out their intrinsic size lazily.
+            static_cast<ReplacedBox&>(flex_item.box).prepare_for_replaced_layout();
+        }
         determine_flex_base_size_and_hypothetical_main_size(flex_item);
     }
 
@@ -138,6 +143,11 @@ void FlexFormattingContext::run(Box const& run_box, LayoutMode layout_mode)
     //        part of the spec, and simply covering up the fact that our inside layout currently
     //        mutates the height of BFC roots.
     copy_dimensions_from_flex_items_to_boxes();
+
+    flex_container().for_each_child_of_type<Box>([&](Layout::Box& box) {
+        if (box.is_absolutely_positioned())
+            layout_absolutely_positioned_element(box);
+    });
 }
 
 void FlexFormattingContext::populate_specified_margins(FlexItem& item, CSS::FlexDirection flex_direction) const
@@ -402,20 +412,22 @@ void FlexFormattingContext::set_offset(Box const& box, float main_offset, float 
         m_state.get_mutable(box).offset = Gfx::FloatPoint { cross_offset, main_offset };
 }
 
-void FlexFormattingContext::set_main_axis_first_margin(Box const& box, float margin)
+void FlexFormattingContext::set_main_axis_first_margin(FlexItem& item, float margin)
 {
+    item.margins.main_before = margin;
     if (is_row_layout())
-        m_state.get_mutable(box).margin_left = margin;
+        m_state.get_mutable(item.box).margin_left = margin;
     else
-        m_state.get_mutable(box).margin_top = margin;
+        m_state.get_mutable(item.box).margin_top = margin;
 }
 
-void FlexFormattingContext::set_main_axis_second_margin(Box const& box, float margin)
+void FlexFormattingContext::set_main_axis_second_margin(FlexItem& item, float margin)
 {
+    item.margins.main_after = margin;
     if (is_row_layout())
-        m_state.get_mutable(box).margin_right = margin;
+        m_state.get_mutable(item.box).margin_right = margin;
     else
-        m_state.get_mutable(box).margin_bottom = margin;
+        m_state.get_mutable(item.box).margin_bottom = margin;
 }
 
 float FlexFormattingContext::sum_of_margin_padding_border_in_main_axis(Box const& box) const
@@ -611,14 +623,80 @@ void FlexFormattingContext::determine_flex_base_size_and_hypothetical_main_size(
     }();
 
     // The hypothetical main size is the item’s flex base size clamped according to its used min and max main sizes (and flooring the content box size at zero).
-    auto clamp_min = has_main_min_size(child_box) ? specified_main_min_size(child_box) : determine_min_main_size_of_child(child_box);
+    auto clamp_min = has_main_min_size(child_box) ? specified_main_min_size(child_box) : automatic_minimum_size(flex_item);
     auto clamp_max = has_main_max_size(child_box) ? specified_main_max_size(child_box) : NumericLimits<float>::max();
     flex_item.hypothetical_main_size = css_clamp(flex_item.flex_base_size, clamp_min, clamp_max);
 }
 
-float FlexFormattingContext::determine_min_main_size_of_child(Box const& box)
+// https://drafts.csswg.org/css-flexbox-1/#min-size-auto
+float FlexFormattingContext::automatic_minimum_size(FlexItem const& item) const
 {
-    return is_row_layout() ? calculate_min_and_max_content_width(box).min_content_size : calculate_min_and_max_content_height(box).min_content_size;
+    // FIXME: Deal with scroll containers.
+    return content_based_minimum_size(item);
+}
+
+// https://drafts.csswg.org/css-flexbox-1/#specified-size-suggestion
+Optional<float> FlexFormattingContext::specified_size_suggestion(FlexItem const& item) const
+{
+    // If the item’s preferred main size is definite and not automatic,
+    // then the specified size suggestion is that size. It is otherwise undefined.
+    if (has_definite_main_size(item.box))
+        return specified_main_size(item.box);
+    return {};
+}
+
+// https://drafts.csswg.org/css-flexbox-1/#content-size-suggestion
+float FlexFormattingContext::content_size_suggestion(FlexItem const& item) const
+{
+    // FIXME: Apply clamps
+    if (is_row_layout())
+        return calculate_min_and_max_content_width(item.box).min_content_size;
+    return calculate_min_and_max_content_height(item.box).min_content_size;
+}
+
+// https://drafts.csswg.org/css-flexbox-1/#transferred-size-suggestion
+Optional<float> FlexFormattingContext::transferred_size_suggestion(FlexItem const& item) const
+{
+    // If the item has a preferred aspect ratio and its preferred cross size is definite,
+    // then the transferred size suggestion is that size
+    // (clamped by its minimum and maximum cross sizes if they are definite), converted through the aspect ratio.
+    if (item.box.has_intrinsic_aspect_ratio() && has_definite_cross_size(item.box)) {
+        auto aspect_ratio = item.box.intrinsic_aspect_ratio().value();
+        // FIXME: Clamp cross size to min/max cross size before this conversion.
+        return resolved_definite_cross_size(item.box) * aspect_ratio;
+    }
+
+    // It is otherwise undefined.
+    return {};
+}
+
+// https://drafts.csswg.org/css-flexbox-1/#content-based-minimum-size
+float FlexFormattingContext::content_based_minimum_size(FlexItem const& item) const
+{
+    auto unclamped_size = [&] {
+        // The content-based minimum size of a flex item is the smaller of its specified size suggestion
+        // and its content size suggestion if its specified size suggestion exists;
+        if (auto specified_size_suggestion = this->specified_size_suggestion(item); specified_size_suggestion.has_value()) {
+            return min(specified_size_suggestion.value(), content_size_suggestion(item));
+        }
+
+        // otherwise, the smaller of its transferred size suggestion and its content size suggestion
+        // if the element is replaced and its transferred size suggestion exists;
+        if (item.box.is_replaced_box()) {
+            if (auto transferred_size_suggestion = this->transferred_size_suggestion(item); transferred_size_suggestion.has_value()) {
+                return min(transferred_size_suggestion.value(), content_size_suggestion(item));
+            }
+        }
+
+        // otherwise its content size suggestion.
+        return content_size_suggestion(item);
+    }();
+
+    // In all cases, the size is clamped by the maximum main size if it’s definite.
+    if (has_main_max_size(item.box)) {
+        return min(unclamped_size, specified_main_max_size(item.box));
+    }
+    return unclamped_size;
 }
 
 // https://www.w3.org/TR/css-flexbox-1/#algo-main-container
@@ -822,7 +900,7 @@ void FlexFormattingContext::resolve_flexible_lengths()
             for_each_unfrozen_item([&](FlexItem* item) {
                 auto min_main = has_main_min_size(item->box)
                     ? specified_main_min_size(item->box)
-                    : determine_min_main_size_of_child(item->box);
+                    : automatic_minimum_size(*item);
                 auto max_main = has_main_max_size(item->box)
                     ? specified_main_max_size(item->box)
                     : NumericLimits<float>::max();
@@ -1012,16 +1090,16 @@ void FlexFormattingContext::distribute_any_remaining_free_space()
             float size_per_auto_margin = remaining_free_space / (float)auto_margins;
             for (auto& flex_item : flex_line.items) {
                 if (is_main_axis_margin_first_auto(flex_item->box))
-                    set_main_axis_first_margin(flex_item->box, size_per_auto_margin);
+                    set_main_axis_first_margin(*flex_item, size_per_auto_margin);
                 if (is_main_axis_margin_second_auto(flex_item->box))
-                    set_main_axis_second_margin(flex_item->box, size_per_auto_margin);
+                    set_main_axis_second_margin(*flex_item, size_per_auto_margin);
             }
         } else {
             for (auto& flex_item : flex_line.items) {
                 if (is_main_axis_margin_first_auto(flex_item->box))
-                    set_main_axis_first_margin(flex_item->box, 0);
+                    set_main_axis_first_margin(*flex_item, 0);
                 if (is_main_axis_margin_second_auto(flex_item->box))
-                    set_main_axis_second_margin(flex_item->box, 0);
+                    set_main_axis_second_margin(*flex_item, 0);
             }
         }
 

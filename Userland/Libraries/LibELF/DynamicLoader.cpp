@@ -67,8 +67,8 @@ DynamicLoader::DynamicLoader(int fd, String filename, void* data, size_t size, S
     , m_file_size(size)
     , m_image_fd(fd)
     , m_file_data(data)
-    , m_elf_image((u8*)m_file_data, m_file_size)
 {
+    m_elf_image = adopt_own(*new ELF::Image((u8*)m_file_data, m_file_size));
     m_valid = validate();
     if (m_valid)
         m_tls_size_of_current_object = calculate_tls_size();
@@ -93,14 +93,14 @@ DynamicObject const& DynamicLoader::dynamic_object() const
     if (!m_cached_dynamic_object) {
         VirtualAddress dynamic_section_address;
 
-        m_elf_image.for_each_program_header([&dynamic_section_address](auto program_header) {
+        image().for_each_program_header([&dynamic_section_address](auto program_header) {
             if (program_header.type() == PT_DYNAMIC) {
                 dynamic_section_address = VirtualAddress(program_header.raw_data());
             }
         });
         VERIFY(!dynamic_section_address.is_null());
 
-        m_cached_dynamic_object = ELF::DynamicObject::create(m_filename, VirtualAddress(m_elf_image.base_address()), dynamic_section_address);
+        m_cached_dynamic_object = ELF::DynamicObject::create(m_filename, VirtualAddress(image().base_address()), dynamic_section_address);
     }
     return *m_cached_dynamic_object;
 }
@@ -108,7 +108,7 @@ DynamicObject const& DynamicLoader::dynamic_object() const
 size_t DynamicLoader::calculate_tls_size() const
 {
     size_t tls_size = 0;
-    m_elf_image.for_each_program_header([&tls_size](auto program_header) {
+    image().for_each_program_header([&tls_size](auto program_header) {
         if (program_header.type() == PT_TLS) {
             tls_size = program_header.size_in_memory();
         }
@@ -118,7 +118,7 @@ size_t DynamicLoader::calculate_tls_size() const
 
 bool DynamicLoader::validate()
 {
-    if (!m_elf_image.is_valid())
+    if (!image().is_valid())
         return false;
 
     auto* elf_header = (ElfW(Ehdr)*)m_file_data;
@@ -263,15 +263,92 @@ void DynamicLoader::do_lazy_relocations()
 
 void DynamicLoader::load_program_headers()
 {
-    Vector<ProgramHeaderRegion> load_regions;
-    Vector<ProgramHeaderRegion> map_regions;
-    Vector<ProgramHeaderRegion> copy_regions;
+    FlatPtr ph_load_start = SIZE_MAX;
+    FlatPtr ph_load_end = 0;
+
+    // We walk the program header list once to find the requested address ranges of the program.
+    // We don't fill in the list of regions yet to keep malloc memory blocks from interfering with our reservation.
+    image().for_each_program_header([&](Image::ProgramHeader const& program_header) {
+        if (program_header.type() != PT_LOAD)
+            return;
+
+        FlatPtr section_start = program_header.vaddr().get();
+        FlatPtr section_end = section_start + program_header.size_in_memory();
+
+        if (ph_load_start > section_start)
+            ph_load_start = section_start;
+
+        if (ph_load_end < section_end)
+            ph_load_end = section_end;
+    });
+
+    void* requested_load_address = image().is_dynamic() ? nullptr : reinterpret_cast<void*>(ph_load_start);
+
+    int reservation_mmap_flags = MAP_ANON | MAP_PRIVATE | MAP_NORESERVE;
+    if (image().is_dynamic())
+        reservation_mmap_flags |= MAP_RANDOMIZED;
+#ifdef MAP_FIXED_NOREPLACE
+    else
+        reservation_mmap_flags |= MAP_FIXED_NOREPLACE;
+#endif
+
+    // First, we make a dummy reservation mapping, in order to allocate enough VM
+    // to hold all regions contiguously in the address space.
+
+    FlatPtr ph_load_base = ph_load_start & ~(FlatPtr)0xfffu;
+    ph_load_end = round_up_to_power_of_two(ph_load_end, PAGE_SIZE);
+
+    size_t total_mapping_size = ph_load_end - ph_load_base;
+
+    // Before we make our reservation, unmap our existing mapped ELF image that we used for reading header information.
+    // This leaves our pointers dangling momentarily, but it reduces the chance that we will conflict with ourselves.
+    if (munmap(m_file_data, m_file_size) < 0) {
+        perror("munmap old mapping");
+        VERIFY_NOT_REACHED();
+    }
+    m_elf_image = nullptr;
+    m_file_data = nullptr;
+
+    auto* reservation = mmap(requested_load_address, total_mapping_size, PROT_NONE, reservation_mmap_flags, 0, 0);
+    if (reservation == MAP_FAILED) {
+        perror("mmap reservation");
+        VERIFY_NOT_REACHED();
+    }
+
+    // Now that we can't accidentally block our requested space, re-map our ELF image.
+    String file_mmap_name = String::formatted("ELF_DYN: {}", m_filepath);
+    auto* data = mmap_with_name(nullptr, m_file_size, PROT_READ, MAP_SHARED, m_image_fd, 0, file_mmap_name.characters());
+    if (data == MAP_FAILED) {
+        perror("mmap new mapping");
+        VERIFY_NOT_REACHED();
+    }
+
+    m_file_data = data;
+    m_elf_image = adopt_own(*new ELF::Image((u8*)m_file_data, m_file_size));
+
+    VERIFY(requested_load_address == nullptr || reservation == requested_load_address);
+
+    m_base_address = VirtualAddress { reservation };
+
+    // Then we unmap the reservation.
+    if (munmap(reservation, total_mapping_size) < 0) {
+        perror("munmap reservation");
+        VERIFY_NOT_REACHED();
+    }
+
+    // Most binaries have four loadable regions, three of which are mapped
+    // (symbol tables/relocation information, executable instructions, read-only data)
+    // and one of which is copied (modifiable data).
+    // These are allocated in-line to cut down on the malloc calls.
+    Vector<ProgramHeaderRegion, 4> load_regions;
+    Vector<ProgramHeaderRegion, 3> map_regions;
+    Vector<ProgramHeaderRegion, 1> copy_regions;
     Optional<ProgramHeaderRegion> tls_region;
     Optional<ProgramHeaderRegion> relro_region;
 
     VirtualAddress dynamic_region_desired_vaddr;
 
-    m_elf_image.for_each_program_header([&](Image::ProgramHeader const& program_header) {
+    image().for_each_program_header([&](Image::ProgramHeader const& program_header) {
         ProgramHeaderRegion region {};
         region.set_program_header(program_header.raw_header());
         if (region.is_tls_template()) {
@@ -305,40 +382,6 @@ void DynamicLoader::load_program_headers()
     quick_sort(copy_regions, compare_load_address);
 
     // Process regions in order: .text, .data, .tls
-    void* requested_load_address = m_elf_image.is_dynamic() ? nullptr : load_regions.first().desired_load_address().as_ptr();
-
-    int reservation_mmap_flags = MAP_ANON | MAP_PRIVATE | MAP_NORESERVE;
-    if (m_elf_image.is_dynamic())
-        reservation_mmap_flags |= MAP_RANDOMIZED;
-#ifdef MAP_FIXED_NOREPLACE
-    else
-        reservation_mmap_flags |= MAP_FIXED_NOREPLACE;
-#endif
-
-    // First, we make a dummy reservation mapping, in order to allocate enough VM
-    // to hold all regions contiguously in the address space.
-
-    FlatPtr ph_load_base = load_regions.first().desired_load_address().page_base().get();
-    FlatPtr ph_load_end = round_up_to_power_of_two(load_regions.last().desired_load_address().offset(load_regions.last().size_in_memory()).get(), PAGE_SIZE);
-
-    size_t total_mapping_size = ph_load_end - ph_load_base;
-
-    auto* reservation = mmap(requested_load_address, total_mapping_size, PROT_NONE, reservation_mmap_flags, 0, 0);
-    if (reservation == MAP_FAILED) {
-        perror("mmap reservation");
-        VERIFY_NOT_REACHED();
-    }
-
-    VERIFY(requested_load_address == nullptr || reservation == requested_load_address);
-
-    m_base_address = VirtualAddress { reservation };
-
-    // Then we unmap the reservation.
-    if (munmap(reservation, total_mapping_size) < 0) {
-        perror("munmap reservation");
-        VERIFY_NOT_REACHED();
-    }
-
     for (auto& region : map_regions) {
         FlatPtr ph_desired_base = region.desired_load_address().get();
         FlatPtr ph_base = region.desired_load_address().page_base().get();
@@ -377,7 +420,7 @@ void DynamicLoader::load_program_headers()
         m_relro_segment_address = VirtualAddress { (u8*)reservation + relro_region->desired_load_address().get() - ph_load_base };
     }
 
-    if (m_elf_image.is_dynamic())
+    if (image().is_dynamic())
         m_dynamic_section_address = VirtualAddress { (u8*)reservation + dynamic_region_desired_vaddr.get() - ph_load_base };
     else
         m_dynamic_section_address = dynamic_region_desired_vaddr;
@@ -405,7 +448,7 @@ void DynamicLoader::load_program_headers()
         }
 
         VirtualAddress data_segment_start;
-        if (m_elf_image.is_dynamic())
+        if (image().is_dynamic())
             data_segment_start = VirtualAddress { (u8*)reservation + region.desired_load_address().get() };
         else
             data_segment_start = region.desired_load_address();
@@ -554,7 +597,7 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
         } else {
             auto relocation_address = (FlatPtr*)relocation.address().as_ptr();
 
-            if (m_elf_image.is_dynamic())
+            if (image().is_dynamic())
                 *relocation_address += m_dynamic_object->base_address().get();
         }
         break;
@@ -607,7 +650,7 @@ void DynamicLoader::copy_initial_tls_data_into(ByteBuffer& buffer) const
     u8 const* tls_data = nullptr;
     size_t tls_size_in_image = 0;
 
-    m_elf_image.for_each_program_header([this, &tls_data, &tls_size_in_image](ELF::Image::ProgramHeader program_header) {
+    image().for_each_program_header([this, &tls_data, &tls_size_in_image](ELF::Image::ProgramHeader program_header) {
         if (program_header.type() != PT_TLS)
             return IterationDecision::Continue;
 
@@ -619,7 +662,7 @@ void DynamicLoader::copy_initial_tls_data_into(ByteBuffer& buffer) const
     if (!tls_data || !tls_size_in_image)
         return;
 
-    m_elf_image.for_each_symbol([this, &buffer, tls_data](ELF::Image::Symbol symbol) {
+    image().for_each_symbol([this, &buffer, tls_data](ELF::Image::Symbol symbol) {
         if (symbol.type() != STT_TLS)
             return IterationDecision::Continue;
 
