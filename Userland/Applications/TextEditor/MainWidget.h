@@ -81,6 +81,7 @@ private:
     RefPtr<GUI::Action> m_layout_toolbar_action;
     RefPtr<GUI::Action> m_layout_statusbar_action;
     RefPtr<GUI::Action> m_layout_ruler_action;
+    RefPtr<GUI::Action> m_auto_detect_preview_mode_action;
 
     GUI::ActionGroup m_preview_actions;
     RefPtr<GUI::Action> m_no_preview_action;

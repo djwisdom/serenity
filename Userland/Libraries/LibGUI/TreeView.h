@@ -78,7 +78,7 @@ private:
     RefPtr<Gfx::Bitmap> m_expand_bitmap;
     RefPtr<Gfx::Bitmap> m_collapse_bitmap;
 
-    bool m_should_fill_selected_rows { false };
+    bool m_should_fill_selected_rows { true };
     int m_vertical_padding { 6 };
 };
 

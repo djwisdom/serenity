@@ -119,7 +119,7 @@ private:
         GUI::Painter painter(*this);
         painter.add_clip_rect(event.rect());
         painter.add_clip_rect(frame_inner_rect());
-        painter.fill_rect(event.rect(), Color::Black);
+        painter.fill_rect(event.rect(), palette().inactive_window_border1());
         int i = m_history.capacity() - m_history.size();
         auto rect = frame_inner_rect();
         for (auto value : m_history) {

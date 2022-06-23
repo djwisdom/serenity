@@ -610,6 +610,12 @@ Icon FileSystemModel::icon_for(Node const& node) const
         }
         if (node.full_path() == Core::StandardPaths::desktop_directory())
             return FileIconProvider::desktop_directory_icon();
+        if (node.full_path() == Core::StandardPaths::documents_directory())
+            return FileIconProvider::documents_directory_icon();
+        if (node.full_path() == Core::StandardPaths::downloads_directory())
+            return FileIconProvider::downloads_directory_icon();
+        if (node.full_path() == Core::StandardPaths::source_directory())
+            return FileIconProvider::source_directory_icon();
         if (node.is_selected() && node.is_accessible_directory)
             return FileIconProvider::directory_open_icon();
     }

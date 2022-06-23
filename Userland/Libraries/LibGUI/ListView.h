@@ -61,7 +61,7 @@ private:
     int m_horizontal_padding { 2 };
     int m_vertical_padding { 2 };
     int m_model_column { 0 };
-    bool m_alternating_row_colors { true };
+    bool m_alternating_row_colors { false };
     bool m_hover_highlighting { false };
 };
 

@@ -31,6 +31,9 @@ static Icon s_inaccessible_directory_icon;
 static Icon s_desktop_directory_icon;
 static Icon s_home_directory_icon;
 static Icon s_home_directory_open_icon;
+static Icon s_documents_directory_icon;
+static Icon s_downloads_directory_icon;
+static Icon s_source_directory_icon;
 static Icon s_file_icon;
 static Icon s_symlink_icon;
 static Icon s_socket_icon;
@@ -78,6 +81,9 @@ static void initialize_if_needed()
     s_home_directory_icon = Icon::default_icon("home-directory");
     s_home_directory_open_icon = Icon::default_icon("home-directory-open");
     s_desktop_directory_icon = Icon::default_icon("desktop");
+    s_documents_directory_icon = Icon::default_icon("documents");
+    s_downloads_directory_icon = Icon::default_icon("downloads");
+    s_source_directory_icon = Icon::default_icon("source");
     s_file_icon = Icon::default_icon("filetype-unknown");
     s_symlink_icon = Icon::default_icon("filetype-symlink");
     s_socket_icon = Icon::default_icon("filetype-socket");
@@ -115,6 +121,24 @@ Icon FileIconProvider::desktop_directory_icon()
 {
     initialize_if_needed();
     return s_desktop_directory_icon;
+}
+
+Icon FileIconProvider::documents_directory_icon()
+{
+    initialize_if_needed();
+    return s_documents_directory_icon;
+}
+
+Icon FileIconProvider::downloads_directory_icon()
+{
+    initialize_if_needed();
+    return s_downloads_directory_icon;
+}
+
+Icon FileIconProvider::source_directory_icon()
+{
+    initialize_if_needed();
+    return s_source_directory_icon;
 }
 
 Icon FileIconProvider::home_directory_open_icon()
@@ -227,6 +251,12 @@ Icon FileIconProvider::icon_for_path(String const& path, mode_t mode)
             return s_home_directory_icon;
         if (path == Core::StandardPaths::desktop_directory())
             return s_desktop_directory_icon;
+        if (path == Core::StandardPaths::documents_directory())
+            return s_documents_directory_icon;
+        if (path == Core::StandardPaths::downloads_directory())
+            return s_downloads_directory_icon;
+        if (path == Core::StandardPaths::source_directory())
+            return s_source_directory_icon;
         if (access(path.characters(), R_OK | X_OK) < 0)
             return s_inaccessible_directory_icon;
         return s_directory_icon;

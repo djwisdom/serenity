@@ -256,7 +256,7 @@ void TreeView::paint_event(PaintEvent& event)
         auto toggle_rect = a_toggle_rect.translated(0, y_offset);
 
         if constexpr (ITEM_RECTS_DEBUG)
-            painter.fill_rect(rect, Color::WarmGray);
+            painter.fill_rect(rect, Color::Transparent);
 
         bool is_selected_row = selection().contains(index);
 
@@ -296,7 +296,7 @@ void TreeView::paint_event(PaintEvent& event)
                 continue;
             int column_width = this->column_width(column_index);
 
-            painter.draw_rect(toggle_rect, text_color);
+            //painter.draw_rect(toggle_rect, text_color);
 
             if (column_index != tree_column) {
                 Gfx::IntRect cell_rect(horizontal_padding() + x_offset, rect.y(), column_width, row_height());
@@ -337,7 +337,7 @@ void TreeView::paint_event(PaintEvent& event)
                 if (icon.is_icon()) {
                     if (auto* bitmap = icon.as_icon().bitmap_for_size(icon_size())) {
                         if (m_hovered_index.is_valid() && m_hovered_index.parent() == index.parent() && m_hovered_index.row() == index.row()) {
-                            painter.blit_brightened(icon_rect.location(), *bitmap, bitmap->rect());
+                             painter.blit_brightened(icon_rect.location(), *bitmap, bitmap->rect());
                         } else {
                             auto opacity = index.data(ModelRole::IconOpacity).as_float_or(1.0f);
                             painter.blit(icon_rect.location(), *bitmap, bitmap->rect(), opacity);
@@ -362,12 +362,12 @@ void TreeView::paint_event(PaintEvent& event)
                     if (index_at_indent_is_last_in_parent)
                         b.set_y(rect.center().y());
                     if (!(i != indent_level && index_at_indent_is_last_in_parent))
-                        painter.draw_line(a, b, Color::MidGray);
+                        painter.draw_line(a, b, Color::Transparent);
 
                     if (i == indent_level) {
                         Gfx::IntPoint c { a.x(), rect.center().y() };
                         Gfx::IntPoint d { c.x() + icon_size() / 2, c.y() };
-                        painter.draw_line(c, d, Color::MidGray);
+                        painter.draw_line(c, d, Color::Transparent);
                     }
                     index_at_indent = parent_of_index_at_indent;
                 }

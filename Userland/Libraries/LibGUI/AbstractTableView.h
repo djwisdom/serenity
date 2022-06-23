@@ -118,7 +118,7 @@ private:
 
     HashMap<int, OwnPtr<TableCellPaintingDelegate>> m_column_painting_delegate;
 
-    bool m_alternating_row_colors { true };
+    bool m_alternating_row_colors { false };
     bool m_highlight_selected_rows { true };
 
     int m_vertical_padding { 8 };
