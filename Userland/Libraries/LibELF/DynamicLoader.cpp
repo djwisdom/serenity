@@ -243,12 +243,16 @@ Result<NonnullRefPtr<DynamicObject>, DlErrorMessage> DynamicLoader::load_stage_3
 #endif
     }
 
+    m_fully_relocated = true;
+
     return NonnullRefPtr<DynamicObject> { *m_dynamic_object };
 }
 
 void DynamicLoader::load_stage_4()
 {
     call_object_init_functions();
+
+    m_fully_initialized = true;
 }
 
 void DynamicLoader::do_lazy_relocations()

@@ -82,6 +82,9 @@ public:
 
     DynamicObject const& dynamic_object() const;
 
+    bool is_fully_relocated() const { return m_fully_relocated; }
+    bool is_fully_initialized() const { return m_fully_initialized; }
+
 private:
     DynamicLoader(int fd, String filename, void* file_data, size_t file_size, String filepath);
 
@@ -158,6 +161,9 @@ private:
     Vector<DynamicObject::Relocation> m_unresolved_relocations;
 
     mutable RefPtr<DynamicObject> m_cached_dynamic_object;
+
+    bool m_fully_relocated { false };
+    bool m_fully_initialized { false };
 };
 
 template<typename F>
