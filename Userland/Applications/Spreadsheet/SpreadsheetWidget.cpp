@@ -130,6 +130,14 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
         load_file(*response.value());
     });
 
+    m_import_action = GUI::Action::create("Import sheets...", [&](auto&) {
+        auto response = FileSystemAccessClient::Client::the().try_open_file(window());
+        if (response.is_error())
+            return;
+
+        import_sheets(*response.value());
+    });
+
     m_save_action = GUI::CommonActions::make_save_action([&](auto&) {
         if (current_filename().is_empty()) {
             m_save_as_action->activate();
@@ -383,6 +391,7 @@ void SpreadsheetWidget::try_generate_tip_for_input_expression(StringView source,
         m_inline_documentation_window->hide();
         return;
     }
+    cursor_offset = min(cursor_offset, source.length());
     auto maybe_function_and_argument = get_function_and_argument_index(source.substring_view(0, cursor_offset));
     if (!maybe_function_and_argument.has_value()) {
         m_inline_documentation_window->hide();
@@ -435,6 +444,30 @@ void SpreadsheetWidget::load_file(Core::File& file)
         GUI::MessageBox::show_error(window(), result.error());
         return;
     }
+
+    m_cell_value_editor->on_change = nullptr;
+    m_current_cell_label->set_text("");
+    m_should_change_selected_cells = false;
+    while (auto* widget = m_tab_widget->active_widget()) {
+        m_tab_widget->remove_tab(*widget);
+    }
+
+    setup_tabs(m_workbook->sheets());
+    update_window_title();
+}
+
+void SpreadsheetWidget::import_sheets(Core::File& file)
+{
+    auto result = m_workbook->import_file(file);
+    if (result.is_error()) {
+        GUI::MessageBox::show_error(window(), result.error());
+        return;
+    }
+
+    if (!result.value())
+        return;
+
+    window()->set_modified(true);
 
     m_cell_value_editor->on_change = nullptr;
     m_current_cell_label->set_text("");
@@ -551,6 +584,8 @@ void SpreadsheetWidget::initialize_menubar(GUI::Window& window)
     file_menu.add_action(*m_open_action);
     file_menu.add_action(*m_save_action);
     file_menu.add_action(*m_save_as_action);
+    file_menu.add_separator();
+    file_menu.add_action(*m_import_action);
     file_menu.add_separator();
     file_menu.add_action(*m_quit_action);
 

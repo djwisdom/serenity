@@ -457,7 +457,7 @@ static Vector<TemporalUnit> temporal_units = {
 };
 
 // 13.15 GetTemporalUnit ( normalizedOptions, key, unitGroup, default [ , extraValues ] ), https://tc39.es/proposal-temporal/#sec-temporal-gettemporalunit
-ThrowCompletionOr<Optional<String>> get_temporal_unit(GlobalObject& global_object, Object const& normalized_options, PropertyKey const& key, UnitGroup unit_group, Variant<TemporalUnitRequired, Optional<StringView>> const& default_, Vector<StringView> const& extra_values)
+ThrowCompletionOr<Optional<String>> get_temporal_unit(GlobalObject& global_object, Object const& normalized_options, PropertyKey const& key, UnitGroup unit_group, TemporalUnitDefault const& default_, Vector<StringView> const& extra_values)
 {
     auto& vm = global_object.vm();
 
@@ -712,7 +712,7 @@ ThrowCompletionOr<Value> to_relative_temporal_object(GlobalObject& global_object
         return MUST(create_temporal_zoned_date_time(global_object, *epoch_nanoseconds, time_zone.as_object(), *calendar));
     }
 
-    // 9. Return ! CreateTemporalDate(result.[[Year]], result.[[Month]], result.[[Day]], calendar).
+    // 9. Return ? CreateTemporalDate(result.[[Year]], result.[[Month]], result.[[Day]], calendar).
     return TRY(create_temporal_date(global_object, result.year, result.month, result.day, *calendar));
 }
 
@@ -1786,14 +1786,25 @@ ThrowCompletionOr<Object*> prepare_temporal_fields(GlobalObject& global_object, 
             any = true;
 
             // ii. If property is in the Property column of Table 15 and there is a Conversion value in the same row, then
-            // 1. Let Conversion represent the abstract operation named by the Conversion value of the same row.
-            // 2. Set value to ? Conversion(value).
-            if (property.is_one_of("year"sv, "hour"sv, "minute"sv, "second"sv, "millisecond"sv, "microsecond"sv, "nanosecond"sv, "eraYear"sv))
+            // 1. Let Conversion be the Conversion value of the same row.
+            // 2. If Conversion is ToIntegerThrowOnInfinity, then
+            if (property.is_one_of("year"sv, "hour"sv, "minute"sv, "second"sv, "millisecond"sv, "microsecond"sv, "nanosecond"sv, "eraYear"sv)) {
+                // a. Set value to ? ToIntegerThrowOnInfinity(value).
+                // b. Set value to 𝔽(value).
                 value = Value(TRY(to_integer_throw_on_infinity(global_object, value, ErrorType::TemporalPropertyMustBeFinite)));
-            else if (property.is_one_of("month"sv, "day"sv))
+            }
+            // 3. Else if Conversion is ToPositiveInteger, then
+            else if (property.is_one_of("month"sv, "day"sv)) {
+                // a. Set value to ? ToPositiveInteger(value).
+                // b. Set value to 𝔽(value).
                 value = Value(TRY(to_positive_integer(global_object, value)));
-            else if (property.is_one_of("monthCode"sv, "offset"sv, "era"sv))
+            }
+            // 4. Else,
+            else if (property.is_one_of("monthCode"sv, "offset"sv, "era"sv)) {
+                // a. Assert: Conversion is ToString.
+                // b. Set value to ? ToString(value).
                 value = TRY(value.to_primitive_string(global_object));
+            }
 
             // iii. Perform ! CreateDataPropertyOrThrow(result, property, value).
             MUST(result->create_data_property_or_throw(property, value));
@@ -1825,6 +1836,64 @@ ThrowCompletionOr<Object*> prepare_temporal_fields(GlobalObject& global_object, 
 
     // 5. Return result.
     return result;
+}
+
+// 13.44 GetDifferenceSettings ( operation, options, unitGroup, disallowedUnits, fallbackSmallestUnit, smallestLargestDefaultUnit ), https://tc39.es/proposal-temporal/#sec-temporal-getdifferencesettings
+ThrowCompletionOr<DifferenceSettings> get_difference_settings(GlobalObject& global_object, DifferenceOperation operation, Value options_value, UnitGroup unit_group, Vector<StringView> const& disallowed_units, TemporalUnitDefault const& fallback_smallest_unit, StringView smallest_largest_default_unit)
+{
+    auto& vm = global_object.vm();
+
+    // 1. Set options to ? GetOptionsObject(options).
+    auto* options = TRY(get_options_object(global_object, options_value));
+
+    // 2. Let smallestUnit be ? GetTemporalUnit(options, "smallestUnit", unitGroup, fallbackSmallestUnit).
+    auto smallest_unit = TRY(get_temporal_unit(global_object, *options, vm.names.smallestUnit, unit_group, fallback_smallest_unit));
+
+    // 3. If disallowedUnits contains smallestUnit, throw a RangeError exception.
+    if (disallowed_units.contains_slow(*smallest_unit))
+        return vm.throw_completion<RangeError>(global_object, ErrorType::OptionIsNotValidValue, *smallest_unit, "smallestUnit"sv);
+
+    // 4. Let defaultLargestUnit be ! LargerOfTwoTemporalUnits(smallestLargestDefaultUnit, smallestUnit).
+    auto default_largest_unit = larger_of_two_temporal_units(smallest_largest_default_unit, *smallest_unit);
+
+    // 5. Let largestUnit be ? GetTemporalUnit(options, "largestUnit", unitGroup, "auto").
+    auto largest_unit = TRY(get_temporal_unit(global_object, *options, vm.names.largestUnit, unit_group, { "auto"sv }));
+
+    // 6. If disallowedUnits contains largestUnit, throw a RangeError exception.
+    if (disallowed_units.contains_slow(*largest_unit))
+        return vm.throw_completion<RangeError>(global_object, ErrorType::OptionIsNotValidValue, *largest_unit, "largestUnit"sv);
+
+    // 7. If largestUnit is "auto", set largestUnit to defaultLargestUnit.
+    if (largest_unit == "auto"sv)
+        largest_unit = default_largest_unit;
+
+    // 8. If LargerOfTwoTemporalUnits(largestUnit, smallestUnit) is not largestUnit, throw a RangeError exception.
+    if (larger_of_two_temporal_units(*largest_unit, *smallest_unit) != largest_unit)
+        return vm.throw_completion<RangeError>(global_object, ErrorType::TemporalInvalidUnitRange, *smallest_unit, *largest_unit);
+
+    // 9. Let roundingMode be ? ToTemporalRoundingMode(options, "trunc").
+    auto rounding_mode = TRY(to_temporal_rounding_mode(global_object, *options, "trunc"sv));
+
+    // 10. If operation is since, then
+    if (operation == DifferenceOperation::Since) {
+        // a. Set roundingMode to ! NegateTemporalRoundingMode(roundingMode).
+        rounding_mode = negate_temporal_rounding_mode(rounding_mode);
+    }
+
+    // 11. Let maximum be ! MaximumTemporalDurationRoundingIncrement(smallestUnit).
+    auto maximum = maximum_temporal_duration_rounding_increment(*smallest_unit);
+
+    // 12. Let roundingIncrement be ? ToTemporalRoundingIncrement(options, maximum, false).
+    auto rounding_increment = TRY(to_temporal_rounding_increment(global_object, *options, Optional<double> { maximum }, false));
+
+    // 13. Return the Record { [[SmallestUnit]]: smallestUnit, [[LargestUnit]]: largestUnit, [[RoundingMode]]: roundingMode, [[RoundingIncrement]]: roundingIncrement, [[Options]]: options }.
+    return DifferenceSettings {
+        .smallest_unit = smallest_unit.release_value(),
+        .largest_unit = largest_unit.release_value(),
+        .rounding_mode = move(rounding_mode),
+        .rounding_increment = rounding_increment,
+        .options = *options,
+    };
 }
 
 }
