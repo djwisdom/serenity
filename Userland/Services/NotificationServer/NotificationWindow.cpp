@@ -107,7 +107,7 @@ RefPtr<NotificationWindow> NotificationWindow::get_window_by_id(i32 id)
 void NotificationWindow::resize_to_fit_text()
 {
     auto line_height = m_text_label->font().glyph_height();
-    auto total_height = m_text_label->preferred_height();
+    auto total_height = m_text_label->text_calculated_preferred_height();
 
     m_text_label->set_fixed_height(total_height);
     set_height(40 - line_height + total_height);
@@ -123,7 +123,7 @@ void NotificationWindow::enter_event(Core::Event&)
 void NotificationWindow::leave_event(Core::Event&)
 {
     m_hovering = false;
-    m_text_label->set_fixed_height(-1);
+    m_text_label->set_preferred_height(GUI::SpecialDimension::Grow);
     set_height(40);
 }
 

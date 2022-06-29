@@ -74,6 +74,7 @@ set(SOURCES
     DOM/AbortSignal.cpp
     DOM/Attribute.cpp
     DOM/Attribute.idl
+    DOM/CDATASection.cpp
     DOM/CharacterData.cpp
     DOM/CharacterData.idl
     DOM/Comment.cpp
@@ -274,6 +275,7 @@ set(SOURCES
     Layout/TextNode.cpp
     Layout/TreeBuilder.cpp
     Loader/ContentFilter.cpp
+    Loader/FileRequest.cpp
     Loader/FrameLoader.cpp
     Loader/ImageLoader.cpp
     Loader/ImageResource.cpp
