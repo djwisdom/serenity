@@ -55,11 +55,30 @@ void HTMLBodyElement::parse_attribute(FlyString const& name, String const& value
     } else if (name.equals_ignoring_case("background")) {
         m_background_style_value = CSS::ImageStyleValue::create(document().parse_url(value));
     }
+
+#undef __ENUMERATE
+#define __ENUMERATE(attribute_name, event_name)                     \
+    if (name == HTML::AttributeNames::attribute_name) {             \
+        element_event_handler_attribute_changed(event_name, value); \
+    }
+    ENUMERATE_WINDOW_EVENT_HANDLERS(__ENUMERATE)
+#undef __ENUMERATE
 }
 
-DOM::EventTarget& HTMLBodyElement::global_event_handlers_to_event_target()
+DOM::EventTarget& HTMLBodyElement::global_event_handlers_to_event_target(FlyString const& event_name)
 {
     // NOTE: This is a little weird, but IIUC document.body.onload actually refers to window.onload
+    // NOTE: document.body can return either a HTMLBodyElement or HTMLFrameSetElement, so both these elements must support this mapping.
+    if (DOM::is_window_reflecting_body_element_event_handler(event_name))
+        return document().window();
+
+    return *this;
+}
+
+DOM::EventTarget& HTMLBodyElement::window_event_handlers_to_event_target()
+{
+    // All WindowEventHandlers on HTMLFrameSetElement (e.g. document.body.onrejectionhandled) are mapped to window.on{event}.
+    // NOTE: document.body can return either a HTMLBodyElement or HTMLFrameSetElement, so both these elements must support this mapping.
     return document().window();
 }
 
