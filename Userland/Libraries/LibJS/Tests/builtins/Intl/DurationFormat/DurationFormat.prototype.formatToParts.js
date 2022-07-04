@@ -138,7 +138,7 @@ describe("correct behavior", () => {
             new Intl.DurationFormat("en", {
                 style: "narrow",
                 nanoseconds: "numeric",
-                fractionalDigits: 7,
+                fractionalDigits: 3,
             }).formatToParts(duration)
         ).toEqual([
             { type: "element", value: "1y" },
@@ -240,7 +240,7 @@ describe("correct behavior", () => {
             new Intl.DurationFormat("de", {
                 style: "narrow",
                 nanoseconds: "numeric",
-                fractionalDigits: 7,
+                fractionalDigits: 3,
             }).formatToParts(duration)
         ).toEqual([
             { type: "element", value: "1 J" },
@@ -261,5 +261,60 @@ describe("correct behavior", () => {
             { type: "literal", value: " und " },
             { type: "element", value: "8,009 μs" },
         ]);
+    });
+});
+
+describe("errors", () => {
+    test("non-object duration records", () => {
+        [-100, Infinity, NaN, "hello", 152n, Symbol("foo")].forEach(value => {
+            expect(() => {
+                new Intl.DurationFormat().formatToParts(value);
+            }).toThrowWithMessage(TypeError, "is not an object");
+        });
+    });
+
+    test("empty duration record", () => {
+        expect(() => {
+            new Intl.DurationFormat().formatToParts({});
+        }).toThrowWithMessage(TypeError, "Invalid duration-like object");
+
+        expect(() => {
+            new Intl.DurationFormat().formatToParts({ foo: 123 });
+        }).toThrowWithMessage(TypeError, "Invalid duration-like object");
+    });
+
+    test("non-integral duration fields", () => {
+        [
+            "years",
+            "months",
+            "weeks",
+            "days",
+            "hours",
+            "minutes",
+            "seconds",
+            "milliseconds",
+            "microseconds",
+            "nanoseconds",
+        ].forEach(field => {
+            expect(() => {
+                new Intl.DurationFormat().formatToParts({ [field]: 1.5 });
+            }).toThrowWithMessage(
+                RangeError,
+                `Invalid value for duration property '${field}': must be an integer, got 1.5`
+            );
+
+            expect(() => {
+                new Intl.DurationFormat().formatToParts({ [field]: -Infinity });
+            }).toThrowWithMessage(
+                RangeError,
+                `Invalid value for duration property '${field}': must be an integer, got -Infinity`
+            );
+        });
+    });
+
+    test("inconsistent field signs", () => {
+        expect(() => {
+            new Intl.DurationFormat().formatToParts({ years: 1, months: -1 });
+        }).toThrowWithMessage(RangeError, "Invalid duration-like object");
     });
 });
