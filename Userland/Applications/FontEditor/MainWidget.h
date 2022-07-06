@@ -15,13 +15,27 @@
 #include <LibGUI/Widget.h>
 #include <LibGfx/Font/BitmapFont.h>
 
+namespace FontEditor {
+
 class GlyphEditorWidget;
 
-class FontEditorWidget final
-    : public GUI::Widget {
-    C_OBJECT(FontEditorWidget)
+class MainWidget final : public GUI::Widget {
+    C_OBJECT(MainWidget)
 public:
-    virtual ~FontEditorWidget() override = default;
+    static ErrorOr<NonnullRefPtr<MainWidget>> try_create()
+    {
+        NonnullRefPtr<MainWidget> font_editor = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) MainWidget()));
+        TRY(font_editor->create_actions());
+        TRY(font_editor->create_models());
+        TRY(font_editor->create_toolbars());
+        TRY(font_editor->create_undo_stack());
+        return font_editor;
+    }
+
+    virtual ~MainWidget() override = default;
+
+    ErrorOr<void> initialize(String const& path, RefPtr<Gfx::BitmapFont>&&);
+    ErrorOr<void> initialize_menubar(GUI::Window&);
 
     bool open_file(String const&);
     bool save_file(String const&);
@@ -30,8 +44,6 @@ public:
 
     String const& path() { return m_path; }
     Gfx::BitmapFont const& edited_font() { return *m_edited_font; }
-    void initialize(String const& path, RefPtr<Gfx::BitmapFont>&&);
-    void initialize_menubar(GUI::Window&);
 
     bool is_showing_font_metadata() { return m_font_metadata; }
     void set_show_font_metadata(bool);
@@ -39,17 +51,20 @@ public:
     bool is_showing_unicode_blocks() { return m_unicode_blocks; }
     void set_show_unicode_blocks(bool);
 
-    Function<void()> on_initialize;
-
 private:
-    FontEditorWidget();
+    MainWidget();
+
+    ErrorOr<void> create_actions();
+    ErrorOr<void> create_models();
+    ErrorOr<void> create_toolbars();
+    ErrorOr<void> create_undo_stack();
+    ErrorOr<RefPtr<GUI::Window>> create_preview_window();
 
     virtual void drop_event(GUI::DropEvent&) override;
 
     void undo();
     void redo();
     void did_modify_font();
-    void did_resize_glyph_editor();
     void update_statusbar();
     void update_preview();
     void set_scale(i32);
@@ -60,6 +75,7 @@ private:
     void paste_glyphs();
     void delete_selected_glyphs();
 
+    void push_undo();
     void reset_selection_and_push_undo();
 
     RefPtr<Gfx::BitmapFont> m_edited_font;
@@ -108,9 +124,6 @@ private:
     RefPtr<GUI::Action> m_rotate_counterclockwise_action;
 
     RefPtr<GUI::Statusbar> m_statusbar;
-    RefPtr<GUI::Window> m_font_preview_window;
-    RefPtr<GUI::Widget> m_left_column_container;
-    RefPtr<GUI::Widget> m_glyph_editor_container;
     RefPtr<GUI::Widget> m_unicode_block_container;
     RefPtr<GUI::ComboBox> m_weight_combobox;
     RefPtr<GUI::ComboBox> m_slope_combobox;
@@ -130,6 +143,10 @@ private:
     RefPtr<GUI::FilteringProxyModel> m_filter_model;
     RefPtr<GUI::Menu> m_context_menu;
 
+    RefPtr<GUI::Label> m_preview_label;
+    RefPtr<GUI::TextBox> m_preview_textbox;
+    RefPtr<GUI::Window> m_font_preview_window;
+
     String m_path;
     Vector<String> m_font_weight_list;
     Vector<String> m_font_slope_list;
@@ -138,3 +155,5 @@ private:
     bool m_unicode_blocks { true };
     Unicode::CodePointRange m_range { 0x0000, 0x10FFFF };
 };
+
+}

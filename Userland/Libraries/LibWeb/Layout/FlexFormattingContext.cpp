@@ -619,7 +619,16 @@ void FlexFormattingContext::determine_flex_base_size_and_hypothetical_main_size(
         if (has_definite_main_size(child_box))
             return specified_main_size_of_child_box(child_box);
 
-        return calculate_indefinite_main_size(flex_item);
+        // NOTE: To avoid repeated layout work, we keep a cache of flex item main sizes on the
+        //       root FormattingState object. It's available through a full layout cycle.
+        // FIXME: Make sure this cache isn't overly permissive..
+        auto& size_cache = m_state.m_root.flex_item_size_cache;
+        auto it = size_cache.find(&flex_item.box);
+        if (it != size_cache.end())
+            return it->value;
+        auto main_size = calculate_indefinite_main_size(flex_item);
+        size_cache.set(&flex_item.box, main_size);
+        return main_size;
     }();
 
     // The hypothetical main size is the item’s flex base size clamped according to its used min and max main sizes (and flooring the content box size at zero).
@@ -959,7 +968,9 @@ void FlexFormattingContext::determine_hypothetical_cross_size_of_item(FlexItem& 
 
     // If we have a definite cross size, this is easy! No need to perform layout, we can just use it as-is.
     if (has_definite_cross_size(item.box)) {
-        item.hypothetical_cross_size = resolved_definite_cross_size(item.box);
+        auto clamp_min = has_cross_min_size(item.box) ? specified_cross_min_size(item.box) : 0;
+        auto clamp_max = has_cross_max_size(item.box) ? specified_cross_max_size(item.box) : NumericLimits<float>::max();
+        item.hypothetical_cross_size = css_clamp(resolved_definite_cross_size(item.box), clamp_min, clamp_max);
         return;
     }
 

@@ -95,7 +95,7 @@ void LookupServer::load_etc_hosts()
         if (original_line.is_empty())
             break;
         auto trimmed_line = original_line.view().trim_whitespace();
-        auto replaced_line = trimmed_line.replace(" ", "\t", true);
+        auto replaced_line = trimmed_line.replace(" ", "\t", ReplaceMode::All);
         auto fields = replaced_line.split_view('\t', false);
 
         if (fields.size() < 2) {
@@ -126,7 +126,7 @@ void LookupServer::load_etc_hosts()
 
 static String get_hostname()
 {
-    char buffer[HOST_NAME_MAX];
+    char buffer[_POSIX_HOST_NAME_MAX];
     VERIFY(gethostname(buffer, sizeof(buffer)) == 0);
     return buffer;
 }

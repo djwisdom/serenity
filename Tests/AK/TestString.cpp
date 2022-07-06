@@ -166,20 +166,20 @@ TEST_CASE(replace)
 {
     String test_string = "Well, hello Friends!";
 
-    test_string = test_string.replace("Friends", "Testers");
+    test_string = test_string.replace("Friends", "Testers", ReplaceMode::FirstOnly);
     EXPECT(test_string == "Well, hello Testers!");
 
-    test_string = test_string.replace("ell", "e're", true);
+    test_string = test_string.replace("ell", "e're", ReplaceMode::All);
     EXPECT(test_string == "We're, he'reo Testers!");
 
-    test_string = test_string.replace("!", " :^)");
+    test_string = test_string.replace("!", " :^)", ReplaceMode::FirstOnly);
     EXPECT(test_string == "We're, he'reo Testers :^)");
 
     test_string = String("111._.111._.111");
-    test_string = test_string.replace("111", "|||", true);
+    test_string = test_string.replace("111", "|||", ReplaceMode::All);
     EXPECT(test_string == "|||._.|||._.|||");
 
-    test_string = test_string.replace("|||", "111");
+    test_string = test_string.replace("|||", "111", ReplaceMode::FirstOnly);
     EXPECT(test_string == "111._.|||._.|||");
 }
 
@@ -255,20 +255,6 @@ TEST_CASE(builder_zero_initial_capacity)
     auto built = builder.build();
     EXPECT_EQ(built.is_null(), false);
     EXPECT_EQ(built.length(), 0u);
-}
-
-TEST_CASE(sprintf)
-{
-    char buf1[128];
-    int ret1 = sprintf(buf1, "%+d", 12);
-    EXPECT_EQ(ret1, 3);
-
-    char buf2[128];
-    int ret2 = sprintf(buf2, "%+d", -12);
-    EXPECT_EQ(ret2, 3);
-
-    EXPECT_EQ(String(buf1), String("+12"));
-    EXPECT_EQ(String(buf2), String("-12"));
 }
 
 TEST_CASE(find)
