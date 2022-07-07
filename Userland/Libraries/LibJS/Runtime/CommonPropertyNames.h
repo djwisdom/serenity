@@ -83,6 +83,7 @@ namespace JS {
     P(byteOffset)                            \
     P(calendar)                              \
     P(calendarName)                          \
+    P(calendars)                             \
     P(call)                                  \
     P(callee)                                \
     P(caller)                                \
@@ -97,6 +98,7 @@ namespace JS {
     P(clz32)                                 \
     P(codePointAt)                           \
     P(collation)                             \
+    P(collations)                            \
     P(compactDisplay)                        \
     P(compareExchange)                       \
     P(compile)                               \
@@ -137,6 +139,7 @@ namespace JS {
     P(deleteProperty)                        \
     P(deref)                                 \
     P(description)                           \
+    P(direction)                             \
     P(disambiguation)                        \
     P(done)                                  \
     P(dotAll)                                \
@@ -171,6 +174,7 @@ namespace JS {
     P(findLast)                              \
     P(findLastIndex)                         \
     P(findIndex)                             \
+    P(firstDay)                              \
     P(fixed)                                 \
     P(flags)                                 \
     P(flat)                                  \
@@ -256,6 +260,7 @@ namespace JS {
     P(hour)                                  \
     P(hour12)                                \
     P(hourCycle)                             \
+    P(hourCycles)                            \
     P(hours)                                 \
     P(hoursDisplay)                          \
     P(hoursInDay)                            \
@@ -316,7 +321,6 @@ namespace JS {
     P(log10)                                 \
     P(map)                                   \
     P(max)                                   \
-    P(maxByteLength)                         \
     P(maximize)                              \
     P(mergeFields)                           \
     P(message)                               \
@@ -327,6 +331,7 @@ namespace JS {
     P(milliseconds)                          \
     P(millisecondsDisplay)                   \
     P(min)                                   \
+    P(minimalDays)                           \
     P(minimize)                              \
     P(maximumFractionDigits)                 \
     P(maximumSignificantDigits)              \
@@ -353,6 +358,7 @@ namespace JS {
     P(notation)                              \
     P(now)                                   \
     P(numberingSystem)                       \
+    P(numberingSystems)                      \
     P(numeric)                               \
     P(of)                                    \
     P(offset)                                \
@@ -388,8 +394,6 @@ namespace JS {
     P(reject)                                \
     P(relativeTo)                            \
     P(repeat)                                \
-    P(resize)                                \
-    P(resizable)                             \
     P(resolve)                               \
     P(resolvedOptions)                       \
     P(reverse)                               \
@@ -468,6 +472,7 @@ namespace JS {
     P(tan)                                   \
     P(tanh)                                  \
     P(test)                                  \
+    P(textInfo)                              \
     P(then)                                  \
     P(time)                                  \
     P(timeEnd)                               \
@@ -475,6 +480,7 @@ namespace JS {
     P(timeStyle)                             \
     P(timeZone)                              \
     P(timeZoneName)                          \
+    P(timeZones)                             \
     P(toDateString)                          \
     P(toExponential)                         \
     P(toFixed)                               \
@@ -527,8 +533,10 @@ namespace JS {
     P(valueOf)                               \
     P(values)                                \
     P(warn)                                  \
+    P(weekInfo)                              \
     P(weekOfYear)                            \
     P(weekday)                               \
+    P(weekend)                               \
     P(weeks)                                 \
     P(weeksDisplay)                          \
     P(with)                                  \
