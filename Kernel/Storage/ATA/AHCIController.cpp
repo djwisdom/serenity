@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Liav A. <liavalb@hotmail.co.il>
+ * Copyright (c) 2021-2022, Liav A. <liavalb@hotmail.co.il>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,35 +10,62 @@
 #include <AK/RefPtr.h>
 #include <AK/Types.h>
 #include <Kernel/Bus/PCI/API.h>
+#include <Kernel/CommandLine.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Storage/ATA/AHCIController.h>
-#include <Kernel/Storage/ATA/AHCIPortHandler.h>
+#include <Kernel/Storage/ATA/AHCIInterruptHandler.h>
 
 namespace Kernel {
 
-NonnullRefPtr<AHCIController> AHCIController::initialize(PCI::DeviceIdentifier const& pci_device_identifier)
+UNMAP_AFTER_INIT NonnullRefPtr<AHCIController> AHCIController::initialize(PCI::DeviceIdentifier const& pci_device_identifier)
 {
-    return adopt_ref(*new AHCIController(pci_device_identifier));
+    auto controller = adopt_ref_if_nonnull(new (nothrow) AHCIController(pci_device_identifier)).release_nonnull();
+    controller->initialize_hba(pci_device_identifier);
+    return controller;
 }
 
 bool AHCIController::reset()
 {
-    hba().control_regs.ghc = 1;
+    dmesgln("{}: AHCI controller reset", pci_address());
+    {
+        SpinlockLocker locker(m_hba_control_lock);
+        hba().control_regs.ghc = 1;
 
-    dbgln_if(AHCI_DEBUG, "{}: AHCI Controller reset", pci_address());
+        dbgln_if(AHCI_DEBUG, "{}: AHCI Controller reset", pci_address());
 
-    full_memory_barrier();
-    size_t retry = 0;
+        full_memory_barrier();
+        size_t retry = 0;
 
-    while (true) {
-        if (retry > 1000)
-            return false;
-        if (!(hba().control_regs.ghc & 1))
-            break;
-        IO::delay(1000);
-        retry++;
+        // Note: The HBA is locked or hung if we waited more than 1 second!
+        while (true) {
+            if (retry > 1000)
+                return false;
+            if (!(hba().control_regs.ghc & 1))
+                break;
+            IO::delay(1000);
+            retry++;
+        }
+        // Note: Turn on AHCI HBA and Global HBA Interrupts.
+        full_memory_barrier();
+        hba().control_regs.ghc = (1 << 31) | (1 << 1);
+        full_memory_barrier();
     }
-    // The HBA is locked or hung if we waited more than 1 second!
+
+    // Note: According to the AHCI spec the PI register indicates which ports are exposed by the HBA.
+    // It is loaded by the BIOS. It indicates which ports that the HBA supports are available for software to use.
+    // For example, on an HBA that supports 6 ports as indicated in CAP.NP, only ports 1 and 3 could be available,
+    // with ports 0, 2, 4, and 5 being unavailable.
+    // Which means that even without clearing the AHCI ports array, we are never able to encounter
+    // a case that we would have stale left-over ports in there. We still clear the array
+    // for the sake of clarity and completeness, as it doesn't harm anything anyway.
+    m_ports.fill({});
+
+    auto implemented_ports = AHCI::MaskedBitField((u32 volatile&)(hba().control_regs.pi));
+    for (auto index : implemented_ports.to_vector()) {
+        auto port = AHCIPort::create(*this, m_hba_capabilities, static_cast<volatile AHCI::PortRegisters&>(hba().port_regs[index]), index).release_value_but_fixme_should_propagate_errors();
+        m_ports[index] = port;
+        port->reset();
+    }
     return true;
 }
 
@@ -49,21 +76,18 @@ bool AHCIController::shutdown()
 
 size_t AHCIController::devices_count() const
 {
+    SpinlockLocker locker(m_hba_control_lock);
     size_t count = 0;
-    for (auto& port_handler : m_handlers) {
-        port_handler.enumerate_ports([&](AHCIPort const& port) {
-            if (port.connected_device())
-                count++;
-        });
+    for (auto port : m_ports) {
+        if (port && port->connected_device())
+            count++;
     }
     return count;
 }
 
 void AHCIController::start_request(ATADevice const& device, AsyncBlockDeviceRequest& request)
 {
-    // FIXME: For now we have one port handler, check all of them...
-    VERIFY(m_handlers.size() > 0);
-    auto port = m_handlers[0].port_at_index(device.ata_address().port);
+    auto port = m_ports[device.ata_address().port];
     VERIFY(port);
     port->start_request(request);
 }
@@ -84,13 +108,12 @@ volatile AHCI::HBA& AHCIController::hba() const
     return static_cast<volatile AHCI::HBA&>(*(volatile AHCI::HBA*)(m_hba_region->vaddr().as_ptr()));
 }
 
-AHCIController::AHCIController(PCI::DeviceIdentifier const& pci_device_identifier)
+UNMAP_AFTER_INIT AHCIController::AHCIController(PCI::DeviceIdentifier const& pci_device_identifier)
     : ATAController()
     , PCI::Device(pci_device_identifier.address())
     , m_hba_region(default_hba_region())
-    , m_capabilities(capabilities())
+    , m_hba_capabilities(capabilities())
 {
-    initialize_hba(pci_device_identifier);
 }
 
 AHCI::HBADefinedCapabilities AHCIController::capabilities() const
@@ -130,31 +153,34 @@ AHCI::HBADefinedCapabilities AHCIController::capabilities() const
     };
 }
 
-NonnullOwnPtr<Memory::Region> AHCIController::default_hba_region() const
+UNMAP_AFTER_INIT NonnullOwnPtr<Memory::Region> AHCIController::default_hba_region() const
 {
     return MM.allocate_kernel_region(PhysicalAddress(PCI::get_BAR5(pci_address())).page_base(), Memory::page_round_up(sizeof(AHCI::HBA)).release_value_but_fixme_should_propagate_errors(), "AHCI HBA", Memory::Region::Access::ReadWrite).release_value();
 }
 
 AHCIController::~AHCIController() = default;
 
-void AHCIController::initialize_hba(PCI::DeviceIdentifier const& pci_device_identifier)
+UNMAP_AFTER_INIT void AHCIController::initialize_hba(PCI::DeviceIdentifier const& pci_device_identifier)
 {
-    if (!reset()) {
-        dmesgln("{}: AHCI controller reset failed", pci_address());
-        return;
-    }
-    dmesgln("{}: AHCI controller reset", pci_address());
-    dbgln("{}: AHCI command list entries count - {}", pci_address(), hba_capabilities().max_command_list_entries_count);
-
     u32 version = hba().control_regs.version;
-    dbgln_if(AHCI_DEBUG, "{}: AHCI Controller Version = {:#08x}", pci_address(), version);
 
     hba().control_regs.ghc = 0x80000000; // Ensure that HBA knows we are AHCI aware.
     PCI::enable_interrupt_line(pci_address());
     PCI::enable_bus_mastering(pci_address());
     enable_global_interrupts();
-    m_handlers.append(AHCIPortHandler::create(*this, pci_device_identifier.interrupt_line().value(),
-        AHCI::MaskedBitField((u32 volatile&)(hba().control_regs.pi))));
+
+    auto implemented_ports = AHCI::MaskedBitField((u32 volatile&)(hba().control_regs.pi));
+    m_irq_handler = AHCIInterruptHandler::create(*this, pci_device_identifier.interrupt_line().value(), implemented_ports).release_value_but_fixme_should_propagate_errors();
+    reset();
+    dbgln_if(AHCI_DEBUG, "{}: AHCI Controller Version = {:#08x}", pci_address(), version);
+    dbgln("{}: AHCI command list entries count - {}", pci_address(), m_hba_capabilities.max_command_list_entries_count);
+}
+
+void AHCIController::handle_interrupt_for_port(Badge<AHCIInterruptHandler>, u32 port_index) const
+{
+    auto port = m_ports[port_index];
+    VERIFY(port);
+    port->handle_interrupt();
 }
 
 void AHCIController::disable_global_interrupts() const
@@ -168,16 +194,12 @@ void AHCIController::enable_global_interrupts() const
 
 RefPtr<StorageDevice> AHCIController::device_by_port(u32 port_index) const
 {
-    for (auto& port_handler : m_handlers) {
-        if (!port_handler.is_responsible_for_port_index(port_index))
-            continue;
-
-        auto port = port_handler.port_at_index(port_index);
-        if (!port)
-            return nullptr;
-        return port->connected_device();
-    }
-    return nullptr;
+    SpinlockLocker locker(m_hba_control_lock);
+    auto port = m_ports[port_index];
+    if (!port)
+        return {};
+    SpinlockLocker port_hard_locker(port->m_hard_lock);
+    return port->connected_device();
 }
 
 RefPtr<StorageDevice> AHCIController::device(u32 index) const

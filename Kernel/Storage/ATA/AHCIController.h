@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Liav A. <liavalb@hotmail.co.il>
+ * Copyright (c) 2021-2022, Liav A. <liavalb@hotmail.co.il>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -17,15 +17,14 @@
 namespace Kernel {
 
 class AsyncBlockDeviceRequest;
-class AHCIPortHandler;
+class AHCIInterruptHandler;
 class AHCIPort;
 class AHCIController final : public ATAController
     , public PCI::Device {
-    friend class AHCIPortHandler;
-    friend class AHCIPort;
+    friend class AHCIInterruptHandler;
 
 public:
-    UNMAP_AFTER_INIT static NonnullRefPtr<AHCIController> initialize(PCI::DeviceIdentifier const& pci_device_identifier);
+    static NonnullRefPtr<AHCIController> initialize(PCI::DeviceIdentifier const& pci_device_identifier);
     virtual ~AHCIController() override;
 
     virtual RefPtr<StorageDevice> device(u32 index) const override;
@@ -35,24 +34,32 @@ public:
     virtual void start_request(ATADevice const&, AsyncBlockDeviceRequest&) override;
     virtual void complete_current_request(AsyncDeviceRequest::RequestResult) override;
 
-    const AHCI::HBADefinedCapabilities& hba_capabilities() const { return m_capabilities; };
+    void handle_interrupt_for_port(Badge<AHCIInterruptHandler>, u32 port_index) const;
 
 private:
     void disable_global_interrupts() const;
     void enable_global_interrupts() const;
 
-    UNMAP_AFTER_INIT explicit AHCIController(PCI::DeviceIdentifier const&);
-    UNMAP_AFTER_INIT void initialize_hba(PCI::DeviceIdentifier const&);
+    explicit AHCIController(PCI::DeviceIdentifier const&);
+    void initialize_hba(PCI::DeviceIdentifier const&);
 
     AHCI::HBADefinedCapabilities capabilities() const;
     RefPtr<StorageDevice> device_by_port(u32 index) const;
 
     volatile AHCI::PortRegisters& port(size_t port_number) const;
-    UNMAP_AFTER_INIT NonnullOwnPtr<Memory::Region> default_hba_region() const;
+    NonnullOwnPtr<Memory::Region> default_hba_region() const;
     volatile AHCI::HBA& hba() const;
 
+    Array<RefPtr<AHCIPort>, 32> m_ports;
     NonnullOwnPtr<Memory::Region> m_hba_region;
-    AHCI::HBADefinedCapabilities m_capabilities;
-    NonnullRefPtrVector<AHCIPortHandler> m_handlers;
+    AHCI::HBADefinedCapabilities m_hba_capabilities;
+
+    // FIXME: There could be multiple IRQ (MSI) handlers for AHCI. Find a way to use all of them.
+    OwnPtr<AHCIInterruptHandler> m_irq_handler;
+
+    // Note: This lock is intended to be locked when doing changes to HBA registers
+    // that affect its core functionality in a manner that controls all attached storage devices
+    // to the HBA SATA ports.
+    mutable Spinlock m_hba_control_lock;
 };
 }
