@@ -71,7 +71,7 @@ DynamicLoader::DynamicLoader(int fd, String filename, void* data, size_t size, S
     m_elf_image = adopt_own(*new ELF::Image((u8*)m_file_data, m_file_size));
     m_valid = validate();
     if (m_valid)
-        m_tls_size_of_current_object = calculate_tls_size();
+        find_tls_size_and_alignment();
     else
         dbgln("Image validation failed for file {}", m_filename);
 }
@@ -100,20 +100,23 @@ DynamicObject const& DynamicLoader::dynamic_object() const
         });
         VERIFY(!dynamic_section_address.is_null());
 
-        m_cached_dynamic_object = ELF::DynamicObject::create(m_filename, VirtualAddress(image().base_address()), dynamic_section_address);
+        m_cached_dynamic_object = ELF::DynamicObject::create(m_filepath, VirtualAddress(image().base_address()), dynamic_section_address);
     }
     return *m_cached_dynamic_object;
 }
 
-size_t DynamicLoader::calculate_tls_size() const
+void DynamicLoader::find_tls_size_and_alignment()
 {
-    size_t tls_size = 0;
-    image().for_each_program_header([&tls_size](auto program_header) {
+    image().for_each_program_header([this](auto program_header) {
         if (program_header.type() == PT_TLS) {
-            tls_size = program_header.size_in_memory();
+            m_tls_size_of_current_object = program_header.size_in_memory();
+            auto alignment = program_header.alignment();
+            VERIFY(!alignment || is_power_of_two(alignment));
+            m_tls_alignment_of_current_object = alignment > 1 ? alignment : 0; // No need to reserve extra space for single byte alignment
+            return IterationDecision::Break;
         }
+        return IterationDecision::Continue;
     });
-    return tls_size;
 }
 
 bool DynamicLoader::validate()
@@ -146,7 +149,7 @@ RefPtr<DynamicObject> DynamicLoader::map()
 
     VERIFY(!m_base_address.is_null());
 
-    m_dynamic_object = DynamicObject::create(m_filename, m_base_address, m_dynamic_section_address);
+    m_dynamic_object = DynamicObject::create(m_filepath, m_base_address, m_dynamic_section_address);
     m_dynamic_object->set_tls_offset(m_tls_offset);
     m_dynamic_object->set_tls_size(m_tls_size_of_current_object);
 
@@ -163,7 +166,7 @@ bool DynamicLoader::load_stage_2(unsigned flags)
     VERIFY(flags & RTLD_GLOBAL);
 
     if (m_dynamic_object->has_text_relocations()) {
-        dbgln("\033[33mWarning:\033[0m Dynamic object {} has text relocations", m_dynamic_object->filename());
+        dbgln("\033[33mWarning:\033[0m Dynamic object {} has text relocations", m_dynamic_object->filepath());
         for (auto& text_segment : m_text_segments) {
             VERIFY(text_segment.address().get() != 0);
 
@@ -243,12 +246,16 @@ Result<NonnullRefPtr<DynamicObject>, DlErrorMessage> DynamicLoader::load_stage_3
 #endif
     }
 
+    m_fully_relocated = true;
+
     return NonnullRefPtr<DynamicObject> { *m_dynamic_object };
 }
 
 void DynamicLoader::load_stage_4()
 {
     call_object_init_functions();
+
+    m_fully_initialized = true;
 }
 
 void DynamicLoader::do_lazy_relocations()

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021-2022, Kenneth Myhra <kennethmyhra@gmail.com>
+ * Copyright (c) 2021-2022, Kenneth Myhra <kennethmyhra@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -47,6 +47,12 @@ ErrorOr<void> disown(pid_t pid);
 ErrorOr<void> profiling_enable(pid_t, u64 event_mask);
 ErrorOr<void> profiling_disable(pid_t);
 ErrorOr<void> profiling_free_buffer(pid_t);
+#else
+inline ErrorOr<void> unveil(StringView, StringView)
+{
+    return {};
+}
+inline ErrorOr<void> pledge(StringView, StringView = {}) { return {}; }
 #endif
 
 #ifndef AK_OS_BSD_GENERIC

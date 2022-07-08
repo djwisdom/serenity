@@ -95,7 +95,7 @@ void LookupServer::load_etc_hosts()
         if (original_line.is_empty())
             break;
         auto trimmed_line = original_line.view().trim_whitespace();
-        auto replaced_line = trimmed_line.replace(" ", "\t", true);
+        auto replaced_line = trimmed_line.replace(" ", "\t", ReplaceMode::All);
         auto fields = replaced_line.split_view('\t', false);
 
         if (fields.size() < 2) {
@@ -126,7 +126,7 @@ void LookupServer::load_etc_hosts()
 
 static String get_hostname()
 {
-    char buffer[HOST_NAME_MAX];
+    char buffer[_POSIX_HOST_NAME_MAX];
     VERIFY(gethostname(buffer, sizeof(buffer)) == 0);
     return buffer;
 }
@@ -196,7 +196,10 @@ ErrorOr<Vector<Answer>> LookupServer::lookup(Name const& name, RecordType record
         int retries = 3;
         Vector<Answer> upstream_answers;
         do {
-            upstream_answers = TRY(lookup(name, nameserver, did_get_response, record_type));
+            auto upstream_answers_or_error = lookup(name, nameserver, did_get_response, record_type);
+            if (upstream_answers_or_error.is_error())
+                continue;
+            upstream_answers = upstream_answers_or_error.release_value();
             if (did_get_response)
                 break;
         } while (--retries);

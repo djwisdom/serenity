@@ -945,7 +945,7 @@ NonnullRefPtr<GUI::Action> HackStudioWidget::create_add_terminal_action()
 
 void HackStudioWidget::reveal_action_tab(GUI::Widget& widget)
 {
-    if (m_action_tab_widget->min_height() < 200)
+    if (m_action_tab_widget->effective_min_size().height().as_int() < 200)
         m_action_tab_widget->set_fixed_height(200);
     m_action_tab_widget->set_active_widget(&widget);
 }
@@ -1543,10 +1543,11 @@ void HackStudioWidget::stop_debugger_if_running()
 void HackStudioWidget::close_current_project()
 {
     m_editors_splitter->remove_all_children();
+    m_all_editor_tab_widgets.clear();
     m_all_editor_wrappers.clear();
+    add_new_editor_tab_widget(*m_editors_splitter);
     m_open_files.clear();
     m_open_files_vector.clear();
-    add_new_editor(*m_current_editor_tab_widget);
     m_find_in_files_widget->reset();
     m_todo_entries_widget->clear();
     m_terminal_wrapper->clear_including_history();

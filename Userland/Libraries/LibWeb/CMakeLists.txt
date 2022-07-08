@@ -74,6 +74,7 @@ set(SOURCES
     DOM/AbortSignal.cpp
     DOM/Attribute.cpp
     DOM/Attribute.idl
+    DOM/CDATASection.cpp
     DOM/CharacterData.cpp
     DOM/CharacterData.idl
     DOM/Comment.cpp
@@ -109,6 +110,7 @@ set(SOURCES
     DOM/Text.idl
     DOM/TreeWalker.cpp
     DOMParsing/InnerHTML.cpp
+    DOMParsing/XMLSerializer.cpp
     Dump.cpp
     Encoding/TextDecoder.cpp
     Encoding/TextEncoder.cpp
@@ -225,6 +227,7 @@ set(SOURCES
     HTML/TextMetrics.cpp
     HTML/Timer.cpp
     HTML/Window.cpp
+    HTML/WindowEventHandlers.cpp
     HTML/Worker.cpp
     HTML/WorkerDebugConsoleClient.cpp
     HTML/WorkerGlobalScope.cpp
@@ -274,6 +277,7 @@ set(SOURCES
     Layout/TextNode.cpp
     Layout/TreeBuilder.cpp
     Loader/ContentFilter.cpp
+    Loader/FileRequest.cpp
     Loader/FrameLoader.cpp
     Loader/ImageLoader.cpp
     Loader/ImageResource.cpp

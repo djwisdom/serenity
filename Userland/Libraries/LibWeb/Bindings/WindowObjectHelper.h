@@ -15,6 +15,8 @@
 #include <LibWeb/Bindings/AbstractRangeConstructor.h>
 #include <LibWeb/Bindings/AbstractRangePrototype.h>
 #include <LibWeb/Bindings/AudioConstructor.h>
+#include <LibWeb/Bindings/CDATASectionConstructor.h>
+#include <LibWeb/Bindings/CDATASectionPrototype.h>
 #include <LibWeb/Bindings/CSSConditionRuleConstructor.h>
 #include <LibWeb/Bindings/CSSConditionRulePrototype.h>
 #include <LibWeb/Bindings/CSSFontFaceRuleConstructor.h>
@@ -353,6 +355,8 @@
 #include <LibWeb/Bindings/XMLHttpRequestEventTargetConstructor.h>
 #include <LibWeb/Bindings/XMLHttpRequestEventTargetPrototype.h>
 #include <LibWeb/Bindings/XMLHttpRequestPrototype.h>
+#include <LibWeb/Bindings/XMLSerializerConstructor.h>
+#include <LibWeb/Bindings/XMLSerializerPrototype.h>
 
 #define ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(interface_name, constructor_name, prototype_name)                                \
     {                                                                                                                                \
@@ -370,6 +374,7 @@
     ADD_WINDOW_OBJECT_INTERFACE(AbortController)                                                    \
     ADD_WINDOW_OBJECT_INTERFACE(AbortSignal)                                                        \
     ADD_WINDOW_OBJECT_INTERFACE(AbstractRange)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(CDATASection)                                                       \
     ADD_WINDOW_OBJECT_INTERFACE(CSSConditionRule)                                                   \
     ADD_WINDOW_OBJECT_INTERFACE(CSSFontFaceRule)                                                    \
     ADD_WINDOW_OBJECT_INTERFACE(CSSGroupingRule)                                                    \
@@ -536,6 +541,7 @@
     ADD_WINDOW_OBJECT_INTERFACE(Worker)                                                             \
     ADD_WINDOW_OBJECT_INTERFACE(XMLHttpRequest)                                                     \
     ADD_WINDOW_OBJECT_INTERFACE(XMLHttpRequestEventTarget)                                          \
+    ADD_WINDOW_OBJECT_INTERFACE(XMLSerializer)                                                      \
     ADD_WINDOW_OBJECT_INTERFACE(Window)                                                             \
     ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(Audio, AudioConstructor, HTMLAudioElementPrototype) \
     ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(Image, ImageConstructor, HTMLImageElementPrototype) \

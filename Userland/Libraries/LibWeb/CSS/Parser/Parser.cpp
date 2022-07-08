@@ -2883,7 +2883,7 @@ Optional<UnicodeRange> Parser::parse_unicode_range(StringView text)
         // 2. Interpret the consumed code points as a hexadecimal number,
         //    with the U+003F QUESTION MARK (?) code points replaced by U+0030 DIGIT ZERO (0) code points.
         //    This is the start value.
-        auto start_value_string = start_value_code_points.replace("?", "0", true);
+        auto start_value_string = start_value_code_points.replace("?", "0", ReplaceMode::All);
         auto maybe_start_value = AK::StringUtils::convert_to_uint_from_hex<u32>(start_value_string);
         if (!maybe_start_value.has_value()) {
             dbgln_if(CSS_PARSER_DEBUG, "CSSParser: <urange> ?-converted start value did not parse as hex number.");
@@ -2894,7 +2894,7 @@ Optional<UnicodeRange> Parser::parse_unicode_range(StringView text)
         // 3. Interpret the consumed code points as a hexadecimal number again,
         //    with the U+003F QUESTION MARK (?) code points replaced by U+0046 LATIN CAPITAL LETTER F (F) code points.
         //    This is the end value.
-        auto end_value_string = start_value_code_points.replace("?", "F", true);
+        auto end_value_string = start_value_code_points.replace("?", "F", ReplaceMode::All);
         auto maybe_end_value = AK::StringUtils::convert_to_uint_from_hex<u32>(end_value_string);
         if (!maybe_end_value.has_value()) {
             dbgln_if(CSS_PARSER_DEBUG, "CSSParser: <urange> ?-converted end value did not parse as hex number.");
@@ -3741,8 +3741,10 @@ RefPtr<StyleValue> Parser::parse_single_background_size_value(TokenStream<Compon
         return nullptr;
     auto x_value = maybe_x_value.release_nonnull();
 
-    if (x_value->to_identifier() == ValueID::Cover || x_value->to_identifier() == ValueID::Contain)
+    if (x_value->to_identifier() == ValueID::Cover || x_value->to_identifier() == ValueID::Contain) {
+        transaction.commit();
         return x_value;
+    }
 
     auto maybe_y_value = parse_css_value(tokens.peek_token());
     if (!maybe_y_value || !property_accepts_value(PropertyID::BackgroundSize, *maybe_y_value)) {

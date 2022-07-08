@@ -102,7 +102,7 @@ void ImageEditor::set_title(String title)
 void ImageEditor::set_path(String path)
 {
     m_path = move(path);
-    set_title(LexicalPath::basename(m_path));
+    set_title(LexicalPath::title(m_path));
 }
 
 void ImageEditor::paint_event(GUI::PaintEvent& event)
@@ -597,7 +597,7 @@ void ImageEditor::save_project()
 
 void ImageEditor::save_project_as()
 {
-    auto response = FileSystemAccessClient::Client::the().try_save_file(window(), "untitled", "pp");
+    auto response = FileSystemAccessClient::Client::the().try_save_file(window(), m_title, "pp");
     if (response.is_error())
         return;
     auto file = response.value();

@@ -45,6 +45,11 @@ class Document
 public:
     using WrapperType = Bindings::DocumentWrapper;
 
+    enum class Type {
+        XML,
+        HTML
+    };
+
     static NonnullRefPtr<Document> create(const AK::URL& url = "about:blank")
     {
         return adopt_ref(*new Document(url));
@@ -208,6 +213,12 @@ public:
     bool in_quirks_mode() const { return m_quirks_mode == QuirksMode::Yes; }
     void set_quirks_mode(QuirksMode mode) { m_quirks_mode = mode; }
 
+    Type document_type() const { return m_type; }
+    void set_document_type(Type type) { m_type = type; }
+
+    // https://dom.spec.whatwg.org/#xml-document
+    bool is_xml_document() const { return m_type == Type::XML; }
+
     ExceptionOr<NonnullRefPtr<Node>> import_node(NonnullRefPtr<Node> node, bool deep);
     void adopt_node(Node&);
     ExceptionOr<NonnullRefPtr<Node>> adopt_node_binding(NonnullRefPtr<Node>);
@@ -353,7 +364,7 @@ private:
     explicit Document(const AK::URL&);
 
     // ^HTML::GlobalEventHandlers
-    virtual EventTarget& global_event_handlers_to_event_target() final { return *this; }
+    virtual EventTarget& global_event_handlers_to_event_target(FlyString const&) final { return *this; }
 
     void tear_down_layout_tree();
 
@@ -411,6 +422,10 @@ private:
     NonnullRefPtrVector<HTML::HTMLScriptElement> m_scripts_to_execute_as_soon_as_possible;
 
     QuirksMode m_quirks_mode { QuirksMode::No };
+
+    // https://dom.spec.whatwg.org/#concept-document-type
+    Type m_type { Type::HTML };
+
     bool m_editable { false };
 
     WeakPtr<Element> m_focused_element;

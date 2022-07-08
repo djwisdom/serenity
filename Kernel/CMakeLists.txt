@@ -81,10 +81,10 @@ set(KERNEL_SOURCES
     Graphics/Console/TextModeConsole.cpp
     Graphics/Console/VGAConsole.cpp
     Graphics/DisplayConnector.cpp
+    Graphics/Generic/DisplayConnector.cpp
     Graphics/GraphicsManagement.cpp
     Graphics/Intel/NativeDisplayConnector.cpp
     Graphics/Intel/NativeGraphicsAdapter.cpp
-    Graphics/VGA/DisplayConnector.cpp
     Graphics/VGA/ISAAdapter.cpp
     Graphics/VGA/PCIAdapter.cpp
     Graphics/VGA/VGACompatibleAdapter.cpp
@@ -97,8 +97,8 @@ set(KERNEL_SOURCES
     Graphics/VirtIOGPU/GraphicsAdapter.cpp
     SanCov.cpp
     Storage/ATA/AHCIController.cpp
+    Storage/ATA/AHCIInterruptHandler.cpp
     Storage/ATA/AHCIPort.cpp
-    Storage/ATA/AHCIPortHandler.cpp
     Storage/ATA/ATADevice.cpp
     Storage/ATA/ATADiskDevice.cpp
     Storage/ATA/ATAPIDiscDevice.cpp
@@ -494,6 +494,18 @@ add_compile_options(-fstack-protector-strong)
 add_compile_options(-fno-exceptions)
 # FIXME: remove -nodefaultlibs after the next toolchain update
 add_compile_options(-nodefaultlibs -nostdlib)
+
+# Auto initialize trivial types on the stack, we use "pattern" as 
+# it's the only option portable across compilers going forward.
+#
+# This is designed to help avoid uninitialized variables bugs and
+# information disclosures coming from the kernel stack. 
+#
+# FIXME: It appears to conflict with something during the boot of the
+# aarch64 kernel, we should investigate and remove this special case.
+if (NOT "${SERENITY_ARCH}" STREQUAL "aarch64")
+    add_compile_options(-ftrivial-auto-var-init=pattern)
+endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # Apply any flags that are only available on >= GCC 11.1

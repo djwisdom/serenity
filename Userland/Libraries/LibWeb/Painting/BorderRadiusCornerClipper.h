@@ -18,7 +18,12 @@ enum class CornerClip {
 
 class BorderRadiusCornerClipper {
 public:
-    static ErrorOr<BorderRadiusCornerClipper> create(Gfx::IntRect const& border_rect, BorderRadiiData const& border_radii, CornerClip corner_clip = CornerClip::Outside);
+    enum class UseCachedBitmap {
+        Yes,
+        No
+    };
+
+    static ErrorOr<BorderRadiusCornerClipper> create(Gfx::IntRect const& border_rect, BorderRadiiData const& border_radii, CornerClip corner_clip = CornerClip::Outside, UseCachedBitmap use_cached_bitmap = UseCachedBitmap::Yes);
 
     void sample_under_corners(Gfx::Painter& page_painter);
     void blit_corner_clipping(Gfx::Painter& page_painter);
@@ -53,6 +58,34 @@ private:
         , m_corner_clip(corner_clip)
     {
     }
+};
+
+struct ScopedCornerRadiusClip {
+    ScopedCornerRadiusClip(Gfx::Painter& painter, Gfx::IntRect const& border_rect, BorderRadiiData const& border_radii, CornerClip corner_clip = CornerClip::Outside, BorderRadiusCornerClipper::UseCachedBitmap use_cached_bitmap = BorderRadiusCornerClipper::UseCachedBitmap::Yes)
+        : m_painter(painter)
+    {
+        if (border_radii.has_any_radius()) {
+            auto clipper = BorderRadiusCornerClipper::create(border_rect, border_radii, corner_clip, use_cached_bitmap);
+            if (!clipper.is_error()) {
+                m_corner_clipper = clipper.release_value();
+                m_corner_clipper->sample_under_corners(m_painter);
+            }
+        }
+    }
+
+    ~ScopedCornerRadiusClip()
+    {
+        if (m_corner_clipper.has_value()) {
+            m_corner_clipper->blit_corner_clipping(m_painter);
+        }
+    }
+
+    AK_MAKE_NONMOVABLE(ScopedCornerRadiusClip);
+    AK_MAKE_NONCOPYABLE(ScopedCornerRadiusClip);
+
+private:
+    Gfx::Painter& m_painter;
+    Optional<BorderRadiusCornerClipper> m_corner_clipper;
 };
 
 }

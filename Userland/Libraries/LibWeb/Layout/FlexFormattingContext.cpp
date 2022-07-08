@@ -619,7 +619,16 @@ void FlexFormattingContext::determine_flex_base_size_and_hypothetical_main_size(
         if (has_definite_main_size(child_box))
             return specified_main_size_of_child_box(child_box);
 
-        return calculate_indefinite_main_size(flex_item);
+        // NOTE: To avoid repeated layout work, we keep a cache of flex item main sizes on the
+        //       root FormattingState object. It's available through a full layout cycle.
+        // FIXME: Make sure this cache isn't overly permissive..
+        auto& size_cache = m_state.m_root.flex_item_size_cache;
+        auto it = size_cache.find(&flex_item.box);
+        if (it != size_cache.end())
+            return it->value;
+        auto main_size = calculate_indefinite_main_size(flex_item);
+        size_cache.set(&flex_item.box, main_size);
+        return main_size;
     }();
 
     // The hypothetical main size is the item’s flex base size clamped according to its used min and max main sizes (and flooring the content box size at zero).
@@ -844,6 +853,7 @@ void FlexFormattingContext::resolve_flexible_lengths()
         };
 
         float initial_free_space = calculate_free_space();
+        flex_line.remaining_free_space = initial_free_space;
 
         // 6.4 Loop
         auto for_each_unfrozen_item = [&flex_line](auto callback) {
@@ -855,7 +865,7 @@ void FlexFormattingContext::resolve_flexible_lengths()
 
         while (number_of_unfrozen_items_on_line > 0) {
             // b Calculate the remaining free space
-            auto remaining_free_space = calculate_free_space();
+            flex_line.remaining_free_space = calculate_free_space();
             float sum_of_unfrozen_flex_items_flex_factors = 0;
             for_each_unfrozen_item([&](FlexItem* item) {
                 sum_of_unfrozen_flex_items_flex_factors += item->flex_factor.value_or(1);
@@ -863,17 +873,17 @@ void FlexFormattingContext::resolve_flexible_lengths()
 
             if (sum_of_unfrozen_flex_items_flex_factors < 1) {
                 auto intermediate_free_space = initial_free_space * sum_of_unfrozen_flex_items_flex_factors;
-                if (AK::abs(intermediate_free_space) < AK::abs(remaining_free_space))
-                    remaining_free_space = intermediate_free_space;
+                if (AK::abs(intermediate_free_space) < AK::abs(flex_line.remaining_free_space))
+                    flex_line.remaining_free_space = intermediate_free_space;
             }
 
             // c Distribute free space proportional to the flex factors
-            if (remaining_free_space != 0) {
+            if (flex_line.remaining_free_space != 0) {
                 if (used_flex_factor == FlexFactor::FlexGrowFactor) {
                     float sum_of_flex_grow_factor_of_unfrozen_items = sum_of_unfrozen_flex_items_flex_factors;
                     for_each_unfrozen_item([&](FlexItem* flex_item) {
                         float ratio = flex_item->flex_factor.value_or(1) / sum_of_flex_grow_factor_of_unfrozen_items;
-                        flex_item->target_main_size = flex_item->flex_base_size + (remaining_free_space * ratio);
+                        flex_item->target_main_size = flex_item->flex_base_size + (flex_line.remaining_free_space * ratio);
                     });
                 } else if (used_flex_factor == FlexFactor::FlexShrinkFactor) {
                     float sum_of_scaled_flex_shrink_factor_of_unfrozen_items = 0;
@@ -886,7 +896,7 @@ void FlexFormattingContext::resolve_flexible_lengths()
                         float ratio = 1.0f;
                         if (sum_of_scaled_flex_shrink_factor_of_unfrozen_items != 0.0f)
                             ratio = flex_item->scaled_flex_shrink_factor / sum_of_scaled_flex_shrink_factor_of_unfrozen_items;
-                        flex_item->target_main_size = flex_item->flex_base_size - (AK::abs(remaining_free_space) * ratio);
+                        flex_item->target_main_size = flex_item->flex_base_size - (AK::abs(flex_line.remaining_free_space) * ratio);
                     });
                 }
             } else {
@@ -959,7 +969,9 @@ void FlexFormattingContext::determine_hypothetical_cross_size_of_item(FlexItem& 
 
     // If we have a definite cross size, this is easy! No need to perform layout, we can just use it as-is.
     if (has_definite_cross_size(item.box)) {
-        item.hypothetical_cross_size = resolved_definite_cross_size(item.box);
+        auto clamp_min = has_cross_min_size(item.box) ? specified_cross_min_size(item.box) : 0;
+        auto clamp_max = has_cross_max_size(item.box) ? specified_cross_max_size(item.box) : NumericLimits<float>::max();
+        item.hypothetical_cross_size = css_clamp(resolved_definite_cross_size(item.box), clamp_min, clamp_max);
         return;
     }
 
@@ -1077,17 +1089,13 @@ void FlexFormattingContext::distribute_any_remaining_free_space()
             used_main_space += flex_item->main_size;
             if (is_main_axis_margin_first_auto(flex_item->box))
                 ++auto_margins;
-            else
-                used_main_space += flex_item->margins.main_before + flex_item->borders.main_before + flex_item->padding.main_before;
 
             if (is_main_axis_margin_second_auto(flex_item->box))
                 ++auto_margins;
-            else
-                used_main_space += flex_item->margins.main_after + flex_item->borders.main_after + flex_item->padding.main_after;
         }
-        float remaining_free_space = m_available_space->main.value_or(NumericLimits<float>::max()) - used_main_space;
-        if (remaining_free_space > 0) {
-            float size_per_auto_margin = remaining_free_space / (float)auto_margins;
+
+        if (flex_line.remaining_free_space > 0) {
+            float size_per_auto_margin = flex_line.remaining_free_space / (float)auto_margins;
             for (auto& flex_item : flex_line.items) {
                 if (is_main_axis_margin_first_auto(flex_item->box))
                     set_main_axis_first_margin(*flex_item, size_per_auto_margin);
@@ -1118,10 +1126,10 @@ void FlexFormattingContext::distribute_any_remaining_free_space()
             space_before_first_item = (m_available_space->main.value_or(NumericLimits<float>::max()) - used_main_space) / 2.0f;
             break;
         case CSS::JustifyContent::SpaceBetween:
-            space_between_items = remaining_free_space / (number_of_items - 1);
+            space_between_items = flex_line.remaining_free_space / (number_of_items - 1);
             break;
         case CSS::JustifyContent::SpaceAround:
-            space_between_items = remaining_free_space / number_of_items;
+            space_between_items = flex_line.remaining_free_space / number_of_items;
             space_before_first_item = space_between_items / 2.0f;
             break;
         }

@@ -340,7 +340,7 @@ static String parse_identifiers(String pattern, StringView replacement, UnicodeL
         utf8_pattern = utf8_pattern.substring_view(*start_index, *end_index - *start_index);
         utf8_pattern = utf8_pattern.trim(whitespace);
 
-        auto identifier = utf8_pattern.as_string().replace("'.'"sv, "."sv);
+        auto identifier = utf8_pattern.as_string().replace("'.'"sv, "."sv, ReplaceMode::FirstOnly);
         auto identifier_index = locale_data.unique_strings.ensure(move(identifier));
         size_t replacement_index = 0;
 
@@ -379,7 +379,7 @@ static void parse_number_pattern(Vector<String> patterns, UnicodeLocaleData& loc
         };
 
         for (auto const& replacement : replacements)
-            pattern = pattern.replace(replacement.key, replacement.value, true);
+            pattern = pattern.replace(replacement.key, replacement.value, ReplaceMode::All);
 
         if (auto start_number_index = pattern.find_any_of("#0"sv, String::SearchDirection::Forward); start_number_index.has_value()) {
             auto end_number_index = *start_number_index + 1;
@@ -415,7 +415,7 @@ static void parse_number_pattern(Vector<String> patterns, UnicodeLocaleData& loc
             // This is specifically handled here rather than in the replacements HashMap above so
             // that we do not errantly replace zeroes in number patterns.
             if (pattern.contains(*replacements.get("E"sv)))
-                pattern = pattern.replace("0"sv, "{scientificExponent}"sv);
+                pattern = pattern.replace("0"sv, "{scientificExponent}"sv, ReplaceMode::FirstOnly);
         }
 
         if (type == NumberFormatType::Compact)
@@ -523,6 +523,8 @@ static ErrorOr<void> parse_number_systems(String locale_numbers_path, UnicodeLoc
             return Unicode::NumericSymbol::PercentSign;
         if (numeric_symbol == "plusSign"sv)
             return Unicode::NumericSymbol::PlusSign;
+        if (numeric_symbol == "timeSeparator"sv)
+            return Unicode::NumericSymbol::TimeSeparator;
         return {};
     };
 
@@ -635,7 +637,10 @@ static ErrorOr<void> parse_units(String locale_units_path, UnicodeLocaleData& lo
         // LibUnicode generally tries to avoid being directly dependent on ECMA-402, but this rather significantly reduces the amount
         // of data generated here, and ECMA-402 is currently the only consumer of this data.
         constexpr auto sanctioned_units = JS::Intl::sanctioned_single_unit_identifiers();
-        return find(sanctioned_units.begin(), sanctioned_units.end(), unit_name) != sanctioned_units.end();
+        if (find(sanctioned_units.begin(), sanctioned_units.end(), unit_name) != sanctioned_units.end())
+            return true;
+        static constexpr auto extra_sanctioned_units = JS::Intl::extra_sanctioned_single_unit_identifiers();
+        return find(extra_sanctioned_units.begin(), extra_sanctioned_units.end(), unit_name) != extra_sanctioned_units.end();
     };
 
     auto parse_units_object = [&](auto const& units_object, Unicode::Style style) {
@@ -672,11 +677,11 @@ static ErrorOr<void> parse_units(String locale_units_path, UnicodeLocaleData& lo
                 auto plurality = unit_key.substring_view(unit_pattern_prefix.length());
                 format.plurality = NumberFormat::plurality_from_string(plurality);
 
-                auto zero_format = pattern_value.as_string().replace("{0}"sv, "{number}"sv);
+                auto zero_format = pattern_value.as_string().replace("{0}"sv, "{number}"sv, ReplaceMode::FirstOnly);
                 zero_format = parse_identifiers(zero_format, "unitIdentifier"sv, locale_data, format);
 
-                format.positive_format_index = locale_data.unique_strings.ensure(zero_format.replace("{number}"sv, "{plusSign}{number}"sv));
-                format.negative_format_index = locale_data.unique_strings.ensure(zero_format.replace("{number}"sv, "{minusSign}{number}"sv));
+                format.positive_format_index = locale_data.unique_strings.ensure(zero_format.replace("{number}"sv, "{plusSign}{number}"sv, ReplaceMode::FirstOnly));
+                format.negative_format_index = locale_data.unique_strings.ensure(zero_format.replace("{number}"sv, "{minusSign}{number}"sv, ReplaceMode::FirstOnly));
                 format.zero_format_index = locale_data.unique_strings.ensure(move(zero_format));
 
                 formats.append(locale_data.unique_formats.ensure(move(format)));

@@ -31,6 +31,7 @@ namespace Browser {
 
 String g_search_engine;
 String g_home_url;
+String g_new_tab_url;
 Vector<String> g_content_filters;
 bool g_content_filters_enabled { true };
 Vector<String> g_proxies;
@@ -83,6 +84,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/etc/passwd", "r"));
     TRY(Core::System::unveil("/etc/timezone", "r"));
+    TRY(Core::System::unveil("/tmp/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/tmp/portal/image", "rw"));
     TRY(Core::System::unveil("/tmp/portal/webcontent", "rw"));
     TRY(Core::System::unveil("/tmp/portal/request", "rw"));
@@ -94,6 +96,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto app_icon = GUI::Icon::default_icon("app-browser");
 
     Browser::g_home_url = Config::read_string("Browser", "Preferences", "Home", "file:///res/html/misc/welcome.html");
+    Browser::g_new_tab_url = Config::read_string("Browser", "Preferences", "NewTab", "file:///res/html/misc/new-tab.html");
     Browser::g_search_engine = Config::read_string("Browser", "Preferences", "SearchEngine", {});
     Browser::g_content_filters_enabled = Config::read_bool("Browser", "Preferences", "EnableContentFilters", true);
 

@@ -153,7 +153,7 @@ static String make_input_acceptable_cpp(String const& input)
         return builder.to_string();
     }
 
-    return input.replace("-", "_");
+    return input.replace("-", "_", ReplaceMode::All);
 }
 
 static void generate_include_for_wrapper(auto& generator, auto& wrapper_name)
@@ -237,7 +237,7 @@ static void emit_includes_for_all_imports(auto& interface, auto& generator, bool
 
         if (is_iterator) {
             auto iterator_name = String::formatted("{}Iterator", interface->name);
-            auto iterator_path = String::formatted("{}Iterator", interface->fully_qualified_name.replace("::", "/"));
+            auto iterator_path = String::formatted("{}Iterator", interface->fully_qualified_name.replace("::", "/", ReplaceMode::All));
             generate_include_for_iterator(generator, iterator_path, iterator_name);
         }
 
@@ -605,10 +605,18 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
         }
 
-        enum_generator.append(R"~~~(
+        // NOTE: Attribute setters return undefined instead of throwing when the string doesn't match an enum value.
+        if constexpr (!IsSame<Attribute, RemoveConst<ParameterType>>) {
+            enum_generator.append(R"~~~(
     @else@
         return vm.throw_completion<JS::TypeError>(global_object, JS::ErrorType::InvalidEnumerationValue, @js_name.as_string@, "@parameter.type.name@");
 )~~~");
+        } else {
+            enum_generator.append(R"~~~(
+    @else@
+        return JS::js_undefined();
+)~~~");
+        }
 
         if (optional) {
             enum_generator.append(R"~~~(
@@ -1893,6 +1901,7 @@ void generate_implementation(IDL::Interface const& interface)
 // FIXME: This is a total hack until we can figure out the namespace for a given type somehow.
 using namespace Web::CSS;
 using namespace Web::DOM;
+using namespace Web::DOMParsing;
 using namespace Web::Geometry;
 using namespace Web::HTML;
 using namespace Web::IntersectionObserver;
@@ -2808,6 +2817,7 @@ void generate_constructor_implementation(IDL::Interface const& interface)
 // FIXME: This is a total hack until we can figure out the namespace for a given type somehow.
 using namespace Web::CSS;
 using namespace Web::DOM;
+using namespace Web::DOMParsing;
 using namespace Web::Geometry;
 using namespace Web::HTML;
 using namespace Web::IntersectionObserver;
@@ -3085,6 +3095,7 @@ void generate_prototype_implementation(IDL::Interface const& interface)
 using namespace Web::Crypto;
 using namespace Web::CSS;
 using namespace Web::DOM;
+using namespace Web::DOMParsing;
 using namespace Web::Geometry;
 using namespace Web::HTML;
 using namespace Web::IntersectionObserver;
@@ -3534,6 +3545,7 @@ void generate_iterator_implementation(IDL::Interface const& interface)
 // FIXME: This is a total hack until we can figure out the namespace for a given type somehow.
 using namespace Web::CSS;
 using namespace Web::DOM;
+using namespace Web::DOMParsing;
 using namespace Web::Geometry;
 using namespace Web::HTML;
 using namespace Web::IntersectionObserver;
@@ -3623,7 +3635,7 @@ void generate_iterator_prototype_implementation(IDL::Interface const& interface)
     generator.set("prototype_class", String::formatted("{}IteratorPrototype", interface.name));
     generator.set("wrapper_class", String::formatted("{}IteratorWrapper", interface.name));
     generator.set("fully_qualified_name", String::formatted("{}Iterator", interface.fully_qualified_name));
-    generator.set("possible_include_path", String::formatted("{}Iterator", interface.name.replace("::", "/")));
+    generator.set("possible_include_path", String::formatted("{}Iterator", interface.name.replace("::", "/", ReplaceMode::All)));
 
     generator.append(R"~~~(
 #include <AK/Function.h>
@@ -3647,6 +3659,7 @@ void generate_iterator_prototype_implementation(IDL::Interface const& interface)
 // FIXME: This is a total hack until we can figure out the namespace for a given type somehow.
 using namespace Web::CSS;
 using namespace Web::DOM;
+using namespace Web::DOMParsing;
 using namespace Web::Geometry;
 using namespace Web::HTML;
 using namespace Web::IntersectionObserver;

@@ -14,6 +14,7 @@
 #include <LibCore/Object.h>
 #include <LibCore/Proxy.h>
 #include <LibWeb/Loader/Resource.h>
+#include <LibWeb/Page/Page.h>
 
 namespace Web {
 
@@ -69,8 +70,8 @@ public:
 
     RefPtr<Resource> load_resource(Resource::Type, LoadRequest&);
 
-    void load(LoadRequest&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {});
-    void load(const AK::URL&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {});
+    void load(LoadRequest&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {}, Function<void()> timeout_callback = nullptr);
+    void load(const AK::URL&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {}, Function<void()> timeout_callback = nullptr);
 
     ResourceLoaderConnector& connector() { return *m_connector; }
 
@@ -98,6 +99,7 @@ private:
     HashTable<NonnullRefPtr<ResourceLoaderConnectorRequest>> m_active_requests;
     NonnullRefPtr<ResourceLoaderConnector> m_connector;
     String m_user_agent;
+    Optional<Page&> m_page {};
 };
 
 }

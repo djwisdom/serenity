@@ -15,7 +15,6 @@
     M(BigIntFromNonIntegral, "Cannot convert non-integral number to BigInt")                                                            \
     M(BigIntInvalidValue, "Invalid value for BigInt: {}")                                                                               \
     M(BindingNotInitialized, "Binding {} is not initialized")                                                                           \
-    M(ByteLengthBeyondRequestedMax, "Byte length exceeds maxByteLength option")                                                         \
     M(CallStackSizeExceeded, "Call stack size limit exceeded")                                                                          \
     M(CannotDeclareGlobalFunction, "Cannot declare global function of name '{}'")                                                       \
     M(CannotDeclareGlobalVariable, "Cannot declare global variable of name '{}'")                                                       \
@@ -49,6 +48,8 @@
     M(IntlNumberIsNaNOrInfinity, "Number must not be NaN or Infinity")                                                                  \
     M(IntlNumberIsNaNOrOutOfRange, "Value {} is NaN or is not between {} and {}")                                                       \
     M(IntlOptionUndefined, "Option {} must be defined when option {} is {}")                                                            \
+    M(IntlNonNumericOr2DigitAfterNumericOr2Digit, "Styles other than 'numeric' and '2-digit' may not be used in smaller units after "   \
+                                                  "being used in larger units")                                                         \
     M(InvalidAssignToConst, "Invalid assignment to const variable")                                                                     \
     M(InvalidCodePoint, "Invalid code point {}, must be an integer no less than 0 and no greater than 0x10FFFF")                        \
     M(InvalidFormat, "Invalid {} format")                                                                                               \
@@ -77,7 +78,6 @@
     M(ModuleNotFound, "Cannot find/open module: '{}'")                                                                                  \
     M(ModuleNotFoundNoReferencingScript, "Cannot resolve module {} without any active script or module")                                \
     M(NegativeExponent, "Exponent must be positive")                                                                                    \
-    M(NewByteLengthOutOfRange, "New byte length outside range supported by ArrayBuffer instance")                                       \
     M(NonExtensibleDefine, "Cannot define property {} on non-extensible object")                                                        \
     M(NotAConstructor, "{} is not a constructor")                                                                                       \
     M(NotAFunction, "{} is not a function")                                                                                             \
@@ -86,7 +86,6 @@
     M(NotAnObjectOfType, "Not an object of type {}")                                                                                    \
     M(NotAnObjectOrNull, "{} is neither an object nor null")                                                                            \
     M(NotAnObjectOrString, "{} is neither an object nor a string")                                                                      \
-    M(NotAResizableArrayBuffer, "ArrayBuffer instance not resizable")                                                                   \
     M(NotAString, "{} is not a string")                                                                                                 \
     M(NotASymbol, "{} is not a symbol")                                                                                                 \
     M(NotImplemented, "TODO({} is not implemented in LibJS)")                                                                           \

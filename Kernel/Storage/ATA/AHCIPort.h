@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Liav A. <liavalb@hotmail.co.il>
+ * Copyright (c) 2021-2022, Liav A. <liavalb@hotmail.co.il>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -21,7 +21,7 @@
 #include <Kernel/Random.h>
 #include <Kernel/Sections.h>
 #include <Kernel/Storage/ATA/AHCI.h>
-#include <Kernel/Storage/ATA/AHCIPortHandler.h>
+#include <Kernel/Storage/ATA/AHCIInterruptHandler.h>
 #include <Kernel/Storage/ATA/ATADevice.h>
 #include <Kernel/WaitQueue.h>
 
@@ -29,15 +29,14 @@ namespace Kernel {
 
 class AsyncBlockDeviceRequest;
 
-class AHCIPortHandler;
+class AHCIInterruptHandler;
 class AHCIPort
     : public RefCounted<AHCIPort>
     , public Weakable<AHCIPort> {
-    friend class AHCIPortHandler;
     friend class AHCIController;
 
 public:
-    UNMAP_AFTER_INIT static NonnullRefPtr<AHCIPort> create(AHCIPortHandler const&, volatile AHCI::PortRegisters&, u32 port_index);
+    static ErrorOr<NonnullRefPtr<AHCIPort>> create(AHCIController const&, AHCI::HBADefinedCapabilities, volatile AHCI::PortRegisters&, u32 port_index);
 
     u32 port_index() const { return m_port_index; }
     u32 representative_port_index() const { return port_index() + 1; }
@@ -47,14 +46,16 @@ public:
     RefPtr<StorageDevice> connected_device() const { return m_connected_device; }
 
     bool reset();
-    UNMAP_AFTER_INIT bool initialize_without_reset();
+    bool initialize_without_reset();
     void handle_interrupt();
 
 private:
+    ErrorOr<void> allocate_resources_and_initialize_ports();
+
     bool is_phy_enabled() const { return (m_port_registers.ssts & 0xf) == 3; }
     bool initialize();
 
-    UNMAP_AFTER_INIT AHCIPort(AHCIPortHandler const&, volatile AHCI::PortRegisters&, u32 port_index);
+    AHCIPort(AHCIController const&, NonnullRefPtr<Memory::PhysicalPage> identify_buffer_page, AHCI::HBADefinedCapabilities, volatile AHCI::PortRegisters&, u32 port_index);
 
     ALWAYS_INLINE void clear_sata_error_register() const;
 
@@ -117,8 +118,16 @@ private:
     RefPtr<ATADevice> m_connected_device;
 
     u32 m_port_index;
+
+    // Note: Ideally the AHCIController should be the only object to hold this data
+    // but because using the m_parent_controller means we need to take a strong ref,
+    // it's probably better to just "cache" this here instead.
+    AHCI::HBADefinedCapabilities const m_hba_capabilities;
+
+    NonnullRefPtr<Memory::PhysicalPage> m_identify_buffer_page;
+
     volatile AHCI::PortRegisters& m_port_registers;
-    NonnullRefPtr<AHCIPortHandler> m_parent_handler;
+    WeakPtr<AHCIController> m_parent_controller;
     AHCI::PortInterruptStatusBitField m_interrupt_status;
     AHCI::PortInterruptEnableBitField m_interrupt_enable;
 

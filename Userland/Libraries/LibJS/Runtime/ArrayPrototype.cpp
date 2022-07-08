@@ -1927,7 +1927,7 @@ JS_DEFINE_NATIVE_FUNCTION(ArrayPrototype::to_spliced)
     if (new_length_double > MAX_ARRAY_LIKE_INDEX)
         return vm.throw_completion<TypeError>(global_object, ErrorType::ArrayMaxSize);
 
-    auto new_length = static_cast<size_t>(new_length_double);
+    auto new_length = static_cast<u64>(new_length_double);
 
     // 13. Let A be ? ArrayCreate(𝔽(newLen)).
     auto* array = TRY(Array::create(global_object, new_length));

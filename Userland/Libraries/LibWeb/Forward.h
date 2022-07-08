@@ -118,6 +118,7 @@ class AbstractRange;
 class AbortController;
 class AbortSignal;
 class Attribute;
+class CDATASection;
 class CharacterData;
 class Comment;
 class CustomEvent;
@@ -156,6 +157,10 @@ struct AddEventListenerOptions;
 
 template<typename ValueType>
 class ExceptionOr;
+}
+
+namespace Web::DOMParsing {
+class XMLSerializer;
 }
 
 namespace Web::Encoding {
@@ -410,6 +415,7 @@ class AttributeWrapper;
 struct CallbackType;
 class CanvasGradientWrapper;
 class CanvasRenderingContext2DWrapper;
+class CDATASectionWrapper;
 class CharacterDataWrapper;
 class CloseEventWrapper;
 class CommentWrapper;
@@ -598,6 +604,7 @@ class XMLHttpRequestConstructor;
 class XMLHttpRequestEventTargetWrapper;
 class XMLHttpRequestPrototype;
 class XMLHttpRequestWrapper;
+class XMLSerializerWrapper;
 enum class CanPlayTypeResult;
 enum class DOMParserSupportedType;
 enum class ResizeObserverBoxOptions;

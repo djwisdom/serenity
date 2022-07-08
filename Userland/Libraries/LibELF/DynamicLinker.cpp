@@ -96,6 +96,8 @@ static Result<NonnullRefPtr<DynamicLoader>, DlErrorMessage> map_library(String c
     s_loaders.set(get_library_name(filename), *loader);
 
     s_current_tls_offset -= loader->tls_size_of_current_object();
+    if (loader->tls_alignment_of_current_object())
+        s_current_tls_offset = align_down_to(s_current_tls_offset, loader->tls_alignment_of_current_object());
     loader->set_tls_offset(s_current_tls_offset);
 
     // This actually maps the library at the intended and final place.
@@ -124,7 +126,7 @@ static Optional<String> resolve_library(String const& name, DynamicObject const&
     search_paths.append("/usr/local/lib"sv);
 
     for (auto const& search_path : search_paths) {
-        LexicalPath library_path(search_path.replace("$ORIGIN"sv, LexicalPath::dirname(parent_object.filename())));
+        LexicalPath library_path(search_path.replace("$ORIGIN"sv, LexicalPath::dirname(parent_object.filepath()), ReplaceMode::FirstOnly));
         String library_name = library_path.append(name).string();
 
         if (access(library_name.characters(), F_OK) == 0)
@@ -196,8 +198,8 @@ static void allocate_tls()
 {
     s_total_tls_size = 0;
     for (auto const& data : s_loaders) {
-        dbgln_if(DYNAMIC_LOAD_DEBUG, "{}: TLS Size: {}", data.key, data.value->tls_size_of_current_object());
-        s_total_tls_size += data.value->tls_size_of_current_object();
+        dbgln_if(DYNAMIC_LOAD_DEBUG, "{}: TLS Size: {}, TLS Alignment: {}", data.key, data.value->tls_size_of_current_object(), data.value->tls_alignment_of_current_object());
+        s_total_tls_size += data.value->tls_size_of_current_object() + data.value->tls_alignment_of_current_object();
     }
 
     if (!s_total_tls_size)
@@ -233,7 +235,7 @@ static int __dl_iterate_phdr(DlIteratePhdrCallbackFunction callback, void* data)
         auto& object = it.value;
         auto info = dl_phdr_info {
             .dlpi_addr = (ElfW(Addr))object->base_address().as_ptr(),
-            .dlpi_name = object->filename().characters(),
+            .dlpi_name = object->filepath().characters(),
             .dlpi_phdr = object->program_headers(),
             .dlpi_phnum = object->program_header_count()
         };
@@ -292,42 +294,52 @@ static void initialize_libc(DynamicObject& libc)
 }
 
 template<typename Callback>
-static void for_each_unfinished_dependency_of(String const& name, HashTable<String>& seen_names, bool first, bool skip_global_objects, Callback callback)
+static void for_each_unfinished_dependency_of(String const& name, HashTable<String>& seen_names, Callback callback)
 {
-    if (!s_loaders.contains(name))
+    auto loader = s_loaders.get(name);
+
+    if (!loader.has_value())
         return;
 
-    if (!first && skip_global_objects && s_global_objects.contains(name))
+    if (loader.value()->is_fully_relocated()) {
+        if (!loader.value()->is_fully_initialized()) {
+            // If we are ending up here, that possibly means that this library either dlopens itself or a library that depends
+            // on it while running its initializers. Assuming that this is the only funny thing that the library does, there is
+            // a reasonable chance that nothing breaks, so just warn and continue.
+            dbgln("\033[33mWarning:\033[0m Querying for dependencies of '{}' while running its initializers", name);
+        }
+
         return;
+    }
 
     if (seen_names.contains(name))
         return;
     seen_names.set(name);
 
     for (auto const& needed_name : get_dependencies(name))
-        for_each_unfinished_dependency_of(get_library_name(needed_name), seen_names, false, skip_global_objects, callback);
+        for_each_unfinished_dependency_of(get_library_name(needed_name), seen_names, callback);
 
     callback(*s_loaders.get(name).value());
 }
 
-static NonnullRefPtrVector<DynamicLoader> collect_loaders_for_library(String const& name, bool skip_global_objects)
+static NonnullRefPtrVector<DynamicLoader> collect_loaders_for_library(String const& name)
 {
     HashTable<String> seen_names;
     NonnullRefPtrVector<DynamicLoader> loaders;
-    for_each_unfinished_dependency_of(name, seen_names, true, skip_global_objects, [&](auto& loader) {
+    for_each_unfinished_dependency_of(name, seen_names, [&](auto& loader) {
         loaders.append(loader);
     });
     return loaders;
 }
 
-static Result<void, DlErrorMessage> link_main_library(String const& name, int flags, bool skip_global_objects)
+static Result<void, DlErrorMessage> link_main_library(String const& name, int flags)
 {
-    auto loaders = collect_loaders_for_library(name, skip_global_objects);
+    auto loaders = collect_loaders_for_library(name);
 
     for (auto& loader : loaders) {
         auto dynamic_object = loader.map();
         if (dynamic_object)
-            s_global_objects.set(dynamic_object->filename(), *dynamic_object);
+            s_global_objects.set(get_library_name(dynamic_object->filepath()), *dynamic_object);
     }
 
     for (auto& loader : loaders) {
@@ -383,7 +395,7 @@ static Optional<DlErrorMessage> verify_tls_for_dlopen(DynamicLoader const& loade
     if (loader.tls_size_of_current_object() == 0)
         return {};
 
-    if (s_total_tls_size + loader.tls_size_of_current_object() > s_allocated_tls_block_size)
+    if (s_total_tls_size + loader.tls_size_of_current_object() + loader.tls_alignment_of_current_object() > s_allocated_tls_block_size)
         return DlErrorMessage("TLS size too large");
 
     bool tls_data_is_all_zero = true;
@@ -447,11 +459,11 @@ static Result<void*, DlErrorMessage> __dlopen(char const* filename, int flags)
         return result2.error();
     }
 
-    auto result = link_main_library(library_name, flags, true);
+    auto result = link_main_library(library_name, flags);
     if (result.is_error())
         return result.error();
 
-    s_total_tls_size += result1.value()->tls_size_of_current_object();
+    s_total_tls_size += result1.value()->tls_size_of_current_object() + result1.value()->tls_alignment_of_current_object();
 
     auto object = s_global_objects.get(library_name);
     if (!object.has_value())
@@ -519,7 +531,7 @@ static Result<void, DlErrorMessage> __dladdr(void* addr, Dl_info* info)
 
     info->dli_fbase = best_matching_library->base_address().as_ptr();
     // This works because we don't support unloading objects.
-    info->dli_fname = best_matching_library->filename().characters();
+    info->dli_fname = best_matching_library->filepath().characters();
     if (best_matching_symbol.has_value()) {
         info->dli_saddr = best_matching_symbol.value().address().as_ptr();
         info->dli_sname = best_matching_symbol.value().raw_name();
@@ -576,14 +588,14 @@ void ELF::DynamicLinker::linker_main(String&& main_program_name, int main_progra
 
     dbgln_if(DYNAMIC_LOAD_DEBUG, "loaded all dependencies");
     for ([[maybe_unused]] auto& lib : s_loaders) {
-        dbgln_if(DYNAMIC_LOAD_DEBUG, "{} - tls size: {}, tls offset: {}", lib.key, lib.value->tls_size_of_current_object(), lib.value->tls_offset());
+        dbgln_if(DYNAMIC_LOAD_DEBUG, "{} - tls size: {}, tls alignment: {}, tls offset: {}", lib.key, lib.value->tls_size_of_current_object(), lib.value->tls_alignment_of_current_object(), lib.value->tls_offset());
     }
 
     allocate_tls();
 
     auto entry_point_function = [&main_program_name] {
         auto library_name = get_library_name(main_program_name);
-        auto result = link_main_library(library_name, RTLD_GLOBAL | RTLD_LAZY, false);
+        auto result = link_main_library(library_name, RTLD_GLOBAL | RTLD_LAZY);
         if (result.is_error()) {
             warnln("{}", result.error().text);
             _exit(1);

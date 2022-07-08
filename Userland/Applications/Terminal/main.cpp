@@ -189,7 +189,7 @@ static ErrorOr<NonnullRefPtr<GUI::Window>> create_find_window(VT::TerminalWidget
     find_textbox->set_fixed_width(230);
     find_textbox->set_focus(true);
     if (terminal.has_selection())
-        find_textbox->set_text(terminal.selected_text().replace("\n", " ", true));
+        find_textbox->set_text(terminal.selected_text().replace("\n", " ", ReplaceMode::All));
     auto find_backwards = TRY(find->try_add<GUI::Button>());
     find_backwards->set_fixed_width(25);
     find_backwards->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/upward-triangle.png").release_value_but_fixme_should_propagate_errors());
@@ -292,6 +292,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto window = TRY(GUI::Window::try_create());
     window->set_title("Terminal");
     window->set_double_buffering_enabled(false);
+    window->set_obey_widget_min_size(false);
 
     auto terminal = TRY(window->try_set_main_widget<VT::TerminalWidget>(ptm_fd, true));
     terminal->on_command_exit = [&] {

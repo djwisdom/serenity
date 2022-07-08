@@ -27,7 +27,7 @@ Requires the metadata-fields `count` (count of glyphs copied) and `first_glyph` 
 
 The data contains codepoint (encoded as host-endian u32), width and height (as u8's) and glyph bitmap data. It is encoded in width times height many bytes, either 0 (clear) or 1 (set).
 
-Implemented in `FontEditor::copy_selected_glyphs` and `FontEditor::paste_glyphs`, in [`Userland/Applications/FontEditor/FontEditor.cpp`](../Userland/Applications/FontEditor/FontEditor.cpp).
+Implemented in `FontEditor::copy_selected_glyphs` and `FontEditor::paste_glyphs`, in [`Userland/Applications/FontEditor/MainWidget.cpp`](../Userland/Applications/FontEditor/MainWidget.cpp).
 
 ## image/x-serenityos (Clipboard-only)
 
@@ -70,7 +70,7 @@ Most prominently, the first four bytes contain the filemagic: `!Fnt`.
 These files are human-readable, have no easily detectable filemagic, and define GUI designs and layouts.
 The format is strongly influenced by QML, the Qt Modeling Language.
 
-See the [GML manpage(s)](../Base/usr/share/man/man5/GML.md), [Playground(1)](../Userland/DevTools/Playground/), and the [GML support in LibGUI](../Userland/Libraries/LibGUI/GML/).
+See the [GML manpage(s)](../Base/usr/share/man/man5/GML.md), [GML Playground(1)](../Userland/DevTools/GMLPlayground/), and the [GML support in LibGUI](../Userland/Libraries/LibGUI/GML/).
 
 ## Inter Process Communication (`*.ipc` files)
 

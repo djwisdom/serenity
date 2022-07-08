@@ -68,6 +68,7 @@ void InspectorWidget::set_selection(GUI::ModelIndex const index)
         update_node_box_model(inspected_node_properties.node_box_sizing_json);
     } else {
         clear_style_json();
+        clear_node_box_model();
     }
 }
 
@@ -200,6 +201,14 @@ void InspectorWidget::update_node_box_model(Optional<String> node_box_sizing_jso
 
     m_element_size_view->set_node_content_width(json_object.get("content_width").to_float());
     m_element_size_view->set_node_content_height(json_object.get("content_height").to_float());
+    m_element_size_view->set_box_model(m_node_box_sizing);
+}
+
+void InspectorWidget::clear_node_box_model()
+{
+    m_node_box_sizing = Web::Layout::BoxModelMetrics {};
+    m_element_size_view->set_node_content_width(0);
+    m_element_size_view->set_node_content_height(0);
     m_element_size_view->set_box_model(m_node_box_sizing);
 }
 
