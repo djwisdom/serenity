@@ -26,13 +26,24 @@ public:
     GUI::Model* model() { return m_model.ptr(); }
     const GUI::Model* model() const { return m_model.ptr(); }
 
-    Function<void(String const& url, unsigned modifiers)> on_bookmark_click;
+    enum class OpenInNewTab {
+        Yes,
+        No
+    };
+
+    Function<void(String const& url, OpenInNewTab)> on_bookmark_click;
     Function<void(String const&, String const&)> on_bookmark_hover;
 
     bool contains_bookmark(String const& url);
     bool remove_bookmark(String const& url);
     bool add_bookmark(String const& url, String const& title);
     bool edit_bookmark(String const& url);
+
+    virtual Optional<GUI::UISize> calculated_min_size() const override
+    {
+        // Large enough to fit the `m_additional` button.
+        return GUI::UISize(20, 20);
+    }
 
 private:
     BookmarksBarWidget(String const&, bool enabled);

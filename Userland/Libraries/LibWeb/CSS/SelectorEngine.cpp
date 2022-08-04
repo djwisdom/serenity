@@ -211,15 +211,15 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Lang:
         return matches_lang_pseudo_class(element, pseudo_class.languages);
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Disabled:
-        if (!element.tag_name().equals_ignoring_case(HTML::TagNames::input))
+        if (!is<HTML::HTMLInputElement>(element))
             return false;
-        if (!element.has_attribute("disabled"))
+        if (!element.has_attribute(HTML::AttributeNames::disabled))
             return false;
         return true;
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Enabled:
-        if (!element.tag_name().equals_ignoring_case(HTML::TagNames::input))
+        if (!is<HTML::HTMLInputElement>(element))
             return false;
-        if (element.has_attribute("disabled"))
+        if (element.has_attribute(HTML::AttributeNames::disabled))
             return false;
         return true;
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Checked:
@@ -341,6 +341,9 @@ static inline bool matches(CSS::Selector::SimpleSelector const& component, DOM::
     case CSS::Selector::SimpleSelector::Type::Class:
         return element.has_class(component.name());
     case CSS::Selector::SimpleSelector::Type::TagName:
+        // See https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
+        if (is<HTML::HTMLElement>(element) && element.document().document_type() != DOM::Document::Type::XML)
+            return component.name().equals_ignoring_case(element.local_name());
         return component.name() == element.local_name();
     case CSS::Selector::SimpleSelector::Type::Attribute:
         return matches_attribute(component.attribute(), element);

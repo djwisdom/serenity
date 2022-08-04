@@ -128,7 +128,7 @@ ErrorOr<void> VirtualFileSystem::mount_root(FileSystem& fs)
         mounts.append(move(mount));
     });
 
-    m_root_custody = TRY(Custody::try_create(nullptr, "", *m_root_inode, root_mount_flags));
+    m_root_custody = TRY(Custody::try_create(nullptr, ""sv, *m_root_inode, root_mount_flags));
     return {};
 }
 
@@ -376,7 +376,7 @@ ErrorOr<void> VirtualFileSystem::mkdir(StringView path, mode_t mode, Custody& ba
     path = path.trim("/"sv, TrimMode::Right);
     if (path.is_empty()) {
         // NOTE: This means the path was a series of slashes, which resolves to "/".
-        path = "/";
+        path = "/"sv;
     }
 
     RefPtr<Custody> parent_custody;
@@ -693,6 +693,8 @@ ErrorOr<void> VirtualFileSystem::symlink(StringView target, StringView linkpath,
     auto inode = TRY(parent_inode.create_child(basename, S_IFLNK | 0644, 0, current_process.euid(), current_process.egid()));
 
     auto target_buffer = UserOrKernelBuffer::for_kernel_buffer(const_cast<u8*>((u8 const*)target.characters_without_null_termination()));
+    MutexLocker locker(inode->m_inode_lock);
+    TRY(inode->prepare_to_write_data());
     TRY(inode->write_bytes(0, target.length(), target_buffer, nullptr));
     return {};
 }
@@ -736,8 +738,8 @@ ErrorOr<void> VirtualFileSystem::rmdir(StringView path, Custody& base)
     if (custody->is_readonly())
         return EROFS;
 
-    TRY(inode.remove_child("."));
-    TRY(inode.remove_child(".."));
+    TRY(inode.remove_child("."sv));
+    TRY(inode.remove_child(".."sv));
 
     return parent_inode.remove_child(KLexicalPath::basename(path));
 }

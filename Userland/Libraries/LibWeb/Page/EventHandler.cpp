@@ -234,7 +234,7 @@ bool EventHandler::handle_mouseup(Gfx::IntPoint const& position, unsigned button
                     auto url = document->parse_url(href);
                     dbgln("Web::EventHandler: Clicking on a link to {}", url);
                     if (button == GUI::MouseButton::Primary) {
-                        if (href.starts_with("javascript:")) {
+                        if (href.starts_with("javascript:"sv)) {
                             document->run_javascript(href.substring_view(11, href.length() - 11));
                         } else if (!url.fragment().is_null() && url.equals(document->url(), AK::URL::ExcludeFragment::Yes)) {
                             m_browsing_context.scroll_to_anchor(url.fragment());
@@ -752,10 +752,7 @@ bool EventHandler::handle_keyup(KeyCode key, unsigned modifiers, u32 code_point)
 
 void EventHandler::set_mouse_event_tracking_layout_node(Layout::Node* layout_node)
 {
-    if (layout_node)
-        m_mouse_event_tracking_layout_node = layout_node->make_weak_ptr();
-    else
-        m_mouse_event_tracking_layout_node = nullptr;
+    m_mouse_event_tracking_layout_node = layout_node;
 }
 
 }

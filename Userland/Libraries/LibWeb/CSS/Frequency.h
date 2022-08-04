@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/RefPtr.h>
+#include <AK/String.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::CSS {
@@ -27,6 +28,7 @@ public:
     Frequency percentage_of(Percentage const&) const;
 
     bool is_calculated() const { return m_type == Type::Calculated; }
+    NonnullRefPtr<CalculatedStyleValue> calculated_style_value() const;
 
     String to_string() const;
     float to_hertz() const;
@@ -50,4 +52,13 @@ private:
     float m_value { 0 };
     RefPtr<CalculatedStyleValue> m_calculated_style;
 };
+
 }
+
+template<>
+struct AK::Formatter<Web::CSS::Frequency> : Formatter<StringView> {
+    ErrorOr<void> format(FormatBuilder& builder, Web::CSS::Frequency const& frequency)
+    {
+        return Formatter<StringView>::format(builder, frequency.to_string());
+    }
+};

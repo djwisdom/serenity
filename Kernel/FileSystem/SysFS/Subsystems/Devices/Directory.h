@@ -13,7 +13,7 @@ namespace Kernel {
 
 class SysFSDevicesDirectory final : public SysFSDirectory {
 public:
-    virtual StringView name() const override { return "dev"sv; }
+    virtual StringView name() const override { return "devices"sv; }
     static NonnullRefPtr<SysFSDevicesDirectory> must_create(SysFSRootDirectory const&);
 
 private:

@@ -20,8 +20,10 @@
 
 #if ARCH(I386)
 static constexpr size_t CHUNK_SIZE = 32;
-#else
+#elif ARCH(X86_64) || ARCH(AARCH64)
 static constexpr size_t CHUNK_SIZE = 64;
+#else
+#    error Unknown architecture
 #endif
 static_assert(is_power_of_two(CHUNK_SIZE));
 
@@ -319,7 +321,7 @@ struct KmallocGlobalData {
             PANIC("Out of address space when expanding kmalloc heap.");
         }
 
-        auto physical_pages_or_error = MM.commit_user_physical_pages(new_subheap_size / PAGE_SIZE);
+        auto physical_pages_or_error = MM.commit_physical_pages(new_subheap_size / PAGE_SIZE);
         if (physical_pages_or_error.is_error()) {
             // FIXME: Dare to return false!
             PANIC("Out of physical pages when expanding kmalloc heap.");

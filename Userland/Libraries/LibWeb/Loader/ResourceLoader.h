@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, Dex♪ <dexes.ttp@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -13,15 +13,17 @@
 #include <AK/URL.h>
 #include <LibCore/Object.h>
 #include <LibCore/Proxy.h>
-#include <LibCore/Timer.h>
 #include <LibWeb/Loader/Resource.h>
+#include <LibWeb/Page/Page.h>
 
 namespace Web {
 
 #if ARCH(I386)
 #    define CPU_STRING "x86"
-#else
+#elif ARCH(X86_64)
 #    define CPU_STRING "x86_64"
+#elif ARCH(AARCH64)
+#    define CPU_STRING "AArch64"
 #endif
 
 constexpr auto default_user_agent = "Mozilla/5.0 (SerenityOS; " CPU_STRING ") LibWeb+LibJS/1.0 Browser/1.0";
@@ -70,8 +72,8 @@ public:
 
     RefPtr<Resource> load_resource(Resource::Type, LoadRequest&);
 
-    void load(LoadRequest&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {});
-    void load(const AK::URL&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {});
+    void load(LoadRequest&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {}, Function<void()> timeout_callback = nullptr);
+    void load(const AK::URL&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {}, Function<void()> timeout_callback = nullptr);
 
     ResourceLoaderConnector& connector() { return *m_connector; }
 
@@ -99,7 +101,7 @@ private:
     HashTable<NonnullRefPtr<ResourceLoaderConnectorRequest>> m_active_requests;
     NonnullRefPtr<ResourceLoaderConnector> m_connector;
     String m_user_agent;
-    RefPtr<Core::Timer> m_timer;
+    Optional<Page&> m_page {};
 };
 
 }

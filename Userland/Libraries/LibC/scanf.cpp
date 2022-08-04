@@ -297,7 +297,7 @@ struct ReadElement {
 template<>
 struct ReadElement<char*, ReadKind::Normal> {
     ReadElement(StringView scan_set = {}, bool invert = false)
-        : scan_set(scan_set.is_null() ? " \t\n\f\r" : scan_set)
+        : scan_set(scan_set.is_null() ? " \t\n\f\r"sv : scan_set)
         , invert(scan_set.is_null() ? true : invert)
         , was_null(scan_set.is_null())
     {
@@ -386,8 +386,8 @@ private:
 
 extern "C" int vsscanf(char const* input, char const* format, va_list ap)
 {
-    GenericLexer format_lexer { format };
-    GenericLexer input_lexer { input };
+    GenericLexer format_lexer { { format, strlen(format) } };
+    GenericLexer input_lexer { { input, strlen(input) } };
 
     int elements_matched = 0;
 

@@ -3,6 +3,7 @@
  * Copyright (c) 2021, Maciej Zygmanowski <sppmacd@pm.me>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2022, the SerenityOS developers.
+ * Copyright (c) 2022, Jakob-Niklas See <git@nwex.de>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -18,6 +19,7 @@
 #include <AK/StringBuilder.h>
 #include <AK/URL.h>
 #include <Applications/Browser/TabGML.h>
+#include <LibConfig/Client.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
@@ -42,8 +44,8 @@ namespace Browser {
 
 URL url_from_user_input(String const& input)
 {
-    if (input.starts_with("?") && !g_search_engine.is_empty())
-        return URL(g_search_engine.replace("{}", URL::percent_encode(input.substring_view(1))));
+    if (input.starts_with('?') && !g_search_engine.is_empty())
+        return URL(g_search_engine.replace("{}"sv, URL::percent_encode(input.substring_view(1)), ReplaceMode::FirstOnly));
 
     URL url_with_http_schema = URL(String::formatted("http://{}", input));
     if (url_with_http_schema.is_valid() && url_with_http_schema.port().has_value())
@@ -113,6 +115,10 @@ Tab::Tab(BrowserWindow& window)
     auto& webview_container = *find_descendant_of_type_named<GUI::Widget>("webview_container");
 
     m_web_content_view = webview_container.add<WebView::OutOfProcessWebView>();
+
+    auto preferred_color_scheme = Web::CSS::preferred_color_scheme_from_string(Config::read_string("Browser"sv, "Preferences"sv, "ColorScheme"sv, "auto"sv));
+    m_web_content_view->set_preferred_color_scheme(preferred_color_scheme);
+
     if (g_content_filters_enabled)
         m_web_content_view->set_content_filters(g_content_filters);
     else
@@ -146,11 +152,16 @@ Tab::Tab(BrowserWindow& window)
         m_go_forward_context_menu->popup(context_menu_event.screen_position());
     };
 
-    toolbar.add_action(window.go_home_action());
+    auto& go_home_button = toolbar.add_action(window.go_home_action());
+    go_home_button.set_allowed_mouse_buttons_for_pressing(GUI::MouseButton::Primary | GUI::MouseButton::Middle);
+    go_home_button.on_middle_mouse_click = [&](auto) {
+        on_tab_open_request(Browser::url_from_user_input(g_home_url));
+    };
+
     toolbar.add_action(window.reload_action());
 
     m_location_box = toolbar.add<GUI::UrlBox>();
-    m_location_box->set_placeholder("Address");
+    m_location_box->set_placeholder("Address"sv);
 
     m_location_box->on_return_pressed = [this] {
         auto url = url_from_location_bar();
@@ -166,7 +177,7 @@ Tab::Tab(BrowserWindow& window)
 
     m_location_box->add_custom_context_menu_action(GUI::Action::create("Paste && Go", [this](auto&) {
         auto [data, mime_type, _] = GUI::Clipboard::the().fetch_data_and_type();
-        if (!mime_type.starts_with("text/"))
+        if (!mime_type.starts_with("text/"sv))
             return;
         auto const& paste_text = data;
         if (paste_text.is_empty())
@@ -400,7 +411,7 @@ Tab::Tab(BrowserWindow& window)
 Optional<URL> Tab::url_from_location_bar(MayAppendTLD may_append_tld)
 {
     if (m_location_box->text().starts_with('?') && g_search_engine.is_empty()) {
-        GUI::MessageBox::show(&this->window(), "Select a search engine in the Settings menu before searching.", "No search engine selected", GUI::MessageBox::Type::Information);
+        GUI::MessageBox::show(&this->window(), "Select a search engine in the Settings menu before searching."sv, "No search engine selected"sv, GUI::MessageBox::Type::Information);
         return {};
     }
 
@@ -410,8 +421,8 @@ Optional<URL> Tab::url_from_location_bar(MayAppendTLD may_append_tld)
     builder.append(text);
     if (may_append_tld == MayAppendTLD::Yes) {
         // FIXME: Expand the list of top level domains.
-        if (!(text.ends_with(".com") || text.ends_with(".net") || text.ends_with(".org"))) {
-            builder.append(".com");
+        if (!(text.ends_with(".com"sv) || text.ends_with(".net"sv) || text.ends_with(".org"sv))) {
+            builder.append(".com"sv);
         }
     }
     String final_text = builder.to_string();
@@ -484,8 +495,8 @@ void Tab::update_bookmark_button(String const& url)
 
 void Tab::did_become_active()
 {
-    BookmarksBarWidget::the().on_bookmark_click = [this](auto& url, unsigned modifiers) {
-        if (modifiers & Mod_Ctrl)
+    BookmarksBarWidget::the().on_bookmark_click = [this](auto& url, auto open_in_new_tab) {
+        if (open_in_new_tab == BookmarksBarWidget::OpenInNewTab::Yes)
             on_tab_open_request(url);
         else
             load(url);

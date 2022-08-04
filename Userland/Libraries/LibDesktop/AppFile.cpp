@@ -33,7 +33,7 @@ void AppFile::for_each(Function<void(NonnullRefPtr<AppFile>)> callback, StringVi
         return;
     while (di.has_next()) {
         auto name = di.next_path();
-        if (!name.ends_with(".af"))
+        if (!name.ends_with(".af"sv))
             continue;
         auto path = String::formatted("{}/{}", directory, name);
         auto af = AppFile::open(path);
@@ -100,6 +100,17 @@ GUI::Icon AppFile::icon() const
 bool AppFile::run_in_terminal() const
 {
     return m_config->read_bool_entry("App", "RunInTerminal", false);
+}
+
+Vector<String> AppFile::launcher_mime_types() const
+{
+    Vector<String> mime_types;
+    for (auto& entry : m_config->read_entry("Launcher", "MimeTypes").split(',')) {
+        entry = entry.trim_whitespace();
+        if (!entry.is_empty())
+            mime_types.append(entry);
+    }
+    return mime_types;
 }
 
 Vector<String> AppFile::launcher_file_types() const

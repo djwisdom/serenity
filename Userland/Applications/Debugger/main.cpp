@@ -43,12 +43,14 @@ static void handle_print_registers(PtraceRegisters const& regs)
     outln("eax={:p} ebx={:p} ecx={:p} edx={:p}", regs.eax, regs.ebx, regs.ecx, regs.edx);
     outln("esp={:p} ebp={:p} esi={:p} edi={:p}", regs.esp, regs.ebp, regs.esi, regs.edi);
     outln("eip={:p} eflags={:p}", regs.eip, regs.eflags);
-#else
+#elif ARCH(X86_64)
     outln("rax={:p} rbx={:p} rcx={:p} rdx={:p}", regs.rax, regs.rbx, regs.rcx, regs.rdx);
     outln("rsp={:p} rbp={:p} rsi={:p} rdi={:p}", regs.rsp, regs.rbp, regs.rsi, regs.rdi);
     outln("r8 ={:p} r9 ={:p} r10={:p} r11={:p}", regs.r8, regs.r9, regs.r10, regs.r11);
     outln("r12={:p} r13={:p} r14={:p} r15={:p}", regs.r12, regs.r13, regs.r14, regs.r15);
     outln("rip={:p} rflags={:p}", regs.rip, regs.rflags);
+#else
+#    error Unknown architecture
 #endif
 }
 
@@ -154,7 +156,7 @@ static bool handle_breakpoint_command(String const& command)
     if (argument.is_empty())
         return false;
 
-    if (argument.contains(":")) {
+    if (argument.contains(":"sv)) {
         auto source_arguments = argument.split(':');
         if (source_arguments.size() != 2)
             return false;
@@ -164,7 +166,7 @@ static bool handle_breakpoint_command(String const& command)
         auto file = source_arguments[0];
         return insert_breakpoint_at_source_position(file, line.value());
     }
-    if ((argument.starts_with("0x"))) {
+    if ((argument.starts_with("0x"sv))) {
         return insert_breakpoint_at_address(strtoul(argument.characters() + 2, nullptr, 16));
     }
 
@@ -181,7 +183,7 @@ static bool handle_examine_command(String const& command)
     if (argument.is_empty())
         return false;
 
-    if (!(argument.starts_with("0x"))) {
+    if (!(argument.starts_with("0x"sv))) {
         return false;
     }
     FlatPtr address = strtoul(argument.characters() + 2, nullptr, 16);
@@ -246,8 +248,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         const PtraceRegisters& regs = optional_regs.value();
 #if ARCH(I386)
         const FlatPtr ip = regs.eip;
-#else
+#elif ARCH(X86_64)
         const FlatPtr ip = regs.rip;
+#else
+#    error Unknown architecture
 #endif
 
         auto symbol_at_ip = g_debug_session->symbolicate(ip);
@@ -309,14 +313,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 handle_print_registers(regs);
                 success = true;
 
-            } else if (command.starts_with("dis")) {
+            } else if (command.starts_with("dis"sv)) {
                 success = handle_disassemble_command(command, ip);
 
-            } else if (command.starts_with("bp")) {
+            } else if (command.starts_with("bp"sv)) {
                 success = handle_breakpoint_command(command);
-            } else if (command.starts_with("x")) {
+            } else if (command.starts_with("x"sv)) {
                 success = handle_examine_command(command);
-            } else if (command.starts_with("bt")) {
+            } else if (command.starts_with("bt"sv)) {
                 success = handle_backtrace_command(regs);
             }
 

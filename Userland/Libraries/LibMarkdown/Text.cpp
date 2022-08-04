@@ -17,21 +17,21 @@ namespace Markdown {
 
 void Text::EmphasisNode::render_to_html(StringBuilder& builder) const
 {
-    builder.append((strong) ? "<strong>" : "<em>");
+    builder.append((strong) ? "<strong>"sv : "<em>"sv);
     child->render_to_html(builder);
-    builder.append((strong) ? "</strong>" : "</em>");
+    builder.append((strong) ? "</strong>"sv : "</em>"sv);
 }
 
 void Text::EmphasisNode::render_for_terminal(StringBuilder& builder) const
 {
     if (strong) {
-        builder.append("\e[1m");
+        builder.append("\e[1m"sv);
         child->render_for_terminal(builder);
-        builder.append("\e[22m");
+        builder.append("\e[22m"sv);
     } else {
-        builder.append("\e[3m");
+        builder.append("\e[3m"sv);
         child->render_for_terminal(builder);
-        builder.append("\e[23m");
+        builder.append("\e[23m"sv);
     }
 }
 
@@ -51,16 +51,16 @@ RecursionDecision Text::EmphasisNode::walk(Visitor& visitor) const
 
 void Text::CodeNode::render_to_html(StringBuilder& builder) const
 {
-    builder.append("<code>");
+    builder.append("<code>"sv);
     code->render_to_html(builder);
-    builder.append("</code>");
+    builder.append("</code>"sv);
 }
 
 void Text::CodeNode::render_for_terminal(StringBuilder& builder) const
 {
-    builder.append("\e[1m");
+    builder.append("\e[1m"sv);
     code->render_for_terminal(builder);
-    builder.append("\e[22m");
+    builder.append("\e[22m"sv);
 }
 
 size_t Text::CodeNode::terminal_length() const
@@ -79,7 +79,7 @@ RecursionDecision Text::CodeNode::walk(Visitor& visitor) const
 
 void Text::BreakNode::render_to_html(StringBuilder& builder) const
 {
-    builder.append("<br />");
+    builder.append("<br />"sv);
 }
 
 void Text::BreakNode::render_for_terminal(StringBuilder&) const
@@ -108,7 +108,7 @@ void Text::TextNode::render_to_html(StringBuilder& builder) const
 void Text::TextNode::render_for_terminal(StringBuilder& builder) const
 {
     if (collapsible && (text == "\n" || text.is_whitespace())) {
-        builder.append(" ");
+        builder.append(' ');
     } else {
         builder.append(text);
     }
@@ -138,34 +138,41 @@ RecursionDecision Text::TextNode::walk(Visitor& visitor) const
 void Text::LinkNode::render_to_html(StringBuilder& builder) const
 {
     if (is_image) {
-        builder.append("<img src=\"");
+        builder.append("<img src=\""sv);
         builder.append(escape_html_entities(href));
-        builder.append("\" alt=\"");
+        if (has_image_dimensions()) {
+            builder.append("\" style=\""sv);
+            if (image_width.has_value())
+                builder.appendff("width: {}px;", *image_width);
+            if (image_height.has_value())
+                builder.appendff("height: {}px;", *image_height);
+        }
+        builder.append("\" alt=\""sv);
         text->render_to_html(builder);
-        builder.append("\" >");
+        builder.append("\" >"sv);
     } else {
-        builder.append("<a href=\"");
+        builder.append("<a href=\""sv);
         builder.append(escape_html_entities(href));
-        builder.append("\">");
+        builder.append("\">"sv);
         text->render_to_html(builder);
-        builder.append("</a>");
+        builder.append("</a>"sv);
     }
 }
 
 void Text::LinkNode::render_for_terminal(StringBuilder& builder) const
 {
-    bool is_linked = href.contains("://");
+    bool is_linked = href.contains("://"sv);
     if (is_linked) {
-        builder.append("\033[0;34m\e]8;;");
+        builder.append("\033[0;34m\e]8;;"sv);
         builder.append(href);
-        builder.append("\e\\");
+        builder.append("\e\\"sv);
     }
 
     text->render_for_terminal(builder);
 
     if (is_linked) {
         builder.appendff(" <{}>", href);
-        builder.append("\033]8;;\033\\\033[0m");
+        builder.append("\033]8;;\033\\\033[0m"sv);
     }
 }
 
@@ -225,16 +232,16 @@ RecursionDecision Text::MultiNode::walk(Visitor& visitor) const
 
 void Text::StrikeThroughNode::render_to_html(StringBuilder& builder) const
 {
-    builder.append("<del>");
+    builder.append("<del>"sv);
     striked_text->render_to_html(builder);
-    builder.append("</del>");
+    builder.append("</del>"sv);
 }
 
 void Text::StrikeThroughNode::render_for_terminal(StringBuilder& builder) const
 {
-    builder.append("\e[9m");
+    builder.append("\e[9m"sv);
     striked_text->render_for_terminal(builder);
-    builder.append("\e[29m");
+    builder.append("\e[29m"sv);
 }
 
 size_t Text::StrikeThroughNode::terminal_length() const
@@ -260,14 +267,14 @@ String Text::render_to_html() const
 {
     StringBuilder builder;
     m_node->render_to_html(builder);
-    return builder.build().trim(" \n\t");
+    return builder.build().trim(" \n\t"sv);
 }
 
 String Text::render_for_terminal() const
 {
     StringBuilder builder;
     m_node->render_for_terminal(builder);
-    return builder.build().trim(" \n\t");
+    return builder.build().trim(" \n\t"sv);
 }
 
 RecursionDecision Text::walk(Visitor& visitor) const
@@ -380,16 +387,16 @@ Vector<Text::Token> Text::tokenize(StringView str)
                 in_space = true;
             }
             current_token.append(ch);
-        } else if (has("\n")) {
-            expect("\n");
-        } else if (has("[")) {
-            expect("[");
-        } else if (has("![")) {
-            expect("![");
-        } else if (has("](")) {
-            expect("](");
-        } else if (has(")")) {
-            expect(")");
+        } else if (has("\n"sv)) {
+            expect("\n"sv);
+        } else if (has("["sv)) {
+            expect("["sv);
+        } else if (has("!["sv)) {
+            expect("!["sv);
+        } else if (has("]("sv)) {
+            expect("]("sv);
+        } else if (has(")"sv)) {
+            expect(")"sv);
         } else {
             current_token.append(ch);
         }
@@ -405,7 +412,7 @@ NonnullOwnPtr<Text::MultiNode> Text::parse_sequence(Vector<Token>::ConstIterator
     for (; !tokens.is_end(); ++tokens) {
         if (tokens->is_space()) {
             node->children.append(parse_break(tokens));
-        } else if (*tokens == "\n") {
+        } else if (*tokens == "\n"sv) {
             node->children.append(parse_newline(tokens));
         } else if (tokens->is_run) {
             switch (tokens->run_char()) {
@@ -420,15 +427,15 @@ NonnullOwnPtr<Text::MultiNode> Text::parse_sequence(Vector<Token>::ConstIterator
                 node->children.append(parse_strike_through(tokens));
                 break;
             }
-        } else if (*tokens == "[" || *tokens == "![") {
+        } else if (*tokens == "["sv || *tokens == "!["sv) {
             node->children.append(parse_link(tokens));
-        } else if (in_link && *tokens == "](") {
+        } else if (in_link && *tokens == "]("sv) {
             return node;
         } else {
             node->children.append(make<TextNode>(tokens->data));
         }
 
-        if (in_link && !tokens.is_end() && *tokens == "](")
+        if (in_link && !tokens.is_end() && *tokens == "]("sv)
             return node;
 
         if (tokens.is_end())
@@ -440,7 +447,7 @@ NonnullOwnPtr<Text::MultiNode> Text::parse_sequence(Vector<Token>::ConstIterator
 NonnullOwnPtr<Text::Node> Text::parse_break(Vector<Token>::ConstIterator& tokens)
 {
     auto next_tok = tokens + 1;
-    if (next_tok.is_end() || *next_tok != "\n")
+    if (next_tok.is_end() || *next_tok != "\n"sv)
         return make<TextNode>(tokens->data);
 
     if (tokens->data.length() >= 2)
@@ -488,7 +495,7 @@ NonnullOwnPtr<Text::Node> Text::parse_emph(Vector<Token>::ConstIterator& tokens,
     for (++tokens; !tokens.is_end(); ++tokens) {
         if (tokens->is_space()) {
             child->children.append(parse_break(tokens));
-        } else if (*tokens == "\n") {
+        } else if (*tokens == "\n"sv) {
             child->children.append(parse_newline(tokens));
         } else if (tokens->is_run) {
             if (can_close_for(opening, *tokens)) {
@@ -507,16 +514,16 @@ NonnullOwnPtr<Text::Node> Text::parse_emph(Vector<Token>::ConstIterator& tokens,
                 child->children.append(parse_strike_through(tokens));
                 break;
             }
-        } else if (*tokens == "[" || *tokens == "![") {
+        } else if (*tokens == "["sv || *tokens == "!["sv) {
             child->children.append(parse_link(tokens));
-        } else if (in_link && *tokens == "](") {
+        } else if (in_link && *tokens == "]("sv) {
             child->children.prepend(make<TextNode>(opening.data));
             return child;
         } else {
             child->children.append(make<TextNode>(tokens->data));
         }
 
-        if (in_link && !tokens.is_end() && *tokens == "](") {
+        if (in_link && !tokens.is_end() && *tokens == "]("sv) {
             child->children.prepend(make<TextNode>(opening.data));
             return child;
         }
@@ -546,7 +553,7 @@ NonnullOwnPtr<Text::Node> Text::parse_code(Vector<Token>::ConstIterator& tokens)
             if (!is_all_whitespace) {
                 auto& first = dynamic_cast<TextNode&>(code->children.first());
                 auto& last = dynamic_cast<TextNode&>(code->children.last());
-                if (first.text.starts_with(" ") && last.text.ends_with(" ")) {
+                if (first.text.starts_with(' ') && last.text.ends_with(' ')) {
                     first.text = first.text.substring(1);
                     last.text = last.text.substring(0, last.text.length() - 1);
                 }
@@ -556,7 +563,7 @@ NonnullOwnPtr<Text::Node> Text::parse_code(Vector<Token>::ConstIterator& tokens)
         }
 
         is_all_whitespace = is_all_whitespace && iterator->data.is_whitespace();
-        code->children.append(make<TextNode>((*iterator == "\n") ? " " : iterator->data, false));
+        code->children.append(make<TextNode>((*iterator == "\n"sv) ? " " : iterator->data, false));
     }
 
     return make<TextNode>(opening.data);
@@ -565,22 +572,63 @@ NonnullOwnPtr<Text::Node> Text::parse_code(Vector<Token>::ConstIterator& tokens)
 NonnullOwnPtr<Text::Node> Text::parse_link(Vector<Token>::ConstIterator& tokens)
 {
     auto opening = *tokens++;
-    bool is_image = opening == "![";
+    bool is_image = opening == "!["sv;
 
     auto link_text = parse_sequence(tokens, true);
 
-    if (tokens.is_end() || *tokens != "](") {
+    if (tokens.is_end() || *tokens != "]("sv) {
         link_text->children.prepend(make<TextNode>(opening.data));
         return link_text;
     }
     auto separator = *tokens;
-    VERIFY(separator == "](");
+    VERIFY(separator == "]("sv);
+
+    Optional<int> image_width;
+    Optional<int> image_height;
+
+    auto parse_image_dimensions = [&](StringView dimensions) -> bool {
+        if (!dimensions.starts_with('='))
+            return false;
+
+        ArmedScopeGuard clear_image_dimensions = [&] {
+            image_width = {};
+            image_height = {};
+        };
+
+        auto dimension_seperator = dimensions.find('x', 1);
+        if (!dimension_seperator.has_value())
+            return false;
+
+        auto width_string = dimensions.substring_view(1, *dimension_seperator - 1);
+        if (!width_string.is_empty()) {
+            auto width = width_string.to_int();
+            if (!width.has_value())
+                return false;
+            image_width = width;
+        }
+
+        auto height_start = *dimension_seperator + 1;
+        if (height_start < dimensions.length()) {
+            auto height_string = dimensions.substring_view(height_start);
+            auto height = height_string.to_int();
+            if (!height.has_value())
+                return false;
+            image_height = height;
+        }
+
+        clear_image_dimensions.disarm();
+        return true;
+    };
 
     StringBuilder address;
     for (auto iterator = tokens + 1; !iterator.is_end(); ++iterator) {
-        if (*iterator == ")") {
+        // FIXME: What to do if there's multiple dimension tokens?
+        if (is_image && !address.is_empty() && parse_image_dimensions(iterator->data))
+            continue;
+
+        if (*iterator == ")"sv) {
             tokens = iterator;
-            return make<LinkNode>(is_image, move(link_text), address.build());
+            return make<LinkNode>(is_image, move(link_text), address.build().trim_whitespace(), image_width, image_height);
         }
 
         address.append(iterator->data);
@@ -608,7 +656,7 @@ NonnullOwnPtr<Text::Node> Text::parse_strike_through(Vector<Token>::ConstIterato
             if (!is_all_whitespace) {
                 auto& first = dynamic_cast<TextNode&>(striked_text->children.first());
                 auto& last = dynamic_cast<TextNode&>(striked_text->children.last());
-                if (first.text.starts_with(" ") && last.text.ends_with(" ")) {
+                if (first.text.starts_with(' ') && last.text.ends_with(' ')) {
                     first.text = first.text.substring(1);
                     last.text = last.text.substring(0, last.text.length() - 1);
                 }
@@ -618,7 +666,7 @@ NonnullOwnPtr<Text::Node> Text::parse_strike_through(Vector<Token>::ConstIterato
         }
 
         is_all_whitespace = is_all_whitespace && iterator->data.is_whitespace();
-        striked_text->children.append(make<TextNode>((*iterator == "\n") ? " " : iterator->data, false));
+        striked_text->children.append(make<TextNode>((*iterator == "\n"sv) ? " " : iterator->data, false));
     }
 
     return make<TextNode>(opening.data);

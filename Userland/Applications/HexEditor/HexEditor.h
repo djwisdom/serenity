@@ -32,11 +32,8 @@ public:
 
     virtual ~HexEditor() override = default;
 
-    bool is_readonly() const { return m_readonly; }
-    void set_readonly(bool);
-
     size_t buffer_size() const { return m_document->size(); }
-    bool open_new_file(size_t size);
+    ErrorOr<void> open_new_file(size_t size);
     void open_file(NonnullRefPtr<Core::File> file);
     void fill_selection(u8 fill_byte);
     Optional<u8> get_byte(size_t position);
@@ -74,7 +71,6 @@ protected:
     virtual void keydown_event(GUI::KeyEvent&) override;
 
 private:
-    bool m_readonly { false };
     size_t m_line_spacing { 4 };
     size_t m_content_length { 0 };
     size_t m_bytes_per_row { 16 };

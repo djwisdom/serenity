@@ -53,8 +53,10 @@ protected:
     virtual void parse_attribute(FlyString const& name, String const& value) override;
 
 private:
+    virtual bool is_html_element() const final { return true; }
+
     // ^HTML::GlobalEventHandlers
-    virtual DOM::EventTarget& global_event_handlers_to_event_target() override { return *this; }
+    virtual DOM::EventTarget& global_event_handlers_to_event_target(FlyString const&) override { return *this; }
 
     enum class ContentEditableState {
         True,
@@ -72,4 +74,9 @@ private:
     bool m_click_in_progress { false };
 };
 
+}
+
+namespace Web::DOM {
+template<>
+inline bool Node::fast_is<HTML::HTMLElement>() const { return is_html_element(); }
 }

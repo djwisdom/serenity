@@ -56,6 +56,7 @@
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLTitleElement.h>
 #include <LibWeb/HTML/MessageEvent.h>
+#include <LibWeb/HTML/Origin.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
@@ -64,7 +65,6 @@
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Namespace.h>
-#include <LibWeb/Origin.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/SVG/TagNames.h>
 #include <LibWeb/UIEvents/EventNames.h>
@@ -132,8 +132,11 @@ void Document::removed_last_ref()
             for (auto& node : descendants) {
                 VERIFY(&node.document() == this);
                 VERIFY(!node.is_document());
-                if (node.parent())
-                    node.remove();
+                if (node.parent()) {
+                    // We need to suppress mutation observers so that they don't try and queue a microtask for this Document which is in the process of dying,
+                    // which will cause an `!m_in_removed_last_ref` assertion failure when it tries to ref this Document.
+                    node.remove(true);
+                }
             }
         }
 
@@ -302,14 +305,14 @@ ExceptionOr<void> Document::close()
     return {};
 }
 
-Origin Document::origin() const
+HTML::Origin Document::origin() const
 {
     if (!m_url.is_valid())
         return {};
     return { m_url.protocol(), m_url.host(), m_url.port_or_default() };
 }
 
-void Document::set_origin(Origin const& origin)
+void Document::set_origin(HTML::Origin const& origin)
 {
     m_url.set_protocol(origin.protocol());
     m_url.set_host(origin.host());
@@ -606,23 +609,28 @@ void Document::update_layout()
     auto viewport_rect = browsing_context()->viewport_rect();
 
     if (!m_layout_root) {
+        m_next_layout_node_serial_id = 0;
         Layout::TreeBuilder tree_builder;
         m_layout_root = static_ptr_cast<Layout::InitialContainingBlock>(tree_builder.build(*this));
     }
 
-    Layout::FormattingState formatting_state;
-    Layout::BlockFormattingContext root_formatting_context(formatting_state, *m_layout_root, nullptr);
+    Layout::LayoutState layout_state;
+    layout_state.used_values_per_layout_node.resize(layout_node_count());
 
-    auto& icb = static_cast<Layout::InitialContainingBlock&>(*m_layout_root);
-    auto& icb_state = formatting_state.get_mutable(icb);
-    icb_state.content_width = viewport_rect.width();
-    icb_state.content_height = viewport_rect.height();
+    {
+        Layout::BlockFormattingContext root_formatting_context(layout_state, *m_layout_root, nullptr);
 
-    icb.set_has_definite_width(true);
-    icb.set_has_definite_height(true);
+        auto& icb = static_cast<Layout::InitialContainingBlock&>(*m_layout_root);
+        auto& icb_state = layout_state.get_mutable(icb);
+        icb_state.set_has_definite_width(true);
+        icb_state.set_has_definite_height(true);
+        icb_state.set_content_width(viewport_rect.width());
+        icb_state.set_content_height(viewport_rect.height());
 
-    root_formatting_context.run(*m_layout_root, Layout::LayoutMode::Normal);
-    formatting_state.commit();
+        root_formatting_context.run(*m_layout_root, Layout::LayoutMode::Normal);
+    }
+
+    layout_state.commit();
 
     browsing_context()->set_needs_display();
 
@@ -1111,8 +1119,7 @@ void Document::adopt_node(Node& node)
         node.remove();
 
     if (&old_document != this) {
-        // FIXME: This should be shadow-including.
-        node.for_each_in_inclusive_subtree([&](auto& inclusive_descendant) {
+        node.for_each_shadow_including_descendant([&](auto& inclusive_descendant) {
             inclusive_descendant.set_document({}, *this);
             // FIXME: If inclusiveDescendant is an element, then set the node document of each attribute in inclusiveDescendant’s attribute list to document.
             return IterationDecision::Continue;
@@ -1122,8 +1129,7 @@ void Document::adopt_node(Node& node)
         //        enqueue a custom element callback reaction with inclusiveDescendant, callback name "adoptedCallback",
         //        and an argument list containing oldDocument and document.
 
-        // FIXME: This should be shadow-including.
-        node.for_each_in_inclusive_subtree([&](auto& inclusive_descendant) {
+        node.for_each_shadow_including_descendant([&](auto& inclusive_descendant) {
             inclusive_descendant.adopted_from(old_document);
             return IterationDecision::Continue;
         });

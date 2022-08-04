@@ -110,7 +110,7 @@ Gfx::Font const& WindowManager::font() const
 
 Gfx::Font const& WindowManager::window_title_font() const
 {
-    return Gfx::FontDatabase::default_font().bold_variant();
+    return Gfx::FontDatabase::window_title_font();
 }
 
 bool WindowManager::set_screen_layout(ScreenLayout&& screen_layout, bool save, String& error_msg)
@@ -2099,7 +2099,7 @@ void WindowManager::invalidate_after_theme_or_font_change()
         return IterationDecision::Continue;
     });
     ConnectionFromClient::for_each_client([&](ConnectionFromClient& client) {
-        client.async_update_system_theme(Gfx::current_system_theme_buffer());
+        client.notify_about_theme_change();
     });
     MenuManager::the().did_change_theme();
     AppletManager::the().did_change_theme();
@@ -2274,7 +2274,7 @@ void WindowManager::apply_cursor_theme(String const& theme_name)
     auto reload_cursor = [&](RefPtr<Cursor>& cursor, String const& name) {
         bool is_current_cursor = current_cursor && current_cursor == cursor.ptr();
 
-        static auto const s_default_cursor_path = "/res/cursor-themes/Default/arrow.x2y2.png";
+        static auto const s_default_cursor_path = "/res/cursor-themes/Default/arrow.x2y2.png"sv;
         cursor = Cursor::create(String::formatted("/res/cursor-themes/{}/{}", theme_name, cursor_theme_config->read_entry("Cursor", name)), s_default_cursor_path);
 
         if (is_current_cursor) {

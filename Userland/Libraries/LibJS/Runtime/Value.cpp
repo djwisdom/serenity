@@ -156,7 +156,7 @@ static String double_to_string(double d)
         return builder.to_string();
     }
     if (-6 < exponent && exponent <= 0) {
-        builder.append("0.");
+        builder.append("0."sv);
         builder.append(String::repeated('0', -exponent));
         builder.append(digits);
         return builder.to_string();
@@ -382,7 +382,7 @@ bool Value::to_boolean() const
             return false;
         return m_value.as_double != 0;
     case Type::String:
-        return !m_value.as_string->string().is_empty();
+        return !m_value.as_string->is_empty();
     case Type::Symbol:
         return true;
     case Type::BigInt:

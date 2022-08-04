@@ -6,7 +6,7 @@
     }
 
     @GUI::Widget {
-        shrink_to_fit: true
+        preferred_height: "fit"
         layout: @GUI::HorizontalBoxLayout {
             spacing: 6
         }
@@ -17,14 +17,13 @@
             text_alignment: "CenterLeft"
         }
 
-        @GUI::Frame {
+        @GUI::Label {
             background_role: "Base"
+            shadow: "Sunken"
+            shape: "Container"
+            thickness: 2
             fill_with_background_color: true
-            layout: @GUI::VerticalBoxLayout {}
-
-            @GUI::Label {
-                name: "default_font_label"
-            }
+            name: "default_font_label"
         }
 
         @GUI::Button {
@@ -35,7 +34,35 @@
     }
 
     @GUI::Widget {
-        shrink_to_fit: true
+        preferred_height: "fit"
+        layout: @GUI::HorizontalBoxLayout {
+            spacing: 6
+        }
+
+        @GUI::Label {
+            fixed_width: 100
+            text: "Window title font:"
+            text_alignment: "CenterLeft"
+        }
+
+        @GUI::Label {
+            background_role: "Base"
+            shadow: "Sunken"
+            shape: "Container"
+            thickness: 2
+            fill_with_background_color: true
+            name: "window_title_font_label"
+        }
+
+        @GUI::Button {
+            text: "..."
+            name: "window_title_font_button"
+            fixed_width: 30
+        }
+    }
+
+    @GUI::Widget {
+        preferred_height: "fit"
         layout: @GUI::HorizontalBoxLayout {
             spacing: 6
         }
@@ -46,14 +73,13 @@
             text_alignment: "CenterLeft"
         }
 
-        @GUI::Frame {
+        @GUI::Label {
             background_role: "Base"
+            shadow: "Sunken"
+            shape: "Container"
+            thickness: 2
             fill_with_background_color: true
-            layout: @GUI::VerticalBoxLayout {}
-
-            @GUI::Label {
-                name: "fixed_width_font_label"
-            }
+            name: "fixed_width_font_label"
         }
 
         @GUI::Button {
@@ -63,5 +89,5 @@
         }
     }
 
-    @GUI::Widget {}
+    @GUI::Layout::Spacer {}
 }

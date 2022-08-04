@@ -24,6 +24,7 @@ ObjectEnvironment* new_object_environment(Object&, bool is_with_environment, Env
 FunctionEnvironment* new_function_environment(ECMAScriptFunctionObject&, Object* new_target);
 PrivateEnvironment* new_private_environment(VM& vm, PrivateEnvironment* outer);
 Environment& get_this_environment(VM&);
+bool can_be_held_weakly(Value);
 Object* get_super_constructor(VM&);
 ThrowCompletionOr<Reference> make_super_property_reference(GlobalObject&, Value actual_this, PropertyKey const&, bool strict);
 ThrowCompletionOr<Value> require_object_coercible(GlobalObject&, Value);
@@ -182,7 +183,7 @@ auto modulo(T x, U y) requires(IsArithmetic<T>, IsArithmetic<U>)
 
 auto modulo(Crypto::BigInteger auto const& x, Crypto::BigInteger auto const& y)
 {
-    VERIFY(y != "0"_bigint);
+    VERIFY(!y.is_zero());
     auto result = x.divided_by(y).remainder;
     if (result.is_negative())
         result = result.plus(y);

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, MacDue <macdue@dueutil.tech>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,6 +12,7 @@
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BackgroundPainting.h>
 #include <LibWeb/Painting/BorderRadiusCornerClipper.h>
+#include <LibWeb/Painting/GradientPainting.h>
 #include <LibWeb/Painting/PaintContext.h>
 
 namespace Web::Painting {
@@ -20,31 +22,49 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
 {
     auto& painter = context.painter();
 
-    auto get_box = [&](CSS::BackgroundBox box) {
-        auto box_rect = border_rect;
-        switch (box) {
+    struct BackgroundBox {
+        Gfx::FloatRect rect;
+        BorderRadiiData radii;
+
+        inline void shrink(float top, float right, float bottom, float left)
+        {
+            rect.shrink(top, right, bottom, left);
+            radii.shrink(top, right, bottom, left);
+        }
+    };
+
+    BackgroundBox border_box {
+        border_rect,
+        border_radii
+    };
+
+    auto get_box = [&](CSS::BackgroundBox box_clip) {
+        auto box = border_box;
+        switch (box_clip) {
         case CSS::BackgroundBox::ContentBox: {
             auto& padding = layout_node.box_model().padding;
-            box_rect.shrink(padding.top, padding.right, padding.bottom, padding.left);
+            box.shrink(padding.top, padding.right, padding.bottom, padding.left);
             [[fallthrough]];
         }
         case CSS::BackgroundBox::PaddingBox: {
             auto& border = layout_node.box_model().border;
-            box_rect.shrink(border.top, border.right, border.bottom, border.left);
+            box.shrink(border.top, border.right, border.bottom, border.left);
             [[fallthrough]];
         }
         case CSS::BackgroundBox::BorderBox:
         default:
-            return box_rect;
+            return box;
         }
     };
 
-    auto color_rect = border_rect;
+    auto color_box = border_box;
     if (background_layers && !background_layers->is_empty())
-        color_rect = get_box(background_layers->last().clip);
+        color_box = get_box(background_layers->last().clip);
 
     auto layer_is_paintable = [&](auto& layer) {
-        return layer.image && layer.image->bitmap();
+        return (layer.background_image
+            && ((layer.background_image->is_image() && layer.background_image->as_image().bitmap())
+                || layer.background_image->is_linear_gradient()));
     };
 
     bool has_paintable_layers = false;
@@ -57,24 +77,9 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
         }
     }
 
-    Optional<BorderRadiusCornerClipper> corner_radius_clipper {};
-
-    if (border_radii.has_any_radius()) {
-        if (!has_paintable_layers) {
-            Gfx::AntiAliasingPainter aa_painter { painter };
-            aa_painter.fill_rect_with_rounded_corners(color_rect.to_rounded<int>(),
-                background_color, border_radii.top_left.as_corner(), border_radii.top_right.as_corner(), border_radii.bottom_right.as_corner(), border_radii.bottom_left.as_corner());
-            return;
-        }
-        auto clipper = BorderRadiusCornerClipper::create(border_rect.to_rounded<int>(), border_radii);
-        if (!clipper.is_error())
-            corner_radius_clipper = clipper.release_value();
-    }
-
-    if (corner_radius_clipper.has_value())
-        corner_radius_clipper->sample_under_corners(painter);
-
-    painter.fill_rect(color_rect.to_rounded<int>(), background_color);
+    Gfx::AntiAliasingPainter aa_painter { painter };
+    aa_painter.fill_rect_with_rounded_corners(color_box.rect.to_rounded<int>(),
+        background_color, color_box.radii.top_left.as_corner(), color_box.radii.top_right.as_corner(), color_box.radii.bottom_right.as_corner(), color_box.radii.bottom_left.as_corner());
 
     if (!has_paintable_layers)
         return;
@@ -84,13 +89,23 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
         // TODO: Gradients!
         if (!layer_is_paintable(layer))
             continue;
-        auto& image = *layer.image->bitmap();
+        Gfx::PainterStateSaver state { painter };
 
         // Clip
-        auto clip_rect = get_box(layer.clip);
-        painter.save();
-        painter.add_clip_rect(clip_rect.to_rounded<int>());
+        auto clip_box = get_box(layer.clip);
+        auto clip_rect = clip_box.rect.to_rounded<int>();
+        painter.add_clip_rect(clip_rect);
+        ScopedCornerRadiusClip corner_clip { painter, clip_rect, clip_box.radii };
 
+        if (layer.background_image->is_linear_gradient()) {
+            // FIXME: Support sizing and positioning rules with gradients.
+            auto& linear_gradient = layer.background_image->as_linear_gradient();
+            auto data = resolve_linear_gradient_data(layout_node, border_box.rect, linear_gradient);
+            paint_linear_gradient(context, border_box.rect.to_rounded<int>(), data);
+            continue;
+        }
+
+        auto& image = *layer.background_image->as_image().bitmap();
         Gfx::FloatRect background_positioning_area;
 
         // Attachment and Origin
@@ -100,7 +115,7 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
             break;
         case CSS::BackgroundAttachment::Local:
         case CSS::BackgroundAttachment::Scroll:
-            background_positioning_area = get_box(layer.origin);
+            background_positioning_area = get_box(layer.origin).rect;
             break;
         }
 
@@ -124,8 +139,8 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
         case CSS::BackgroundSize::LengthPercentage: {
             float width;
             float height;
-            bool x_is_auto = layer.size_x.is_length() && layer.size_x.length().is_auto();
-            bool y_is_auto = layer.size_y.is_length() && layer.size_y.length().is_auto();
+            bool x_is_auto = layer.size_x.is_auto();
+            bool y_is_auto = layer.size_y.is_auto();
             if (x_is_auto && y_is_auto) {
                 width = image.width();
                 height = image.height();
@@ -164,10 +179,10 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
             // for the other dimension, then there is a third step: that other dimension is scaled
             // so that the original aspect ratio is restored.
             if (layer.repeat_x != layer.repeat_y) {
-                if (layer.size_x.is_length() && layer.size_x.length().is_auto()) {
+                if (layer.size_x.is_auto()) {
                     image_rect.set_width(image.width() * (image_rect.height() / image.height()));
                 }
-                if (layer.size_y.is_length() && layer.size_y.length().is_auto()) {
+                if (layer.size_y.is_auto()) {
                     image_rect.set_height(image.height() * (image_rect.width() / image.width()));
                 }
             }
@@ -282,12 +297,7 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
                 break;
             image_y += y_step;
         }
-
-        painter.restore();
     }
-
-    if (corner_radius_clipper.has_value())
-        corner_radius_clipper->blit_corner_clipping(painter);
 }
 
 }

@@ -203,6 +203,31 @@
             width: 150px;
             height: 100px;
         }
+
+        .solid-color {
+            background: red content-box;
+        }
+
+        .image {
+            background: center / contain  url(car.png) content-box;
+        }
+
+        .image-layers {
+            background: center / contain url(car.png) content-box, center / contain url(old-computer.png);
+        }
+
+        .box-background-clip {
+            width: 100px;
+            height: 100px;
+            border: 10px solid black;
+            border-radius: 50px;
+            padding: 10px;
+        }
+
+        .positioned {
+            background-color: red;
+            position: relative;
+        }
     </style>
 </head>
 
@@ -279,6 +304,76 @@
     <br>
     <br>
 
+    <p>These use a border-radius + a background clip (the radius of the inner background should shrink)</p>
+    <em>Solid color</em>
+    <div class="box-background-clip solid-color"></div>
+    <br>
+    <em>Background image</em>
+    <div class="box-background-clip image"></div>
+    <br>
+    <em>Background image layers</em>
+    <div class="box-background-clip image-layers"></div>
+    <br>
+    <br>
+
+    <p>The all have a border-radius +/- overflow: hidden, which clips their child elements<p>
+    <em>Lorem ipsum, <b>without</b> overflow: hidden</em>
+    <div style="width: 200px; height: 200px; border-radius: 30%; background-color: brown">
+        <span>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</span>
+    </div>
+    <br>
+    <em>Lorem ipsum, <b>with</b> overflow: hidden</em>
+    <div style="width: 200px; height: 200px; border-radius: 30%; background-color: brown; overflow: hidden;">
+        <span>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</span>
+    </div>
+    <br>
+    <em>An image inside a inline-block <code>&lt;a&gt;</code> tag, with a border-radius of 50% and overflow: hidden</em>
+    <br>
+    (this is commonly used for avatars and occurs GitHub a few times)
+    <br>
+    <a style="display: inline-block; border-radius: 50%; overflow: hidden; width: 100px; height: 100px;">
+        <img src="car.png" style="width: 100px; height: 100px">
+    </a>
+    <br>
+    <em>A red div with position: relative within a parent with overflow: hidden + a border-radius</em><br>
+    <div class="box" style="border-radius: 10px; overflow: hidden;">
+        <div class="box positioned"></div>
+    </div>
+    <br>
+    <em>A blue (background) div within a parent with overflow: hidden + a border-radius</em><br>
+    <div class="box" style="border-radius: 10px; overflow: hidden;">
+        <div class="box" style="background-color: blue;"></div>
+    </div>
+    <br>
+    <br>
+
+    <p>All these are non-conventional elements with a border-radius :^)<p>
+    <em>iframe to the welcome page</em>
+    <br>
+    <iframe style="border-radius: 50%; border: none; width: 300px; height: 200px;" src="welcome.html"></iframe>
+    <br>
+    <em>Fun canvas demo</em>
+    <br>
+    <canvas id="fun-canvas" style="border-radius: 30%;" width="200" height="200"></canvas>
+    <script src="fun-canvas.js"></script>
+    <script>
+        makeFunCanvas("fun-canvas")
+    </script>
+    <br/>
+    <br/>
+
+    <p>These test the inner border-radius shrinking to accommodate the border</p>
+    <em>An <code>&lt;img&gt;</code> tag with a border-radius and a border</em>
+    <br>
+    <img src="car.png" style="border-radius: 100%; border: 10px solid limegreen;">
+    <br/>
+    <em>Clipping text overflow with a border-radius and a border</em>
+    <div style="width: 100px; height: 100px; border-radius: 30%; background-color: cyan; overflow: hidden; border: 20px solid salmon;">
+        Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+    </div>
+    <br/>
+    <br/>
+
     <p>The boxes are 50x50px</p>
     <em>All round 10px</em>
     <div class="box box-1"></div>
@@ -317,7 +412,6 @@
     <div class="box box-5"></div>
     <br>
     <br>
-
     <p>200px box, 75px radius</p>
     <div class="box box-6"></div>
     <br>

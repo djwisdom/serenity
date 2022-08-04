@@ -186,8 +186,10 @@ void DebugSession::run(DesiredInitialDebugeeState initial_debugee_state, Callbac
 
 #if ARCH(I386)
         FlatPtr current_instruction = regs.eip;
-#else
+#elif ARCH(X86_64)
         FlatPtr current_instruction = regs.rip;
+#else
+#    error Unknown architecture
 #endif
 
         auto debug_status = peek_debug(DEBUG_STATUS_REGISTER);
@@ -207,8 +209,10 @@ void DebugSession::run(DesiredInitialDebugeeState initial_debugee_state, Callbac
 
 #if ARCH(I386)
                 FlatPtr current_ebp = regs.ebp;
-#else
+#elif ARCH(X86_64)
                 FlatPtr current_ebp = regs.rbp;
+#else
+#    error Unknown architecture
 #endif
 
                 do {
@@ -253,8 +257,10 @@ void DebugSession::run(DesiredInitialDebugeeState initial_debugee_state, Callbac
             auto breakpoint_addr = bit_cast<FlatPtr>(current_breakpoint.value().address);
 #if ARCH(I386)
             regs.eip = breakpoint_addr;
-#else
+#elif ARCH(X86_64)
             regs.rip = breakpoint_addr;
+#else
+#    error Unknown architecture
 #endif
             set_registers(regs);
             disable_breakpoint(current_breakpoint.value().address);
@@ -278,29 +284,31 @@ void DebugSession::run(DesiredInitialDebugeeState initial_debugee_state, Callbac
 
         bool did_single_step = false;
 
-        auto current_breakpoint_address = bit_cast<FlatPtr>(current_breakpoint.value().address);
         // Re-enable the breakpoint if it wasn't removed by the user
-        if (current_breakpoint.has_value() && m_breakpoints.contains(current_breakpoint_address)) {
-            // The current breakpoint was removed to make it transparent to the user.
-            // We now want to re-enable it - the code execution flow could hit it again.
-            // To re-enable the breakpoint, we first perform a single step and execute the
-            // instruction of the breakpoint, and then redo the INT3 patch in its first byte.
+        if (current_breakpoint.has_value()) {
+            auto current_breakpoint_address = bit_cast<FlatPtr>(current_breakpoint.value().address);
+            if (m_breakpoints.contains(current_breakpoint_address)) {
+                // The current breakpoint was removed to make it transparent to the user.
+                // We now want to re-enable it - the code execution flow could hit it again.
+                // To re-enable the breakpoint, we first perform a single step and execute the
+                // instruction of the breakpoint, and then redo the INT3 patch in its first byte.
 
-            // If the user manually inserted a breakpoint at the current instruction,
-            // we need to disable that breakpoint because we want to singlestep over that
-            // instruction (we re-enable it again later anyways).
-            if (m_breakpoints.contains(current_breakpoint_address) && m_breakpoints.get(current_breakpoint_address).value().state == BreakPointState::Enabled) {
-                disable_breakpoint(current_breakpoint.value().address);
-            }
-            auto stopped_address = single_step();
-            enable_breakpoint(current_breakpoint.value().address);
-            did_single_step = true;
-            // If there is another breakpoint after the current one,
-            // Then we are already on it (because of single_step)
-            auto breakpoint_at_next_instruction = m_breakpoints.get(stopped_address);
-            if (breakpoint_at_next_instruction.has_value()
-                && breakpoint_at_next_instruction.value().state == BreakPointState::Enabled) {
-                state = State::ConsecutiveBreakpoint;
+                // If the user manually inserted a breakpoint at the current instruction,
+                // we need to disable that breakpoint because we want to singlestep over that
+                // instruction (we re-enable it again later anyways).
+                if (m_breakpoints.contains(current_breakpoint_address) && m_breakpoints.get(current_breakpoint_address).value().state == BreakPointState::Enabled) {
+                    disable_breakpoint(current_breakpoint.value().address);
+                }
+                auto stopped_address = single_step();
+                enable_breakpoint(current_breakpoint.value().address);
+                did_single_step = true;
+                // If there is another breakpoint after the current one,
+                // Then we are already on it (because of single_step)
+                auto breakpoint_at_next_instruction = m_breakpoints.get(stopped_address);
+                if (breakpoint_at_next_instruction.has_value()
+                    && breakpoint_at_next_instruction.value().state == BreakPointState::Enabled) {
+                    state = State::ConsecutiveBreakpoint;
+                }
             }
         }
 

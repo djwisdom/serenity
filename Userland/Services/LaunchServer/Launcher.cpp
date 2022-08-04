@@ -13,6 +13,7 @@
 #include <AK/StringBuilder.h>
 #include <LibCore/ConfigFile.h>
 #include <LibCore/File.h>
+#include <LibCore/MimeData.h>
 #include <LibCore/Process.h>
 #include <LibDesktop/AppFile.h>
 #include <errno.h>
@@ -47,17 +48,17 @@ String Handler::to_details_str() const
 {
     StringBuilder builder;
     auto obj = MUST(JsonObjectSerializer<>::try_create(builder));
-    MUST(obj.add("executable", executable));
-    MUST(obj.add("name", name));
+    MUST(obj.add("executable"sv, executable));
+    MUST(obj.add("name"sv, name));
     switch (handler_type) {
     case Type::Application:
-        MUST(obj.add("type", "app"));
+        MUST(obj.add("type"sv, "app"));
         break;
     case Type::UserDefault:
-        MUST(obj.add("type", "userdefault"));
+        MUST(obj.add("type"sv, "userdefault"));
         break;
     case Type::UserPreferred:
-        MUST(obj.add("type", "userpreferred"));
+        MUST(obj.add("type"sv, "userpreferred"));
         break;
     default:
         break;
@@ -83,6 +84,9 @@ void Launcher::load_handlers(String const& af_dir)
     Desktop::AppFile::for_each([&](auto af) {
         auto app_name = af->name();
         auto app_executable = af->executable();
+        HashTable<String> mime_types;
+        for (auto& mime_type : af->launcher_mime_types())
+            mime_types.set(mime_type);
         HashTable<String> file_types;
         for (auto& file_type : af->launcher_file_types())
             file_types.set(file_type);
@@ -90,13 +94,22 @@ void Launcher::load_handlers(String const& af_dir)
         for (auto& protocol : af->launcher_protocols())
             protocols.set(protocol);
         if (access(app_executable.characters(), X_OK) == 0)
-            m_handlers.set(app_executable, { Handler::Type::Default, app_name, app_executable, file_types, protocols });
+            m_handlers.set(app_executable, { Handler::Type::Default, app_name, app_executable, mime_types, file_types, protocols });
     },
         af_dir);
 }
 
 void Launcher::load_config(Core::ConfigFile const& cfg)
 {
+    for (auto key : cfg.keys("MimeType")) {
+        auto handler = cfg.read_entry("MimeType", key).trim_whitespace();
+        if (handler.is_empty())
+            continue;
+        if (access(handler.characters(), X_OK) != 0)
+            continue;
+        m_mime_handlers.set(key.to_lowercase(), handler);
+    }
+
     for (auto key : cfg.keys("FileType")) {
         auto handler = cfg.read_entry("FileType", key).trim_whitespace();
         if (handler.is_empty())
@@ -114,6 +127,14 @@ void Launcher::load_config(Core::ConfigFile const& cfg)
             continue;
         m_protocol_handlers.set(key.to_lowercase(), handler);
     }
+}
+
+bool Launcher::has_mime_handlers(String const& mime_type)
+{
+    for (auto& handler : m_handlers)
+        if (handler.value.mime_types.contains(mime_type))
+            return true;
+    return false;
 }
 
 Vector<String> Launcher::handlers_for_url(const URL& url)
@@ -154,6 +175,20 @@ Vector<String> Launcher::handlers_with_details_for_url(const URL& url)
         });
     }
     return handlers;
+}
+
+Optional<String> Launcher::mime_type_for_file(String path)
+{
+    auto file_or_error = Core::File::open(path, Core::OpenMode::ReadOnly);
+    if (file_or_error.is_error()) {
+        return {};
+    } else {
+        auto file = file_or_error.release_value();
+        // Read accounts for longest possible offset + signature we currently match against.
+        auto bytes = file->read(0x9006);
+
+        return Core::guess_mime_type_based_on_sniffed_bytes(bytes.bytes());
+    }
 }
 
 bool Launcher::open_url(const URL& url, String const& handler_name)
@@ -206,6 +241,17 @@ bool Launcher::open_with_user_preferences(HashMap<String, String> const& user_pr
     if (program_path.has_value())
         return spawn(program_path.value(), arguments);
 
+    String executable = "";
+    if (for_each_handler(key, user_preferences, [&](auto const& handler) -> bool {
+            if (executable.is_empty() && (handler.mime_types.contains(key) || handler.file_types.contains(key) || handler.protocols.contains(key))) {
+                executable = handler.executable;
+                return true;
+            }
+            return false;
+        })) {
+        return spawn(executable, arguments);
+    }
+
     // There wasn't a handler for this, so try the fallback instead
     program_path = user_preferences.get("*");
     if (program_path.has_value())
@@ -218,7 +264,7 @@ bool Launcher::open_with_user_preferences(HashMap<String, String> const& user_pr
     return false;
 }
 
-void Launcher::for_each_handler(String const& key, HashMap<String, String>& user_preference, Function<bool(Handler const&)> f)
+size_t Launcher::for_each_handler(String const& key, HashMap<String, String> const& user_preference, Function<bool(Handler const&)> f)
 {
     auto user_preferred = user_preference.get(key);
     if (user_preferred.has_value())
@@ -236,6 +282,9 @@ void Launcher::for_each_handler(String const& key, HashMap<String, String>& user
     auto user_default = user_preference.get("*");
     if (counted == 0 && user_default.has_value())
         f(get_handler_for_executable(Handler::Type::UserDefault, user_default.value()));
+    // Return the number of times f() was called,
+    // which can be used to know whether there were any handlers
+    return counted;
 }
 
 void Launcher::for_each_handler_for_path(String const& path, Function<bool(Handler const&)> f)
@@ -275,6 +324,17 @@ void Launcher::for_each_handler_for_path(String const& path, Function<bool(Handl
         f(get_handler_for_executable(Handler::Type::Application, path));
 
     auto extension = LexicalPath::extension(path).to_lowercase();
+    auto mime_type = mime_type_for_file(path);
+
+    if (mime_type.has_value()) {
+        if (for_each_handler(mime_type.value(), m_mime_handlers, [&](auto const& handler) -> bool {
+                if (handler.handler_type != Handler::Type::Default || handler.mime_types.contains(mime_type.value()))
+                    return f(handler);
+                return false;
+            })) {
+            return;
+        }
+    }
 
     for_each_handler(extension, m_file_handlers, [&](auto const& handler) -> bool {
         if (handler.handler_type != Handler::Type::Default || handler.file_types.contains(extension))
@@ -312,15 +372,18 @@ bool Launcher::open_file_url(const URL& url)
     if ((st.st_mode & S_IFMT) == S_IFREG && st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH))
         return spawn(url.path(), {});
 
-    auto extension_parts = url.path().to_lowercase().split('.');
-    String extension = {};
-    if (extension_parts.size() > 1)
-        extension = extension_parts.last();
+    auto extension = LexicalPath::extension(url.path()).to_lowercase();
+    auto mime_type = mime_type_for_file(url.path());
+
+    auto mime_type_or_extension = extension;
+    bool should_use_mime_type = mime_type.has_value() && has_mime_handlers(mime_type.value());
+    if (should_use_mime_type)
+        mime_type_or_extension = mime_type.value();
 
     auto handler_optional = m_file_handlers.get("txt");
-    if (!handler_optional.has_value())
-        return false;
-    auto& default_handler = handler_optional.value();
+    String default_handler = "";
+    if (handler_optional.has_value())
+        default_handler = handler_optional.value();
 
     // Additional parameters parsing, specific for the file protocol and txt file handlers
     Vector<String> additional_parameters;
@@ -339,6 +402,6 @@ bool Launcher::open_file_url(const URL& url)
 
     additional_parameters.append(filepath);
 
-    return open_with_user_preferences(m_file_handlers, extension, additional_parameters, default_handler);
+    return open_with_user_preferences(should_use_mime_type ? m_mime_handlers : m_file_handlers, mime_type_or_extension, additional_parameters, default_handler);
 }
 }

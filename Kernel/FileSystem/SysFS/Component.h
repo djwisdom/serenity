@@ -23,7 +23,10 @@ struct SysFSInodeData : public OpenFileDescriptionData {
     OwnPtr<KBuffer> buffer;
 };
 
+class SysFSDirectory;
 class SysFSComponent : public RefCounted<SysFSComponent> {
+    friend class SysFSDirectory;
+
 public:
     virtual StringView name() const = 0;
     virtual ErrorOr<size_t> read_bytes(off_t, size_t, UserOrKernelBuffer&, OpenFileDescription*) const { return Error::from_errno(ENOTIMPL); }
@@ -42,25 +45,50 @@ public:
 
     virtual ~SysFSComponent() = default;
 
+    ErrorOr<NonnullOwnPtr<KString>> relative_path(NonnullOwnPtr<KString>, size_t current_hop = 0) const;
+    ErrorOr<size_t> relative_path_hops_count_from_mountpoint(size_t current_hop = 0) const;
+
 protected:
+    explicit SysFSComponent(SysFSDirectory const& parent_directory);
     SysFSComponent();
+
+    RefPtr<SysFSDirectory> m_parent_directory;
+
+    IntrusiveListNode<SysFSComponent, NonnullRefPtr<SysFSComponent>> m_list_node;
 
 private:
     InodeIndex m_component_index {};
 };
 
-class SysFSDirectory : public SysFSComponent {
+class SysFSSymbolicLink : public SysFSComponent {
 public:
-    virtual ErrorOr<void> traverse_as_directory(FileSystemID, Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)>) const override;
-    virtual RefPtr<SysFSComponent> lookup(StringView name) override;
-
+    virtual ErrorOr<size_t> read_bytes(off_t, size_t, UserOrKernelBuffer&, OpenFileDescription*) const override final;
     virtual ErrorOr<NonnullRefPtr<SysFSInode>> to_inode(SysFS const& sysfs_instance) const override final;
 
 protected:
-    SysFSDirectory() = default;
+    ErrorOr<NonnullOwnPtr<KString>> try_generate_return_path_to_mount_point() const;
+    ErrorOr<NonnullOwnPtr<KBuffer>> try_to_generate_buffer() const;
+
+    explicit SysFSSymbolicLink(SysFSDirectory const& parent_directory, SysFSComponent const& pointed_component);
+
+    RefPtr<SysFSComponent> m_pointed_component;
+};
+
+class SysFSDirectory : public SysFSComponent {
+public:
+    virtual ErrorOr<void> traverse_as_directory(FileSystemID, Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)>) const override final;
+    virtual RefPtr<SysFSComponent> lookup(StringView name) override final;
+
+    virtual ErrorOr<NonnullRefPtr<SysFSInode>> to_inode(SysFS const& sysfs_instance) const override final;
+
+    using ChildList = SpinlockProtected<IntrusiveList<&SysFSComponent::m_list_node>>;
+
+protected:
+    virtual bool is_root_directory() const { return false; }
+
+    SysFSDirectory() {};
     explicit SysFSDirectory(SysFSDirectory const& parent_directory);
-    NonnullRefPtrVector<SysFSComponent> m_components;
-    RefPtr<SysFSDirectory> m_parent_directory;
+    ChildList m_child_components;
 };
 
 }

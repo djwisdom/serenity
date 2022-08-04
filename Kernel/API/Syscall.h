@@ -52,6 +52,7 @@ enum class NeedsBigProcessLock {
     S(chown, NeedsBigProcessLock::No)                       \
     S(clock_gettime, NeedsBigProcessLock::No)               \
     S(clock_nanosleep, NeedsBigProcessLock::No)             \
+    S(clock_getres, NeedsBigProcessLock::No)                \
     S(clock_settime, NeedsBigProcessLock::No)               \
     S(close, NeedsBigProcessLock::No)                       \
     S(connect, NeedsBigProcessLock::No)                     \
@@ -128,6 +129,7 @@ enum class NeedsBigProcessLock {
     S(pipe, NeedsBigProcessLock::Yes)                       \
     S(pledge, NeedsBigProcessLock::Yes)                     \
     S(poll, NeedsBigProcessLock::Yes)                       \
+    S(posix_fallocate, NeedsBigProcessLock::No)             \
     S(prctl, NeedsBigProcessLock::Yes)                      \
     S(profiling_disable, NeedsBigProcessLock::Yes)          \
     S(profiling_enable, NeedsBigProcessLock::Yes)           \
@@ -170,6 +172,7 @@ enum class NeedsBigProcessLock {
     S(sigpending, NeedsBigProcessLock::Yes)                 \
     S(sigprocmask, NeedsBigProcessLock::Yes)                \
     S(sigreturn, NeedsBigProcessLock::Yes)                  \
+    S(sigsuspend, NeedsBigProcessLock::Yes)                 \
     S(sigtimedwait, NeedsBigProcessLock::Yes)               \
     S(socket, NeedsBigProcessLock::Yes)                     \
     S(socketpair, NeedsBigProcessLock::Yes)                 \
@@ -255,6 +258,11 @@ struct SC_clock_nanosleep_params {
     int flags;
     const struct timespec* requested_sleep;
     struct timespec* remaining_sleep;
+};
+
+struct SC_clock_getres_params {
+    int clock_id;
+    struct timespec* result;
 };
 
 struct SC_accept4_params {

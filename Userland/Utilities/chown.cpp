@@ -7,6 +7,7 @@
 #include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
+#include <LibCore/DirIterator.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <grp.h>
@@ -21,14 +22,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::pledge("stdio rpath chown"));
 
     String spec;
-    String path;
-    bool dont_follow_symlinks = false;
+    Vector<StringView> paths;
+    bool no_dereference = false;
+    bool recursive = false;
+    bool follow_symlinks = false;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("Change the ownership of a file or directory.");
-    args_parser.add_option(dont_follow_symlinks, "Don't follow symlinks", "no-dereference", 'h');
+    args_parser.add_option(no_dereference, "Don't follow symlinks", "no-dereference", 'h');
+    args_parser.add_option(recursive, "Change file ownership recursively", "recursive", 'R');
+    args_parser.add_option(follow_symlinks, "Follow symlinks while recursing into directories", nullptr, 'L');
     args_parser.add_positional_argument(spec, "User and group IDs", "USER[:GROUP]");
-    args_parser.add_positional_argument(path, "Path to file", "PATH");
+    args_parser.add_positional_argument(paths, "Paths to files", "PATH");
     args_parser.parse(arguments);
 
     uid_t new_uid = -1;
@@ -66,10 +71,30 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
     }
 
-    if (dont_follow_symlinks) {
-        TRY(Core::System::lchown(path, new_uid, new_gid));
-    } else {
-        TRY(Core::System::chown(path, new_uid, new_gid));
+    Function<ErrorOr<void>(StringView)> update_path_owner = [&](StringView path) -> ErrorOr<void> {
+        auto stat = TRY(Core::System::lstat(path));
+
+        if (S_ISLNK(stat.st_mode) && !follow_symlinks && !paths.contains_slow(path))
+            return {};
+
+        if (no_dereference) {
+            TRY(Core::System::lchown(path, new_uid, new_gid));
+        } else {
+            TRY(Core::System::chown(path, new_uid, new_gid));
+        }
+
+        if (recursive && S_ISDIR(stat.st_mode)) {
+            Core::DirIterator it(path, Core::DirIterator::Flags::SkipParentAndBaseDir);
+
+            while (it.has_next())
+                TRY(update_path_owner(it.next_full_path()));
+        }
+
+        return {};
+    };
+
+    for (auto path : paths) {
+        TRY(update_path_owner(path));
     }
 
     return 0;

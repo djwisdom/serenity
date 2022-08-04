@@ -15,6 +15,10 @@
 #include <LibWeb/Bindings/AbstractRangeConstructor.h>
 #include <LibWeb/Bindings/AbstractRangePrototype.h>
 #include <LibWeb/Bindings/AudioConstructor.h>
+#include <LibWeb/Bindings/BlobConstructor.h>
+#include <LibWeb/Bindings/BlobPrototype.h>
+#include <LibWeb/Bindings/CDATASectionConstructor.h>
+#include <LibWeb/Bindings/CDATASectionPrototype.h>
 #include <LibWeb/Bindings/CSSConditionRuleConstructor.h>
 #include <LibWeb/Bindings/CSSConditionRulePrototype.h>
 #include <LibWeb/Bindings/CSSFontFaceRuleConstructor.h>
@@ -57,6 +61,10 @@
 #include <LibWeb/Bindings/DOMImplementationPrototype.h>
 #include <LibWeb/Bindings/DOMParserConstructor.h>
 #include <LibWeb/Bindings/DOMParserPrototype.h>
+#include <LibWeb/Bindings/DOMPointConstructor.h>
+#include <LibWeb/Bindings/DOMPointPrototype.h>
+#include <LibWeb/Bindings/DOMPointReadOnlyConstructor.h>
+#include <LibWeb/Bindings/DOMPointReadOnlyPrototype.h>
 #include <LibWeb/Bindings/DOMRectConstructor.h>
 #include <LibWeb/Bindings/DOMRectListConstructor.h>
 #include <LibWeb/Bindings/DOMRectListPrototype.h>
@@ -79,6 +87,8 @@
 #include <LibWeb/Bindings/EventPrototype.h>
 #include <LibWeb/Bindings/EventTargetConstructor.h>
 #include <LibWeb/Bindings/EventTargetPrototype.h>
+#include <LibWeb/Bindings/FileConstructor.h>
+#include <LibWeb/Bindings/FilePrototype.h>
 #include <LibWeb/Bindings/FocusEventConstructor.h>
 #include <LibWeb/Bindings/FocusEventPrototype.h>
 #include <LibWeb/Bindings/HTMLAnchorElementConstructor.h>
@@ -227,6 +237,8 @@
 #include <LibWeb/Bindings/HTMLUnknownElementPrototype.h>
 #include <LibWeb/Bindings/HTMLVideoElementConstructor.h>
 #include <LibWeb/Bindings/HTMLVideoElementPrototype.h>
+#include <LibWeb/Bindings/HeadersConstructor.h>
+#include <LibWeb/Bindings/HeadersPrototype.h>
 #include <LibWeb/Bindings/HistoryConstructor.h>
 #include <LibWeb/Bindings/HistoryPrototype.h>
 #include <LibWeb/Bindings/IdleDeadlineConstructor.h>
@@ -252,6 +264,10 @@
 #include <LibWeb/Bindings/MessageEventPrototype.h>
 #include <LibWeb/Bindings/MouseEventConstructor.h>
 #include <LibWeb/Bindings/MouseEventPrototype.h>
+#include <LibWeb/Bindings/MutationObserverConstructor.h>
+#include <LibWeb/Bindings/MutationObserverPrototype.h>
+#include <LibWeb/Bindings/MutationRecordConstructor.h>
+#include <LibWeb/Bindings/MutationRecordPrototype.h>
 #include <LibWeb/Bindings/NavigatorConstructor.h>
 #include <LibWeb/Bindings/NavigatorPrototype.h>
 #include <LibWeb/Bindings/NodeConstructor.h>
@@ -353,6 +369,8 @@
 #include <LibWeb/Bindings/XMLHttpRequestEventTargetConstructor.h>
 #include <LibWeb/Bindings/XMLHttpRequestEventTargetPrototype.h>
 #include <LibWeb/Bindings/XMLHttpRequestPrototype.h>
+#include <LibWeb/Bindings/XMLSerializerConstructor.h>
+#include <LibWeb/Bindings/XMLSerializerPrototype.h>
 
 #define ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(interface_name, constructor_name, prototype_name)                                \
     {                                                                                                                                \
@@ -370,6 +388,8 @@
     ADD_WINDOW_OBJECT_INTERFACE(AbortController)                                                    \
     ADD_WINDOW_OBJECT_INTERFACE(AbortSignal)                                                        \
     ADD_WINDOW_OBJECT_INTERFACE(AbstractRange)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(Blob)                                                               \
+    ADD_WINDOW_OBJECT_INTERFACE(CDATASection)                                                       \
     ADD_WINDOW_OBJECT_INTERFACE(CSSConditionRule)                                                   \
     ADD_WINDOW_OBJECT_INTERFACE(CSSFontFaceRule)                                                    \
     ADD_WINDOW_OBJECT_INTERFACE(CSSGroupingRule)                                                    \
@@ -394,6 +414,8 @@
     ADD_WINDOW_OBJECT_INTERFACE(DOMException)                                                       \
     ADD_WINDOW_OBJECT_INTERFACE(DOMImplementation)                                                  \
     ADD_WINDOW_OBJECT_INTERFACE(DOMParser)                                                          \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMPoint)                                                           \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMPointReadOnly)                                                   \
     ADD_WINDOW_OBJECT_INTERFACE(DOMRect)                                                            \
     ADD_WINDOW_OBJECT_INTERFACE(DOMRectList)                                                        \
     ADD_WINDOW_OBJECT_INTERFACE(DOMRectReadOnly)                                                    \
@@ -402,6 +424,8 @@
     ADD_WINDOW_OBJECT_INTERFACE(ErrorEvent)                                                         \
     ADD_WINDOW_OBJECT_INTERFACE(Event)                                                              \
     ADD_WINDOW_OBJECT_INTERFACE(EventTarget)                                                        \
+    ADD_WINDOW_OBJECT_INTERFACE(File)                                                               \
+    ADD_WINDOW_OBJECT_INTERFACE(Headers)                                                            \
     ADD_WINDOW_OBJECT_INTERFACE(History)                                                            \
     ADD_WINDOW_OBJECT_INTERFACE(HTMLAnchorElement)                                                  \
     ADD_WINDOW_OBJECT_INTERFACE(HTMLAreaElement)                                                    \
@@ -487,6 +511,8 @@
     ADD_WINDOW_OBJECT_INTERFACE(MessageChannel)                                                     \
     ADD_WINDOW_OBJECT_INTERFACE(MessageEvent)                                                       \
     ADD_WINDOW_OBJECT_INTERFACE(MouseEvent)                                                         \
+    ADD_WINDOW_OBJECT_INTERFACE(MutationObserver)                                                   \
+    ADD_WINDOW_OBJECT_INTERFACE(MutationRecord)                                                     \
     ADD_WINDOW_OBJECT_INTERFACE(Navigator)                                                          \
     ADD_WINDOW_OBJECT_INTERFACE(Node)                                                               \
     ADD_WINDOW_OBJECT_INTERFACE(NodeIterator)                                                       \
@@ -536,6 +562,7 @@
     ADD_WINDOW_OBJECT_INTERFACE(Worker)                                                             \
     ADD_WINDOW_OBJECT_INTERFACE(XMLHttpRequest)                                                     \
     ADD_WINDOW_OBJECT_INTERFACE(XMLHttpRequestEventTarget)                                          \
+    ADD_WINDOW_OBJECT_INTERFACE(XMLSerializer)                                                      \
     ADD_WINDOW_OBJECT_INTERFACE(Window)                                                             \
     ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(Audio, AudioConstructor, HTMLAudioElementPrototype) \
     ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(Image, ImageConstructor, HTMLImageElementPrototype) \

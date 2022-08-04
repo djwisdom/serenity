@@ -39,10 +39,19 @@ ErrorOr<FilePermissionsMask> FilePermissionsMask::parse(StringView string)
 
 ErrorOr<FilePermissionsMask> FilePermissionsMask::from_numeric_notation(StringView string)
 {
-    mode_t mode = AK::StringUtils::convert_to_uint_from_octal<u16>(string).value_or(01000);
-    if (mode > 0777)
-        return Error::from_string_literal("invalid octal representation"sv);
-    return FilePermissionsMask().assign_permissions(mode);
+    string = string.trim_whitespace();
+    mode_t mode = AK::StringUtils::convert_to_uint_from_octal<u16>(string, TrimWhitespace::No).value_or(010000);
+    if (mode > 07777)
+        return Error::from_string_literal("invalid octal representation");
+
+    FilePermissionsMask mask;
+    mask.assign_permissions(mode);
+
+    // For compatibility purposes, just clear the special mode bits if we explicitly passed a 4-character mode.
+    if (string.length() >= 4)
+        mask.remove_permissions(07000);
+
+    return mask;
 }
 
 ErrorOr<FilePermissionsMask> FilePermissionsMask::from_symbolic_notation(StringView string)
@@ -73,9 +82,9 @@ ErrorOr<FilePermissionsMask> FilePermissionsMask::from_symbolic_notation(StringV
                 else if (ch == '=')
                     operation = Operation::Assign;
                 else if (classes == 0)
-                    return Error::from_string_literal("invalid class: expected 'u', 'g', 'o' or 'a'"sv);
+                    return Error::from_string_literal("invalid class: expected 'u', 'g', 'o' or 'a'");
                 else
-                    return Error::from_string_literal("invalid operation: expected '+', '-' or '='"sv);
+                    return Error::from_string_literal("invalid operation: expected '+', '-' or '='");
 
                 // if an operation was specified without a class, assume all
                 if (classes == 0)
@@ -98,25 +107,37 @@ ErrorOr<FilePermissionsMask> FilePermissionsMask::from_symbolic_notation(StringV
             }
 
             mode_t write_bits = 0;
+            bool apply_to_directories_and_executables_only = false;
 
-            if (ch == 'r')
+            switch (ch) {
+            case 'r':
                 write_bits = 4;
-            else if (ch == 'w')
+                break;
+            case 'w':
                 write_bits = 2;
-            else if (ch == 'x')
+                break;
+            case 'x':
                 write_bits = 1;
-            else
-                return Error::from_string_literal("invalid symbolic permission: expected 'r', 'w' or 'x'"sv);
+                break;
+            case 'X':
+                write_bits = 1;
+                apply_to_directories_and_executables_only = true;
+                break;
+            default:
+                return Error::from_string_literal("invalid symbolic permission: expected 'r', 'w' or 'x'");
+            }
 
             mode_t clear_bits = operation == Operation::Assign ? 7 : write_bits;
+
+            FilePermissionsMask& edit_mask = apply_to_directories_and_executables_only ? mask.directory_or_executable_mask() : mask;
 
             // Update masks one class at a time in other, group, user order
             for (auto cls = classes; cls != 0; cls >>= 1) {
                 if (cls & 1) {
                     if (operation == Operation::Add || operation == Operation::Assign)
-                        mask.add_permissions(write_bits);
+                        edit_mask.add_permissions(write_bits);
                     if (operation == Operation::Remove || operation == Operation::Assign)
-                        mask.remove_permissions(clear_bits);
+                        edit_mask.remove_permissions(clear_bits);
                 }
                 write_bits <<= 3;
                 clear_bits <<= 3;

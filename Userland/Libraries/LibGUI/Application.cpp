@@ -27,8 +27,8 @@ public:
     void set_tooltip(String const& tooltip)
     {
         m_label->set_text(Gfx::parse_ampersand_string(tooltip));
-        int tooltip_width = m_label->min_width() + 10;
-        int line_count = m_label->text().count("\n");
+        int tooltip_width = m_label->effective_min_size().width().as_int() + 10;
+        int line_count = m_label->text().count("\n"sv);
         int glyph_height = m_label->font().glyph_height();
         int tooltip_height = glyph_height * (1 + line_count) + ((glyph_height + 1) / 2) * line_count + 8;
 
@@ -224,7 +224,7 @@ void Application::request_tooltip_show()
     int const margin = 30;
     Gfx::IntPoint adjusted_pos = ConnectionToWindowServer::the().get_global_cursor_position();
 
-    adjusted_pos.translate_by(0, 18);
+    adjusted_pos.translate_by(0, 14);
 
     if (adjusted_pos.x() + m_tooltip_window->width() >= desktop_rect.width() - margin) {
         adjusted_pos = adjusted_pos.translated(-m_tooltip_window->width(), 0);

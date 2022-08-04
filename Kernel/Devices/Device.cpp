@@ -9,6 +9,8 @@
 #include <Kernel/Devices/DeviceManagement.h>
 #include <Kernel/FileSystem/InodeMetadata.h>
 #include <Kernel/FileSystem/SysFS.h>
+#include <Kernel/FileSystem/SysFS/Subsystems/DeviceIdentifiers/BlockDevicesDirectory.h>
+#include <Kernel/FileSystem/SysFS/Subsystems/DeviceIdentifiers/CharacterDevicesDirectory.h>
 #include <Kernel/Sections.h>
 
 namespace Kernel {
@@ -19,25 +21,31 @@ Device::Device(MajorNumber major, MinorNumber minor)
 {
 }
 
-void Device::after_inserting()
+void Device::before_will_be_destroyed_remove_from_device_management()
+{
+    DeviceManagement::the().before_device_removal({}, *this);
+    m_state = State::BeingRemoved;
+}
+
+void Device::after_inserting_add_to_device_management()
 {
     DeviceManagement::the().after_inserting_device({}, *this);
+}
+
+void Device::after_inserting()
+{
+    after_inserting_add_to_device_management();
     VERIFY(!m_sysfs_component);
     auto sys_fs_component = SysFSDeviceComponent::must_create(*this);
     m_sysfs_component = sys_fs_component;
-    SysFSComponentRegistry::the().devices_list().with_exclusive([&](auto& list) -> void {
-        list.append(sys_fs_component);
-    });
+    after_inserting_add_to_device_identifier_directory();
 }
 
 void Device::will_be_destroyed()
 {
     VERIFY(m_sysfs_component);
-    SysFSComponentRegistry::the().devices_list().with_exclusive([&](auto& list) -> void {
-        list.remove(*m_sysfs_component);
-    });
-    DeviceManagement::the().before_device_removal({}, *this);
-    m_state = State::BeingRemoved;
+    before_will_be_destroyed_remove_from_device_identifier_directory();
+    before_will_be_destroyed_remove_from_device_management();
 }
 
 Device::~Device()

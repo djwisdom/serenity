@@ -17,15 +17,27 @@
 namespace JS {
 
 // 10.4.2.2 ArrayCreate ( length [ , proto ] ), https://tc39.es/ecma262/#sec-arraycreate
-ThrowCompletionOr<Array*> Array::create(GlobalObject& global_object, size_t length, Object* prototype)
+ThrowCompletionOr<Array*> Array::create(GlobalObject& global_object, u64 length, Object* prototype)
 {
     auto& vm = global_object.vm();
+
+    // 1. If length > 2^32 - 1, throw a RangeError exception.
     if (length > NumericLimits<u32>::max())
         return vm.throw_completion<RangeError>(global_object, ErrorType::InvalidLength, "array");
+
+    // 2. If proto is not present, set proto to %Array.prototype%.
     if (!prototype)
         prototype = global_object.array_prototype();
+
+    // 3. Let A be MakeBasicObject(« [[Prototype]], [[Extensible]] »).
+    // 4. Set A.[[Prototype]] to proto.
+    // 5. Set A.[[DefineOwnProperty]] as specified in 10.4.2.1.
     auto* array = global_object.heap().allocate<Array>(global_object, *prototype);
+
+    // 6. Perform ! OrdinaryDefineOwnProperty(A, "length", PropertyDescriptor { [[Value]]: 𝔽(length), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false }).
     MUST(array->internal_define_own_property(vm.names.length, { .value = Value(length), .writable = true, .enumerable = false, .configurable = false }));
+
+    // 7. Return A.
     return array;
 }
 
@@ -238,13 +250,13 @@ ThrowCompletionOr<MarkedVector<Value>> sort_indexed_properties(GlobalObject& glo
     }
 
     // 4. Sort items using an implementation-defined sequence of calls to SortCompare. If any such call returns an abrupt completion, stop before performing any further calls to SortCompare or steps in this algorithm and return that Completion Record.
-    // FIXME: Support AK::Function in array_merge_sort() to avoid having to create a NativeFunction.
-    auto* native_comparefn = NativeFunction::create(global_object, "", [&](auto& vm, auto&) -> ThrowCompletionOr<Value> {
-        auto x = vm.argument(0);
-        auto y = vm.argument(1);
-        return TRY(sort_compare(x, y));
-    });
-    TRY(array_merge_sort(global_object, native_comparefn, items));
+
+    // Perform sorting by merge sort. This isn't as efficient compared to quick sort, but
+    // quicksort can't be used in all cases because the spec requires Array.prototype.sort()
+    // to be stable. FIXME: when initially scanning through the array, maintain a flag
+    // for if an unstable sort would be indistinguishable from a stable sort (such as just
+    // just strings or numbers), and in that case use quick sort instead for better performance.
+    TRY(array_merge_sort(global_object, sort_compare, items));
 
     // 5. Return items.
     return items;

@@ -98,6 +98,8 @@ public:
     {
         return m_value.visit(
             [&](T const& t) {
+                if (t.is_calculated())
+                    return resolve_calculated(t.calculated_style_value(), layout_node, reference_value);
                 return t;
             },
             [&](Percentage const& percentage) {
@@ -181,6 +183,8 @@ public:
 class LengthPercentage : public PercentageOr<Length> {
 public:
     using PercentageOr<Length>::PercentageOr;
+
+    bool is_auto() const { return is_length() && length().is_auto(); }
 
     bool is_length() const { return is_t(); }
     Length const& length() const { return get_t(); }

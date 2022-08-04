@@ -18,6 +18,15 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::proc));
     RefPtr<Thread> child_first_thread;
+
+    ArmedScopeGuard thread_finalizer_guard = [&child_first_thread]() {
+        SpinlockLocker lock(g_scheduler_lock);
+        if (child_first_thread) {
+            child_first_thread->detach();
+            child_first_thread->set_state(Thread::State::Dying);
+        }
+    };
+
     auto child_name = TRY(m_name->try_clone());
     auto child = TRY(Process::try_create(child_first_thread, move(child_name), uid(), gid(), pid(), m_is_kernel_process, current_directory(), m_executable, m_tty, this));
     TRY(m_unveil_data.with([&](auto& parent_unveil_data) -> ErrorOr<void> {
@@ -80,7 +89,7 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 
     dbgln_if(FORK_DEBUG, "fork: child will begin executing at {:#04x}:{:p} with stack {:#04x}:{:p}, kstack {:#04x}:{:p}",
         child_regs.cs, child_regs.eip, child_regs.ss, child_regs.esp, child_regs.ss0, child_regs.esp0);
-#else
+#elif ARCH(X86_64)
     auto& child_regs = child_first_thread->m_regs;
     child_regs.rax = 0; // fork() returns 0 in the child :^)
     child_regs.rbx = regs.rbx;
@@ -104,6 +113,8 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 
     dbgln_if(FORK_DEBUG, "fork: child will begin executing at {:#04x}:{:p} with stack {:p}, kstack {:p}",
         child_regs.cs, child_regs.rip, child_regs.rsp, child_regs.rsp0);
+#else
+#    error Unknown architecture
 #endif
 
     {
@@ -119,6 +130,8 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
                 child->m_master_tls_region = TRY(child_region->try_make_weak_ptr());
         }
     }
+
+    thread_finalizer_guard.disarm();
 
     Process::register_new(*child);
 
