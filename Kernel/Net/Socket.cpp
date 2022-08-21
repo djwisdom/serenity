@@ -242,7 +242,7 @@ ErrorOr<size_t> Socket::read(OpenFileDescription& description, u64, UserOrKernel
     if (is_shut_down_for_reading())
         return 0;
     Time t {};
-    return recvfrom(description, buffer, size, 0, {}, 0, t);
+    return recvfrom(description, buffer, size, 0, {}, 0, t, description.is_blocking());
 }
 
 ErrorOr<size_t> Socket::write(OpenFileDescription& description, u64, UserOrKernelBuffer const& data, size_t size)
@@ -288,12 +288,14 @@ void Socket::set_connected(bool connected)
 
 void Socket::set_origin(Process const& process)
 {
-    m_origin = { process.pid().value(), process.uid().value(), process.gid().value() };
+    auto credentials = process.credentials();
+    m_origin = { process.pid().value(), credentials->uid().value(), credentials->gid().value() };
 }
 
 void Socket::set_acceptor(Process const& process)
 {
-    m_acceptor = { process.pid().value(), process.uid().value(), process.gid().value() };
+    auto credentials = process.credentials();
+    m_acceptor = { process.pid().value(), credentials->uid().value(), credentials->gid().value() };
 }
 
 }

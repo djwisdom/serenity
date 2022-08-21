@@ -8,6 +8,7 @@
 
 #include <AK/AtomicRefCounted.h>
 #include <AK/Badge.h>
+#include <AK/RefPtr.h>
 #include <Kernel/FileSystem/FIFO.h>
 #include <Kernel/FileSystem/Inode.h>
 #include <Kernel/FileSystem/InodeMetadata.h>
@@ -49,7 +50,7 @@ public:
     ErrorOr<size_t> read(UserOrKernelBuffer&, u64 offset, size_t);
     ErrorOr<size_t> write(u64 offset, UserOrKernelBuffer const&, size_t);
 
-    ErrorOr<void> chmod(mode_t);
+    ErrorOr<void> chmod(Credentials const& credentials, mode_t);
 
     bool can_read() const;
     bool can_write() const;
@@ -88,8 +89,8 @@ public:
     Inode* inode() { return m_inode.ptr(); }
     Inode const* inode() const { return m_inode.ptr(); }
 
-    Custody* custody() { return m_custody.ptr(); }
-    Custody const* custody() const { return m_custody.ptr(); }
+    RefPtr<Custody> custody();
+    RefPtr<Custody const> custody() const;
 
     ErrorOr<Memory::Region*> mmap(Process&, Memory::VirtualRange const&, u64 offset, int prot, bool shared);
 
@@ -120,7 +121,7 @@ public:
 
     off_t offset() const;
 
-    ErrorOr<void> chown(UserID, GroupID);
+    ErrorOr<void> chown(Credentials const& credentials, UserID, GroupID);
 
     FileBlockerSet& blocker_set();
 
@@ -138,12 +139,12 @@ private:
         blocker_set().unblock_all_blockers_whose_conditions_are_met();
     }
 
-    LockRefPtr<Custody> m_custody;
     LockRefPtr<Inode> m_inode;
     NonnullLockRefPtr<File> m_file;
 
     struct State {
         OwnPtr<OpenFileDescriptionData> data;
+        RefPtr<Custody> custody;
         off_t current_offset { 0 };
         u32 file_flags { 0 };
         bool readable : 1 { false };

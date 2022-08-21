@@ -18,9 +18,9 @@ ErrorOr<FlatPtr> Process::sys$getpid()
 
 ErrorOr<FlatPtr> Process::sys$getppid()
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
-    return m_protected_values.ppid.value();
+    return ppid().value();
 }
 
 ErrorOr<FlatPtr> Process::sys$get_process_name(Userspace<char*> buffer, size_t buffer_size)
