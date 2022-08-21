@@ -381,7 +381,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
 
     m_no_preview_action = GUI::Action::create_checkable(
         "&No Preview", [this](auto&) {
-            Config::write_string("TextEditor", "View", "PreviewMode", "None");
+            Config::write_string("TextEditor"sv, "View"sv, "PreviewMode"sv, "None"sv);
             set_preview_mode(PreviewMode::None);
         },
         this);
@@ -389,7 +389,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
 
     m_markdown_preview_action = GUI::Action::create_checkable(
         "&Markdown Preview", [this](auto&) {
-            Config::write_string("TextEditor", "View", "PreviewMode", "Markdown");
+            Config::write_string("TextEditor"sv, "View"sv, "PreviewMode"sv, "Markdown"sv);
             set_preview_mode(PreviewMode::Markdown);
         },
         this);
@@ -397,7 +397,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
 
     m_html_preview_action = GUI::Action::create_checkable(
         "&HTML Preview", [this](auto&) {
-            Config::write_string("TextEditor", "View", "PreviewMode", "HTML");
+            Config::write_string("TextEditor"sv, "View"sv, "PreviewMode"sv, "HTML"sv);
             set_preview_mode(PreviewMode::HTML);
         },
         this);
@@ -523,18 +523,18 @@ void MainWidget::initialize_menubar(GUI::Window& window)
 
     m_visualize_trailing_whitespace_action = GUI::Action::create_checkable("T&railing Whitespace", [&](auto& action) {
         action.is_checked() ? m_editor->set_visualize_trailing_whitespace(true) : m_editor->set_visualize_trailing_whitespace(false);
-        Config::write_bool("TextEditor", "View", "TrailingWhitespace", action.is_checked());
+        Config::write_bool("TextEditor"sv, "View"sv, "TrailingWhitespace"sv, action.is_checked());
     });
-    auto get_trailing_whitespace_value = Config::read_bool("TextEditor", "View", "TrailingWhitespace", true);
+    auto get_trailing_whitespace_value = Config::read_bool("TextEditor"sv, "View"sv, "TrailingWhitespace"sv, true);
     m_visualize_trailing_whitespace_action->set_checked(get_trailing_whitespace_value);
     m_visualize_trailing_whitespace_action->set_status_tip("Visualize trailing whitespace");
     m_editor->set_visualize_trailing_whitespace(m_visualize_trailing_whitespace_action->is_checked());
 
     m_visualize_leading_whitespace_action = GUI::Action::create_checkable("L&eading Whitespace", [&](auto& action) {
         action.is_checked() ? m_editor->set_visualize_leading_whitespace(true) : m_editor->set_visualize_leading_whitespace(false);
-        Config::write_bool("TextEditor", "View", "LeadingWhitespace", action.is_checked());
+        Config::write_bool("TextEditor"sv, "View"sv, "LeadingWhitespace"sv, action.is_checked());
     });
-    auto get_leading_whitespace_value = Config::read_bool("TextEditor", "View", "LeadingWhitespace", true);
+    auto get_leading_whitespace_value = Config::read_bool("TextEditor"sv, "View"sv, "LeadingWhitespace"sv, true);
     m_visualize_leading_whitespace_action->set_checked(get_leading_whitespace_value);
     m_visualize_leading_whitespace_action->set_status_tip("Visualize leading whitespace");
     m_editor->set_visualize_leading_whitespace(m_visualize_leading_whitespace_action->is_checked());
@@ -544,9 +544,9 @@ void MainWidget::initialize_menubar(GUI::Window& window)
 
     m_cursor_line_highlighting_action = GUI::Action::create_checkable("L&ine Highlighting", [&](auto& action) {
         action.is_checked() ? m_editor->set_cursor_line_highlighting(true) : m_editor->set_cursor_line_highlighting(false);
-        Config::write_bool("TextEditor", "View", "LineHighlighting", action.is_checked());
+        Config::write_bool("TextEditor"sv, "View"sv, "LineHighlighting"sv, action.is_checked());
     });
-    auto get_highlighting_value = Config::read_bool("TextEditor", "View", "LineHighlighting", true);
+    auto get_highlighting_value = Config::read_bool("TextEditor"sv, "View"sv, "LineHighlighting"sv, true);
     m_cursor_line_highlighting_action->set_checked(get_highlighting_value);
     m_cursor_line_highlighting_action->set_status_tip("Highlight the current line");
     m_editor->set_cursor_line_highlighting(m_cursor_line_highlighting_action->is_checked());
@@ -556,9 +556,9 @@ void MainWidget::initialize_menubar(GUI::Window& window)
 
     m_auto_detect_preview_mode_action = GUI::Action::create_checkable("Enable Autodetect Preview", [&](auto&) {
         //action.is_checked() ? (m_auto_detect_preview_mode == true) : (m_auto_detect_preview_mode == false);
-        Config::write_bool("TextEditor", "View", "PreviewAutoDetect", m_auto_detect_preview_mode_action->is_checked());
+        Config::write_bool("TextEditor"sv, "View"sv, "PreviewAutoDetect"sv, m_auto_detect_preview_mode_action->is_checked());
     });
-    auto get_auto_detect_preview_mode_value = Config::read_bool("TextEditor", "View", "PreviewAutoDetect", true);
+    auto get_auto_detect_preview_mode_value = Config::read_bool("TextEditor"sv, "View"sv, "PreviewAutoDetect"sv, true);
     m_auto_detect_preview_mode_action->set_checked(get_auto_detect_preview_mode_value);
     m_auto_detect_preview_mode_action->set_status_tip("Enable autodetecting supported filetypes");
     set_auto_detect_preview_mode(m_auto_detect_preview_mode_action->is_checked());
@@ -725,7 +725,7 @@ void MainWidget::set_path(StringView path)
         else
             set_preview_mode(PreviewMode::None);
     } else {
-      auto get_preview_mode = Config::read_string("TextEditor", "View", "PreviewMode", "None");
+      auto get_preview_mode = Config::read_string("TextEditor"sv, "View"sv, "PreviewMode"sv, "None"sv);
       if (get_preview_mode == "HTML") {
           set_preview_mode(PreviewMode::HTML);
           m_html_preview_action->set_checked(true);
