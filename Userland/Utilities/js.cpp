@@ -92,14 +92,16 @@ class ReplObject final : public JS::GlobalObject {
     JS_OBJECT(ReplObject, JS::GlobalObject);
 
 public:
-    ReplObject() = default;
+    ReplObject(JS::Realm& realm)
+        : GlobalObject(realm)
+    {
+    }
     virtual void initialize_global_object() override;
     virtual ~ReplObject() override = default;
 
 private:
     JS_DECLARE_NATIVE_FUNCTION(exit_interpreter);
     JS_DECLARE_NATIVE_FUNCTION(repl_help);
-    JS_DECLARE_NATIVE_FUNCTION(load_file);
     JS_DECLARE_NATIVE_FUNCTION(save_to_file);
     JS_DECLARE_NATIVE_FUNCTION(load_ini);
     JS_DECLARE_NATIVE_FUNCTION(load_json);
@@ -111,12 +113,14 @@ class ScriptObject final : public JS::GlobalObject {
     JS_OBJECT(ScriptObject, JS::GlobalObject);
 
 public:
-    ScriptObject() = default;
+    ScriptObject(JS::Realm& realm)
+        : JS::GlobalObject(realm)
+    {
+    }
     virtual void initialize_global_object() override;
     virtual ~ScriptObject() override = default;
 
 private:
-    JS_DECLARE_NATIVE_FUNCTION(load_file);
     JS_DECLARE_NATIVE_FUNCTION(load_ini);
     JS_DECLARE_NATIVE_FUNCTION(load_json);
     JS_DECLARE_NATIVE_FUNCTION(print);
@@ -138,10 +142,10 @@ static String prompt_for_level(int level)
 {
     static StringBuilder prompt_builder;
     prompt_builder.clear();
-    prompt_builder.append("> ");
+    prompt_builder.append("> "sv);
 
     for (auto i = 0; i < level; ++i)
-        prompt_builder.append("    ");
+        prompt_builder.append("    "sv);
 
     return prompt_builder.build();
 }
@@ -267,7 +271,7 @@ static void print_type(FlyString const& name)
 
 static void print_separator(bool& first)
 {
-    js_out(first ? " " : ", ");
+    js_out(first ? " "sv : ", "sv);
     first = false;
 }
 
@@ -749,9 +753,13 @@ static void print_intl_number_format(JS::Intl::NumberFormat const& number_format
         print_value(JS::Value(number_format.max_significant_digits()), seen_objects);
     }
     js_out("\n  useGrouping: ");
-    print_value(JS::Value(number_format.use_grouping()), seen_objects);
+    print_value(number_format.use_grouping_to_value(number_format.global_object()), seen_objects);
     js_out("\n  roundingType: ");
     print_value(js_string(number_format.vm(), number_format.rounding_type_string()), seen_objects);
+    js_out("\n  roundingMode: ");
+    print_value(js_string(number_format.vm(), number_format.rounding_mode_string()), seen_objects);
+    js_out("\n  roundingIncrement: ");
+    print_value(JS::Value(number_format.rounding_increment()), seen_objects);
     js_out("\n  notation: ");
     print_value(js_string(number_format.vm(), number_format.notation_string()), seen_objects);
     if (number_format.has_compact_display()) {
@@ -760,6 +768,8 @@ static void print_intl_number_format(JS::Intl::NumberFormat const& number_format
     }
     js_out("\n  signDisplay: ");
     print_value(js_string(number_format.vm(), number_format.sign_display_string()), seen_objects);
+    js_out("\n  trailingZeroDisplay: ");
+    print_value(js_string(number_format.vm(), number_format.trailing_zero_display_string()), seen_objects);
 }
 
 static void print_intl_date_time_format(JS::Intl::DateTimeFormat& date_time_format, HashTable<JS::Object*>& seen_objects)
@@ -1183,7 +1193,7 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             auto hint = error.source_location_hint(source);
             if (!hint.is_empty())
                 outln("{}", hint);
-            outln(error.to_string());
+            outln("{}", error.to_string());
             result = interpreter.vm().throw_completion<JS::SyntaxError>(interpreter.global_object(), error.to_string());
         } else {
             auto return_early = run_script_or_module(script_or_error.value());
@@ -1252,24 +1262,6 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
     return true;
 }
 
-static JS::ThrowCompletionOr<JS::Value> load_file_impl(JS::VM& vm, JS::GlobalObject& global_object)
-{
-    auto filename = TRY(vm.argument(0).to_string(global_object));
-    auto file = Core::File::construct(filename);
-    if (!file->open(Core::OpenMode::ReadOnly))
-        return vm.throw_completion<JS::Error>(global_object, String::formatted("Failed to open '{}': {}", filename, file->error_string()));
-    auto file_contents = file->read_all();
-    auto source = StringView { file_contents };
-    auto script_or_error = JS::Script::parse(source, vm.interpreter().realm(), filename);
-    if (script_or_error.is_error()) {
-        auto& error = script_or_error.error()[0];
-        return vm.throw_completion<JS::SyntaxError>(global_object, error.to_string());
-    }
-    // FIXME: Use eval()-like semantics and execute in current scope?
-    TRY(vm.interpreter().run(script_or_error.value()));
-    return JS::js_undefined();
-}
-
 static JS::ThrowCompletionOr<JS::Value> load_ini_impl(JS::VM& vm, JS::GlobalObject& global_object)
 {
     auto filename = TRY(vm.argument(0).to_string(global_object));
@@ -1310,7 +1302,6 @@ void ReplObject::initialize_global_object()
     u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
     define_native_function("exit", exit_interpreter, 0, attr);
     define_native_function("help", repl_help, 0, attr);
-    define_native_function("load", load_file, 1, attr);
     define_native_function("save", save_to_file, 1, attr);
     define_native_function("loadINI", load_ini, 1, attr);
     define_native_function("loadJSON", load_json, 1, attr);
@@ -1340,8 +1331,7 @@ JS_DEFINE_NATIVE_FUNCTION(ReplObject::save_to_file)
     if (!vm.argument_count())
         return JS::Value(false);
     String save_path = vm.argument(0).to_string_without_side_effects();
-    StringView path = StringView(save_path.characters());
-    if (write_to_file(path)) {
+    if (write_to_file(save_path)) {
         return JS::Value(true);
     }
     return JS::Value(false);
@@ -1359,14 +1349,11 @@ JS_DEFINE_NATIVE_FUNCTION(ReplObject::repl_help)
     js_outln("REPL commands:");
     js_outln("    exit(code): exit the REPL with specified code. Defaults to 0.");
     js_outln("    help(): display this menu");
-    js_outln("    load(file): load given JS file into running session. For example: load(\"foo.js\")");
+    js_outln("    loadINI(file): load the given file as INI.");
+    js_outln("    loadJSON(file): load the given file as JSON.");
+    js_outln("    print(value): pretty-print the given JS value.");
     js_outln("    save(file): write REPL input history to the given file. For example: save(\"foo.txt\")");
     return JS::js_undefined();
-}
-
-JS_DEFINE_NATIVE_FUNCTION(ReplObject::load_file)
-{
-    return load_file_impl(vm, global_object);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ReplObject::load_ini)
@@ -1390,15 +1377,9 @@ void ScriptObject::initialize_global_object()
     Base::initialize_global_object();
     define_direct_property("global", this, JS::Attribute::Enumerable);
     u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
-    define_native_function("load", load_file, 1, attr);
     define_native_function("loadINI", load_ini, 1, attr);
     define_native_function("loadJSON", load_json, 1, attr);
     define_native_function("print", print, 1, attr);
-}
-
-JS_DEFINE_NATIVE_FUNCTION(ScriptObject::load_file)
-{
-    return load_file_impl(vm, global_object);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ScriptObject::load_ini)
@@ -1425,7 +1406,7 @@ static void repl(JS::Interpreter& interpreter)
             continue;
 
         g_repl_statements.append(piece);
-        parse_and_run(interpreter, piece, "REPL");
+        parse_and_run(interpreter, piece, "REPL"sv);
     }
 }
 
@@ -1458,7 +1439,7 @@ public:
     // 2.3. Printer(logLevel, args[, options]), https://console.spec.whatwg.org/#printer
     virtual JS::ThrowCompletionOr<JS::Value> printer(JS::Console::LogLevel log_level, PrinterArguments arguments) override
     {
-        String indent = String::repeated("  ", m_group_stack_depth);
+        String indent = String::repeated("  "sv, m_group_stack_depth);
 
         if (log_level == JS::Console::LogLevel::Trace) {
             auto trace = arguments.get<JS::Console::Trace>();
@@ -1480,7 +1461,7 @@ public:
             return JS::js_undefined();
         }
 
-        auto output = String::join(" ", arguments.get<JS::MarkedVector<JS::Value>>());
+        auto output = String::join(' ', arguments.get<JS::MarkedVector<JS::Value>>());
         m_console.output_debug_message(log_level, output);
 
         switch (log_level) {
@@ -1711,7 +1692,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
             if (mode == CompleteNullProperty) {
                 mode = CompleteProperty;
-                property_name = "";
+                property_name = ""sv;
                 last_token_has_trivia = false; // <name> <dot> [tab] is sensible to complete.
             }
 

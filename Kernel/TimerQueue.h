@@ -6,19 +6,19 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Function.h>
 #include <AK/IntrusiveList.h>
-#include <AK/NonnullRefPtr.h>
 #include <AK/OwnPtr.h>
-#include <AK/RefCounted.h>
 #include <AK/Time.h>
+#include <Kernel/Library/NonnullLockRefPtr.h>
 #include <Kernel/Time/TimeManagement.h>
 
 namespace Kernel {
 
-TYPEDEF_DISTINCT_ORDERED_ID(u64, TimerId);
+AK_TYPEDEF_DISTINCT_ORDERED_ID(u64, TimerId);
 
-class Timer : public RefCounted<Timer> {
+class Timer final : public AtomicRefCounted<Timer> {
     friend class TimerQueue;
 
 public:
@@ -87,8 +87,8 @@ public:
     TimerQueue();
     static TimerQueue& the();
 
-    TimerId add_timer(NonnullRefPtr<Timer>&&);
-    bool add_timer_without_id(NonnullRefPtr<Timer>, clockid_t, Time const&, Function<void()>&&);
+    TimerId add_timer(NonnullLockRefPtr<Timer>&&);
+    bool add_timer_without_id(NonnullLockRefPtr<Timer>, clockid_t, Time const&, Function<void()>&&);
     bool cancel_timer(Timer& timer, bool* was_in_use = nullptr);
     void fire();
 
@@ -99,7 +99,7 @@ private:
     };
     void remove_timer_locked(Queue&, Timer&);
     void update_next_timer_due(Queue&);
-    void add_timer_locked(NonnullRefPtr<Timer>);
+    void add_timer_locked(NonnullLockRefPtr<Timer>);
 
     Queue& queue_for_timer(Timer& timer)
     {

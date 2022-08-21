@@ -21,16 +21,16 @@ namespace Kernel {
 #define DEVICE_EVENTS_CLEAR 0x4
 #define DEVICE_NUM_SCANOUTS 0x8
 
-NonnullRefPtr<VirtIOGraphicsAdapter> VirtIOGraphicsAdapter::initialize(PCI::DeviceIdentifier const& device_identifier)
+NonnullLockRefPtr<VirtIOGraphicsAdapter> VirtIOGraphicsAdapter::initialize(PCI::DeviceIdentifier const& device_identifier)
 {
     VERIFY(device_identifier.hardware_id().vendor_id == PCI::VendorID::VirtIO);
     // Setup memory transfer region
     auto scratch_space_region = MUST(MM.allocate_contiguous_kernel_region(
         32 * PAGE_SIZE,
-        "VirtGPU Scratch Space",
+        "VirtGPU Scratch Space"sv,
         Memory::Region::Access::ReadWrite));
 
-    auto adapter = adopt_ref(*new (nothrow) VirtIOGraphicsAdapter(device_identifier, move(scratch_space_region)));
+    auto adapter = adopt_lock_ref(*new (nothrow) VirtIOGraphicsAdapter(device_identifier, move(scratch_space_region)));
     adapter->initialize();
     MUST(adapter->initialize_adapter());
     return adapter;

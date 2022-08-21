@@ -29,7 +29,7 @@ String StandardPaths::desktop_directory()
 {
     StringBuilder builder;
     builder.append(home_directory());
-    builder.append("/Desktop");
+    builder.append("/Desktop"sv);
     return LexicalPath::canonicalized_path(builder.to_string());
 }
 
@@ -37,47 +37,7 @@ String StandardPaths::downloads_directory()
 {
     StringBuilder builder;
     builder.append(home_directory());
-    builder.append("/Downloads");
-    return LexicalPath::canonicalized_path(builder.to_string());
-}
-
-String StandardPaths::documents_directory()
-{
-    StringBuilder builder;
-    builder.append(home_directory());
-    builder.append("/Documents");
-    return LexicalPath::canonicalized_path(builder.to_string());
-}
-
-String StandardPaths::source_directory()
-{
-    StringBuilder builder;
-    builder.append(home_directory());
-    builder.append("/Source");
-    return LexicalPath::canonicalized_path(builder.to_string());
-}
-
-String StandardPaths::music_directory()
-{
-    StringBuilder builder;
-    builder.append(home_directory());
-    builder.append("/Music");
-    return LexicalPath::canonicalized_path(builder.to_string());
-}
-
-String StandardPaths::pictures_directory()
-{
-    StringBuilder builder;
-    builder.append(home_directory());
-    builder.append("/Pictures");
-    return LexicalPath::canonicalized_path(builder.to_string());
-}
-
-String StandardPaths::videos_directory()
-{
-    StringBuilder builder;
-    builder.append(home_directory());
-    builder.append("/Videos");
+    builder.append("/Downloads"sv);
     return LexicalPath::canonicalized_path(builder.to_string());
 }
 
@@ -85,7 +45,7 @@ String StandardPaths::config_directory()
 {
     StringBuilder builder;
     builder.append(home_directory());
-    builder.append("/.config");
+    builder.append("/.config"sv);
     return LexicalPath::canonicalized_path(builder.to_string());
 }
 

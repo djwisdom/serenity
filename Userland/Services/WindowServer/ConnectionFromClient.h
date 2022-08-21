@@ -80,6 +80,8 @@ public:
 
     void notify_display_link(Badge<Compositor>);
 
+    void notify_about_theme_change();
+
 private:
     explicit ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSocket>, int client_id);
 
@@ -124,7 +126,7 @@ private:
     virtual void set_fullscreen(i32, bool) override;
     virtual void set_frameless(i32, bool) override;
     virtual void set_forced_shadow(i32, bool) override;
-    virtual void set_wallpaper(Gfx::ShareableBitmap const&) override;
+    virtual Messages::WindowServer::SetWallpaperResponse set_wallpaper(Gfx::ShareableBitmap const&) override;
     virtual void set_background_color(String const&) override;
     virtual void set_wallpaper_mode(String const&) override;
     virtual Messages::WindowServer::GetWallpaperResponse get_wallpaper() override;
@@ -152,7 +154,8 @@ private:
     virtual void set_cursor_highlight_color(Gfx::Color const& color) override;
     virtual Messages::WindowServer::GetCursorHighlightColorResponse get_cursor_highlight_color() override;
     virtual Messages::WindowServer::GetCursorThemeResponse get_cursor_theme() override;
-    virtual Messages::WindowServer::SetSystemFontsResponse set_system_fonts(String const&, String const&) override;
+    virtual Messages::WindowServer::SetSystemFontsResponse set_system_fonts(String const&, String const&, String const&) override;
+    virtual void set_system_effects(Vector<bool> const&, u8) override;
     virtual void set_window_base_size_and_size_increment(i32, Gfx::IntSize const&, Gfx::IntSize const&) override;
     virtual void set_window_resize_aspect_ratio(i32, Optional<Gfx::IntSize> const&) override;
     virtual void enable_display_link() override;

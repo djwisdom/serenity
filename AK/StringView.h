@@ -33,11 +33,6 @@ public:
     {
         VERIFY(!Checked<uintptr_t>::addition_would_overflow((uintptr_t)characters, length));
     }
-    ALWAYS_INLINE constexpr StringView(char const* cstring)
-        : m_characters(cstring)
-        , m_length(cstring ? __builtin_strlen(cstring) : 0)
-    {
-    }
     ALWAYS_INLINE StringView(ReadonlyBytes bytes)
         : m_characters(reinterpret_cast<char const*>(bytes.data()))
         , m_length(bytes.size())
@@ -67,7 +62,12 @@ public:
 
     [[nodiscard]] ReadonlyBytes bytes() const { return { m_characters, m_length }; }
 
-    constexpr char const& operator[](size_t index) const { return m_characters[index]; }
+    constexpr char const& operator[](size_t index) const
+    {
+        if (!is_constant_evaluated())
+            VERIFY(index < m_length);
+        return m_characters[index];
+    }
 
     using ConstIterator = SimpleIterator<const StringView, char const>;
 
@@ -131,6 +131,14 @@ public:
     [[nodiscard]] Vector<StringView> split_view(StringView, bool keep_empty = false) const;
 
     [[nodiscard]] Vector<StringView> split_view_if(Function<bool(char)> const& predicate, bool keep_empty = false) const;
+
+    [[nodiscard]] StringView find_last_split_view(char separator) const
+    {
+        auto begin = find_last(separator);
+        if (!begin.has_value())
+            return *this;
+        return substring_view(begin.release_value() + 1);
+    }
 
     template<VoidFunction<StringView> Callback>
     void for_each_split_view(char separator, bool keep_empty, Callback callback) const

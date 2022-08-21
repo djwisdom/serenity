@@ -75,7 +75,7 @@ ErrorOr<void> Process::validate_mmap_prot(int prot, bool map_stack, bool map_ano
     bool make_writable = prot & PROT_WRITE;
     bool make_executable = prot & PROT_EXEC;
 
-    if (map_anonymous && make_executable)
+    if (map_anonymous && make_executable && !(executable()->mount_flags() & MS_AXALLOWED))
         return EINVAL;
 
     if (map_stack && make_executable)
@@ -127,7 +127,7 @@ ErrorOr<void> Process::validate_inode_mmap_prot(int prot, Inode const& inode, bo
 
 ErrorOr<FlatPtr> Process::sys$mmap(Userspace<Syscall::SC_mmap_params const*> user_params)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
@@ -203,7 +203,7 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<Syscall::SC_mmap_params const*> use
 
     if (map_anonymous) {
         auto strategy = map_noreserve ? AllocationStrategy::None : AllocationStrategy::Reserve;
-        RefPtr<Memory::AnonymousVMObject> vmobject;
+        LockRefPtr<Memory::AnonymousVMObject> vmobject;
         if (flags & MAP_PURGEABLE) {
             vmobject = TRY(Memory::AnonymousVMObject::try_create_purgeable_with_size(rounded_size, strategy));
         } else {
@@ -250,7 +250,7 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<Syscall::SC_mmap_params const*> use
 
 ErrorOr<FlatPtr> Process::sys$mprotect(Userspace<void*> addr, size_t size, int prot)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::stdio));
 
     if (prot & PROT_EXEC) {
@@ -379,7 +379,7 @@ ErrorOr<FlatPtr> Process::sys$mprotect(Userspace<void*> addr, size_t size, int p
 
 ErrorOr<FlatPtr> Process::sys$madvise(Userspace<void*> address, size_t size, int advice)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::stdio));
 
     auto range_to_madvise = TRY(Memory::expand_range_to_page_boundaries(address.ptr(), size));
@@ -410,7 +410,7 @@ ErrorOr<FlatPtr> Process::sys$madvise(Userspace<void*> address, size_t size, int
 
 ErrorOr<FlatPtr> Process::sys$set_mmap_name(Userspace<Syscall::SC_set_mmap_name_params const*> user_params)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
@@ -434,7 +434,7 @@ ErrorOr<FlatPtr> Process::sys$set_mmap_name(Userspace<Syscall::SC_set_mmap_name_
 
 ErrorOr<FlatPtr> Process::sys$munmap(Userspace<void*> addr, size_t size)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::stdio));
     TRY(address_space().unmap_mmap_range(addr.vaddr(), size));
     return 0;
@@ -442,7 +442,7 @@ ErrorOr<FlatPtr> Process::sys$munmap(Userspace<void*> addr, size_t size)
 
 ErrorOr<FlatPtr> Process::sys$mremap(Userspace<Syscall::SC_mremap_params const*> user_params)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
@@ -459,7 +459,7 @@ ErrorOr<FlatPtr> Process::sys$mremap(Userspace<Syscall::SC_mremap_params const*>
         auto range = old_region->range();
         auto old_prot = region_access_flags_to_prot(old_region->access());
         auto old_offset = old_region->offset_in_vmobject();
-        NonnullRefPtr inode = static_cast<Memory::SharedInodeVMObject&>(old_region->vmobject()).inode();
+        NonnullLockRefPtr inode = static_cast<Memory::SharedInodeVMObject&>(old_region->vmobject()).inode();
 
         auto new_vmobject = TRY(Memory::PrivateInodeVMObject::try_create_with_inode(inode));
         auto old_name = old_region->take_name();
@@ -478,7 +478,7 @@ ErrorOr<FlatPtr> Process::sys$mremap(Userspace<Syscall::SC_mremap_params const*>
 
 ErrorOr<FlatPtr> Process::sys$allocate_tls(Userspace<char const*> initial_data, size_t size)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::stdio));
 
     if (!size || size % PAGE_SIZE != 0)
@@ -532,7 +532,7 @@ ErrorOr<FlatPtr> Process::sys$allocate_tls(Userspace<char const*> initial_data, 
 
 ErrorOr<FlatPtr> Process::sys$msyscall(Userspace<void*> address)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     if (address_space().enforces_syscall_regions())
         return EPERM;
 
@@ -571,23 +571,36 @@ ErrorOr<FlatPtr> Process::sys$msync(Userspace<void*> address, size_t size, int f
     // Note: This is not specified
     auto rounded_size = TRY(Memory::page_round_up(size));
 
-    // FIXME: We probably want to sync all mappings in the address+size range.
-    auto* region = address_space().find_region_containing(Memory::VirtualRange { address.vaddr(), rounded_size });
+    auto regions = TRY(address_space().find_regions_intersecting(Memory::VirtualRange { address.vaddr(), rounded_size }));
     // All regions from address upto address+size shall be mapped
-    if (!region)
+    if (regions.is_empty())
         return ENOMEM;
 
-    auto& vmobject = region->vmobject();
-    if (!vmobject.is_shared_inode())
-        return 0;
+    size_t total_intersection_size = 0;
+    Memory::VirtualRange range_to_sync { address.vaddr(), rounded_size };
+    for (auto const* region : regions) {
+        // Region was not mapped
+        if (!region->is_mmap())
+            return ENOMEM;
+        total_intersection_size += region->range().intersect(range_to_sync).size();
+    }
+    // Part of the indicated range was not mapped
+    if (total_intersection_size != size)
+        return ENOMEM;
 
-    off_t offset = region->offset_in_vmobject() + address.ptr() - region->range().base().get();
+    for (auto* region : regions) {
+        auto& vmobject = region->vmobject();
+        if (!vmobject.is_shared_inode())
+            continue;
 
-    auto& inode_vmobject = static_cast<Memory::SharedInodeVMObject&>(vmobject);
-    // FIXME: Handle MS_ASYNC
-    TRY(inode_vmobject.sync(offset / PAGE_SIZE, size / PAGE_SIZE));
-    // FIXME: Handle MS_INVALIDATE
-    // FIXME: If msync() causes any write to a file, the file's st_ctime and st_mtime fields shall be marked for update.
+        off_t offset = region->offset_in_vmobject() + address.ptr() - region->range().base().get();
+
+        auto& inode_vmobject = static_cast<Memory::SharedInodeVMObject&>(vmobject);
+        // FIXME: If multiple regions belong to the same vmobject we might want to coalesce these writes
+        // FIXME: Handle MS_ASYNC
+        TRY(inode_vmobject.sync(offset / PAGE_SIZE, rounded_size / PAGE_SIZE));
+        // FIXME: Handle MS_INVALIDATE
+    }
     return 0;
 }
 

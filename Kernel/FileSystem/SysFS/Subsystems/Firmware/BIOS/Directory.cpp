@@ -39,9 +39,9 @@ UNMAP_AFTER_INIT void BIOSSysFSDirectory::set_dmi_32_bit_entry_initialization_va
     m_smbios_structure_table_length = smbios_entry.ptr()->legacy_structure.smbios_table_length;
 }
 
-UNMAP_AFTER_INIT NonnullRefPtr<BIOSSysFSDirectory> BIOSSysFSDirectory::must_create(FirmwareSysFSDirectory& firmware_directory)
+UNMAP_AFTER_INIT NonnullLockRefPtr<BIOSSysFSDirectory> BIOSSysFSDirectory::must_create(FirmwareSysFSDirectory& firmware_directory)
 {
-    auto bios_directory = MUST(adopt_nonnull_ref_or_enomem(new (nothrow) BIOSSysFSDirectory(firmware_directory)));
+    auto bios_directory = MUST(adopt_nonnull_lock_ref_or_enomem(new (nothrow) BIOSSysFSDirectory(firmware_directory)));
     bios_directory->create_components();
     return bios_directory;
 }
@@ -58,8 +58,11 @@ void BIOSSysFSDirectory::create_components()
         dbgln("BIOSSysFSDirectory: invalid smbios structure table length");
         return;
     }
-    m_components.append(BIOSSysFSComponent::must_create(BIOSSysFSComponent::Type::DMIEntryPoint, m_dmi_entry_point, m_dmi_entry_point_length));
-    m_components.append(BIOSSysFSComponent::must_create(BIOSSysFSComponent::Type::SMBIOSTable, m_smbios_structure_table, m_smbios_structure_table_length));
+    MUST(m_child_components.with([&](auto& list) -> ErrorOr<void> {
+        list.append(BIOSSysFSComponent::must_create(BIOSSysFSComponent::Type::DMIEntryPoint, m_dmi_entry_point, m_dmi_entry_point_length));
+        list.append(BIOSSysFSComponent::must_create(BIOSSysFSComponent::Type::SMBIOSTable, m_smbios_structure_table, m_smbios_structure_table_length));
+        return {};
+    }));
 }
 
 UNMAP_AFTER_INIT void BIOSSysFSDirectory::initialize_dmi_exposer()
@@ -96,7 +99,7 @@ UNMAP_AFTER_INIT Optional<PhysicalAddress> BIOSSysFSDirectory::find_dmi_entry64b
     auto bios_or_error = map_bios();
     if (bios_or_error.is_error())
         return {};
-    return bios_or_error.value().find_chunk_starting_with("_SM3_", 16);
+    return bios_or_error.value().find_chunk_starting_with("_SM3_"sv, 16);
 }
 
 UNMAP_AFTER_INIT Optional<PhysicalAddress> BIOSSysFSDirectory::find_dmi_entry32bit_point()
@@ -104,7 +107,7 @@ UNMAP_AFTER_INIT Optional<PhysicalAddress> BIOSSysFSDirectory::find_dmi_entry32b
     auto bios_or_error = map_bios();
     if (bios_or_error.is_error())
         return {};
-    return bios_or_error.value().find_chunk_starting_with("_SM_", 16);
+    return bios_or_error.value().find_chunk_starting_with("_SM_"sv, 16);
 }
 
 }

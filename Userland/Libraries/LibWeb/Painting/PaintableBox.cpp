@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/GenericShorthands.h>
 #include <LibUnicode/CharacterTypes.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
@@ -112,7 +113,15 @@ void PaintableBox::paint(PaintContext& context, PaintPhase phase) const
     if (!is_visible())
         return;
 
+    auto clip_rect = computed_values().clip();
+    auto should_clip_rect = clip_rect.is_rect() && layout_box().is_absolutely_positioned();
+
     if (phase == PaintPhase::Background) {
+        if (should_clip_rect) {
+            context.painter().save();
+            auto border_box = absolute_border_box_rect();
+            context.painter().add_clip_rect(clip_rect.to_rect().resolved(Paintable::layout_node(), border_box).to_rounded<int>());
+        }
         paint_background(context);
         paint_box_shadow(context);
     }
@@ -120,6 +129,9 @@ void PaintableBox::paint(PaintContext& context, PaintPhase phase) const
     if (phase == PaintPhase::Border) {
         paint_border(context);
     }
+
+    if (phase == PaintPhase::Overlay && should_clip_rect)
+        context.painter().restore();
 
     if (phase == PaintPhase::Overlay && layout_box().dom_node() && layout_box().document().inspected_node() == layout_box().dom_node()) {
         auto content_rect = absolute_rect();
@@ -210,7 +222,7 @@ void PaintableBox::paint_background(PaintContext& context) const
     if (computed_values().border_top().width || computed_values().border_right().width || computed_values().border_bottom().width || computed_values().border_left().width)
         background_rect = absolute_border_box_rect();
 
-    Painting::paint_background(context, layout_box(), background_rect, background_color, background_layers, normalized_border_radii_data());
+    Painting::paint_background(context, layout_box(), background_rect, background_color, computed_values().image_rendering(), background_layers, normalized_border_radii_data());
 }
 
 void PaintableBox::paint_box_shadow(PaintContext& context) const
@@ -233,17 +245,23 @@ void PaintableBox::paint_box_shadow(PaintContext& context) const
     Painting::paint_box_shadow(context, absolute_border_box_rect().to_rounded<int>(), normalized_border_radii_data(), resolved_box_shadow_data);
 }
 
-BorderRadiiData PaintableBox::normalized_border_radii_data() const
+BorderRadiiData PaintableBox::normalized_border_radii_data(ShrinkRadiiForBorders shrink) const
 {
-    return Painting::normalized_border_radii_data(layout_box(), absolute_border_box_rect(),
+    auto border_radius_data = Painting::normalized_border_radii_data(layout_box(), absolute_border_box_rect(),
         computed_values().border_top_left_radius(),
         computed_values().border_top_right_radius(),
         computed_values().border_bottom_right_radius(),
         computed_values().border_bottom_left_radius());
+    if (shrink == ShrinkRadiiForBorders::Yes)
+        border_radius_data.shrink(computed_values().border_top().width, computed_values().border_right().width, computed_values().border_bottom().width, computed_values().border_left().width);
+    return border_radius_data;
 }
 
-void PaintableBox::before_children_paint(PaintContext& context, PaintPhase) const
+void PaintableBox::before_children_paint(PaintContext& context, PaintPhase phase) const
 {
+    if (!AK::first_is_one_of(phase, PaintPhase::Background, PaintPhase::Border, PaintPhase::Foreground))
+        return;
+
     // FIXME: Support more overflow variations.
     auto clip_rect = absolute_padding_box_rect().to_rounded<int>();
     auto overflow_x = computed_values().overflow_x();
@@ -261,9 +279,7 @@ void PaintableBox::before_children_paint(PaintContext& context, PaintPhase) cons
         clip_overflow();
     }
     if (overflow_y == CSS::Overflow::Hidden || overflow_x == CSS::Overflow::Hidden) {
-        auto border_radii_data = normalized_border_radii_data();
-        auto const& border = box_model().border;
-        border_radii_data.shrink(border.top, border.right, border.bottom, border.left);
+        auto border_radii_data = normalized_border_radii_data(ShrinkRadiiForBorders::Yes);
         if (border_radii_data.has_any_radius()) {
             auto corner_clipper = BorderRadiusCornerClipper::create(clip_rect, border_radii_data, CornerClip::Outside, BorderRadiusCornerClipper::UseCachedBitmap::No);
             if (corner_clipper.is_error()) {
@@ -277,8 +293,11 @@ void PaintableBox::before_children_paint(PaintContext& context, PaintPhase) cons
     }
 }
 
-void PaintableBox::after_children_paint(PaintContext& context, PaintPhase) const
+void PaintableBox::after_children_paint(PaintContext& context, PaintPhase phase) const
 {
+    if (!AK::first_is_one_of(phase, PaintPhase::Background, PaintPhase::Border, PaintPhase::Foreground))
+        return;
+
     // FIXME: Support more overflow variations.
     if (m_clipping_overflow) {
         context.painter().restore();
@@ -457,7 +476,7 @@ void PaintableWithLines::paint(PaintContext& context, PaintPhase phase) const
         auto scroll_offset = static_cast<Layout::BlockContainer const&>(layout_box()).scroll_offset();
         context.painter().translate(-scroll_offset.to_type<int>());
 
-        auto border_radii = normalized_border_radii_data();
+        auto border_radii = normalized_border_radii_data(ShrinkRadiiForBorders::Yes);
         if (border_radii.has_any_radius()) {
             auto clipper = BorderRadiusCornerClipper::create(clip_box, border_radii);
             if (!clipper.is_error()) {

@@ -9,14 +9,14 @@
 
 namespace Kernel::Memory {
 
-InodeVMObject::InodeVMObject(Inode& inode, FixedArray<RefPtr<PhysicalPage>>&& new_physical_pages, Bitmap dirty_pages)
+InodeVMObject::InodeVMObject(Inode& inode, FixedArray<LockRefPtr<PhysicalPage>>&& new_physical_pages, Bitmap dirty_pages)
     : VMObject(move(new_physical_pages))
     , m_inode(inode)
     , m_dirty_pages(move(dirty_pages))
 {
 }
 
-InodeVMObject::InodeVMObject(InodeVMObject const& other, FixedArray<RefPtr<PhysicalPage>>&& new_physical_pages, Bitmap dirty_pages)
+InodeVMObject::InodeVMObject(InodeVMObject const& other, FixedArray<LockRefPtr<PhysicalPage>>&& new_physical_pages, Bitmap dirty_pages)
     : VMObject(move(new_physical_pages))
     , m_inode(other.m_inode)
     , m_dirty_pages(move(dirty_pages))
@@ -54,6 +54,25 @@ int InodeVMObject::release_all_clean_pages()
 
     int count = 0;
     for (size_t i = 0; i < page_count(); ++i) {
+        if (!m_dirty_pages.get(i) && m_physical_pages[i]) {
+            m_physical_pages[i] = nullptr;
+            ++count;
+        }
+    }
+    if (count) {
+        for_each_region([](auto& region) {
+            region.remap();
+        });
+    }
+    return count;
+}
+
+int InodeVMObject::try_release_clean_pages(int page_amount)
+{
+    SpinlockLocker locker(m_lock);
+
+    int count = 0;
+    for (size_t i = 0; i < page_count() && count < page_amount; ++i) {
         if (!m_dirty_pages.get(i) && m_physical_pages[i]) {
             m_physical_pages[i] = nullptr;
             ++count;

@@ -33,6 +33,9 @@ void DesktopSettingsWidget::create_frame()
     m_workspace_columns_spinbox->on_change = [&](auto) {
         set_modified(true);
     };
+
+    auto& keyboard_shortcuts_label = *find_descendant_of_type_named<GUI::Label>("keyboard_shortcuts_label");
+    keyboard_shortcuts_label.set_text("\xE2\x84\xB9\tCtrl+Alt+{Shift}+Arrows moves between workspaces");
 }
 
 void DesktopSettingsWidget::load_current_settings()
@@ -50,7 +53,7 @@ void DesktopSettingsWidget::apply_settings()
     if (workspace_rows != desktop.workspace_rows() || workspace_columns != desktop.workspace_columns()) {
         if (!GUI::ConnectionToWindowServer::the().apply_workspace_settings(workspace_rows, workspace_columns, true)) {
             GUI::MessageBox::show(window(), String::formatted("Error applying workspace settings"),
-                "Workspace settings", GUI::MessageBox::Type::Error);
+                "Workspace settings"sv, GUI::MessageBox::Type::Error);
         }
     }
 }

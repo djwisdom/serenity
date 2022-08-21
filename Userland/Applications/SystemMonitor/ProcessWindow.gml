@@ -1,6 +1,8 @@
 @GUI::Widget {
     fill_with_background_color: true
-    layout: @GUI::VerticalBoxLayout {}
+    layout: @GUI::VerticalBoxLayout {
+        margins: [4]
+    }
 
     @GUI::Widget {
         shrink_to_fit: true
@@ -19,6 +21,7 @@
             font_weight: "Bold"
             text_alignment: "CenterLeft"
             text: "This is the process name."
+            preferred_width: "grow"
         }
     }
 

@@ -37,8 +37,8 @@ public:
     ErrorOr<void> initialize(String const& path, RefPtr<Gfx::BitmapFont>&&);
     ErrorOr<void> initialize_menubar(GUI::Window&);
 
-    bool open_file(String const&);
-    bool save_file(String const&);
+    ErrorOr<void> open_file(String const&);
+    ErrorOr<void> save_file(String const&);
     bool request_close();
     void update_title();
 
@@ -50,6 +50,8 @@ public:
 
     bool is_showing_unicode_blocks() { return m_unicode_blocks; }
     void set_show_unicode_blocks(bool);
+
+    void set_highlight_modifications(bool);
 
 private:
     MainWidget();
@@ -70,13 +72,15 @@ private:
     void set_scale(i32);
     void set_scale_and_save(i32);
 
-    void copy_selected_glyphs();
-    void cut_selected_glyphs();
+    ErrorOr<void> copy_selected_glyphs();
+    ErrorOr<void> cut_selected_glyphs();
     void paste_glyphs();
     void delete_selected_glyphs();
 
     void push_undo();
     void reset_selection_and_push_undo();
+
+    void show_error(StringView preface, Error);
 
     RefPtr<Gfx::BitmapFont> m_edited_font;
 
@@ -108,6 +112,7 @@ private:
     RefPtr<GUI::Action> m_open_preview_action;
     RefPtr<GUI::Action> m_show_metadata_action;
     RefPtr<GUI::Action> m_show_unicode_blocks_action;
+    RefPtr<GUI::Action> m_highlight_modifications_action;
 
     GUI::ActionGroup m_glyph_editor_scale_actions;
     RefPtr<GUI::Action> m_scale_five_action;

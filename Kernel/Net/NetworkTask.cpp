@@ -30,20 +30,20 @@ static void handle_ipv4(EthernetFrameHeader const&, size_t frame_size, Time cons
 static void handle_icmp(EthernetFrameHeader const&, IPv4Packet const&, Time const& packet_timestamp);
 static void handle_udp(IPv4Packet const&, Time const& packet_timestamp);
 static void handle_tcp(IPv4Packet const&, Time const& packet_timestamp);
-static void send_delayed_tcp_ack(RefPtr<TCPSocket> socket);
-static void send_tcp_rst(IPv4Packet const& ipv4_packet, TCPPacket const& tcp_packet, RefPtr<NetworkAdapter> adapter);
+static void send_delayed_tcp_ack(LockRefPtr<TCPSocket> socket);
+static void send_tcp_rst(IPv4Packet const& ipv4_packet, TCPPacket const& tcp_packet, LockRefPtr<NetworkAdapter> adapter);
 static void flush_delayed_tcp_acks();
 static void retransmit_tcp_packets();
 
 static Thread* network_task = nullptr;
-static HashTable<RefPtr<TCPSocket>>* delayed_ack_sockets;
+static HashTable<LockRefPtr<TCPSocket>>* delayed_ack_sockets;
 
 [[noreturn]] static void NetworkTask_main(void*);
 
 void NetworkTask::spawn()
 {
-    RefPtr<Thread> thread;
-    auto name = KString::try_create("Network Task");
+    LockRefPtr<Thread> thread;
+    auto name = KString::try_create("Network Task"sv);
     if (name.is_error())
         TODO();
     (void)Process::create_kernel_process(thread, name.release_value(), NetworkTask_main, nullptr);
@@ -57,7 +57,7 @@ bool NetworkTask::is_current()
 
 void NetworkTask_main(void*)
 {
-    delayed_ack_sockets = new HashTable<RefPtr<TCPSocket>>;
+    delayed_ack_sockets = new HashTable<LockRefPtr<TCPSocket>>;
 
     WaitQueue packet_wait_queue;
     int pending_packets = 0;
@@ -90,7 +90,7 @@ void NetworkTask_main(void*)
     };
 
     size_t buffer_size = 64 * KiB;
-    auto region_or_error = MM.allocate_kernel_region(buffer_size, "Kernel Packet Buffer", Memory::Region::Access::ReadWrite);
+    auto region_or_error = MM.allocate_kernel_region(buffer_size, "Kernel Packet Buffer"sv, Memory::Region::Access::ReadWrite);
     if (region_or_error.is_error())
         TODO();
     auto buffer_region = region_or_error.release_value();
@@ -104,7 +104,7 @@ void NetworkTask_main(void*)
         if (!packet_size) {
             auto timeout_time = Time::from_milliseconds(500);
             auto timeout = Thread::BlockTimeout { false, &timeout_time };
-            [[maybe_unused]] auto result = packet_wait_queue.wait_on(timeout, "NetworkTask");
+            [[maybe_unused]] auto result = packet_wait_queue.wait_on(timeout, "NetworkTask"sv);
             continue;
         }
         if (packet_size < sizeof(EthernetFrameHeader)) {
@@ -229,7 +229,7 @@ void handle_icmp(EthernetFrameHeader const& eth, IPv4Packet const& ipv4_packet, 
     dbgln_if(ICMP_DEBUG, "handle_icmp: source={}, destination={}, type={:#02x}, code={:#02x}", ipv4_packet.source().to_string(), ipv4_packet.destination().to_string(), icmp_header.type(), icmp_header.code());
 
     {
-        NonnullRefPtrVector<IPv4Socket> icmp_sockets;
+        NonnullLockRefPtrVector<IPv4Socket> icmp_sockets;
         IPv4Socket::all_sockets().with_exclusive([&](auto& sockets) {
             for (auto& socket : sockets) {
                 if (socket.protocol() == (unsigned)IPv4Protocol::ICMP)
@@ -302,7 +302,7 @@ void handle_udp(IPv4Packet const& ipv4_packet, Time const& packet_timestamp)
         socket->did_receive(ipv4_packet.source(), udp_packet.source_port(), { &ipv4_packet, sizeof(IPv4Packet) + ipv4_packet.payload_size() }, packet_timestamp);
 }
 
-void send_delayed_tcp_ack(RefPtr<TCPSocket> socket)
+void send_delayed_tcp_ack(LockRefPtr<TCPSocket> socket)
 {
     VERIFY(socket->mutex().is_locked());
     if (!socket->should_delay_next_ack()) {
@@ -315,7 +315,7 @@ void send_delayed_tcp_ack(RefPtr<TCPSocket> socket)
 
 void flush_delayed_tcp_acks()
 {
-    Vector<RefPtr<TCPSocket>, 32> remaining_sockets;
+    Vector<LockRefPtr<TCPSocket>, 32> remaining_sockets;
     for (auto& socket : *delayed_ack_sockets) {
         MutexLocker locker(socket->mutex());
         if (socket->should_delay_next_ack()) {
@@ -334,7 +334,7 @@ void flush_delayed_tcp_acks()
     }
 }
 
-void send_tcp_rst(IPv4Packet const& ipv4_packet, TCPPacket const& tcp_packet, RefPtr<NetworkAdapter> adapter)
+void send_tcp_rst(IPv4Packet const& ipv4_packet, TCPPacket const& tcp_packet, LockRefPtr<NetworkAdapter> adapter)
 {
     auto routing_decision = route_to(ipv4_packet.source(), ipv4_packet.destination(), adapter);
     if (routing_decision.is_zero())
@@ -657,7 +657,7 @@ void retransmit_tcp_packets()
 {
     // We must keep the sockets alive until after we've unlocked the hash table
     // in case retransmit_packets() realizes that it wants to close the socket.
-    NonnullRefPtrVector<TCPSocket, 16> sockets;
+    NonnullLockRefPtrVector<TCPSocket, 16> sockets;
     TCPSocket::sockets_for_retransmit().for_each_shared([&](auto const& socket) {
         // We ignore allocation failures above the first 16 guaranteed socket slots, as
         // we will just retransmit their packets the next time around

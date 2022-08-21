@@ -14,7 +14,7 @@
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
-#include <LibWeb/Origin.h>
+#include <LibWeb/HTML/Origin.h>
 
 namespace Web::HTML {
 
@@ -105,10 +105,10 @@ struct EnvironmentSettingsObject
     bool is_scripting_disabled() const;
 
 protected:
-    explicit EnvironmentSettingsObject(JS::ExecutionContext& realm_execution_context);
+    explicit EnvironmentSettingsObject(NonnullOwnPtr<JS::ExecutionContext>);
 
 private:
-    JS::ExecutionContext& m_realm_execution_context;
+    NonnullOwnPtr<JS::ExecutionContext> m_realm_execution_context;
     EventLoop* m_responsible_event_loop { nullptr };
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#outstanding-rejected-promises-weak-set
@@ -126,6 +126,7 @@ EnvironmentSettingsObject& current_settings_object();
 JS::GlobalObject& current_global_object();
 JS::Realm& relevant_realm(JS::Object const&);
 EnvironmentSettingsObject& relevant_settings_object(JS::Object const&);
+EnvironmentSettingsObject& relevant_settings_object(DOM::Node const&);
 JS::GlobalObject& relevant_global_object(JS::Object const&);
 
 }

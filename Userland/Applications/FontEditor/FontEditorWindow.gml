@@ -9,6 +9,7 @@
 
         @GUI::Toolbar {
             name: "toolbar"
+            collapsible: true
         }
     }
 
@@ -61,7 +62,7 @@
             }
 
             @GUI::HorizontalSplitter {
-                fixed_resizee: "Second"
+                opportunistic_resizee: "First"
 
                 @GUI::Widget {
                     layout: @GUI::VerticalBoxLayout {}
@@ -216,7 +217,7 @@
 
                 @GUI::Widget {
                     name: "unicode_block_container"
-                    fixed_width: 175
+                    preferred_width: 175
                     layout: @GUI::VerticalBoxLayout {}
 
                     @GUI::TextBox {

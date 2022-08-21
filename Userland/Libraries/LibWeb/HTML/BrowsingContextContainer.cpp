@@ -9,7 +9,7 @@
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/BrowsingContextContainer.h>
-#include <LibWeb/Origin.h>
+#include <LibWeb/HTML/Origin.h>
 #include <LibWeb/Page/Page.h>
 
 namespace Web::HTML {
@@ -34,7 +34,7 @@ void BrowsingContextContainer::create_new_nested_browsing_context()
 
     // 2. Let browsingContext be the result of creating a new browsing context with element's node document, element, and group.
     // 3. Set element's nested browsing context to browsingContext.
-    m_nested_browsing_context = BrowsingContext::create_nested(*group->page(), *this);
+    m_nested_browsing_context = BrowsingContext::create_a_new_browsing_context(*group->page(), document(), *this);
     group->append_child(*m_nested_browsing_context);
     m_nested_browsing_context->set_frame_nesting_levels(group->frame_nesting_levels());
     m_nested_browsing_context->register_frame_nesting(document().url());
@@ -101,6 +101,15 @@ const DOM::Document* BrowsingContextContainer::get_svg_document() const
         return document;
     // 3. Return null.
     return nullptr;
+}
+
+HTML::Window* BrowsingContextContainer::content_window() const
+{
+    // FIXME: This should return the WindowProxy
+    auto* document = content_document();
+    if (!document)
+        return nullptr;
+    return const_cast<HTML::Window*>(&document->window());
 }
 
 }

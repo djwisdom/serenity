@@ -51,22 +51,22 @@ ByteBuffer HttpRequest::to_raw_request() const
         builder.append('?');
         builder.append(m_url.query());
     }
-    builder.append(" HTTP/1.1\r\nHost: ");
+    builder.append(" HTTP/1.1\r\nHost: "sv);
     builder.append(m_url.host());
     if (m_url.port().has_value())
         builder.appendff(":{}", *m_url.port());
-    builder.append("\r\n");
+    builder.append("\r\n"sv);
     for (auto& header : m_headers) {
         builder.append(header.name);
-        builder.append(": ");
+        builder.append(": "sv);
         builder.append(header.value);
-        builder.append("\r\n");
+        builder.append("\r\n"sv);
     }
     if (!m_body.is_empty()) {
         builder.appendff("Content-Length: {}\r\n\r\n", m_body.size());
         builder.append((char const*)m_body.data(), m_body.size());
     }
-    builder.append("\r\n");
+    builder.append("\r\n"sv);
     return builder.to_byte_buffer();
 }
 
@@ -182,8 +182,18 @@ Optional<HttpRequest> HttpRequest::from_raw_request(ReadonlyBytes raw_request)
     else
         return {};
 
-    request.m_resource = URL::percent_decode(resource);
     request.m_headers = move(headers);
+    auto url_parts = resource.split_limit('?', 2, true);
+
+    request.m_url.set_cannot_be_a_base_url(true);
+    if (url_parts.size() == 2) {
+        request.m_resource = url_parts[0];
+        request.m_url.set_paths({ url_parts[0] });
+        request.m_url.set_query(url_parts[1]);
+    } else {
+        request.m_resource = resource;
+        request.m_url.set_paths({ resource });
+    }
 
     return request;
 }
@@ -204,14 +214,14 @@ Optional<HttpRequest::Header> HttpRequest::get_http_basic_authentication_header(
     builder.append(url.password());
     auto token = encode_base64(builder.to_string().bytes());
     builder.clear();
-    builder.append("Basic ");
+    builder.append("Basic "sv);
     builder.append(token);
     return Header { "Authorization", builder.to_string() };
 }
 
 Optional<HttpRequest::BasicAuthenticationCredentials> HttpRequest::parse_http_basic_authentication_header(String const& value)
 {
-    if (!value.starts_with("Basic ", AK::CaseSensitivity::CaseInsensitive))
+    if (!value.starts_with("Basic "sv, AK::CaseSensitivity::CaseInsensitive))
         return {};
     auto token = value.substring_view(6);
     if (token.is_empty())

@@ -38,7 +38,7 @@ static Gfx::Bitmap& minimize_icon()
 {
     static RefPtr<Gfx::Bitmap> s_icon;
     if (!s_icon)
-        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/downward-triangle.png").release_value_but_fixme_should_propagate_errors();
+        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/downward-triangle.png"sv).release_value_but_fixme_should_propagate_errors();
     return *s_icon;
 }
 
@@ -46,7 +46,7 @@ static Gfx::Bitmap& maximize_icon()
 {
     static RefPtr<Gfx::Bitmap> s_icon;
     if (!s_icon)
-        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/upward-triangle.png").release_value_but_fixme_should_propagate_errors();
+        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/upward-triangle.png"sv).release_value_but_fixme_should_propagate_errors();
     return *s_icon;
 }
 
@@ -54,7 +54,7 @@ static Gfx::Bitmap& restore_icon()
 {
     static RefPtr<Gfx::Bitmap> s_icon;
     if (!s_icon)
-        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/window-restore.png").release_value_but_fixme_should_propagate_errors();
+        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/window-restore.png"sv).release_value_but_fixme_should_propagate_errors();
     return *s_icon;
 }
 
@@ -62,7 +62,7 @@ static Gfx::Bitmap& close_icon()
 {
     static RefPtr<Gfx::Bitmap> s_icon;
     if (!s_icon)
-        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/window-close.png").release_value_but_fixme_should_propagate_errors();
+        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/window-close.png"sv).release_value_but_fixme_should_propagate_errors();
     return *s_icon;
 }
 
@@ -70,7 +70,7 @@ static Gfx::Bitmap& pin_icon()
 {
     static RefPtr<Gfx::Bitmap> s_icon;
     if (!s_icon)
-        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/window-pin.png").release_value_but_fixme_should_propagate_errors();
+        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/window-pin.png"sv).release_value_but_fixme_should_propagate_errors();
     return *s_icon;
 }
 
@@ -78,7 +78,7 @@ static Gfx::Bitmap& move_icon()
 {
     static RefPtr<Gfx::Bitmap> s_icon;
     if (!s_icon)
-        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/move.png").release_value_but_fixme_should_propagate_errors();
+        s_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/move.png"sv).release_value_but_fixme_should_propagate_errors();
     return *s_icon;
 }
 
@@ -382,6 +382,8 @@ void Window::start_minimize_animation()
 {
     if (&window_stack() != &WindowManager::the().current_window_stack())
         return;
+    if (!WindowManager::the().system_effects().animate_windows())
+        return;
     if (!m_have_taskbar_rect) {
         // If this is a modal window, it may not have its own taskbar
         // button, so there is no rectangle. In that case, walk the
@@ -426,6 +428,8 @@ void Window::start_minimize_animation()
 void Window::start_launch_animation(Gfx::IntRect const& launch_origin_rect)
 {
     if (&window_stack() != &WindowManager::the().current_window_stack())
+        return;
+    if (!WindowManager::the().system_effects().animate_windows())
         return;
 
     m_animation = Animation::create();
@@ -1183,7 +1187,7 @@ void Window::set_modified(bool modified)
 
 String Window::computed_title() const
 {
-    String title = m_title.replace("[*]", is_modified() ? " (*)" : "", ReplaceMode::FirstOnly);
+    String title = m_title.replace("[*]"sv, is_modified() ? " (*)"sv : ""sv, ReplaceMode::FirstOnly);
     if (client() && client()->is_unresponsive())
         return String::formatted("{} (Not responding)", title);
     return title;

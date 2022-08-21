@@ -85,10 +85,10 @@ static Optional<String> elf_details(String description, String const& path)
         description,
         bitness,
         byteorder,
-        ELF::Image::object_file_type_to_string(header.e_type).value_or("(?)"),
-        ELF::Image::object_machine_type_to_string(header.e_machine).value_or("(?)"),
+        ELF::Image::object_file_type_to_string(header.e_type).value_or("(?)"sv),
+        ELF::Image::object_machine_type_to_string(header.e_machine).value_or("(?)"sv),
         header.e_ident[EI_ABIVERSION],
-        ELF::Image::object_abi_type_to_string(header.e_ident[EI_OSABI]).value_or("(?)"),
+        ELF::Image::object_abi_type_to_string(header.e_ident[EI_OSABI]).value_or("(?)"sv),
         is_dynamically_linked ? dynamic_section : "");
 }
 
@@ -101,11 +101,13 @@ static Optional<String> elf_details(String description, String const& path)
     __ENUMERATE_MIME_TYPE_DESCRIPTION("application/tar", "tape archive", description_only)                          \
     __ENUMERATE_MIME_TYPE_DESCRIPTION("application/wasm", "WebAssembly bytecode", description_only)                 \
     __ENUMERATE_MIME_TYPE_DESCRIPTION("application/x-7z-compressed", "7-Zip archive", description_only)             \
-    __ENUMERATE_MIME_TYPE_DESCRIPTION("audio/midi", "MIDI sound", description_only)                                 \
+    __ENUMERATE_MIME_TYPE_DESCRIPTION("audio/flac", "FLAC audio", description_only)                                 \
+    __ENUMERATE_MIME_TYPE_DESCRIPTION("audio/midi", "MIDI notes", description_only)                                 \
+    __ENUMERATE_MIME_TYPE_DESCRIPTION("audio/mpeg", "MP3 audio", description_only)                                  \
+    __ENUMERATE_MIME_TYPE_DESCRIPTION("audio/wave", "WAVE audio", description_only)                                 \
     __ENUMERATE_MIME_TYPE_DESCRIPTION("extra/blender", "Blender project file", description_only)                    \
     __ENUMERATE_MIME_TYPE_DESCRIPTION("extra/elf", "ELF", elf_details)                                              \
     __ENUMERATE_MIME_TYPE_DESCRIPTION("extra/ext", "ext filesystem", description_only)                              \
-    __ENUMERATE_MIME_TYPE_DESCRIPTION("extra/flac", "FLAC audio", description_only)                                 \
     __ENUMERATE_MIME_TYPE_DESCRIPTION("extra/iso-9660", "ISO 9660 CD/DVD image", description_only)                  \
     __ENUMERATE_MIME_TYPE_DESCRIPTION("extra/isz", "Compressed ISO image", description_only)                        \
     __ENUMERATE_MIME_TYPE_DESCRIPTION("extra/lua-bytecode", "Lua bytecode", description_only)                       \

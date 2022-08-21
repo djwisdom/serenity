@@ -155,6 +155,7 @@ MarkedVector<BigInt*> get_iana_time_zone_epoch_value(GlobalObject& global_object
     // The implementation-defined abstract operation GetIANATimeZoneEpochValue takes arguments timeZoneIdentifier (a String), year (an integer), month (an integer between 1 and 12 inclusive), day (an integer between 1 and 31 inclusive), hour (an integer between 0 and 23 inclusive), minute (an integer between 0 and 59 inclusive), second (an integer between 0 and 59 inclusive), millisecond (an integer between 0 and 999 inclusive), microsecond (an integer between 0 and 999 inclusive), and nanosecond (an integer between 0 and 999 inclusive) and returns a List of BigInts.
     // Each value in the returned List represents a number of nanoseconds since the Unix epoch in UTC that corresponds to the given ISO 8601 calendar date and wall-clock time in the IANA time zone identified by timeZoneIdentifier.
     // When the input represents a local time repeating multiple times at a negative time zone transition (e.g. when the daylight saving time ends or the time zone offset is decreased due to a time zone rule change), the returned List will have more than one element. The elements are sorted in numerical order. When the input represents a skipped local time at a positive time zone transition (e.g. when the daylight saving time starts or the time zone offset is increased due to a time zone rule change), the returned List will be empty. Otherwise, the returned List will have one element.
+    // It is an error to call GetIANATimeZoneEpochValue with arguments such that IsValidISODate(year, month, day) is false.
 
     // FIXME: Implement this properly for non-UTC timezones.
     auto& vm = global_object.vm();
@@ -199,7 +200,7 @@ i64 get_iana_time_zone_offset_nanoseconds(BigInt const& epoch_nanoseconds, Strin
 BigInt* get_iana_time_zone_next_transition(GlobalObject&, [[maybe_unused]] BigInt const& epoch_nanoseconds, [[maybe_unused]] StringView time_zone_identifier)
 {
     // The implementation-defined abstract operation GetIANATimeZoneNextTransition takes arguments epochNanoseconds (a BigInt) and timeZoneIdentifier (a String) and returns a BigInt or null.
-    // The returned value represents the number of nanoseconds since the Unix epoch in UTC that corresponds to the first time zone transition after epochNanoseconds in the IANA time zone identified by timeZoneIdentifier, or null if no such transition exists.
+    // The returned value t represents the number of nanoseconds since the Unix epoch in UTC that corresponds to the first time zone transition after epochNanoseconds in the IANA time zone identified by timeZoneIdentifier. The operation returns null if no such transition exists for which t ≤ ℤ(nsMaxInstant).
     // Given the same values of epochNanoseconds and timeZoneIdentifier, the result must be the same for the lifetime of the surrounding agent.
 
     // TODO: Implement this
@@ -210,7 +211,7 @@ BigInt* get_iana_time_zone_next_transition(GlobalObject&, [[maybe_unused]] BigIn
 BigInt* get_iana_time_zone_previous_transition(GlobalObject&, [[maybe_unused]] BigInt const& epoch_nanoseconds, [[maybe_unused]] StringView time_zone_identifier)
 {
     // The implementation-defined abstract operation GetIANATimeZonePreviousTransition takes arguments epochNanoseconds (a BigInt) and timeZoneIdentifier (a String) and returns a BigInt or null.
-    // The returned value represents the number of nanoseconds since the Unix epoch in UTC that corresponds to the last time zone transition before epochNanoseconds in the IANA time zone identified by timeZoneIdentifier, or null if no such transition exists.
+    // The returned value t represents the number of nanoseconds since the Unix epoch in UTC that corresponds to the last time zone transition before epochNanoseconds in the IANA time zone identified by timeZoneIdentifier. The operation returns null if no such transition exists for which t ≥ ℤ(nsMinInstant).
     // Given the same values of epochNanoseconds and timeZoneIdentifier, the result must be the same for the lifetime of the surrounding agent.
 
     // TODO: Implement this
@@ -454,7 +455,7 @@ ThrowCompletionOr<Object*> to_temporal_time_zone(GlobalObject& global_object, Va
         // a. Let name be parseResult.[[Name]].
         auto name = parse_result.name.release_value();
 
-        // b. If ParseText(StringToCodePoints(name, TimeZoneNumericUTCOffset)) is a List of errors, then
+        // b. If ParseText(StringToCodePoints(name), TimeZoneNumericUTCOffset) is a List of errors, then
         if (!is_valid_time_zone_numeric_utc_offset_syntax(name)) {
             // i. If IsValidTimeZoneName(name) is false, throw a RangeError exception.
             if (!is_valid_time_zone_name(name))

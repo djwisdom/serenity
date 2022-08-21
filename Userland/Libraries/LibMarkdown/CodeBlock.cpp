@@ -17,15 +17,15 @@ String CodeBlock::render_to_html(bool) const
 {
     StringBuilder builder;
 
-    builder.append("<pre>");
+    builder.append("<pre>"sv);
 
     if (m_style.length() >= 2)
-        builder.append("<strong>");
+        builder.append("<strong>"sv);
     else if (m_style.length() >= 2)
-        builder.append("<em>");
+        builder.append("<em>"sv);
 
     if (m_language.is_empty())
-        builder.append("<code>");
+        builder.append("<code>"sv);
     else
         builder.appendff("<code class=\"language-{}\">", escape_html_entities(m_language));
 
@@ -34,14 +34,14 @@ String CodeBlock::render_to_html(bool) const
     else
         builder.append(escape_html_entities(m_code));
 
-    builder.append("</code>");
+    builder.append("</code>"sv);
 
     if (m_style.length() >= 2)
-        builder.append("</strong>");
+        builder.append("</strong>"sv);
     else if (m_style.length() >= 2)
-        builder.append("</em>");
+        builder.append("</em>"sv);
 
-    builder.append("</pre>\n");
+    builder.append("</pre>\n"sv);
 
     return builder.build();
 }
@@ -51,9 +51,13 @@ String CodeBlock::render_for_terminal(size_t) const
     StringBuilder builder;
 
     for (auto line : m_code.split('\n')) {
-        builder.append("  ");
+        // Do not indent too much if we are in the synopsis
+        if (!(m_current_section && m_current_section->render_for_terminal().contains("SYNOPSIS"sv)))
+            builder.append("  "sv);
+
+        builder.append("  "sv);
         builder.append(line);
-        builder.append("\n");
+        builder.append("\x1b[0m\n"sv);
     }
 
     return builder.build();
@@ -104,14 +108,14 @@ static Optional<int> line_block_prefix(StringView const& line)
     return {};
 }
 
-OwnPtr<CodeBlock> CodeBlock::parse(LineIterator& lines)
+OwnPtr<CodeBlock> CodeBlock::parse(LineIterator& lines, Heading* current_section)
 {
     if (lines.is_end())
         return {};
 
     StringView line = *lines;
     if (open_fence_re.match(line).success)
-        return parse_backticks(lines);
+        return parse_backticks(lines, current_section);
 
     if (line_block_prefix(line).has_value())
         return parse_indent(lines);
@@ -119,7 +123,7 @@ OwnPtr<CodeBlock> CodeBlock::parse(LineIterator& lines)
     return {};
 }
 
-OwnPtr<CodeBlock> CodeBlock::parse_backticks(LineIterator& lines)
+OwnPtr<CodeBlock> CodeBlock::parse_backticks(LineIterator& lines, Heading* current_section)
 {
     StringView line = *lines;
 
@@ -160,7 +164,7 @@ OwnPtr<CodeBlock> CodeBlock::parse_backticks(LineIterator& lines)
         builder.append('\n');
     }
 
-    return make<CodeBlock>(language, style, builder.build());
+    return make<CodeBlock>(language, style, builder.build(), current_section);
 }
 
 OwnPtr<CodeBlock> CodeBlock::parse_indent(LineIterator& lines)
@@ -183,6 +187,6 @@ OwnPtr<CodeBlock> CodeBlock::parse_indent(LineIterator& lines)
         builder.append('\n');
     }
 
-    return make<CodeBlock>("", "", builder.build());
+    return make<CodeBlock>("", "", builder.build(), nullptr);
 }
 }

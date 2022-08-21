@@ -56,6 +56,8 @@
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLTitleElement.h>
 #include <LibWeb/HTML/MessageEvent.h>
+#include <LibWeb/HTML/NavigationParams.h>
+#include <LibWeb/HTML/Origin.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
@@ -64,7 +66,6 @@
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Namespace.h>
-#include <LibWeb/Origin.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/SVG/TagNames.h>
 #include <LibWeb/UIEvents/EventNames.h>
@@ -73,6 +74,206 @@
 #include <LibWeb/UIEvents/MouseEvent.h>
 
 namespace Web::DOM {
+
+// https://html.spec.whatwg.org/multipage/origin.html#obtain-browsing-context-navigation
+static NonnullRefPtr<HTML::BrowsingContext> obtain_a_browsing_context_to_use_for_a_navigation_response(
+    HTML::BrowsingContext& browsing_context,
+    HTML::SandboxingFlagSet sandbox_flags,
+    HTML::CrossOriginOpenerPolicy navigation_coop,
+    HTML::CrossOriginOpenerPolicyEnforcementResult coop_enforcement_result)
+{
+    // 1. If browsingContext is not a top-level browsing context, return browsingContext.
+    if (!browsing_context.is_top_level())
+        return browsing_context;
+
+    // 2. If coopEnforcementResult's needs a browsing context group switch is false, then:
+    if (!coop_enforcement_result.needs_a_browsing_context_group_switch) {
+        // 1. If coopEnforcementResult's would need a browsing context group switch due to report-only is true,
+        if (coop_enforcement_result.would_need_a_browsing_context_group_switch_due_to_report_only) {
+            // FIXME: set browsing context's virtual browsing context group ID to a new unique identifier.
+        }
+        // 2. Return browsingContext.
+        return browsing_context;
+    }
+
+    // 3. Let newBrowsingContext be the result of creating a new top-level browsing context.
+    VERIFY(browsing_context.page());
+    auto new_browsing_context = HTML::BrowsingContext::create_a_new_browsing_context(*browsing_context.page(), nullptr, nullptr);
+
+    // FIXME: 4. If navigationCOOP's value is "same-origin-plus-COEP", then set newBrowsingContext's group's
+    //           cross-origin isolation mode to either "logical" or "concrete". The choice of which is implementation-defined.
+
+    // 5. If sandboxFlags is not empty, then:
+    if (!sandbox_flags.is_empty()) {
+        // 1. Assert navigationCOOP's value is "unsafe-none".
+        VERIFY(navigation_coop.value == HTML::CrossOriginOpenerPolicyValue::UnsafeNone);
+
+        // 2. Assert: newBrowsingContext's popup sandboxing flag set is empty.
+
+        // 3. Set newBrowsingContext's popup sandboxing flag set to a clone of sandboxFlags.
+    }
+
+    // FIXME: 6. Discard browsingContext.
+
+    // 7. Return newBrowsingContext.
+    return new_browsing_context;
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#initialise-the-document-object
+NonnullRefPtr<Document> Document::create_and_initialize(Type type, String content_type, HTML::NavigationParams navigation_params)
+{
+    // 1. Let browsingContext be the result of the obtaining a browsing context to use for a navigation response
+    //    given navigationParams's browsing context, navigationParams's final sandboxing flag set,
+    //    navigationParams's cross-origin opener policy, and navigationParams's COOP enforcement result.
+    auto browsing_context = obtain_a_browsing_context_to_use_for_a_navigation_response(
+        navigation_params.browsing_context,
+        navigation_params.final_sandboxing_flag_set,
+        navigation_params.cross_origin_opener_policy,
+        navigation_params.coop_enforcement_result);
+
+    // FIXME: 2. Let permissionsPolicy be the result of creating a permissions policy from a response
+    //           given browsingContext, navigationParams's origin, and navigationParams's response.
+
+    // 3. Let creationURL be navigationParams's response's URL.
+    auto creation_url = navigation_params.response->url();
+
+    // 4. If navigationParams's request is non-null, then set creationURL to navigationParams's request's current URL.
+    if (navigation_params.request) {
+        creation_url = navigation_params.request->current_url();
+    }
+
+    RefPtr<HTML::Window> window;
+
+    // 5. If browsingContext is still on its initial about:blank Document,
+    //    and navigationParams's history handling is "replace",
+    //    and browsingContext's active document's origin is same origin-domain with navigationParams's origin,
+    //    then do nothing.
+    if (browsing_context->still_on_its_initial_about_blank_document()
+        && navigation_params.history_handling == HTML::HistoryHandlingBehavior::Replace
+        && (browsing_context->active_document() && browsing_context->active_document()->origin().is_same_origin(navigation_params.origin))) {
+        // Do nothing.
+    }
+
+    // 6. Otherwise:
+    else {
+        // FIXME: 1. Let oacHeader be the result of getting a structured field value given `Origin-Agent-Cluster` and "item" from response's header list.
+
+        // FIXME: 2. Let requestsOAC be true if oacHeader is not null and oacHeader[0] is the boolean true; otherwise false.
+        [[maybe_unused]] auto requests_oac = false;
+
+        // FIXME: 3. If navigationParams's reserved environment is a non-secure context, then set requestsOAC to false.
+
+        // FIXME: 4. Let agent be the result of obtaining a similar-origin window agent given navigationParams's origin, browsingContext's group, and requestsOAC.
+
+        // 5. Let realm execution context be the result of creating a new JavaScript realm given agent and the following customizations:
+        auto realm_execution_context = Bindings::create_a_new_javascript_realm(
+            Bindings::main_thread_vm(),
+            [&](JS::Realm& realm) -> JS::GlobalObject* {
+                // - For the global object, create a new Window object.
+                window = HTML::Window::create();
+                auto* global_object = realm.heap().allocate_without_global_object<Bindings::WindowObject>(realm, *window);
+                VERIFY(window->wrapper() == global_object);
+                return global_object;
+            },
+            [](JS::Realm&) -> JS::GlobalObject* {
+                // FIXME: - For the global this binding, use browsingContext's WindowProxy object.
+                return nullptr;
+            });
+
+        // 6. Let topLevelCreationURL be creationURL.
+        auto top_level_creation_url = creation_url;
+
+        // 7. Let topLevelOrigin be navigationParams's origin.
+        auto top_level_origin = navigation_params.origin;
+
+        // 8. If browsingContext is not a top-level browsing context, then:
+        if (!browsing_context->is_top_level()) {
+            // 1. Let parentEnvironment be browsingContext's container's relevant settings object.
+            auto& parent_environment = browsing_context->container()->document().relevant_settings_object();
+
+            // 2. Set topLevelCreationURL to parentEnvironment's top-level creation URL.
+            top_level_creation_url = parent_environment.top_level_creation_url;
+
+            // 3. Set topLevelOrigin to parentEnvironment's top-level origin.
+            top_level_origin = parent_environment.top_level_origin;
+        }
+
+        // 9. Set up a window environment settings object with creationURL, realm execution context,
+        //    navigationParams's reserved environment, topLevelCreationURL, and topLevelOrigin.
+
+        // FIXME: Why do we assume `creation_url` is non-empty here? Is this a spec bug?
+        // FIXME: Why do we assume `top_level_creation_url` is non-empty here? Is this a spec bug?
+        HTML::WindowEnvironmentSettingsObject::setup(
+            creation_url.value(),
+            move(realm_execution_context),
+            navigation_params.reserved_environment,
+            top_level_creation_url.value(),
+            top_level_origin);
+    }
+
+    // FIXME: 7. Let loadTimingInfo be a new document load timing info with its navigation start time set to response's timing info's start time.
+
+    // 8. Let document be a new Document,
+    //    whose type is type,
+    //    content type is contentType,
+    //    FIXME: origin is navigationParams's origin,
+    //    FIXME: policy container is navigationParams's policy container,
+    //    FIXME: permissions policy is permissionsPolicy,
+    //    FIXME: active sandboxing flag set is navigationParams's final sandboxing flag set,
+    //    FIXME: and cross-origin opener policy is navigationParams's cross-origin opener policy,
+    //    FIXME: load timing info is loadTimingInfo,
+    //    FIXME: and navigation id is navigationParams's id.
+    auto document = Document::create();
+    document->m_type = type;
+    document->m_content_type = content_type;
+
+    document->m_window = window;
+    window->set_associated_document(*document);
+
+    // 9. Set document's URL to creationURL.
+    document->m_url = creation_url.value();
+
+    // 10. Set document's current document readiness to "loading".
+    document->m_readiness = HTML::DocumentReadyState::Loading;
+
+    // FIXME: 11. Run CSP initialization for a Document given document.
+
+    // 12. If navigationParams's request is non-null, then:
+    if (navigation_params.request) {
+        // FIXME: 1. Set document's referrer to the empty string.
+        // FIXME: 2. Let referrer be navigationParams's request's referrer.
+        // FIXME: 3. If referrer is a URL record, then set document's referrer to the serialization of referrer.
+    }
+
+    // FIXME: 13. Let historyHandling be navigationParams's history handling.
+
+    // FIXME: 14: Let navigationTimingType be the result of switching on navigationParams's history handling...
+
+    // FIXME: 15. Let redirectCount be 0 if navigationParams's has cross-origin redirects is true;
+    //            otherwise navigationParams's request's redirect count.
+
+    // FIXME: 16. Create the navigation timing entry for document, with navigationParams's response's timing info,
+    //            redirectCount, navigationTimingType, and navigationParams's response's service worker timing info.
+
+    // FIXME: 17. If navigationParams's response has a `Refresh` header, then...
+
+    // FIXME: 18. If navigationParams's commit early hints is not null, then call navigationParams's commit early hints with document.
+
+    // FIXME: 19. Process link headers given document, navigationParams's response, and "pre-media".
+
+    // 20. Return document.
+    return document;
+}
+
+NonnullRefPtr<Document> Document::create_with_global_object(Bindings::WindowObject&)
+{
+    return Document::create();
+}
+
+NonnullRefPtr<Document> Document::create(AK::URL const& url)
+{
+    return adopt_ref(*new Document(url));
+}
 
 Document::Document(const AK::URL& url)
     : ParentNode(*this, NodeType::DOCUMENT_NODE)
@@ -132,8 +333,11 @@ void Document::removed_last_ref()
             for (auto& node : descendants) {
                 VERIFY(&node.document() == this);
                 VERIFY(!node.is_document());
-                if (node.parent())
-                    node.remove();
+                if (node.parent()) {
+                    // We need to suppress mutation observers so that they don't try and queue a microtask for this Document which is in the process of dying,
+                    // which will cause an `!m_in_removed_last_ref` assertion failure when it tries to ref this Document.
+                    node.remove(true);
+                }
             }
         }
 
@@ -173,7 +377,7 @@ ExceptionOr<void> Document::writeln(Vector<String> const& strings)
 ExceptionOr<void> Document::run_the_document_write_steps(String input)
 {
     // 1. If document is an XML document, then throw an "InvalidStateError" DOMException.
-    if (doctype() && doctype()->name() == "xml")
+    if (m_type == Type::XML)
         return DOM::InvalidStateError::create("write() called on XML document.");
 
     // 2. If document's throw-on-dynamic-markup-insertion counter is greater than 0, then throw an "InvalidStateError" DOMException.
@@ -208,7 +412,7 @@ ExceptionOr<void> Document::run_the_document_write_steps(String input)
 ExceptionOr<Document*> Document::open(String const&, String const&)
 {
     // 1. If document is an XML document, then throw an "InvalidStateError" DOMException exception.
-    if (doctype() && doctype()->name() == "xml")
+    if (m_type == Type::XML)
         return DOM::InvalidStateError::create("open() called on XML document.");
 
     // 2. If document's throw-on-dynamic-markup-insertion counter is greater than 0, then throw an "InvalidStateError" DOMException.
@@ -254,7 +458,8 @@ ExceptionOr<Document*> Document::open(String const&, String const&)
         // FIXME: 3. Run the URL and history update steps with document and newURL.
     }
 
-    // FIXME: 13. Set document's is initial about:blank to false.
+    // 13. Set document's is initial about:blank to false.
+    set_is_initial_about_blank(false);
 
     // FIXME: 14. If document's iframe load in progress flag is set, then set document's mute iframe load flag.
 
@@ -278,7 +483,7 @@ ExceptionOr<Document*> Document::open(String const&, String const&)
 ExceptionOr<void> Document::close()
 {
     // 1. If document is an XML document, then throw an "InvalidStateError" DOMException exception.
-    if (doctype() && doctype()->name() == "xml")
+    if (m_type == Type::XML)
         return DOM::InvalidStateError::create("close() called on XML document.");
 
     // 2. If document's throw-on-dynamic-markup-insertion counter is greater than 0, then throw an "InvalidStateError" DOMException.
@@ -302,18 +507,14 @@ ExceptionOr<void> Document::close()
     return {};
 }
 
-Origin Document::origin() const
+HTML::Origin Document::origin() const
 {
-    if (!m_url.is_valid())
-        return {};
-    return { m_url.protocol(), m_url.host(), m_url.port_or_default() };
+    return m_origin;
 }
 
-void Document::set_origin(Origin const& origin)
+void Document::set_origin(HTML::Origin const& origin)
 {
-    m_url.set_protocol(origin.protocol());
-    m_url.set_host(origin.host());
-    m_url.set_port(origin.port());
+    m_origin = origin;
 }
 
 void Document::schedule_style_update()
@@ -458,7 +659,6 @@ void Document::set_title(String const& title)
 void Document::attach_to_browsing_context(Badge<HTML::BrowsingContext>, HTML::BrowsingContext& browsing_context)
 {
     m_browsing_context = browsing_context;
-    update_layout();
 }
 
 void Document::detach_from_browsing_context(Badge<HTML::BrowsingContext>, HTML::BrowsingContext& browsing_context)
@@ -606,23 +806,28 @@ void Document::update_layout()
     auto viewport_rect = browsing_context()->viewport_rect();
 
     if (!m_layout_root) {
+        m_next_layout_node_serial_id = 0;
         Layout::TreeBuilder tree_builder;
         m_layout_root = static_ptr_cast<Layout::InitialContainingBlock>(tree_builder.build(*this));
     }
 
-    Layout::FormattingState formatting_state;
-    Layout::BlockFormattingContext root_formatting_context(formatting_state, *m_layout_root, nullptr);
+    Layout::LayoutState layout_state;
+    layout_state.used_values_per_layout_node.resize(layout_node_count());
 
-    auto& icb = static_cast<Layout::InitialContainingBlock&>(*m_layout_root);
-    auto& icb_state = formatting_state.get_mutable(icb);
-    icb_state.content_width = viewport_rect.width();
-    icb_state.content_height = viewport_rect.height();
+    {
+        Layout::BlockFormattingContext root_formatting_context(layout_state, *m_layout_root, nullptr);
 
-    icb.set_has_definite_width(true);
-    icb.set_has_definite_height(true);
+        auto& icb = static_cast<Layout::InitialContainingBlock&>(*m_layout_root);
+        auto& icb_state = layout_state.get_mutable(icb);
+        icb_state.set_has_definite_width(true);
+        icb_state.set_has_definite_height(true);
+        icb_state.set_content_width(viewport_rect.width());
+        icb_state.set_content_height(viewport_rect.height());
 
-    root_formatting_context.run(*m_layout_root, Layout::LayoutMode::Normal);
-    formatting_state.commit();
+        root_formatting_context.run(*m_layout_root, Layout::LayoutMode::Normal);
+    }
+
+    layout_state.commit();
 
     browsing_context()->set_needs_display();
 
@@ -873,52 +1078,16 @@ HTML::EnvironmentSettingsObject& Document::relevant_settings_object()
 
 JS::Realm& Document::realm()
 {
-    return interpreter().realm();
+    VERIFY(m_window);
+    VERIFY(m_window->wrapper());
+    VERIFY(m_window->wrapper()->associated_realm());
+    return *m_window->wrapper()->associated_realm();
 }
 
 JS::Interpreter& Document::interpreter()
 {
     if (!m_interpreter) {
-        // FIXME: This is all ad-hoc. It loosely follows steps 6.4 to 6.9 of https://html.spec.whatwg.org/#initialise-the-document-object
-        auto& vm = Bindings::main_thread_vm();
-
-        // https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-new-javascript-realm
-        // FIXME: Put all this into it's own function that can be used outside of Document.
-
-        // 1. Perform InitializeHostDefinedRealm() with the provided customizations for creating the global object and the global this binding.
-        // FIXME: Use WindowProxy as the global this value.
-        m_interpreter = JS::Interpreter::create<Bindings::WindowObject>(vm, *m_window);
-
-        // 2. Let realm execution context be the running JavaScript execution context.
-        auto& realm_execution_context = vm.running_execution_context();
-
-        // 3. Remove realm execution context from the JavaScript execution context stack.
-        vm.execution_context_stack().remove_first_matching([&realm_execution_context](auto* execution_context) {
-            return execution_context == &realm_execution_context;
-        });
-
-        // FIXME: 4. Let realm be realm execution context's Realm component.
-        // FIXME: 5. Set realm's agent to agent.
-
-        // FIXME: 6. If agent's agent cluster's cross-origin isolation mode is "none", then:
-        //          1. Let global be realm's global object.
-        //          2. Let status be ! global.[[Delete]]("SharedArrayBuffer").
-        //          3. Assert: status is true.
-
-        // FIXME: 7. Return realm execution context. (Requires being in it's own function as mentioned above)
-
-        // == End of "create a JavaScript realm" ==
-
-        // FIXME: 6. Let topLevelCreationURL be creationURL.
-        // FIXME: 7. Let topLevelOrigin be navigationParams's origin.
-        // FIXME: 8. If browsingContext is not a top-level browsing context, then:
-        //          1. Let parentEnvironment be browsingContext's container's relevant settings object.
-        //          2. Set topLevelCreationURL to parentEnvironment's top-level creation URL.
-        //          3. Set topLevelOrigin to parentEnvironment's top-level origin.
-
-        // FIXME: 9. Set up a window environment settings object with creationURL, realm execution context, navigationParams's reserved environment, topLevelCreationURL, and topLevelOrigin.
-        //        (This is missing reserved environment, topLevelCreationURL and topLevelOrigin. It also assumes creationURL is the document's URL, when it's really "navigationParams's response's URL.")
-        HTML::WindowEnvironmentSettingsObject::setup(m_url, realm_execution_context);
+        m_interpreter = JS::Interpreter::create_with_existing_realm(realm());
     }
     return *m_interpreter;
 }
@@ -1111,8 +1280,7 @@ void Document::adopt_node(Node& node)
         node.remove();
 
     if (&old_document != this) {
-        // FIXME: This should be shadow-including.
-        node.for_each_in_inclusive_subtree([&](auto& inclusive_descendant) {
+        node.for_each_shadow_including_descendant([&](auto& inclusive_descendant) {
             inclusive_descendant.set_document({}, *this);
             // FIXME: If inclusiveDescendant is an element, then set the node document of each attribute in inclusiveDescendant’s attribute list to document.
             return IterationDecision::Continue;
@@ -1122,8 +1290,7 @@ void Document::adopt_node(Node& node)
         //        enqueue a custom element callback reaction with inclusiveDescendant, callback name "adoptedCallback",
         //        and an argument list containing oldDocument and document.
 
-        // FIXME: This should be shadow-including.
-        node.for_each_in_inclusive_subtree([&](auto& inclusive_descendant) {
+        node.for_each_shadow_including_descendant([&](auto& inclusive_descendant) {
             inclusive_descendant.adopted_from(old_document);
             return IterationDecision::Continue;
         });
@@ -1330,8 +1497,12 @@ bool Document::has_a_style_sheet_that_is_blocking_scripts() const
 
 String Document::referrer() const
 {
-    // FIXME: Return the document's actual referrer.
-    return "";
+    return m_referrer;
+}
+
+void Document::set_referrer(String referrer)
+{
+    m_referrer = referrer;
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#fully-active
@@ -1659,6 +1830,11 @@ void Document::check_favicon_after_loading_link_resource()
     }
 
     dbgln_if(SPAM_DEBUG, "No favicon found to be used");
+}
+
+void Document::set_window(Badge<HTML::BrowsingContext>, HTML::Window& window)
+{
+    m_window = window;
 }
 
 }

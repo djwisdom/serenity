@@ -10,6 +10,7 @@
 #include <AK/GenericShorthands.h>
 #include <AK/JsonValue.h>
 #include <LibGUI/BoxLayout.h>
+#include <LibGUI/Desktop.h>
 #include <LibGUI/Painter.h>
 #include <LibGUI/TabWidget.h>
 #include <LibGUI/Window.h>
@@ -256,14 +257,16 @@ void TabWidget::paint_event(PaintEvent& event)
         text_rect.intersect(button_rect);
     };
 
+    bool accented = Desktop::the().system_effects().tab_accents();
+
     for (size_t i = 0; i < m_tabs.size(); ++i) {
         if (m_tabs[i].widget == m_active_widget)
             continue;
         bool hovered = i == m_hovered_tab_index;
         auto button_rect = this->button_rect(i);
-        Gfx::StylePainter::paint_tab_button(painter, button_rect, palette(), false, hovered, m_tabs[i].widget->is_enabled(), m_tab_position, window()->is_active());
+        Gfx::StylePainter::paint_tab_button(painter, button_rect, palette(), false, hovered, m_tabs[i].widget->is_enabled(), m_tab_position, window()->is_active(), accented);
 
-        auto tab_button_content_rect = button_rect.shrunken(2, 0);
+        auto tab_button_content_rect = button_rect.shrunken(8, 0);
 
         paint_tab_icon_if_needed(m_tabs[i].icon, button_rect, tab_button_content_rect);
         tab_button_content_rect.set_width(tab_button_content_rect.width() - (m_close_button_enabled ? 16 : 0));
@@ -303,8 +306,8 @@ void TabWidget::paint_event(PaintEvent& event)
                 button_rect.set_x(m_mouse_pos - m_grab_offset);
         }
 
-        auto tab_button_content_rect = button_rect.shrunken(2, 0);
-        Gfx::StylePainter::paint_tab_button(painter, button_rect, palette(), true, hovered, m_tabs[i].widget->is_enabled(), m_tab_position, window()->is_active());
+        auto tab_button_content_rect = button_rect.shrunken(8, 0);
+        Gfx::StylePainter::paint_tab_button(painter, button_rect, palette(), true, hovered, m_tabs[i].widget->is_enabled(), m_tab_position, window()->is_active(), accented);
 
         paint_tab_icon_if_needed(m_tabs[i].icon, button_rect, tab_button_content_rect);
         tab_button_content_rect.set_width(tab_button_content_rect.width() - (m_close_button_enabled ? 16 : 0));

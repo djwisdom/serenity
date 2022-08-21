@@ -45,8 +45,10 @@ Optional<FlatPtr> kernel_base()
         auto kernel_base_str = String { file.value()->read_all(), NoChomp };
 #if ARCH(I386)
         using AddressType = u32;
-#else
+#elif ARCH(X86_64) || ARCH(AARCH64)
         using AddressType = u64;
+#else
+#    error Unknown architecture
 #endif
         auto maybe_kernel_base = kernel_base_str.to_uint<AddressType>();
         if (!maybe_kernel_base.has_value()) {
@@ -185,14 +187,14 @@ Vector<Symbol> symbolicate_thread(pid_t pid, pid_t tid, IncludeSourcePosition in
 
         for (auto& region_value : json.value().as_array().values()) {
             auto& region = region_value.as_object();
-            auto name = region.get("name").to_string();
-            auto address = region.get("address").to_addr();
-            auto size = region.get("size").to_addr();
+            auto name = region.get("name"sv).to_string();
+            auto address = region.get("address"sv).to_addr();
+            auto size = region.get("size"sv).to_addr();
 
             String path;
             if (name == "/usr/lib/Loader.so") {
                 path = name;
-            } else if (name.ends_with(": .text") || name.ends_with(": .rodata")) {
+            } else if (name.ends_with(": .text"sv) || name.ends_with(": .rodata"sv)) {
                 auto parts = name.split_view(':');
                 path = parts[0];
             } else {

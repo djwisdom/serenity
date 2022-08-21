@@ -25,7 +25,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Config::pledge_domain("HexEditor");
 
-    auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-hex-editor"));
+    auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-hex-editor"sv));
 
     auto window = TRY(GUI::Window::try_create());
     window->set_title("Hex Editor");
@@ -40,7 +40,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     };
 
     TRY(Core::System::unveil("/res", "r"));
-    TRY(Core::System::unveil("/tmp/portal/filesystemaccess", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     hex_editor_widget->initialize_menubar(*window);

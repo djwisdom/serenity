@@ -21,14 +21,14 @@
 
 namespace Kernel {
 
-UNMAP_AFTER_INIT RefPtr<VMWareGraphicsAdapter> VMWareGraphicsAdapter::try_initialize(PCI::DeviceIdentifier const& pci_device_identifier)
+UNMAP_AFTER_INIT LockRefPtr<VMWareGraphicsAdapter> VMWareGraphicsAdapter::try_initialize(PCI::DeviceIdentifier const& pci_device_identifier)
 {
     PCI::HardwareID id = pci_device_identifier.hardware_id();
     VERIFY(id.vendor_id == PCI::VendorID::VMWare);
     // Note: We only support VMWare SVGA II adapter
     if (id.device_id != 0x0405)
         return {};
-    auto adapter = MUST(adopt_nonnull_ref_or_enomem(new (nothrow) VMWareGraphicsAdapter(pci_device_identifier)));
+    auto adapter = MUST(adopt_nonnull_lock_ref_or_enomem(new (nothrow) VMWareGraphicsAdapter(pci_device_identifier)));
     MUST(adapter->initialize_adapter());
     return adapter;
 }
@@ -186,11 +186,6 @@ UNMAP_AFTER_INIT ErrorOr<void> VMWareGraphicsAdapter::initialize_adapter()
     m_display_connector = VMWareDisplayConnector::must_create(*this, PhysicalAddress(PCI::get_BAR1(pci_address()) & 0xfffffff0), bar1_space_size);
     TRY(m_display_connector->set_safe_mode_setting());
     return {};
-}
-
-bool VMWareGraphicsAdapter::vga_compatible() const
-{
-    return false;
 }
 
 }

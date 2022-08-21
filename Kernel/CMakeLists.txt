@@ -43,6 +43,7 @@ set(KERNEL_SOURCES
     CMOS.cpp
     CommandLine.cpp
     Coredump.cpp
+    Credentials.cpp
     Devices/AsyncDeviceRequest.cpp
     Devices/Audio/AC97.cpp
     Devices/Audio/Channel.cpp
@@ -78,16 +79,12 @@ set(KERNEL_SOURCES
     Graphics/Console/BootFramebufferConsole.cpp
     Graphics/Console/GenericFramebufferConsole.cpp
     Graphics/Console/ContiguousFramebufferConsole.cpp
-    Graphics/Console/TextModeConsole.cpp
-    Graphics/Console/VGAConsole.cpp
+    Graphics/Console/VGATextModeConsole.cpp
     Graphics/DisplayConnector.cpp
     Graphics/Generic/DisplayConnector.cpp
     Graphics/GraphicsManagement.cpp
     Graphics/Intel/NativeDisplayConnector.cpp
     Graphics/Intel/NativeGraphicsAdapter.cpp
-    Graphics/VGA/ISAAdapter.cpp
-    Graphics/VGA/PCIAdapter.cpp
-    Graphics/VGA/VGACompatibleAdapter.cpp
     Graphics/VMWare/Console.cpp
     Graphics/VMWare/GraphicsAdapter.cpp
     Graphics/VMWare/DisplayConnector.cpp
@@ -96,23 +93,16 @@ set(KERNEL_SOURCES
     Graphics/VirtIOGPU/GPU3DDevice.cpp
     Graphics/VirtIOGPU/GraphicsAdapter.cpp
     SanCov.cpp
-    Storage/ATA/AHCIController.cpp
-    Storage/ATA/AHCIInterruptHandler.cpp
-    Storage/ATA/AHCIPort.cpp
+    Storage/ATA/AHCI/Controller.cpp
+    Storage/ATA/AHCI/Port.cpp
+    Storage/ATA/AHCI/InterruptHandler.cpp
+    Storage/ATA/GenericIDE/Controller.cpp
+    Storage/ATA/GenericIDE/Channel.cpp
+    Storage/ATA/GenericIDE/ISAController.cpp
+    Storage/ATA/GenericIDE/PCIController.cpp
     Storage/ATA/ATADevice.cpp
     Storage/ATA/ATADiskDevice.cpp
-    Storage/ATA/ATAPIDiscDevice.cpp
-    Storage/ATA/BMIDEChannel.cpp
-    Storage/ATA/ISAIDEController.cpp
-    Storage/ATA/PCIIDEController.cpp
-    Storage/ATA/IDEController.cpp
-    Storage/ATA/IDEChannel.cpp
-    Storage/Partition/DiskPartition.cpp
-    Storage/Partition/DiskPartitionMetadata.cpp
-    Storage/Partition/EBRPartitionTable.cpp
-    Storage/Partition/GUIDPartitionTable.cpp
-    Storage/Partition/MBRPartitionTable.cpp
-    Storage/Partition/PartitionTable.cpp
+    Storage/ATA/ATAPort.cpp
     Storage/NVMe/NVMeController.cpp
     Storage/NVMe/NVMeNameSpace.cpp
     Storage/NVMe/NVMeInterruptQueue.cpp
@@ -120,6 +110,8 @@ set(KERNEL_SOURCES
     Storage/NVMe/NVMeQueue.cpp
     Storage/Ramdisk/Controller.cpp
     Storage/Ramdisk/Device.cpp
+    Storage/DiskPartition.cpp
+    Storage/StorageController.cpp
     Storage/StorageDevice.cpp
     Storage/StorageManagement.cpp
     DoubleBuffer.cpp
@@ -135,6 +127,7 @@ set(KERNEL_SOURCES
     FileSystem/FileSystem.cpp
     FileSystem/Inode.cpp
     FileSystem/InodeFile.cpp
+    FileSystem/InodeMetadata.cpp
     FileSystem/InodeWatcher.cpp
     FileSystem/ISO9660FileSystem.cpp
     FileSystem/Mount.cpp
@@ -151,9 +144,18 @@ set(KERNEL_SOURCES
     FileSystem/SysFS/Subsystems/Bus/USB/BusDirectory.cpp
     FileSystem/SysFS/Subsystems/Bus/USB/DeviceInformation.cpp
     FileSystem/SysFS/Subsystems/Bus/Directory.cpp
-    FileSystem/SysFS/Subsystems/Devices/BlockDevicesDirectory.cpp
-    FileSystem/SysFS/Subsystems/Devices/CharacterDevicesDirectory.cpp
-    FileSystem/SysFS/Subsystems/Devices/DeviceComponent.cpp
+    FileSystem/SysFS/Subsystems/DeviceIdentifiers/BlockDevicesDirectory.cpp
+    FileSystem/SysFS/Subsystems/DeviceIdentifiers/CharacterDevicesDirectory.cpp
+    FileSystem/SysFS/Subsystems/DeviceIdentifiers/DeviceComponent.cpp
+    FileSystem/SysFS/Subsystems/DeviceIdentifiers/Directory.cpp
+    FileSystem/SysFS/Subsystems/DeviceIdentifiers/SymbolicLinkDeviceComponent.cpp
+    FileSystem/SysFS/Subsystems/Devices/Storage/DeviceAttribute.cpp
+    FileSystem/SysFS/Subsystems/Devices/Storage/DeviceDirectory.cpp
+    FileSystem/SysFS/Subsystems/Devices/Storage/Directory.cpp
+    FileSystem/SysFS/Subsystems/Devices/Graphics/Directory.cpp
+    FileSystem/SysFS/Subsystems/Devices/Graphics/DisplayConnector/Directory.cpp
+    FileSystem/SysFS/Subsystems/Devices/Graphics/DisplayConnector/DeviceDirectory.cpp
+    FileSystem/SysFS/Subsystems/Devices/Graphics/DisplayConnector/DeviceAttribute.cpp
     FileSystem/SysFS/Subsystems/Devices/Directory.cpp
     FileSystem/SysFS/Subsystems/Firmware/BIOS/Component.cpp
     FileSystem/SysFS/Subsystems/Firmware/BIOS/Directory.cpp
@@ -241,6 +243,7 @@ set(KERNEL_SOURCES
     Syscalls/emuctl.cpp
     Syscalls/execve.cpp
     Syscalls/exit.cpp
+    Syscalls/fallocate.cpp
     Syscalls/fcntl.cpp
     Syscalls/fork.cpp
     Syscalls/fsync.cpp
@@ -361,6 +364,13 @@ if ("${SERENITY_ARCH}" STREQUAL "i686" OR "${SERENITY_ARCH}" STREQUAL "x86_64")
             ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/SyscallEntry.cpp
         )
     endif()
+
+    if ("${SERENITY_ARCH}" STREQUAL "i686")
+        set(KERNEL_SOURCES
+            ${KERNEL_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/Atomics.cpp
+        )
+    endif()
 endif()
 
 set(AK_SOURCES
@@ -398,6 +408,14 @@ set(CRYPTO_SOURCES
     ../Userland/Libraries/LibCrypto/Hash/SHA2.cpp
 )
 
+set(PARTITION_SOURCES
+    ../Userland/Libraries/LibPartition/DiskPartitionMetadata.cpp
+    ../Userland/Libraries/LibPartition/EBRPartitionTable.cpp
+    ../Userland/Libraries/LibPartition/GUIDPartitionTable.cpp
+    ../Userland/Libraries/LibPartition/MBRPartitionTable.cpp
+    ../Userland/Libraries/LibPartition/PartitionTable.cpp
+)
+
 set(SOURCES
     ${AK_SOURCES}
     )
@@ -409,6 +427,7 @@ if (NOT "${SERENITY_ARCH}" STREQUAL "aarch64")
         ${ELF_SOURCES}
         ${VT_SOURCES}
         ${CRYPTO_SOURCES}
+        ${PARTITION_SOURCES}
     )
 else()
     set(RPI_SOURCES
@@ -448,6 +467,9 @@ else()
         KSyms.cpp
         MiniStdLib.cpp
         UBSanitizer.cpp
+
+        Graphics/Console/BootFramebufferConsole.cpp
+        Graphics/Console/GenericFramebufferConsole.cpp
 
         Memory/AddressSpace.cpp
         Memory/AnonymousVMObject.cpp

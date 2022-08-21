@@ -67,6 +67,7 @@ ErrorOr<NonnullRefPtr<SettingsWindow>> SettingsWindow::create(String title, Show
     };
 
     window->m_apply_button = TRY(button_container->try_add<GUI::DialogButton>("Apply"));
+    window->m_apply_button->set_enabled(false);
     window->m_apply_button->on_click = [window = window->make_weak_ptr<SettingsWindow>()](auto) mutable {
         window->apply_settings();
     };
@@ -75,7 +76,7 @@ ErrorOr<NonnullRefPtr<SettingsWindow>> SettingsWindow::create(String title, Show
         if (!window->is_modified())
             return Window::CloseRequestDecision::Close;
 
-        auto result = MessageBox::show(window, "Apply these settings before closing?", "Unsaved changes", MessageBox::Type::Warning, MessageBox::InputType::YesNoCancel);
+        auto result = MessageBox::show(window, "Apply these settings before closing?"sv, "Unsaved changes"sv, MessageBox::Type::Warning, MessageBox::InputType::YesNoCancel);
         switch (result) {
         case MessageBox::ExecResult::Yes:
             window->apply_settings();

@@ -25,9 +25,11 @@
 #include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/DOM/NonElementParentNode.h>
 #include <LibWeb/DOM/ParentNode.h>
+#include <LibWeb/HTML/CrossOrigin/CrossOriginOpenerPolicy.h>
 #include <LibWeb/HTML/DocumentReadyState.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/History.h>
+#include <LibWeb/HTML/Origin.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 
 namespace Web::DOM {
@@ -50,21 +52,20 @@ public:
         HTML
     };
 
-    static NonnullRefPtr<Document> create(const AK::URL& url = "about:blank")
-    {
-        return adopt_ref(*new Document(url));
-    }
-    static NonnullRefPtr<Document> create_with_global_object(Bindings::WindowObject&)
-    {
-        return Document::create();
-    }
+    static NonnullRefPtr<Document> create_and_initialize(Type, String content_type, HTML::NavigationParams);
 
+    static NonnullRefPtr<Document> create(AK::URL const& url = "about:blank"sv);
+    static NonnullRefPtr<Document> create_with_global_object(Bindings::WindowObject&);
     virtual ~Document() override;
+
+    size_t next_layout_node_serial_id(Badge<Layout::Node>) { return m_next_layout_node_serial_id++; }
+    size_t layout_node_count() const { return m_next_layout_node_serial_id; }
 
     String cookie(Cookie::Source = Cookie::Source::NonHttp);
     void set_cookie(String const&, Cookie::Source = Cookie::Source::NonHttp);
 
     String referrer() const;
+    void set_referrer(String);
 
     bool should_invalidate_styles_on_attribute_changes() const { return m_should_invalidate_styles_on_attribute_changes; }
     void set_should_invalidate_styles_on_attribute_changes(bool b) { m_should_invalidate_styles_on_attribute_changes = b; }
@@ -79,8 +80,11 @@ public:
     String url_string() const { return m_url.to_string(); }
     String document_uri() const { return m_url.to_string(); }
 
-    Origin origin() const;
-    void set_origin(Origin const& origin);
+    HTML::Origin origin() const;
+    void set_origin(HTML::Origin const& origin);
+
+    HTML::CrossOriginOpenerPolicy const& cross_origin_opener_policy() const { return m_cross_origin_opener_policy; }
+    void set_cross_origin_opener_policy(HTML::CrossOriginOpenerPolicy policy) { m_cross_origin_opener_policy = move(policy); }
 
     AK::URL parse_url(String const&) const;
 
@@ -187,7 +191,7 @@ public:
     JS::Realm& realm();
     JS::Interpreter& interpreter();
 
-    JS::Value run_javascript(StringView source, StringView filename = "(unknown)");
+    JS::Value run_javascript(StringView source, StringView filename = "(unknown)"sv);
 
     ExceptionOr<NonnullRefPtr<Element>> create_element(String const& tag_name);
     ExceptionOr<NonnullRefPtr<Element>> create_element_ns(String const& namespace_, String const& qualified_name);
@@ -262,6 +266,8 @@ public:
 
     HTML::Window& window() { return *m_window; }
     HTML::Window const& window() const { return *m_window; }
+
+    void set_window(Badge<HTML::BrowsingContext>, HTML::Window&);
 
     ExceptionOr<void> write(Vector<String> const& strings);
     ExceptionOr<void> writeln(Vector<String> const& strings);
@@ -360,6 +366,10 @@ public:
     bool has_active_favicon() const { return m_active_favicon; }
     void check_favicon_after_loading_link_resource();
 
+    // https://html.spec.whatwg.org/multipage/dom.html#is-initial-about:blank
+    bool is_initial_about_blank() const { return m_is_initial_about_blank; }
+    void set_is_initial_about_blank(bool b) { m_is_initial_about_blank = b; }
+
 private:
     explicit Document(const AK::URL&);
 
@@ -390,6 +400,8 @@ private:
     }
 
     unsigned m_referencing_node_count { 0 };
+
+    size_t m_next_layout_node_serial_id { 0 };
 
     OwnPtr<CSS::StyleComputer> m_style_computer;
     RefPtr<CSS::StyleSheetList> m_style_sheets;
@@ -474,6 +486,18 @@ private:
     bool m_needs_full_style_update { false };
 
     HashTable<NodeIterator*> m_node_iterators;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#is-initial-about:blank
+    bool m_is_initial_about_blank { false };
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-coop
+    HTML::CrossOriginOpenerPolicy m_cross_origin_opener_policy;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#the-document's-referrer
+    String m_referrer { "" };
+
+    // https://dom.spec.whatwg.org/#concept-document-origin
+    HTML::Origin m_origin;
 };
 
 }

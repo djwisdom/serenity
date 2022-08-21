@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <AK/RefCounted.h>
 #include <AK/Types.h>
 #include <Kernel/Graphics/Console/Console.h>
 #include <Kernel/PhysicalAddress.h>
@@ -81,7 +80,7 @@ protected:
 
     virtual void clear_glyph(size_t x, size_t y) override;
 
-    mutable Spinlock m_lock;
+    mutable Spinlock m_lock { LockRank::None };
 };
 
 }

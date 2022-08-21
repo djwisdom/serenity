@@ -11,17 +11,17 @@ namespace Kernel {
 
 ErrorOr<FlatPtr> Process::sys$perf_event(int type, FlatPtr arg1, FlatPtr arg2)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     auto* events_buffer = current_perf_events_buffer();
     if (!events_buffer)
         return 0;
-    TRY(events_buffer->append(type, arg1, arg2, nullptr));
+    TRY(events_buffer->append(type, arg1, arg2, {}));
     return 0;
 }
 
 ErrorOr<FlatPtr> Process::sys$perf_register_string(Userspace<char const*> user_string, size_t user_string_length)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     auto* events_buffer = current_perf_events_buffer();
     if (!events_buffer)
         return 0;

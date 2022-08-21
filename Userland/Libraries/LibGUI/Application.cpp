@@ -28,7 +28,7 @@ public:
     {
         m_label->set_text(Gfx::parse_ampersand_string(tooltip));
         int tooltip_width = m_label->effective_min_size().width().as_int() + 10;
-        int line_count = m_label->text().count("\n");
+        int line_count = m_label->text().count("\n"sv);
         int glyph_height = m_label->font().glyph_height();
         int tooltip_height = glyph_height * (1 + line_count) + ((glyph_height + 1) / 2) * line_count + 8;
 
@@ -43,6 +43,7 @@ private:
     TooltipWindow()
     {
         set_window_type(WindowType::Tooltip);
+        set_obey_widget_min_size(false);
         m_label = set_main_widget<Label>();
         m_label->set_background_role(Gfx::ColorRole::Tooltip);
         m_label->set_foreground_role(Gfx::ColorRole::TooltipText);
@@ -146,6 +147,8 @@ Action* Application::action_for_shortcut(Shortcut const& shortcut) const
 
 void Application::show_tooltip(String tooltip, Widget const* tooltip_source_widget)
 {
+    if (!Desktop::the().system_effects().tooltips())
+        return;
     m_tooltip_source_widget = tooltip_source_widget;
     if (!m_tooltip_window) {
         m_tooltip_window = TooltipWindow::construct();
@@ -165,6 +168,8 @@ void Application::show_tooltip(String tooltip, Widget const* tooltip_source_widg
 
 void Application::show_tooltip_immediately(String tooltip, Widget const* tooltip_source_widget)
 {
+    if (!Desktop::the().system_effects().tooltips())
+        return;
     m_tooltip_source_widget = tooltip_source_widget;
     if (!m_tooltip_window) {
         m_tooltip_window = TooltipWindow::construct();
@@ -224,7 +229,7 @@ void Application::request_tooltip_show()
     int const margin = 30;
     Gfx::IntPoint adjusted_pos = ConnectionToWindowServer::the().get_global_cursor_position();
 
-    adjusted_pos.translate_by(0, 18);
+    adjusted_pos.translate_by(0, 14);
 
     if (adjusted_pos.x() + m_tooltip_window->width() >= desktop_rect.width() - margin) {
         adjusted_pos = adjusted_pos.translated(-m_tooltip_window->width(), 0);

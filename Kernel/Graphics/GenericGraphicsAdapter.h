@@ -7,19 +7,17 @@
 #pragma once
 
 #include <AK/Types.h>
-#include <AK/Weakable.h>
 #include <Kernel/Bus/PCI/Definitions.h>
 #include <Kernel/Devices/BlockDevice.h>
+#include <Kernel/Library/LockWeakable.h>
 #include <Kernel/PhysicalAddress.h>
 
 namespace Kernel {
 class GenericGraphicsAdapter
-    : public RefCounted<GenericGraphicsAdapter>
-    , public Weakable<GenericGraphicsAdapter> {
+    : public AtomicRefCounted<GenericGraphicsAdapter>
+    , public LockWeakable<GenericGraphicsAdapter> {
 public:
     virtual ~GenericGraphicsAdapter() = default;
-
-    virtual bool vga_compatible() const = 0;
 
 protected:
     GenericGraphicsAdapter() = default;

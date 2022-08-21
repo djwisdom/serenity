@@ -26,10 +26,8 @@ class VMWareGraphicsAdapter final
     friend class GraphicsManagement;
 
 public:
-    static RefPtr<VMWareGraphicsAdapter> try_initialize(PCI::DeviceIdentifier const&);
+    static LockRefPtr<VMWareGraphicsAdapter> try_initialize(PCI::DeviceIdentifier const&);
     virtual ~VMWareGraphicsAdapter() = default;
-
-    virtual bool vga_compatible() const override;
 
     ErrorOr<void> modeset_primary_screen_resolution(Badge<VMWareDisplayConnector>, size_t width, size_t height);
     size_t primary_screen_width(Badge<VMWareDisplayConnector>) const;
@@ -51,11 +49,10 @@ private:
     explicit VMWareGraphicsAdapter(PCI::DeviceIdentifier const&);
 
     Memory::TypedMapping<volatile VMWareDisplayFIFORegisters> m_fifo_registers;
-    RefPtr<VMWareDisplayConnector> m_display_connector;
+    LockRefPtr<VMWareDisplayConnector> m_display_connector;
     const IOAddress m_io_registers_base;
-    mutable Spinlock m_io_access_lock;
-    mutable RecursiveSpinlock m_operation_lock;
-    bool m_is_vga_capable { false };
+    mutable Spinlock m_io_access_lock { LockRank::None };
+    mutable RecursiveSpinlock m_operation_lock { LockRank::None };
 };
 
 }

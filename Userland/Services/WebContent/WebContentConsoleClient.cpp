@@ -26,12 +26,13 @@ WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, WeakPtr<J
     auto& vm = m_interpreter->vm();
     auto& global_object = m_interpreter->global_object();
 
-    auto console_global_object = m_interpreter->heap().allocate_without_global_object<ConsoleGlobalObject>(static_cast<Web::Bindings::WindowObject&>(global_object));
+    auto console_global_object = m_interpreter->heap().allocate_without_global_object<ConsoleGlobalObject>(m_interpreter->realm(), static_cast<Web::Bindings::WindowObject&>(global_object));
 
     // NOTE: We need to push an execution context here for NativeFunction::create() to succeed during global object initialization.
     // It gets removed immediately after creating the interpreter in Document::interpreter().
     auto& eso = verify_cast<Web::HTML::EnvironmentSettingsObject>(*m_interpreter->realm().host_defined());
     vm.push_execution_context(eso.realm_execution_context());
+    console_global_object->set_associated_realm(m_interpreter->realm());
     console_global_object->initialize_global_object();
     vm.pop_execution_context();
 
@@ -50,7 +51,7 @@ void WebContentConsoleClient::handle_input(String const& js_source)
     StringBuilder output_html;
 
     if (result.is_abrupt()) {
-        output_html.append("Uncaught exception: ");
+        output_html.append("Uncaught exception: "sv);
         auto error = *result.release_error().value();
         if (error.is_object())
             output_html.append(JS::MarkupGenerator::html_from_error(error.as_object()));
@@ -111,19 +112,19 @@ void WebContentConsoleClient::send_messages(i32 start_index)
         auto& message = m_message_log[i];
         switch (message.type) {
         case ConsoleOutput::Type::HTML:
-            message_types.append("html");
+            message_types.append("html"sv);
             break;
         case ConsoleOutput::Type::Clear:
-            message_types.append("clear");
+            message_types.append("clear"sv);
             break;
         case ConsoleOutput::Type::BeginGroup:
-            message_types.append("group");
+            message_types.append("group"sv);
             break;
         case ConsoleOutput::Type::BeginGroupCollapsed:
-            message_types.append("groupCollapsed");
+            message_types.append("groupCollapsed"sv);
             break;
         case ConsoleOutput::Type::EndGroup:
-            message_types.append("groupEnd");
+            message_types.append("groupEnd"sv);
             break;
         }
 
@@ -147,10 +148,10 @@ JS::ThrowCompletionOr<JS::Value> WebContentConsoleClient::printer(JS::Console::L
         if (!trace.label.is_empty())
             html.appendff("<span class='title'>{}</span><br>", escape_html_entities(trace.label));
 
-        html.append("<span class='trace'>");
+        html.append("<span class='trace'>"sv);
         for (auto& function_name : trace.stack)
             html.appendff("-> {}<br>", escape_html_entities(function_name));
-        html.append("</span>");
+        html.append("</span>"sv);
 
         print_html(html.string_view());
         return JS::js_undefined();
@@ -162,34 +163,34 @@ JS::ThrowCompletionOr<JS::Value> WebContentConsoleClient::printer(JS::Console::L
         return JS::js_undefined();
     }
 
-    auto output = String::join(" ", arguments.get<JS::MarkedVector<JS::Value>>());
+    auto output = String::join(' ', arguments.get<JS::MarkedVector<JS::Value>>());
     m_console.output_debug_message(log_level, output);
 
     StringBuilder html;
     switch (log_level) {
     case JS::Console::LogLevel::Debug:
-        html.append("<span class=\"debug\">(d) ");
+        html.append("<span class=\"debug\">(d) "sv);
         break;
     case JS::Console::LogLevel::Error:
-        html.append("<span class=\"error\">(e) ");
+        html.append("<span class=\"error\">(e) "sv);
         break;
     case JS::Console::LogLevel::Info:
-        html.append("<span class=\"info\">(i) ");
+        html.append("<span class=\"info\">(i) "sv);
         break;
     case JS::Console::LogLevel::Log:
-        html.append("<span class=\"log\"> ");
+        html.append("<span class=\"log\"> "sv);
         break;
     case JS::Console::LogLevel::Warn:
     case JS::Console::LogLevel::CountReset:
-        html.append("<span class=\"warn\">(w) ");
+        html.append("<span class=\"warn\">(w) "sv);
         break;
     default:
-        html.append("<span>");
+        html.append("<span>"sv);
         break;
     }
 
     html.append(escape_html_entities(output));
-    html.append("</span>");
+    html.append("</span>"sv);
     print_html(html.string_view());
     return JS::js_undefined();
 }

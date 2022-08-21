@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -16,6 +16,8 @@
 #include <LibGfx/Size.h>
 #include <LibWeb/DOM/Position.h>
 #include <LibWeb/HTML/BrowsingContextContainer.h>
+#include <LibWeb/HTML/Origin.h>
+#include <LibWeb/HTML/SessionHistoryEntry.h>
 #include <LibWeb/Loader/FrameLoader.h>
 #include <LibWeb/Page/EventHandler.h>
 #include <LibWeb/TreeNode.h>
@@ -24,8 +26,8 @@ namespace Web::HTML {
 
 class BrowsingContext : public TreeNode<BrowsingContext> {
 public:
-    static NonnullRefPtr<BrowsingContext> create_nested(Page& page, HTML::BrowsingContextContainer& container) { return adopt_ref(*new BrowsingContext(page, &container)); }
-    static NonnullRefPtr<BrowsingContext> create(Page& page) { return adopt_ref(*new BrowsingContext(page, nullptr)); }
+    static NonnullRefPtr<BrowsingContext> create_a_new_browsing_context(Page&, RefPtr<DOM::Document> creator, RefPtr<DOM::Element> embedder);
+
     ~BrowsingContext();
 
     class ViewportClient {
@@ -112,6 +114,12 @@ public:
     String const& name() const { return m_name; }
     void set_name(String const& name) { m_name = name; }
 
+    Vector<SessionHistoryEntry>& session_history() { return m_session_history; }
+    Vector<SessionHistoryEntry> const& session_history() const { return m_session_history; }
+
+    // https://html.spec.whatwg.org/multipage/dom.html#still-on-its-initial-about:blank-document
+    bool still_on_its_initial_about_blank_document() const;
+
 private:
     explicit BrowsingContext(Page&, HTML::BrowsingContextContainer*);
 
@@ -121,6 +129,18 @@ private:
 
     FrameLoader m_loader;
     Web::EventHandler m_event_handler;
+
+    // https://html.spec.whatwg.org/multipage/history.html#session-history
+    Vector<SessionHistoryEntry> m_session_history;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#creator-url
+    Optional<AK::URL> m_creator_url;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#creator-base-url
+    Optional<AK::URL> m_creator_base_url;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#creator-origin
+    Optional<HTML::Origin> m_creator_origin;
 
     WeakPtr<HTML::BrowsingContextContainer> m_container;
     RefPtr<DOM::Document> m_active_document;

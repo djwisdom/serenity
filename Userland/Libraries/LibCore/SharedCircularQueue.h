@@ -118,7 +118,7 @@ public:
             if (!result.is_error())
                 break;
             if (result.error() != QueueStatus::Full)
-                return Error::from_string_literal("Unexpected error while enqueuing"sv);
+                return Error::from_string_literal("Unexpected error while enqueuing");
 
             wait_function();
         }
@@ -168,9 +168,9 @@ private:
         // A full queue is signalled with:  head - 1 mod size = tail mod size  (i.e. head and tail point to the same index in the data array)
         // FIXME: These invariants aren't proven to be correct after each successful completion of each operation where it is relevant.
         //        The work could be put in but for now I think the algorithmic correctness proofs of the functions are enough.
-        CACHE_ALIGNED Atomic<size_t, AK::MemoryOrder::memory_order_seq_cst> m_tail { 0 };
-        CACHE_ALIGNED Atomic<size_t, AK::MemoryOrder::memory_order_seq_cst> m_head { 0 };
-        CACHE_ALIGNED Atomic<size_t, AK::MemoryOrder::memory_order_seq_cst> m_head_protector { NumericLimits<size_t>::max() };
+        AK_CACHE_ALIGNED Atomic<size_t, AK::MemoryOrder::memory_order_seq_cst> m_tail { 0 };
+        AK_CACHE_ALIGNED Atomic<size_t, AK::MemoryOrder::memory_order_seq_cst> m_head { 0 };
+        AK_CACHE_ALIGNED Atomic<size_t, AK::MemoryOrder::memory_order_seq_cst> m_head_protector { NumericLimits<size_t>::max() };
 
         alignas(ValueType) Array<ValueType, Size> m_data;
     };
@@ -208,7 +208,7 @@ private:
         SharedMemorySPCQ* shared_queue = is_new ? new (raw_mapping) SharedMemorySPCQ() : reinterpret_cast<SharedMemorySPCQ*>(raw_mapping);
 
         if (!shared_queue)
-            return Error::from_string_literal("Unexpected error when creating shared queue from raw memory"sv);
+            return Error::from_string_literal("Unexpected error when creating shared queue from raw memory");
 
         return SharedSingleProducerCircularQueue<T, Size> { move(name), adopt_ref(*new (nothrow) RefCountedSharedMemorySPCQ(shared_queue, fd)) };
     }

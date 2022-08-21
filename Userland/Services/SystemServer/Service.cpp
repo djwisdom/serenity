@@ -35,6 +35,10 @@ ErrorOr<void> Service::setup_socket(SocketDescriptor& socket)
 {
     VERIFY(socket.fd == -1);
 
+    // Note: The purpose of this syscall is to remove potential left-over of previous portal.
+    // The return value is discarded as sockets are not always there, and unlinking a non-existent path is considered as a failure.
+    (void)Core::System::unlink(socket.path);
+
     TRY(Core::Directory::create(LexicalPath(socket.path).parent(), Core::Directory::CreateDirectories::Yes));
 
     // Note: we use SOCK_CLOEXEC here to make sure we don't leak every socket to
@@ -207,7 +211,7 @@ void Service::spawn(int socket_fd)
             setenv("SOCKET_TAKEOVER", builder.to_string().characters(), true);
         }
 
-        if (m_account.has_value()) {
+        if (m_account.has_value() && m_account.value().uid() != getuid()) {
             auto& account = m_account.value();
             if (setgid(account.gid()) < 0 || setgroups(account.extra_gids().size(), account.extra_gids().data()) < 0 || setuid(account.uid()) < 0) {
                 dbgln("Failed to drop privileges (GID={}, UID={})\n", account.gid(), account.uid());
@@ -295,7 +299,7 @@ Service::Service(Core::ConfigFile const& config, StringView name)
 
     m_user = config.read_entry(name, "User");
     if (!m_user.is_null()) {
-        auto result = Core::Account::from_name(m_user.characters());
+        auto result = Core::Account::from_name(m_user.characters(), Core::Account::Read::PasswdOnly);
         if (result.is_error())
             warnln("Failed to resolve user {}: {}", m_user, result.error());
         else
@@ -318,7 +322,7 @@ Service::Service(Core::ConfigFile const& config, StringView name)
 
         // Need i here to iterate along with all other vectors.
         for (unsigned i = 0; i < socket_paths.size(); i++) {
-            String& path = socket_paths.at(i);
+            auto const path = Core::Account::parse_path_with_uid(socket_paths.at(i), m_account.has_value() ? m_account.value().uid() : Optional<uid_t> {});
 
             // Socket path (plus NUL) must fit into the structs sent to the Kernel.
             VERIFY(path.length() < UNIX_PATH_MAX);
@@ -411,8 +415,16 @@ ErrorOr<void> Service::determine_account(int fd)
     TRY(Core::System::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &creds, &creds_size));
 
     auto const directory_name = String::formatted("/proc/{}/", creds.pid);
-    auto const stat = TRY(Core::System::stat(directory_name.characters()));
+    auto const stat = TRY(Core::System::stat(directory_name));
 
-    m_account = TRY(Core::Account::from_uid(stat.st_uid));
+    m_account = TRY(Core::Account::from_uid(stat.st_uid, Core::Account::Read::PasswdOnly));
     return {};
+}
+
+Service::~Service()
+{
+    for (auto& socket : m_sockets) {
+        if (auto rc = remove(socket.path.characters()); rc != 0)
+            dbgln("{}", Error::from_errno(errno));
+    }
 }

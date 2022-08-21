@@ -346,8 +346,10 @@ FlatPtr DebugSession::single_step()
     constexpr u32 TRAP_FLAG = 0x100;
 #if ARCH(I386)
     regs.eflags |= TRAP_FLAG;
-#else
+#elif ARCH(X86_64)
     regs.rflags |= TRAP_FLAG;
+#else
+#    error Unknown architecture
 #endif
     set_registers(regs);
 
@@ -361,8 +363,10 @@ FlatPtr DebugSession::single_step()
     regs = get_registers();
 #if ARCH(I386)
     regs.eflags &= ~(TRAP_FLAG);
-#else
+#elif ARCH(X86_64)
     regs.rflags &= ~(TRAP_FLAG);
+#else
+#    error Unknown architecture
 #endif
     set_registers(regs);
     return regs.ip();
@@ -438,14 +442,14 @@ void DebugSession::update_loaded_libs()
         if (!rc)
             return {};
         auto lib_name = result.capture_group_matches.at(0).at(0).view.string_view().to_string();
-        if (lib_name.starts_with("/"))
+        if (lib_name.starts_with('/'))
             return lib_name;
         return String::formatted("/usr/lib/{}", lib_name);
     };
 
     vm_entries.for_each([&](auto& entry) {
         // TODO: check that region is executable
-        auto vm_name = entry.as_object().get("name").as_string();
+        auto vm_name = entry.as_object().get("name"sv).as_string();
 
         auto object_path = get_path_to_object(vm_name);
         if (!object_path.has_value())
@@ -455,7 +459,7 @@ void DebugSession::update_loaded_libs()
         if (Core::File::looks_like_shared_library(lib_name))
             lib_name = LexicalPath::basename(object_path.value());
 
-        FlatPtr base_address = entry.as_object().get("address").to_addr();
+        FlatPtr base_address = entry.as_object().get("address"sv).to_addr();
         if (auto it = m_loaded_libraries.find(lib_name); it != m_loaded_libraries.end()) {
             // We expect the VM regions to be sorted by address.
             VERIFY(base_address >= it->value->base_address);

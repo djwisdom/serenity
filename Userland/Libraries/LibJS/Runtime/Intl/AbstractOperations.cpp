@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2021-2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -425,13 +425,15 @@ LocaleResult resolve_locale(Vector<String> const& requested_locales, LocaleOptio
         // b. Assert: Type(foundLocaleData) is Record.
         // c. Let keyLocaleData be foundLocaleData.[[<key>]].
         // d. Assert: Type(keyLocaleData) is List.
-        auto key_locale_data = Unicode::get_keywords_for_locale(found_locale, key);
+        auto key_locale_data = Unicode::get_available_keyword_values(key);
 
         // e. Let value be keyLocaleData[0].
         // f. Assert: Type(value) is either String or Null.
+        // NOTE: ECMA-402 assumes keyLocaleData is sorted by locale preference. Our list is sorted
+        //       alphabetically, so we get the locale's preferred value from LibUnicode.
         Optional<String> value;
-        if (!key_locale_data.is_empty())
-            value = key_locale_data[0];
+        if (auto preference = Unicode::get_preferred_keyword_value_for_locale(found_locale, key); preference.has_value())
+            value = *preference;
 
         // g. Let supportedExtensionAddition be "".
         Optional<Unicode::Keyword> supported_extension_addition {};
@@ -604,6 +606,39 @@ ThrowCompletionOr<Object*> coerce_options_to_object(GlobalObject& global_object,
 }
 
 // NOTE: 9.2.13 GetOption has been removed and is being pulled in from ECMA-262 in the Temporal proposal.
+
+// 1.2.12 GetStringOrBooleanOption ( options, property, values, trueValue, falsyValue, fallback ), https://tc39.es/proposal-intl-numberformat-v3/out/negotiation/proposed.html#sec-getstringorbooleanoption
+ThrowCompletionOr<StringOrBoolean> get_string_or_boolean_option(GlobalObject& global_object, Object const& options, PropertyKey const& property, Span<StringView const> values, StringOrBoolean true_value, StringOrBoolean falsy_value, StringOrBoolean fallback)
+{
+    // 1. Let value be ? Get(options, property).
+    auto value = TRY(options.get(property));
+
+    // 2. If value is undefined, return fallback.
+    if (value.is_undefined())
+        return fallback;
+
+    // 3. If value is true, return trueValue.
+    if (value.is_boolean() && value.as_bool())
+        return true_value;
+
+    // 4. Let valueBoolean be ToBoolean(value).
+    auto value_boolean = value.to_boolean();
+
+    // 5. If valueBoolean is false, return falsyValue.
+    if (!value_boolean)
+        return falsy_value;
+
+    // 6. Let value be ? ToString(value).
+    auto value_string = TRY(value.to_string(global_object));
+
+    // 7. If values does not contain an element equal to value, return fallback.
+    auto it = find(values.begin(), values.end(), value_string);
+    if (it == values.end())
+        return fallback;
+
+    // 8. Return value.
+    return StringOrBoolean { *it };
+}
 
 // 9.2.14 DefaultNumberOption ( value, minimum, maximum, fallback ), https://tc39.es/ecma402/#sec-defaultnumberoption
 ThrowCompletionOr<Optional<int>> default_number_option(GlobalObject& global_object, Value value, int minimum, int maximum, Optional<int> fallback)

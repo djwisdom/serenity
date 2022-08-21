@@ -90,7 +90,7 @@ struct AK::Formatter<DisplayPattern> : Formatter<FormatString> {
     ErrorOr<void> format(FormatBuilder& builder, DisplayPattern const& patterns)
     {
         return Formatter<FormatString>::format(builder,
-            "{{ {}, {} }}",
+            "{{ {}, {} }}"sv,
             patterns.locale_pattern,
             patterns.locale_separator);
     }
@@ -135,7 +135,7 @@ struct AK::Formatter<ListPatterns> : Formatter<FormatString> {
     ErrorOr<void> format(FormatBuilder& builder, ListPatterns const& patterns)
     {
         return Formatter<FormatString>::format(builder,
-            "{{ ListPatternType::{}, Style::{}, {}, {}, {}, {} }}",
+            "{{ ListPatternType::{}, Style::{}, {}, {}, {}, {} }}"sv,
             format_identifier({}, patterns.type),
             format_identifier({}, patterns.style),
             patterns.start,
@@ -169,7 +169,7 @@ struct AK::Formatter<TextLayout> : Formatter<FormatString> {
     ErrorOr<void> format(FormatBuilder& builder, TextLayout const& patterns)
     {
         return Formatter<FormatString>::format(builder,
-            "{{ CharacterOrder::{} }}",
+            "{{ CharacterOrder::{} }}"sv,
             format_identifier({}, patterns.character_order));
     }
 };
@@ -413,7 +413,7 @@ static ErrorOr<void> preprocess_languages(String locale_path, UnicodeLocaleData&
 
 static ErrorOr<void> parse_unicode_extension_keywords(String bcp47_path, UnicodeLocaleData& locale_data)
 {
-    constexpr auto desired_keywords = Array { "ca"sv, "kf"sv, "kn"sv, "nu"sv };
+    constexpr auto desired_keywords = Array { "ca"sv, "co"sv, "hc"sv, "kf"sv, "kn"sv, "nu"sv };
     auto keywords = TRY(read_json_file(bcp47_path));
 
     auto const& keyword_object = keywords.as_object().get("keyword"sv);
@@ -425,13 +425,26 @@ static ErrorOr<void> parse_unicode_extension_keywords(String bcp47_path, Unicode
         if (!desired_keywords.span().contains_slow(key))
             return;
 
-        auto const& name = value.as_object().get("_alias");
+        auto const& name = value.as_object().get("_alias"sv);
         locale_data.keyword_names.set(key, name.as_string());
 
         auto& keywords = locale_data.keywords.ensure(key);
 
+        // FIXME: ECMA-402 requires the list of supported collation types to include "default", but
+        //        that type does not appear in collation.json.
+        if (key == "co" && !keywords.contains_slow("default"sv))
+            keywords.append("default"sv);
+
         value.as_object().for_each_member([&](auto const& keyword, auto const& properties) {
             if (!properties.is_object())
+                return;
+
+            // Filter out values not permitted by ECMA-402.
+            // https://tc39.es/ecma402/#sec-intl-collator-internal-slots
+            if (key == "co"sv && keyword.is_one_of("search"sv, "standard"sv))
+                return;
+            // https://tc39.es/ecma402/#sec-intl.numberformat-internal-slots
+            if (key == "nu"sv && keyword.is_one_of("finance"sv, "native"sv, "traditio"sv))
                 return;
 
             if (auto const& preferred = properties.as_object().get("_preferred"sv); preferred.is_string()) {
@@ -441,6 +454,7 @@ static ErrorOr<void> parse_unicode_extension_keywords(String bcp47_path, Unicode
 
             if (auto const& alias = properties.as_object().get("_alias"sv); alias.is_string())
                 locale_data.keyword_aliases.ensure(key).append({ keyword, alias.as_string() });
+
             keywords.append(keyword);
         });
     });
@@ -1103,8 +1117,8 @@ struct DisplayPatternImpl {
     DisplayPattern to_display_pattern() const
     {
         DisplayPattern display_patterns {};
-        display_patterns.locale_pattern = s_string_list[locale_pattern];
-        display_patterns.locale_separator = s_string_list[locale_separator];
+        display_patterns.locale_pattern = decode_string(locale_pattern);
+        display_patterns.locale_separator = decode_string(locale_separator);
 
         return display_patterns;
     }
@@ -1127,9 +1141,47 @@ struct TextLayout {
 };
 )~~~");
 
-    generate_available_values(generator, "get_available_calendars"sv, locale_data.keywords.find("ca"sv)->value, locale_data.keyword_aliases.find("ca"sv)->value);
-    generate_available_values(generator, "get_available_number_systems"sv, locale_data.keywords.find("nu"sv)->value, locale_data.keyword_aliases.find("nu"sv)->value);
+    generate_available_values(generator, "get_available_calendars"sv, locale_data.keywords.find("ca"sv)->value, locale_data.keyword_aliases.find("ca"sv)->value,
+        [](auto calendar) {
+            // FIXME: Remove this filter when we support all calendars.
+            return calendar.is_one_of("gregory"sv, "iso8601"sv);
+        });
+    generate_available_values(generator, "get_available_collation_case_orderings"sv, locale_data.keywords.find("kf"sv)->value, locale_data.keyword_aliases.find("kf"sv)->value);
+    generate_available_values(generator, "get_available_collation_numeric_orderings"sv, locale_data.keywords.find("kn"sv)->value, locale_data.keyword_aliases.find("kn"sv)->value);
+    generate_available_values(generator, "get_available_collation_types"sv, locale_data.keywords.find("co"sv)->value, locale_data.keyword_aliases.find("co"sv)->value,
+        [](auto collation) {
+            // FIXME: Remove this filter when we support all collation types.
+            return collation == "default"sv;
+        });
+    generate_available_values(generator, "get_available_hour_cycles"sv, locale_data.keywords.find("hc"sv)->value);
+    generate_available_values(generator, "get_available_number_systems"sv, locale_data.keywords.find("nu"sv)->value);
     generate_available_values(generator, "get_available_currencies"sv, locale_data.currencies);
+
+    generator.append(R"~~~(
+Span<StringView const> get_available_keyword_values(StringView key)
+{
+    auto key_value = key_from_string(key);
+    if (!key_value.has_value())
+        return {};
+
+    switch (*key_value) {
+    case Key::Ca:
+        return get_available_calendars();
+    case Key::Co:
+        return get_available_collation_types();
+    case Key::Hc:
+        return get_available_hour_cycles();
+    case Key::Kf:
+        return get_available_collation_case_orderings();
+    case Key::Kn:
+        return get_available_collation_numeric_orderings();
+    case Key::Nu:
+        return get_available_number_systems();
+    }
+
+    VERIFY_NOT_REACHED();
+}
+)~~~");
 
     locale_data.unique_display_patterns.generate(generator, "DisplayPatternImpl"sv, "s_display_patterns"sv, 30);
     locale_data.unique_language_lists.generate(generator, s_string_index_type, "s_language_lists"sv);
@@ -1156,7 +1208,7 @@ struct TextLayout {
         bool first = true;
         generator.append(", {");
         for (auto const& item : list) {
-            generator.append(first ? " " : ", ");
+            generator.append(first ? " "sv : ", "sv);
             generator.append(String::number(item));
             first = false;
         }
@@ -1176,7 +1228,7 @@ static constexpr Array<@type@, @size@> @name@ { {)~~~");
             auto const& value = map.find(key)->value;
             auto mapping = mapping_getter(value);
 
-            generator.append(first ? " " : ", ");
+            generator.append(first ? " "sv : ", "sv);
             generator.append(String::number(mapping));
             first = false;
         }
@@ -1214,13 +1266,13 @@ struct CanonicalLanguageID {
         LanguageID language_id {};
         language_id.variants.ensure_capacity(variants_size);
 
-        language_id.language = s_string_list[language];
+        language_id.language = decode_string(language);
         if (script != 0)
-            language_id.script = s_string_list[script];
+            language_id.script = decode_string(script);
         if (region != 0)
-            language_id.region = s_string_list[region];
+            language_id.region = decode_string(region);
         for (size_t i = 0; i < variants_size; ++i)
-            language_id.variants.append(s_string_list[variants[i]]);
+            language_id.variants.append(decode_string(variants[i]));
 
         return language_id;
     }
@@ -1232,7 +1284,7 @@ struct CanonicalLanguageID {
             return false;
 
         for (size_t i = 0; i < variants_size; ++i) {
-            if (s_string_list[variants[i]] != other_variants[i])
+            if (decode_string(variants[i]) != other_variants[i])
                 return false;
         }
 
@@ -1363,9 +1415,9 @@ static LanguageMapping const* resolve_likely_subtag(LanguageID const& language_i
         }
 
         for (auto const& map : s_likely_subtags) {
-            auto const& key_language = s_string_list[map.key.language];
-            auto const& key_script = s_string_list[map.key.script];
-            auto const& key_region  = s_string_list[map.key.region];
+            auto const& key_language = decode_string(map.key.language);
+            auto const& key_script = decode_string(map.key.script);
+            auto const& key_region  = decode_string(map.key.region);
 
             if (key_language != search_key.language)
                 continue;
@@ -1411,7 +1463,7 @@ Optional<StringView> get_locale_@enum_snake@_mapping(StringView locale, StringVi
     auto const& mappings = @unique_list@.at(mapping_index);
 
     auto @enum_snake@_string_index = mappings.at(@enum_snake@_index);
-    auto @enum_snake@_mapping = s_string_list.at(@enum_snake@_string_index);
+    auto @enum_snake@_mapping = decode_string(@enum_snake@_string_index);
 
     if (@enum_snake@_mapping.is_empty())
         return {};
@@ -1441,7 +1493,7 @@ Optional<StringView> get_locale_@enum_snake@_mapping(StringView locale, StringVi
 
         ValueFromStringOptions options {};
         options.return_type = "StringView"sv;
-        options.return_format = "s_string_list[{}]"sv;
+        options.return_format = "decode_string({})"sv;
 
         generate_value_from_string(generator, "resolve_{}_alias"sv, s_string_index_type, enum_snake, move(hashes), options);
     };
@@ -1495,23 +1547,8 @@ Optional<StringView> get_locale_@enum_snake@_mapping(StringView locale, StringVi
     generate_value_to_string(generator, "{}_to_string"sv, "CharacterOrder"sv, "character_order"sv, format_identifier, locale_data.character_orders);
 
     generator.append(R"~~~(
-Vector<StringView> get_keywords_for_locale(StringView locale, StringView key)
+static Span<@string_index_type@ const> find_keyword_indices(StringView locale, StringView key)
 {
-    // Hour cycle keywords are region-based rather than locale-based, so they need to be handled specially.
-    // FIXME: Calendar keywords are also region-based, and will need to be handled here when we support non-Gregorian calendars:
-    //        https://github.com/unicode-org/cldr-json/blob/main/cldr-json/cldr-core/supplemental/calendarPreferenceData.json
-    if (key == "hc"sv) {
-        auto hour_cycles = get_locale_hour_cycles(locale);
-
-        Vector<StringView> values;
-        values.ensure_capacity(hour_cycles.size());
-
-        for (auto hour_cycle : hour_cycles)
-            values.unchecked_append(hour_cycle_to_string(hour_cycle));
-
-        return values;
-    }
-
     auto locale_value = locale_from_string(locale);
     if (!locale_value.has_value())
         return {};
@@ -1540,13 +1577,66 @@ Vector<StringView> get_keywords_for_locale(StringView locale, StringView key)
         VERIFY_NOT_REACHED();
     }
 
-    auto keyword_indices = s_keyword_lists.at(keywords_index);
+    return s_keyword_lists.at(keywords_index);
+}
+
+Optional<StringView> get_preferred_keyword_value_for_locale(StringView locale, StringView key)
+{
+    // Hour cycle keywords are region-based rather than locale-based, so they need to be handled specially.
+    // FIXME: Calendar keywords are also region-based, and will need to be handled here when we support non-Gregorian calendars:
+    //        https://github.com/unicode-org/cldr-json/blob/main/cldr-json/cldr-core/supplemental/calendarPreferenceData.json
+    if (key == "hc"sv) {
+        auto hour_cycles = get_locale_hour_cycles(locale);
+        if (hour_cycles.is_empty())
+            return {};
+
+        return hour_cycle_to_string(hour_cycles[0]);
+    }
+
+    // FIXME: Generate locale-preferred collation data when available in the CLDR.
+    if (key == "co"sv) {
+        auto collations = get_available_collation_types();
+        if (collations.is_empty())
+            return {};
+
+        return collations[0];
+    }
+
+    auto keyword_indices = find_keyword_indices(locale, key);
+    if (keyword_indices.is_empty())
+        return {};
+
+    return decode_string(keyword_indices[0]);
+}
+
+Vector<StringView> get_keywords_for_locale(StringView locale, StringView key)
+{
+    // Hour cycle keywords are region-based rather than locale-based, so they need to be handled specially.
+    // FIXME: Calendar keywords are also region-based, and will need to be handled here when we support non-Gregorian calendars:
+    //        https://github.com/unicode-org/cldr-json/blob/main/cldr-json/cldr-core/supplemental/calendarPreferenceData.json
+    if (key == "hc"sv) {
+        auto hour_cycles = get_locale_hour_cycles(locale);
+
+        Vector<StringView> values;
+        values.ensure_capacity(hour_cycles.size());
+
+        for (auto hour_cycle : hour_cycles)
+            values.unchecked_append(hour_cycle_to_string(hour_cycle));
+
+        return values;
+    }
+
+    // FIXME: Generate locale-preferred collation data when available in the CLDR.
+    if (key == "co"sv)
+        return Vector<StringView> { get_available_collation_types() };
+
+    auto keyword_indices = find_keyword_indices(locale, key);
 
     Vector<StringView> keywords;
     keywords.ensure_capacity(keyword_indices.size());
 
     for (auto keyword : keyword_indices)
-        keywords.unchecked_append(s_string_list[keyword]);
+        keywords.unchecked_append(decode_string(keyword));
 
     return keywords;
 }
@@ -1583,10 +1673,10 @@ Optional<ListPatterns> get_locale_list_patterns(StringView locale, StringView li
         auto const& list_patterns = s_list_patterns.at(list_patterns_index);
 
         if ((list_patterns.type == type_value) && (list_patterns.style == list_pattern_style)) {
-            auto const& start = s_string_list[list_patterns.start];
-            auto const& middle = s_string_list[list_patterns.middle];
-            auto const& end = s_string_list[list_patterns.end];
-            auto const& pair = s_string_list[list_patterns.pair];
+            auto const& start = decode_string(list_patterns.start);
+            auto const& middle = decode_string(list_patterns.middle);
+            auto const& end = decode_string(list_patterns.end);
+            auto const& pair = decode_string(list_patterns.pair);
 
             return ListPatterns { start, middle, end, pair };
         }
@@ -1617,9 +1707,9 @@ Optional<CharacterOrder> character_order_for_locale(StringView locale)
 void resolve_complex_language_aliases(LanguageID& language_id)
 {
     for (auto const& map : s_complex_alias) {
-        auto const& key_language = s_string_list[map.key.language];
-        auto const& key_script = s_string_list[map.key.script];
-        auto const& key_region  = s_string_list[map.key.region];
+        auto const& key_language = decode_string(map.key.language);
+        auto const& key_script = decode_string(map.key.script);
+        auto const& key_region  = decode_string(map.key.region);
 
         if ((key_language != language_id.language) && (key_language != "und"sv))
             continue;
@@ -1655,12 +1745,12 @@ Optional<LanguageID> add_likely_subtags(LanguageID const& language_id)
 
     auto maximized = language_id;
 
-    auto const& key_script = s_string_list[likely_subtag->key.script];
-    auto const& key_region = s_string_list[likely_subtag->key.region];
+    auto const& key_script = decode_string(likely_subtag->key.script);
+    auto const& key_region = decode_string(likely_subtag->key.region);
 
-    auto const& alias_language = s_string_list[likely_subtag->alias.language];
-    auto const& alias_script = s_string_list[likely_subtag->alias.script];
-    auto const& alias_region = s_string_list[likely_subtag->alias.region];
+    auto const& alias_language = decode_string(likely_subtag->alias.language);
+    auto const& alias_script = decode_string(likely_subtag->alias.script);
+    auto const& alias_region = decode_string(likely_subtag->alias.region);
 
     if (maximized.language == "und"sv)
         maximized.language = alias_language;
@@ -1675,7 +1765,7 @@ Optional<LanguageID> add_likely_subtags(LanguageID const& language_id)
 Optional<String> resolve_most_likely_territory(LanguageID const& language_id)
 {
     if (auto const* likely_subtag = resolve_likely_subtag(language_id); likely_subtag != nullptr)
-        return s_string_list[likely_subtag->alias.region];
+        return decode_string(likely_subtag->alias.region);
     return {};
 }
 

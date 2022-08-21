@@ -180,39 +180,39 @@ void Path::close_all_subpaths()
 String Path::to_string() const
 {
     StringBuilder builder;
-    builder.append("Path { ");
+    builder.append("Path { "sv);
     for (auto& segment : m_segments) {
         switch (segment.type()) {
         case Segment::Type::MoveTo:
-            builder.append("MoveTo");
+            builder.append("MoveTo"sv);
             break;
         case Segment::Type::LineTo:
-            builder.append("LineTo");
+            builder.append("LineTo"sv);
             break;
         case Segment::Type::QuadraticBezierCurveTo:
-            builder.append("QuadraticBezierCurveTo");
+            builder.append("QuadraticBezierCurveTo"sv);
             break;
         case Segment::Type::CubicBezierCurveTo:
-            builder.append("CubicBezierCurveTo");
+            builder.append("CubicBezierCurveTo"sv);
             break;
         case Segment::Type::EllipticalArcTo:
-            builder.append("EllipticalArcTo");
+            builder.append("EllipticalArcTo"sv);
             break;
         case Segment::Type::Invalid:
-            builder.append("Invalid");
+            builder.append("Invalid"sv);
             break;
         }
         builder.appendff("({}", segment.point());
 
         switch (segment.type()) {
         case Segment::Type::QuadraticBezierCurveTo:
-            builder.append(", ");
+            builder.append(", "sv);
             builder.append(static_cast<QuadraticBezierCurveSegment const&>(segment).through().to_string());
             break;
         case Segment::Type::CubicBezierCurveTo:
-            builder.append(", ");
+            builder.append(", "sv);
             builder.append(static_cast<CubicBezierCurveSegment const&>(segment).through_0().to_string());
-            builder.append(", ");
+            builder.append(", "sv);
             builder.append(static_cast<CubicBezierCurveSegment const&>(segment).through_1().to_string());
             break;
         case Segment::Type::EllipticalArcTo: {
@@ -229,9 +229,9 @@ String Path::to_string() const
             break;
         }
 
-        builder.append(") ");
+        builder.append(") "sv);
     }
-    builder.append("}");
+    builder.append('}');
     return builder.to_string();
 }
 
@@ -330,6 +330,50 @@ void Path::segmentize_path()
 
     m_split_lines = move(segments);
     m_bounding_box = Gfx::FloatRect { min_x, min_y, max_x - min_x, max_y - min_y };
+}
+
+Path Path::copy_transformed(Gfx::AffineTransform const& transform) const
+{
+    Path result;
+
+    for (auto const& segment : m_segments) {
+        switch (segment.type()) {
+        case Segment::Type::MoveTo:
+            result.move_to(transform.map(segment.point()));
+            break;
+        case Segment::Type::LineTo: {
+            result.line_to(transform.map(segment.point()));
+            break;
+        }
+        case Segment::Type::QuadraticBezierCurveTo: {
+            auto const& quadratic_segment = static_cast<QuadraticBezierCurveSegment const&>(segment);
+            result.quadratic_bezier_curve_to(transform.map(quadratic_segment.through()), transform.map(segment.point()));
+            break;
+        }
+        case Segment::Type::CubicBezierCurveTo: {
+            auto const& cubic_segment = static_cast<CubicBezierCurveSegment const&>(segment);
+            result.cubic_bezier_curve_to(transform.map(cubic_segment.through_0()), transform.map(cubic_segment.through_1()), transform.map(segment.point()));
+            break;
+        }
+        case Segment::Type::EllipticalArcTo: {
+            auto const& arc_segment = static_cast<EllipticalArcSegment const&>(segment);
+            result.elliptical_arc_to(
+                transform.map(segment.point()),
+                transform.map(arc_segment.center()),
+                transform.map(arc_segment.radii()),
+                arc_segment.x_axis_rotation(),
+                arc_segment.theta_1(),
+                arc_segment.theta_delta(),
+                arc_segment.large_arc(),
+                arc_segment.sweep());
+            break;
+        }
+        case Segment::Type::Invalid:
+            VERIFY_NOT_REACHED();
+        }
+    }
+
+    return result;
 }
 
 }

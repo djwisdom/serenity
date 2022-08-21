@@ -30,11 +30,14 @@ Layout::FrameBox const& NestedBrowsingContextPaintable::layout_box() const
 
 void NestedBrowsingContextPaintable::paint(PaintContext& context, PaintPhase phase) const
 {
+    if (!layout_box().is_visible())
+        return;
+
     PaintableBox::paint(context, phase);
 
     if (phase == PaintPhase::Foreground) {
         auto clip_rect = absolute_rect().to_rounded<int>();
-        ScopedCornerRadiusClip corner_clip { context.painter(), clip_rect, normalized_border_radii_data() };
+        ScopedCornerRadiusClip corner_clip { context.painter(), clip_rect, normalized_border_radii_data(ShrinkRadiiForBorders::Yes) };
 
         auto* hosted_document = layout_box().dom_node().content_document_without_origin_check();
         if (!hosted_document)

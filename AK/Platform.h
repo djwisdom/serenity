@@ -27,6 +27,21 @@
 #    define AK_OS_BSD_GENERIC
 #endif
 
+// FIXME: Remove clang-format suppression after https://github.com/llvm/llvm-project/issues/56602 resolved
+// clang-format off
+#if defined(__ANDROID__)
+#    define STR(x) __STR(x)
+#    define __STR(x) #x
+#    if __ANDROID_API__ < 30
+#        pragma message "Invalid android API " STR(__ANDROID_API__)
+#        error "Build configuration not tested on configured Android API version"
+#    endif
+#    undef STR
+#    undef __STR
+#    define AK_OS_ANDROID
+#endif
+// clang-format on
+
 #define ARCH(arch) (defined(AK_ARCH_##arch) && AK_ARCH_##arch)
 
 #if ARCH(I386) || ARCH(X86_64)
@@ -111,15 +126,15 @@ extern "C" {
 #    define CLOCK_REALTIME_COARSE CLOCK_REALTIME
 #endif
 
-#ifndef SYSTEM_CACHE_ALIGNMENT_SIZE
+#ifndef AK_SYSTEM_CACHE_ALIGNMENT_SIZE
 #    if ARCH(AARCH64) || ARCH(x86_64)
-#        define SYSTEM_CACHE_ALIGNMENT_SIZE 64
+#        define AK_SYSTEM_CACHE_ALIGNMENT_SIZE 64
 #    else
-#        define SYSTEM_CACHE_ALIGNMENT_SIZE 128
+#        define AK_SYSTEM_CACHE_ALIGNMENT_SIZE 128
 #    endif
-#endif /* SYSTEM_CACHE_ALIGNMENT_SIZE */
+#endif /* AK_SYSTEM_CACHE_ALIGNMENT_SIZE */
 
-#ifdef CACHE_ALIGNED
-#    undef CACHE_ALIGNED
+#ifdef AK_CACHE_ALIGNED
+#    undef AK_CACHE_ALIGNED
 #endif
-#define CACHE_ALIGNED alignas(SYSTEM_CACHE_ALIGNMENT_SIZE)
+#define AK_CACHE_ALIGNED alignas(AK_SYSTEM_CACHE_ALIGNMENT_SIZE)

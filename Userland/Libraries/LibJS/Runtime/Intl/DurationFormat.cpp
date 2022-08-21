@@ -299,7 +299,7 @@ ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(GlobalObject& g
 //  here, but at some point we should split the the NumberFormat exporter to export both formats of the data.
 static String convert_number_format_pattern_to_duration_format_template(Unicode::NumberFormat const& number_format)
 {
-    auto result = number_format.zero_format.replace("{number}", "{0}", ReplaceMode::FirstOnly);
+    auto result = number_format.zero_format.replace("{number}"sv, "{0}"sv, ReplaceMode::FirstOnly);
 
     for (size_t i = 0; i < number_format.identifiers.size(); ++i)
         result = result.replace(String::formatted("{{unitIdentifier:{}}}", i), number_format.identifiers[i], ReplaceMode::FirstOnly);
@@ -428,20 +428,25 @@ ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(Gl
                 auto separator = Unicode::get_number_system_symbol(data_locale, duration_format.numbering_system(), Unicode::NumericSymbol::TimeSeparator).value_or(":"sv);
 
                 // 2. Append the new Record { [[Type]]: "literal", [[Value]]: separator} to the end of result.
-                result.append({ "literal", separator });
+                result.append({ "literal"sv, separator });
             }
         }
 
         // t. Else,
         else {
             // i. Let pr be ? Construct(%PluralRules%, « durationFormat.[[Locale]] »).
+            auto* plural_rules = TRY(construct(global_object, *global_object.intl_plural_rules_constructor(), js_string(vm, duration_format.locale())));
+
             // ii. Let prv be ! ResolvePlural(pr, value).
-            // FIXME: Use ResolvePlural when Intl.PluralRules is implemented.
+            auto plurality = resolve_plural(static_cast<PluralRules&>(*plural_rules), value);
+
             auto formats = Unicode::get_unit_formats(data_locale, duration_instances_component.unit_singular, static_cast<Unicode::Style>(style));
-            auto pattern = Unicode::select_pattern_with_plurality(formats, value.as_double()).release_value();
+            auto pattern = formats.find_if([&](auto& p) { return p.plurality == plurality; });
+            if (pattern == formats.end())
+                continue;
 
             // iii. Let template be the current value of the prv slot of the unit slot of the style slot of dataLocaleData.[[formats]].
-            auto template_ = convert_number_format_pattern_to_duration_format_template(pattern);
+            auto template_ = convert_number_format_pattern_to_duration_format_template(*pattern);
 
             // FIXME: MakePartsList takes a list, not a string, so likely missing spec step: Let fv be ! PartitionNumberPattern(nf, value).
             auto formatted_value = partition_number_pattern(global_object, *number_format, value);

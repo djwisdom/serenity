@@ -185,7 +185,7 @@ ErrorOr<void> File::open_path(StringView filename, mode_t permissions)
     VERIFY(m_fd == -1);
     auto flags = open_mode_to_options(m_mode);
 
-    m_fd = TRY(System::open(filename.characters_without_null_termination(), flags, permissions));
+    m_fd = TRY(System::open(filename, flags, permissions));
     return {};
 }
 
@@ -333,10 +333,11 @@ ErrorOr<IPv4Address> Socket::resolve_host(String const& host, SocketType type)
     int rc = getaddrinfo(host.characters(), nullptr, &hints, &results);
     if (rc != 0) {
         if (rc == EAI_SYSTEM) {
-            return Error::from_syscall("getaddrinfo", -errno);
+            return Error::from_syscall("getaddrinfo"sv, -errno);
         }
 
-        return Error::from_string_literal(gai_strerror(rc));
+        auto const* error_string = gai_strerror(rc);
+        return Error::from_string_view({ error_string, strlen(error_string) });
     }
 
     auto* socket_address = bit_cast<struct sockaddr_in*>(results->ai_addr);
@@ -422,7 +423,7 @@ ErrorOr<bool> PosixSocketHelper::can_read_without_blocking(int timeout) const
     } while (rc < 0 && errno == EINTR);
 
     if (rc < 0) {
-        return Error::from_syscall("poll", -errno);
+        return Error::from_syscall("poll"sv, -errno);
     }
 
     return (the_fd.revents & POLLIN) > 0;

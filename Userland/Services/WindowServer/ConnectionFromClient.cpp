@@ -53,7 +53,7 @@ ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSock
     s_connections->set(client_id, *this);
 
     auto& wm = WindowManager::the();
-    async_fast_greet(Screen::rects(), Screen::main().index(), wm.window_stack_rows(), wm.window_stack_columns(), Gfx::current_system_theme_buffer(), Gfx::FontDatabase::default_font_query(), Gfx::FontDatabase::fixed_width_font_query(), client_id);
+    async_fast_greet(Screen::rects(), Screen::main().index(), wm.window_stack_rows(), wm.window_stack_columns(), Gfx::current_system_theme_buffer(), Gfx::FontDatabase::default_font_query(), Gfx::FontDatabase::fixed_width_font_query(), Gfx::FontDatabase::window_title_font_query(), wm.system_effects().effects(), client_id);
 }
 
 ConnectionFromClient::~ConnectionFromClient()
@@ -305,10 +305,9 @@ void ConnectionFromClient::set_window_opacity(i32 window_id, float opacity)
     it->value->set_opacity(opacity);
 }
 
-void ConnectionFromClient::set_wallpaper(Gfx::ShareableBitmap const& bitmap)
+Messages::WindowServer::SetWallpaperResponse ConnectionFromClient::set_wallpaper(Gfx::ShareableBitmap const& bitmap)
 {
-    Compositor::the().set_wallpaper(bitmap.bitmap());
-    async_set_wallpaper_finished(true);
+    return Compositor::the().set_wallpaper(bitmap.bitmap());
 }
 
 void ConnectionFromClient::set_background_color(String const& background_color)
@@ -467,6 +466,36 @@ Messages::WindowServer::GetWindowRectResponse ConnectionFromClient::get_window_r
     return it->value->rect();
 }
 
+static Gfx::IntSize calculate_minimum_size_for_window(Window const& window)
+{
+    // NOTE: Windows with a title bar have a minimum size enforced by the system,
+    //       because we want to always keep their title buttons accessible.
+    if (window.type() == WindowType::Normal || window.type() == WindowType::ToolWindow) {
+        auto palette = WindowManager::the().palette();
+
+        int required_width = 0;
+        // Padding on left and right of window title content.
+        // FIXME: This seems like it should be defined in the theme.
+        required_width += 2 + 2;
+        // App icon
+        required_width += 16;
+        // Padding between icon and buttons
+        required_width += 2;
+        // Close button
+        required_width += palette.window_title_button_width();
+        // Maximize button
+        if (window.is_resizable())
+            required_width += palette.window_title_button_width();
+        // Minimize button
+        if (window.is_minimizable())
+            required_width += palette.window_title_button_width();
+
+        return { required_width, 0 };
+    }
+
+    return { 0, 0 };
+}
+
 void ConnectionFromClient::set_window_minimum_size(i32 window_id, Gfx::IntSize const& size)
 {
     auto it = m_windows.find(window_id);
@@ -480,7 +509,9 @@ void ConnectionFromClient::set_window_minimum_size(i32 window_id, Gfx::IntSize c
         return;
     }
 
-    window.set_minimum_size(size);
+    auto system_window_minimum_size = calculate_minimum_size_for_window(window);
+    window.set_minimum_size({ max(size.width(), system_window_minimum_size.width()),
+        max(size.height(), system_window_minimum_size.height()) });
 
     if (window.width() < window.minimum_size().width() || window.height() < window.minimum_size().height()) {
         // New minimum size is larger than the current window size, resize accordingly.
@@ -569,7 +600,9 @@ void ConnectionFromClient::create_window(i32 window_id, Gfx::IntRect const& rect
             new_rect = { WindowManager::the().get_recommended_window_position({ 100, 100 }), rect.size() };
             window->set_default_positioned(true);
         }
-        window->set_minimum_size(minimum_size);
+        auto system_window_minimum_size = calculate_minimum_size_for_window(window);
+        window->set_minimum_size({ max(minimum_size.width(), system_window_minimum_size.width()),
+            max(minimum_size.height(), system_window_minimum_size.height()) });
         bool did_size_clamp = window->apply_minimum_size(new_rect);
         window->set_rect(new_rect);
         window->nudge_into_desktop(nullptr);
@@ -784,7 +817,7 @@ void ConnectionFromClient::start_window_resize(i32 window_id)
 Messages::WindowServer::StartDragResponse ConnectionFromClient::start_drag(String const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap)
 {
     auto& wm = WindowManager::the();
-    if (wm.dnd_client())
+    if (wm.dnd_client() || !(wm.last_processed_buttons() & MouseButton::Primary))
         return false;
 
     wm.start_dnd_drag(*this, text, drag_bitmap.bitmap(), Core::MimeData::construct(mime_data));
@@ -857,7 +890,7 @@ Messages::WindowServer::GetCursorThemeResponse ConnectionFromClient::get_cursor_
     return name;
 }
 
-Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_fonts(String const& default_font_query, String const& fixed_width_font_query)
+Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_fonts(String const& default_font_query, String const& fixed_width_font_query, String const& window_title_font_query)
 {
     if (!Gfx::FontDatabase::the().get_by_name(default_font_query)
         || !Gfx::FontDatabase::the().get_by_name(fixed_width_font_query)) {
@@ -869,9 +902,10 @@ Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_
 
     Gfx::FontDatabase::set_default_font_query(default_font_query);
     Gfx::FontDatabase::set_fixed_width_font_query(fixed_width_font_query);
+    Gfx::FontDatabase::set_window_title_font_query(window_title_font_query);
 
     ConnectionFromClient::for_each_client([&](auto& client) {
-        client.async_update_system_fonts(default_font_query, fixed_width_font_query);
+        client.async_update_system_fonts(default_font_query, fixed_width_font_query, window_title_font_query);
     });
 
     WindowManager::the().invalidate_after_theme_or_font_change();
@@ -884,7 +918,16 @@ Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_
     auto wm_config = wm_config_or_error.release_value();
     wm_config->write_entry("Fonts", "Default", default_font_query);
     wm_config->write_entry("Fonts", "FixedWidth", fixed_width_font_query);
+    wm_config->write_entry("Fonts", "WindowTitle", window_title_font_query);
     return true;
+}
+
+void ConnectionFromClient::set_system_effects(Vector<bool> const& effects, u8 geometry)
+{
+    WindowManager::the().apply_system_effects(effects, static_cast<ShowGeometry>(geometry));
+    ConnectionFromClient::for_each_client([&](auto& client) {
+        client.async_update_system_effects(effects);
+    });
 }
 
 void ConnectionFromClient::set_window_base_size_and_size_increment(i32 window_id, Gfx::IntSize const& base_size, Gfx::IntSize const& size_increment)
@@ -1282,6 +1325,31 @@ void ConnectionFromClient::remove_window_stealing(i32 window_id)
         did_misbehave("RemoveWindowStealing: Bad window ID");
 
     window->remove_all_stealing();
+}
+
+void ConnectionFromClient::notify_about_theme_change()
+{
+    // Recalculate minimum size for each window, using the new theme metrics.
+    // FIXME: We only ever increase the minimum size, which means that if you go from a theme with large buttons
+    //        (eg Basalt) to one with smaller buttons (eg Default) then the minimum size will remain large. This
+    //        only happens with pre-existing windows, and it's unlikely that you will ever have windows that are
+    //        so small, so it's probably fine, but it is technically a bug. :^)
+    for_each_window([](auto& window) -> IterationDecision {
+        auto system_window_minimum_size = calculate_minimum_size_for_window(window);
+
+        auto old_minimum_size = window.minimum_size();
+        auto new_rect = window.rect();
+
+        window.set_minimum_size({ max(old_minimum_size.width(), system_window_minimum_size.width()),
+            max(old_minimum_size.height(), system_window_minimum_size.height()) });
+        if (window.apply_minimum_size(new_rect)) {
+            window.set_rect(new_rect);
+            window.refresh_client_size();
+        }
+
+        return IterationDecision::Continue;
+    });
+    async_update_system_theme(Gfx::current_system_theme_buffer());
 }
 
 }

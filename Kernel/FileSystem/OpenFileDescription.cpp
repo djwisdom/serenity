@@ -22,19 +22,19 @@
 
 namespace Kernel {
 
-ErrorOr<NonnullRefPtr<OpenFileDescription>> OpenFileDescription::try_create(Custody& custody)
+ErrorOr<NonnullLockRefPtr<OpenFileDescription>> OpenFileDescription::try_create(Custody& custody)
 {
     auto inode_file = TRY(InodeFile::create(custody.inode()));
-    auto description = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) OpenFileDescription(move(inode_file))));
+    auto description = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) OpenFileDescription(move(inode_file))));
 
     description->m_custody = custody;
     TRY(description->attach());
     return description;
 }
 
-ErrorOr<NonnullRefPtr<OpenFileDescription>> OpenFileDescription::try_create(File& file)
+ErrorOr<NonnullLockRefPtr<OpenFileDescription>> OpenFileDescription::try_create(File& file)
 {
-    auto description = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) OpenFileDescription(file)));
+    auto description = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) OpenFileDescription(file)));
     TRY(description->attach());
     return description;
 }
@@ -445,12 +445,12 @@ FileBlockerSet& OpenFileDescription::blocker_set()
     return m_file->blocker_set();
 }
 
-ErrorOr<void> OpenFileDescription::apply_flock(Process const& process, Userspace<flock const*> lock)
+ErrorOr<void> OpenFileDescription::apply_flock(Process const& process, Userspace<flock const*> lock, ShouldBlock should_block)
 {
     if (!m_inode)
         return EBADF;
 
-    return m_inode->apply_flock(process, *this, lock);
+    return m_inode->apply_flock(process, *this, lock, should_block);
 }
 
 ErrorOr<void> OpenFileDescription::get_flock(Userspace<flock*> lock) const

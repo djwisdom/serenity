@@ -76,21 +76,24 @@ auto const DATETIME_NANOSECONDS_MAX = "8640000086400000000000"_sbigint;
 // 5.5.2 ISODateTimeWithinLimits ( year, month, day, hour, minute, second, millisecond, microsecond, nanosecond ), https://tc39.es/proposal-temporal/#sec-temporal-isodatetimewithinlimits
 bool iso_date_time_within_limits(GlobalObject& global_object, i32 year, u8 month, u8 day, u8 hour, u8 minute, u8 second, u16 millisecond, u16 microsecond, u16 nanosecond)
 {
-    // 1. Let ns be ℝ(GetEpochFromISOParts(year, month, day, hour, minute, second, millisecond, microsecond, nanosecond)).
+    // 1. Assert: IsValidISODate(year, month, day) is true.
+    VERIFY(is_valid_iso_date(year, month, day));
+
+    // 2. Let ns be ℝ(GetEpochFromISOParts(year, month, day, hour, minute, second, millisecond, microsecond, nanosecond)).
     auto ns = get_epoch_from_iso_parts(global_object, year, month, day, hour, minute, second, millisecond, microsecond, nanosecond)->big_integer();
 
-    // 2. If ns ≤ nsMinInstant - nsPerDay, then
+    // 3. If ns ≤ nsMinInstant - nsPerDay, then
     if (ns <= DATETIME_NANOSECONDS_MIN) {
         // a. Return false.
         return false;
     }
 
-    // 3. If ns ≥ nsMaxInstant + nsPerDay, then
+    // 4. If ns ≥ nsMaxInstant + nsPerDay, then
     if (ns >= DATETIME_NANOSECONDS_MAX) {
         // a. Return false.
         return false;
     }
-    // 4. Return true.
+    // 5. Return true.
     return true;
 }
 
@@ -364,7 +367,7 @@ ThrowCompletionOr<DurationRecord> difference_iso_date_time(GlobalObject& global_
     VERIFY(iso_date_time_within_limits(global_object, year2, month2, day2, hour2, minute2, second2, millisecond2, microsecond2, nanosecond2));
 
     // 3. Let timeDifference be ! DifferenceTime(h1, min1, s1, ms1, mus1, ns1, h2, min2, s2, ms2, mus2, ns2).
-    auto time_difference = difference_time(hour1, minute1, second1, millisecond1, microsecond1, nanosecond1, hour2, minute2, second2, millisecond2, microsecond2, nanosecond2);
+    auto time_difference = difference_time(global_object, hour1, minute1, second1, millisecond1, microsecond1, nanosecond1, hour2, minute2, second2, millisecond2, microsecond2, nanosecond2);
 
     // 4. Let timeSign be ! DurationSign(0, 0, 0, 0, timeDifference.[[Hours]], timeDifference.[[Minutes]], timeDifference.[[Seconds]], timeDifference.[[Milliseconds]], timeDifference.[[Microseconds]], timeDifference.[[Nanoseconds]]).
     auto time_sign = duration_sign(0, 0, 0, 0, time_difference.hours, time_difference.minutes, time_difference.seconds, time_difference.milliseconds, time_difference.microseconds, time_difference.nanoseconds);

@@ -95,6 +95,8 @@ public:
     bool is_displayonly() const { return m_mode == DisplayOnly; }
     void set_mode(const Mode);
 
+    void set_editing_cursor();
+
     bool is_ruler_visible() const { return m_ruler_visible; }
     void set_ruler_visible(bool);
 
@@ -151,6 +153,9 @@ public:
     void select_current_line();
     virtual void undo();
     virtual void redo();
+    bool is_indenting_selection();
+    void indent_selection();
+    void unindent_selection();
 
     Function<void()> on_change;
     Function<void(bool modified)> on_modified_change;
@@ -225,6 +230,12 @@ public:
     Vector<TextRange> const& search_results() const { return m_search_results; }
 
     virtual Optional<UISize> calculated_min_size() const override;
+
+    template<class T, class... Args>
+    inline void execute(Badge<EditingEngine>, Args&&... args)
+    {
+        execute<T>(forward<Args>(args)...);
+    }
 
 protected:
     explicit TextEditor(Type = Type::MultiLine);
@@ -370,7 +381,7 @@ private:
     bool m_cursor_line_highlighting { true };
     size_t m_soft_tab_width { 4 };
     int m_horizontal_content_padding { 3 };
-    TextRange m_selection;
+    TextRange m_selection {};
 
     Optional<u32> m_substitution_code_point;
     mutable OwnPtr<Vector<u32>> m_substitution_string_data; // Used to avoid repeated String construction.

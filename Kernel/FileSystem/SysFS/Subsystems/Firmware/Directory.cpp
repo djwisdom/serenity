@@ -15,17 +15,20 @@ namespace Kernel {
 
 UNMAP_AFTER_INIT void FirmwareSysFSDirectory::initialize()
 {
-    auto firmware_directory = adopt_ref_if_nonnull(new (nothrow) FirmwareSysFSDirectory()).release_nonnull();
+    auto firmware_directory = adopt_lock_ref_if_nonnull(new (nothrow) FirmwareSysFSDirectory()).release_nonnull();
     SysFSComponentRegistry::the().register_new_component(firmware_directory);
     firmware_directory->create_components();
 }
 
 void FirmwareSysFSDirectory::create_components()
 {
-    m_components.append(BIOSSysFSDirectory::must_create(*this));
-    if (ACPI::is_enabled())
-        m_components.append(ACPI::ACPISysFSDirectory::must_create(*this));
-    m_components.append(PowerStateSwitchNode::must_create(*this));
+    MUST(m_child_components.with([&](auto& list) -> ErrorOr<void> {
+        list.append(BIOSSysFSDirectory::must_create(*this));
+        if (ACPI::is_enabled())
+            list.append(ACPI::ACPISysFSDirectory::must_create(*this));
+        list.append(PowerStateSwitchNode::must_create(*this));
+        return {};
+    }));
 }
 
 UNMAP_AFTER_INIT FirmwareSysFSDirectory::FirmwareSysFSDirectory()

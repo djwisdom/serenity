@@ -6,17 +6,17 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/IntrusiveList.h>
-#include <AK/RefCounted.h>
-#include <AK/Weakable.h>
+#include <Kernel/Library/LockWeakable.h>
 #include <Kernel/Locking/SpinlockProtected.h>
 #include <Kernel/UnixTypes.h>
 
 namespace Kernel {
 
 class ProcessGroup
-    : public RefCounted<ProcessGroup>
-    , public Weakable<ProcessGroup> {
+    : public AtomicRefCounted<ProcessGroup>
+    , public LockWeakable<ProcessGroup> {
 
     AK_MAKE_NONMOVABLE(ProcessGroup);
     AK_MAKE_NONCOPYABLE(ProcessGroup);
@@ -24,9 +24,9 @@ class ProcessGroup
 public:
     ~ProcessGroup();
 
-    static ErrorOr<NonnullRefPtr<ProcessGroup>> try_create(ProcessGroupID);
-    static ErrorOr<NonnullRefPtr<ProcessGroup>> try_find_or_create(ProcessGroupID);
-    static RefPtr<ProcessGroup> from_pgid(ProcessGroupID);
+    static ErrorOr<NonnullLockRefPtr<ProcessGroup>> try_create(ProcessGroupID);
+    static ErrorOr<NonnullLockRefPtr<ProcessGroup>> try_find_or_create(ProcessGroupID);
+    static LockRefPtr<ProcessGroup> from_pgid(ProcessGroupID);
 
     ProcessGroupID const& pgid() const { return m_pgid; }
 

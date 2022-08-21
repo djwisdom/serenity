@@ -9,10 +9,10 @@
 #include <LibCore/DirIterator.h>
 #include <LibCore/System.h>
 #include <LibDesktop/Launcher.h>
+#include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/ActionGroup.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/Clipboard.h>
-#include <LibGUI/FilePicker.h>
 #include <LibGUI/Icon.h>
 #include <LibGUI/Menu.h>
 #include <LibGUI/Menubar.h>
@@ -22,7 +22,7 @@
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    TRY(Core::System::pledge("stdio rpath wpath cpath recvfd sendfd thread proc exec unix"));
+    TRY(Core::System::pledge("stdio rpath recvfd sendfd thread proc exec unix"));
 
     auto app = TRY(GUI::Application::try_create(arguments));
 
@@ -31,9 +31,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Desktop::Launcher::add_allowed_handler_with_only_specific_urls("/bin/Help", { URL::create_with_file_protocol("/usr/share/man/man6/Chess.md") }));
     TRY(Desktop::Launcher::seal_allowlist());
 
-    TRY(Core::System::pledge("stdio rpath wpath cpath recvfd sendfd thread proc exec"));
-
-    auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-chess"));
+    auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-chess"sv));
 
     auto window = TRY(GUI::Window::try_create());
     auto widget = TRY(window->try_set_main_widget<ChessWidget>());
@@ -41,11 +39,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/bin/ChessEngine", "x"));
     TRY(Core::System::unveil("/etc/passwd", "r"));
-    TRY(Core::System::unveil("/tmp/portal/launch", "rw"));
-    TRY(Core::System::unveil(Core::StandardPaths::home_directory().characters(), "wcbr"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/launch", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    auto size = Config::read_i32("Chess", "Display", "size", 512);
+    auto size = Config::read_i32("Chess"sv, "Display"sv, "size"sv, 512);
     window->set_title("Chess");
     window->set_base_size({ 4, 4 });
     window->set_size_increment({ 8, 8 });
@@ -53,10 +51,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     window->set_icon(app_icon.bitmap_for_size(16));
 
-    widget->set_piece_set(Config::read_string("Chess", "Style", "PieceSet", "stelar7"));
-    widget->set_board_theme(Config::read_string("Chess", "Style", "BoardTheme", "Beige"));
-    widget->set_coordinates(Config::read_bool("Chess", "Style", "Coordinates", true));
-    widget->set_show_available_moves(Config::read_bool("Chess", "Style", "ShowAvailableMoves", true));
+    widget->set_piece_set(Config::read_string("Chess"sv, "Style"sv, "PieceSet"sv, "stelar7"sv));
+    widget->set_board_theme(Config::read_string("Chess"sv, "Style"sv, "BoardTheme"sv, "Beige"sv));
+    widget->set_coordinates(Config::read_bool("Chess"sv, "Style"sv, "Coordinates"sv, true));
+    widget->set_show_available_moves(Config::read_bool("Chess"sv, "Style"sv, "ShowAvailableMoves"sv, true));
 
     auto game_menu = TRY(window->try_add_menu("&Game"));
 
@@ -69,38 +67,28 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(game_menu->try_add_separator());
 
     TRY(game_menu->try_add_action(GUI::Action::create("&Import PGN...", { Mod_Ctrl, Key_O }, [&](auto&) {
-        Optional<String> import_path = GUI::FilePicker::get_open_filepath(window);
-
-        if (!import_path.has_value())
+        auto result = FileSystemAccessClient::Client::the().try_open_file(window);
+        if (result.is_error())
             return;
 
-        if (!widget->import_pgn(import_path.value())) {
-            GUI::MessageBox::show(window, "Unable to import game.\n", "Error", GUI::MessageBox::Type::Error);
-            return;
-        }
-
-        dbgln("Imported PGN file from {}", import_path.value());
+        widget->import_pgn(result.value());
+        dbgln("Imported PGN file from {}", result.value()->filename());
     })));
     TRY(game_menu->try_add_action(GUI::Action::create("&Export PGN...", { Mod_Ctrl, Key_S }, [&](auto&) {
-        Optional<String> export_path = GUI::FilePicker::get_save_filepath(window, "Untitled", "pgn");
-
-        if (!export_path.has_value())
+        auto result = FileSystemAccessClient::Client::the().try_save_file(window, "Untitled", "pgn");
+        if (result.is_error())
             return;
 
-        if (!widget->export_pgn(export_path.value())) {
-            GUI::MessageBox::show(window, "Unable to export game.\n", "Error", GUI::MessageBox::Type::Error);
-            return;
-        }
-
-        dbgln("Exported PGN file to {}", export_path.value());
+        widget->export_pgn(result.value());
+        dbgln("Exported PGN file to {}", result.value()->filename());
     })));
     TRY(game_menu->try_add_action(GUI::Action::create("&Copy FEN", { Mod_Ctrl, Key_C }, [&](auto&) {
         GUI::Clipboard::the().set_data(widget->get_fen().bytes());
-        GUI::MessageBox::show(window, "Board state copied to clipboard as FEN.", "Copy FEN", GUI::MessageBox::Type::Information);
+        GUI::MessageBox::show(window, "Board state copied to clipboard as FEN."sv, "Copy FEN"sv, GUI::MessageBox::Type::Information);
     })));
     TRY(game_menu->try_add_separator());
 
-    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png")), [&](auto&) {
+    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png"sv)), [&](auto&) {
         if (widget->board().game_result() == Chess::Board::Result::NotFinished) {
             if (widget->resign() < 0)
                 return;
@@ -124,7 +112,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         auto action = GUI::Action::create_checkable(set, [&](auto& action) {
             widget->set_piece_set(action.text());
             widget->update();
-            Config::write_string("Chess", "Style", "PieceSet", action.text());
+            Config::write_string("Chess"sv, "Style"sv, "PieceSet"sv, action.text());
         });
 
         piece_set_action_group.add_action(*action);
@@ -136,13 +124,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     GUI::ActionGroup board_theme_action_group;
     board_theme_action_group.set_exclusive(true);
     auto board_theme_menu = TRY(style_menu->try_add_submenu("Board Theme"));
-    board_theme_menu->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/chess/mini-board.png").release_value_but_fixme_should_propagate_errors());
+    board_theme_menu->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/chess/mini-board.png"sv).release_value_but_fixme_should_propagate_errors());
 
     for (auto const& theme : { "Beige", "Green", "Blue" }) {
         auto action = GUI::Action::create_checkable(theme, [&](auto& action) {
             widget->set_board_theme(action.text());
             widget->update();
-            Config::write_string("Chess", "Style", "BoardTheme", action.text());
+            Config::write_string("Chess"sv, "Style"sv, "BoardTheme"sv, action.text());
         });
         board_theme_action_group.add_action(*action);
         if (widget->board_theme().name == theme)
@@ -153,7 +141,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto coordinates_action = GUI::Action::create_checkable("Coordinates", [&](auto& action) {
         widget->set_coordinates(action.is_checked());
         widget->update();
-        Config::write_bool("Chess", "Style", "Coordinates", action.is_checked());
+        Config::write_bool("Chess"sv, "Style"sv, "Coordinates"sv, action.is_checked());
     });
     coordinates_action->set_checked(widget->coordinates());
     TRY(style_menu->try_add_action(coordinates_action));
@@ -161,7 +149,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto show_available_moves_action = GUI::Action::create_checkable("Show Available Moves", [&](auto& action) {
         widget->set_show_available_moves(action.is_checked());
         widget->update();
-        Config::write_bool("Chess", "Style", "ShowAvailableMoves", action.is_checked());
+        Config::write_bool("Chess"sv, "Style"sv, "ShowAvailableMoves"sv, action.is_checked());
     });
     show_available_moves_action->set_checked(widget->show_available_moves());
     TRY(style_menu->try_add_action(show_available_moves_action));

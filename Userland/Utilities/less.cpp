@@ -332,7 +332,7 @@ private:
 
     size_t render_status_line(StringView prompt, size_t off = 0, char end = '\0', bool ignored = false)
     {
-        for (; prompt[off] != end && off < prompt.length(); ++off) {
+        for (; off < prompt.length() && prompt[off] != end; ++off) {
             if (ignored)
                 continue;
 
@@ -526,8 +526,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     TRY(Core::System::pledge("stdio rpath tty sigaction"));
 
-    char const* filename = "-";
-    char const* prompt = "?f%f :.(line %l)?e (END):.";
+    // FIXME: Make these into StringViews once we stop using fopen below.
+    String filename = "-";
+    String prompt = "?f%f :.(line %l)?e (END):.";
     bool dont_switch_buffer = false;
     bool quit_at_eof = false;
     bool emulate_more = false;
@@ -546,7 +547,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     FILE* file;
     if (String("-") == filename) {
         file = stdin;
-    } else if ((file = fopen(filename, "r")) == nullptr) {
+    } else if ((file = fopen(filename.characters(), "r")) == nullptr) {
         perror("fopen");
         exit(1);
     }

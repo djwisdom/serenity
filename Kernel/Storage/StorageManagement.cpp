@@ -16,20 +16,23 @@
 #include <Kernel/Devices/BlockDevice.h>
 #include <Kernel/FileSystem/Ext2FileSystem.h>
 #include <Kernel/Panic.h>
-#include <Kernel/Storage/ATA/AHCIController.h>
-#include <Kernel/Storage/ATA/ISAIDEController.h>
-#include <Kernel/Storage/ATA/PCIIDEController.h>
+#include <Kernel/Storage/ATA/AHCI/Controller.h>
+#include <Kernel/Storage/ATA/GenericIDE/Controller.h>
+#include <Kernel/Storage/ATA/GenericIDE/ISAController.h>
+#include <Kernel/Storage/ATA/GenericIDE/PCIController.h>
 #include <Kernel/Storage/NVMe/NVMeController.h>
-#include <Kernel/Storage/Partition/EBRPartitionTable.h>
-#include <Kernel/Storage/Partition/GUIDPartitionTable.h>
-#include <Kernel/Storage/Partition/MBRPartitionTable.h>
 #include <Kernel/Storage/Ramdisk/Controller.h>
 #include <Kernel/Storage/StorageManagement.h>
+#include <LibPartition/EBRPartitionTable.h>
+#include <LibPartition/GUIDPartitionTable.h>
+#include <LibPartition/MBRPartitionTable.h>
 
 namespace Kernel {
 
 static Singleton<StorageManagement> s_the;
-static Atomic<u32> s_device_minor_number;
+static Atomic<u32> s_storage_device_minor_number;
+static Atomic<u32> s_partition_device_minor_number;
+static Atomic<u32> s_controller_id;
 
 static constexpr StringView partition_uuid_prefix = "PARTUUID:"sv;
 
@@ -129,16 +132,16 @@ UNMAP_AFTER_INIT void StorageManagement::dump_storage_devices_and_partitions() c
     }
 }
 
-UNMAP_AFTER_INIT ErrorOr<NonnullOwnPtr<PartitionTable>> StorageManagement::try_to_initialize_partition_table(StorageDevice const& device) const
+UNMAP_AFTER_INIT ErrorOr<NonnullOwnPtr<Partition::PartitionTable>> StorageManagement::try_to_initialize_partition_table(StorageDevice const& device) const
 {
-    auto mbr_table_or_error = MBRPartitionTable::try_to_initialize(device);
+    auto mbr_table_or_error = Partition::MBRPartitionTable::try_to_initialize(device);
     if (!mbr_table_or_error.is_error())
         return mbr_table_or_error.release_value();
-    auto ebr_table_or_error = EBRPartitionTable::try_to_initialize(device);
+    auto ebr_table_or_error = Partition::EBRPartitionTable::try_to_initialize(device);
     if (!ebr_table_or_error.is_error()) {
         return ebr_table_or_error.release_value();
     }
-    return TRY(GUIDPartitionTable::try_to_initialize(device));
+    return TRY(Partition::GUIDPartitionTable::try_to_initialize(device));
 }
 
 UNMAP_AFTER_INIT void StorageManagement::enumerate_disk_partitions()
@@ -154,8 +157,7 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_disk_partitions()
             auto partition_metadata = partition_table->partition(partition_index);
             if (!partition_metadata.has_value())
                 continue;
-            // FIXME: Try to not hardcode a maximum of 16 partitions per drive!
-            auto disk_partition = DiskPartition::create(device, (partition_index + (16 * device_index)), partition_metadata.value());
+            auto disk_partition = DiskPartition::create(device, generate_partition_minor_number(), partition_metadata.value());
             device.add_partition(disk_partition);
         }
         device_index++;
@@ -228,7 +230,7 @@ UNMAP_AFTER_INIT void StorageManagement::determine_boot_device_with_partition_uu
     }
 }
 
-RefPtr<BlockDevice> StorageManagement::boot_block_device() const
+LockRefPtr<BlockDevice> StorageManagement::boot_block_device() const
 {
     return m_boot_block_device.strong_ref();
 }
@@ -239,12 +241,20 @@ MajorNumber StorageManagement::storage_type_major_number()
 }
 MinorNumber StorageManagement::generate_storage_minor_number()
 {
-    auto minor_number = s_device_minor_number.load();
-    s_device_minor_number++;
-    return minor_number;
+    return s_storage_device_minor_number.fetch_add(1);
 }
 
-NonnullRefPtr<FileSystem> StorageManagement::root_filesystem() const
+MinorNumber StorageManagement::generate_partition_minor_number()
+{
+    return s_partition_device_minor_number.fetch_add(1);
+}
+
+u32 StorageManagement::generate_controller_id()
+{
+    return s_controller_id.fetch_add(1);
+}
+
+NonnullLockRefPtr<FileSystem> StorageManagement::root_filesystem() const
 {
     auto boot_device_description = boot_block_device();
     if (!boot_device_description) {
@@ -265,7 +275,7 @@ NonnullRefPtr<FileSystem> StorageManagement::root_filesystem() const
 
 UNMAP_AFTER_INIT void StorageManagement::initialize(StringView root_device, bool force_pio, bool poll)
 {
-    VERIFY(s_device_minor_number == 0);
+    VERIFY(s_storage_device_minor_number == 0);
     m_boot_argument = root_device;
     if (PCI::Access::is_disabled()) {
         // Note: If PCI is disabled, we assume that at least we have an ISA IDE controller

@@ -402,12 +402,15 @@ namespace JS {
     P(round)                                 \
     P(roundingIncrement)                     \
     P(roundingMode)                          \
+    P(roundingPriority)                      \
     P(script)                                \
     P(seal)                                  \
     P(second)                                \
     P(seconds)                               \
     P(secondsDisplay)                        \
     P(segment)                               \
+    P(select)                                \
+    P(selectRange)                           \
     P(sensitivity)                           \
     P(set)                                   \
     P(setBigInt64)                           \
@@ -512,6 +515,7 @@ namespace JS {
     P(toZonedDateTime)                       \
     P(toZonedDateTimeISO)                    \
     P(trace)                                 \
+    P(trailingZeroDisplay)                   \
     P(trim)                                  \
     P(trimEnd)                               \
     P(trimLeft)                              \
@@ -522,11 +526,12 @@ namespace JS {
     P(undefined)                             \
     P(unescape)                              \
     P(unicode)                               \
+    P(unicodeSets)                           \
     P(unit)                                  \
     P(unitDisplay)                           \
-    P(until)                                 \
     P(unregister)                            \
     P(unshift)                               \
+    P(until)                                 \
     P(usage)                                 \
     P(useGrouping)                           \
     P(value)                                 \

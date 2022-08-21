@@ -92,8 +92,9 @@ Optional<FunctionAndArgumentIndex> get_function_and_argument_index(StringView so
     return {};
 }
 
-SheetGlobalObject::SheetGlobalObject(Sheet& sheet)
-    : m_sheet(sheet)
+SheetGlobalObject::SheetGlobalObject(JS::Realm& realm, Sheet& sheet)
+    : JS::GlobalObject(realm)
+    , m_sheet(sheet)
 {
 }
 
@@ -323,7 +324,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::column_arithmetic)
     auto& column_name_str = column_name.as_string().string();
 
     auto offset = TRY(vm.argument(1).to_number(global_object));
-    auto offset_number = offset.as_i32();
+    auto offset_number = static_cast<i32>(offset.as_double());
 
     auto* this_object = TRY(vm.this_value(global_object).to_object(global_object));
 

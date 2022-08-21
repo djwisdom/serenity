@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,19 +8,17 @@
 
 #include <AK/Error.h>
 #include <AK/IntrusiveList.h>
-#include <AK/RefPtr.h>
 #include <Kernel/Forward.h>
 #include <Kernel/KString.h>
 #include <Kernel/Library/ListedRefCounted.h>
-#include <Kernel/Locking/MutexProtected.h>
+#include <Kernel/Library/LockRefPtr.h>
+#include <Kernel/Locking/SpinlockProtected.h>
 
 namespace Kernel {
 
-// FIXME: Custody needs some locking.
-
-class Custody : public ListedRefCounted<Custody, LockType::Mutex> {
+class Custody : public ListedRefCounted<Custody, LockType::Spinlock> {
 public:
-    static ErrorOr<NonnullRefPtr<Custody>> try_create(Custody* parent, StringView name, Inode&, int mount_flags);
+    static ErrorOr<NonnullLockRefPtr<Custody>> try_create(Custody* parent, StringView name, Inode&, int mount_flags);
 
     ~Custody();
 
@@ -37,16 +35,16 @@ public:
 private:
     Custody(Custody* parent, NonnullOwnPtr<KString> name, Inode&, int mount_flags);
 
-    RefPtr<Custody> m_parent;
+    LockRefPtr<Custody> m_parent;
     NonnullOwnPtr<KString> m_name;
-    NonnullRefPtr<Inode> m_inode;
+    NonnullLockRefPtr<Inode> m_inode;
     int m_mount_flags { 0 };
 
     mutable IntrusiveListNode<Custody> m_all_custodies_list_node;
 
 public:
     using AllCustodiesList = IntrusiveList<&Custody::m_all_custodies_list_node>;
-    static MutexProtected<Custody::AllCustodiesList>& all_instances();
+    static SpinlockProtected<Custody::AllCustodiesList>& all_instances();
 };
 
 }

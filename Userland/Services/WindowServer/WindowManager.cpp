@@ -72,8 +72,8 @@ void WindowManager::reload_config()
 {
     m_config = Core::ConfigFile::open("/etc/WindowServer.ini", Core::ConfigFile::AllowWriting::Yes).release_value_but_fixme_should_propagate_errors();
 
-    unsigned workspace_rows = (unsigned)m_config->read_num_entry("Workspace", "Rows", default_window_stack_rows);
-    unsigned workspace_columns = (unsigned)m_config->read_num_entry("Workspace", "Columns", default_window_stack_columns);
+    unsigned workspace_rows = (unsigned)m_config->read_num_entry("Workspaces", "Rows", default_window_stack_rows);
+    unsigned workspace_columns = (unsigned)m_config->read_num_entry("Workspaces", "Columns", default_window_stack_columns);
     if (workspace_rows == 0 || workspace_columns == 0 || workspace_rows > max_window_stack_rows || workspace_columns > max_window_stack_columns) {
         workspace_rows = default_window_stack_rows;
         workspace_columns = default_window_stack_columns;
@@ -101,6 +101,8 @@ void WindowManager::reload_config()
     Compositor::the().invalidate_after_theme_or_font_change();
 
     WindowFrame::reload_config();
+
+    load_system_effects();
 }
 
 Gfx::Font const& WindowManager::font() const
@@ -110,7 +112,7 @@ Gfx::Font const& WindowManager::font() const
 
 Gfx::Font const& WindowManager::window_title_font() const
 {
-    return Gfx::FontDatabase::default_font().bold_variant();
+    return Gfx::FontDatabase::window_title_font();
 }
 
 bool WindowManager::set_screen_layout(ScreenLayout&& screen_layout, bool save, String& error_msg)
@@ -252,8 +254,8 @@ bool WindowManager::apply_workspace_settings(unsigned rows, unsigned columns, bo
     }
 
     if (save) {
-        m_config->write_num_entry("Workspace", "Rows", window_stack_rows());
-        m_config->write_num_entry("Workspace", "Columns", window_stack_columns());
+        m_config->write_num_entry("Workspaces", "Rows", window_stack_rows());
+        m_config->write_num_entry("Workspaces", "Columns", window_stack_columns());
         return !m_config->sync().is_error();
     }
     return true;
@@ -697,8 +699,10 @@ void WindowManager::start_window_move(Window& window, Gfx::IntPoint const& origi
     m_move_origin = origin;
     m_move_window_origin = window.position();
     m_move_window_cursor_position = window.is_tiled() ? to_floating_cursor_position(m_mouse_down_origin) : m_mouse_down_origin;
-    m_geometry_overlay = Compositor::the().create_overlay<WindowGeometryOverlay>(window);
-    m_geometry_overlay->set_enabled(true);
+    if (system_effects().geometry() == ShowGeometry::OnMoveAndResize || system_effects().geometry() == ShowGeometry::OnMoveOnly) {
+        m_geometry_overlay = Compositor::the().create_overlay<WindowGeometryOverlay>(window);
+        m_geometry_overlay->set_enabled(true);
+    }
     window.invalidate(true, true);
 }
 
@@ -738,10 +742,12 @@ void WindowManager::start_window_resize(Window& window, Gfx::IntPoint const& pos
     m_resize_window = window;
     m_resize_origin = position;
     m_resize_window_original_rect = window.rect();
-    m_geometry_overlay = Compositor::the().create_overlay<WindowGeometryOverlay>(window);
-    m_geometry_overlay->set_enabled(true);
+    if (system_effects().geometry() == ShowGeometry::OnMoveAndResize || system_effects().geometry() == ShowGeometry::OnResizeOnly) {
+        m_geometry_overlay = Compositor::the().create_overlay<WindowGeometryOverlay>(window);
+        m_geometry_overlay->set_enabled(true);
+    }
 
-    current_window_stack().set_active_input_tracking_window(nullptr);
+    set_automatic_cursor_tracking_window(nullptr);
 
     window.invalidate(true, true);
 
@@ -841,8 +847,9 @@ bool WindowManager::process_ongoing_window_move(MouseEvent& event)
                 m_move_window_origin = m_move_window->position();
             }
         }
-
-        m_geometry_overlay->window_rect_changed();
+        if (system_effects().geometry() == ShowGeometry::OnMoveAndResize || system_effects().geometry() == ShowGeometry::OnMoveOnly) {
+            m_geometry_overlay->window_rect_changed();
+        }
     }
     return true;
 }
@@ -1015,7 +1022,9 @@ bool WindowManager::process_ongoing_window_resize(MouseEvent const& event)
     dbgln_if(RESIZE_DEBUG, "[WM] Resizing, original: {}, now: {}", m_resize_window_original_rect, new_rect);
 
     m_resize_window->set_rect(new_rect);
-    m_geometry_overlay->window_rect_changed();
+    if (system_effects().geometry() == ShowGeometry::OnMoveAndResize || system_effects().geometry() == ShowGeometry::OnResizeOnly) {
+        m_geometry_overlay->window_rect_changed();
+    }
     Core::EventLoop::current().post_event(*m_resize_window, make<ResizeEvent>(new_rect));
     return true;
 }
@@ -1197,8 +1206,7 @@ void WindowManager::deliver_mouse_event(Window& window, MouseEvent const& event,
 
 bool WindowManager::process_ongoing_active_input_mouse_event(MouseEvent const& event)
 {
-    auto& window_stack = current_window_stack();
-    auto* input_tracking_window = window_stack.active_input_tracking_window();
+    auto* input_tracking_window = automatic_cursor_tracking_window();
     if (!input_tracking_window)
         return false;
 
@@ -1211,7 +1219,7 @@ bool WindowManager::process_ongoing_active_input_mouse_event(MouseEvent const& e
     deliver_mouse_event(*input_tracking_window, event, true);
 
     if (event.type() == Event::MouseUp && event.buttons() == 0)
-        window_stack.set_active_input_tracking_window(nullptr);
+        set_automatic_cursor_tracking_window(nullptr);
 
     return true;
 }
@@ -1282,7 +1290,7 @@ void WindowManager::process_mouse_event_for_window(HitTestResult& result, MouseE
     }
 
     if (event.type() == Event::MouseDown)
-        current_window_stack().set_active_input_tracking_window(&window);
+        set_automatic_cursor_tracking_window(&window);
 }
 
 void WindowManager::process_mouse_event(MouseEvent& event)
@@ -1301,16 +1309,15 @@ void WindowManager::process_mouse_event(MouseEvent& event)
             conn.async_track_mouse_move(event.position());
         }
     });
-    // The active input tracking window is excluded here because we're sending the event to it
+    // The automatic cursor tracking window is excluded here because we're sending the event to it
     // in the next step.
-    auto& window_stack = current_window_stack();
     for_each_visible_window_from_front_to_back([&](Window& window) {
-        if (window.is_automatic_cursor_tracking() && &window != window_stack.active_input_tracking_window())
+        if (window.is_automatic_cursor_tracking() && &window != automatic_cursor_tracking_window())
             deliver_mouse_event(window, event, false);
         return IterationDecision::Continue;
     });
 
-    // 3. If there's an active input tracking window, all mouse events go there.
+    // 3. If there's an automatic cursor tracking window, all mouse events go there.
     //    Tracking ends after all mouse buttons have been released.
     if (process_ongoing_active_input_mouse_event(event))
         return;
@@ -1452,6 +1459,7 @@ void WindowManager::event(Core::Event& event)
             m_previous_event_was_super_keydown = false;
 
         process_mouse_event(mouse_event);
+        m_last_processed_buttons = mouse_event.buttons();
         // TODO: handle transitioning between two stacks
         set_hovered_window(current_window_stack().window_at(mouse_event.position(), WindowStack::IncludeWindowFrame::No));
         return;
@@ -1606,7 +1614,7 @@ void WindowManager::process_key_event(KeyEvent& event)
         m_previous_event_was_super_keydown = true;
     } else if (m_previous_event_was_super_keydown) {
         m_previous_event_was_super_keydown = false;
-        if (!m_dnd_client && !current_window_stack().active_input_tracking_window() && event.type() == Event::KeyUp && event.key() == Key_Super) {
+        if (!m_dnd_client && !automatic_cursor_tracking_window() && event.type() == Event::KeyUp && event.key() == Key_Super) {
             tell_wms_super_key_pressed();
             return;
         }
@@ -1882,7 +1890,7 @@ void WindowManager::set_active_window(Window* new_active_window, bool make_input
 
     if (auto* previously_active_window = window_stack.active_window()) {
         window_stack.set_active_window(nullptr);
-        window_stack.set_active_input_tracking_window(nullptr);
+        set_automatic_cursor_tracking_window(nullptr);
         notify_previous_active_window(*previously_active_window);
     }
 
@@ -1964,7 +1972,10 @@ Cursor const& WindowManager::active_cursor() const
         }
     }
 
-    if (m_hovered_window) {
+    if (m_automatic_cursor_tracking_window) {
+        if (m_automatic_cursor_tracking_window->cursor())
+            return *m_automatic_cursor_tracking_window->cursor();
+    } else if (m_hovered_window) {
         if (auto* modal_window = const_cast<Window&>(*m_hovered_window).blocking_modal_window()) {
             if (modal_window->cursor())
                 return *modal_window->cursor();
@@ -2070,11 +2081,11 @@ void WindowManager::start_dnd_drag(ConnectionFromClient& client, String const& t
     VERIFY(!m_dnd_client);
     m_dnd_client = client;
     m_dnd_text = text;
+    Compositor::the().invalidate_cursor(true);
     m_dnd_overlay = Compositor::the().create_overlay<DndOverlay>(text, bitmap);
     m_dnd_overlay->set_enabled(true);
     m_dnd_mime_data = mime_data;
-    Compositor::the().invalidate_cursor();
-    current_window_stack().set_active_input_tracking_window(nullptr);
+    set_automatic_cursor_tracking_window(nullptr);
 }
 
 void WindowManager::end_dnd_drag()
@@ -2099,7 +2110,7 @@ void WindowManager::invalidate_after_theme_or_font_change()
         return IterationDecision::Continue;
     });
     ConnectionFromClient::for_each_client([&](ConnectionFromClient& client) {
-        client.async_update_system_theme(Gfx::current_system_theme_buffer());
+        client.notify_about_theme_change();
     });
     MenuManager::the().did_change_theme();
     AppletManager::the().did_change_theme();
@@ -2155,11 +2166,11 @@ void WindowManager::clear_theme_override()
 void WindowManager::did_popup_a_menu(Badge<Menu>)
 {
     // Clear any ongoing input gesture
-    auto* active_input_tracking_window = current_window_stack().active_input_tracking_window();
-    if (!active_input_tracking_window)
+    auto* window = automatic_cursor_tracking_window();
+    if (!window)
         return;
-    active_input_tracking_window->set_automatic_cursor_tracking_enabled(false);
-    current_window_stack().set_active_input_tracking_window(nullptr);
+    window->set_automatic_cursor_tracking_enabled(false);
+    set_automatic_cursor_tracking_window(nullptr);
 }
 
 void WindowManager::minimize_windows(Window& window, bool minimized)
@@ -2274,7 +2285,7 @@ void WindowManager::apply_cursor_theme(String const& theme_name)
     auto reload_cursor = [&](RefPtr<Cursor>& cursor, String const& name) {
         bool is_current_cursor = current_cursor && current_cursor == cursor.ptr();
 
-        static auto const s_default_cursor_path = "/res/cursor-themes/Default/arrow.x2y2.png";
+        static auto const s_default_cursor_path = "/res/cursor-themes/Default/arrow.x2y2.png"sv;
         cursor = Cursor::create(String::formatted("/res/cursor-themes/{}/{}", theme_name, cursor_theme_config->read_entry("Cursor", name)), s_default_cursor_path);
 
         if (is_current_cursor) {
@@ -2329,6 +2340,48 @@ void WindowManager::set_cursor_highlight_color(Gfx::Color const& color)
     Compositor::the().invalidate_cursor();
     m_config->write_entry("Mouse", "CursorHighlightColor", color.to_string());
     sync_config_to_disk();
+}
+
+void WindowManager::apply_system_effects(Vector<bool> effects, ShowGeometry geometry)
+{
+    if (m_system_effects == SystemEffects { effects, geometry })
+        return;
+
+    m_system_effects = { effects, geometry };
+    m_config->write_bool_entry("Effects", "AnimateMenus", m_system_effects.animate_menus());
+    m_config->write_bool_entry("Effects", "FlashMenus", m_system_effects.flash_menus());
+    m_config->write_bool_entry("Effects", "AnimateWindows", m_system_effects.animate_windows());
+    m_config->write_bool_entry("Effects", "SmoothScrolling", m_system_effects.smooth_scrolling());
+    m_config->write_bool_entry("Effects", "TabAccents", m_system_effects.tab_accents());
+    m_config->write_bool_entry("Effects", "SplitterKnurls", m_system_effects.splitter_knurls());
+    m_config->write_bool_entry("Effects", "Tooltips", m_system_effects.tooltips());
+    m_config->write_bool_entry("Effects", "MenuShadow", m_system_effects.menu_shadow());
+    m_config->write_bool_entry("Effects", "WindowShadow", m_system_effects.window_shadow());
+    m_config->write_bool_entry("Effects", "TooltipShadow", m_system_effects.tooltip_shadow());
+    m_config->write_entry("Effects", "ShowGeometry", ShowGeometryTools::enum_to_string(geometry));
+    sync_config_to_disk();
+}
+
+void WindowManager::load_system_effects()
+{
+    Vector<bool> effects = {
+        m_config->read_bool_entry("Effects", "AnimateMenus", true),
+        m_config->read_bool_entry("Effects", "FlashMenus", true),
+        m_config->read_bool_entry("Effects", "AnimateWindows", true),
+        m_config->read_bool_entry("Effects", "SmoothScrolling", true),
+        m_config->read_bool_entry("Effects", "TabAccents", true),
+        m_config->read_bool_entry("Effects", "SplitterKnurls", true),
+        m_config->read_bool_entry("Effects", "Tooltips", true),
+        m_config->read_bool_entry("Effects", "MenuShadow", true),
+        m_config->read_bool_entry("Effects", "WindowShadow", true),
+        m_config->read_bool_entry("Effects", "TooltipShadow", true)
+    };
+    ShowGeometry geometry = ShowGeometryTools::string_to_enum(m_config->read_entry("Effects", "ShowGeometry", "OnMoveAndResize"));
+    m_system_effects = { effects, geometry };
+
+    ConnectionFromClient::for_each_client([&](auto& client) {
+        client.async_update_system_effects(effects);
+    });
 }
 
 bool WindowManager::sync_config_to_disk()

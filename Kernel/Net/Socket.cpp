@@ -17,7 +17,7 @@
 
 namespace Kernel {
 
-ErrorOr<NonnullRefPtr<Socket>> Socket::create(int domain, int type, int protocol)
+ErrorOr<NonnullLockRefPtr<Socket>> Socket::create(int domain, int type, int protocol)
 {
     switch (domain) {
     case AF_LOCAL:
@@ -46,7 +46,7 @@ void Socket::set_setup_state(SetupState new_setup_state)
     evaluate_block_conditions();
 }
 
-RefPtr<Socket> Socket::accept()
+LockRefPtr<Socket> Socket::accept()
 {
     MutexLocker locker(mutex());
     if (m_pending.is_empty())
@@ -63,7 +63,7 @@ RefPtr<Socket> Socket::accept()
     return client;
 }
 
-ErrorOr<void> Socket::queue_connection_from(NonnullRefPtr<Socket> peer)
+ErrorOr<void> Socket::queue_connection_from(NonnullLockRefPtr<Socket> peer)
 {
     dbgln_if(SOCKET_DEBUG, "Socket({}) queueing connection", this);
     MutexLocker locker(mutex());
@@ -125,6 +125,9 @@ ErrorOr<void> Socket::setsockopt(int level, int option, Userspace<void const*> u
         m_routing_disabled = TRY(copy_typed_from_user(static_ptr_cast<int const*>(user_value))) != 0;
         return {};
     }
+    case SO_REUSEADDR:
+        dbgln("FIXME: SO_REUSEADDR requested, but not implemented.");
+        return {};
     default:
         dbgln("setsockopt({}) at SOL_SOCKET not implemented.", option);
         return ENOPROTOOPT;
@@ -256,12 +259,14 @@ ErrorOr<void> Socket::shutdown(int how)
         return set_so_error(ENOTCONN);
     if (m_role == Role::Listener)
         return set_so_error(ENOTCONN);
-    if (!m_shut_down_for_writing && (how & SHUT_WR))
+    if (!m_shut_down_for_writing && (how == SHUT_WR || how == SHUT_RDWR)) {
         shut_down_for_writing();
-    if (!m_shut_down_for_reading && (how & SHUT_RD))
+        m_shut_down_for_writing = true;
+    }
+    if (!m_shut_down_for_reading && (how == SHUT_RD || how == SHUT_RDWR)) {
         shut_down_for_reading();
-    m_shut_down_for_reading |= (how & SHUT_RD) != 0;
-    m_shut_down_for_writing |= (how & SHUT_WR) != 0;
+        m_shut_down_for_reading = true;
+    }
     return {};
 }
 

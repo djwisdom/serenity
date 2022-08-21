@@ -16,6 +16,7 @@
 namespace Kernel {
 
 extern WorkQueue* g_io_work;
+extern WorkQueue* g_ata_work;
 
 class WorkQueue {
     AK_MAKE_NONCOPYABLE(WorkQueue);
@@ -60,9 +61,9 @@ private:
 
     void do_queue(WorkItem&);
 
-    RefPtr<Thread> m_thread;
+    LockRefPtr<Thread> m_thread;
     WaitQueue m_wait_queue;
-    SpinlockProtected<IntrusiveList<&WorkItem::m_node>> m_items;
+    SpinlockProtected<IntrusiveList<&WorkItem::m_node>> m_items { LockRank::None };
 };
 
 }

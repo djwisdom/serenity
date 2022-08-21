@@ -25,17 +25,14 @@ class BochsGraphicsAdapter final : public GenericGraphicsAdapter
     friend class GraphicsManagement;
 
 public:
-    static NonnullRefPtr<BochsGraphicsAdapter> initialize(PCI::DeviceIdentifier const&);
+    static NonnullLockRefPtr<BochsGraphicsAdapter> initialize(PCI::DeviceIdentifier const&);
     virtual ~BochsGraphicsAdapter() = default;
-
-    virtual bool vga_compatible() const override;
 
 private:
     ErrorOr<void> initialize_adapter(PCI::DeviceIdentifier const&);
 
     explicit BochsGraphicsAdapter(PCI::DeviceIdentifier const&);
 
-    RefPtr<BochsDisplayConnector> m_display_connector;
-    bool m_is_vga_capable { false };
+    LockRefPtr<BochsDisplayConnector> m_display_connector;
 };
 }

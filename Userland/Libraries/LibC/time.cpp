@@ -11,6 +11,7 @@
 #include <Kernel/API/TimePage.h>
 #include <LibTimeZone/TimeZone.h>
 #include <assert.h>
+#include <bits/pthread_cancel.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -23,6 +24,16 @@
 #include <utime.h>
 
 extern "C" {
+
+static constexpr char const* __utc = "UTC";
+static StringView __tzname { __utc, __builtin_strlen(__utc) };
+static char __tzname_standard[TZNAME_MAX];
+static char __tzname_daylight[TZNAME_MAX];
+
+long timezone = 0;
+long altzone = 0;
+char* tzname[2] = { const_cast<char*>(__utc), const_cast<char*>(__utc) };
+int daylight = 0;
 
 time_t time(time_t* tloc)
 {
@@ -91,15 +102,26 @@ char* ctime_r(time_t const* t, char* buf)
 
 static int const __seconds_per_day = 60 * 60 * 24;
 
-static struct tm* time_to_tm(struct tm* tm, time_t t)
+static bool is_valid_time(time_t timestamp)
 {
     // Note: these correspond to the number of seconds from epoch to the dates "Jan 1 00:00:00 -2147483648" and "Dec 31 23:59:59 2147483647",
     // respectively, which are the smallest and biggest representable dates without overflowing tm->tm_year, if it is an int.
     constexpr time_t smallest_possible_time = -67768040609740800;
     constexpr time_t biggest_possible_time = 67768036191676799;
-    if (t < smallest_possible_time || t > biggest_possible_time) {
+
+    return (timestamp >= smallest_possible_time) && (timestamp <= biggest_possible_time);
+}
+
+static struct tm* time_to_tm(struct tm* tm, time_t t, StringView time_zone)
+{
+    if (!is_valid_time(t)) {
         errno = EOVERFLOW;
         return nullptr;
+    }
+
+    if (auto offset = TimeZone::get_time_zone_offset(time_zone, AK::Time::from_seconds(t)); offset.has_value()) {
+        tm->tm_isdst = offset->in_dst == TimeZone::InDST::Yes;
+        t += offset->seconds;
     }
 
     int year = 1970;
@@ -129,7 +151,7 @@ static struct tm* time_to_tm(struct tm* tm, time_t t)
     return tm;
 }
 
-static time_t tm_to_time(struct tm* tm, long timezone_adjust_seconds)
+static time_t tm_to_time(struct tm* tm, StringView time_zone)
 {
     // "The original values of the tm_wday and tm_yday components of the structure are ignored,
     // and the original values of the other components are not restricted to the ranges described in <time.h>.
@@ -138,8 +160,6 @@ static time_t tm_to_time(struct tm* tm, long timezone_adjust_seconds)
     // and the other components are set to represent the specified time since the Epoch,
     // but with their values forced to the ranges indicated in the <time.h> entry;
     // the final value of tm_mday shall not be set until tm_mon and tm_year are determined."
-
-    // FIXME: Handle tm_isdst eventually.
 
     tm->tm_year += tm->tm_mon / 12;
     tm->tm_mon %= 12;
@@ -150,16 +170,30 @@ static time_t tm_to_time(struct tm* tm, long timezone_adjust_seconds)
 
     tm->tm_yday = day_of_year(1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday);
     time_t days_since_epoch = years_to_days_since_epoch(1900 + tm->tm_year) + tm->tm_yday;
-    auto timestamp = ((days_since_epoch * 24 + tm->tm_hour) * 60 + tm->tm_min) * 60 + tm->tm_sec + timezone_adjust_seconds;
-    if (!time_to_tm(tm, timestamp))
+    auto timestamp = ((days_since_epoch * 24 + tm->tm_hour) * 60 + tm->tm_min) * 60 + tm->tm_sec;
+
+    if (tm->tm_isdst < 0) {
+        if (auto offset = TimeZone::get_time_zone_offset(time_zone, AK::Time::from_seconds(timestamp)); offset.has_value())
+            timestamp -= offset->seconds;
+    } else {
+        auto index = tm->tm_isdst == 0 ? 0 : 1;
+
+        if (auto offsets = TimeZone::get_named_time_zone_offsets(time_zone, AK::Time::from_seconds(timestamp)); offsets.has_value())
+            timestamp -= offsets->at(index).seconds;
+    }
+
+    if (!is_valid_time(timestamp)) {
+        errno = EOVERFLOW;
         return -1;
+    }
+
     return timestamp;
 }
 
 time_t mktime(struct tm* tm)
 {
     tzset();
-    return tm_to_time(tm, daylight ? altzone : timezone);
+    return tm_to_time(tm, __tzname);
 }
 
 struct tm* localtime(time_t const* t)
@@ -175,12 +209,12 @@ struct tm* localtime_r(time_t const* t, struct tm* tm)
     if (!t)
         return nullptr;
 
-    return time_to_tm(tm, *t - (daylight ? altzone : timezone));
+    return time_to_tm(tm, *t, __tzname);
 }
 
 time_t timegm(struct tm* tm)
 {
-    return tm_to_time(tm, 0);
+    return tm_to_time(tm, { __utc, __builtin_strlen(__utc) });
 }
 
 struct tm* gmtime(time_t const* t)
@@ -193,7 +227,7 @@ struct tm* gmtime_r(time_t const* t, struct tm* tm)
 {
     if (!t)
         return nullptr;
-    return time_to_tm(tm, *t);
+    return time_to_tm(tm, *t, { __utc, __builtin_strlen(__utc) });
 }
 
 char* asctime(const struct tm* tm)
@@ -283,7 +317,7 @@ size_t strftime(char* destination, size_t max_size, char const* format, const st
                 builder.append('\n');
                 break;
             case 'p':
-                builder.append(tm->tm_hour < 12 ? "AM" : "PM");
+                builder.append(tm->tm_hour < 12 ? "AM"sv : "PM"sv);
                 break;
             case 'r': {
                 int display_hour = tm->tm_hour % 12;
@@ -361,35 +395,25 @@ size_t strftime(char* destination, size_t max_size, char const* format, const st
     return fits ? str.length() : 0;
 }
 
-static char __tzname_standard[TZNAME_MAX];
-static char __tzname_daylight[TZNAME_MAX];
-constexpr char const* __utc = "UTC";
-
-long timezone = 0;
-long altzone = 0;
-char* tzname[2] = { const_cast<char*>(__utc), const_cast<char*>(__utc) };
-int daylight = 0;
-
 void tzset()
 {
     // FIXME: Actually parse the TZ environment variable, described here:
     // https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap08.html#tag_08
-    StringView time_zone;
-
     if (char* tz = getenv("TZ"); tz != nullptr)
-        time_zone = tz;
+        __tzname = { tz, strlen(tz) };
     else
-        time_zone = TimeZone::system_time_zone();
+        __tzname = TimeZone::system_time_zone();
 
     auto set_default_values = []() {
         timezone = 0;
         altzone = 0;
         daylight = 0;
+        __tzname = StringView { __utc, __builtin_strlen(__utc) };
         tzname[0] = const_cast<char*>(__utc);
         tzname[1] = const_cast<char*>(__utc);
     };
 
-    if (auto offsets = TimeZone::get_named_time_zone_offsets(time_zone, AK::Time::now_realtime()); offsets.has_value()) {
+    if (auto offsets = TimeZone::get_named_time_zone_offsets(__tzname, AK::Time::now_realtime()); offsets.has_value()) {
         if (!offsets->at(0).name.copy_characters_to_buffer(__tzname_standard, TZNAME_MAX))
             return set_default_values();
         if (!offsets->at(1).name.copy_characters_to_buffer(__tzname_daylight, TZNAME_MAX))
@@ -458,6 +482,8 @@ int clock_settime(clockid_t clock_id, struct timespec* ts)
 
 int clock_nanosleep(clockid_t clock_id, int flags, const struct timespec* requested_sleep, struct timespec* remaining_sleep)
 {
+    __pthread_maybe_cancel();
+
     Syscall::SC_clock_nanosleep_params params { clock_id, flags, requested_sleep, remaining_sleep };
     int rc = syscall(SC_clock_nanosleep, &params);
     __RETURN_WITH_ERRNO(rc, rc, -1);
@@ -468,10 +494,10 @@ int nanosleep(const struct timespec* requested_sleep, struct timespec* remaining
     return clock_nanosleep(CLOCK_REALTIME, 0, requested_sleep, remaining_sleep);
 }
 
-int clock_getres(clockid_t, struct timespec*)
+int clock_getres(clockid_t clock_id, struct timespec* result)
 {
-    dbgln("FIXME: Implement clock_getres()");
-    auto rc = -ENOSYS;
+    Syscall::SC_clock_getres_params params { clock_id, result };
+    int rc = syscall(SC_clock_getres, &params);
     __RETURN_WITH_ERRNO(rc, rc, -1);
 }
 

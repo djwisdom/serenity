@@ -25,6 +25,7 @@ set(SOURCES
     Crypto/Crypto.cpp
     Crypto/SubtleCrypto.cpp
     CSS/Angle.cpp
+    CSS/Clip.cpp
     CSS/CSSConditionRule.cpp
     CSS/CSSGroupingRule.cpp
     CSS/CSSImportRule.cpp
@@ -94,6 +95,9 @@ set(SOURCES
     DOM/EventTarget.cpp
     DOM/HTMLCollection.cpp
     DOM/LiveNodeList.cpp
+    DOM/MutationObserver.cpp
+    DOM/MutationRecord.cpp
+    DOM/MutationType.cpp
     DOM/NamedNodeMap.cpp
     DOM/Node.cpp
     DOM/NodeIterator.cpp
@@ -114,12 +118,26 @@ set(SOURCES
     Dump.cpp
     Encoding/TextDecoder.cpp
     Encoding/TextEncoder.cpp
-    Fetch/AbstractOperations.cpp
+    Fetch/Headers.cpp
+    Fetch/HeadersIterator.cpp
+    Fetch/Infrastructure/HTTP.cpp
+    Fetch/Infrastructure/URL.cpp
+    Fetch/Infrastructure/HTTP/Bodies.cpp
+    Fetch/Infrastructure/HTTP/Headers.cpp
+    Fetch/Infrastructure/HTTP/Methods.cpp
+    Fetch/Infrastructure/HTTP/Requests.cpp
+    Fetch/Infrastructure/HTTP/Responses.cpp
+    Fetch/Infrastructure/HTTP/Statuses.cpp
+    FileAPI/Blob.cpp
+    FileAPI/File.cpp
     FontCache.cpp
     Geometry/DOMRectList.cpp
     HTML/AttributeNames.cpp
     HTML/BrowsingContext.cpp
     HTML/BrowsingContextContainer.cpp
+    HTML/Canvas/CanvasDrawImage.cpp
+    HTML/Canvas/CanvasPath.cpp
+    HTML/Canvas/CanvasState.cpp
     HTML/CanvasGradient.cpp
     HTML/CanvasRenderingContext2D.cpp
     HTML/CrossOrigin/Reporting.cpp
@@ -216,6 +234,7 @@ set(SOURCES
     HTML/Parser/HTMLTokenizer.cpp
     HTML/Parser/ListOfActiveFormattingElements.cpp
     HTML/Parser/StackOfOpenElements.cpp
+    HTML/Path2D.cpp
     HTML/Scripting/ClassicScript.cpp
     HTML/Scripting/Environments.cpp
     HTML/Scripting/ExceptionReporter.cpp
@@ -234,6 +253,7 @@ set(SOURCES
     HTML/WorkerLocation.cpp
     HighResolutionTime/Performance.cpp
     ImageDecoding.cpp
+    Infra/ByteSequences.cpp
     IntersectionObserver/IntersectionObserver.cpp
     Layout/BlockContainer.cpp
     Layout/BlockFormattingContext.cpp
@@ -245,7 +265,6 @@ set(SOURCES
     Layout/CheckBox.cpp
     Layout/FlexFormattingContext.cpp
     Layout/FormattingContext.cpp
-    Layout/FormattingState.cpp
     Layout/FrameBox.cpp
     Layout/ImageBox.cpp
     Layout/InitialContainingBlock.cpp
@@ -255,6 +274,7 @@ set(SOURCES
     Layout/Label.cpp
     Layout/LabelableNode.cpp
     Layout/LayoutPosition.cpp
+    Layout/LayoutState.cpp
     Layout/LineBox.cpp
     Layout/LineBoxFragment.cpp
     Layout/LineBuilder.cpp
@@ -297,6 +317,7 @@ set(SOURCES
     Painting/ButtonPaintable.cpp
     Painting/CanvasPaintable.cpp
     Painting/CheckBoxPaintable.cpp
+    Painting/GradientPainting.cpp
     Painting/ImagePaintable.cpp
     Painting/InlinePaintable.cpp
     Painting/LabelablePaintable.cpp
@@ -311,9 +332,9 @@ set(SOURCES
     Painting/SVGGraphicsPaintable.cpp
     Painting/SVGPaintable.cpp
     Painting/SVGSVGPaintable.cpp
-    Painting/TextPaintable.cpp
     Painting/ShadowPainting.cpp
     Painting/StackingContext.cpp
+    Painting/TextPaintable.cpp
     RequestIdleCallback/IdleDeadline.cpp
     ResizeObserver/ResizeObserver.cpp
     SVG/AttributeNames.cpp

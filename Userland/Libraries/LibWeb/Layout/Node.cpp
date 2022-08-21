@@ -23,6 +23,8 @@ Node::Node(DOM::Document& document, DOM::Node* node)
     : m_document(document)
     , m_dom_node(node)
 {
+    m_serial_id = m_document->next_layout_node_serial_id({});
+
     if (m_dom_node)
         m_dom_node->set_layout_node({}, this);
 }
@@ -190,41 +192,8 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, CSS::Comp
     m_font = Gfx::FontDatabase::default_font();
 }
 
-void NodeWithStyle::did_insert_into_layout_tree(CSS::StyleProperties const& style)
+void NodeWithStyle::did_insert_into_layout_tree(CSS::StyleProperties const&)
 {
-    // https://drafts.csswg.org/css-sizing-3/#definite
-    auto is_definite_size = [&](CSS::PropertyID property_id, bool width) {
-        // A size that can be determined without performing layout; that is,
-        // a <length>,
-        // a measure of text (without consideration of line-wrapping),
-        // a size of the initial containing block,
-        // or a <percentage> or other formula (such as the “stretch-fit” sizing of non-replaced blocks [CSS2]) that is resolved solely against definite sizes.
-        auto maybe_value = style.property(property_id);
-
-        auto const* containing_block = this->containing_block();
-        auto containing_block_has_definite_size = containing_block && (width ? containing_block->m_has_definite_width : containing_block->m_has_definite_height);
-
-        if (maybe_value->has_auto()) {
-            // NOTE: The width of a non-flex-item block is considered definite if it's auto and the containing block has definite width.
-            if (width && is_block_container() && parent() && !parent()->computed_values().display().is_flex_inside())
-                return containing_block_has_definite_size;
-            return false;
-        }
-
-        auto maybe_length_percentage = style.length_percentage(property_id);
-        if (!maybe_length_percentage.has_value())
-            return false;
-        auto length_percentage = maybe_length_percentage.release_value();
-        if (length_percentage.is_length())
-            return true;
-        if (length_percentage.is_percentage())
-            return containing_block_has_definite_size;
-        // FIXME: Determine if calc() value is definite.
-        return false;
-    };
-
-    m_has_definite_width = is_definite_size(CSS::PropertyID::Width, true);
-    m_has_definite_height = is_definite_size(CSS::PropertyID::Height, false);
 }
 
 void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
@@ -278,9 +247,11 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
         for (size_t layer_index = 0; layer_index < layer_count; layer_index++) {
             CSS::BackgroundLayerData layer;
 
-            if (auto image_value = value_for_layer(images, layer_index); image_value && image_value->is_image()) {
-                layer.image = image_value->as_image();
-                layer.image->load_bitmap(document());
+            if (auto image_value = value_for_layer(images, layer_index); image_value) {
+                if (image_value->is_abstract_image()) {
+                    layer.background_image = image_value->as_abstract_image();
+                    layer.background_image->load_any_resources(document());
+                }
             }
 
             if (auto attachment_value = value_for_layer(attachments, layer_index); attachment_value && attachment_value->has_identifier()) {
@@ -412,6 +383,7 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     computed_values.set_flex_grow(computed_style.flex_grow());
     computed_values.set_flex_shrink(computed_style.flex_shrink());
     computed_values.set_order(computed_style.order());
+    computed_values.set_clip(computed_style.clip());
 
     auto justify_content = computed_style.justify_content();
     if (justify_content.has_value())
@@ -420,6 +392,14 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     auto align_items = computed_style.align_items();
     if (align_items.has_value())
         computed_values.set_align_items(align_items.value());
+
+    auto align_self = computed_style.align_self();
+    if (align_self.has_value())
+        computed_values.set_align_self(align_self.value());
+
+    auto appearance = computed_style.appearance();
+    if (appearance.has_value())
+        computed_values.set_appearance(appearance.value());
 
     auto position = computed_style.position();
     if (position.has_value())
@@ -479,9 +459,9 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
         computed_values.set_list_style_type(list_style_type.value());
 
     auto list_style_image = computed_style.property(CSS::PropertyID::ListStyleImage);
-    if (list_style_image->is_image()) {
-        m_list_style_image = list_style_image->as_image();
-        m_list_style_image->load_bitmap(document());
+    if (list_style_image->is_abstract_image()) {
+        m_list_style_image = list_style_image->as_abstract_image();
+        m_list_style_image->load_any_resources(document());
     }
 
     computed_values.set_color(computed_style.color_or_fallback(CSS::PropertyID::Color, *this, CSS::InitialValues::color()));
@@ -568,7 +548,8 @@ bool Node::is_root_element() const
 
 String Node::class_name() const
 {
-    return demangle(typeid(*this).name());
+    auto const* mangled_name = typeid(*this).name();
+    return demangle({ mangled_name, strlen(mangled_name) });
 }
 
 String Node::debug_description() const
@@ -585,7 +566,7 @@ String Node::debug_description() const
                 builder.appendff(".{}", class_name);
         }
     } else {
-        builder.append("(anonymous)");
+        builder.append("(anonymous)"sv);
     }
     return builder.to_string();
 }

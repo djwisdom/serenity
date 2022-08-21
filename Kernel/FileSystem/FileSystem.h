@@ -6,19 +6,19 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Error.h>
-#include <AK/RefCounted.h>
-#include <AK/RefPtr.h>
 #include <AK/StringView.h>
 #include <Kernel/FileSystem/InodeIdentifier.h>
 #include <Kernel/Forward.h>
+#include <Kernel/Library/LockRefPtr.h>
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/UnixTypes.h>
 #include <Kernel/UserOrKernelBuffer.h>
 
 namespace Kernel {
 
-class FileSystem : public RefCounted<FileSystem> {
+class FileSystem : public AtomicRefCounted<FileSystem> {
     friend class Inode;
 
 public:
@@ -67,7 +67,7 @@ protected:
     void set_block_size(u64 size) { m_block_size = size; }
     void set_fragment_size(size_t size) { m_fragment_size = size; }
 
-    mutable Mutex m_lock { "FS" };
+    mutable Mutex m_lock { "FS"sv };
 
 private:
     FileSystemID m_fsid;

@@ -17,9 +17,22 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::proc));
-    RefPtr<Thread> child_first_thread;
+    LockRefPtr<Thread> child_first_thread;
+
+    ArmedScopeGuard thread_finalizer_guard = [&child_first_thread]() {
+        SpinlockLocker lock(g_scheduler_lock);
+        if (child_first_thread) {
+            child_first_thread->detach();
+            child_first_thread->set_state(Thread::State::Dying);
+        }
+    };
+
     auto child_name = TRY(m_name->try_clone());
     auto child = TRY(Process::try_create(child_first_thread, move(child_name), uid(), gid(), pid(), m_is_kernel_process, current_directory(), m_executable, m_tty, this));
+
+    // NOTE: All user processes have a leaked ref on them. It's balanced by Thread::WaitBlockerSet::finalize().
+    child->ref();
+
     TRY(m_unveil_data.with([&](auto& parent_unveil_data) -> ErrorOr<void> {
         return child->m_unveil_data.with([&](auto& child_unveil_data) -> ErrorOr<void> {
             child_unveil_data.state = parent_unveil_data.state;
@@ -43,7 +56,7 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
         child->m_protected_values.has_promises = m_protected_values.has_promises.load();
         child->m_protected_values.has_execpromises = m_protected_values.has_execpromises.load();
         child->m_protected_values.sid = m_protected_values.sid;
-        child->m_protected_values.extra_gids = m_protected_values.extra_gids;
+        child->m_protected_values.credentials = m_protected_values.credentials;
         child->m_protected_values.umask = m_protected_values.umask;
         child->m_protected_values.signal_trampoline = m_protected_values.signal_trampoline;
         child->m_protected_values.dumpable = m_protected_values.dumpable;
@@ -80,7 +93,7 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 
     dbgln_if(FORK_DEBUG, "fork: child will begin executing at {:#04x}:{:p} with stack {:#04x}:{:p}, kstack {:#04x}:{:p}",
         child_regs.cs, child_regs.eip, child_regs.ss, child_regs.esp, child_regs.ss0, child_regs.esp0);
-#else
+#elif ARCH(X86_64)
     auto& child_regs = child_first_thread->m_regs;
     child_regs.rax = 0; // fork() returns 0 in the child :^)
     child_regs.rbx = regs.rbx;
@@ -104,6 +117,8 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 
     dbgln_if(FORK_DEBUG, "fork: child will begin executing at {:#04x}:{:p} with stack {:p}, kstack {:p}",
         child_regs.cs, child_regs.rip, child_regs.rsp, child_regs.rsp0);
+#else
+#    error Unknown architecture
 #endif
 
     {
@@ -120,6 +135,8 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
         }
     }
 
+    thread_finalizer_guard.disarm();
+
     Process::register_new(*child);
 
     PerformanceManager::add_process_created_event(*child);
@@ -129,9 +146,6 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     child_first_thread->set_state(Thread::State::Runnable);
 
     auto child_pid = child->pid().value();
-
-    // NOTE: All user processes have a leaked ref on them. It's balanced by Thread::WaitBlockerSet::finalize().
-    (void)child.leak_ref();
 
     return child_pid;
 }

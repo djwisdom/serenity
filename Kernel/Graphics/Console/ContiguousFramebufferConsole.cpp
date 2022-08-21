@@ -9,9 +9,9 @@
 
 namespace Kernel::Graphics {
 
-NonnullRefPtr<ContiguousFramebufferConsole> ContiguousFramebufferConsole::initialize(PhysicalAddress framebuffer_address, size_t width, size_t height, size_t pitch)
+NonnullLockRefPtr<ContiguousFramebufferConsole> ContiguousFramebufferConsole::initialize(PhysicalAddress framebuffer_address, size_t width, size_t height, size_t pitch)
 {
-    return adopt_ref(*new ContiguousFramebufferConsole(framebuffer_address, width, height, pitch));
+    return adopt_lock_ref(*new ContiguousFramebufferConsole(framebuffer_address, width, height, pitch));
 }
 
 ContiguousFramebufferConsole::ContiguousFramebufferConsole(PhysicalAddress framebuffer_address, size_t width, size_t height, size_t pitch)
@@ -29,7 +29,7 @@ void ContiguousFramebufferConsole::set_resolution(size_t width, size_t height, s
 
     size_t size = Memory::page_round_up(pitch * height).release_value_but_fixme_should_propagate_errors();
     dbgln("Framebuffer Console: taking {} bytes", size);
-    auto region_or_error = MM.allocate_kernel_region(m_framebuffer_address, size, "Framebuffer Console", Memory::Region::Access::ReadWrite, Memory::Region::Cacheable::Yes);
+    auto region_or_error = MM.allocate_kernel_region(m_framebuffer_address, size, "Framebuffer Console"sv, Memory::Region::Access::ReadWrite, Memory::Region::Cacheable::Yes);
     VERIFY(!region_or_error.is_error());
     m_framebuffer_region = region_or_error.release_value();
 

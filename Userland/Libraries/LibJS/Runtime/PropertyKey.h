@@ -33,7 +33,7 @@ public:
         if (value.is_symbol())
             return PropertyKey { value.as_symbol() };
         if (value.is_integral_number() && value.as_double() >= 0 && value.as_double() < NumericLimits<u32>::max())
-            return value.as_u32();
+            return static_cast<u32>(value.as_double());
         return TRY(value.to_string(global_object));
     }
 
@@ -228,10 +228,10 @@ struct Formatter<JS::PropertyKey> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, JS::PropertyKey const& property_key)
     {
         if (!property_key.is_valid())
-            return Formatter<StringView>::format(builder, "<invalid PropertyKey>");
+            return builder.put_string("<invalid PropertyKey>"sv);
         if (property_key.is_number())
-            return Formatter<StringView>::format(builder, String::number(property_key.as_number()));
-        return Formatter<StringView>::format(builder, property_key.to_string_or_symbol().to_display_string());
+            return builder.put_u64(property_key.as_number());
+        return builder.put_string(property_key.to_string_or_symbol().to_display_string());
     }
 };
 

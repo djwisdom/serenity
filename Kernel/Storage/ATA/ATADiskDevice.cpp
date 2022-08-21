@@ -8,13 +8,11 @@
 #include <Kernel/Devices/DeviceManagement.h>
 #include <Kernel/Sections.h>
 #include <Kernel/Storage/ATA/ATADiskDevice.h>
-#include <Kernel/Storage/ATA/IDEChannel.h>
-#include <Kernel/Storage/ATA/IDEController.h>
 #include <Kernel/Storage/StorageManagement.h>
 
 namespace Kernel {
 
-NonnullRefPtr<ATADiskDevice> ATADiskDevice::create(ATAController const& controller, ATADevice::Address ata_address, u16 capabilities, u16 logical_sector_size, u64 max_addressable_block)
+NonnullLockRefPtr<ATADiskDevice> ATADiskDevice::create(ATAController const& controller, ATADevice::Address ata_address, u16 capabilities, u16 logical_sector_size, u64 max_addressable_block)
 {
     auto minor_device_number = StorageManagement::generate_storage_minor_number();
 
@@ -35,7 +33,7 @@ ATADiskDevice::~ATADiskDevice() = default;
 
 StringView ATADiskDevice::class_name() const
 {
-    return "ATADiskDevice";
+    return "ATADiskDevice"sv;
 }
 
 }

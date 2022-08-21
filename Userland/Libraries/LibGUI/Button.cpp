@@ -43,6 +43,7 @@ Button::Button(String text)
         { Gfx::ButtonStyle::Coolbar, "Coolbar" });
 
     REGISTER_STRING_PROPERTY("icon", icon, set_icon_from_path);
+    REGISTER_BOOL_PROPERTY("default", is_default, set_default);
 }
 
 Button::~Button()
@@ -141,6 +142,17 @@ void Button::click(unsigned modifiers)
         m_action->activate(this);
 }
 
+void Button::middle_mouse_click(unsigned int modifiers)
+{
+    if (!is_enabled())
+        return;
+
+    NonnullRefPtr protector = *this;
+
+    if (on_middle_mouse_click)
+        on_middle_mouse_click(modifiers);
+}
+
 void Button::context_menu_event(ContextMenuEvent& context_menu_event)
 {
     if (!is_enabled())
@@ -203,10 +215,22 @@ void Button::set_menu(RefPtr<GUI::Menu> menu)
 void Button::mousedown_event(MouseEvent& event)
 {
     if (m_menu) {
-        if (button_style() == Gfx::ButtonStyle::Tray)
-            m_menu->popup(screen_relative_rect().top_right());
-        else
+        switch (m_menu_position) {
+        case TopLeft:
             m_menu->popup(screen_relative_rect().top_left());
+            break;
+        case TopRight:
+            m_menu->popup(screen_relative_rect().top_right());
+            break;
+        case BottomLeft:
+            m_menu->popup(screen_relative_rect().bottom_left());
+            break;
+        case BottomRight:
+            m_menu->popup(screen_relative_rect().bottom_right());
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
         update();
         return;
     }

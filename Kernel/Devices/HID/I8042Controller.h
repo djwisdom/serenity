@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <AK/RefCounted.h>
+#include <AK/AtomicRefCounted.h>
 #include <Kernel/Devices/HID/KeyboardDevice.h>
 #include <Kernel/Devices/HID/MouseDevice.h>
 #include <Kernel/Locking/Spinlock.h>
@@ -77,18 +77,18 @@ protected:
     {
     }
 
-    NonnullRefPtr<I8042Controller> m_i8042_controller;
+    NonnullLockRefPtr<I8042Controller> m_i8042_controller;
 };
 
 class PS2KeyboardDevice;
 class PS2MouseDevice;
 class HIDManagement;
-class I8042Controller : public RefCounted<I8042Controller> {
+class I8042Controller final : public AtomicRefCounted<I8042Controller> {
     friend class PS2KeyboardDevice;
     friend class PS2MouseDevice;
 
 public:
-    static NonnullRefPtr<I8042Controller> initialize();
+    static NonnullLockRefPtr<I8042Controller> initialize();
 
     ErrorOr<void> detect_devices();
 
@@ -132,8 +132,8 @@ public:
 
     bool irq_process_input_buffer(HIDDevice::Type);
 
-    RefPtr<MouseDevice> mouse() const;
-    RefPtr<KeyboardDevice> keyboard() const;
+    LockRefPtr<MouseDevice> mouse() const;
+    LockRefPtr<KeyboardDevice> keyboard() const;
 
     // Note: This function exists only for the initialization process of the controller
     bool check_existence_via_probing(Badge<HIDManagement>);
@@ -153,12 +153,12 @@ private:
     void do_write(u8 port, u8 data);
     u8 do_read(u8 port);
 
-    Spinlock m_lock;
+    Spinlock m_lock { LockRank::None };
     bool m_first_port_available { false };
     bool m_second_port_available { false };
     bool m_is_dual_channel { false };
-    RefPtr<MouseDevice> m_mouse_device;
-    RefPtr<KeyboardDevice> m_keyboard_device;
+    LockRefPtr<MouseDevice> m_mouse_device;
+    LockRefPtr<KeyboardDevice> m_keyboard_device;
 };
 
 }

@@ -36,7 +36,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_positional_argument(path, "The font file for editing.", "file", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
-    auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-font-editor"));
+    auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-font-editor"sv));
 
     auto window = TRY(GUI::Window::try_create());
     window->set_icon(app_icon.bitmap_for_size(16));
@@ -46,11 +46,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(font_editor->initialize_menubar(*window));
 
     if (path) {
-        auto success = font_editor->open_file(path);
-        if (!success)
-            return 1;
+        TRY(font_editor->open_file(path));
     } else {
-        auto mutable_font = static_ptr_cast<Gfx::BitmapFont>(Gfx::FontDatabase::default_font().clone())->unmasked_character_set();
+        auto mutable_font = TRY(TRY(Gfx::BitmapFont::try_load_from_file("/res/fonts/KaticaRegular10.font"))->unmasked_character_set());
         TRY(font_editor->initialize({}, move(mutable_font)));
     }
 

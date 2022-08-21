@@ -9,6 +9,7 @@
 #pragma once
 
 #include <AK/Function.h>
+#include <AK/GenericShorthands.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/NonnullOwnPtrVector.h>
 #include <AK/NonnullRefPtrVector.h>
@@ -38,6 +39,7 @@
 #include <LibWeb/CSS/ValueID.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Loader/ImageResource.h>
+#include <LibWeb/Painting/GradientPainting.h>
 
 namespace Web::CSS {
 
@@ -56,6 +58,40 @@ enum class FlexBasis {
     Content,
     LengthPercentage,
     Auto,
+};
+
+// Note: The sides must be before the corners in this enum (as this order is used in parsing).
+enum class SideOrCorner {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight
+};
+
+struct GradientColorStop {
+    Color color;
+    Optional<LengthPercentage> length;
+};
+
+struct GradientColorHint {
+    LengthPercentage value;
+};
+
+struct ColorStopListElement {
+    Optional<GradientColorHint> transition_hint;
+    GradientColorStop color_stop;
+};
+
+struct EdgeRect {
+    Length top_edge;
+    Length right_edge;
+    Length bottom_edge;
+    Length left_edge;
+    Gfx::FloatRect resolved(Layout::Node const&, Gfx::FloatRect) const;
 };
 
 // FIXME: Find a better place for this helper.
@@ -99,11 +135,13 @@ public:
         Initial,
         Invalid,
         Length,
+        LinearGradient,
         ListStyle,
         Numeric,
         Overflow,
         Percentage,
         Position,
+        Rect,
         Resolution,
         Shadow,
         String,
@@ -112,11 +150,12 @@ public:
         Transformation,
         Unresolved,
         Unset,
-        ValueList,
+        ValueList
     };
 
     Type type() const { return m_type; }
 
+    bool is_abstract_image() const { return AK::first_is_one_of(type(), Type::Image, Type::LinearGradient); }
     bool is_angle() const { return type() == Type::Angle; }
     bool is_background() const { return type() == Type::Background; }
     bool is_background_repeat() const { return type() == Type::BackgroundRepeat; }
@@ -136,11 +175,13 @@ public:
     bool is_inherit() const { return type() == Type::Inherit; }
     bool is_initial() const { return type() == Type::Initial; }
     bool is_length() const { return type() == Type::Length; }
+    bool is_linear_gradient() const { return type() == Type::LinearGradient; }
     bool is_list_style() const { return type() == Type::ListStyle; }
     bool is_numeric() const { return type() == Type::Numeric; }
     bool is_overflow() const { return type() == Type::Overflow; }
     bool is_percentage() const { return type() == Type::Percentage; }
     bool is_position() const { return type() == Type::Position; }
+    bool is_rect() const { return type() == Type::Rect; }
     bool is_resolution() const { return type() == Type::Resolution; }
     bool is_shadow() const { return type() == Type::Shadow; }
     bool is_string() const { return type() == Type::String; }
@@ -153,6 +194,7 @@ public:
 
     bool is_builtin() const { return is_inherit() || is_initial() || is_unset(); }
 
+    AbstractImageStyleValue const& as_abstract_image() const;
     AngleStyleValue const& as_angle() const;
     BackgroundStyleValue const& as_background() const;
     BackgroundRepeatStyleValue const& as_background_repeat() const;
@@ -172,11 +214,13 @@ public:
     InheritStyleValue const& as_inherit() const;
     InitialStyleValue const& as_initial() const;
     LengthStyleValue const& as_length() const;
+    LinearGradientStyleValue const& as_linear_gradient() const;
     ListStyleStyleValue const& as_list_style() const;
     NumericStyleValue const& as_numeric() const;
     OverflowStyleValue const& as_overflow() const;
     PercentageStyleValue const& as_percentage() const;
     PositionStyleValue const& as_position() const;
+    RectStyleValue const& as_rect() const;
     ResolutionStyleValue const& as_resolution() const;
     ShadowStyleValue const& as_shadow() const;
     StringStyleValue const& as_string() const;
@@ -187,6 +231,7 @@ public:
     UnsetStyleValue const& as_unset() const;
     StyleValueList const& as_value_list() const;
 
+    AbstractImageStyleValue& as_abstract_image() { return const_cast<AbstractImageStyleValue&>(const_cast<StyleValue const&>(*this).as_abstract_image()); }
     AngleStyleValue& as_angle() { return const_cast<AngleStyleValue&>(const_cast<StyleValue const&>(*this).as_angle()); }
     BackgroundStyleValue& as_background() { return const_cast<BackgroundStyleValue&>(const_cast<StyleValue const&>(*this).as_background()); }
     BackgroundRepeatStyleValue& as_background_repeat() { return const_cast<BackgroundRepeatStyleValue&>(const_cast<StyleValue const&>(*this).as_background_repeat()); }
@@ -206,11 +251,13 @@ public:
     InheritStyleValue& as_inherit() { return const_cast<InheritStyleValue&>(const_cast<StyleValue const&>(*this).as_inherit()); }
     InitialStyleValue& as_initial() { return const_cast<InitialStyleValue&>(const_cast<StyleValue const&>(*this).as_initial()); }
     LengthStyleValue& as_length() { return const_cast<LengthStyleValue&>(const_cast<StyleValue const&>(*this).as_length()); }
+    LinearGradientStyleValue& as_linear_gradient() { return const_cast<LinearGradientStyleValue&>(const_cast<StyleValue const&>(*this).as_linear_gradient()); }
     ListStyleStyleValue& as_list_style() { return const_cast<ListStyleStyleValue&>(const_cast<StyleValue const&>(*this).as_list_style()); }
     NumericStyleValue& as_numeric() { return const_cast<NumericStyleValue&>(const_cast<StyleValue const&>(*this).as_numeric()); }
     OverflowStyleValue& as_overflow() { return const_cast<OverflowStyleValue&>(const_cast<StyleValue const&>(*this).as_overflow()); }
     PercentageStyleValue& as_percentage() { return const_cast<PercentageStyleValue&>(const_cast<StyleValue const&>(*this).as_percentage()); }
     PositionStyleValue& as_position() { return const_cast<PositionStyleValue&>(const_cast<StyleValue const&>(*this).as_position()); }
+    RectStyleValue& as_rect() { return const_cast<RectStyleValue&>(const_cast<StyleValue const&>(*this).as_rect()); }
     ResolutionStyleValue& as_resolution() { return const_cast<ResolutionStyleValue&>(const_cast<StyleValue const&>(*this).as_resolution()); }
     ShadowStyleValue& as_shadow() { return const_cast<ShadowStyleValue&>(const_cast<StyleValue const&>(*this).as_shadow()); }
     StringStyleValue& as_string() { return const_cast<StringStyleValue&>(const_cast<StyleValue const&>(*this).as_string()); }
@@ -225,12 +272,14 @@ public:
     virtual bool has_color() const { return false; }
     virtual bool has_identifier() const { return false; }
     virtual bool has_length() const { return false; }
+    virtual bool has_rect() const { return false; }
     virtual bool has_number() const { return false; }
     virtual bool has_integer() const { return false; }
 
     virtual NonnullRefPtr<StyleValue> absolutized(Gfx::IntRect const& viewport_rect, Gfx::FontPixelMetrics const& font_metrics, float font_size, float root_font_size) const;
 
     virtual Color to_color(Layout::NodeWithStyle const&) const { return {}; }
+    virtual EdgeRect to_rect() const { VERIFY_NOT_REACHED(); }
     virtual CSS::ValueID to_identifier() const { return ValueID::Invalid; }
     virtual Length to_length() const { VERIFY_NOT_REACHED(); }
     virtual float to_number() const { return 0; }
@@ -646,15 +695,27 @@ public:
     ResolvedType resolved_type() const { return m_resolved_type; }
     NonnullOwnPtr<CalcSum> const& expression() const { return m_expression; }
 
+    bool resolves_to_angle() const { return m_resolved_type == ResolvedType::Angle; }
     Optional<Angle> resolve_angle() const;
-    Optional<AnglePercentage> resolve_angle_percentage(Angle const& percentage_basis) const;
+    Optional<Angle> resolve_angle_percentage(Angle const& percentage_basis) const;
+
+    bool resolves_to_frequency() const { return m_resolved_type == ResolvedType::Frequency; }
     Optional<Frequency> resolve_frequency() const;
-    Optional<FrequencyPercentage> resolve_frequency_percentage(Frequency const& percentage_basis) const;
+    Optional<Frequency> resolve_frequency_percentage(Frequency const& percentage_basis) const;
+
+    bool resolves_to_length() const { return m_resolved_type == ResolvedType::Length; }
     Optional<Length> resolve_length(Layout::Node const& layout_node) const;
-    Optional<LengthPercentage> resolve_length_percentage(Layout::Node const&, Length const& percentage_basis) const;
+    Optional<Length> resolve_length_percentage(Layout::Node const&, Length const& percentage_basis) const;
+
+    bool resolves_to_percentage() const { return m_resolved_type == ResolvedType::Percentage; }
     Optional<Percentage> resolve_percentage() const;
+
+    bool resolves_to_time() const { return m_resolved_type == ResolvedType::Time; }
     Optional<Time> resolve_time() const;
-    Optional<TimePercentage> resolve_time_percentage(Time const& percentage_basis) const;
+    Optional<Time> resolve_time_percentage(Time const& percentage_basis) const;
+
+    bool resolves_to_integer() const { return m_resolved_type == ResolvedType::Integer; }
+    bool resolves_to_number() const { return resolves_to_integer() || m_resolved_type == ResolvedType::Number; }
     Optional<float> resolve_number();
     Optional<i64> resolve_integer();
 
@@ -863,8 +924,22 @@ private:
     CSS::ValueID m_id { CSS::ValueID::Invalid };
 };
 
+class AbstractImageStyleValue : public StyleValue {
+public:
+    using StyleValue::StyleValue;
+
+    virtual Optional<int> natural_width() const { return {}; }
+    virtual Optional<int> natural_height() const { return {}; }
+
+    virtual void load_any_resources(DOM::Document&) {};
+    virtual void resolve_for_size(Layout::Node const&, Gfx::FloatSize const&) const {};
+
+    virtual bool is_paintable() const = 0;
+    virtual void paint(PaintContext& context, Gfx::IntRect const& dest_rect, CSS::ImageRendering image_rendering) const = 0;
+};
+
 class ImageStyleValue final
-    : public StyleValue
+    : public AbstractImageStyleValue
     , public ImageResourceClient {
 public:
     static NonnullRefPtr<ImageStyleValue> create(AK::URL const& url) { return adopt_ref(*new ImageStyleValue(url)); }
@@ -873,8 +948,15 @@ public:
     virtual String to_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
-    void load_bitmap(DOM::Document& document);
+    virtual void load_any_resources(DOM::Document&) override;
+
     Gfx::Bitmap const* bitmap() const { return m_bitmap; }
+
+    Optional<int> natural_width() const override;
+    Optional<int> natural_height() const override;
+
+    bool is_paintable() const override { return !m_bitmap.is_null(); }
+    void paint(PaintContext& context, Gfx::IntRect const& dest_rect, CSS::ImageRendering image_rendering) const override;
 
 private:
     ImageStyleValue(AK::URL const&);
@@ -885,6 +967,62 @@ private:
     AK::URL m_url;
     WeakPtr<DOM::Document> m_document;
     RefPtr<Gfx::Bitmap> m_bitmap;
+};
+
+class LinearGradientStyleValue final : public AbstractImageStyleValue {
+public:
+    using GradientDirection = Variant<Angle, SideOrCorner>;
+
+    enum class GradientType {
+        Standard,
+        WebKit
+    };
+
+    enum class Repeating {
+        Yes,
+        No
+    };
+
+    static NonnullRefPtr<LinearGradientStyleValue> create(GradientDirection direction, Vector<ColorStopListElement> color_stop_list, GradientType type, Repeating repeating)
+    {
+        VERIFY(color_stop_list.size() >= 2);
+        return adopt_ref(*new LinearGradientStyleValue(direction, move(color_stop_list), type, repeating));
+    }
+
+    virtual String to_string() const override;
+    virtual ~LinearGradientStyleValue() override = default;
+    virtual bool equals(StyleValue const& other) const override;
+
+    Vector<ColorStopListElement> const& color_stop_list() const
+    {
+        return m_color_stop_list;
+    }
+
+    bool is_repeating() const { return m_repeating == Repeating::Yes; }
+
+    float angle_degrees(Gfx::FloatSize const& gradient_size) const;
+
+    void resolve_for_size(Layout::Node const&, Gfx::FloatSize const&) const override;
+
+    bool is_paintable() const override { return true; }
+    void paint(PaintContext& context, Gfx::IntRect const& dest_rect, CSS::ImageRendering image_rendering) const override;
+
+private:
+    LinearGradientStyleValue(GradientDirection direction, Vector<ColorStopListElement> color_stop_list, GradientType type, Repeating repeating)
+        : AbstractImageStyleValue(Type::LinearGradient)
+        , m_direction(direction)
+        , m_color_stop_list(move(color_stop_list))
+        , m_gradient_type(type)
+        , m_repeating(repeating)
+    {
+    }
+
+    GradientDirection m_direction;
+    Vector<ColorStopListElement> m_color_stop_list;
+    GradientType m_gradient_type;
+    Repeating m_repeating;
+
+    mutable Optional<Painting::LinearGradientData> m_resolved_data;
 };
 
 class InheritStyleValue final : public StyleValue {
@@ -1356,6 +1494,27 @@ private:
 
     Separator m_separator;
     NonnullRefPtrVector<StyleValue> m_values;
+};
+
+class RectStyleValue : public StyleValue {
+public:
+    static NonnullRefPtr<RectStyleValue> create(EdgeRect rect);
+    virtual ~RectStyleValue() override = default;
+
+    EdgeRect rect() const { return m_rect; }
+    virtual String to_string() const override;
+    virtual bool has_rect() const override { return true; }
+    virtual EdgeRect to_rect() const override { return m_rect; }
+    virtual bool equals(StyleValue const& other) const override;
+
+private:
+    explicit RectStyleValue(EdgeRect rect)
+        : StyleValue(Type::Rect)
+        , m_rect(rect)
+    {
+    }
+
+    EdgeRect m_rect;
 };
 
 }

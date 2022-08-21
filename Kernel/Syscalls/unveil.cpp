@@ -26,7 +26,7 @@ static void update_intermediate_node_permissions(UnveilNode& root_node, UnveilAc
 
 ErrorOr<FlatPtr> Process::sys$unveil(Userspace<Syscall::SC_unveil_params const*> user_params)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this)
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     auto params = TRY(copy_typed_from_user(user_params));
 
     if (!params.path.characters && !params.permissions.characters) {
@@ -79,7 +79,7 @@ ErrorOr<FlatPtr> Process::sys$unveil(Userspace<Syscall::SC_unveil_params const*>
     // However, if the user specified unveil() with "c" permissions, we don't set errno if ENOENT is encountered,
     // because they most likely intend the program to create the file for them later on.
     // If this case is encountered, the parent node of the path is returned and the custody of that inode is used instead.
-    RefPtr<Custody> parent_custody; // Parent inode in case of ENOENT
+    LockRefPtr<Custody> parent_custody; // Parent inode in case of ENOENT
     OwnPtr<KString> new_unveiled_path;
     auto custody_or_error = VirtualFileSystem::the().resolve_path_without_veil(path->view(), VirtualFileSystem::the().root_custody(), &parent_custody);
     if (!custody_or_error.is_error()) {
@@ -95,6 +95,11 @@ ErrorOr<FlatPtr> Process::sys$unveil(Userspace<Syscall::SC_unveil_params const*>
     auto path_parts = KLexicalPath::parts(new_unveiled_path->view());
     auto it = path_parts.begin();
     return m_unveil_data.with([&](auto& unveil_data) -> ErrorOr<FlatPtr> {
+        // NOTE: We have to check again, since the veil may have been locked by another thread
+        //       while we were parsing the arguments.
+        if (unveil_data.state == VeilState::Locked)
+            return EPERM;
+
         auto& matching_node = unveil_data.paths.traverse_until_last_accessible_node(it, path_parts.end());
         if (it.is_end()) {
             // If the path has already been explicitly unveiled, do not allow elevating its permissions.

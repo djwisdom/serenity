@@ -26,7 +26,7 @@
 #include <time.h>
 #include <utime.h>
 
-#ifndef AK_OS_BSD_GENERIC
+#if !defined(AK_OS_BSD_GENERIC) && !defined(AK_OS_ANDROID)
 #    include <shadow.h>
 #endif
 
@@ -55,7 +55,30 @@ inline ErrorOr<void> unveil(StringView, StringView)
 inline ErrorOr<void> pledge(StringView, StringView = {}) { return {}; }
 #endif
 
-#ifndef AK_OS_BSD_GENERIC
+template<size_t N>
+ALWAYS_INLINE ErrorOr<void> pledge(char const (&promises)[N])
+{
+    return pledge(StringView { promises, N - 1 });
+}
+
+template<size_t NPromises, size_t NExecPromises>
+ALWAYS_INLINE ErrorOr<void> pledge(char const (&promises)[NPromises], char const (&execpromises)[NExecPromises])
+{
+    return pledge(StringView { promises, NPromises - 1 }, StringView { execpromises, NExecPromises - 1 });
+}
+
+template<size_t NPath, size_t NPermissions>
+ALWAYS_INLINE ErrorOr<void> unveil(char const (&path)[NPath], char const (&permissions)[NPermissions])
+{
+    return unveil(StringView { path, NPath - 1 }, StringView { permissions, NPermissions - 1 });
+}
+
+ALWAYS_INLINE ErrorOr<void> unveil(std::nullptr_t, std::nullptr_t)
+{
+    return unveil(StringView {}, StringView {});
+}
+
+#if !defined(AK_OS_BSD_GENERIC) && !defined(AK_OS_ANDROID)
 ErrorOr<Optional<struct spwd>> getspent();
 ErrorOr<Optional<struct spwd>> getspnam(StringView name);
 #endif
@@ -121,6 +144,7 @@ ErrorOr<void> setpgid(pid_t pid, pid_t pgid);
 ErrorOr<pid_t> setsid();
 ErrorOr<void> drop_privileges();
 ErrorOr<bool> isatty(int fd);
+ErrorOr<void> link(StringView old_path, StringView new_path);
 ErrorOr<void> symlink(StringView target, StringView link_path);
 ErrorOr<void> mkdir(StringView path, mode_t);
 ErrorOr<void> chdir(StringView path);
@@ -134,7 +158,10 @@ ErrorOr<void> unlink(StringView path);
 ErrorOr<void> utime(StringView path, Optional<struct utimbuf>);
 ErrorOr<struct utsname> uname();
 ErrorOr<Array<int, 2>> pipe2(int flags);
+#ifndef AK_OS_ANDROID
 ErrorOr<void> adjtime(const struct timeval* delta, struct timeval* old_delta);
+#endif
+ErrorOr<String> find_file_in_path(StringView filename);
 enum class SearchInPath {
     No,
     Yes,

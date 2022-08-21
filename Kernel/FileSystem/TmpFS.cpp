@@ -10,9 +10,9 @@
 
 namespace Kernel {
 
-ErrorOr<NonnullRefPtr<FileSystem>> TmpFS::try_create()
+ErrorOr<NonnullLockRefPtr<FileSystem>> TmpFS::try_create()
 {
-    return TRY(adopt_nonnull_ref_or_enomem(new (nothrow) TmpFS));
+    return TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) TmpFS));
 }
 
 TmpFS::TmpFS() = default;
@@ -37,7 +37,7 @@ unsigned TmpFS::next_inode_index()
     return m_next_inode_index++;
 }
 
-TmpFSInode::TmpFSInode(TmpFS& fs, InodeMetadata const& metadata, WeakPtr<TmpFSInode> parent)
+TmpFSInode::TmpFSInode(TmpFS& fs, InodeMetadata const& metadata, LockWeakPtr<TmpFSInode> parent)
     : Inode(fs, fs.next_inode_index())
     , m_metadata(metadata)
     , m_parent(move(parent))
@@ -47,12 +47,12 @@ TmpFSInode::TmpFSInode(TmpFS& fs, InodeMetadata const& metadata, WeakPtr<TmpFSIn
 
 TmpFSInode::~TmpFSInode() = default;
 
-ErrorOr<NonnullRefPtr<TmpFSInode>> TmpFSInode::try_create(TmpFS& fs, InodeMetadata const& metadata, WeakPtr<TmpFSInode> parent)
+ErrorOr<NonnullLockRefPtr<TmpFSInode>> TmpFSInode::try_create(TmpFS& fs, InodeMetadata const& metadata, LockWeakPtr<TmpFSInode> parent)
 {
-    return adopt_nonnull_ref_or_enomem(new (nothrow) TmpFSInode(fs, metadata, move(parent)));
+    return adopt_nonnull_lock_ref_or_enomem(new (nothrow) TmpFSInode(fs, metadata, move(parent)));
 }
 
-ErrorOr<NonnullRefPtr<TmpFSInode>> TmpFSInode::try_create_root(TmpFS& fs)
+ErrorOr<NonnullLockRefPtr<TmpFSInode>> TmpFSInode::try_create_root(TmpFS& fs)
 {
     InodeMetadata metadata;
     auto now = kgettimeofday().to_truncated_seconds();
@@ -77,9 +77,9 @@ ErrorOr<void> TmpFSInode::traverse_as_directory(Function<ErrorOr<void>(FileSyste
     if (!is_directory())
         return ENOTDIR;
 
-    TRY(callback({ ".", identifier(), 0 }));
+    TRY(callback({ "."sv, identifier(), 0 }));
     if (auto parent = m_parent.strong_ref())
-        TRY(callback({ "..", parent->identifier(), 0 }));
+        TRY(callback({ ".."sv, parent->identifier(), 0 }));
 
     for (auto& child : m_children) {
         TRY(callback({ child.name->view(), child.inode->identifier(), 0 }));
@@ -108,11 +108,9 @@ ErrorOr<size_t> TmpFSInode::read_bytes(off_t offset, size_t size, UserOrKernelBu
 
 ErrorOr<size_t> TmpFSInode::write_bytes(off_t offset, size_t size, UserOrKernelBuffer const& buffer, OpenFileDescription*)
 {
-    MutexLocker locker(m_inode_lock);
+    VERIFY(m_inode_lock.is_locked());
     VERIFY(!is_directory());
     VERIFY(offset >= 0);
-
-    TRY(prepare_to_write_data());
 
     off_t old_size = m_metadata.size;
     off_t new_size = m_metadata.size;
@@ -133,7 +131,7 @@ ErrorOr<size_t> TmpFSInode::write_bytes(off_t offset, size_t size, UserOrKernelB
             // FIXME: Fix this so that no memcpy() is necessary, and we can just grow the
             //        KBuffer and it will add physical pages as needed while keeping the
             //        existing ones.
-            auto tmp = TRY(KBuffer::try_create_with_size(new_size * 2));
+            auto tmp = TRY(KBuffer::try_create_with_size("TmpFSInode: Content"sv, new_size * 2));
             tmp->set_size(new_size);
             if (m_content)
                 memcpy(tmp->data(), m_content->data(), old_size);
@@ -149,7 +147,7 @@ ErrorOr<size_t> TmpFSInode::write_bytes(off_t offset, size_t size, UserOrKernelB
     return size;
 }
 
-ErrorOr<NonnullRefPtr<Inode>> TmpFSInode::lookup(StringView name)
+ErrorOr<NonnullLockRefPtr<Inode>> TmpFSInode::lookup(StringView name)
 {
     MutexLocker locker(m_inode_lock, Mutex::Mode::Shared);
     VERIFY(is_directory());
@@ -207,7 +205,7 @@ ErrorOr<void> TmpFSInode::chown(UserID uid, GroupID gid)
     return {};
 }
 
-ErrorOr<NonnullRefPtr<Inode>> TmpFSInode::create_child(StringView name, mode_t mode, dev_t dev, UserID uid, GroupID gid)
+ErrorOr<NonnullLockRefPtr<Inode>> TmpFSInode::create_child(StringView name, mode_t mode, dev_t dev, UserID uid, GroupID gid)
 {
     MutexLocker locker(m_inode_lock);
 
@@ -285,7 +283,7 @@ ErrorOr<void> TmpFSInode::truncate(u64 size)
     if (size == 0)
         m_content.clear();
     else if (!m_content) {
-        m_content = TRY(KBuffer::try_create_with_size(size));
+        m_content = TRY(KBuffer::try_create_with_size("TmpFSInode: Content"sv, size));
     } else if (static_cast<size_t>(size) < m_content->capacity()) {
         size_t prev_size = m_metadata.size;
         m_content->set_size(size);
@@ -293,7 +291,7 @@ ErrorOr<void> TmpFSInode::truncate(u64 size)
             memset(m_content->data() + prev_size, 0, size - prev_size);
     } else {
         size_t prev_size = m_metadata.size;
-        auto tmp = TRY(KBuffer::try_create_with_size(size));
+        auto tmp = TRY(KBuffer::try_create_with_size("TmpFSInode: Content"sv, size));
         memcpy(tmp->data(), m_content->data(), prev_size);
         m_content = move(tmp);
     }

@@ -17,6 +17,7 @@
 #include <LibWeb/Bindings/CrossOriginAbstractOperations.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/HTML/GlobalEventHandlers.h>
+#include <LibWeb/HTML/Origin.h>
 #include <LibWeb/HTML/WindowEventHandlers.h>
 
 namespace Web {
@@ -31,14 +32,14 @@ class WindowObject
     JS_OBJECT(WindowObject, JS::GlobalObject);
 
 public:
-    explicit WindowObject(HTML::Window&);
+    explicit WindowObject(JS::Realm&, HTML::Window&);
     virtual void initialize_global_object() override;
     virtual ~WindowObject() override = default;
 
     HTML::Window& impl() { return *m_impl; }
     const HTML::Window& impl() const { return *m_impl; }
 
-    Origin origin() const;
+    HTML::Origin origin() const;
 
     LocationObject* location_object() { return m_location_object; }
     LocationObject const* location_object() const { return m_location_object; }
@@ -81,10 +82,15 @@ private:
 
     JS_DECLARE_NATIVE_FUNCTION(document_getter);
 
+    JS_DECLARE_NATIVE_FUNCTION(location_getter);
+    JS_DECLARE_NATIVE_FUNCTION(location_setter);
+
     JS_DECLARE_NATIVE_FUNCTION(name_getter);
     JS_DECLARE_NATIVE_FUNCTION(name_setter);
 
     JS_DECLARE_NATIVE_FUNCTION(performance_getter);
+    JS_DECLARE_NATIVE_FUNCTION(performance_setter);
+
     JS_DECLARE_NATIVE_FUNCTION(history_getter);
     JS_DECLARE_NATIVE_FUNCTION(screen_getter);
 

@@ -30,7 +30,7 @@ namespace Kernel {
     return region.name().starts_with("LibJS:"sv) || region.name().starts_with("malloc:"sv);
 }
 
-ErrorOr<NonnullOwnPtr<Coredump>> Coredump::try_create(NonnullRefPtr<Process> process, StringView output_path)
+ErrorOr<NonnullOwnPtr<Coredump>> Coredump::try_create(NonnullLockRefPtr<Process> process, StringView output_path)
 {
     if (!process->is_dumpable()) {
         dbgln("Refusing to generate coredump for non-dumpable process {}", process->pid().value());
@@ -41,7 +41,7 @@ ErrorOr<NonnullOwnPtr<Coredump>> Coredump::try_create(NonnullRefPtr<Process> pro
     return adopt_nonnull_own_or_enomem(new (nothrow) Coredump(move(process), move(description)));
 }
 
-Coredump::Coredump(NonnullRefPtr<Process> process, NonnullRefPtr<OpenFileDescription> description)
+Coredump::Coredump(NonnullLockRefPtr<Process> process, NonnullLockRefPtr<OpenFileDescription> description)
     : m_process(move(process))
     , m_description(move(description))
 {
@@ -59,7 +59,7 @@ Coredump::Coredump(NonnullRefPtr<Process> process, NonnullRefPtr<OpenFileDescrip
     ++m_num_program_headers; // +1 for NOTE segment
 }
 
-ErrorOr<NonnullRefPtr<OpenFileDescription>> Coredump::try_create_target_file(Process const& process, StringView output_path)
+ErrorOr<NonnullLockRefPtr<OpenFileDescription>> Coredump::try_create_target_file(Process const& process, StringView output_path)
 {
     auto output_directory = KLexicalPath::dirname(output_path);
     auto dump_directory = TRY(VirtualFileSystem::the().open_directory(output_directory, VirtualFileSystem::the().root_custody()));
@@ -85,8 +85,10 @@ ErrorOr<void> Coredump::write_elf_header()
     elf_file_header.e_ident[EI_MAG3] = 'F';
 #if ARCH(I386)
     elf_file_header.e_ident[EI_CLASS] = ELFCLASS32;
-#else
+#elif ARCH(X86_64) || ARCH(AARCH64)
     elf_file_header.e_ident[EI_CLASS] = ELFCLASS64;
+#else
+#    error Unknown architecture
 #endif
     elf_file_header.e_ident[EI_DATA] = ELFDATA2LSB;
     elf_file_header.e_ident[EI_VERSION] = EV_CURRENT;
@@ -101,8 +103,12 @@ ErrorOr<void> Coredump::write_elf_header()
     elf_file_header.e_type = ET_CORE;
 #if ARCH(I386)
     elf_file_header.e_machine = EM_386;
-#else
+#elif ARCH(X86_64)
     elf_file_header.e_machine = EM_X86_64;
+#elif ARCH(AARCH64)
+    elf_file_header.e_machine = EM_AARCH64;
+#else
+#    error Unknown architecture
 #endif
     elf_file_header.e_version = 1;
     elf_file_header.e_entry = 0;
@@ -194,7 +200,7 @@ ErrorOr<void> Coredump::write_regions()
         region.remap();
 
         for (size_t i = 0; i < region.page_count(); i++) {
-            auto const* page = region.physical_page(i);
+            auto page = region.physical_page(i);
             auto src_buffer = [&]() -> ErrorOr<UserOrKernelBuffer> {
                 if (page)
                     return UserOrKernelBuffer::for_user_buffer(reinterpret_cast<uint8_t*>((region.vaddr().as_ptr() + (i * PAGE_SIZE))), PAGE_SIZE);

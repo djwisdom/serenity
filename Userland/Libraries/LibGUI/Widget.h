@@ -32,12 +32,12 @@ extern Core::ObjectClassRegistration registration_Widget;
 }
 }
 
-#define REGISTER_WIDGET(namespace_, class_name)                                                                                                   \
-    namespace Core {                                                                                                                              \
-    namespace Registration {                                                                                                                      \
-    Core::ObjectClassRegistration registration_##class_name(                                                                                      \
-        #namespace_ "::" #class_name, []() { return static_ptr_cast<Core::Object>(namespace_::class_name::construct()); }, &registration_Widget); \
-    }                                                                                                                                             \
+#define REGISTER_WIDGET(namespace_, class_name)                                                                                                       \
+    namespace Core {                                                                                                                                  \
+    namespace Registration {                                                                                                                          \
+    Core::ObjectClassRegistration registration_##class_name(                                                                                          \
+        #namespace_ "::" #class_name##sv, []() { return static_ptr_cast<Core::Object>(namespace_::class_name::construct()); }, &registration_Widget); \
+    }                                                                                                                                                 \
     }
 
 namespace GUI {
@@ -51,6 +51,22 @@ enum class VerticalDirection {
     Up,
     Down
 };
+
+constexpr VerticalDirection operator!(VerticalDirection const& other)
+{
+    if (other == VerticalDirection::Up)
+        return VerticalDirection::Down;
+    return VerticalDirection::Up;
+}
+
+constexpr VerticalDirection key_code_to_vertical_direction(KeyCode const& key)
+{
+    if (key == Key_Up)
+        return VerticalDirection::Up;
+    if (key == Key_Down)
+        return VerticalDirection::Down;
+    VERIFY_NOT_REACHED();
+}
 
 enum class AllowCallback {
     No,
@@ -329,7 +345,7 @@ public:
 
     virtual Gfx::IntRect children_clip_rect() const;
 
-    AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> override_cursor() const { return m_override_cursor; }
+    AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> const& override_cursor() const { return m_override_cursor; }
     void set_override_cursor(AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>>);
 
     bool load_from_gml(StringView);

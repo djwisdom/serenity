@@ -27,6 +27,7 @@
 #include <LibELF/DynamicObject.h>
 #include <LibELF/Hashes.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <string.h>
 #include <sys/types.h>
 #include <syscall.h>
@@ -54,6 +55,8 @@ static __pthread_mutex_t s_loader_lock = __PTHREAD_MUTEX_INITIALIZER;
 static bool s_allowed_to_check_environment_variables { false };
 static bool s_do_breakpoint_trap_before_entry { false };
 static StringView s_ld_library_path;
+static StringView s_main_program_pledge_promises;
+static String s_loader_pledge_promises;
 
 static Result<void, DlErrorMessage> __dlclose(void* handle);
 static Result<void*, DlErrorMessage> __dlopen(char const* filename, int flags);
@@ -228,8 +231,8 @@ static void allocate_tls()
 
 static int __dl_iterate_phdr(DlIteratePhdrCallbackFunction callback, void* data)
 {
-    __pthread_mutex_lock(&s_loader_lock);
-    ScopeGuard unlock_guard = [] { __pthread_mutex_unlock(&s_loader_lock); };
+    pthread_mutex_lock(&s_loader_lock);
+    ScopeGuard unlock_guard = [] { pthread_mutex_unlock(&s_loader_lock); };
 
     for (auto& it : s_global_objects) {
         auto& object = it.value;
@@ -258,6 +261,12 @@ static void initialize_libc(DynamicObject& libc)
     auto res = libc.lookup_symbol("environ"sv);
     VERIFY(res.has_value());
     *((char***)res.value().address.as_ptr()) = s_envp;
+
+    // __stack_chk_guard should be initialized before anything significant (read: global constructors) is running.
+    // This is not done in __libc_init, as we definitely have to return from that, and it might affect Loader as well.
+    res = libc.lookup_symbol("__stack_chk_guard"sv);
+    VERIFY(res.has_value());
+    arc4random_buf(res.value().address.as_ptr(), sizeof(size_t));
 
     res = libc.lookup_symbol("__environ_is_malloced"sv);
     VERIFY(res.has_value());
@@ -332,6 +341,25 @@ static NonnullRefPtrVector<DynamicLoader> collect_loaders_for_library(String con
     return loaders;
 }
 
+static void drop_loader_promise(StringView promise_to_drop)
+{
+    if (s_main_program_pledge_promises.is_empty() || s_loader_pledge_promises.is_empty())
+        return;
+
+    s_loader_pledge_promises = s_loader_pledge_promises.replace(promise_to_drop, ""sv, ReplaceMode::All);
+
+    auto extended_promises = String::formatted("{} {}", s_main_program_pledge_promises, s_loader_pledge_promises);
+    Syscall::SC_pledge_params params {
+        { extended_promises.characters(), extended_promises.length() },
+        { nullptr, 0 },
+    };
+    int rc = syscall(SC_pledge, &params);
+    if (rc < 0 && rc > -EMAXERRNO) {
+        warnln("Failed to drop loader pledge promise: {}. errno={}", promise_to_drop, errno);
+        _exit(1);
+    }
+}
+
 static Result<void, DlErrorMessage> link_main_library(String const& name, int flags)
 {
     auto loaders = collect_loaders_for_library(name);
@@ -368,6 +396,8 @@ static Result<void, DlErrorMessage> link_main_library(String const& name, int fl
         }
     }
 
+    drop_loader_promise("prot_exec"sv);
+
     for (auto& loader : loaders) {
         loader.load_stage_4();
     }
@@ -379,8 +409,8 @@ static Result<void, DlErrorMessage> __dlclose(void* handle)
 {
     dbgln_if(DYNAMIC_LOAD_DEBUG, "__dlclose: {}", handle);
 
-    __pthread_mutex_lock(&s_loader_lock);
-    ScopeGuard unlock_guard = [] { __pthread_mutex_unlock(&s_loader_lock); };
+    pthread_mutex_lock(&s_loader_lock);
+    ScopeGuard unlock_guard = [] { pthread_mutex_unlock(&s_loader_lock); };
 
     // FIXME: this will not currently destroy the dynamic object
     // because we're intentionally holding a strong reference to it
@@ -431,9 +461,9 @@ static Result<void*, DlErrorMessage> __dlopen(char const* filename, int flags)
 
     auto library_name = get_library_name(filename ? filename : s_main_program_name);
 
-    if (__pthread_mutex_trylock(&s_loader_lock) != 0)
+    if (pthread_mutex_trylock(&s_loader_lock) != 0)
         return DlErrorMessage { "Nested calls to dlopen() are not permitted." };
-    ScopeGuard unlock_guard = [] { __pthread_mutex_unlock(&s_loader_lock); };
+    ScopeGuard unlock_guard = [] { pthread_mutex_unlock(&s_loader_lock); };
 
     auto existing_elf_object = s_global_objects.get(library_name);
     if (existing_elf_object.has_value()) {
@@ -478,22 +508,23 @@ static Result<void*, DlErrorMessage> __dlsym(void* handle, char const* symbol_na
 {
     dbgln_if(DYNAMIC_LOAD_DEBUG, "__dlsym: {}, {}", handle, symbol_name);
 
-    __pthread_mutex_lock(&s_loader_lock);
-    ScopeGuard unlock_guard = [] { __pthread_mutex_unlock(&s_loader_lock); };
+    pthread_mutex_lock(&s_loader_lock);
+    ScopeGuard unlock_guard = [] { pthread_mutex_unlock(&s_loader_lock); };
 
+    StringView symbol_name_view { symbol_name, strlen(symbol_name) };
     Optional<DynamicObject::SymbolLookupResult> symbol;
 
     if (handle) {
         auto object = static_cast<DynamicObject*>(handle);
-        symbol = object->lookup_symbol(symbol_name);
+        symbol = object->lookup_symbol(symbol_name_view);
     } else {
         // When handle is 0 (RTLD_DEFAULT) we should look up the symbol in all global modules
         // https://pubs.opengroup.org/onlinepubs/009604499/functions/dlsym.html
-        symbol = DynamicLinker::lookup_global_symbol(symbol_name);
+        symbol = DynamicLinker::lookup_global_symbol(symbol_name_view);
     }
 
     if (!symbol.has_value())
-        return DlErrorMessage { String::formatted("Symbol {} not found", symbol_name) };
+        return DlErrorMessage { String::formatted("Symbol {} not found", symbol_name_view) };
 
     if (symbol.value().type == STT_GNU_IFUNC)
         return (void*)reinterpret_cast<DynamicObject::IfuncResolver>(symbol.value().address.as_ptr())();
@@ -503,8 +534,8 @@ static Result<void*, DlErrorMessage> __dlsym(void* handle, char const* symbol_na
 static Result<void, DlErrorMessage> __dladdr(void* addr, Dl_info* info)
 {
     VirtualAddress user_addr { addr };
-    __pthread_mutex_lock(&s_loader_lock);
-    ScopeGuard unlock_guard = [] { __pthread_mutex_unlock(&s_loader_lock); };
+    pthread_mutex_lock(&s_loader_lock);
+    ScopeGuard unlock_guard = [] { pthread_mutex_unlock(&s_loader_lock); };
 
     RefPtr<DynamicObject> best_matching_library;
     VirtualAddress best_library_offset;
@@ -545,7 +576,7 @@ static Result<void, DlErrorMessage> __dladdr(void* addr, Dl_info* info)
 static void read_environment_variables()
 {
     for (char** env = s_envp; *env; ++env) {
-        StringView env_string { *env };
+        StringView env_string { *env, strlen(*env) };
         if (env_string == "_LOADER_BREAKPOINT=1"sv) {
             s_do_breakpoint_trap_before_entry = true;
         }
@@ -553,6 +584,16 @@ static void read_environment_variables()
         constexpr auto library_path_string = "LD_LIBRARY_PATH="sv;
         if (env_string.starts_with(library_path_string)) {
             s_ld_library_path = env_string.substring_view(library_path_string.length());
+        }
+
+        constexpr auto main_pledge_promises_key = "_LOADER_MAIN_PROGRAM_PLEDGE_PROMISES="sv;
+        if (env_string.starts_with(main_pledge_promises_key)) {
+            s_main_program_pledge_promises = env_string.substring_view(main_pledge_promises_key.length());
+        }
+
+        constexpr auto loader_pledge_promises_key = "_LOADER_PLEDGE_PROMISES="sv;
+        if (env_string.starts_with(loader_pledge_promises_key)) {
+            s_loader_pledge_promises = env_string.substring_view(loader_pledge_promises_key.length());
         }
     }
 }
@@ -600,6 +641,9 @@ void ELF::DynamicLinker::linker_main(String&& main_program_name, int main_progra
             warnln("{}", result.error().text);
             _exit(1);
         }
+
+        drop_loader_promise("rpath"sv);
+
         auto& main_executable_loader = *s_loaders.get(library_name);
         auto entry_point = main_executable_loader->image().entry();
         if (main_executable_loader->is_dynamic())

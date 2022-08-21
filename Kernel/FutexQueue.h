@@ -6,22 +6,20 @@
 
 #pragma once
 
-#include <AK/Atomic.h>
-#include <AK/RefCounted.h>
+#include <AK/AtomicRefCounted.h>
 #include <Kernel/Locking/Spinlock.h>
-#include <Kernel/Memory/VMObject.h>
 #include <Kernel/Thread.h>
 
 namespace Kernel {
 
 class FutexQueue final
-    : public RefCounted<FutexQueue>
+    : public AtomicRefCounted<FutexQueue>
     , public Thread::BlockerSet {
 public:
     FutexQueue();
     virtual ~FutexQueue();
 
-    u32 wake_n_requeue(u32, Function<FutexQueue*()> const&, u32, bool&, bool&);
+    ErrorOr<u32> wake_n_requeue(u32, Function<ErrorOr<FutexQueue*>()> const&, u32, bool&, bool&);
     u32 wake_n(u32, Optional<u32> const&, bool&);
     u32 wake_all(bool&);
 

@@ -7,15 +7,15 @@
 #pragma once
 
 #include <AK/NonnullOwnPtr.h>
-#include <AK/NonnullRefPtr.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/Types.h>
 #include <Kernel/Bus/PCI/Definitions.h>
 #include <Kernel/Graphics/Console/Console.h>
 #include <Kernel/Graphics/DisplayConnector.h>
+#include <Kernel/Graphics/Generic/DisplayConnector.h>
 #include <Kernel/Graphics/GenericGraphicsAdapter.h>
-#include <Kernel/Graphics/VGA/VGACompatibleAdapter.h>
 #include <Kernel/Graphics/VirtIOGPU/GraphicsAdapter.h>
+#include <Kernel/Library/NonnullLockRefPtr.h>
+#include <Kernel/Library/NonnullLockRefPtrVector.h>
 #include <Kernel/Memory/Region.h>
 
 namespace Kernel {
@@ -37,7 +37,7 @@ public:
     void disable_vga_text_mode_console_cursor();
     void disable_vga_emulation_access_permanently();
 
-    RefPtr<Graphics::Console> console() const { return m_console; }
+    LockRefPtr<Graphics::Console> console() const { return m_console; }
     void set_console(Graphics::Console&);
 
     void deactivate_graphical_mode();
@@ -47,20 +47,20 @@ private:
     void enable_vga_text_mode_console_cursor();
 
     bool determine_and_initialize_graphics_device(PCI::DeviceIdentifier const&);
-    bool determine_and_initialize_isa_graphics_device();
-    NonnullRefPtrVector<GenericGraphicsAdapter> m_graphics_devices;
-    RefPtr<Graphics::Console> m_console;
+
+    void initialize_preset_resolution_generic_display_connector();
+
+    NonnullLockRefPtrVector<GenericGraphicsAdapter> m_graphics_devices;
+    LockRefPtr<Graphics::Console> m_console;
 
     // Note: This is only used when booting with kernel commandline that includes "graphics_subsystem_mode=limited"
-    RefPtr<GenericDisplayConnector> m_preset_resolution_generic_display_connector;
+    LockRefPtr<GenericDisplayConnector> m_preset_resolution_generic_display_connector;
 
-    // Note: there could be multiple VGA adapters, but only one can operate in VGA mode
-    RefPtr<VGACompatibleAdapter> m_vga_adapter;
     unsigned m_current_minor_number { 0 };
 
-    SpinlockProtected<IntrusiveList<&DisplayConnector::m_list_node>> m_display_connector_nodes;
+    SpinlockProtected<IntrusiveList<&DisplayConnector::m_list_node>> m_display_connector_nodes { LockRank::None };
 
-    RecursiveSpinlock m_main_vga_lock;
+    RecursiveSpinlock m_main_vga_lock { LockRank::None };
     bool m_vga_access_is_disabled { false };
 };
 

@@ -7,11 +7,14 @@
  */
 
 #include <AK/Concepts.h>
+#include <AK/SIMDExtras.h>
 #include <AK/String.h>
 #include <LibCompress/Zlib.h>
 #include <LibCrypto/Checksum/CRC32.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/PNGWriter.h>
+
+#pragma GCC diagnostic ignored "-Wpsabi"
 
 namespace Gfx {
 
@@ -112,17 +115,16 @@ void PNGWriter::add_chunk(PNGChunk& png_chunk)
 
 void PNGWriter::add_png_header()
 {
-    const u8 png_header[8] = { 0x89, 'P', 'N', 'G', 13, 10, 26, 10 };
-    m_data.append(png_header, sizeof(png_header));
+    m_data.append(PNG::header.data(), PNG::header.size());
 }
 
-void PNGWriter::add_IHDR_chunk(u32 width, u32 height, u8 bit_depth, u8 color_type, u8 compression_method, u8 filter_method, u8 interlace_method)
+void PNGWriter::add_IHDR_chunk(u32 width, u32 height, u8 bit_depth, PNG::ColorType color_type, u8 compression_method, u8 filter_method, u8 interlace_method)
 {
     PNGChunk png_chunk { "IHDR" };
     png_chunk.add_as_big_endian(width);
     png_chunk.add_as_big_endian(height);
     png_chunk.add_u8(bit_depth);
-    png_chunk.add_u8(color_type);
+    png_chunk.add_u8(to_underlying(color_type));
     png_chunk.add_u8(compression_method);
     png_chunk.add_u8(filter_method);
     png_chunk.add_u8(interlace_method);
@@ -135,6 +137,24 @@ void PNGWriter::add_IEND_chunk()
     add_chunk(png_chunk);
 }
 
+union [[gnu::packed]] Pixel {
+    ARGB32 rgba { 0 };
+    struct {
+        u8 red;
+        u8 green;
+        u8 blue;
+        u8 alpha;
+    };
+    AK::SIMD::u8x4 simd;
+
+    ALWAYS_INLINE static AK::SIMD::u8x4 gfx_to_png(Pixel pixel)
+    {
+        swap(pixel.red, pixel.blue);
+        return pixel.simd;
+    }
+};
+static_assert(AssertSize<Pixel, 4>());
+
 void PNGWriter::add_IDAT_chunk(Gfx::Bitmap const& bitmap)
 {
     PNGChunk png_chunk { "IDAT" };
@@ -143,19 +163,94 @@ void PNGWriter::add_IDAT_chunk(Gfx::Bitmap const& bitmap)
     ByteBuffer uncompressed_block_data;
     uncompressed_block_data.ensure_capacity(bitmap.size_in_bytes() + bitmap.height());
 
+    Pixel dummy_scanline[bitmap.width()];
+    auto const* scanline_minus_1 = dummy_scanline;
+
     for (int y = 0; y < bitmap.height(); ++y) {
-        uncompressed_block_data.append(0);
+        auto* scanline = reinterpret_cast<Pixel const*>(bitmap.scanline(y));
+
+        struct Filter {
+            PNG::FilterType type;
+            ByteBuffer buffer {};
+            int sum = 0;
+
+            void append(u8 byte)
+            {
+                buffer.append(byte);
+                sum += static_cast<i8>(byte);
+            }
+
+            void append(AK::SIMD::u8x4 simd)
+            {
+                append(simd[0]);
+                append(simd[1]);
+                append(simd[2]);
+                append(simd[3]);
+            }
+        };
+
+        Filter none_filter { .type = PNG::FilterType::None };
+        none_filter.buffer.ensure_capacity(sizeof(Pixel) * bitmap.height());
+
+        Filter sub_filter { .type = PNG::FilterType::Sub };
+        sub_filter.buffer.ensure_capacity(sizeof(Pixel) * bitmap.height());
+
+        Filter up_filter { .type = PNG::FilterType::Up };
+        up_filter.buffer.ensure_capacity(sizeof(Pixel) * bitmap.height());
+
+        Filter average_filter { .type = PNG::FilterType::Average };
+        average_filter.buffer.ensure_capacity(sizeof(ARGB32) * bitmap.height());
+
+        Filter paeth_filter { .type = PNG::FilterType::Paeth };
+        paeth_filter.buffer.ensure_capacity(sizeof(ARGB32) * bitmap.height());
+
+        auto pixel_x_minus_1 = Pixel::gfx_to_png(*dummy_scanline);
+        auto pixel_xy_minus_1 = Pixel::gfx_to_png(*dummy_scanline);
 
         for (int x = 0; x < bitmap.width(); ++x) {
-            auto pixel = bitmap.get_pixel(x, y);
-            uncompressed_block_data.append(pixel.red());
-            uncompressed_block_data.append(pixel.green());
-            uncompressed_block_data.append(pixel.blue());
-            uncompressed_block_data.append(pixel.alpha());
+            auto pixel = Pixel::gfx_to_png(scanline[x]);
+            auto pixel_y_minus_1 = Pixel::gfx_to_png(scanline_minus_1[x]);
+
+            none_filter.append(pixel);
+
+            sub_filter.append(pixel - pixel_x_minus_1);
+
+            up_filter.append(pixel - pixel_y_minus_1);
+
+            // The sum Orig(a) + Orig(b) shall be performed without overflow (using at least nine-bit arithmetic).
+            auto sum = AK::SIMD::to_u16x4(pixel_x_minus_1) + AK::SIMD::to_u16x4(pixel_y_minus_1);
+            auto average = AK::SIMD::to_u8x4(sum / 2);
+            average_filter.append(pixel - average);
+
+            paeth_filter.append(pixel - PNG::paeth_predictor(pixel_x_minus_1, pixel_y_minus_1, pixel_xy_minus_1));
+
+            pixel_x_minus_1 = pixel;
+            pixel_xy_minus_1 = pixel_y_minus_1;
         }
+
+        scanline_minus_1 = scanline;
+
+        // 12.8 Filter selection: https://www.w3.org/TR/PNG/#12Filter-selection
+        // For best compression of truecolour and greyscale images, the recommended approach
+        // is adaptive filtering in which a filter is chosen for each scanline.
+        // The following simple heuristic has performed well in early tests:
+        // compute the output scanline using all five filters, and select the filter that gives the smallest sum of absolute values of outputs.
+        // (Consider the output bytes as signed differences for this test.)
+        Filter& best_filter = none_filter;
+        if (abs(best_filter.sum) > abs(sub_filter.sum))
+            best_filter = sub_filter;
+        if (abs(best_filter.sum) > abs(up_filter.sum))
+            best_filter = up_filter;
+        if (abs(best_filter.sum) > abs(average_filter.sum))
+            best_filter = average_filter;
+        if (abs(best_filter.sum) > abs(paeth_filter.sum))
+            best_filter = paeth_filter;
+
+        uncompressed_block_data.append(to_underlying(best_filter.type));
+        uncompressed_block_data.append(best_filter.buffer);
     }
 
-    auto maybe_zlib_buffer = Compress::ZlibCompressor::compress_all(uncompressed_block_data);
+    auto maybe_zlib_buffer = Compress::ZlibCompressor::compress_all(uncompressed_block_data, Compress::ZlibCompressionLevel::Best);
     if (!maybe_zlib_buffer.has_value()) {
         // FIXME: Handle errors.
         VERIFY_NOT_REACHED();
@@ -170,7 +265,7 @@ ByteBuffer PNGWriter::encode(Gfx::Bitmap const& bitmap)
 {
     PNGWriter writer;
     writer.add_png_header();
-    writer.add_IHDR_chunk(bitmap.width(), bitmap.height(), 8, 6, 0, 0, 0);
+    writer.add_IHDR_chunk(bitmap.width(), bitmap.height(), 8, PNG::ColorType::TruecolorWithAlpha, 0, 0, 0);
     writer.add_IDAT_chunk(bitmap);
     writer.add_IEND_chunk();
     // FIXME: Handle OOM failure.

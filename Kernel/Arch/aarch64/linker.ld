@@ -7,7 +7,6 @@ PHDRS
   data PT_LOAD ;
   ksyms PT_LOAD ;
   bss PT_LOAD ;
-  super_pages PT_LOAD ;
 }
 
 SECTIONS
@@ -55,11 +54,6 @@ SECTIONS
         *(.heap)
     } :bss
 
-    .super_pages ALIGN(4K) (NOLOAD) : AT (ADDR(.super_pages))
-    {
-        *(.super_pages)
-    } :super_pages
-
     /*
         FIXME: 8MB is enough space for all of the tables required to identity map 
                physical memory. 8M is wasteful, so this should be properly calculated.
@@ -84,4 +78,4 @@ SECTIONS
     page_tables_phys_end = .;
 }
 
-size_of_bss_divided_by_8 = (end_of_bss - start_of_bss) / 8;
+size_of_bss_divided_by_8 = (end_of_bss - start_of_bss + 7) / 8;

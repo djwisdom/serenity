@@ -15,7 +15,7 @@
 
 namespace Kernel {
 
-static Spinlock s_index_lock;
+static Spinlock s_index_lock { LockRank::None };
 static InodeIndex s_next_inode_index = 0;
 
 namespace SegmentedProcFSIndex {
@@ -205,17 +205,17 @@ ErrorOr<size_t> ProcFSExposedLink::read_bytes(off_t offset, size_t count, UserOr
     return nread;
 }
 
-ErrorOr<NonnullRefPtr<Inode>> ProcFSExposedLink::to_inode(ProcFS const& procfs_instance) const
+ErrorOr<NonnullLockRefPtr<Inode>> ProcFSExposedLink::to_inode(ProcFS const& procfs_instance) const
 {
     return TRY(ProcFSLinkInode::try_create(procfs_instance, *this));
 }
 
-ErrorOr<NonnullRefPtr<Inode>> ProcFSExposedComponent::to_inode(ProcFS const& procfs_instance) const
+ErrorOr<NonnullLockRefPtr<Inode>> ProcFSExposedComponent::to_inode(ProcFS const& procfs_instance) const
 {
     return TRY(ProcFSGlobalInode::try_create(procfs_instance, *this));
 }
 
-ErrorOr<NonnullRefPtr<Inode>> ProcFSExposedDirectory::to_inode(ProcFS const& procfs_instance) const
+ErrorOr<NonnullLockRefPtr<Inode>> ProcFSExposedDirectory::to_inode(ProcFS const& procfs_instance) const
 {
     return TRY(ProcFSDirectoryInode::try_create(procfs_instance, *this));
 }
@@ -225,7 +225,7 @@ void ProcFSExposedDirectory::add_component(ProcFSExposedComponent const&)
     TODO();
 }
 
-ErrorOr<NonnullRefPtr<ProcFSExposedComponent>> ProcFSExposedDirectory::lookup(StringView name)
+ErrorOr<NonnullLockRefPtr<ProcFSExposedComponent>> ProcFSExposedDirectory::lookup(StringView name)
 {
     for (auto& component : m_components) {
         if (component.name() == name) {
@@ -241,8 +241,8 @@ ErrorOr<void> ProcFSExposedDirectory::traverse_as_directory(FileSystemID fsid, F
     auto parent_directory = m_parent_directory.strong_ref();
     if (parent_directory.is_null())
         return Error::from_errno(EINVAL);
-    TRY(callback({ ".", { fsid, component_index() }, DT_DIR }));
-    TRY(callback({ "..", { fsid, parent_directory->component_index() }, DT_DIR }));
+    TRY(callback({ "."sv, { fsid, component_index() }, DT_DIR }));
+    TRY(callback({ ".."sv, { fsid, parent_directory->component_index() }, DT_DIR }));
 
     for (auto const& component : m_components) {
         InodeIdentifier identifier = { fsid, component.component_index() };

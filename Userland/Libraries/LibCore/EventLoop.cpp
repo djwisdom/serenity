@@ -17,6 +17,7 @@
 #include <AK/Singleton.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
+#include <LibCore/Account.h>
 #include <LibCore/Event.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/LocalServer.h>
@@ -209,15 +210,20 @@ public:
     void send_response(JsonObject const& response)
     {
         auto serialized = response.to_string();
-        u32 length = serialized.length();
+        auto bytes_to_send = serialized.bytes();
+        u32 length = bytes_to_send.size();
         // FIXME: Propagate errors
-        MUST(m_socket->write({ (u8 const*)&length, sizeof(length) }));
-        MUST(m_socket->write(serialized.bytes()));
+        auto sent = MUST(m_socket->write({ (u8 const*)&length, sizeof(length) }));
+        VERIFY(sent == sizeof(length));
+        while (!bytes_to_send.is_empty()) {
+            size_t bytes_sent = MUST(m_socket->write(bytes_to_send));
+            bytes_to_send = bytes_to_send.slice(bytes_sent);
+        }
     }
 
     void handle_request(JsonObject const& request)
     {
-        auto type = request.get("type").as_string_or({});
+        auto type = request.get("type"sv).as_string_or({});
 
         if (type.is_null()) {
             dbgln("RPC client sent request without type field");
@@ -255,7 +261,7 @@ public:
         }
 
         if (type == "SetInspectedObject") {
-            auto address = request.get("address").to_number<FlatPtr>();
+            auto address = request.get("address"sv).to_number<FlatPtr>();
             for (auto& object : Object::all_objects()) {
                 if ((FlatPtr)&object == address) {
                     if (auto inspected_object = m_inspected_object.strong_ref())
@@ -269,10 +275,10 @@ public:
         }
 
         if (type == "SetProperty") {
-            auto address = request.get("address").to_number<FlatPtr>();
+            auto address = request.get("address"sv).to_number<FlatPtr>();
             for (auto& object : Object::all_objects()) {
                 if ((FlatPtr)&object == address) {
-                    bool success = object.set_property(request.get("name").to_string(), request.get("value"));
+                    bool success = object.set_property(request.get("name"sv).to_string(), request.get("value"sv));
                     JsonObject response;
                     response.set("type", "SetProperty");
                     response.set("success", success);
@@ -354,7 +360,8 @@ EventLoop::~EventLoop()
 bool connect_to_inspector_server()
 {
 #ifdef __serenity__
-    auto maybe_socket = Core::Stream::LocalSocket::connect("/tmp/portal/inspectables");
+    auto inspector_server_path = Account::parse_path_with_uid("/tmp/user/%uid/portal/inspectables"sv);
+    auto maybe_socket = Stream::LocalSocket::connect(inspector_server_path);
     if (maybe_socket.is_error()) {
         dbgln("connect_to_inspector_server: Failed to connect: {}", maybe_socket.error());
         return false;
@@ -494,6 +501,23 @@ void EventLoop::post_event(Object& receiver, NonnullOwnPtr<Event>&& event, Shoul
     m_queued_events.empend(receiver, move(event));
     if (should_wake == ShouldWake::Yes)
         wake();
+}
+
+void EventLoop::wake_once(Object& receiver, int custom_event_type)
+{
+    Threading::MutexLocker lock(m_private->lock);
+    dbgln_if(EVENTLOOP_DEBUG, "Core::EventLoop::wake_once: event type {}", custom_event_type);
+    auto identical_events = m_queued_events.find_if([&](auto& queued_event) {
+        if (queued_event.receiver.is_null())
+            return false;
+        auto const& event = queued_event.event;
+        auto is_receiver_identical = queued_event.receiver.ptr() == &receiver;
+        auto event_id_matches = event->type() == Event::Type::Custom && static_cast<CustomEvent const*>(event.ptr())->custom_type() == custom_event_type;
+        return is_receiver_identical && event_id_matches;
+    });
+    // Event is not in the queue yet, so we want to wake.
+    if (identical_events.is_end())
+        post_event(receiver, make<CustomEvent>(custom_event_type), ShouldWake::Yes);
 }
 
 SignalHandlers::SignalHandlers(int signo, void (*handle_signal)(int))

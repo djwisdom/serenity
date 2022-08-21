@@ -296,21 +296,21 @@ static String permission_string(mode_t mode)
 {
     StringBuilder builder;
     if (S_ISDIR(mode))
-        builder.append("d");
+        builder.append('d');
     else if (S_ISLNK(mode))
-        builder.append("l");
+        builder.append('l');
     else if (S_ISBLK(mode))
-        builder.append("b");
+        builder.append('b');
     else if (S_ISCHR(mode))
-        builder.append("c");
+        builder.append('c');
     else if (S_ISFIFO(mode))
-        builder.append("f");
+        builder.append('f');
     else if (S_ISSOCK(mode))
-        builder.append("s");
+        builder.append('s');
     else if (S_ISREG(mode))
-        builder.append("-");
+        builder.append('-');
     else
-        builder.append("?");
+        builder.append('?');
 
     builder.append(mode & S_IRUSR ? 'r' : '-');
     builder.append(mode & S_IWUSR ? 'w' : '-');
@@ -384,7 +384,7 @@ void FileSystemModel::handle_file_event(Core::FileWatcherEvent const& event)
         LexicalPath path { event.event_path };
         auto& parts = path.parts_view();
         StringView child_name = parts.last();
-        if (!m_should_show_dotfiles && child_name.starts_with("."))
+        if (!m_should_show_dotfiles && child_name.starts_with('.'))
             break;
 
         auto parent_name = path.parent().string();
@@ -610,12 +610,6 @@ Icon FileSystemModel::icon_for(Node const& node) const
         }
         if (node.full_path() == Core::StandardPaths::desktop_directory())
             return FileIconProvider::desktop_directory_icon();
-        if (node.full_path() == Core::StandardPaths::documents_directory())
-            return FileIconProvider::documents_directory_icon();
-        if (node.full_path() == Core::StandardPaths::downloads_directory())
-            return FileIconProvider::downloads_directory_icon();
-        if (node.full_path() == Core::StandardPaths::source_directory())
-            return FileIconProvider::source_directory_icon();
         if (node.is_selected() && node.is_accessible_directory)
             return FileIconProvider::directory_open_icon();
     }

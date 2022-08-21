@@ -23,6 +23,7 @@ class SubtleCrypto;
 }
 
 namespace Web::CSS {
+class AbstractImageStyleValue;
 class Angle;
 class AnglePercentage;
 class AngleStyleValue;
@@ -32,6 +33,7 @@ class BackgroundStyleValue;
 class BorderRadiusStyleValue;
 class BorderRadiusShorthandStyleValue;
 class BorderStyleValue;
+class Clip;
 class CalculatedStyleValue;
 class ColorStyleValue;
 class ContentStyleValue;
@@ -62,6 +64,7 @@ class InitialStyleValue;
 class Length;
 class LengthPercentage;
 class LengthStyleValue;
+class LinearGradientStyleValue;
 class ListStyleStyleValue;
 class MediaList;
 class MediaQuery;
@@ -74,6 +77,7 @@ class Percentage;
 class PercentageStyleValue;
 class PositionStyleValue;
 class PropertyOwningCSSStyleDeclaration;
+class RectStyleValue;
 class Resolution;
 class ResolutionStyleValue;
 class Screen;
@@ -137,6 +141,8 @@ class EventTarget;
 class HTMLCollection;
 class IDLEventListener;
 class LiveNodeList;
+class MutationObserver;
+class MutationRecord;
 class NamedNodeMap;
 class Node;
 class NodeFilter;
@@ -167,7 +173,27 @@ namespace Web::Encoding {
 class TextEncoder;
 }
 
+namespace Web::Fetch {
+class Headers;
+class HeadersIterator;
+}
+
+namespace Web::Fetch::Infrastructure {
+class Body;
+struct Header;
+class HeaderList;
+class Request;
+class Response;
+}
+
+namespace Web::FileAPI {
+class Blob;
+class File;
+}
+
 namespace Web::Geometry {
+class DOMPoint;
+class DOMPointReadOnly;
 class DOMRect;
 class DOMRectList;
 class DOMRectReadOnly;
@@ -179,6 +205,8 @@ class BrowsingContextContainer;
 class CanvasRenderingContext2D;
 class ClassicScript;
 class CloseEvent;
+struct CrossOriginOpenerPolicy;
+struct CrossOriginOpenerPolicyEnforcementResult;
 class DOMParser;
 class DOMStringMap;
 struct Environment;
@@ -264,9 +292,14 @@ class ImageData;
 class MessageChannel;
 class MessageEvent;
 class MessagePort;
+struct NavigationParams;
+class Origin;
 class PageTransitionEvent;
+class Path2D;
+struct PolicyContainer;
 class PromiseRejectionEvent;
 class WorkerDebugConsoleClient;
+struct SandboxingFlagSet;
 class Storage;
 class SubmitEvent;
 class TextMetrics;
@@ -308,6 +341,7 @@ class StackingContext;
 class TextPaintable;
 struct BorderRadiusData;
 struct BorderRadiiData;
+struct LinearGradientData;
 }
 
 namespace Web::RequestIdleCallback {
@@ -353,7 +387,7 @@ class ButtonBox;
 class CheckBox;
 class FlexFormattingContext;
 class FormattingContext;
-struct FormattingState;
+struct LayoutState;
 class InitialContainingBlock;
 class InlineFormattingContext;
 class Label;
@@ -375,7 +409,6 @@ class EditEventHandler;
 class EventHandler;
 class FrameLoader;
 class LoadRequest;
-class Origin;
 class Page;
 class PageClient;
 class PaintContext;
@@ -412,6 +445,7 @@ class AbstractRangeWrapper;
 class AbortControllerWrapper;
 class AbortSignalWrapper;
 class AttributeWrapper;
+class BlobWrapper;
 struct CallbackType;
 class CanvasGradientWrapper;
 class CanvasRenderingContext2DWrapper;
@@ -438,6 +472,8 @@ class DocumentWrapper;
 class DOMExceptionWrapper;
 class DOMImplementationWrapper;
 class DOMParserWrapper;
+class DOMPointWrapper;
+class DOMPointReadOnlyWrapper;
 class DOMRectListWrapper;
 class DOMRectReadOnlyWrapper;
 class DOMRectWrapper;
@@ -448,7 +484,10 @@ class ErrorEventWrapper;
 class EventListenerWrapper;
 class EventTargetWrapper;
 class EventWrapper;
+class FileWrapper;
 class FocusEventWrapper;
+class HeadersWrapper;
+class HeadersIteratorWrapper;
 class HistoryWrapper;
 class HTMLAnchorElementWrapper;
 class HTMLAreaElementWrapper;
@@ -535,6 +574,8 @@ class MessageChannelWrapper;
 class MessageEventWrapper;
 class MessagePortWrapper;
 class MouseEventWrapper;
+class MutationObserverWrapper;
+class MutationRecordWrapper;
 class NamedNodeMapWrapper;
 class NodeFilterWrapper;
 class NodeIteratorWrapper;
@@ -542,6 +583,7 @@ class NodeListWrapper;
 class NodeWrapper;
 class OptionConstructor;
 class PageTransitionEventWrapper;
+class Path2DWrapper;
 class PerformanceTimingWrapper;
 class PerformanceWrapper;
 class ProcessingInstructionWrapper;
@@ -606,6 +648,8 @@ class XMLHttpRequestPrototype;
 class XMLHttpRequestWrapper;
 class XMLSerializerWrapper;
 enum class CanPlayTypeResult;
+enum class CanvasFillRule;
+enum class EndingType;
 enum class DOMParserSupportedType;
 enum class ResizeObserverBoxOptions;
 enum class XMLHttpRequestResponseType;

@@ -43,6 +43,8 @@ public:
 
     ErrorOr<LexicalPath> path() const;
 
+    ErrorOr<void> chown(uid_t, gid_t);
+
     static ErrorOr<bool> is_valid_directory(int fd);
 
 private:
@@ -62,8 +64,9 @@ struct Formatter<Core::Directory> : Formatter<StringView> {
     {
         auto path = directory.path();
         if (path.is_error())
-            return Formatter<StringView>::format(builder, "<unknown>");
-        return Formatter<StringView>::format(builder, path.release_value().string());
+            TRY(builder.put_string("<unknown>"sv));
+        TRY(builder.put_string(path.release_value().string()));
+        return {};
     }
 };
 

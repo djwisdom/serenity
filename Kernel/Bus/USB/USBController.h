@@ -6,14 +6,14 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Error.h>
-#include <AK/RefCounted.h>
 #include <Kernel/Bus/USB/USBDevice.h>
 #include <Kernel/Bus/USB/USBTransfer.h>
 
 namespace Kernel::USB {
 
-class USBController : public RefCounted<USBController> {
+class USBController : public AtomicRefCounted<USBController> {
 public:
     virtual ~USBController() = default;
 
@@ -31,7 +31,7 @@ public:
 private:
     u8 m_next_device_index { 1 };
 
-    IntrusiveListNode<USBController, NonnullRefPtr<USBController>> m_controller_list_node;
+    IntrusiveListNode<USBController, NonnullLockRefPtr<USBController>> m_controller_list_node;
 
 public:
     using List = IntrusiveList<&USBController::m_controller_list_node>;

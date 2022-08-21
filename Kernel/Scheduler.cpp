@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -20,12 +20,9 @@
 #include <Kernel/Time/TimeManagement.h>
 #include <Kernel/kstdio.h>
 
-// Remove this once SMP is stable and can be enabled by default
-#define SCHEDULE_ON_ALL_PROCESSORS 0
-
 namespace Kernel {
 
-RecursiveSpinlock g_scheduler_lock;
+RecursiveSpinlock g_scheduler_lock { LockRank::None };
 
 static u32 time_slice_for(Thread const& thread)
 {
@@ -52,7 +49,7 @@ struct ThreadReadyQueues {
 
 static Singleton<SpinlockProtected<ThreadReadyQueues>> g_ready_queues;
 
-static SpinlockProtected<TotalTimeScheduled> g_total_time_scheduled;
+static SpinlockProtected<TotalTimeScheduled> g_total_time_scheduled { LockRank::None };
 
 // The Scheduler::current_time function provides a current time for scheduling purposes,
 // which may not necessarily relate to wall time
@@ -397,15 +394,15 @@ UNMAP_AFTER_INIT void Scheduler::initialize()
         current_time = current_time_monotonic;
     }
 
-    RefPtr<Thread> idle_thread;
+    LockRefPtr<Thread> idle_thread;
     g_finalizer_wait_queue = new WaitQueue;
 
     g_finalizer_has_work.store(false, AK::MemoryOrder::memory_order_release);
-    s_colonel_process = Process::create_kernel_process(idle_thread, KString::must_create("colonel"), idle_loop, nullptr, 1, Process::RegisterProcess::No).leak_ref();
+    s_colonel_process = Process::create_kernel_process(idle_thread, KString::must_create("colonel"sv), idle_loop, nullptr, 1, Process::RegisterProcess::No).leak_ref();
     VERIFY(s_colonel_process);
     VERIFY(idle_thread);
     idle_thread->set_priority(THREAD_PRIORITY_MIN);
-    idle_thread->set_name(KString::must_create("Idle Task #0"));
+    idle_thread->set_name(KString::must_create("Idle Task #0"sv));
 
     set_idle_thread(idle_thread);
 }
@@ -450,11 +447,6 @@ void Scheduler::timer_tick(RegisterState const& regs)
     // Sanity checks
     VERIFY(current_thread->current_trap());
     VERIFY(current_thread->current_trap()->regs == &regs);
-
-#if !SCHEDULE_ON_ALL_PROCESSORS
-    if (!Processor::is_bootstrap_processor())
-        return; // TODO: This prevents scheduling on other CPUs!
-#endif
 
     if (current_thread->process().is_kernel_process()) {
         // Because the previous mode when entering/exiting kernel threads never changes
@@ -519,12 +511,7 @@ void Scheduler::idle_loop(void*)
 
         proc.idle_end();
         VERIFY_INTERRUPTS_ENABLED();
-#if SCHEDULE_ON_ALL_PROCESSORS
         yield();
-#else
-        if (Processor::current_id() == 0)
-            yield();
-#endif
     }
 }
 

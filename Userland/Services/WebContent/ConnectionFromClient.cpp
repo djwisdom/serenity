@@ -65,10 +65,11 @@ void ConnectionFromClient::update_system_theme(Core::AnonymousBuffer const& them
     m_page_host->set_palette_impl(*impl);
 }
 
-void ConnectionFromClient::update_system_fonts(String const& default_font_query, String const& fixed_width_font_query)
+void ConnectionFromClient::update_system_fonts(String const& default_font_query, String const& fixed_width_font_query, String const& window_title_font_query)
 {
     Gfx::FontDatabase::set_default_font_query(default_font_query);
     Gfx::FontDatabase::set_fixed_width_font_query(fixed_width_font_query);
+    Gfx::FontDatabase::set_window_title_font_query(window_title_font_query);
 }
 
 void ConnectionFromClient::update_screen_rects(Vector<Gfx::IntRect> const& rects, u32 main_screen)
@@ -321,24 +322,24 @@ Messages::WebContentServer::InspectDomNodeResponse ConnectionFromClient::inspect
             auto box_model = box->box_model();
             StringBuilder builder;
             auto serializer = MUST(JsonObjectSerializer<>::try_create(builder));
-            MUST(serializer.add("padding_top", box_model.padding.top));
-            MUST(serializer.add("padding_right", box_model.padding.right));
-            MUST(serializer.add("padding_bottom", box_model.padding.bottom));
-            MUST(serializer.add("padding_left", box_model.padding.left));
-            MUST(serializer.add("margin_top", box_model.margin.top));
-            MUST(serializer.add("margin_right", box_model.margin.right));
-            MUST(serializer.add("margin_bottom", box_model.margin.bottom));
-            MUST(serializer.add("margin_left", box_model.margin.left));
-            MUST(serializer.add("border_top", box_model.border.top));
-            MUST(serializer.add("border_right", box_model.border.right));
-            MUST(serializer.add("border_bottom", box_model.border.bottom));
-            MUST(serializer.add("border_left", box_model.border.left));
+            MUST(serializer.add("padding_top"sv, box_model.padding.top));
+            MUST(serializer.add("padding_right"sv, box_model.padding.right));
+            MUST(serializer.add("padding_bottom"sv, box_model.padding.bottom));
+            MUST(serializer.add("padding_left"sv, box_model.padding.left));
+            MUST(serializer.add("margin_top"sv, box_model.margin.top));
+            MUST(serializer.add("margin_right"sv, box_model.margin.right));
+            MUST(serializer.add("margin_bottom"sv, box_model.margin.bottom));
+            MUST(serializer.add("margin_left"sv, box_model.margin.left));
+            MUST(serializer.add("border_top"sv, box_model.border.top));
+            MUST(serializer.add("border_right"sv, box_model.border.right));
+            MUST(serializer.add("border_bottom"sv, box_model.border.bottom));
+            MUST(serializer.add("border_left"sv, box_model.border.left));
             if (auto* paint_box = box->paint_box()) {
-                MUST(serializer.add("content_width", paint_box->content_width()));
-                MUST(serializer.add("content_height", paint_box->content_height()));
+                MUST(serializer.add("content_width"sv, paint_box->content_width()));
+                MUST(serializer.add("content_height"sv, paint_box->content_height()));
             } else {
-                MUST(serializer.add("content_width", 0));
-                MUST(serializer.add("content_height", 0));
+                MUST(serializer.add("content_width"sv, 0));
+                MUST(serializer.add("content_height"sv, 0));
             }
 
             MUST(serializer.finish());

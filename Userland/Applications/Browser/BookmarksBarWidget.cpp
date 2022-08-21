@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Emanuel Sprung <emanuel.sprung@gmail.com>
+ * Copyright (c) 2022, Jakob-Niklas See <git@nwex.de>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -101,6 +102,7 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
     s_the = this;
     set_layout<GUI::HorizontalBoxLayout>();
     layout()->set_spacing(0);
+    layout()->set_margins(2);
 
     set_fixed_height(20);
 
@@ -108,15 +110,15 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
         set_visible(false);
 
     m_additional = GUI::Button::construct();
+    m_additional->set_tooltip("Show hidden bookmarks");
+    m_additional->set_menu(m_additional_menu);
+    m_additional->set_menu_position(GUI::Button::MenuPosition::BottomLeft);
+    auto bitmap_or_error = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/overflow-menu.png"sv);
+    if (!bitmap_or_error.is_error())
+        m_additional->set_icon(bitmap_or_error.release_value());
     m_additional->set_button_style(Gfx::ButtonStyle::Coolbar);
-    m_additional->set_text(">");
-    m_additional->set_fixed_size(14, 20);
+    m_additional->set_fixed_size(22, 20);
     m_additional->set_focus_policy(GUI::FocusPolicy::TabFocus);
-    m_additional->on_click = [this](auto) {
-        if (m_additional_menu) {
-            m_additional_menu->popup(m_additional->relative_position().translated(relative_position().translated(m_additional->window()->position())));
-        }
-    };
 
     m_separator = GUI::Widget::construct();
 
@@ -124,7 +126,7 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
     auto default_action = GUI::Action::create(
         "&Open", [this](auto&) {
             if (on_bookmark_click)
-                on_bookmark_click(m_context_menu_url, Mod_None);
+                on_bookmark_click(m_context_menu_url, OpenInNewTab::No);
         },
         this);
     m_context_menu_default_action = default_action;
@@ -132,7 +134,7 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
     m_context_menu->add_action(GUI::Action::create(
         "Open in New &Tab", [this](auto&) {
             if (on_bookmark_click)
-                on_bookmark_click(m_context_menu_url, Mod_Ctrl);
+                on_bookmark_click(m_context_menu_url, OpenInNewTab::Yes);
         },
         this));
     m_context_menu->add_separator();
@@ -200,10 +202,16 @@ void BookmarksBarWidget::model_did_update(unsigned)
         button.set_relative_rect(rect);
         button.set_focus_policy(GUI::FocusPolicy::TabFocus);
         button.set_tooltip(url);
+        button.set_allowed_mouse_buttons_for_pressing(GUI::MouseButton::Primary | GUI::MouseButton::Middle);
 
-        button.on_click = [title, url, this](auto modifiers) {
+        button.on_click = [title, url, this](auto) {
             if (on_bookmark_click)
-                on_bookmark_click(url, modifiers);
+                on_bookmark_click(url, OpenInNewTab::No);
+        };
+
+        button.on_middle_mouse_click = [title, url, this](auto) {
+            if (on_bookmark_click)
+                on_bookmark_click(url, OpenInNewTab::Yes);
         };
 
         button.on_context_menu_request = [this, url](auto& context_menu_event) {
@@ -243,6 +251,7 @@ void BookmarksBarWidget::update_content_size()
         // hide all items > m_last_visible_index and create new bookmarks menu for them
         m_additional->set_visible(true);
         m_additional_menu = GUI::Menu::construct("Additional Bookmarks");
+        m_additional->set_menu(m_additional_menu);
         for (size_t i = m_last_visible_index; i < m_bookmarks.size(); ++i) {
             auto& bookmark = m_bookmarks.at(i);
             bookmark.set_visible(false);

@@ -100,7 +100,7 @@ private:
     // the lock is unlocked, it just means we don't know which threads hold it.
     // When locked exclusively, this is always the one thread that holds the
     // lock.
-    RefPtr<Thread> m_holder;
+    LockRefPtr<Thread> m_holder;
     size_t m_shared_holders { 0 };
 
     struct BlockedThreadLists {
@@ -116,9 +116,11 @@ private:
             return mode == Mode::Exclusive ? exclusive : shared;
         }
     };
-    SpinlockProtected<BlockedThreadLists> m_blocked_thread_lists;
+    // FIXME: Use a specific lock rank passed by constructor.
+    SpinlockProtected<BlockedThreadLists> m_blocked_thread_lists { LockRank::None };
 
-    mutable Spinlock m_lock;
+    // FIXME: See above.
+    mutable Spinlock m_lock { LockRank::None };
 
 #if LOCK_SHARED_UPGRADE_DEBUG
     HashMap<Thread*, u32> m_shared_holders_map;

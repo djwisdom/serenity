@@ -31,10 +31,10 @@ ErrorOr<FlatPtr> Process::sys$alarm(unsigned seconds)
         auto deadline = TimeManagement::the().current_time(CLOCK_REALTIME_COARSE);
         deadline = deadline + Time::from_seconds(seconds);
         if (!m_alarm_timer) {
-            m_alarm_timer = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) Timer));
+            m_alarm_timer = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) Timer));
         }
         auto timer_was_added = TimerQueue::the().add_timer_without_id(*m_alarm_timer, CLOCK_REALTIME_COARSE, deadline, [this]() {
-            [[maybe_unused]] auto rc = send_signal(SIGALRM, nullptr);
+            MUST(send_signal(SIGALRM, nullptr));
         });
         if (!timer_was_added)
             return ENOMEM;

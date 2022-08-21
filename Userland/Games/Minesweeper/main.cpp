@@ -7,6 +7,7 @@
 #include "CustomGameDialog.h"
 #include "Field.h"
 #include <AK/URL.h>
+#include <Games/Minesweeper/MinesweeperWindowGML.h>
 #include <LibConfig/Client.h>
 #include <LibCore/System.h>
 #include <LibDesktop/Launcher.h>
@@ -38,65 +39,32 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::pledge("stdio rpath recvfd sendfd"));
 
     TRY(Core::System::unveil("/res", "r"));
-    TRY(Core::System::unveil("/tmp/portal/launch", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/launch", "rw"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-minesweeper"));
+    auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-minesweeper"sv));
 
     auto window = TRY(GUI::Window::try_create());
     window->set_resizable(false);
     window->set_title("Minesweeper");
-    window->resize(139, 175);
+    window->resize(139, 177);
 
     auto widget = TRY(window->try_set_main_widget<GUI::Widget>());
-    (void)TRY(widget->try_set_layout<GUI::VerticalBoxLayout>());
-    widget->layout()->set_spacing(0);
+    widget->load_from_gml(minesweeper_window_gml);
 
-    auto top_line = TRY(widget->try_add<GUI::SeparatorWidget>(Gfx::Orientation::Horizontal));
-    top_line->set_fixed_height(2);
-
-    auto container = TRY(widget->try_add<GUI::Widget>());
-    container->set_fill_with_background_color(true);
-    container->set_fixed_height(36);
-    (void)TRY(container->try_set_layout<GUI::HorizontalBoxLayout>());
-
-    container->layout()->add_spacer();
-
-    auto flag_image = TRY(container->try_add<GUI::Label>());
-    flag_image->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/minesweeper/flag.png").release_value_but_fixme_should_propagate_errors());
-    flag_image->set_fixed_width(16);
-
-    auto flag_label = TRY(container->try_add<GUI::Label>());
-    flag_label->set_autosize(true);
-    flag_label->set_text_alignment(Gfx::TextAlignment::CenterLeft);
-
-    container->layout()->add_spacer();
-
-    auto face_button = TRY(container->try_add<GUI::Button>());
-    face_button->set_focus_policy(GUI::FocusPolicy::TabFocus);
-    face_button->set_button_style(Gfx::ButtonStyle::Coolbar);
-    face_button->set_fixed_size(36, 36);
-
-    container->layout()->add_spacer();
-
-    auto time_image = TRY(container->try_add<GUI::Label>());
-    time_image->set_fixed_width(16);
-    time_image->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/minesweeper/timer.png").release_value_but_fixme_should_propagate_errors());
-
-    auto time_label = TRY(container->try_add<GUI::Label>());
-    time_label->set_fixed_width(50);
-    time_label->set_text_alignment(Gfx::TextAlignment::CenterLeft);
-
-    container->layout()->add_spacer();
-
+    auto& separator = *widget->find_descendant_of_type_named<GUI::HorizontalSeparator>("separator");
+    auto& container = *widget->find_descendant_of_type_named<GUI::Widget>("container");
+    auto& flag_label = *widget->find_descendant_of_type_named<GUI::Label>("flag_label");
+    auto& time_label = *widget->find_descendant_of_type_named<GUI::Label>("time_label");
+    auto& face_button = *widget->find_descendant_of_type_named<GUI::Button>("face_button");
     auto field = TRY(widget->try_add<Field>(flag_label, time_label, face_button, [&](auto size) {
-        size.set_height(size.height() + container->min_size().height().as_int());
+        size.set_height(size.height() + separator.height() + container.height());
         window->resize(size);
     }));
 
     auto game_menu = TRY(window->try_add_menu("&Game"));
 
-    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png")), [&](auto&) {
+    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png"sv)), [&](auto&) {
         field->reset();
     })));
 

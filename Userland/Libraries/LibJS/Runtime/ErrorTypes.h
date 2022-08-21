@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <AK/StringView.h>
+
 #define JS_ENUMERATE_ERROR_TYPES(M)                                                                                                     \
     M(ArrayMaxSize, "Maximum array size exceeded")                                                                                      \
     M(AccessorBadField, "Accessor descriptor's '{}' field must be a function or undefined")                                             \
@@ -41,10 +43,13 @@
     M(IntlInvalidDateTimeFormatOption, "Option {} cannot be set when also providing {}")                                                \
     M(IntlInvalidKey, "{} is not a valid key")                                                                                          \
     M(IntlInvalidLanguageTag, "{} is not a structurally valid language tag")                                                            \
+    M(IntlInvalidRoundingIncrement, "{} is not a valid rounding increment")                                                             \
+    M(IntlInvalidRoundingIncrementForFractionDigits, "{} is not a valid rounding increment for inequal min/max fraction digits")        \
+    M(IntlInvalidRoundingIncrementForRoundingType, "{} is not a valid rounding increment for rounding type {}")                         \
     M(IntlInvalidTime, "Time value must be between -8.64E15 and 8.64E15")                                                               \
     M(IntlInvalidUnit, "Unit {} is not a valid time unit")                                                                              \
-    M(IntlStartTimeAfterEndTime, "Start time {} is after end time {}")                                                                  \
     M(IntlMinimumExceedsMaximum, "Minimum value {} is larger than maximum value {}")                                                    \
+    M(IntlNumberIsNaN, "{} must not be NaN")                                                                                            \
     M(IntlNumberIsNaNOrInfinity, "Number must not be NaN or Infinity")                                                                  \
     M(IntlNumberIsNaNOrOutOfRange, "Value {} is NaN or is not between {} and {}")                                                       \
     M(IntlOptionUndefined, "Option {} must be defined when option {} is {}")                                                            \
@@ -202,6 +207,7 @@
     M(RegExpCompileError, "RegExp compile error: {}")                                                                                   \
     M(RegExpObjectBadFlag, "Invalid RegExp flag '{}'")                                                                                  \
     M(RegExpObjectRepeatedFlag, "Repeated RegExp flag '{}'")                                                                            \
+    M(RegExpObjectIncompatibleFlags, "RegExp flag '{}' is incompatible with flag '{}'")                                                 \
     M(RestrictedFunctionPropertiesAccess, "Restricted function properties like 'callee', 'caller' and 'arguments' may "                 \
                                           "not be accessed in strict mode")                                                             \
     M(RestrictedGlobalProperty, "Cannot declare global property '{}'")                                                                  \
@@ -264,7 +270,8 @@
     M(TemporalPropertyMustBeFinite, "Property must not be Infinity")                                                                    \
     M(TemporalPropertyMustBePositiveInteger, "Property must be a positive integer")                                                     \
     M(TemporalTimeZoneOffsetStringMismatch, "Time zone offset string mismatch: '{}' is not equal to '{}'")                              \
-    M(TemporalZonedDateTimeRoundZeroLengthDay, "Cannot round a ZonedDateTime in a calendar that has zero-length days")                  \
+    M(TemporalZonedDateTimeRoundZeroOrNegativeLengthDay, "Cannot round a ZonedDateTime in a calendar or time zone that has zero or "    \
+                                                         "negative length days")                                                        \
     M(ThisHasNotBeenInitialized, "|this| has not been initialized")                                                                     \
     M(ThisIsAlreadyInitialized, "|this| is already initialized")                                                                        \
     M(ToObjectNullOrUndefined, "ToObject on null or undefined")                                                                         \
@@ -304,18 +311,18 @@ public:
     JS_ENUMERATE_ERROR_TYPES(__ENUMERATE_JS_ERROR)
 #undef __ENUMERATE_JS_ERROR
 
-    char const* message() const
+    StringView message() const
     {
         return m_message;
     }
 
 private:
-    explicit ErrorType(char const* message)
+    explicit ErrorType(StringView message)
         : m_message(message)
     {
     }
 
-    char const* m_message;
+    StringView m_message;
 };
 
 }

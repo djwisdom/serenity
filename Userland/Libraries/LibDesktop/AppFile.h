@@ -15,7 +15,8 @@ namespace Desktop {
 
 class AppFile : public RefCounted<AppFile> {
 public:
-    static constexpr char const* APP_FILES_DIRECTORY = "/res/apps";
+    static constexpr auto APP_FILES_DIRECTORY = "/res/apps"sv;
+
     static NonnullRefPtr<AppFile> get_for_app(StringView app_name);
     static NonnullRefPtr<AppFile> open(StringView path);
     static void for_each(Function<void(NonnullRefPtr<AppFile>)>, StringView directory = APP_FILES_DIRECTORY);
@@ -31,6 +32,7 @@ public:
     String icon_path() const;
     GUI::Icon icon() const;
     bool run_in_terminal() const;
+    Vector<String> launcher_mime_types() const;
     Vector<String> launcher_file_types() const;
     Vector<String> launcher_protocols() const;
     bool spawn() const;

@@ -49,21 +49,9 @@ HexEditor::HexEditor()
     m_blink_timer->start();
 }
 
-void HexEditor::set_readonly(bool readonly)
+ErrorOr<void> HexEditor::open_new_file(size_t size)
 {
-    if (m_readonly == readonly)
-        return;
-    m_readonly = readonly;
-}
-
-bool HexEditor::open_new_file(size_t size)
-{
-    auto maybe_buffer = ByteBuffer::create_zeroed(size);
-    if (maybe_buffer.is_error()) {
-        return false;
-    }
-
-    m_document = make<HexDocumentMemory>(maybe_buffer.release_value());
+    m_document = make<HexDocumentMemory>(TRY(ByteBuffer::create_zeroed(size)));
     set_content_length(m_document->size());
     m_position = 0;
     m_cursor_at_low_nibble = false;
@@ -73,7 +61,7 @@ bool HexEditor::open_new_file(size_t size)
     update();
     update_status();
 
-    return true;
+    return {};
 }
 
 void HexEditor::open_file(NonnullRefPtr<Core::File> file)
@@ -128,13 +116,13 @@ void HexEditor::set_selection(size_t position, size_t length)
 bool HexEditor::save_as(NonnullRefPtr<Core::File> new_file)
 {
     if (m_document->type() == HexDocument::Type::File) {
-        HexDocumentFile* fileDocument = static_cast<HexDocumentFile*>(m_document.ptr());
-        if (!fileDocument->write_to_file(new_file))
+        auto& file_document = static_cast<HexDocumentFile&>(*m_document);
+        if (!file_document.write_to_file(new_file))
             return false;
-        fileDocument->set_file(new_file);
+        file_document.set_file(new_file);
     } else {
-        HexDocumentMemory* memoryDocument = static_cast<HexDocumentMemory*>(m_document.ptr());
-        if (!memoryDocument->write_to_file(new_file))
+        auto& memory_document = static_cast<HexDocumentMemory&>(*m_document);
+        if (!memory_document.write_to_file(new_file))
             return false;
         m_document = make<HexDocumentFile>(new_file);
     }
@@ -194,17 +182,17 @@ bool HexEditor::copy_selected_hex_to_clipboard_as_c_code()
 
     StringBuilder output_string_builder;
     output_string_builder.appendff("unsigned char raw_data[{}] = {{\n", m_selection_end - m_selection_start);
-    output_string_builder.append("    ");
+    output_string_builder.append("    "sv);
     for (size_t i = m_selection_start, j = 1; i < m_selection_end; i++, j++) {
         output_string_builder.appendff("{:#02X}", m_document->get(i).value);
         if (i >= m_selection_end - 1)
             continue;
         if ((j % 12) == 0)
-            output_string_builder.append(",\n    ");
+            output_string_builder.append(",\n    "sv);
         else
-            output_string_builder.append(", ");
+            output_string_builder.append(", "sv);
     }
-    output_string_builder.append("\n};\n");
+    output_string_builder.append("\n};\n"sv);
 
     GUI::Clipboard::the().set_plain_text(output_string_builder.to_string());
     return true;
@@ -460,7 +448,7 @@ void HexEditor::keydown_event(GUI::KeyEvent& event)
         return;
     }
 
-    if (!is_readonly() && !event.ctrl() && !event.alt() && !event.text().is_empty()) {
+    if (!event.ctrl() && !event.alt() && !event.text().is_empty()) {
         if (m_edit_mode == EditMode::Hex) {
             hex_mode_keydown_event(event);
         } else {
@@ -604,8 +592,17 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
                 line_height() - m_line_spacing
             };
 
+            const u8 cell_value = m_document->get(byte_position).value;
+            auto line = String::formatted("{:02X}", cell_value);
+
             Gfx::Color background_color = palette().color(background_role());
-            Gfx::Color text_color = edited_flag ? Color::Red : palette().color(foreground_role());
+            Gfx::Color text_color = [&]() -> Gfx::Color {
+                if (edited_flag)
+                    return Color::Red;
+                if (cell_value == 0x00)
+                    return palette().color(ColorRole::PlaceholderText);
+                return palette().color(foreground_role());
+            }();
 
             if (highlight_flag) {
                 background_color = edited_flag ? palette().selection().inverted() : palette().selection();
@@ -616,8 +613,6 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
             }
             painter.fill_rect(hex_display_rect, background_color);
 
-            const u8 cell_value = m_document->get(byte_position).value;
-            auto line = String::formatted("{:02X}", cell_value);
             painter.draw_text(hex_display_rect, line, Gfx::TextAlignment::TopLeft, text_color);
 
             if (m_edit_mode == EditMode::Hex) {
@@ -640,7 +635,13 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
             };
 
             background_color = palette().color(background_role());
-            text_color = edited_flag ? Color::Red : palette().color(foreground_role());
+            text_color = [&]() -> Gfx::Color {
+                if (edited_flag)
+                    return Color::Red;
+                if (cell_value == 0x00)
+                    return palette().color(ColorRole::PlaceholderText);
+                return palette().color(foreground_role());
+            }();
 
             if (highlight_flag) {
                 background_color = edited_flag ? palette().selection().inverted() : palette().selection();
@@ -763,10 +764,8 @@ Vector<Match> HexEditor::find_all_strings(size_t min_length)
             }
             builder.append(c);
         } else {
-            if (builder.length() >= min_length) {
-                dbgln("find_all_strings: relative_offset={} string={}", offset, builder.to_string());
+            if (builder.length() >= min_length)
                 matches.append({ offset, builder.to_string() });
-            }
             builder.clear();
             found_string = false;
         }

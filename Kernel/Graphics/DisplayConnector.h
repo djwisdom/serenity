@@ -114,14 +114,14 @@ protected:
 
     ErrorOr<void> initialize_edid_for_generic_monitor(Optional<Array<u8, 3>> manufacturer_id_string);
 
-    mutable Spinlock m_control_lock;
+    mutable Spinlock m_control_lock { LockRank::None };
     mutable Mutex m_flushing_lock;
 
     bool m_console_mode { false };
 
     bool m_vertical_offsetted { false };
 
-    mutable Spinlock m_modeset_lock;
+    mutable Spinlock m_modeset_lock { LockRank::None };
     ModeSetting m_current_mode_setting {};
 
     Optional<EDID::Parser> m_edid_parser;
@@ -148,6 +148,8 @@ private:
     virtual void will_be_destroyed() override;
     virtual void after_inserting() override;
 
+    bool ioctl_requires_ownership(unsigned request) const;
+
     OwnPtr<Memory::Region> m_framebuffer_region;
     OwnPtr<Memory::Region> m_fake_writes_framebuffer_region;
     u8* m_framebuffer_data {};
@@ -160,8 +162,11 @@ protected:
     size_t const m_framebuffer_resource_size;
 
 private:
-    RefPtr<Memory::SharedFramebufferVMObject> m_shared_framebuffer_vmobject;
+    LockRefPtr<Memory::SharedFramebufferVMObject> m_shared_framebuffer_vmobject;
 
-    IntrusiveListNode<DisplayConnector, RefPtr<DisplayConnector>> m_list_node;
+    LockWeakPtr<Process> m_responsible_process;
+    Spinlock m_responsible_process_lock { LockRank::None };
+
+    IntrusiveListNode<DisplayConnector, LockRefPtr<DisplayConnector>> m_list_node;
 };
 }

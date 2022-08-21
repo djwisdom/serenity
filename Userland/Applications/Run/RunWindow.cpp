@@ -31,7 +31,7 @@ RunWindow::RunWindow()
 {
     load_history();
 
-    auto app_icon = GUI::Icon::default_icon("app-run");
+    auto app_icon = GUI::Icon::default_icon("app-run"sv);
 
     set_title("Run");
     set_icon(app_icon.bitmap_for_size(16));
@@ -71,7 +71,7 @@ RunWindow::RunWindow()
 
 void RunWindow::event(Core::Event& event)
 {
-    if (event.type() == GUI::Event::KeyUp || event.type() == GUI::Event::KeyDown) {
+    if (event.type() == GUI::Event::KeyDown) {
         auto& key_event = static_cast<GUI::KeyEvent&>(event);
         if (key_event.key() == Key_Escape) {
             // Escape key pressed, close dialog
@@ -101,7 +101,7 @@ void RunWindow::do_run()
         return;
     }
 
-    GUI::MessageBox::show_error(this, "Failed to run. Please check your command, path, or address, and try again.");
+    GUI::MessageBox::show_error(this, "Failed to run. Please check your command, path, or address, and try again."sv);
 
     show();
 }

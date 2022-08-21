@@ -44,15 +44,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
     }
 
-    TRY(Core::System::unveil("/tmp/portal/webcontent", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/webcontent", "rw"));
     // For writing temporary files when exporting.
     TRY(Core::System::unveil("/tmp", "crw"));
     TRY(Core::System::unveil("/etc", "r"));
-    TRY(Core::System::unveil(Core::StandardPaths::home_directory().characters(), "rwc"));
+    TRY(Core::System::unveil(Core::StandardPaths::home_directory(), "rwc"sv));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    auto app_icon = GUI::Icon::default_icon("app-spreadsheet");
+    auto app_icon = GUI::Icon::default_icon("app-spreadsheet"sv);
     auto window = GUI::Window::construct();
     window->resize(640, 480);
     window->set_icon(app_icon.bitmap_for_size(16));

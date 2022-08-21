@@ -20,17 +20,15 @@ class IntelNativeGraphicsAdapter final
     , public PCI::Device {
 
 public:
-    static RefPtr<IntelNativeGraphicsAdapter> initialize(PCI::DeviceIdentifier const&);
+    static LockRefPtr<IntelNativeGraphicsAdapter> initialize(PCI::DeviceIdentifier const&);
 
     virtual ~IntelNativeGraphicsAdapter() = default;
-
-    virtual bool vga_compatible() const override { return true; }
 
 private:
     ErrorOr<void> initialize_adapter();
 
     explicit IntelNativeGraphicsAdapter(PCI::Address);
 
-    RefPtr<IntelNativeDisplayConnector> m_display_connector;
+    LockRefPtr<IntelNativeDisplayConnector> m_display_connector;
 };
 }

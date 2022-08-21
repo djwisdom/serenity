@@ -37,10 +37,10 @@ MutexProtected<IPv4Socket::List>& IPv4Socket::all_sockets()
 
 ErrorOr<NonnullOwnPtr<DoubleBuffer>> IPv4Socket::try_create_receive_buffer()
 {
-    return DoubleBuffer::try_create(256 * KiB);
+    return DoubleBuffer::try_create("IPv4Socket: Receive buffer"sv, 256 * KiB);
 }
 
-ErrorOr<NonnullRefPtr<Socket>> IPv4Socket::create(int type, int protocol)
+ErrorOr<NonnullLockRefPtr<Socket>> IPv4Socket::create(int type, int protocol)
 {
     auto receive_buffer = TRY(IPv4Socket::try_create_receive_buffer());
 
@@ -49,7 +49,7 @@ ErrorOr<NonnullRefPtr<Socket>> IPv4Socket::create(int type, int protocol)
     if (type == SOCK_DGRAM)
         return TRY(UDPSocket::try_create(protocol, move(receive_buffer)));
     if (type == SOCK_RAW) {
-        auto raw_socket = adopt_ref_if_nonnull(new (nothrow) IPv4Socket(type, protocol, move(receive_buffer), {}));
+        auto raw_socket = adopt_lock_ref_if_nonnull(new (nothrow) IPv4Socket(type, protocol, move(receive_buffer), {}));
         if (raw_socket)
             return raw_socket.release_nonnull();
         return ENOMEM;
@@ -138,7 +138,7 @@ ErrorOr<void> IPv4Socket::listen(size_t backlog)
     return protocol_listen(result.did_allocate);
 }
 
-ErrorOr<void> IPv4Socket::connect(OpenFileDescription& description, Userspace<sockaddr const*> address, socklen_t address_size, ShouldBlock should_block)
+ErrorOr<void> IPv4Socket::connect(OpenFileDescription& description, Userspace<sockaddr const*> address, socklen_t address_size)
 {
     if (address_size != sizeof(sockaddr_in))
         return set_so_error(EINVAL);
@@ -158,7 +158,7 @@ ErrorOr<void> IPv4Socket::connect(OpenFileDescription& description, Userspace<so
         m_peer_address = IPv4Address { 127, 0, 0, 1 };
     m_peer_port = ntohs(safe_address.sin_port);
 
-    return protocol_connect(description, should_block);
+    return protocol_connect(description);
 }
 
 bool IPv4Socket::can_read(OpenFileDescription const&, u64) const
@@ -444,7 +444,7 @@ bool IPv4Socket::did_receive(IPv4Address const& source_address, u16 source_port,
             dbgln("IPv4Socket({}): did_receive refusing packet since queue is full.", this);
             return false;
         }
-        auto data_or_error = KBuffer::try_create_with_bytes(packet);
+        auto data_or_error = KBuffer::try_create_with_bytes("IPv4Socket: Packet buffer"sv, packet);
         if (data_or_error.is_error()) {
             dbgln("IPv4Socket: did_receive unable to allocate storage for incoming packet.");
             return false;
@@ -474,7 +474,7 @@ ErrorOr<NonnullOwnPtr<KString>> IPv4Socket::pseudo_path(OpenFileDescription cons
         return KString::try_create("socket"sv);
 
     StringBuilder builder;
-    TRY(builder.try_append("socket:"));
+    TRY(builder.try_append("socket:"sv));
 
     TRY(builder.try_appendff("{}:{}", m_local_address.to_string(), m_local_port));
     if (m_role == Role::Accepted || m_role == Role::Connected)
@@ -482,16 +482,16 @@ ErrorOr<NonnullOwnPtr<KString>> IPv4Socket::pseudo_path(OpenFileDescription cons
 
     switch (m_role) {
     case Role::Listener:
-        TRY(builder.try_append(" (listening)"));
+        TRY(builder.try_append(" (listening)"sv));
         break;
     case Role::Accepted:
-        TRY(builder.try_append(" (accepted)"));
+        TRY(builder.try_append(" (accepted)"sv));
         break;
     case Role::Connected:
-        TRY(builder.try_append(" (connected)"));
+        TRY(builder.try_append(" (connected)"sv));
         break;
     case Role::Connecting:
-        TRY(builder.try_append(" (connecting)"));
+        TRY(builder.try_append(" (connecting)"sv));
         break;
     default:
         VERIFY_NOT_REACHED();
@@ -689,7 +689,7 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
         memcpy(namebuf, ifr.ifr_name, IFNAMSIZ);
         namebuf[sizeof(namebuf) - 1] = '\0';
 
-        auto adapter = NetworkingManagement::the().lookup_by_name(namebuf);
+        auto adapter = NetworkingManagement::the().lookup_by_name({ namebuf, strlen(namebuf) });
         if (!adapter)
             return ENODEV;
 

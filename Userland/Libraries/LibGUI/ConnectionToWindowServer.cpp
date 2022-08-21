@@ -50,12 +50,14 @@ ConnectionToWindowServer::ConnectionToWindowServer(NonnullOwnPtr<Core::Stream::L
     auto message = wait_for_specific_message<Messages::WindowClient::FastGreet>();
     set_system_theme_from_anonymous_buffer(message->theme_buffer());
     Desktop::the().did_receive_screen_rects({}, message->screen_rects(), message->main_screen_index(), message->workspace_rows(), message->workspace_columns());
+    Desktop::the().set_system_effects(message->effects());
     Gfx::FontDatabase::set_default_font_query(message->default_font_query());
     Gfx::FontDatabase::set_fixed_width_font_query(message->fixed_width_font_query());
+    Gfx::FontDatabase::set_window_title_font_query(message->window_title_font_query());
     m_client_id = message->client_id();
 }
 
-void ConnectionToWindowServer::fast_greet(Vector<Gfx::IntRect> const&, u32, u32, u32, Core::AnonymousBuffer const&, String const&, String const&, i32)
+void ConnectionToWindowServer::fast_greet(Vector<Gfx::IntRect> const&, u32, u32, u32, Core::AnonymousBuffer const&, String const&, String const&, String const&, Vector<bool> const&, i32)
 {
     // NOTE: This message is handled in the constructor.
 }
@@ -71,14 +73,20 @@ void ConnectionToWindowServer::update_system_theme(Core::AnonymousBuffer const& 
     Application::the()->dispatch_event(*make<ThemeChangeEvent>());
 }
 
-void ConnectionToWindowServer::update_system_fonts(String const& default_font_query, String const& fixed_width_font_query)
+void ConnectionToWindowServer::update_system_fonts(String const& default_font_query, String const& fixed_width_font_query, String const& window_title_font_query)
 {
     Gfx::FontDatabase::set_default_font_query(default_font_query);
     Gfx::FontDatabase::set_fixed_width_font_query(fixed_width_font_query);
+    Gfx::FontDatabase::set_window_title_font_query(window_title_font_query);
     Window::update_all_windows({});
     Window::for_each_window({}, [](auto& window) {
         Core::EventLoop::current().post_event(window, make<FontsChangeEvent>());
     });
+}
+
+void ConnectionToWindowServer::update_system_effects(Vector<bool> const& effects)
+{
+    Desktop::the().set_system_effects(effects);
 }
 
 void ConnectionToWindowServer::paint(i32 window_id, Gfx::IntSize const& window_size, Vector<Gfx::IntRect> const& rects)
@@ -364,11 +372,6 @@ void ConnectionToWindowServer::applet_area_rect_changed(Gfx::IntRect const& rect
     Window::for_each_window({}, [&](auto& window) {
         Core::EventLoop::current().post_event(window, make<AppletAreaRectChangeEvent>(rect));
     });
-}
-
-void ConnectionToWindowServer::set_wallpaper_finished(bool)
-{
-    // This is handled manually by Desktop::set_wallpaper().
 }
 
 void ConnectionToWindowServer::drag_dropped(i32 window_id, Gfx::IntPoint const& mouse_position, String const& text, HashMap<String, ByteBuffer> const& mime_data)

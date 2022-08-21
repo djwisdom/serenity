@@ -31,9 +31,6 @@ static Icon s_inaccessible_directory_icon;
 static Icon s_desktop_directory_icon;
 static Icon s_home_directory_icon;
 static Icon s_home_directory_open_icon;
-static Icon s_documents_directory_icon;
-static Icon s_downloads_directory_icon;
-static Icon s_source_directory_icon;
 static Icon s_file_icon;
 static Icon s_symlink_icon;
 static Icon s_socket_icon;
@@ -51,7 +48,7 @@ static void initialize_executable_icon_if_needed()
     if (initialized)
         return;
     initialized = true;
-    s_executable_icon = Icon::default_icon("filetype-executable");
+    s_executable_icon = Icon::default_icon("filetype-executable"sv);
 }
 
 static void initialize_filetype_image_icon_if_needed()
@@ -60,7 +57,7 @@ static void initialize_filetype_image_icon_if_needed()
     if (initialized)
         return;
     initialized = true;
-    s_filetype_image_icon = Icon::default_icon("filetype-image");
+    s_filetype_image_icon = Icon::default_icon("filetype-image"sv);
 }
 
 static void initialize_if_needed()
@@ -71,22 +68,19 @@ static void initialize_if_needed()
 
     auto config = Core::ConfigFile::open("/etc/FileIconProvider.ini").release_value_but_fixme_should_propagate_errors();
 
-    s_symlink_emblem = Gfx::Bitmap::try_load_from_file("/res/icons/symlink-emblem.png").release_value_but_fixme_should_propagate_errors();
-    s_symlink_emblem_small = Gfx::Bitmap::try_load_from_file("/res/icons/symlink-emblem-small.png").release_value_but_fixme_should_propagate_errors();
+    s_symlink_emblem = Gfx::Bitmap::try_load_from_file("/res/icons/symlink-emblem.png"sv).release_value_but_fixme_should_propagate_errors();
+    s_symlink_emblem_small = Gfx::Bitmap::try_load_from_file("/res/icons/symlink-emblem-small.png"sv).release_value_but_fixme_should_propagate_errors();
 
-    s_hard_disk_icon = Icon::default_icon("hard-disk");
-    s_directory_icon = Icon::default_icon("filetype-folder");
-    s_directory_open_icon = Icon::default_icon("filetype-folder-open");
-    s_inaccessible_directory_icon = Icon::default_icon("filetype-folder-inaccessible");
-    s_home_directory_icon = Icon::default_icon("home-directory");
-    s_home_directory_open_icon = Icon::default_icon("home-directory-open");
-    s_desktop_directory_icon = Icon::default_icon("desktop");
-    s_documents_directory_icon = Icon::default_icon("documents");
-    s_downloads_directory_icon = Icon::default_icon("downloads");
-    s_source_directory_icon = Icon::default_icon("source");
-    s_file_icon = Icon::default_icon("filetype-unknown");
-    s_symlink_icon = Icon::default_icon("filetype-symlink");
-    s_socket_icon = Icon::default_icon("filetype-socket");
+    s_hard_disk_icon = Icon::default_icon("hard-disk"sv);
+    s_directory_icon = Icon::default_icon("filetype-folder"sv);
+    s_directory_open_icon = Icon::default_icon("filetype-folder-open"sv);
+    s_inaccessible_directory_icon = Icon::default_icon("filetype-folder-inaccessible"sv);
+    s_home_directory_icon = Icon::default_icon("home-directory"sv);
+    s_home_directory_open_icon = Icon::default_icon("home-directory-open"sv);
+    s_desktop_directory_icon = Icon::default_icon("desktop"sv);
+    s_file_icon = Icon::default_icon("filetype-unknown"sv);
+    s_symlink_icon = Icon::default_icon("filetype-symlink"sv);
+    s_socket_icon = Icon::default_icon("filetype-socket"sv);
 
     initialize_filetype_image_icon_if_needed();
     initialize_executable_icon_if_needed();
@@ -121,24 +115,6 @@ Icon FileIconProvider::desktop_directory_icon()
 {
     initialize_if_needed();
     return s_desktop_directory_icon;
-}
-
-Icon FileIconProvider::documents_directory_icon()
-{
-    initialize_if_needed();
-    return s_documents_directory_icon;
-}
-
-Icon FileIconProvider::downloads_directory_icon()
-{
-    initialize_if_needed();
-    return s_downloads_directory_icon;
-}
-
-Icon FileIconProvider::source_directory_icon()
-{
-    initialize_if_needed();
-    return s_source_directory_icon;
 }
 
 Icon FileIconProvider::home_directory_open_icon()
@@ -200,13 +176,13 @@ Icon FileIconProvider::icon_for_executable(String const& path)
     // If any of the required sections are missing then use the defaults
     Icon icon;
     struct IconSection {
-        char const* section_name;
+        StringView section_name;
         int image_size;
     };
 
     static constexpr Array<IconSection, 2> icon_sections = {
-        IconSection { .section_name = "serenity_icon_s", .image_size = 16 },
-        IconSection { .section_name = "serenity_icon_m", .image_size = 32 }
+        IconSection { .section_name = "serenity_icon_s"sv, .image_size = 16 },
+        IconSection { .section_name = "serenity_icon_m"sv, .image_size = 32 }
     };
 
     bool had_error = false;
@@ -251,12 +227,6 @@ Icon FileIconProvider::icon_for_path(String const& path, mode_t mode)
             return s_home_directory_icon;
         if (path == Core::StandardPaths::desktop_directory())
             return s_desktop_directory_icon;
-        if (path == Core::StandardPaths::documents_directory())
-            return s_documents_directory_icon;
-        if (path == Core::StandardPaths::downloads_directory())
-            return s_downloads_directory_icon;
-        if (path == Core::StandardPaths::source_directory())
-            return s_source_directory_icon;
         if (access(path.characters(), R_OK | X_OK) < 0)
             return s_inaccessible_directory_icon;
         return s_directory_icon;

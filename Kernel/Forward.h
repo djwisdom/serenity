@@ -14,6 +14,7 @@ namespace Kernel {
 class BlockDevice;
 class CharacterDevice;
 class Coredump;
+class Credentials;
 class Custody;
 class DevTmpFSDeviceInode;
 class DevTmpFSDirectoryInode;
@@ -56,6 +57,7 @@ class SysFS;
 class SysFSDirectory;
 class SysFSRootDirectory;
 class SysFSBusDirectory;
+class SysFSDevicesDirectory;
 class SysFSDirectoryInode;
 class SysFSInode;
 class TCPSocket;
@@ -91,12 +93,12 @@ class SpinlockLocker;
 struct InodeMetadata;
 struct TrapFrame;
 
-TYPEDEF_DISTINCT_ORDERED_ID(pid_t, ProcessID);
-TYPEDEF_DISTINCT_ORDERED_ID(pid_t, ThreadID);
-TYPEDEF_DISTINCT_ORDERED_ID(pid_t, SessionID);
-TYPEDEF_DISTINCT_ORDERED_ID(pid_t, ProcessGroupID);
+AK_TYPEDEF_DISTINCT_ORDERED_ID(pid_t, ProcessID);
+AK_TYPEDEF_DISTINCT_ORDERED_ID(pid_t, ThreadID);
+AK_TYPEDEF_DISTINCT_ORDERED_ID(pid_t, SessionID);
+AK_TYPEDEF_DISTINCT_ORDERED_ID(pid_t, ProcessGroupID);
 
-TYPEDEF_DISTINCT_ORDERED_ID(uid_t, UserID);
-TYPEDEF_DISTINCT_ORDERED_ID(gid_t, GroupID);
+AK_TYPEDEF_DISTINCT_ORDERED_ID(uid_t, UserID);
+AK_TYPEDEF_DISTINCT_ORDERED_ID(gid_t, GroupID);
 
 }

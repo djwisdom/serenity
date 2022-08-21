@@ -48,9 +48,9 @@ StringView PCIDeviceAttributeSysFSComponent::name() const
     }
 }
 
-NonnullRefPtr<PCIDeviceAttributeSysFSComponent> PCIDeviceAttributeSysFSComponent::create(PCIDeviceSysFSDirectory const& device, PCI::RegisterOffset offset, size_t field_bytes_width)
+NonnullLockRefPtr<PCIDeviceAttributeSysFSComponent> PCIDeviceAttributeSysFSComponent::create(PCIDeviceSysFSDirectory const& device, PCI::RegisterOffset offset, size_t field_bytes_width)
 {
-    return adopt_ref(*new (nothrow) PCIDeviceAttributeSysFSComponent(device, offset, field_bytes_width));
+    return adopt_lock_ref(*new (nothrow) PCIDeviceAttributeSysFSComponent(device, offset, field_bytes_width));
 }
 
 PCIDeviceAttributeSysFSComponent::PCIDeviceAttributeSysFSComponent(PCIDeviceSysFSDirectory const& device, PCI::RegisterOffset offset, size_t field_bytes_width)
@@ -90,6 +90,6 @@ ErrorOr<NonnullOwnPtr<KBuffer>> PCIDeviceAttributeSysFSComponent::try_to_generat
         VERIFY_NOT_REACHED();
     }
 
-    return KBuffer::try_create_with_bytes(value->view().bytes());
+    return KBuffer::try_create_with_bytes("PCIDeviceAttributeSysFSComponent: Device address"sv, value->view().bytes());
 }
 }

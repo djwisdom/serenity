@@ -25,6 +25,7 @@ class ComboBoxEditor final : public TextEditor {
 
 public:
     Function<void(int delta)> on_mousewheel;
+    Function<void(KeyEvent& event)> on_keypress;
 
 private:
     ComboBoxEditor()
@@ -46,8 +47,10 @@ private:
             if (is_focused())
                 set_focus(false);
             event.accept();
-        } else
+        } else {
+            on_keypress(event);
             TextEditor::keydown_event(event);
+        }
     }
 };
 
@@ -86,10 +89,16 @@ ComboBox::ComboBox()
         if (only_allow_values_from_model())
             m_open_button->click();
     };
+    m_editor->on_keypress = [this](KeyEvent& event) {
+        if (!m_list_window->is_visible() && event.key() <= Key_Z && event.key() >= Key_A) {
+            open();
+            m_list_window->event(event);
+        }
+    };
 
     m_open_button = add<Button>();
     m_open_button->set_button_style(Gfx::ButtonStyle::ThickCap);
-    m_open_button->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/downward-triangle.png").release_value_but_fixme_should_propagate_errors());
+    m_open_button->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/downward-triangle.png"sv).release_value_but_fixme_should_propagate_errors());
     m_open_button->set_focus_policy(GUI::FocusPolicy::NoFocus);
     m_open_button->on_click = [this](auto) {
         if (m_list_window->is_visible())

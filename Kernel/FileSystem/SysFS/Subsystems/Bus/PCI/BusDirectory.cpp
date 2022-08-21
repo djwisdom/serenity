@@ -16,16 +16,19 @@ namespace Kernel {
 
 UNMAP_AFTER_INIT void PCIBusSysFSDirectory::initialize()
 {
-    auto pci_directory = adopt_ref(*new (nothrow) PCIBusSysFSDirectory());
+    auto pci_directory = adopt_lock_ref(*new (nothrow) PCIBusSysFSDirectory());
     SysFSComponentRegistry::the().register_new_bus_directory(pci_directory);
 }
 
 UNMAP_AFTER_INIT PCIBusSysFSDirectory::PCIBusSysFSDirectory()
     : SysFSDirectory(SysFSComponentRegistry::the().buses_directory())
 {
-    MUST(PCI::enumerate([&](PCI::DeviceIdentifier const& device_identifier) {
-        auto pci_device = PCIDeviceSysFSDirectory::create(*this, device_identifier.address());
-        m_components.append(pci_device);
+    MUST(m_child_components.with([&](auto& list) -> ErrorOr<void> {
+        MUST(PCI::enumerate([&](PCI::DeviceIdentifier const& device_identifier) {
+            auto pci_device = PCIDeviceSysFSDirectory::create(*this, device_identifier.address());
+            list.append(pci_device);
+        }));
+        return {};
     }));
 }
 

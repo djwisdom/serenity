@@ -6,8 +6,8 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Badge.h>
-#include <AK/RefCounted.h>
 #include <Kernel/FileSystem/FIFO.h>
 #include <Kernel/FileSystem/Inode.h>
 #include <Kernel/FileSystem/InodeMetadata.h>
@@ -22,10 +22,10 @@ public:
     virtual ~OpenFileDescriptionData() = default;
 };
 
-class OpenFileDescription : public RefCounted<OpenFileDescription> {
+class OpenFileDescription final : public AtomicRefCounted<OpenFileDescription> {
 public:
-    static ErrorOr<NonnullRefPtr<OpenFileDescription>> try_create(Custody&);
-    static ErrorOr<NonnullRefPtr<OpenFileDescription>> try_create(File&);
+    static ErrorOr<NonnullLockRefPtr<OpenFileDescription>> try_create(Custody&);
+    static ErrorOr<NonnullLockRefPtr<OpenFileDescription>> try_create(File&);
     ~OpenFileDescription();
 
     Thread::FileBlocker::BlockFlags should_unblock(Thread::FileBlocker::BlockFlags) const;
@@ -112,7 +112,7 @@ public:
 
     OwnPtr<OpenFileDescriptionData>& data();
 
-    void set_original_inode(Badge<VirtualFileSystem>, NonnullRefPtr<Inode>&& inode) { m_inode = move(inode); }
+    void set_original_inode(Badge<VirtualFileSystem>, NonnullLockRefPtr<Inode>&& inode) { m_inode = move(inode); }
     void set_original_custody(Badge<VirtualFileSystem>, Custody& custody);
 
     ErrorOr<void> truncate(u64);
@@ -124,7 +124,7 @@ public:
 
     FileBlockerSet& blocker_set();
 
-    ErrorOr<void> apply_flock(Process const&, Userspace<flock const*>);
+    ErrorOr<void> apply_flock(Process const&, Userspace<flock const*>, ShouldBlock);
     ErrorOr<void> get_flock(Userspace<flock*>) const;
 
 private:
@@ -138,9 +138,9 @@ private:
         blocker_set().unblock_all_blockers_whose_conditions_are_met();
     }
 
-    RefPtr<Custody> m_custody;
-    RefPtr<Inode> m_inode;
-    NonnullRefPtr<File> m_file;
+    LockRefPtr<Custody> m_custody;
+    LockRefPtr<Inode> m_inode;
+    NonnullLockRefPtr<File> m_file;
 
     struct State {
         OwnPtr<OpenFileDescriptionData> data;
@@ -155,6 +155,6 @@ private:
         FIFO::Direction fifo_direction : 2 { FIFO::Direction::Neither };
     };
 
-    SpinlockProtected<State> m_state;
+    SpinlockProtected<State> m_state { LockRank::None };
 };
 }
