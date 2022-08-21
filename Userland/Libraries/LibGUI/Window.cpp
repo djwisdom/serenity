@@ -1177,10 +1177,17 @@ void Window::update_cursor()
 {
     auto new_cursor = m_cursor;
 
-    if (m_hovered_widget) {
-        auto override_cursor = m_hovered_widget->override_cursor();
-        if (override_cursor.has<NonnullRefPtr<Gfx::Bitmap>>() || override_cursor.get<Gfx::StandardCursor>() != Gfx::StandardCursor::None)
-            new_cursor = move(override_cursor);
+    auto is_usable_cursor = [](auto& cursor) {
+        return cursor.template has<NonnullRefPtr<Gfx::Bitmap>>() || cursor.template get<Gfx::StandardCursor>() != Gfx::StandardCursor::None;
+    };
+
+    // NOTE: If there's an automatic cursor tracking widget, we retain its cursor until tracking stops.
+    if (auto widget = m_automatic_cursor_tracking_widget) {
+        if (is_usable_cursor(widget->override_cursor()))
+            new_cursor = widget->override_cursor();
+    } else if (auto widget = m_hovered_widget) {
+        if (is_usable_cursor(widget->override_cursor()))
+            new_cursor = widget->override_cursor();
     }
 
     if (are_cursors_the_same(m_effective_cursor, new_cursor))
@@ -1234,6 +1241,8 @@ Menu& Window::add_menu(String name)
 
 void Window::flash_menubar_menu_for(MenuItem const& menu_item)
 {
+    if (!Desktop::the().system_effects().flash_menus())
+        return;
     auto menu_id = menu_item.menu_id();
     if (menu_id < 0)
         return;

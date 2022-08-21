@@ -68,6 +68,15 @@ ErrorOr<Account> Account::from_passwd(passwd const& pwd, spwd const& spwd)
     return account;
 }
 
+String Account::parse_path_with_uid(StringView general_path, Optional<uid_t> uid)
+{
+    if (general_path.contains("%uid"sv)) {
+        auto const final_uid = uid.has_value() ? uid.value() : getuid();
+        return general_path.replace("%uid"sv, String::number(final_uid), ReplaceMode::All);
+    }
+    return general_path;
+}
+
 ErrorOr<Account> Account::self([[maybe_unused]] Read options)
 {
     Vector<gid_t> extra_gids = TRY(Core::System::getgroups());
@@ -140,6 +149,14 @@ bool Account::authenticate(SecretString const& password) const
     return hash != nullptr && AK::timing_safe_compare(hash, m_password_hash.characters(), m_password_hash.length());
 }
 
+ErrorOr<void> Account::create_user_temporary_directory_if_needed() const
+{
+    auto const temporary_directory = String::formatted("/tmp/user/{}", m_uid);
+    auto directory = TRY(Core::Directory::create(temporary_directory, Core::Directory::CreateDirectories::Yes));
+    TRY(directory.chown(m_uid, m_gid));
+    return {};
+}
+
 bool Account::login() const
 {
     if (setgroups(m_extra_gids.size(), m_extra_gids.data()) < 0)
@@ -150,10 +167,6 @@ bool Account::login() const
 
     if (setuid(m_uid) < 0)
         return false;
-
-    auto const temporary_directory = String::formatted("/tmp/{}", m_uid);
-    if (auto result = Core::Directory::create(temporary_directory, Core::Directory::CreateDirectories::No); result.is_error())
-        dbgln("{}", result.release_error());
 
     return true;
 }

@@ -18,7 +18,7 @@ class RamdiskDevice final : public StorageDevice {
     friend class DeviceManagement;
 
 public:
-    static NonnullRefPtr<RamdiskDevice> create(RamdiskController const&, NonnullOwnPtr<Memory::Region>&& region, int major, int minor);
+    static NonnullLockRefPtr<RamdiskDevice> create(RamdiskController const&, NonnullOwnPtr<Memory::Region>&& region, int major, int minor);
     virtual ~RamdiskDevice() override;
 
     // ^DiskDevice
@@ -32,7 +32,6 @@ private:
 
     // ^StorageDevice
     virtual CommandSet command_set() const override { return CommandSet::PlainMemory; }
-    virtual InterfaceType interface_type() const override { return InterfaceType::PlainMemory; }
 
     Mutex m_lock { "RamdiskDevice"sv };
 

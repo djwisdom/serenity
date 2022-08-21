@@ -6,13 +6,13 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Error.h>
-#include <AK/NonnullRefPtr.h>
-#include <AK/RefCounted.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
-#include <AK/Weakable.h>
 #include <Kernel/Forward.h>
+#include <Kernel/Library/LockWeakable.h>
+#include <Kernel/Library/NonnullLockRefPtr.h>
 #include <Kernel/UnixTypes.h>
 #include <Kernel/UserOrKernelBuffer.h>
 #include <Kernel/VirtualAddress.h>
@@ -71,14 +71,14 @@ public:
 //   - Should create a Region in the Process and return it if successful.
 
 class File
-    : public RefCounted<File>
-    , public Weakable<File> {
+    : public AtomicRefCounted<File>
+    , public LockWeakable<File> {
 public:
-    virtual bool unref() const { return RefCounted<File>::unref(); }
+    virtual bool unref() const { return AtomicRefCounted<File>::unref(); }
     virtual void will_be_destroyed() { }
     virtual ~File();
 
-    virtual ErrorOr<NonnullRefPtr<OpenFileDescription>> open(int options);
+    virtual ErrorOr<NonnullLockRefPtr<OpenFileDescription>> open(int options);
     virtual ErrorOr<void> close();
 
     virtual bool can_read(OpenFileDescription const&, u64) const = 0;

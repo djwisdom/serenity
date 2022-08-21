@@ -22,6 +22,7 @@
 #include <WindowServer/KeymapSwitcher.h>
 #include <WindowServer/MenuManager.h>
 #include <WindowServer/ScreenLayout.h>
+#include <WindowServer/SystemEffects.h>
 #include <WindowServer/WMConnectionFromClient.h>
 #include <WindowServer/WindowSwitcher.h>
 #include <WindowServer/WindowType.h>
@@ -336,7 +337,17 @@ public:
 
     bool is_cursor_highlight_enabled() const { return m_cursor_highlight_radius > 0 && m_cursor_highlight_enabled; }
 
+    void load_system_effects();
+    void apply_system_effects(Vector<bool>, ShowGeometry);
+    SystemEffects& system_effects() { return m_system_effects; }
+
     RefPtr<KeymapSwitcher> keymap_switcher() { return m_keymap_switcher; }
+
+    Window* automatic_cursor_tracking_window() { return m_automatic_cursor_tracking_window; }
+    Window const* automatic_cursor_tracking_window() const { return m_automatic_cursor_tracking_window; }
+    void set_automatic_cursor_tracking_window(Window* window) { m_automatic_cursor_tracking_window = window; }
+
+    u8 last_processed_buttons() { return m_last_processed_buttons; }
 
 private:
     explicit WindowManager(Gfx::PaletteImpl const&);
@@ -443,6 +454,7 @@ private:
     WeakPtr<Window> m_hovered_window;
     WeakPtr<Window> m_highlight_window;
     WeakPtr<Window> m_window_with_active_menu;
+    WeakPtr<Window> m_automatic_cursor_tracking_window;
 
     OwnPtr<WindowGeometryOverlay> m_geometry_overlay;
     WeakPtr<Window> m_move_window;
@@ -459,6 +471,7 @@ private:
     ResizeDirection m_resize_direction { ResizeDirection::None };
 
     u8 m_keyboard_modifiers { 0 };
+    u8 m_last_processed_buttons { MouseButton::None };
 
     NonnullRefPtr<WindowSwitcher> m_switcher;
     NonnullRefPtr<KeymapSwitcher> m_keymap_switcher;
@@ -478,6 +491,8 @@ private:
 
     WindowStack* m_switching_to_window_stack { nullptr };
     Vector<WeakPtr<Window>, 4> m_carry_window_to_new_stack;
+
+    SystemEffects m_system_effects;
 };
 
 template<typename Callback>

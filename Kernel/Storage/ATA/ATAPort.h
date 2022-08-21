@@ -13,8 +13,8 @@ namespace Kernel {
 class AsyncBlockDeviceRequest;
 
 class ATAPort
-    : public RefCounted<ATAPort>
-    , public Weakable<ATAPort> {
+    : public AtomicRefCounted<ATAPort>
+    , public LockWeakable<ATAPort> {
 
     friend class ATAPortInterruptDisabler;
     friend class ATAPortInterruptCleaner;
@@ -50,7 +50,7 @@ public:
     };
 
 public:
-    RefPtr<StorageDevice> connected_device(size_t device_index) const;
+    LockRefPtr<StorageDevice> connected_device(size_t device_index) const;
 
     virtual ~ATAPort() = default;
 
@@ -135,22 +135,22 @@ protected:
     }
 
     mutable Mutex m_lock;
-    Spinlock m_hard_lock;
+    Spinlock m_hard_lock { LockRank::None };
 
     EntropySource m_entropy_source;
 
-    RefPtr<AsyncBlockDeviceRequest> m_current_request;
+    LockRefPtr<AsyncBlockDeviceRequest> m_current_request;
     u64 m_current_request_block_index { 0 };
     bool m_current_request_flushing_cache { false };
 
     OwnPtr<Memory::Region> m_prdt_region;
     OwnPtr<Memory::Region> m_dma_buffer_region;
-    RefPtr<Memory::PhysicalPage> m_prdt_page;
-    RefPtr<Memory::PhysicalPage> m_dma_buffer_page;
+    LockRefPtr<Memory::PhysicalPage> m_prdt_page;
+    LockRefPtr<Memory::PhysicalPage> m_dma_buffer_page;
 
     const u8 m_port_index;
-    NonnullRefPtrVector<ATADevice> m_ata_devices;
+    NonnullLockRefPtrVector<ATADevice> m_ata_devices;
     NonnullOwnPtr<KBuffer> m_ata_identify_data_buffer;
-    NonnullRefPtr<ATAController> m_parent_ata_controller;
+    NonnullLockRefPtr<ATAController> m_parent_ata_controller;
 };
 }

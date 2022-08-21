@@ -311,33 +311,24 @@ void BlockFormattingContext::compute_width_for_block_level_replaced_element_in_n
 float BlockFormattingContext::compute_theoretical_height(LayoutState const& state, Box const& box)
 {
     auto const& computed_values = box.computed_values();
-    auto const& containing_block = *box.containing_block();
     auto containing_block_height = CSS::Length::make_px(containing_block_height_for(box, state));
-
-    auto is_absolute = [](Optional<CSS::LengthPercentage> const& length_percentage) {
-        return length_percentage.has_value() && length_percentage->is_length() && length_percentage->length().is_absolute();
-    };
 
     // Then work out what the height is, based on box type and CSS properties.
     float height = 0;
     if (is<ReplacedBox>(box)) {
         height = compute_height_for_replaced_element(state, verify_cast<ReplacedBox>(box));
     } else {
-        if (box.computed_values().height().is_auto()
-            || (computed_values.height().is_percentage() && !is_absolute(containing_block.computed_values().height()))) {
+        if (box.computed_values().height().is_auto())
             height = compute_auto_height_for_block_level_element(state, box);
-        } else {
+        else
             height = computed_values.height().resolved(box, containing_block_height).to_px(box);
-        }
     }
 
     auto specified_max_height = computed_values.max_height().resolved(box, containing_block_height).resolved(box);
-    if (!specified_max_height.is_auto()
-        && !(computed_values.max_height().is_percentage() && !is_absolute(containing_block.computed_values().height())))
+    if (!specified_max_height.is_auto())
         height = min(height, specified_max_height.to_px(box));
     auto specified_min_height = computed_values.min_height().resolved(box, containing_block_height).resolved(box);
-    if (!specified_min_height.is_auto()
-        && !(computed_values.min_height().is_percentage() && !is_absolute(containing_block.computed_values().height())))
+    if (!specified_min_height.is_auto())
         height = max(height, specified_min_height.to_px(box));
     return height;
 }
@@ -514,57 +505,7 @@ void BlockFormattingContext::place_block_level_element_in_normal_flow_vertically
 
     compute_vertical_box_model_metrics(child_box, containing_block);
 
-    float y = box_state.border_box_top();
-
-    Vector<float> collapsible_margins;
-
-    auto* relevant_sibling = child_box.previous_sibling_of_type<Layout::BlockContainer>();
-    while (relevant_sibling != nullptr) {
-        if (!relevant_sibling->is_absolutely_positioned() && !relevant_sibling->is_floating()) {
-            auto const& relevant_sibling_state = m_state.get(*relevant_sibling);
-            collapsible_margins.append(relevant_sibling_state.margin_bottom);
-            // NOTE: Empty (0-height) preceding siblings have their margins collapsed with *their* preceding sibling, etc.
-            if (relevant_sibling_state.border_box_height() > 0)
-                break;
-            collapsible_margins.append(relevant_sibling_state.margin_top);
-        }
-        relevant_sibling = relevant_sibling->previous_sibling_of_type<Layout::BlockContainer>();
-    }
-
-    if (relevant_sibling) {
-        // Collapse top margin with the collapsed margin(s) of preceding siblings.
-        collapsible_margins.append(box_state.margin_top);
-
-        float smallest_margin = 0;
-        float largest_margin = 0;
-        size_t negative_margin_count = 0;
-        for (auto margin : collapsible_margins) {
-            if (margin < 0)
-                ++negative_margin_count;
-            largest_margin = max(largest_margin, margin);
-            smallest_margin = min(smallest_margin, margin);
-        }
-
-        float collapsed_margin = 0;
-        if (negative_margin_count == collapsible_margins.size()) {
-            // When all margins are negative, the size of the collapsed margin is the smallest (most negative) margin.
-            collapsed_margin = smallest_margin;
-        } else if (negative_margin_count > 0) {
-            // When negative margins are involved, the size of the collapsed margin is the sum of the largest positive margin and the smallest (most negative) negative margin.
-            collapsed_margin = largest_margin + smallest_margin;
-        } else {
-            // Otherwise, collapse all the adjacent margins by using only the largest one.
-            collapsed_margin = largest_margin;
-        }
-
-        auto const& relevant_sibling_state = m_state.get(*relevant_sibling);
-        y += relevant_sibling_state.offset.y()
-            + relevant_sibling_state.content_height()
-            + relevant_sibling_state.border_box_bottom()
-            + collapsed_margin;
-    } else {
-        y += box_state.margin_top;
-    }
+    auto y = FormattingContext::compute_box_y_position_with_respect_to_siblings(child_box, box_state);
 
     auto clear_floating_boxes = [&](FloatSideData& float_side) {
         if (!float_side.current_boxes.is_empty()) {
@@ -774,9 +715,9 @@ void BlockFormattingContext::layout_list_item_marker(ListItemBox const& list_ite
 
     int image_width = 0;
     int image_height = 0;
-    if (auto const* list_style_image = marker.list_style_image_bitmap()) {
-        image_width = list_style_image->rect().width();
-        image_height = list_style_image->rect().height();
+    if (auto const* list_style_image = marker.list_style_image()) {
+        image_width = list_style_image->natural_width().value_or(0);
+        image_height = list_style_image->natural_height().value_or(0);
     }
 
     int default_marker_width = max(4, marker.font().glyph_height() - 4);

@@ -115,7 +115,7 @@ String guess_mime_type_based_on_filename(StringView path)
     __ENUMERATE_MIME_TYPE_HEADER(compressed_iso, "extra/isz", 0, 4, 'I', 's', 'Z', '!')                                                          \
     __ENUMERATE_MIME_TYPE_HEADER(elf, "extra/elf", 0, 4, 0x7F, 'E', 'L', 'F')                                                                    \
     __ENUMERATE_MIME_TYPE_HEADER(ext, "extra/ext", 0x438, 2, 0x53, 0xEF)                                                                         \
-    __ENUMERATE_MIME_TYPE_HEADER(flac, "extra/flac", 0, 4, 0x66, 0x4C, 0x61, 0x43)                                                               \
+    __ENUMERATE_MIME_TYPE_HEADER(flac, "audio/flac", 0, 4, 'f', 'L', 'a', 'C')                                                                   \
     __ENUMERATE_MIME_TYPE_HEADER(gif_87, "image/gif", 0, 6, 'G', 'I', 'F', '8', '7', 'a')                                                        \
     __ENUMERATE_MIME_TYPE_HEADER(gif_89, "image/gif", 0, 6, 'G', 'I', 'F', '8', '9', 'a')                                                        \
     __ENUMERATE_MIME_TYPE_HEADER(gzip, "application/gzip", 0, 2, 0x1F, 0x8B)                                                                     \
@@ -128,6 +128,7 @@ String guess_mime_type_based_on_filename(StringView path)
     __ENUMERATE_MIME_TYPE_HEADER(lua_bytecode, "extra/lua-bytecode", 0, 4, 0x1B, 'L', 'u', 'a')                                                  \
     __ENUMERATE_MIME_TYPE_HEADER(midi, "audio/midi", 0, 4, 0x4D, 0x54, 0x68, 0x64)                                                               \
     __ENUMERATE_MIME_TYPE_HEADER(mkv, "extra/matroska", 0, 4, 0x1A, 0x45, 0xDF, 0xA3)                                                            \
+    __ENUMERATE_MIME_TYPE_HEADER(mp3, "audio/mpeg", 0, 2, 0xFF, 0xFB)                                                                            \
     __ENUMERATE_MIME_TYPE_HEADER(nesrom, "extra/nes-rom", 0, 4, 'N', 'E', 'S', 0x1A)                                                             \
     __ENUMERATE_MIME_TYPE_HEADER(pbm, "image/x-portable-bitmap", 0, 3, 0x50, 0x31, 0x0A)                                                         \
     __ENUMERATE_MIME_TYPE_HEADER(pdf, "application/pdf", 0, 5, 0x25, 'P', 'D', 'F', 0x2D)                                                        \
@@ -145,6 +146,7 @@ String guess_mime_type_based_on_filename(StringView path)
     __ENUMERATE_MIME_TYPE_HEADER(tiff, "image/tiff", 0, 4, 'I', 'I', '*', 0x00)                                                                  \
     __ENUMERATE_MIME_TYPE_HEADER(tiff_bigendian, "image/tiff", 0, 4, 'M', 'M', 0x00, '*')                                                        \
     __ENUMERATE_MIME_TYPE_HEADER(wasm, "application/wasm", 0, 4, 0x00, 'a', 's', 'm')                                                            \
+    __ENUMERATE_MIME_TYPE_HEADER(wav, "audio/wave", 8, 4, 'W', 'A', 'V', 'E')                                                                    \
     __ENUMERATE_MIME_TYPE_HEADER(win_31x_archive, "extra/win-31x-compressed", 0, 4, 'K', 'W', 'A', 'J')                                          \
     __ENUMERATE_MIME_TYPE_HEADER(win_95_archive, "extra/win-95-compressed", 0, 4, 'S', 'Z', 'D', 'D')                                            \
     __ENUMERATE_MIME_TYPE_HEADER(zlib_0, "extra/raw-zlib", 0, 2, 0x78, 0x01)                                                                     \

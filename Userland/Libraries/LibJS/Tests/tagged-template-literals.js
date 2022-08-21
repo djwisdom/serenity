@@ -105,4 +105,62 @@ describe("tagged template literal functionality", () => {
         expect(raw[1]).toHaveLength(5);
         expect(raw[1]).toBe("\\nbar");
     });
+
+    test("invalid escapes give undefined cooked values but can be accesed in raw form", () => {
+        let calls = 0;
+        let lastValue = null;
+        function noCookedButRaw(values) {
+            ++calls;
+            expect(values).not.toBeNull();
+            expect(values.raw).toHaveLength(1);
+            expect(values.raw[0].length).toBeGreaterThan(0);
+            expect(values.raw[0].charAt(0)).toBe("\\");
+            expect(values[0]).toBeUndefined();
+            lastValue = values.raw[0];
+        }
+        noCookedButRaw`\u`;
+        expect(calls).toBe(1);
+        expect(lastValue).toBe("\\u");
+
+        noCookedButRaw`\01`;
+        expect(calls).toBe(2);
+        expect(lastValue).toBe("\\01");
+
+        noCookedButRaw`\u{10FFFFF}`;
+        expect(calls).toBe(3);
+        expect(lastValue).toBe("\\u{10FFFFF}");
+    });
+
+    test("for multiple values gives undefined only for invalid strings", () => {
+        let restValue = null;
+        let stringsValue = null;
+        let calls = 0;
+
+        function extractArguments(value, ...arguments) {
+            ++calls;
+            restValue = arguments;
+            stringsValue = value;
+        }
+        extractArguments`valid${1}invalid\u`;
+
+        expect(calls).toBe(1);
+        expect(restValue).toHaveLength(1);
+        expect(restValue[0]).toBe(1);
+        expect(stringsValue).toHaveLength(2);
+        expect(stringsValue[0]).toBe("valid");
+        expect(stringsValue[1]).toBeUndefined();
+        expect(stringsValue.raw).toHaveLength(2);
+        expect(stringsValue.raw[0]).toBe("valid");
+        expect(stringsValue.raw[1]).toBe("invalid\\u");
+    });
+
+    test("string value gets cached per AST node", () => {
+        function call(func, val) {
+            return func`template${val}second`;
+        }
+
+        let firstResult = call(value => value, 1);
+        let secondResult = call(value => value, 2);
+        expect(firstResult).toBe(secondResult);
+    });
 });

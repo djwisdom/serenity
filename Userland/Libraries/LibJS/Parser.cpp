@@ -1313,9 +1313,16 @@ NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_
         if (!super_class.is_null()) {
             // Set constructor to the result of parsing the source text
             // constructor(... args){ super (...args);}
+            // However: The most notable distinction is that while the aforementioned ECMAScript
+            //          source text observably calls the @@iterator method on %Array.prototype%,
+            //          this function does not.
+            //          So we use a custom version of SuperCall which doesn't use the @@iterator
+            //          method on %Array.prototype% visibly.
+            FlyString argument_name = "args";
             auto super_call = create_ast_node<SuperCall>(
                 { m_state.current_token.filename(), rule_start.position(), position() },
-                Vector { CallExpression::Argument { create_ast_node<Identifier>({ m_state.current_token.filename(), rule_start.position(), position() }, "args"), true } });
+                SuperCall::IsPartOfSyntheticConstructor::Yes,
+                CallExpression::Argument { create_ast_node<Identifier>({ m_state.current_token.filename(), rule_start.position(), position() }, "args"), true });
             // NOTE: While the JS approximation above doesn't do `return super(...args)`, the
             // abstract closure is expected to capture and return the result, so we do need a
             // return statement here to create the correct completion.
@@ -1323,7 +1330,7 @@ NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_
 
             constructor = create_ast_node<FunctionExpression>(
                 { m_state.current_token.filename(), rule_start.position(), position() }, class_name, "",
-                move(constructor_body), Vector { FunctionNode::Parameter { FlyString { "args" }, nullptr, true } }, 0, FunctionKind::Normal,
+                move(constructor_body), Vector { FunctionNode::Parameter { move(argument_name), nullptr, true } }, 0, FunctionKind::Normal,
                 /* is_strict_mode */ true, /* might_need_arguments_object */ false, /* contains_direct_call_to_eval */ false);
         } else {
             constructor = create_ast_node<FunctionExpression>(
@@ -1811,16 +1818,18 @@ NonnullRefPtr<ArrayExpression> Parser::parse_array_expression()
     return create_ast_node<ArrayExpression>({ m_state.current_token.filename(), rule_start.position(), position() }, move(elements));
 }
 
-NonnullRefPtr<StringLiteral> Parser::parse_string_literal(Token const& token, bool in_template_literal)
+NonnullRefPtr<StringLiteral> Parser::parse_string_literal(Token const& token, StringLiteralType string_literal_type, bool* contains_invalid_escape)
 {
     auto rule_start = push_start();
     auto status = Token::StringValueStatus::Ok;
     auto string = token.string_value(status);
+    // NOTE: Tagged templates should not fail on invalid strings as their raw contents can still be accessed.
     if (status != Token::StringValueStatus::Ok) {
         String message;
         if (status == Token::StringValueStatus::LegacyOctalEscapeSequence) {
             m_state.string_legacy_octal_escape_sequence_in_scope = true;
-            if (in_template_literal)
+            // It is a Syntax Error if the [Tagged] parameter was not set and Template{Head, Middle, Tail} Contains NotEscapeSequence.
+            if (string_literal_type != StringLiteralType::Normal)
                 message = "Octal escape sequence not allowed in template literal";
             else if (m_state.strict_mode)
                 message = "Octal escape sequence in string literal not allowed in strict mode";
@@ -1833,11 +1842,17 @@ NonnullRefPtr<StringLiteral> Parser::parse_string_literal(Token const& token, bo
             VERIFY_NOT_REACHED();
         }
 
-        if (!message.is_empty())
-            syntax_error(message, Position { token.line_number(), token.line_column() });
+        if (!message.is_empty()) {
+            if (contains_invalid_escape != nullptr) {
+                VERIFY(string_literal_type == StringLiteralType::TaggedTemplate);
+                *contains_invalid_escape = true;
+            } else {
+                syntax_error(message, Position { token.line_number(), token.line_column() });
+            }
+        }
     }
 
-    auto is_use_strict_directive = !in_template_literal && (token.value() == "'use strict'" || token.value() == "\"use strict\"");
+    auto is_use_strict_directive = string_literal_type == StringLiteralType::Normal && (token.value() == "'use strict'" || token.value() == "\"use strict\"");
 
     return create_ast_node<StringLiteral>({ m_state.current_token.filename(), rule_start.position(), position() }, string, is_use_strict_directive);
 }
@@ -1863,7 +1878,15 @@ NonnullRefPtr<TemplateLiteral> Parser::parse_template_literal(bool is_tagged)
     while (!done() && !match(TokenType::TemplateLiteralEnd) && !match(TokenType::UnterminatedTemplateLiteral)) {
         if (match(TokenType::TemplateLiteralString)) {
             auto token = consume();
-            expressions.append(parse_string_literal(token, true));
+            bool contains_invalid_escape = false;
+            auto parsed_string_value = parse_string_literal(token,
+                is_tagged ? StringLiteralType::TaggedTemplate : StringLiteralType::NonTaggedTemplate,
+                is_tagged ? &contains_invalid_escape : nullptr);
+            // An invalid string leads to a cooked value of `undefined` but still gives the raw string.
+            if (contains_invalid_escape)
+                expressions.append(create_ast_node<NullLiteral>({ m_state.current_token.filename(), rule_start.position(), position() }));
+            else
+                expressions.append(move(parsed_string_value));
             if (is_tagged)
                 raw_strings.append(create_ast_node<StringLiteral>({ m_state.current_token.filename(), rule_start.position(), position() }, token.raw_template_value()));
         } else if (match(TokenType::TemplateLiteralExprStart)) {
@@ -4011,7 +4034,7 @@ FlyString Parser::consume_string_value()
 {
     VERIFY(match(TokenType::StringLiteral));
     auto string_token = consume();
-    FlyString value = parse_string_literal(string_token, false)->value();
+    FlyString value = parse_string_literal(string_token)->value();
 
     // This also checks IsStringWellFormedUnicode which makes sure there is no unpaired surrogate
     // Surrogates are at least 3 bytes

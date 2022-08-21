@@ -18,6 +18,11 @@
 
 static void child_process(Core::Account const& account)
 {
+    if (auto result = account.create_user_temporary_directory_if_needed(); result.is_error()) {
+        dbgln("Failed to create temporary directory for user {}: {}", account.username(), result.error());
+        exit(1);
+    }
+
     if (!account.login()) {
         dbgln("failed to switch users: {}", strerror(errno));
         exit(1);
@@ -56,7 +61,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     auto app = TRY(GUI::Application::try_create(arguments));
 
-    TRY(Core::System::pledge("stdio recvfd sendfd cpath rpath exec proc id"));
+    TRY(Core::System::pledge("stdio recvfd sendfd cpath chown rpath exec proc id"));
     TRY(Core::System::unveil("/home", "r"));
     TRY(Core::System::unveil("/tmp", "c"));
     TRY(Core::System::unveil("/etc/passwd", "r"));

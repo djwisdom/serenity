@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,6 +11,7 @@
 #include <Kernel/API/Syscall.h>
 #include <Kernel/Arch/InterruptDisabler.h>
 #include <Kernel/Coredump.h>
+#include <Kernel/Credentials.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Devices/DeviceManagement.h>
 #ifdef ENABLE_KERNEL_COVERAGE_COLLECTION
@@ -45,7 +46,7 @@ static void create_signal_trampoline();
 
 extern ProcessID g_init_pid;
 
-RecursiveSpinlock g_profiling_lock;
+RecursiveSpinlock g_profiling_lock { LockRank::None };
 static Atomic<pid_t> next_pid;
 static Singleton<SpinlockProtected<Process::List>> s_all_instances;
 READONLY_AFTER_INIT Memory::Region* g_signal_trampoline_region;
@@ -85,7 +86,8 @@ UNMAP_AFTER_INIT void Process::initialize()
 
 bool Process::in_group(GroupID gid) const
 {
-    return this->gid() == gid || extra_gids().contains_slow(gid);
+    auto credentials = this->credentials();
+    return credentials->gid() == gid || credentials->extra_gids().contains_slow(gid);
 }
 
 void Process::kill_threads_except_self()
@@ -126,13 +128,13 @@ void Process::kill_all_threads()
 void Process::register_new(Process& process)
 {
     // Note: this is essentially the same like process->ref()
-    RefPtr<Process> new_process = process;
+    LockRefPtr<Process> new_process = process;
     all_instances().with([&](auto& list) {
         list.prepend(process);
     });
 }
 
-ErrorOr<NonnullRefPtr<Process>> Process::try_create_user_process(RefPtr<Thread>& first_thread, StringView path, UserID uid, GroupID gid, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment, TTY* tty)
+ErrorOr<NonnullLockRefPtr<Process>> Process::try_create_user_process(LockRefPtr<Thread>& first_thread, StringView path, UserID uid, GroupID gid, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment, TTY* tty)
 {
     auto parts = path.split_view('/');
     if (arguments.is_empty()) {
@@ -181,7 +183,7 @@ ErrorOr<NonnullRefPtr<Process>> Process::try_create_user_process(RefPtr<Thread>&
     return process;
 }
 
-RefPtr<Process> Process::create_kernel_process(RefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, void (*entry)(void*), void* entry_data, u32 affinity, RegisterProcess do_register)
+LockRefPtr<Process> Process::create_kernel_process(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, void (*entry)(void*), void* entry_data, u32 affinity, RegisterProcess do_register)
 {
     auto process_or_error = Process::try_create(first_thread, move(name), UserID(0), GroupID(0), ProcessID(0), true);
     if (process_or_error.is_error())
@@ -220,22 +222,23 @@ void Process::unprotect_data()
     });
 }
 
-ErrorOr<NonnullRefPtr<Process>> Process::try_create(RefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, UserID uid, GroupID gid, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, Process* fork_parent)
+ErrorOr<NonnullLockRefPtr<Process>> Process::try_create(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, UserID uid, GroupID gid, ProcessID ppid, bool is_kernel_process, LockRefPtr<Custody> current_directory, LockRefPtr<Custody> executable, TTY* tty, Process* fork_parent)
 {
     auto space = TRY(Memory::AddressSpace::try_create(fork_parent ? &fork_parent->address_space() : nullptr));
     auto unveil_tree = UnveilNode { TRY(KString::try_create("/"sv)), UnveilMetadata(TRY(KString::try_create("/"sv))) };
-    auto process = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) Process(move(name), uid, gid, ppid, is_kernel_process, move(current_directory), move(executable), tty, move(unveil_tree))));
+    auto credentials = TRY(Credentials::create(uid, gid, uid, gid, uid, gid, {}));
+    auto process = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) Process(move(name), move(credentials), ppid, is_kernel_process, move(current_directory), move(executable), tty, move(unveil_tree))));
     TRY(process->attach_resources(move(space), first_thread, fork_parent));
     return process;
 }
 
-Process::Process(NonnullOwnPtr<KString> name, UserID uid, GroupID gid, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree)
+Process::Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials> credentials, ProcessID ppid, bool is_kernel_process, LockRefPtr<Custody> current_directory, LockRefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree)
     : m_name(move(name))
     , m_is_kernel_process(is_kernel_process)
     , m_executable(move(executable))
-    , m_current_directory(move(current_directory))
+    , m_current_directory(LockRank::None, move(current_directory))
     , m_tty(tty)
-    , m_unveil_data(move(unveil_tree))
+    , m_unveil_data(LockRank::None, move(unveil_tree))
     , m_wait_blocker_set(*this)
 {
     // Ensure that we protect the process data when exiting the constructor.
@@ -243,17 +246,12 @@ Process::Process(NonnullOwnPtr<KString> name, UserID uid, GroupID gid, ProcessID
 
     m_protected_values.pid = allocate_pid();
     m_protected_values.ppid = ppid;
-    m_protected_values.uid = uid;
-    m_protected_values.gid = gid;
-    m_protected_values.euid = uid;
-    m_protected_values.egid = gid;
-    m_protected_values.suid = uid;
-    m_protected_values.sgid = gid;
+    m_protected_values.credentials = move(credentials);
 
     dbgln_if(PROCESS_DEBUG, "Created new process {}({})", m_name, this->pid().value());
 }
 
-ErrorOr<void> Process::attach_resources(NonnullOwnPtr<Memory::AddressSpace>&& preallocated_space, RefPtr<Thread>& first_thread, Process* fork_parent)
+ErrorOr<void> Process::attach_resources(NonnullOwnPtr<Memory::AddressSpace>&& preallocated_space, LockRefPtr<Thread>& first_thread, Process* fork_parent)
 {
     m_space = move(preallocated_space);
 
@@ -418,9 +416,9 @@ void Process::crash(int signal, FlatPtr ip, bool out_of_memory)
     VERIFY_NOT_REACHED();
 }
 
-RefPtr<Process> Process::from_pid(ProcessID pid)
+LockRefPtr<Process> Process::from_pid(ProcessID pid)
 {
-    return all_instances().with([&](auto const& list) -> RefPtr<Process> {
+    return all_instances().with([&](auto const& list) -> LockRefPtr<Process> {
         for (auto const& process : list) {
             if (process.pid() == pid)
                 return &process;
@@ -462,13 +460,13 @@ Process::OpenFileDescriptionAndFlags& Process::OpenFileDescriptions::at(size_t i
     return m_fds_metadatas[i];
 }
 
-ErrorOr<NonnullRefPtr<OpenFileDescription>> Process::OpenFileDescriptions::open_file_description(int fd) const
+ErrorOr<NonnullLockRefPtr<OpenFileDescription>> Process::OpenFileDescriptions::open_file_description(int fd) const
 {
     if (fd < 0)
         return EBADF;
     if (static_cast<size_t>(fd) >= m_fds_metadatas.size())
         return EBADF;
-    RefPtr description = m_fds_metadatas[fd].description();
+    LockRefPtr description = m_fds_metadatas[fd].description();
     if (!description)
         return EBADF;
     return description.release_nonnull();
@@ -539,9 +537,9 @@ siginfo_t Process::wait_info() const
     return siginfo;
 }
 
-NonnullRefPtr<Custody> Process::current_directory()
+NonnullLockRefPtr<Custody> Process::current_directory()
 {
-    return m_current_directory.with([&](auto& current_directory) -> NonnullRefPtr<Custody> {
+    return m_current_directory.with([&](auto& current_directory) -> NonnullLockRefPtr<Custody> {
         if (!current_directory)
             current_directory = VirtualFileSystem::the().root_custody();
         return *current_directory;
@@ -582,7 +580,7 @@ ErrorOr<void> Process::dump_perfcore()
     // Try to generate a filename which isn't already used.
     auto base_filename = TRY(KString::formatted("{}_{}", name(), pid().value()));
     auto perfcore_filename = TRY(KString::formatted("{}.profile", base_filename));
-    RefPtr<OpenFileDescription> description;
+    LockRefPtr<OpenFileDescription> description;
     for (size_t attempt = 1; attempt <= 10; ++attempt) {
         auto description_or_error = VirtualFileSystem::the().open(perfcore_filename->view(), O_CREAT | O_EXCL, 0400, current_directory(), UidAndGid { 0, 0 });
         if (!description_or_error.is_error()) {
@@ -627,13 +625,13 @@ void Process::finalize()
         if (m_should_generate_coredump) {
             auto result = dump_core();
             if (result.is_error()) {
-                critical_dmesgln("Failed to write coredump: {}", result.error());
+                dmesgln("Failed to write coredump for pid {}: {}", pid(), result.error());
             }
         }
         if (m_perf_event_buffer) {
             auto result = dump_perfcore();
             if (result.is_error())
-                critical_dmesgln("Failed to write perfcore: {}", result.error());
+                dmesgln("Failed to write perfcore for pid {}: {}", pid(), result.error());
             TimeManagement::the().disable_profile_timer();
         }
     }
@@ -683,7 +681,7 @@ void Process::disowned_by_waiter(Process& process)
 
 void Process::unblock_waiters(Thread::WaitBlocker::UnblockFlags flags, u8 signal)
 {
-    RefPtr<Process> waiter_process;
+    LockRefPtr<Process> waiter_process;
     if (auto* my_tracer = tracer())
         waiter_process = Process::from_pid(my_tracer->tracer_pid());
     else
@@ -772,7 +770,7 @@ ErrorOr<void> Process::send_signal(u8 signal, Process* sender)
     return ESRCH;
 }
 
-RefPtr<Thread> Process::create_kernel_thread(void (*entry)(void*), void* entry_data, u32 priority, NonnullOwnPtr<KString> name, u32 affinity, bool joinable)
+LockRefPtr<Thread> Process::create_kernel_thread(void (*entry)(void*), void* entry_data, u32 priority, NonnullOwnPtr<KString> name, u32 affinity, bool joinable)
 {
     VERIFY((priority >= THREAD_PRIORITY_MIN) && (priority <= THREAD_PRIORITY_MAX));
 
@@ -805,7 +803,7 @@ void Process::OpenFileDescriptionAndFlags::clear()
     m_flags = 0;
 }
 
-void Process::OpenFileDescriptionAndFlags::set(NonnullRefPtr<OpenFileDescription>&& description, u32 flags)
+void Process::OpenFileDescriptionAndFlags::set(NonnullLockRefPtr<OpenFileDescription>&& description, u32 flags)
 {
     // FIXME: Verify Process::m_fds_lock is locked!
     m_description = move(description);
@@ -936,6 +934,41 @@ ErrorOr<void> Process::require_promise(Pledge promise)
     Thread::current()->set_promise_violation_pending(true);
     (void)try_set_coredump_property("pledge_violation"sv, to_string(promise));
     return EPROMISEVIOLATION;
+}
+
+UserID Process::uid() const
+{
+    return credentials()->uid();
+}
+
+GroupID Process::gid() const
+{
+    return credentials()->gid();
+}
+
+UserID Process::euid() const
+{
+    return credentials()->euid();
+}
+
+GroupID Process::egid() const
+{
+    return credentials()->egid();
+}
+
+UserID Process::suid() const
+{
+    return credentials()->suid();
+}
+
+GroupID Process::sgid() const
+{
+    return credentials()->sgid();
+}
+
+NonnullRefPtr<Credentials> Process::credentials() const
+{
+    return *m_protected_values.credentials;
 }
 
 }

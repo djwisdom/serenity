@@ -127,7 +127,7 @@ Tab::Tab(BrowserWindow& window)
     m_web_content_view->set_proxy_mappings(g_proxies, g_proxy_mappings);
 
     auto& go_back_button = toolbar.add_action(window.go_back_action());
-    go_back_button.on_context_menu_request = [this](auto& context_menu_event) {
+    go_back_button.on_context_menu_request = [&](auto&) {
         if (!m_history.can_go_back())
             return;
         int i = 0;
@@ -136,11 +136,11 @@ Tab::Tab(BrowserWindow& window)
             i++;
             m_go_back_context_menu->add_action(GUI::Action::create(url.to_string(), g_icon_bag.filetype_html, [this, i](auto&) { go_back(i); }));
         }
-        m_go_back_context_menu->popup(context_menu_event.screen_position());
+        m_go_back_context_menu->popup(go_back_button.screen_relative_rect().bottom_left());
     };
 
     auto& go_forward_button = toolbar.add_action(window.go_forward_action());
-    go_forward_button.on_context_menu_request = [this](auto& context_menu_event) {
+    go_forward_button.on_context_menu_request = [&](auto&) {
         if (!m_history.can_go_forward())
             return;
         int i = 0;
@@ -149,7 +149,7 @@ Tab::Tab(BrowserWindow& window)
             i++;
             m_go_forward_context_menu->add_action(GUI::Action::create(url.to_string(), g_icon_bag.filetype_html, [this, i](auto&) { go_forward(i); }));
         }
-        m_go_forward_context_menu->popup(context_menu_event.screen_position());
+        m_go_forward_context_menu->popup(go_forward_button.screen_relative_rect().bottom_left());
     };
 
     auto& go_home_button = toolbar.add_action(window.go_home_action());
@@ -186,21 +186,18 @@ Tab::Tab(BrowserWindow& window)
         m_location_box->on_return_pressed();
     }));
 
-    m_bookmark_button = toolbar.add<GUI::Button>();
-    m_bookmark_button->set_button_style(Gfx::ButtonStyle::Coolbar);
-    m_bookmark_button->set_focus_policy(GUI::FocusPolicy::TabFocus);
-    m_bookmark_button->set_icon(g_icon_bag.bookmark_contour);
-    m_bookmark_button->set_fixed_size(22, 22);
-
-    m_bookmark_button->on_click = [this](auto) {
-        bookmark_current_url();
-    };
-
     auto bookmark_action = GUI::Action::create(
         "Bookmark current URL", { Mod_Ctrl, Key_D }, [this](auto&) {
             bookmark_current_url();
         },
         this);
+
+    m_bookmark_button = toolbar.add<GUI::Button>();
+    m_bookmark_button->set_action(bookmark_action);
+    m_bookmark_button->set_button_style(Gfx::ButtonStyle::Coolbar);
+    m_bookmark_button->set_focus_policy(GUI::FocusPolicy::TabFocus);
+    m_bookmark_button->set_icon(g_icon_bag.bookmark_contour);
+    m_bookmark_button->set_fixed_size(22, 22);
 
     view().on_load_start = [this](auto& url) {
         m_navigating_url = url;
@@ -380,7 +377,7 @@ Tab::Tab(BrowserWindow& window)
 
     m_tab_context_menu = GUI::Menu::construct();
     m_tab_context_menu->add_action(GUI::CommonActions::make_reload_action([this](auto&) {
-        this->window().reload_action().activate();
+        reload();
     }));
     m_tab_context_menu->add_action(GUI::CommonActions::make_close_tab_action([this](auto&) {
         on_tab_close_request(*this);

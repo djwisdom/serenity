@@ -43,6 +43,7 @@ private:
     TooltipWindow()
     {
         set_window_type(WindowType::Tooltip);
+        set_obey_widget_min_size(false);
         m_label = set_main_widget<Label>();
         m_label->set_background_role(Gfx::ColorRole::Tooltip);
         m_label->set_foreground_role(Gfx::ColorRole::TooltipText);
@@ -146,6 +147,8 @@ Action* Application::action_for_shortcut(Shortcut const& shortcut) const
 
 void Application::show_tooltip(String tooltip, Widget const* tooltip_source_widget)
 {
+    if (!Desktop::the().system_effects().tooltips())
+        return;
     m_tooltip_source_widget = tooltip_source_widget;
     if (!m_tooltip_window) {
         m_tooltip_window = TooltipWindow::construct();
@@ -165,6 +168,8 @@ void Application::show_tooltip(String tooltip, Widget const* tooltip_source_widg
 
 void Application::show_tooltip_immediately(String tooltip, Widget const* tooltip_source_widget)
 {
+    if (!Desktop::the().system_effects().tooltips())
+        return;
     m_tooltip_source_widget = tooltip_source_widget;
     if (!m_tooltip_window) {
         m_tooltip_window = TooltipWindow::construct();

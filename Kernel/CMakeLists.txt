@@ -43,6 +43,7 @@ set(KERNEL_SOURCES
     CMOS.cpp
     CommandLine.cpp
     Coredump.cpp
+    Credentials.cpp
     Devices/AsyncDeviceRequest.cpp
     Devices/Audio/AC97.cpp
     Devices/Audio/Channel.cpp
@@ -101,7 +102,6 @@ set(KERNEL_SOURCES
     Storage/ATA/GenericIDE/PCIController.cpp
     Storage/ATA/ATADevice.cpp
     Storage/ATA/ATADiskDevice.cpp
-    Storage/ATA/ATAPIDiscDevice.cpp
     Storage/ATA/ATAPort.cpp
     Storage/NVMe/NVMeController.cpp
     Storage/NVMe/NVMeNameSpace.cpp
@@ -127,6 +127,7 @@ set(KERNEL_SOURCES
     FileSystem/FileSystem.cpp
     FileSystem/Inode.cpp
     FileSystem/InodeFile.cpp
+    FileSystem/InodeMetadata.cpp
     FileSystem/InodeWatcher.cpp
     FileSystem/ISO9660FileSystem.cpp
     FileSystem/Mount.cpp
@@ -363,6 +364,13 @@ if ("${SERENITY_ARCH}" STREQUAL "i686" OR "${SERENITY_ARCH}" STREQUAL "x86_64")
             ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/SyscallEntry.cpp
         )
     endif()
+
+    if ("${SERENITY_ARCH}" STREQUAL "i686")
+        set(KERNEL_SOURCES
+            ${KERNEL_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/Atomics.cpp
+        )
+    endif()
 endif()
 
 set(AK_SOURCES
@@ -459,6 +467,9 @@ else()
         KSyms.cpp
         MiniStdLib.cpp
         UBSanitizer.cpp
+
+        Graphics/Console/BootFramebufferConsole.cpp
+        Graphics/Console/GenericFramebufferConsole.cpp
 
         Memory/AddressSpace.cpp
         Memory/AnonymousVMObject.cpp

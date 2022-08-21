@@ -38,7 +38,7 @@ ErrorOr<NonnullOwnPtr<AddressSpace>> AddressSpace::try_create(AddressSpace const
     return space;
 }
 
-AddressSpace::AddressSpace(NonnullRefPtr<PageDirectory> page_directory, VirtualRange total_range)
+AddressSpace::AddressSpace(NonnullLockRefPtr<PageDirectory> page_directory, VirtualRange total_range)
     : m_page_directory(move(page_directory))
     , m_region_tree(total_range)
 {
@@ -173,12 +173,12 @@ ErrorOr<Region*> AddressSpace::allocate_region(RandomizeVirtualAddress randomize
     return region.leak_ptr();
 }
 
-ErrorOr<Region*> AddressSpace::allocate_region_with_vmobject(VirtualRange requested_range, NonnullRefPtr<VMObject> vmobject, size_t offset_in_vmobject, StringView name, int prot, bool shared)
+ErrorOr<Region*> AddressSpace::allocate_region_with_vmobject(VirtualRange requested_range, NonnullLockRefPtr<VMObject> vmobject, size_t offset_in_vmobject, StringView name, int prot, bool shared)
 {
     return allocate_region_with_vmobject(RandomizeVirtualAddress::Yes, requested_range.base(), requested_range.size(), PAGE_SIZE, move(vmobject), offset_in_vmobject, name, prot, shared);
 }
 
-ErrorOr<Region*> AddressSpace::allocate_region_with_vmobject(RandomizeVirtualAddress randomize_virtual_address, VirtualAddress requested_address, size_t requested_size, size_t requested_alignment, NonnullRefPtr<VMObject> vmobject, size_t offset_in_vmobject, StringView name, int prot, bool shared)
+ErrorOr<Region*> AddressSpace::allocate_region_with_vmobject(RandomizeVirtualAddress randomize_virtual_address, VirtualAddress requested_address, size_t requested_size, size_t requested_alignment, NonnullLockRefPtr<VMObject> vmobject, size_t offset_in_vmobject, StringView name, int prot, bool shared)
 {
     if (!requested_address.is_page_aligned())
         return EINVAL;
@@ -211,14 +211,21 @@ ErrorOr<Region*> AddressSpace::allocate_region_with_vmobject(RandomizeVirtualAdd
     else
         TRY(m_region_tree.place_specifically(*region, VirtualRange { VirtualAddress { requested_address }, size }));
 
+    ArmedScopeGuard remove_region_from_tree_on_failure = [this, &region]() {
+        // At this point the region is already part of the Process region tree, so we have to make sure
+        // we remove it from the tree before returning an error, or else the Region tree will contain
+        // a dangling pointer to the free'd Region instance
+        m_region_tree.remove(*region);
+    };
+
     if (prot == PROT_NONE) {
         // For PROT_NONE mappings, we don't have to set up any page table mappings.
         // We do still need to attach the region to the page_directory though.
-        SpinlockLocker mm_locker(s_mm_lock);
         region->set_page_directory(page_directory());
     } else {
         TRY(region->map(page_directory(), ShouldFlushTLB::No));
     }
+    remove_region_from_tree_on_failure.disarm();
     return region.leak_ptr();
 }
 

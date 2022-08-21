@@ -286,6 +286,12 @@ JS::VM& main_thread_vm()
         vm->host_resolve_imported_module = [&](JS::ScriptOrModule, JS::ModuleRequest const&) -> JS::ThrowCompletionOr<NonnullRefPtr<JS::Module>> {
             return vm->throw_completion<JS::InternalError>(vm->current_realm()->global_object(), JS::ErrorType::NotImplemented, "Modules in the browser");
         };
+
+        // NOTE: We push a dummy execution context onto the JS execution context stack,
+        //       just to make sure that it's never empty.
+        auto& custom_data = *verify_cast<WebEngineCustomData>(vm->custom_data());
+        custom_data.root_execution_context = make<JS::ExecutionContext>(vm->heap());
+        vm->push_execution_context(*custom_data.root_execution_context);
     }
     return *vm;
 }
@@ -358,6 +364,30 @@ void queue_mutation_observer_microtask(DOM::Document& document)
 
         // FIXME: 6. For each slot of signalSet, fire an event named slotchange, with its bubbles attribute set to true, at slot.
     });
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-new-javascript-realm
+NonnullOwnPtr<JS::ExecutionContext> create_a_new_javascript_realm(JS::VM& vm, Function<JS::GlobalObject*(JS::Realm&)> create_global_object, Function<JS::GlobalObject*(JS::Realm&)> create_global_this_value)
+{
+    // 1. Perform InitializeHostDefinedRealm() with the provided customizations for creating the global object and the global this binding.
+    // 2. Let realm execution context be the running JavaScript execution context.
+    auto realm_execution_context = MUST(JS::Realm::initialize_host_defined_realm(vm, move(create_global_object), move(create_global_this_value)));
+
+    // 3. Remove realm execution context from the JavaScript execution context stack.
+    vm.execution_context_stack().remove_first_matching([&realm_execution_context](auto* execution_context) {
+        return execution_context == realm_execution_context.ptr();
+    });
+
+    // NO-OP: 4. Let realm be realm execution context's Realm component.
+    // NO-OP: 5. Set realm's agent to agent.
+
+    // FIXME: 6. If agent's agent cluster's cross-origin isolation mode is "none", then:
+    //          1. Let global be realm's global object.
+    //          2. Let status be ! global.[[Delete]]("SharedArrayBuffer").
+    //          3. Assert: status is true.
+
+    // 7. Return realm execution context.
+    return realm_execution_context;
 }
 
 }

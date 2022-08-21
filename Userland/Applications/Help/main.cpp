@@ -33,9 +33,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/usr/share/man", "r"));
-    TRY(Core::System::unveil("/tmp/portal/filesystemaccess", "rw"));
-    TRY(Core::System::unveil("/tmp/100/portal/launch", "rw"));
-    TRY(Core::System::unveil("/tmp/portal/webcontent", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/filesystemaccess", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/launch", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/webcontent", "rw"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     String start_page;

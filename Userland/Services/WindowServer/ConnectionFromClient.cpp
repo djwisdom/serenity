@@ -53,7 +53,7 @@ ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSock
     s_connections->set(client_id, *this);
 
     auto& wm = WindowManager::the();
-    async_fast_greet(Screen::rects(), Screen::main().index(), wm.window_stack_rows(), wm.window_stack_columns(), Gfx::current_system_theme_buffer(), Gfx::FontDatabase::default_font_query(), Gfx::FontDatabase::fixed_width_font_query(), Gfx::FontDatabase::window_title_font_query(), client_id);
+    async_fast_greet(Screen::rects(), Screen::main().index(), wm.window_stack_rows(), wm.window_stack_columns(), Gfx::current_system_theme_buffer(), Gfx::FontDatabase::default_font_query(), Gfx::FontDatabase::fixed_width_font_query(), Gfx::FontDatabase::window_title_font_query(), wm.system_effects().effects(), client_id);
 }
 
 ConnectionFromClient::~ConnectionFromClient()
@@ -817,7 +817,7 @@ void ConnectionFromClient::start_window_resize(i32 window_id)
 Messages::WindowServer::StartDragResponse ConnectionFromClient::start_drag(String const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap)
 {
     auto& wm = WindowManager::the();
-    if (wm.dnd_client())
+    if (wm.dnd_client() || !(wm.last_processed_buttons() & MouseButton::Primary))
         return false;
 
     wm.start_dnd_drag(*this, text, drag_bitmap.bitmap(), Core::MimeData::construct(mime_data));
@@ -920,6 +920,14 @@ Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_
     wm_config->write_entry("Fonts", "FixedWidth", fixed_width_font_query);
     wm_config->write_entry("Fonts", "WindowTitle", window_title_font_query);
     return true;
+}
+
+void ConnectionFromClient::set_system_effects(Vector<bool> const& effects, u8 geometry)
+{
+    WindowManager::the().apply_system_effects(effects, static_cast<ShowGeometry>(geometry));
+    ConnectionFromClient::for_each_client([&](auto& client) {
+        client.async_update_system_effects(effects);
+    });
 }
 
 void ConnectionFromClient::set_window_base_size_and_size_increment(i32 window_id, Gfx::IntSize const& base_size, Gfx::IntSize const& size_increment)

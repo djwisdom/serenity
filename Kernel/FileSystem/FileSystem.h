@@ -6,19 +6,19 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Error.h>
-#include <AK/RefCounted.h>
-#include <AK/RefPtr.h>
 #include <AK/StringView.h>
 #include <Kernel/FileSystem/InodeIdentifier.h>
 #include <Kernel/Forward.h>
+#include <Kernel/Library/LockRefPtr.h>
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/UnixTypes.h>
 #include <Kernel/UserOrKernelBuffer.h>
 
 namespace Kernel {
 
-class FileSystem : public RefCounted<FileSystem> {
+class FileSystem : public AtomicRefCounted<FileSystem> {
     friend class Inode;
 
 public:

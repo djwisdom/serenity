@@ -1,68 +1,34 @@
 #import <HTML/HTMLCanvasElement.idl>
-#import <HTML/HTMLImageElement.idl>
-#import <HTML/ImageData.idl>
-#import <HTML/TextMetrics.idl>
-#import <HTML/CanvasGradient.idl>
+#import <HTML/Canvas/CanvasDrawImage.idl>
+#import <HTML/Canvas/CanvasDrawPath.idl>
+#import <HTML/Canvas/CanvasFillStrokeStyles.idl>
+#import <HTML/Canvas/CanvasImageData.idl>
+#import <HTML/Canvas/CanvasPath.idl>
+#import <HTML/Canvas/CanvasPathDrawingStyles.idl>
+#import <HTML/Canvas/CanvasRect.idl>
+#import <HTML/Canvas/CanvasState.idl>
+#import <HTML/Canvas/CanvasText.idl>
+#import <HTML/Canvas/CanvasTransform.idl>
 
+// https://html.spec.whatwg.org/multipage/canvas.html#canvasrenderingcontext2d
+[Exposed=Window]
 interface CanvasRenderingContext2D {
-
-    undefined fillRect(double x, double y, double w, double h);
-    undefined strokeRect(double x, double y, double w, double h);
-    undefined clearRect(double x, double y, double w, double h);
-
-    undefined scale(double x, double y);
-    undefined translate(double x, double y);
-    undefined rotate(double radians);
-
-    undefined beginPath();
-    undefined closePath();
-    undefined fill(optional DOMString fillRule = "nonzero");
-    undefined stroke();
-    undefined moveTo(double x, double y);
-    undefined lineTo(double x, double y);
-    undefined quadraticCurveTo(double cpx, double cpy, double x, double y);
-    undefined bezierCurveTo(double cp1x, double cp1y, double cp2x, double cp2y, double x, double y);
-
-    undefined arc(double x, double y, double radius, double startAngle, double endAngle, optional boolean counterclockwise = false);
-    undefined ellipse(double x, double y, double radiusX, double radiusY, double rotation, double startAngle, double endAngle, optional boolean counterclockwise = false);
-    undefined rect(double x, double y, double width, double height);
-
-    undefined fillText(DOMString text, double x, double y, optional double maxWidth);
-    undefined strokeText(DOMString text, double x, double y, optional double maxWidth);
-
-    undefined drawImage((HTMLImageElement or HTMLCanvasElement) image, double dx, double dy);
-    undefined drawImage((HTMLImageElement or HTMLCanvasElement) image, double dx, double dy, double dw, double dh);
-    undefined drawImage((HTMLImageElement or HTMLCanvasElement) image, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh);
-
-    attribute DOMString fillStyle;
-    attribute DOMString strokeStyle;
-    attribute double lineWidth;
-
-    ImageData createImageData(long sw, long sh);
-    ImageData getImageData(long sx, long sy, long sw, long sh);
-    undefined putImageData(ImageData imagedata, double dx, double dy);
-
-    undefined save();
-    undefined restore();
-    undefined reset();
-    boolean isContextLost();
-
     [ImplementedAs=canvas_for_binding] readonly attribute HTMLCanvasElement canvas;
-
-    TextMetrics measureText(DOMString text);
-
-    CanvasGradient createRadialGradient(double x0, double y0, double r0, double x1, double y1, double r1);
-    CanvasGradient createLinearGradient(double x0, double y0, double x1, double y1);
-    CanvasGradient createConicGradient(double startAngle, double x, double y);
-
-    // FIXME: All these `double`s should be `unrestricted double`
-    undefined transform(double a, double b, double c, double d, double e, double f);
-    undefined setTransform(double a, double b, double c, double d, double e, double f);
-    undefined resetTransform();
-
-    // undefined clip(optional CanvasFillRule fillRule = "nonzero");
-    // undefined clip(Path2D path, optional CanvasFillRule fillRule = "nonzero");
-    // FIXME: Replace this with the two definitions above.
-    undefined clip();
-
 };
+
+CanvasRenderingContext2D includes CanvasState;
+CanvasRenderingContext2D includes CanvasTransform;
+// FIXME: CanvasRenderingContext2D includes CanvasCompositing;
+// FIXME: CanvasRenderingContext2D includes CanvasImageSmoothing;
+CanvasRenderingContext2D includes CanvasFillStrokeStyles;
+// FIXME: CanvasRenderingContext2D includes CanvasShadowStyles;
+// FIXME: CanvasRenderingContext2D includes CanvasFilters;
+CanvasRenderingContext2D includes CanvasRect;
+CanvasRenderingContext2D includes CanvasDrawPath;
+// FIXME: CanvasRenderingContext2D includes CanvasUserInterface;
+CanvasRenderingContext2D includes CanvasText;
+CanvasRenderingContext2D includes CanvasDrawImage;
+CanvasRenderingContext2D includes CanvasImageData;
+CanvasRenderingContext2D includes CanvasPathDrawingStyles;
+// FIXME: CanvasRenderingContext2D includes CanvasTextDrawingStyles;
+CanvasRenderingContext2D includes CanvasPath;

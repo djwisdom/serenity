@@ -658,7 +658,6 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
 
     // FIXME: The section below is partly on-spec, partly ad-hoc.
     auto& computed_values = box.computed_values();
-    auto const& containing_block = *box.containing_block();
 
     auto width_of_containing_block = containing_block_width_for(box);
     auto height_of_containing_block = containing_block_height_for(box);
@@ -675,12 +674,8 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
     auto used_bottom = computed_bottom.resolved(box, height_of_containing_block_as_length).resolved(box).to_px(box);
     auto tentative_height = CSS::Length::make_auto();
 
-    if (computed_values.height().is_percentage()
-        && !(containing_block.computed_values().height().is_length() && containing_block.computed_values().height().length().is_absolute())) {
-        // tentative_height is already auto
-    } else {
+    if (!computed_height.is_auto())
         tentative_height = computed_values.height().resolved(box, height_of_containing_block_as_length).resolved(box);
-    }
 
     auto& box_state = m_state.get_mutable(box);
     box_state.margin_top = computed_values.margin().top.resolved(box, width_of_containing_block_as_length).to_px(box);
@@ -759,6 +754,16 @@ void FormattingContext::layout_absolutely_positioned_element(Box const& box)
 
     Gfx::FloatPoint used_offset;
 
+    auto* relevant_parent = box.first_ancestor_of_type<Layout::BlockContainer>();
+    while (relevant_parent != nullptr) {
+        if (!relevant_parent->is_absolutely_positioned() && !relevant_parent->is_floating()) {
+            break;
+        } else {
+            relevant_parent = relevant_parent->first_ancestor_of_type<Layout::BlockContainer>();
+        }
+    }
+    auto parent_location = absolute_content_rect(static_cast<Box const&>(*relevant_parent), m_state);
+
     if (!box.computed_values().inset().left.is_auto()) {
         float x_offset = box_state.inset_left
             + box_state.border_box_left();
@@ -769,7 +774,8 @@ void FormattingContext::layout_absolutely_positioned_element(Box const& box)
             - box_state.border_box_right();
         used_offset.set_x(width_of_containing_block + x_offset - box_state.content_width() - box_state.margin_right);
     } else {
-        float x_offset = box_state.margin_box_left();
+        float x_offset = box_state.margin_box_left()
+            + (relevant_parent->computed_values().position() == CSS::Position::Relative ? 0 : parent_location.x());
         used_offset.set_x(x_offset);
     }
 
@@ -783,7 +789,9 @@ void FormattingContext::layout_absolutely_positioned_element(Box const& box)
             - box_state.border_box_bottom();
         used_offset.set_y(height_of_containing_block + y_offset - box_state.content_height() - box_state.margin_bottom);
     } else {
-        float y_offset = box_state.margin_box_top();
+        float y_offset = box_state.margin_box_top()
+            + compute_box_y_position_with_respect_to_siblings(box, box_state)
+            + (relevant_parent->computed_values().position() == CSS::Position::Relative ? 0 : parent_location.y());
         used_offset.set_y(y_offset);
     }
 
@@ -1092,6 +1100,61 @@ float FormattingContext::containing_block_height_for(Box const& box, LayoutState
         return containing_block_state.content_height();
     }
     VERIFY_NOT_REACHED();
+}
+
+float FormattingContext::compute_box_y_position_with_respect_to_siblings(Box const& child_box, LayoutState::UsedValues const& box_state)
+{
+    float y = box_state.border_box_top();
+
+    Vector<float> collapsible_margins;
+
+    auto* relevant_sibling = child_box.previous_sibling_of_type<Layout::BlockContainer>();
+    while (relevant_sibling != nullptr) {
+        if (!relevant_sibling->is_absolutely_positioned() && !relevant_sibling->is_floating()) {
+            auto const& relevant_sibling_state = m_state.get(*relevant_sibling);
+            collapsible_margins.append(relevant_sibling_state.margin_bottom);
+            // NOTE: Empty (0-height) preceding siblings have their margins collapsed with *their* preceding sibling, etc.
+            if (relevant_sibling_state.border_box_height() > 0)
+                break;
+            collapsible_margins.append(relevant_sibling_state.margin_top);
+        }
+        relevant_sibling = relevant_sibling->previous_sibling_of_type<Layout::BlockContainer>();
+    }
+
+    if (relevant_sibling) {
+        // Collapse top margin with the collapsed margin(s) of preceding siblings.
+        collapsible_margins.append(box_state.margin_top);
+
+        float smallest_margin = 0;
+        float largest_margin = 0;
+        size_t negative_margin_count = 0;
+        for (auto margin : collapsible_margins) {
+            if (margin < 0)
+                ++negative_margin_count;
+            largest_margin = max(largest_margin, margin);
+            smallest_margin = min(smallest_margin, margin);
+        }
+
+        float collapsed_margin = 0;
+        if (negative_margin_count == collapsible_margins.size()) {
+            // When all margins are negative, the size of the collapsed margin is the smallest (most negative) margin.
+            collapsed_margin = smallest_margin;
+        } else if (negative_margin_count > 0) {
+            // When negative margins are involved, the size of the collapsed margin is the sum of the largest positive margin and the smallest (most negative) negative margin.
+            collapsed_margin = largest_margin + smallest_margin;
+        } else {
+            // Otherwise, collapse all the adjacent margins by using only the largest one.
+            collapsed_margin = largest_margin;
+        }
+
+        auto const& relevant_sibling_state = m_state.get(*relevant_sibling);
+        return y + relevant_sibling_state.offset.y()
+            + relevant_sibling_state.content_height()
+            + relevant_sibling_state.border_box_bottom()
+            + collapsed_margin;
+    } else {
+        return y + box_state.margin_top;
+    }
 }
 
 }

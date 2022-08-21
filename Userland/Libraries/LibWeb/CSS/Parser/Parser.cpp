@@ -27,6 +27,7 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Parser/Rule.h>
 #include <LibWeb/CSS/Selector.h>
+#include <LibWeb/CSS/StyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Dump.h>
 
@@ -2360,11 +2361,34 @@ Optional<AK::URL> Parser::parse_url_function(ComponentValue const& component_val
 
 RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& component_value)
 {
+    using GradientType = LinearGradientStyleValue::GradientType;
+    using Repeating = LinearGradientStyleValue::Repeating;
+
     if (!component_value.is_function())
         return {};
 
+    auto consume_if_starts_with = [](StringView str, StringView start, auto found_callback) {
+        if (str.starts_with(start, CaseSensitivity::CaseInsensitive)) {
+            found_callback();
+            return str.substring_view(start.length());
+        }
+        return str;
+    };
+
+    Repeating repeating_gradient = Repeating::No;
+    GradientType gradient_type { GradientType::Standard };
+
     auto function_name = component_value.function().name();
-    if (!function_name.is_one_of_ignoring_case("linear-gradient"sv, "-webkit-linear-gradient"sv))
+
+    function_name = consume_if_starts_with(function_name, "-webkit-"sv, [&] {
+        gradient_type = GradientType::WebKit;
+    });
+
+    function_name = consume_if_starts_with(function_name, "repeating-"sv, [&] {
+        repeating_gradient = Repeating::Yes;
+    });
+
+    if (!function_name.equals_ignoring_case("linear-gradient"sv))
         return {};
 
     // linear-gradient() = linear-gradient([ <angle> | to <side-or-corner> ]?, <color-stop-list>)
@@ -2376,7 +2400,29 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
         return {};
 
     bool has_direction_param = true;
-    LinearGradientStyleValue::GradientDirection gradient_direction = SideOrCorner::Bottom;
+    LinearGradientStyleValue::GradientDirection gradient_direction = gradient_type == GradientType::Standard
+        ? SideOrCorner::Bottom
+        : SideOrCorner::Top;
+
+    auto to_side = [](StringView value) -> Optional<SideOrCorner> {
+        if (value.equals_ignoring_case("top"sv))
+            return SideOrCorner::Top;
+        if (value.equals_ignoring_case("bottom"sv))
+            return SideOrCorner::Bottom;
+        if (value.equals_ignoring_case("left"sv))
+            return SideOrCorner::Left;
+        if (value.equals_ignoring_case("right"sv))
+            return SideOrCorner::Right;
+        return {};
+    };
+
+    auto is_to_side_or_corner = [&](auto const& token) {
+        if (!token.is(Token::Type::Ident))
+            return false;
+        if (gradient_type == GradientType::WebKit)
+            return to_side(token.token().ident()).has_value();
+        return token.token().ident().equals_ignoring_case("to"sv);
+    };
 
     auto& first_param = tokens.peek_token();
     if (first_param.is(Token::Type::Dimension)) {
@@ -2390,31 +2436,24 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
             return {};
 
         gradient_direction = Angle { angle_value, angle_type.release_value() };
-    } else if (first_param.is(Token::Type::Ident) && first_param.token().ident().equals_ignoring_case("to"sv)) {
+    } else if (is_to_side_or_corner(first_param)) {
         // <side-or-corner> = [left | right] || [top | bottom]
-        tokens.next_token();
-        tokens.skip_whitespace();
 
-        auto to_side = [](StringView value) -> Optional<SideOrCorner> {
-            if (value.equals_ignoring_case("top"sv))
-                return SideOrCorner::Top;
-            if (value.equals_ignoring_case("bottom"sv))
-                return SideOrCorner::Bottom;
-            if (value.equals_ignoring_case("left"sv))
-                return SideOrCorner::Left;
-            if (value.equals_ignoring_case("right"sv))
-                return SideOrCorner::Right;
-            return {};
-        };
+        // Note: -webkit-linear-gradient does not include to the "to" prefix on the side or corner
+        if (gradient_type == GradientType::Standard) {
+            tokens.next_token();
+            tokens.skip_whitespace();
 
-        if (!tokens.has_next_token())
-            return {};
+            if (!tokens.has_next_token())
+                return {};
+        }
 
         // [left | right] || [top | bottom]
-        auto& second_param = tokens.next_token();
-        if (!second_param.is(Token::Type::Ident))
+        auto& first_side = tokens.next_token();
+        if (!first_side.is(Token::Type::Ident))
             return {};
-        auto side_a = to_side(second_param.token().ident());
+
+        auto side_a = to_side(first_side.token().ident());
         tokens.skip_whitespace();
         Optional<SideOrCorner> side_b;
         if (tokens.has_next_token() && tokens.peek_token().is(Token::Type::Ident))
@@ -2536,7 +2575,7 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
         color_stops.append(list_element);
     }
 
-    return LinearGradientStyleValue::create(gradient_direction, move(color_stops));
+    return LinearGradientStyleValue::create(gradient_direction, move(color_stops), gradient_type, repeating_gradient);
 }
 
 RefPtr<CSSRule> Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
@@ -3327,6 +3366,83 @@ Optional<Color> Parser::parse_rgb_or_hsl_color(StringView function_name, Vector<
     }
 
     return {};
+}
+
+// https://www.w3.org/TR/CSS2/visufx.html#value-def-shape
+RefPtr<StyleValue> Parser::parse_rect_value(ComponentValue const& component_value)
+{
+    if (!component_value.is_function())
+        return {};
+    auto& function = component_value.function();
+    if (!function.name().equals_ignoring_case("rect"sv))
+        return {};
+
+    Vector<Length, 4> params;
+    auto tokens = TokenStream { function.values() };
+
+    enum class CommaRequirement {
+        Unknown,
+        RequiresCommas,
+        RequiresNoCommas
+    };
+
+    enum class Side {
+        Top = 0,
+        Right = 1,
+        Bottom = 2,
+        Left = 3
+    };
+
+    auto comma_requirement = CommaRequirement::Unknown;
+
+    // In CSS 2.1, the only valid <shape> value is: rect(<top>, <right>, <bottom>, <left>) where
+    // <top> and <bottom> specify offsets from the top border edge of the box, and <right>, and
+    //  <left> specify offsets from the left border edge of the box.
+    for (size_t side = 0; side < 4; side++) {
+        tokens.skip_whitespace();
+
+        // <top>, <right>, <bottom>, and <left> may either have a <length> value or 'auto'.
+        // Negative lengths are permitted.
+        auto current_token = tokens.next_token().token();
+        if (current_token.to_string() == "auto") {
+            params.append(Length::make_auto());
+        } else {
+            auto maybe_length = parse_length(current_token);
+            if (!maybe_length.has_value())
+                return {};
+            params.append(maybe_length.value());
+        }
+        tokens.skip_whitespace();
+
+        // The last side, should be no more tokens following it.
+        if (static_cast<Side>(side) == Side::Left) {
+            if (tokens.has_next_token())
+                return {};
+            break;
+        }
+
+        bool next_is_comma = tokens.peek_token().is(Token::Type::Comma);
+
+        // Authors should separate offset values with commas. User agents must support separation
+        // with commas, but may also support separation without commas (but not a combination),
+        // because a previous revision of this specification was ambiguous in this respect.
+        if (comma_requirement == CommaRequirement::Unknown)
+            comma_requirement = next_is_comma ? CommaRequirement::RequiresCommas : CommaRequirement::RequiresNoCommas;
+
+        if (comma_requirement == CommaRequirement::RequiresCommas) {
+            if (next_is_comma)
+                tokens.next_token();
+            else
+                return {};
+        } else if (comma_requirement == CommaRequirement::RequiresNoCommas) {
+            if (next_is_comma)
+                return {};
+        } else {
+            VERIFY_NOT_REACHED();
+        }
+    }
+
+    return RectStyleValue::create(EdgeRect { params[0], params[1], params[2], params[3] });
 }
 
 Optional<Color> Parser::parse_color(ComponentValue const& component_value)
@@ -5394,6 +5510,9 @@ RefPtr<StyleValue> Parser::parse_css_value(ComponentValue const& component_value
 
     if (auto image = parse_image_value(component_value))
         return image;
+
+    if (auto rect = parse_rect_value(component_value))
+        return rect;
 
     return {};
 }

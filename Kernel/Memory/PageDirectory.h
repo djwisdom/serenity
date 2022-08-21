@@ -6,24 +6,24 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Badge.h>
 #include <AK/HashMap.h>
 #include <AK/IntrusiveRedBlackTree.h>
-#include <AK/RefCounted.h>
-#include <AK/RefPtr.h>
 #include <Kernel/Forward.h>
+#include <Kernel/Library/LockRefPtr.h>
 #include <Kernel/Locking/Spinlock.h>
 #include <Kernel/Memory/PhysicalPage.h>
 
 namespace Kernel::Memory {
 
-class PageDirectory : public RefCounted<PageDirectory> {
+class PageDirectory final : public AtomicRefCounted<PageDirectory> {
     friend class MemoryManager;
 
 public:
-    static ErrorOr<NonnullRefPtr<PageDirectory>> try_create_for_userspace();
-    static NonnullRefPtr<PageDirectory> must_create_kernel_page_directory();
-    static RefPtr<PageDirectory> find_current();
+    static ErrorOr<NonnullLockRefPtr<PageDirectory>> try_create_for_userspace();
+    static NonnullLockRefPtr<PageDirectory> must_create_kernel_page_directory();
+    static LockRefPtr<PageDirectory> find_current();
 
     ~PageDirectory();
 
@@ -64,15 +64,15 @@ private:
 
     AddressSpace* m_space { nullptr };
 #if ARCH(X86_64)
-    RefPtr<PhysicalPage> m_pml4t;
+    LockRefPtr<PhysicalPage> m_pml4t;
 #endif
-    RefPtr<PhysicalPage> m_directory_table;
+    LockRefPtr<PhysicalPage> m_directory_table;
 #if ARCH(X86_64)
-    RefPtr<PhysicalPage> m_directory_pages[512];
+    LockRefPtr<PhysicalPage> m_directory_pages[512];
 #else
-    RefPtr<PhysicalPage> m_directory_pages[4];
+    LockRefPtr<PhysicalPage> m_directory_pages[4];
 #endif
-    RecursiveSpinlock m_lock;
+    RecursiveSpinlock m_lock { LockRank::None };
 };
 
 void activate_kernel_page_directory(PageDirectory const& pgd);

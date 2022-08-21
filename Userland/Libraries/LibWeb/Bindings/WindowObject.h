@@ -32,7 +32,7 @@ class WindowObject
     JS_OBJECT(WindowObject, JS::GlobalObject);
 
 public:
-    explicit WindowObject(HTML::Window&);
+    explicit WindowObject(JS::Realm&, HTML::Window&);
     virtual void initialize_global_object() override;
     virtual ~WindowObject() override = default;
 
@@ -82,10 +82,15 @@ private:
 
     JS_DECLARE_NATIVE_FUNCTION(document_getter);
 
+    JS_DECLARE_NATIVE_FUNCTION(location_getter);
+    JS_DECLARE_NATIVE_FUNCTION(location_setter);
+
     JS_DECLARE_NATIVE_FUNCTION(name_getter);
     JS_DECLARE_NATIVE_FUNCTION(name_setter);
 
     JS_DECLARE_NATIVE_FUNCTION(performance_getter);
+    JS_DECLARE_NATIVE_FUNCTION(performance_setter);
+
     JS_DECLARE_NATIVE_FUNCTION(history_getter);
     JS_DECLARE_NATIVE_FUNCTION(screen_getter);
 

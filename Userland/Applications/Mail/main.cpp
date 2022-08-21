@@ -26,9 +26,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/etc", "r"));
-    TRY(Core::System::unveil("/tmp/portal/webcontent", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/webcontent", "rw"));
     TRY(Core::System::unveil("/tmp/portal/lookup", "rw"));
-    TRY(Core::System::unveil("/tmp/100/portal/launch", "rw"));
+    TRY(Core::System::unveil("/tmp/user/%uid/portal/launch", "rw"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     TRY(Desktop::Launcher::add_allowed_url(URL::create_with_file_protocol("/bin/MailSettings")));

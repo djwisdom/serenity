@@ -40,18 +40,18 @@ SpinlockProtected<Thread::GlobalList>& Thread::all_instances()
     return *s_list;
 }
 
-ErrorOr<NonnullRefPtr<Thread>> Thread::try_create(NonnullRefPtr<Process> process)
+ErrorOr<NonnullLockRefPtr<Thread>> Thread::try_create(NonnullLockRefPtr<Process> process)
 {
     auto kernel_stack_region = TRY(MM.allocate_kernel_region(default_kernel_stack_size, {}, Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow));
     kernel_stack_region->set_stack(true);
 
-    auto block_timer = TRY(try_make_ref_counted<Timer>());
+    auto block_timer = TRY(try_make_lock_ref_counted<Timer>());
 
     auto name = TRY(KString::try_create(process->name()));
-    return adopt_nonnull_ref_or_enomem(new (nothrow) Thread(move(process), move(kernel_stack_region), move(block_timer), move(name)));
+    return adopt_nonnull_lock_ref_or_enomem(new (nothrow) Thread(move(process), move(kernel_stack_region), move(block_timer), move(name)));
 }
 
-Thread::Thread(NonnullRefPtr<Process> process, NonnullOwnPtr<Memory::Region> kernel_stack_region, NonnullRefPtr<Timer> block_timer, NonnullOwnPtr<KString> name)
+Thread::Thread(NonnullLockRefPtr<Process> process, NonnullOwnPtr<Memory::Region> kernel_stack_region, NonnullLockRefPtr<Timer> block_timer, NonnullOwnPtr<KString> name)
     : m_process(move(process))
     , m_kernel_stack_region(move(kernel_stack_region))
     , m_name(move(name))
@@ -133,19 +133,10 @@ Thread::Thread(NonnullRefPtr<Process> process, NonnullOwnPtr<Memory::Region> ker
 
 Thread::~Thread()
 {
-    {
-        // We need to explicitly remove ourselves from the thread list
-        // here. We may get preempted in the middle of destructing this
-        // thread, which causes problems if the thread list is iterated.
-        // Specifically, if this is the last thread of a process, checking
-        // block conditions would access m_process, which would be in
-        // the middle of being destroyed.
-        SpinlockLocker lock(g_scheduler_lock);
-        VERIFY(!m_process_thread_list_node.is_in_list());
+    VERIFY(!m_process_thread_list_node.is_in_list());
 
-        // We shouldn't be queued
-        VERIFY(m_runnable_priority < 0);
-    }
+    // We shouldn't be queued
+    VERIFY(m_runnable_priority < 0);
 }
 
 Thread::BlockResult Thread::block_impl(BlockTimeout const& timeout, Blocker& blocker)
@@ -154,6 +145,8 @@ Thread::BlockResult Thread::block_impl(BlockTimeout const& timeout, Blocker& blo
     VERIFY(this == Thread::current());
     ScopedCritical critical;
     VERIFY(!Memory::s_mm_lock.is_locked_by_current_processor());
+
+    SpinlockLocker scheduler_lock(g_scheduler_lock);
 
     SpinlockLocker block_lock(m_block_lock);
     // We need to hold m_block_lock so that nobody can unblock a blocker as soon
@@ -168,7 +161,6 @@ Thread::BlockResult Thread::block_impl(BlockTimeout const& timeout, Blocker& blo
         return BlockResult::NotBlocked;
     }
 
-    SpinlockLocker scheduler_lock(g_scheduler_lock);
     // Relaxed semantics are fine for timeout_unblocked because we
     // synchronize on the spin locks already.
     Atomic<bool, AK::MemoryOrder::memory_order_relaxed> timeout_unblocked(false);
@@ -212,8 +204,8 @@ Thread::BlockResult Thread::block_impl(BlockTimeout const& timeout, Blocker& blo
 
     set_state(Thread::State::Blocked);
 
-    scheduler_lock.unlock();
     block_lock.unlock();
+    scheduler_lock.unlock();
 
     dbgln_if(THREAD_DEBUG, "Thread {} blocking on {} ({}) -->", *this, &blocker, blocker.state_string());
     bool did_timeout = false;
@@ -296,8 +288,8 @@ void Thread::block(Kernel::Mutex& lock, SpinlockLocker<Spinlock>& lock_lock, u32
 
     set_state(Thread::State::Blocked);
 
-    scheduler_lock.unlock();
     block_lock.unlock();
+    scheduler_lock.unlock();
 
     lock_lock.unlock();
 
@@ -640,7 +632,7 @@ void Thread::finalize_dying_threads()
         });
     }
     for (auto* thread : dying_threads) {
-        RefPtr<Process> process = thread->process();
+        LockRefPtr<Process> process = thread->process();
         dbgln_if(PROCESS_DEBUG, "Before finalization, {} has {} refs and its process has {}",
             *thread, thread->ref_count(), thread->process().ref_count());
         thread->finalize();
@@ -666,8 +658,7 @@ void Thread::update_time_scheduled(u64 current_scheduler_time, bool is_kernel, b
             Scheduler::add_time_scheduled(delta, is_kernel);
 
             auto& total_time = is_kernel ? m_total_time_scheduled_kernel : m_total_time_scheduled_user;
-            SpinlockLocker scheduler_lock(g_scheduler_lock);
-            total_time += delta;
+            total_time.fetch_add(delta, AK::memory_order_relaxed);
         }
     }
     if (no_longer_running)
@@ -695,7 +686,6 @@ void Thread::check_dispatch_pending_signal()
     {
         SpinlockLocker scheduler_lock(g_scheduler_lock);
         if (pending_signals_for_state() != 0) {
-            SpinlockLocker lock(m_lock);
             result = dispatch_one_pending_signal();
         }
     }
@@ -748,7 +738,6 @@ void Thread::send_signal(u8 signal, [[maybe_unused]] Process* sender)
         return;
 
     if (m_state == Thread::State::Stopped) {
-        SpinlockLocker lock(m_lock);
         if (pending_signals_for_state() != 0) {
             dbgln_if(SIGNAL_DEBUG, "Signal: Resuming stopped {} to deliver signal {}", *this, signal);
             resume_from_stopped();
@@ -823,7 +812,7 @@ void Thread::send_urgent_signal_to_self(u8 signal)
 
 DispatchSignalResult Thread::dispatch_one_pending_signal()
 {
-    VERIFY(m_lock.is_locked_by_current_processor());
+    VERIFY(g_scheduler_lock.is_locked_by_current_processor());
     u32 signal_candidates = pending_signals_for_state() & ~m_signal_mask;
     if (signal_candidates == 0)
         return DispatchSignalResult::Continue;
@@ -841,7 +830,6 @@ DispatchSignalResult Thread::try_dispatch_one_pending_signal(u8 signal)
 {
     VERIFY(signal != 0);
     SpinlockLocker scheduler_lock(g_scheduler_lock);
-    SpinlockLocker lock(m_lock);
     u32 signal_candidates = pending_signals_for_state() & ~m_signal_mask;
     if ((signal_candidates & (1 << (signal - 1))) == 0)
         return DispatchSignalResult::Continue;
@@ -1263,7 +1251,7 @@ RegisterState& Thread::get_register_dump_from_stack()
     return *trap->regs;
 }
 
-ErrorOr<NonnullRefPtr<Thread>> Thread::try_clone(Process& process)
+ErrorOr<NonnullLockRefPtr<Thread>> Thread::try_clone(Process& process)
 {
     auto clone = TRY(Thread::try_create(process));
     m_signal_action_masks.span().copy_to(clone->m_signal_action_masks);
@@ -1281,7 +1269,6 @@ void Thread::set_state(State new_state, u8 stop_signal)
         return;
 
     {
-        SpinlockLocker thread_lock(m_lock);
         previous_state = m_state;
         if (previous_state == Thread::State::Invalid) {
             // If we were *just* created, we may have already pending signals
@@ -1440,9 +1427,9 @@ ErrorOr<void> Thread::make_thread_specific_region(Badge<Process>)
     return {};
 }
 
-RefPtr<Thread> Thread::from_tid(ThreadID tid)
+LockRefPtr<Thread> Thread::from_tid(ThreadID tid)
 {
-    return Thread::all_instances().with([&](auto& list) -> RefPtr<Thread> {
+    return Thread::all_instances().with([&](auto& list) -> LockRefPtr<Thread> {
         for (Thread& thread : list) {
             if (thread.tid() == tid)
                 return thread;
@@ -1494,7 +1481,7 @@ void Thread::track_lock_release(LockRank rank)
     // This is validated by toggling the least significant bit of the mask, and
     // then bit wise or-ing the rank we are trying to release with the resulting
     // mask. If the rank we are releasing is truly the highest rank then the mask
-    // we get back will be equal to the current mask of stored on the thread.
+    // we get back will be equal to the current mask stored on the thread.
     auto rank_is_in_order = [](auto mask_enum, auto rank_enum) -> bool {
         auto mask = to_underlying(mask_enum);
         auto rank = to_underlying(rank_enum);

@@ -36,7 +36,8 @@ namespace std {
 const nothrow_t nothrow;
 }
 
-static RecursiveSpinlock s_lock; // needs to be recursive because of dump_backtrace()
+// FIXME: Figure out whether this can be MemoryManager.
+static RecursiveSpinlock s_lock { LockRank::None }; // needs to be recursive because of dump_backtrace()
 
 struct KmallocSubheap {
     KmallocSubheap(u8* base, size_t size)
@@ -332,8 +333,8 @@ struct KmallocGlobalData {
 
         auto cpu_supports_nx = Processor::current().has_nx();
 
-        SpinlockLocker mm_locker(Memory::s_mm_lock);
         SpinlockLocker pd_locker(MM.kernel_page_directory().get_lock());
+        SpinlockLocker mm_locker(Memory::s_mm_lock);
 
         for (auto vaddr = new_subheap_base; !physical_pages.is_empty(); vaddr = vaddr.offset(PAGE_SIZE)) {
             // FIXME: We currently leak physical memory when mapping it into the kmalloc heap.
@@ -365,8 +366,8 @@ struct KmallocGlobalData {
 
         // Make sure the entire kmalloc VM range is backed by page tables.
         // This avoids having to deal with lazy page table allocation during heap expansion.
-        SpinlockLocker mm_locker(Memory::s_mm_lock);
         SpinlockLocker pd_locker(MM.kernel_page_directory().get_lock());
+        SpinlockLocker mm_locker(Memory::s_mm_lock);
         for (auto vaddr = reserved_region->range().base(); vaddr < reserved_region->range().end(); vaddr = vaddr.offset(PAGE_SIZE)) {
             MM.ensure_pte(MM.kernel_page_directory(), vaddr);
         }

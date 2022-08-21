@@ -1492,10 +1492,26 @@ public:
 
 class SuperCall final : public Expression {
 public:
+    // This is here to be able to make a constructor like
+    // constructor(...args) { super(...args); } which does not use @@iterator of %Array.prototype%.
+    enum class IsPartOfSyntheticConstructor {
+        No,
+        Yes,
+    };
+
     SuperCall(SourceRange source_range, Vector<CallExpression::Argument> arguments)
         : Expression(source_range)
         , m_arguments(move(arguments))
+        , m_is_synthetic(IsPartOfSyntheticConstructor::No)
     {
+    }
+
+    SuperCall(SourceRange source_range, IsPartOfSyntheticConstructor is_part_of_synthetic_constructor, CallExpression::Argument constructor_argument)
+        : Expression(source_range)
+        , m_arguments({ move(constructor_argument) })
+        , m_is_synthetic(IsPartOfSyntheticConstructor::Yes)
+    {
+        VERIFY(is_part_of_synthetic_constructor == IsPartOfSyntheticConstructor::Yes);
     }
 
     virtual Completion execute(Interpreter&, GlobalObject&) const override;
@@ -1503,6 +1519,7 @@ public:
 
 private:
     Vector<CallExpression::Argument> const m_arguments;
+    IsPartOfSyntheticConstructor const m_is_synthetic;
 };
 
 enum class AssignmentOp {
@@ -1769,9 +1786,12 @@ public:
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
+    ThrowCompletionOr<Value> get_template_object(Interpreter& interpreter, GlobalObject& global_object) const;
+
 private:
     NonnullRefPtr<Expression> const m_tag;
     NonnullRefPtr<TemplateLiteral> const m_template_literal;
+    mutable HashMap<Realm*, Handle<Array>> m_cached_values;
 };
 
 class MemberExpression final : public Expression {

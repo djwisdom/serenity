@@ -50,8 +50,9 @@
 
 namespace Web::Bindings {
 
-WindowObject::WindowObject(HTML::Window& impl)
-    : m_impl(impl)
+WindowObject::WindowObject(JS::Realm& realm, HTML::Window& impl)
+    : GlobalObject(realm)
+    , m_impl(impl)
 {
     impl.set_wrapper({}, *this);
 }
@@ -71,7 +72,7 @@ void WindowObject::initialize_global_object()
     define_native_accessor("document", document_getter, {}, JS::Attribute::Enumerable);
     define_native_accessor("name", name_getter, name_setter, JS::Attribute::Enumerable);
     define_native_accessor("history", history_getter, {}, JS::Attribute::Enumerable);
-    define_native_accessor("performance", performance_getter, {}, JS::Attribute::Enumerable);
+    define_native_accessor("performance", performance_getter, performance_setter, JS::Attribute::Enumerable | JS::Attribute::Configurable);
     define_native_accessor("crypto", crypto_getter, {}, JS::Attribute::Enumerable);
     define_native_accessor("screen", screen_getter, {}, JS::Attribute::Enumerable);
     define_native_accessor("innerWidth", inner_width_getter, {}, JS::Attribute::Enumerable);
@@ -132,7 +133,7 @@ void WindowObject::initialize_global_object()
     define_direct_property("clientInformation", m_navigator_object, JS::Attribute::Enumerable | JS::Attribute::Configurable);
 
     // NOTE: location is marked as [LegacyUnforgeable], meaning it isn't configurable.
-    define_direct_property("location", m_location_object, JS::Attribute::Enumerable);
+    define_native_accessor("location", location_getter, location_setter, JS::Attribute::Enumerable);
 
     // WebAssembly "namespace"
     define_direct_property("WebAssembly", heap().allocate<WebAssemblyObject>(*this, *this), JS::Attribute::Enumerable | JS::Attribute::Configurable);
@@ -183,7 +184,7 @@ static JS::ThrowCompletionOr<HTML::Window*> impl_from(JS::VM& vm, JS::GlobalObje
 
     auto* this_object = MUST(this_value.to_object(global_object));
 
-    if ("WindowObject"sv != this_object->class_name())
+    if (!is<WindowObject>(*this_object))
         return vm.throw_completion<JS::TypeError>(global_object, JS::ErrorType::NotAnObjectOfType, "WindowObject");
     return &static_cast<WindowObject*>(this_object)->impl();
 }
@@ -433,6 +434,24 @@ JS_DEFINE_NATIVE_FUNCTION(WindowObject::performance_getter)
     return wrap(global_object, impl->performance());
 }
 
+JS_DEFINE_NATIVE_FUNCTION(WindowObject::performance_setter)
+{
+    // https://webidl.spec.whatwg.org/#dfn-attribute-setter
+    // 4.1. If no arguments were passed, then throw a TypeError.
+    if (vm.argument_count() == 0)
+        return vm.throw_completion<JS::TypeError>(global_object, JS::ErrorType::BadArgCountOne, "set performance");
+
+    auto* impl = TRY(impl_from(vm, global_object));
+
+    // 5. If attribute is declared with the [Replaceable] extended attribute, then:
+    // 1. Perform ? CreateDataProperty(esValue, id, V).
+    VERIFY(impl->wrapper());
+    TRY(impl->wrapper()->create_data_property("performance", vm.argument(0)));
+
+    // 2. Return undefined.
+    return JS::js_undefined();
+}
+
 JS_DEFINE_NATIVE_FUNCTION(WindowObject::screen_getter)
 {
     auto* impl = TRY(impl_from(vm, global_object));
@@ -450,6 +469,21 @@ JS_DEFINE_NATIVE_FUNCTION(WindowObject::event_getter)
 JS_DEFINE_NATIVE_FUNCTION(WindowObject::event_setter)
 {
     REPLACEABLE_PROPERTY_SETTER(WindowObject, event);
+}
+
+JS_DEFINE_NATIVE_FUNCTION(WindowObject::location_getter)
+{
+    auto* impl = TRY(impl_from(vm, global_object));
+    VERIFY(impl->wrapper());
+    return impl->wrapper()->m_location_object;
+}
+
+JS_DEFINE_NATIVE_FUNCTION(WindowObject::location_setter)
+{
+    auto* impl = TRY(impl_from(vm, global_object));
+    VERIFY(impl->wrapper());
+    TRY(impl->wrapper()->m_location_object->set(JS::PropertyKey("href"), vm.argument(0), JS::Object::ShouldThrowExceptions::Yes));
+    return JS::js_undefined();
 }
 
 JS_DEFINE_NATIVE_FUNCTION(WindowObject::crypto_getter)

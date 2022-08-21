@@ -197,7 +197,7 @@ void MenuManager::handle_mouse_event(MouseEvent& mouse_event)
     }
 
     if (mouse_event.type() == Event::MouseMove) {
-        for (auto& menu : m_open_menu_stack) {
+        for (auto& menu : m_open_menu_stack.in_reverse()) {
             if (!menu)
                 continue;
             if (!menu->menu_window()->rect().contains(mouse_event.position()))
@@ -227,6 +227,14 @@ void MenuManager::close_everyone()
     }
     m_open_menu_stack.clear();
     clear_current_menu();
+}
+
+Menu* MenuManager::closest_open_ancestor_of(Menu const& other) const
+{
+    for (auto& menu : m_open_menu_stack.in_reverse())
+        if (menu->is_menu_ancestor_of(other))
+            return menu.ptr();
+    return nullptr;
 }
 
 void MenuManager::close_everyone_not_in_lineage(Menu& menu)

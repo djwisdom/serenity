@@ -16,7 +16,7 @@ namespace GUI {
 class ConnectionToWindowServer final
     : public IPC::ConnectionToServer<WindowClientEndpoint, WindowServerEndpoint>
     , public WindowClientEndpoint {
-    IPC_CLIENT_CONNECTION(ConnectionToWindowServer, "/tmp/portal/window")
+    IPC_CLIENT_CONNECTION(ConnectionToWindowServer, "/tmp/portal/window"sv)
 public:
     static ConnectionToWindowServer& the();
     i32 expose_client_id() { return m_client_id; }
@@ -24,7 +24,7 @@ public:
 private:
     ConnectionToWindowServer(NonnullOwnPtr<Core::Stream::LocalSocket>);
 
-    virtual void fast_greet(Vector<Gfx::IntRect> const&, u32, u32, u32, Core::AnonymousBuffer const&, String const&, String const&, String const&, i32) override;
+    virtual void fast_greet(Vector<Gfx::IntRect> const&, u32, u32, u32, Core::AnonymousBuffer const&, String const&, String const&, String const&, Vector<bool> const&, i32) override;
     virtual void paint(i32, Gfx::IntSize const&, Vector<Gfx::IntRect> const&) override;
     virtual void mouse_move(i32, Gfx::IntPoint const&, u32, u32, u32, i32, i32, i32, i32, bool, Vector<String> const&) override;
     virtual void mouse_down(i32, Gfx::IntPoint const&, u32, u32, u32, i32, i32, i32, i32) override;
@@ -52,6 +52,7 @@ private:
     virtual void drag_cancelled() override;
     virtual void update_system_theme(Core::AnonymousBuffer const&) override;
     virtual void update_system_fonts(String const&, String const&, String const&) override;
+    virtual void update_system_effects(Vector<bool> const&) override;
     virtual void window_state_changed(i32, bool, bool, bool) override;
     virtual void display_link_notification() override;
     virtual void track_mouse_move(Gfx::IntPoint const&) override;

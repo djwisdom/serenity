@@ -248,11 +248,9 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
             CSS::BackgroundLayerData layer;
 
             if (auto image_value = value_for_layer(images, layer_index); image_value) {
-                if (image_value->is_image()) {
-                    image_value->as_image().load_bitmap(document());
-                    layer.background_image = image_value;
-                } else if (image_value->is_linear_gradient()) {
-                    layer.background_image = image_value;
+                if (image_value->is_abstract_image()) {
+                    layer.background_image = image_value->as_abstract_image();
+                    layer.background_image->load_any_resources(document());
                 }
             }
 
@@ -385,6 +383,7 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     computed_values.set_flex_grow(computed_style.flex_grow());
     computed_values.set_flex_shrink(computed_style.flex_shrink());
     computed_values.set_order(computed_style.order());
+    computed_values.set_clip(computed_style.clip());
 
     auto justify_content = computed_style.justify_content();
     if (justify_content.has_value())
@@ -460,9 +459,9 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
         computed_values.set_list_style_type(list_style_type.value());
 
     auto list_style_image = computed_style.property(CSS::PropertyID::ListStyleImage);
-    if (list_style_image->is_image()) {
-        m_list_style_image = list_style_image->as_image();
-        m_list_style_image->load_bitmap(document());
+    if (list_style_image->is_abstract_image()) {
+        m_list_style_image = list_style_image->as_abstract_image();
+        m_list_style_image->load_any_resources(document());
     }
 
     computed_values.set_color(computed_style.color_or_fallback(CSS::PropertyID::Color, *this, CSS::InitialValues::color()));

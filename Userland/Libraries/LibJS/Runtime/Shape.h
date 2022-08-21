@@ -47,10 +47,7 @@ public:
         Prototype,
     };
 
-    enum class ShapeWithoutGlobalObjectTag { Tag };
-
-    explicit Shape(ShapeWithoutGlobalObjectTag) {};
-    explicit Shape(Object& global_object);
+    explicit Shape(Realm&);
     Shape(Shape& previous_shape, StringOrSymbol const& property_key, PropertyAttributes attributes, TransitionType);
     Shape(Shape& previous_shape, Object* new_prototype);
 
@@ -64,6 +61,7 @@ public:
     bool is_unique() const { return m_unique; }
     Shape* create_unique_clone() const;
 
+    Realm& realm() const { return m_realm; }
     GlobalObject* global_object() const;
 
     Object* prototype() { return m_prototype; }
@@ -95,7 +93,7 @@ private:
 
     void ensure_property_table() const;
 
-    Object* m_global_object { nullptr };
+    Realm& m_realm;
 
     mutable OwnPtr<HashMap<StringOrSymbol, PropertyMetadata>> m_property_table;
 
