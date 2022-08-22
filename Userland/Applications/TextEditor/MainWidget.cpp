@@ -374,22 +374,34 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     edit_menu.add_action(*m_replace_action);
     edit_menu.add_action(*m_replace_all_action);
 
+//    m_no_preview_action = GUI::Action::create_checkable(
+//        "&No Preview", [this](auto&) {
+//            set_preview_mode(PreviewMode::None);
+//        });
+
     m_no_preview_action = GUI::Action::create_checkable(
         "&No Preview", [this](auto&) {
+            Config::write_string("TextEditor"sv, "View"sv, "PreviewMode"sv, "None"sv);
             set_preview_mode(PreviewMode::None);
-        });
+        },
+        this);
+    m_no_preview_action->set_status_tip("No preview, display plain text");
 
     m_markdown_preview_action = GUI::Action::create_checkable(
         "&Markdown Preview", [this](auto&) {
+            Config::write_string("TextEditor"sv, "View"sv, "PreviewMode"sv, "Markdown"sv);
             set_preview_mode(PreviewMode::Markdown);
         },
         this);
+    m_markdown_preview_action->set_status_tip("Preview in Markdown mode");
 
     m_html_preview_action = GUI::Action::create_checkable(
         "&HTML Preview", [this](auto&) {
+            Config::write_string("TextEditor"sv, "View"sv, "PreviewMode"sv, "HTML"sv);
             set_preview_mode(PreviewMode::HTML);
         },
         this);
+    m_html_preview_action->set_status_tip("Preview in HTML mode");
 
     m_preview_actions.add_action(*m_no_preview_action);
     m_preview_actions.add_action(*m_markdown_preview_action);
@@ -509,30 +521,51 @@ void MainWidget::initialize_menubar(GUI::Window& window)
 
     view_menu.add_separator();
 
-    m_visualize_trailing_whitespace_action = GUI::Action::create_checkable("T&railing Whitespace", [&](auto&) {
-        m_editor->set_visualize_trailing_whitespace(m_visualize_trailing_whitespace_action->is_checked());
+    m_visualize_trailing_whitespace_action = GUI::Action::create_checkable("T&railing Whitespace", [&](auto& action) {
+        action.is_checked() ? m_editor->set_visualize_trailing_whitespace(true) : m_editor->set_visualize_trailing_whitespace(false);
+        Config::write_bool("TextEditor"sv, "View"sv, "TrailingWhitespace"sv, action.is_checked());
     });
-    m_visualize_leading_whitespace_action = GUI::Action::create_checkable("L&eading Whitespace", [&](auto&) {
-        m_editor->set_visualize_leading_whitespace(m_visualize_leading_whitespace_action->is_checked());
-    });
-
-    m_visualize_trailing_whitespace_action->set_checked(true);
+    auto get_trailing_whitespace_value = Config::read_bool("TextEditor"sv, "View"sv, "TrailingWhitespace"sv, true);
+    m_visualize_trailing_whitespace_action->set_checked(get_trailing_whitespace_value);
     m_visualize_trailing_whitespace_action->set_status_tip("Visualize trailing whitespace");
+    m_editor->set_visualize_trailing_whitespace(m_visualize_trailing_whitespace_action->is_checked());
+
+    m_visualize_leading_whitespace_action = GUI::Action::create_checkable("L&eading Whitespace", [&](auto& action) {
+        action.is_checked() ? m_editor->set_visualize_leading_whitespace(true) : m_editor->set_visualize_leading_whitespace(false);
+        Config::write_bool("TextEditor"sv, "View"sv, "LeadingWhitespace"sv, action.is_checked());
+    });
+    auto get_leading_whitespace_value = Config::read_bool("TextEditor"sv, "View"sv, "LeadingWhitespace"sv, true);
+    m_visualize_leading_whitespace_action->set_checked(get_leading_whitespace_value);
     m_visualize_leading_whitespace_action->set_status_tip("Visualize leading whitespace");
+    m_editor->set_visualize_leading_whitespace(m_visualize_leading_whitespace_action->is_checked());
 
     view_menu.add_action(*m_visualize_trailing_whitespace_action);
     view_menu.add_action(*m_visualize_leading_whitespace_action);
 
-    m_cursor_line_highlighting_action = GUI::Action::create_checkable("L&ine Highlighting", [&](auto&) {
-        m_editor->set_cursor_line_highlighting(m_cursor_line_highlighting_action->is_checked());
+    m_cursor_line_highlighting_action = GUI::Action::create_checkable("L&ine Highlighting", [&](auto& action) {
+        action.is_checked() ? m_editor->set_cursor_line_highlighting(true) : m_editor->set_cursor_line_highlighting(false);
+        Config::write_bool("TextEditor"sv, "View"sv, "LineHighlighting"sv, action.is_checked());
     });
-
-    m_cursor_line_highlighting_action->set_checked(true);
+    auto get_highlighting_value = Config::read_bool("TextEditor"sv, "View"sv, "LineHighlighting"sv, true);
+    m_cursor_line_highlighting_action->set_checked(get_highlighting_value);
     m_cursor_line_highlighting_action->set_status_tip("Highlight the current line");
+    m_editor->set_cursor_line_highlighting(m_cursor_line_highlighting_action->is_checked());
 
     view_menu.add_action(*m_cursor_line_highlighting_action);
-
     view_menu.add_separator();
+
+    m_auto_detect_preview_mode_action = GUI::Action::create_checkable("Enable Autodetect Preview", [&](auto&) {
+        //action.is_checked() ? (m_auto_detect_preview_mode == true) : (m_auto_detect_preview_mode == false);
+        Config::write_bool("TextEditor"sv, "View"sv, "PreviewAutoDetect"sv, m_auto_detect_preview_mode_action->is_checked());
+    });
+    auto get_auto_detect_preview_mode_value = Config::read_bool("TextEditor"sv, "View"sv, "PreviewAutoDetect"sv, true);
+    m_auto_detect_preview_mode_action->set_checked(get_auto_detect_preview_mode_value);
+    m_auto_detect_preview_mode_action->set_status_tip("Enable autodetecting supported filetypes");
+    set_auto_detect_preview_mode(m_auto_detect_preview_mode_action->is_checked());
+
+    view_menu.add_action(*m_auto_detect_preview_mode_action);
+    view_menu.add_separator();
+
     view_menu.add_action(*m_no_preview_action);
     view_menu.add_action(*m_markdown_preview_action);
     view_menu.add_action(*m_html_preview_action);
@@ -691,6 +724,18 @@ void MainWidget::set_path(StringView path)
             set_preview_mode(PreviewMode::HTML);
         else
             set_preview_mode(PreviewMode::None);
+    } else {
+      auto get_preview_mode = Config::read_string("TextEditor"sv, "View"sv, "PreviewMode"sv, "None"sv);
+      if (get_preview_mode == "HTML") {
+          set_preview_mode(PreviewMode::HTML);
+          m_html_preview_action->set_checked(true);
+       } else if (get_preview_mode == "Markdown") {
+          set_preview_mode(PreviewMode::Markdown);
+          m_markdown_preview_action->set_checked(true);
+      } else {
+          set_preview_mode(PreviewMode::None);
+          m_no_preview_action->set_checked(true);
+      }
     }
 
     update_title();
