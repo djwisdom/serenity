@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/RefPtr.h>
 #include <Kernel/FileSystem/Custody.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Library/NonnullLockRefPtrVector.h>
@@ -29,7 +30,7 @@ ErrorOr<FlatPtr> Process::sys$stat(Userspace<Syscall::SC_stat_params const*> use
 
     auto path = TRY(get_syscall_path_argument(params.path));
 
-    LockRefPtr<Custody> base;
+    RefPtr<Custody> base;
     if (params.dirfd == AT_FDCWD) {
         base = current_directory();
     } else {
@@ -40,7 +41,7 @@ ErrorOr<FlatPtr> Process::sys$stat(Userspace<Syscall::SC_stat_params const*> use
             return EINVAL;
         base = base_description->custody();
     }
-    auto metadata = TRY(VirtualFileSystem::the().lookup_metadata(path->view(), *base, params.follow_symlinks ? 0 : O_NOFOLLOW_NOERROR));
+    auto metadata = TRY(VirtualFileSystem::the().lookup_metadata(credentials(), path->view(), *base, params.follow_symlinks ? 0 : O_NOFOLLOW_NOERROR));
     auto statbuf = TRY(metadata.stat());
     TRY(copy_to_user(params.statbuf, &statbuf));
     return 0;

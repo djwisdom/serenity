@@ -81,7 +81,7 @@ void LineTool::on_mouseup(Layer* layer, MouseEvent& event)
         m_drawing_button = GUI::MouseButton::None;
         layer->did_modify_bitmap();
         m_editor->update();
-        m_editor->did_complete_action();
+        m_editor->did_complete_action(tool_name());
     }
 }
 
@@ -117,6 +117,7 @@ void LineTool::on_second_paint(Layer const* layer, GUI::PaintEvent& event)
 
     GUI::Painter painter(*m_editor);
     painter.add_clip_rect(event.rect());
+    painter.translate(editor_layer_location(*layer));
     auto preview_start = editor_stroke_position(m_line_start_position, m_thickness);
     auto preview_end = editor_stroke_position(m_line_end_position, m_thickness);
     draw_using(painter, preview_start, preview_end, m_editor->color_for(m_drawing_button), AK::max(m_thickness * m_editor->scale(), 1));

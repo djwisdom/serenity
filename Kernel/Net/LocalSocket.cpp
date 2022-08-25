@@ -73,8 +73,9 @@ LocalSocket::LocalSocket(int type, NonnullOwnPtr<DoubleBuffer> client_buffer, No
     , m_for_server(move(server_buffer))
 {
     auto& current_process = Process::current();
-    m_prebind_uid = current_process.euid();
-    m_prebind_gid = current_process.egid();
+    auto current_process_credentials = current_process.credentials();
+    m_prebind_uid = current_process_credentials->euid();
+    m_prebind_gid = current_process_credentials->egid();
     m_prebind_mode = 0666;
 
     m_for_client->set_unblock_callback([this]() {
@@ -121,7 +122,7 @@ void LocalSocket::get_peer_address(sockaddr* address, socklen_t* address_size)
     get_local_address(address, address_size);
 }
 
-ErrorOr<void> LocalSocket::bind(Userspace<sockaddr const*> user_address, socklen_t address_size)
+ErrorOr<void> LocalSocket::bind(Credentials const& credentials, Userspace<sockaddr const*> user_address, socklen_t address_size)
 {
     VERIFY(setup_state() == SetupState::Unstarted);
     if (address_size > sizeof(sockaddr_un))
@@ -138,7 +139,7 @@ ErrorOr<void> LocalSocket::bind(Userspace<sockaddr const*> user_address, socklen
 
     mode_t mode = S_IFSOCK | (m_prebind_mode & 0777);
     UidAndGid owner { m_prebind_uid, m_prebind_gid };
-    auto result = VirtualFileSystem::the().open(path->view(), O_CREAT | O_EXCL | O_NOFOLLOW_NOERROR, mode, Process::current().current_directory(), owner);
+    auto result = VirtualFileSystem::the().open(credentials, path->view(), O_CREAT | O_EXCL | O_NOFOLLOW_NOERROR, mode, Process::current().current_directory(), owner);
     if (result.is_error()) {
         if (result.error().code() == EEXIST)
             return set_so_error(EADDRINUSE);
@@ -159,7 +160,7 @@ ErrorOr<void> LocalSocket::bind(Userspace<sockaddr const*> user_address, socklen
     return {};
 }
 
-ErrorOr<void> LocalSocket::connect(OpenFileDescription& description, Userspace<sockaddr const*> user_address, socklen_t address_size)
+ErrorOr<void> LocalSocket::connect(Credentials const& credentials, OpenFileDescription& description, Userspace<sockaddr const*> user_address, socklen_t address_size)
 {
     VERIFY(!m_bound);
 
@@ -178,7 +179,7 @@ ErrorOr<void> LocalSocket::connect(OpenFileDescription& description, Userspace<s
     auto path = SOCKET_TRY(KString::try_create(StringView { address.sun_path, strnlen(address.sun_path, sizeof(address.sun_path)) }));
     dbgln_if(LOCAL_SOCKET_DEBUG, "LocalSocket({}) connect({})", this, *path);
 
-    auto file = SOCKET_TRY(VirtualFileSystem::the().open(path->view(), O_RDWR, 0, Process::current().current_directory()));
+    auto file = SOCKET_TRY(VirtualFileSystem::the().open(credentials, path->view(), O_RDWR, 0, Process::current().current_directory()));
     auto inode = file->inode();
     m_inode = inode;
 
@@ -333,12 +334,12 @@ DoubleBuffer* LocalSocket::send_buffer_for(OpenFileDescription& description)
     return nullptr;
 }
 
-ErrorOr<size_t> LocalSocket::recvfrom(OpenFileDescription& description, UserOrKernelBuffer& buffer, size_t buffer_size, int, Userspace<sockaddr*>, Userspace<socklen_t*>, Time&)
+ErrorOr<size_t> LocalSocket::recvfrom(OpenFileDescription& description, UserOrKernelBuffer& buffer, size_t buffer_size, int, Userspace<sockaddr*>, Userspace<socklen_t*>, Time&, bool blocking)
 {
     auto* socket_buffer = receive_buffer_for(description);
     if (!socket_buffer)
         return set_so_error(EINVAL);
-    if (!description.is_blocking()) {
+    if (!blocking) {
         if (socket_buffer->is_empty()) {
             if (!has_attached_peer(description))
                 return 0;
@@ -444,24 +445,27 @@ ErrorOr<void> LocalSocket::ioctl(OpenFileDescription& description, unsigned requ
     return EINVAL;
 }
 
-ErrorOr<void> LocalSocket::chmod(OpenFileDescription&, mode_t mode)
+ErrorOr<void> LocalSocket::chmod(Credentials const& credentials, OpenFileDescription& description, mode_t mode)
 {
-    auto inode = m_inode.strong_ref();
-    if (inode)
-        return inode->chmod(mode);
+    if (m_inode) {
+        if (auto custody = description.custody())
+            return VirtualFileSystem::the().chmod(credentials, *custody, mode);
+        VERIFY_NOT_REACHED();
+    }
 
     m_prebind_mode = mode & 0777;
     return {};
 }
 
-ErrorOr<void> LocalSocket::chown(OpenFileDescription&, UserID uid, GroupID gid)
+ErrorOr<void> LocalSocket::chown(Credentials const& credentials, OpenFileDescription& description, UserID uid, GroupID gid)
 {
-    auto inode = m_inode.strong_ref();
-    if (inode)
-        return inode->chown(uid, gid);
+    if (m_inode) {
+        if (auto custody = description.custody())
+            return VirtualFileSystem::the().chown(credentials, *custody, uid, gid);
+        VERIFY_NOT_REACHED();
+    }
 
-    auto& current_process = Process::current();
-    if (!current_process.is_superuser() && (current_process.euid() != uid || !current_process.in_group(gid)))
+    if (!credentials.is_superuser() && (credentials.euid() != uid || !credentials.in_group(gid)))
         return set_so_error(EPERM);
 
     m_prebind_uid = uid;

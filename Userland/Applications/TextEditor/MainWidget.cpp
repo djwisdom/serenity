@@ -555,7 +555,6 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     view_menu.add_separator();
 
     m_auto_detect_preview_mode_action = GUI::Action::create_checkable("Enable Autodetect Preview", [&](auto&) {
-        //action.is_checked() ? (m_auto_detect_preview_mode == true) : (m_auto_detect_preview_mode == false);
         Config::write_bool("TextEditor"sv, "View"sv, "PreviewAutoDetect"sv, m_auto_detect_preview_mode_action->is_checked());
     });
     auto get_auto_detect_preview_mode_value = Config::read_bool("TextEditor"sv, "View"sv, "PreviewAutoDetect"sv, true);

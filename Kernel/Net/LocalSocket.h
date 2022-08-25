@@ -36,8 +36,8 @@ public:
     ErrorOr<NonnullOwnPtr<KString>> pseudo_path(OpenFileDescription const& description) const override;
 
     // ^Socket
-    virtual ErrorOr<void> bind(Userspace<sockaddr const*>, socklen_t) override;
-    virtual ErrorOr<void> connect(OpenFileDescription&, Userspace<sockaddr const*>, socklen_t) override;
+    virtual ErrorOr<void> bind(Credentials const&, Userspace<sockaddr const*>, socklen_t) override;
+    virtual ErrorOr<void> connect(Credentials const&, OpenFileDescription&, Userspace<sockaddr const*>, socklen_t) override;
     virtual ErrorOr<void> listen(size_t) override;
     virtual void get_local_address(sockaddr*, socklen_t*) override;
     virtual void get_peer_address(sockaddr*, socklen_t*) override;
@@ -46,11 +46,11 @@ public:
     virtual bool can_read(OpenFileDescription const&, u64) const override;
     virtual bool can_write(OpenFileDescription const&, u64) const override;
     virtual ErrorOr<size_t> sendto(OpenFileDescription&, UserOrKernelBuffer const&, size_t, int, Userspace<sockaddr const*>, socklen_t) override;
-    virtual ErrorOr<size_t> recvfrom(OpenFileDescription&, UserOrKernelBuffer&, size_t, int flags, Userspace<sockaddr*>, Userspace<socklen_t*>, Time&) override;
+    virtual ErrorOr<size_t> recvfrom(OpenFileDescription&, UserOrKernelBuffer&, size_t, int flags, Userspace<sockaddr*>, Userspace<socklen_t*>, Time&, bool blocking) override;
     virtual ErrorOr<void> getsockopt(OpenFileDescription&, int level, int option, Userspace<void*>, Userspace<socklen_t*>) override;
     virtual ErrorOr<void> ioctl(OpenFileDescription&, unsigned request, Userspace<void*> arg) override;
-    virtual ErrorOr<void> chown(OpenFileDescription&, UserID, GroupID) override;
-    virtual ErrorOr<void> chmod(OpenFileDescription&, mode_t) override;
+    virtual ErrorOr<void> chown(Credentials const&, OpenFileDescription&, UserID, GroupID) override;
+    virtual ErrorOr<void> chmod(Credentials const&, OpenFileDescription&, mode_t) override;
 
 private:
     explicit LocalSocket(int type, NonnullOwnPtr<DoubleBuffer> client_buffer, NonnullOwnPtr<DoubleBuffer> server_buffer);

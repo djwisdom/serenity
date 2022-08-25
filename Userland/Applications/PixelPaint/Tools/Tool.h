@@ -74,10 +74,14 @@ public:
     GUI::Action* action() { return m_action; }
     void set_action(GUI::Action*);
 
+    virtual StringView tool_name() const = 0;
+
 protected:
     Tool() = default;
     WeakPtr<ImageEditor> m_editor;
     RefPtr<GUI::Action> m_action;
+
+    Gfx::IntPoint editor_layer_location(Layer const& layer) const;
 
     virtual Gfx::IntPoint editor_stroke_position(Gfx::IntPoint const& pixel_coords, int stroke_thickness) const;
 
