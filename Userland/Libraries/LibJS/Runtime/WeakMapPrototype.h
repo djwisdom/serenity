@@ -15,8 +15,8 @@ class WeakMapPrototype final : public PrototypeObject<WeakMapPrototype, WeakMap>
     JS_PROTOTYPE_OBJECT(WeakMapPrototype, WeakMap, WeakMap);
 
 public:
-    WeakMapPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    WeakMapPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~WeakMapPrototype() override = default;
 
 private:

@@ -1512,8 +1512,9 @@ String LinearGradientStyleValue::to_string() const
         }
 
         serialize_a_srgb_value(builder, element.color_stop.color);
-        if (element.color_stop.length.has_value()) {
-            builder.appendff(" {}"sv, element.color_stop.length->to_string());
+        for (auto position : Array { &element.color_stop.position, &element.color_stop.second_position }) {
+            if (position->has_value())
+                builder.appendff(" {}"sv, (*position)->to_string());
         }
         first = false;
     }
@@ -1537,7 +1538,7 @@ static bool operator==(GradientColorHint a, GradientColorHint b)
 
 static bool operator==(GradientColorStop a, GradientColorStop b)
 {
-    return a.color == b.color && a.length == b.length;
+    return a.color == b.color && a.position == b.position && a.second_position == b.second_position;
 }
 
 static bool operator==(ColorStopListElement a, ColorStopListElement b)
@@ -1556,8 +1557,12 @@ bool LinearGradientStyleValue::equals(StyleValue const& other_) const
         return false;
     auto& other = other_.as_linear_gradient();
 
-    if (m_direction != other.m_direction || m_color_stop_list.size() != other.m_color_stop_list.size())
+    if (m_gradient_type != other.m_gradient_type
+        || m_repeating != other.m_repeating
+        || m_direction != other.m_direction
+        || m_color_stop_list.size() != other.m_color_stop_list.size()) {
         return false;
+    }
 
     for (size_t i = 0; i < m_color_stop_list.size(); i++) {
         if (m_color_stop_list[i] != other.m_color_stop_list[i])
@@ -1607,13 +1612,15 @@ float LinearGradientStyleValue::angle_degrees(Gfx::FloatSize const& gradient_siz
 
 void LinearGradientStyleValue::resolve_for_size(Layout::Node const& node, Gfx::FloatSize const& size) const
 {
-    m_resolved_data = Painting::resolve_linear_gradient_data(node, size, *this);
+    if (m_resolved.has_value() && m_resolved->size == size)
+        return;
+    m_resolved = ResolvedData { Painting::resolve_linear_gradient_data(node, size, *this), size };
 }
 
 void LinearGradientStyleValue::paint(PaintContext& context, Gfx::IntRect const& dest_rect, CSS::ImageRendering) const
 {
-    VERIFY(m_resolved_data.has_value());
-    Painting::paint_linear_gradient(context, dest_rect, *m_resolved_data);
+    VERIFY(m_resolved.has_value());
+    Painting::paint_linear_gradient(context, dest_rect, m_resolved->data);
 }
 
 bool InheritStyleValue::equals(StyleValue const& other) const

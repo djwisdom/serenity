@@ -11,7 +11,7 @@
 
 namespace JS {
 
-ThrowCompletionOr<Object*> promise_resolve(GlobalObject&, Object& constructor, Value);
+ThrowCompletionOr<Object*> promise_resolve(VM&, Object& constructor, Value);
 
 class Promise : public Object {
     JS_OBJECT(Promise, Object);
@@ -27,7 +27,7 @@ public:
         Handle,
     };
 
-    static Promise* create(GlobalObject&);
+    static Promise* create(Realm&);
 
     explicit Promise(Object& prototype);
     virtual ~Promise() = default;

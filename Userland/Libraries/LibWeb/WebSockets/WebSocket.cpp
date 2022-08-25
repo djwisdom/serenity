@@ -213,9 +213,10 @@ void WebSocket::on_message(ByteBuffer message, bool is_text)
         TODO();
     } else if (m_binary_type == "arraybuffer") {
         // type indicates that the data is Binary and binaryType is "arraybuffer"
-        auto& global_object = wrapper()->global_object();
+        auto& vm = wrapper()->vm();
+        auto& realm = *vm.current_realm();
         HTML::MessageEventInit event_init;
-        event_init.data = JS::ArrayBuffer::create(global_object, message);
+        event_init.data = JS::ArrayBuffer::create(realm, message);
         event_init.origin = url();
         dispatch_event(HTML::MessageEvent::create(HTML::EventNames::message, event_init));
         return;
@@ -225,9 +226,9 @@ void WebSocket::on_message(ByteBuffer message, bool is_text)
     TODO();
 }
 
-JS::Object* WebSocket::create_wrapper(JS::GlobalObject& global_object)
+JS::Object* WebSocket::create_wrapper(JS::Realm& realm)
 {
-    return wrap(global_object, *this);
+    return wrap(realm, *this);
 }
 
 #undef __ENUMERATE

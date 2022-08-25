@@ -311,7 +311,7 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
         auto resolution = TRY(resolve_export(vm, entry.export_name));
         // b. If resolution is null or ambiguous, throw a SyntaxError exception.
         if (!resolution.is_valid())
-            return vm.throw_completion<SyntaxError>(realm().global_object(), ErrorType::InvalidOrAmbiguousExportEntry, entry.export_name);
+            return vm.throw_completion<SyntaxError>(ErrorType::InvalidOrAmbiguousExportEntry, entry.export_name);
 
         // c. Assert: resolution is a ResolvedBinding Record.
         VERIFY(resolution.is_valid());
@@ -325,10 +325,8 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
     // 4. Assert: realm is not undefined.
     // Note: This must be true because we use a reference.
 
-    auto& global_object = realm().global_object();
-
     // 5. Let env be NewModuleEnvironment(realm.[[GlobalEnv]]).
-    auto* environment = vm.heap().allocate_without_global_object<ModuleEnvironment>(&realm().global_environment());
+    auto* environment = vm.heap().allocate_without_realm<ModuleEnvironment>(&realm().global_environment());
 
     // 6. Set module.[[Environment]] to env.
     set_environment(environment);
@@ -345,10 +343,10 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
             auto* namespace_ = TRY(imported_module->get_module_namespace(vm));
 
             // ii. Perform ! env.CreateImmutableBinding(in.[[LocalName]], true).
-            MUST(environment->create_immutable_binding(global_object, import_entry.local_name, true));
+            MUST(environment->create_immutable_binding(vm, import_entry.local_name, true));
 
             // iii. Perform ! env.InitializeBinding(in.[[LocalName]], namespace).
-            MUST(environment->initialize_binding(global_object, import_entry.local_name, namespace_));
+            MUST(environment->initialize_binding(vm, import_entry.local_name, namespace_));
         }
         // d. Else,
         else {
@@ -357,7 +355,7 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
 
             // ii. If resolution is null or ambiguous, throw a SyntaxError exception.
             if (!resolution.is_valid())
-                return vm.throw_completion<SyntaxError>(global_object, ErrorType::InvalidOrAmbiguousExportEntry, import_entry.import_name);
+                return vm.throw_completion<SyntaxError>(ErrorType::InvalidOrAmbiguousExportEntry, import_entry.import_name);
 
             // iii. If resolution.[[BindingName]] is namespace, then
             if (resolution.is_namespace()) {
@@ -365,10 +363,10 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
                 auto* namespace_ = TRY(resolution.module->get_module_namespace(vm));
 
                 // 2. Perform ! env.CreateImmutableBinding(in.[[LocalName]], true).
-                MUST(environment->create_immutable_binding(global_object, import_entry.local_name, true));
+                MUST(environment->create_immutable_binding(vm, import_entry.local_name, true));
 
                 // 3. Perform ! env.InitializeBinding(in.[[LocalName]], namespace).
-                MUST(environment->initialize_binding(global_object, import_entry.local_name, namespace_));
+                MUST(environment->initialize_binding(vm, import_entry.local_name, namespace_));
             }
             // iv. Else,
             else {
@@ -404,7 +402,7 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
     // Note: We're already working on that one.
 
     // 17. Push moduleContext onto the execution context stack; moduleContext is now the running execution context.
-    TRY(vm.push_execution_context(m_execution_context, realm().global_object()));
+    TRY(vm.push_execution_context(m_execution_context, {}));
 
     // 18. Let code be module.[[ECMAScriptCode]].
 
@@ -420,10 +418,10 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
         // i. If dn is not an element of declaredVarNames, then
         if (!declared_var_names.contains_slow(name)) {
             // 1. Perform ! env.CreateMutableBinding(dn, false).
-            MUST(environment->create_mutable_binding(global_object, name, false));
+            MUST(environment->create_mutable_binding(vm, name, false));
 
             // 2. Perform ! env.InitializeBinding(dn, undefined).
-            MUST(environment->initialize_binding(global_object, name, js_undefined()));
+            MUST(environment->initialize_binding(vm, name, js_undefined()));
 
             // 3. Append dn to declaredVarNames.
             declared_var_names.empend(name);
@@ -443,12 +441,12 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
             // i. If IsConstantDeclaration of d is true, then
             if (declaration.is_constant_declaration()) {
                 // 1. Perform ! env.CreateImmutableBinding(dn, true).
-                MUST(environment->create_immutable_binding(global_object, name, true));
+                MUST(environment->create_immutable_binding(vm, name, true));
             }
             // ii. Else,
             else {
                 // 1. Perform ! env.CreateMutableBinding(dn, false).
-                MUST(environment->create_mutable_binding(global_object, name, false));
+                MUST(environment->create_mutable_binding(vm, name, false));
             }
 
             // iii. If d is a FunctionDeclaration, a GeneratorDeclaration, an AsyncFunctionDeclaration, or an AsyncGeneratorDeclaration, then
@@ -457,10 +455,10 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
                 auto const& function_declaration = static_cast<FunctionDeclaration const&>(declaration);
 
                 // 1. Let fo be InstantiateFunctionObject of d with arguments env and privateEnv.
-                auto* function = ECMAScriptFunctionObject::create(global_object, function_declaration.name(), function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
+                auto* function = ECMAScriptFunctionObject::create(realm(), function_declaration.name(), function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
 
                 // 2. Perform ! env.InitializeBinding(dn, fo).
-                MUST(environment->initialize_binding(global_object, name, function));
+                MUST(environment->initialize_binding(vm, name, function));
             }
         });
     });
@@ -479,7 +477,7 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
             dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] Adding default export to lexical declarations: local name: {}, Expression: {}", name, statement.class_name());
 
             // 1. Perform ! env.CreateMutableBinding(dn, false).
-            MUST(environment->create_mutable_binding(global_object, name, false));
+            MUST(environment->create_mutable_binding(vm, name, false));
 
             // Note: Since this is not a function declaration 24.a.iii never applies
         }
@@ -657,10 +655,10 @@ ThrowCompletionOr<void> SourceTextModule::execute_module(VM& vm, Optional<Promis
         // a. Assert: capability is not present.
         VERIFY(!capability.has_value());
         // b. Push moduleContext onto the execution context stack; moduleContext is now the running execution context.
-        TRY(vm.push_execution_context(module_context, realm().global_object()));
+        TRY(vm.push_execution_context(module_context, {}));
 
         // c. Let result be the result of evaluating module.[[ECMAScriptCode]].
-        auto result = m_ecmascript_code->execute(vm.interpreter(), realm().global_object());
+        auto result = m_ecmascript_code->execute(vm.interpreter());
 
         // d. Suspend moduleContext and remove it from the execution context stack.
         vm.pop_execution_context();

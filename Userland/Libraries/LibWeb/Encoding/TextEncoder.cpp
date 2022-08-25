@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,7 +14,8 @@ namespace Web::Encoding {
 // https://encoding.spec.whatwg.org/#dom-textencoder-encode
 JS::Uint8Array* TextEncoder::encode(String const& input) const
 {
-    auto& global_object = wrapper()->global_object();
+    auto& vm = wrapper()->vm();
+    auto& realm = *vm.current_realm();
 
     // NOTE: The AK::String returned from PrimitiveString::string() is always UTF-8, regardless of the internal string type, so most of these steps are no-ops.
 
@@ -28,8 +29,8 @@ JS::Uint8Array* TextEncoder::encode(String const& input) const
 
     auto byte_buffer = input.to_byte_buffer();
     auto array_length = byte_buffer.size();
-    auto* array_buffer = JS::ArrayBuffer::create(global_object, move(byte_buffer));
-    return JS::Uint8Array::create(global_object, array_length, *array_buffer);
+    auto* array_buffer = JS::ArrayBuffer::create(realm, move(byte_buffer));
+    return JS::Uint8Array::create(realm, array_length, *array_buffer);
 }
 
 // https://encoding.spec.whatwg.org/#dom-textencoder-encoding

@@ -17,22 +17,22 @@
 namespace JS {
 
 // 10.4.2.2 ArrayCreate ( length [ , proto ] ), https://tc39.es/ecma262/#sec-arraycreate
-ThrowCompletionOr<Array*> Array::create(GlobalObject& global_object, u64 length, Object* prototype)
+ThrowCompletionOr<Array*> Array::create(Realm& realm, u64 length, Object* prototype)
 {
-    auto& vm = global_object.vm();
+    auto& vm = realm.vm();
 
     // 1. If length > 2^32 - 1, throw a RangeError exception.
     if (length > NumericLimits<u32>::max())
-        return vm.throw_completion<RangeError>(global_object, ErrorType::InvalidLength, "array");
+        return vm.throw_completion<RangeError>(ErrorType::InvalidLength, "array");
 
     // 2. If proto is not present, set proto to %Array.prototype%.
     if (!prototype)
-        prototype = global_object.array_prototype();
+        prototype = realm.global_object().array_prototype();
 
     // 3. Let A be MakeBasicObject(« [[Prototype]], [[Extensible]] »).
     // 4. Set A.[[Prototype]] to proto.
     // 5. Set A.[[DefineOwnProperty]] as specified in 10.4.2.1.
-    auto* array = global_object.heap().allocate<Array>(global_object, *prototype);
+    auto* array = realm.heap().allocate<Array>(realm, *prototype);
 
     // 6. Perform ! OrdinaryDefineOwnProperty(A, "length", PropertyDescriptor { [[Value]]: 𝔽(length), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false }).
     MUST(array->internal_define_own_property(vm.names.length, { .value = Value(length), .writable = true, .enumerable = false, .configurable = false }));
@@ -42,10 +42,10 @@ ThrowCompletionOr<Array*> Array::create(GlobalObject& global_object, u64 length,
 }
 
 // 7.3.18 CreateArrayFromList ( elements ), https://tc39.es/ecma262/#sec-createarrayfromlist
-Array* Array::create_from(GlobalObject& global_object, Vector<Value> const& elements)
+Array* Array::create_from(Realm& realm, Vector<Value> const& elements)
 {
     // 1. Let array be ! ArrayCreate(0).
-    auto* array = MUST(Array::create(global_object, 0));
+    auto* array = MUST(Array::create(realm, 0));
 
     // 2. Let n be 0.
     // 3. For each element e of elements, do
@@ -68,7 +68,6 @@ Array::Array(Object& prototype)
 // 10.4.2.4 ArraySetLength ( A, Desc ), https://tc39.es/ecma262/#sec-arraysetlength
 ThrowCompletionOr<bool> Array::set_length(PropertyDescriptor const& property_descriptor)
 {
-    auto& global_object = this->global_object();
     auto& vm = this->vm();
 
     // 1. If Desc does not have a [[Value]] field, then
@@ -79,12 +78,12 @@ ThrowCompletionOr<bool> Array::set_length(PropertyDescriptor const& property_des
     size_t new_length = indexed_properties().array_like_size();
     if (property_descriptor.value.has_value()) {
         // 3. Let newLen be ? ToUint32(Desc.[[Value]]).
-        new_length = TRY(property_descriptor.value->to_u32(global_object));
+        new_length = TRY(property_descriptor.value->to_u32(vm));
         // 4. Let numberLen be ? ToNumber(Desc.[[Value]]).
-        auto number_length = TRY(property_descriptor.value->to_number(global_object));
+        auto number_length = TRY(property_descriptor.value->to_number(vm));
         // 5. If newLen is not the same value as numberLen, throw a RangeError exception.
         if (new_length != number_length.as_double())
-            return vm.throw_completion<RangeError>(global_object, ErrorType::InvalidLength, "array");
+            return vm.throw_completion<RangeError>(ErrorType::InvalidLength, "array");
     }
 
     // 6. Set newLenDesc.[[Value]] to newLen.
@@ -158,10 +157,8 @@ ThrowCompletionOr<bool> Array::set_length(PropertyDescriptor const& property_des
 }
 
 // 1.1.1.2 CompareArrayElements ( x, y, comparefn ), https://tc39.es/proposal-change-array-by-copy/#sec-comparearrayelements
-ThrowCompletionOr<double> compare_array_elements(GlobalObject& global_object, Value x, Value y, FunctionObject* comparefn)
+ThrowCompletionOr<double> compare_array_elements(VM& vm, Value x, Value y, FunctionObject* comparefn)
 {
-    auto& vm = global_object.vm();
-
     // 1. If x and y are both undefined, return +0𝔽.
     if (x.is_undefined() && y.is_undefined())
         return 0;
@@ -177,8 +174,8 @@ ThrowCompletionOr<double> compare_array_elements(GlobalObject& global_object, Va
     // 4. If comparefn is not undefined, then
     if (comparefn != nullptr) {
         // a. Let v be ? ToNumber(? Call(comparefn, undefined, « x, y »)).
-        auto value = TRY(call(global_object, comparefn, js_undefined(), x, y));
-        auto value_number = TRY(value.to_number(global_object));
+        auto value = TRY(call(vm, comparefn, js_undefined(), x, y));
+        auto value_number = TRY(value.to_number(vm));
 
         // b. If v is NaN, return +0𝔽.
         if (value_number.is_nan())
@@ -189,20 +186,20 @@ ThrowCompletionOr<double> compare_array_elements(GlobalObject& global_object, Va
     }
 
     // 5. Let xString be ? ToString(x).
-    auto* x_string = js_string(vm, TRY(x.to_string(global_object)));
+    auto* x_string = js_string(vm, TRY(x.to_string(vm)));
 
     // 6. Let yString be ? ToString(y).
-    auto* y_string = js_string(vm, TRY(y.to_string(global_object)));
+    auto* y_string = js_string(vm, TRY(y.to_string(vm)));
 
     // 7. Let xSmaller be ! IsLessThan(xString, yString, true).
-    auto x_smaller = MUST(is_less_than(global_object, x_string, y_string, true));
+    auto x_smaller = MUST(is_less_than(vm, x_string, y_string, true));
 
     // 8. If xSmaller is true, return -1𝔽.
     if (x_smaller == TriState::True)
         return -1;
 
     // 9. Let ySmaller be ! IsLessThan(yString, xString, true).
-    auto y_smaller = MUST(is_less_than(global_object, y_string, x_string, true));
+    auto y_smaller = MUST(is_less_than(vm, y_string, x_string, true));
 
     // 10. If ySmaller is true, return 1𝔽.
     if (y_smaller == TriState::True)
@@ -213,10 +210,10 @@ ThrowCompletionOr<double> compare_array_elements(GlobalObject& global_object, Va
 }
 
 // 1.1.1.3 SortIndexedProperties ( obj, len, SortCompare, skipHoles ), https://tc39.es/proposal-change-array-by-copy/#sec-sortindexedproperties
-ThrowCompletionOr<MarkedVector<Value>> sort_indexed_properties(GlobalObject& global_object, Object const& object, size_t length, Function<ThrowCompletionOr<double>(Value, Value)> const& sort_compare, bool skip_holes)
+ThrowCompletionOr<MarkedVector<Value>> sort_indexed_properties(VM& vm, Object const& object, size_t length, Function<ThrowCompletionOr<double>(Value, Value)> const& sort_compare, bool skip_holes)
 {
     // 1. Let items be a new empty List.
-    auto items = MarkedVector<Value> { global_object.heap() };
+    auto items = MarkedVector<Value> { vm.heap() };
 
     // 2. Let k be 0.
     // 3. Repeat, while k < len,
@@ -256,7 +253,7 @@ ThrowCompletionOr<MarkedVector<Value>> sort_indexed_properties(GlobalObject& glo
     // to be stable. FIXME: when initially scanning through the array, maintain a flag
     // for if an unstable sort would be indistinguishable from a stable sort (such as just
     // just strings or numbers), and in that case use quick sort instead for better performance.
-    TRY(array_merge_sort(global_object, sort_compare, items));
+    TRY(array_merge_sort(vm, sort_compare, items));
 
     // 5. Return items.
     return items;

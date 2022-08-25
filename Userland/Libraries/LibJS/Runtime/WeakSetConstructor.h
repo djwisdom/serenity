@@ -14,8 +14,8 @@ class WeakSetConstructor final : public NativeFunction {
     JS_OBJECT(WeakSetConstructor, NativeFunction);
 
 public:
-    explicit WeakSetConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit WeakSetConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~WeakSetConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;

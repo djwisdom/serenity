@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -17,22 +17,22 @@ namespace JS {
 
 static const Crypto::SignedBigInteger BIGINT_ONE { 1 };
 
-BigIntConstructor::BigIntConstructor(GlobalObject& global_object)
-    : NativeFunction(vm().names.BigInt.as_string(), *global_object.function_prototype())
+BigIntConstructor::BigIntConstructor(Realm& realm)
+    : NativeFunction(vm().names.BigInt.as_string(), *realm.global_object().function_prototype())
 {
 }
 
-void BigIntConstructor::initialize(GlobalObject& global_object)
+void BigIntConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     // 21.2.2.3 BigInt.prototype, https://tc39.es/ecma262/#sec-bigint.prototype
-    define_direct_property(vm.names.prototype, global_object.bigint_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.global_object().bigint_prototype(), 0);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.asIntN, as_int_n, 2, attr);
-    define_native_function(vm.names.asUintN, as_uint_n, 2, attr);
+    define_native_function(realm, vm.names.asIntN, as_int_n, 2, attr);
+    define_native_function(realm, vm.names.asUintN, as_uint_n, 2, attr);
 
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
 }
@@ -41,35 +41,34 @@ void BigIntConstructor::initialize(GlobalObject& global_object)
 ThrowCompletionOr<Value> BigIntConstructor::call()
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
     auto value = vm.argument(0);
 
     // 2. Let prim be ? ToPrimitive(value, number).
-    auto primitive = TRY(value.to_primitive(global_object, Value::PreferredType::Number));
+    auto primitive = TRY(value.to_primitive(vm, Value::PreferredType::Number));
 
     // 3. If Type(prim) is Number, return ? NumberToBigInt(prim).
     if (primitive.is_number())
-        return TRY(number_to_bigint(global_object, primitive));
+        return TRY(number_to_bigint(vm, primitive));
 
     // 4. Otherwise, return ? ToBigInt(prim).
-    return TRY(primitive.to_bigint(global_object));
+    return TRY(primitive.to_bigint(vm));
 }
 
 // 21.2.1.1 BigInt ( value ), https://tc39.es/ecma262/#sec-bigint-constructor-number-value
 ThrowCompletionOr<Object*> BigIntConstructor::construct(FunctionObject&)
 {
-    return vm().throw_completion<TypeError>(global_object(), ErrorType::NotAConstructor, "BigInt");
+    return vm().throw_completion<TypeError>(ErrorType::NotAConstructor, "BigInt");
 }
 
 // 21.2.2.1 BigInt.asIntN ( bits, bigint ), https://tc39.es/ecma262/#sec-bigint.asintn
 JS_DEFINE_NATIVE_FUNCTION(BigIntConstructor::as_int_n)
 {
     // 1. Set bits to ? ToIndex(bits).
-    auto bits = TRY(vm.argument(0).to_index(global_object));
+    auto bits = TRY(vm.argument(0).to_index(vm));
 
     // 2. Set bigint to ? ToBigInt(bigint).
-    auto* bigint = TRY(vm.argument(1).to_bigint(global_object));
+    auto* bigint = TRY(vm.argument(1).to_bigint(vm));
 
     // 3. Let mod be ℝ(bigint) modulo 2^bits.
     // FIXME: For large values of `bits`, this can likely be improved with a SignedBigInteger API to
@@ -92,10 +91,10 @@ JS_DEFINE_NATIVE_FUNCTION(BigIntConstructor::as_int_n)
 JS_DEFINE_NATIVE_FUNCTION(BigIntConstructor::as_uint_n)
 {
     // 1. Set bits to ? ToIndex(bits).
-    auto bits = TRY(vm.argument(0).to_index(global_object));
+    auto bits = TRY(vm.argument(0).to_index(vm));
 
     // 2. Set bigint to ? ToBigInt(bigint).
-    auto* bigint = TRY(vm.argument(1).to_bigint(global_object));
+    auto* bigint = TRY(vm.argument(1).to_bigint(vm));
 
     // 3. Return the BigInt value that represents ℝ(bigint) modulo 2bits.
     // FIXME: For large values of `bits`, this can likely be improved with a SignedBigInteger API to

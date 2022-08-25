@@ -28,7 +28,8 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     };
 
     auto child_name = TRY(m_name->try_clone());
-    auto child = TRY(Process::try_create(child_first_thread, move(child_name), uid(), gid(), pid(), m_is_kernel_process, current_directory(), executable(), m_tty, this));
+    auto credentials = this->credentials();
+    auto child = TRY(Process::try_create(child_first_thread, move(child_name), credentials->uid(), credentials->gid(), pid(), m_is_kernel_process, current_directory(), executable(), m_tty, this));
 
     // NOTE: All user processes have a leaked ref on them. It's balanced by Thread::WaitBlockerSet::finalize().
     child->ref();
@@ -64,7 +65,6 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     });
 
     dbgln_if(FORK_DEBUG, "fork: child={}", child);
-    child->address_space().set_enforces_syscall_regions(address_space().enforces_syscall_regions());
 
     // A child created via fork(2) inherits a copy of its parent's signal mask
     child_first_thread->update_signal_mask(Thread::current()->signal_mask());
@@ -122,19 +122,22 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 #    error Unknown architecture
 #endif
 
-    {
-        SpinlockLocker lock(address_space().get_lock());
-        for (auto& region : address_space().regions()) {
-            dbgln_if(FORK_DEBUG, "fork: cloning Region '{}' @ {}", region.name(), region.vaddr());
-            auto region_clone = TRY(region.try_clone());
-            TRY(region_clone->map(child->address_space().page_directory(), Memory::ShouldFlushTLB::No));
-            TRY(child->address_space().region_tree().place_specifically(*region_clone, region.range()));
-            auto* child_region = region_clone.leak_ptr();
+    TRY(address_space().with([&](auto& parent_space) {
+        return child->address_space().with([&](auto& child_space) -> ErrorOr<void> {
+            child_space->set_enforces_syscall_regions(parent_space->enforces_syscall_regions());
+            for (auto& region : parent_space->region_tree().regions()) {
+                dbgln_if(FORK_DEBUG, "fork: cloning Region '{}' @ {}", region.name(), region.vaddr());
+                auto region_clone = TRY(region.try_clone());
+                TRY(region_clone->map(child_space->page_directory(), Memory::ShouldFlushTLB::No));
+                TRY(child_space->region_tree().place_specifically(*region_clone, region.range()));
+                auto* child_region = region_clone.leak_ptr();
 
-            if (&region == m_master_tls_region.unsafe_ptr())
-                child->m_master_tls_region = TRY(child_region->try_make_weak_ptr());
-        }
-    }
+                if (&region == m_master_tls_region.unsafe_ptr())
+                    child->m_master_tls_region = TRY(child_region->try_make_weak_ptr());
+            }
+            return {};
+        });
+    }));
 
     thread_finalizer_guard.disarm();
 
@@ -150,5 +153,4 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 
     return child_pid;
 }
-
 }

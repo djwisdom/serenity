@@ -71,8 +71,7 @@ NonnullRefPtr<ClassicScript> ClassicScript::create(String filename, StringView s
 // https://html.spec.whatwg.org/multipage/webappapis.html#run-a-classic-script
 JS::Completion ClassicScript::run(RethrowErrors rethrow_errors)
 {
-    auto& global_object = settings_object().global_object();
-    auto& vm = global_object.vm();
+    auto& vm = settings_object().realm().vm();
 
     // 1. Let settings be the settings object of script.
     auto& settings = settings_object();
@@ -89,7 +88,7 @@ JS::Completion ClassicScript::run(RethrowErrors rethrow_errors)
 
     // 5. If script's error to rethrow is not null, then set evaluationStatus to Completion { [[Type]]: throw, [[Value]]: script's error to rethrow, [[Target]]: empty }.
     if (m_error_to_rethrow.has_value()) {
-        evaluation_status = vm.throw_completion<JS::SyntaxError>(global_object, m_error_to_rethrow.value().to_string());
+        evaluation_status = vm.throw_completion<JS::SyntaxError>(m_error_to_rethrow.value().to_string());
     } else {
         auto timer = Core::ElapsedTimer::start_new();
 
@@ -120,7 +119,7 @@ JS::Completion ClassicScript::run(RethrowErrors rethrow_errors)
             settings.clean_up_after_running_script();
 
             // 2. Throw a "NetworkError" DOMException.
-            return Bindings::throw_dom_exception_if_needed(global_object, [] {
+            return Bindings::throw_dom_exception_if_needed(vm, [] {
                 return DOM::NetworkError::create("Script error.");
             }).release_error();
         }

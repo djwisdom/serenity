@@ -15,8 +15,8 @@ class SegmentsPrototype final : public PrototypeObject<SegmentsPrototype, Segmen
     JS_PROTOTYPE_OBJECT(SegmentsPrototype, Segments, Segments);
 
 public:
-    explicit SegmentsPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit SegmentsPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~SegmentsPrototype() override = default;
 
 private:

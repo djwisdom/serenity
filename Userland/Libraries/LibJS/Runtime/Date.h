@@ -15,8 +15,8 @@ class Date final : public Object {
     JS_OBJECT(Date, Object);
 
 public:
-    static Date* create(GlobalObject&, double date_value);
-    static Date* now(GlobalObject&);
+    static Date* create(Realm&, double date_value);
+    static Date* now(VM&);
 
     Date(double date_value, Object& prototype);
     virtual ~Date() override = default;

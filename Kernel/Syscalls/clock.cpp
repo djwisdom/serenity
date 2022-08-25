@@ -17,8 +17,10 @@ ErrorOr<FlatPtr> Process::sys$map_time_page()
 
     auto& vmobject = TimeManagement::the().time_page_vmobject();
 
-    auto* region = TRY(address_space().allocate_region_with_vmobject(Memory::RandomizeVirtualAddress::Yes, {}, PAGE_SIZE, PAGE_SIZE, vmobject, 0, "Kernel time page"sv, PROT_READ, true));
-    return region->vaddr().get();
+    return address_space().with([&](auto& space) -> ErrorOr<FlatPtr> {
+        auto* region = TRY(space->allocate_region_with_vmobject(Memory::RandomizeVirtualAddress::Yes, {}, PAGE_SIZE, PAGE_SIZE, vmobject, 0, "Kernel time page"sv, PROT_READ, true));
+        return region->vaddr().get();
+    });
 }
 
 ErrorOr<FlatPtr> Process::sys$clock_gettime(clockid_t clock_id, Userspace<timespec*> user_ts)
@@ -38,7 +40,8 @@ ErrorOr<FlatPtr> Process::sys$clock_settime(clockid_t clock_id, Userspace<timesp
     VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::settime));
 
-    if (!is_superuser())
+    auto credentials = this->credentials();
+    if (!credentials->is_superuser())
         return EPERM;
 
     auto time = TRY(copy_time_from_user(user_ts));
@@ -120,7 +123,8 @@ ErrorOr<FlatPtr> Process::sys$adjtime(Userspace<timeval const*> user_delta, User
 
     if (user_delta) {
         TRY(require_promise(Pledge::settime));
-        if (!is_superuser())
+        auto credentials = this->credentials();
+        if (!credentials->is_superuser())
             return EPERM;
         auto delta = TRY(copy_time_from_user(user_delta));
 

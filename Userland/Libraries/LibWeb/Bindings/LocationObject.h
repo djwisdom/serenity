@@ -21,8 +21,8 @@ class LocationObject final : public JS::Object {
     JS_OBJECT(LocationObject, JS::Object);
 
 public:
-    explicit LocationObject(JS::GlobalObject&);
-    virtual void initialize(JS::GlobalObject&) override;
+    explicit LocationObject(JS::Realm&);
+    virtual void initialize(JS::Realm&) override;
     virtual ~LocationObject() override = default;
 
     virtual JS::ThrowCompletionOr<JS::Object*> internal_get_prototype_of() const override;

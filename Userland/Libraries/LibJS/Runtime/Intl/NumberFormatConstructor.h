@@ -15,8 +15,8 @@ class NumberFormatConstructor final : public NativeFunction {
     JS_OBJECT(NumberFormatConstructor, NativeFunction);
 
 public:
-    explicit NumberFormatConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit NumberFormatConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~NumberFormatConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
@@ -28,8 +28,8 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(supported_locales_of);
 };
 
-ThrowCompletionOr<NumberFormat*> initialize_number_format(GlobalObject& global_object, NumberFormat& number_format, Value locales_value, Value options_value);
-ThrowCompletionOr<void> set_number_format_digit_options(GlobalObject& global_object, NumberFormatBase& intl_object, Object const& options, int default_min_fraction_digits, int default_max_fraction_digits, NumberFormat::Notation notation);
-ThrowCompletionOr<void> set_number_format_unit_options(GlobalObject& global_object, NumberFormat& intl_object, Object const& options);
+ThrowCompletionOr<NumberFormat*> initialize_number_format(VM&, NumberFormat&, Value locales_value, Value options_value);
+ThrowCompletionOr<void> set_number_format_digit_options(VM&, NumberFormatBase& intl_object, Object const& options, int default_min_fraction_digits, int default_max_fraction_digits, NumberFormat::Notation notation);
+ThrowCompletionOr<void> set_number_format_unit_options(VM&, NumberFormat& intl_object, Object const& options);
 
 }

@@ -16,13 +16,13 @@ class GeneratorObject final : public Object {
     JS_OBJECT(GeneratorObject, Object);
 
 public:
-    static ThrowCompletionOr<GeneratorObject*> create(GlobalObject&, Value, ECMAScriptFunctionObject*, ExecutionContext, Bytecode::RegisterWindow);
-    GeneratorObject(GlobalObject&, Object& prototype, ExecutionContext);
-    virtual void initialize(GlobalObject&) override;
+    static ThrowCompletionOr<GeneratorObject*> create(Realm&, Value, ECMAScriptFunctionObject*, ExecutionContext, Bytecode::RegisterWindow);
+    GeneratorObject(Realm&, Object& prototype, ExecutionContext);
+    virtual void initialize(Realm&) override;
     virtual ~GeneratorObject() override = default;
     void visit_edges(Cell::Visitor&) override;
 
-    ThrowCompletionOr<Value> next_impl(VM&, GlobalObject&, Optional<Value> next_argument, Optional<Value> value_to_throw);
+    ThrowCompletionOr<Value> next_impl(VM&, Optional<Value> next_argument, Optional<Value> value_to_throw);
     void set_done() { m_done = true; }
 
 private:

@@ -15,18 +15,16 @@
 namespace JS::Intl {
 
 // 10.1.2 InitializeCollator ( collator, locales, options ), https://tc39.es/ecma402/#sec-initializecollator
-static ThrowCompletionOr<Collator*> initialize_collator(GlobalObject& global_object, Collator& collator, Value locales_value, Value options_value)
+static ThrowCompletionOr<Collator*> initialize_collator(VM& vm, Collator& collator, Value locales_value, Value options_value)
 {
-    auto& vm = global_object.vm();
-
     // 1. Let requestedLocales be ? CanonicalizeLocaleList(locales).
-    auto requested_locales = TRY(canonicalize_locale_list(global_object, locales_value));
+    auto requested_locales = TRY(canonicalize_locale_list(vm, locales_value));
 
     // 2. Set options to ? CoerceOptionsToObject(options).
-    auto* options = TRY(coerce_options_to_object(global_object, options_value));
+    auto* options = TRY(coerce_options_to_object(vm, options_value));
 
     // 3. Let usage be ? GetOption(options, "usage", "string", « "sort", "search" », "sort").
-    auto usage = TRY(get_option(global_object, *options, vm.names.usage, OptionType::String, { "sort"sv, "search"sv }, "sort"sv));
+    auto usage = TRY(get_option(vm, *options, vm.names.usage, OptionType::String, { "sort"sv, "search"sv }, "sort"sv));
 
     // 4. Set collator.[[Usage]] to usage.
     collator.set_usage(usage.as_string().string());
@@ -40,36 +38,36 @@ static ThrowCompletionOr<Collator*> initialize_collator(GlobalObject& global_obj
     LocaleOptions opt {};
 
     // 8. Let matcher be ? GetOption(options, "localeMatcher", "string", « "lookup", "best fit" », "best fit").
-    auto matcher = TRY(get_option(global_object, *options, vm.names.localeMatcher, OptionType::String, { "lookup"sv, "best fit"sv }, "best fit"sv));
+    auto matcher = TRY(get_option(vm, *options, vm.names.localeMatcher, OptionType::String, { "lookup"sv, "best fit"sv }, "best fit"sv));
 
     // 9. Set opt.[[localeMatcher]] to matcher.
     opt.locale_matcher = matcher;
 
     // 10. Let collation be ? GetOption(options, "collation", "string", undefined, undefined).
-    auto collation = TRY(get_option(global_object, *options, vm.names.collation, OptionType::String, {}, Empty {}));
+    auto collation = TRY(get_option(vm, *options, vm.names.collation, OptionType::String, {}, Empty {}));
 
     // 11. If collation is not undefined, then
     if (!collation.is_undefined()) {
         // a. If collation does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
         if (!Unicode::is_type_identifier(collation.as_string().string()))
-            return vm.throw_completion<RangeError>(global_object, ErrorType::OptionIsNotValidValue, collation, "collation"sv);
+            return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, collation, "collation"sv);
 
         // 12. Set opt.[[co]] to collation.
         opt.co = collation.as_string().string();
     }
 
     // 13. Let numeric be ? GetOption(options, "numeric", "boolean", undefined, undefined).
-    auto numeric = TRY(get_option(global_object, *options, vm.names.numeric, OptionType::Boolean, {}, Empty {}));
+    auto numeric = TRY(get_option(vm, *options, vm.names.numeric, OptionType::Boolean, {}, Empty {}));
 
     // 14. If numeric is not undefined, then
     //     a. Let numeric be ! ToString(numeric).
     // 15. Set opt.[[kn]] to numeric.
     if (!numeric.is_undefined())
-        opt.kn = MUST(numeric.to_string(global_object));
+        opt.kn = MUST(numeric.to_string(vm));
 
     // 16. Let caseFirst be ? GetOption(options, "caseFirst", "string", « "upper", "lower", "false" », undefined).
     // 17. Set opt.[[kf]] to caseFirst.
-    auto case_first = TRY(get_option(global_object, *options, vm.names.caseFirst, OptionType::String, { "upper"sv, "lower"sv, "false"sv }, Empty {}));
+    auto case_first = TRY(get_option(vm, *options, vm.names.caseFirst, OptionType::String, { "upper"sv, "lower"sv, "false"sv }, Empty {}));
     if (!case_first.is_undefined())
         opt.kf = case_first.as_string().string();
 
@@ -100,7 +98,7 @@ static ThrowCompletionOr<Collator*> initialize_collator(GlobalObject& global_obj
     }
 
     // 26. Let sensitivity be ? GetOption(options, "sensitivity", "string", « "base", "accent", "case", "variant" », undefined).
-    auto sensitivity = TRY(get_option(global_object, *options, vm.names.sensitivity, OptionType::String, { "base"sv, "accent"sv, "case"sv, "variant"sv }, Empty {}));
+    auto sensitivity = TRY(get_option(vm, *options, vm.names.sensitivity, OptionType::String, { "base"sv, "accent"sv, "case"sv, "variant"sv }, Empty {}));
 
     // 27. If sensitivity is undefined, then
     if (sensitivity.is_undefined()) {
@@ -122,7 +120,7 @@ static ThrowCompletionOr<Collator*> initialize_collator(GlobalObject& global_obj
     collator.set_sensitivity(sensitivity.as_string().string());
 
     // 29. Let ignorePunctuation be ? GetOption(options, "ignorePunctuation", "boolean", undefined, false).
-    auto ignore_punctuation = TRY(get_option(global_object, *options, vm.names.ignorePunctuation, OptionType::Boolean, {}, false));
+    auto ignore_punctuation = TRY(get_option(vm, *options, vm.names.ignorePunctuation, OptionType::Boolean, {}, false));
 
     // 30. Set collator.[[IgnorePunctuation]] to ignorePunctuation.
     collator.set_ignore_punctuation(ignore_punctuation.as_bool());
@@ -132,23 +130,23 @@ static ThrowCompletionOr<Collator*> initialize_collator(GlobalObject& global_obj
 }
 
 // 10.1 The Intl.Collator Constructor, https://tc39.es/ecma402/#sec-the-intl-collator-constructor
-CollatorConstructor::CollatorConstructor(GlobalObject& global_object)
-    : NativeFunction(vm().names.Collator.as_string(), *global_object.function_prototype())
+CollatorConstructor::CollatorConstructor(Realm& realm)
+    : NativeFunction(vm().names.Collator.as_string(), *realm.global_object().function_prototype())
 {
 }
 
-void CollatorConstructor::initialize(GlobalObject& global_object)
+void CollatorConstructor::initialize(Realm& realm)
 {
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     auto& vm = this->vm();
 
     // 10.2.1 Intl.Collator.prototype, https://tc39.es/ecma402/#sec-intl.collator.prototype
-    define_direct_property(vm.names.prototype, global_object.intl_collator_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.global_object().intl_collator_prototype(), 0);
     define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.supportedLocalesOf, supported_locales_of, 1, attr);
+    define_native_function(realm, vm.names.supportedLocalesOf, supported_locales_of, 1, attr);
 }
 
 // 10.1.1 Intl.Collator ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-intl.collator
@@ -162,7 +160,6 @@ ThrowCompletionOr<Value> CollatorConstructor::call()
 ThrowCompletionOr<Object*> CollatorConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
     auto locales = vm.argument(0);
     auto options = vm.argument(1);
@@ -174,10 +171,10 @@ ThrowCompletionOr<Object*> CollatorConstructor::construct(FunctionObject& new_ta
     //     a. Append [[CaseFirst]] as the last element of internalSlotsList.
 
     // 5. Let collator be ? OrdinaryCreateFromConstructor(newTarget, "%Collator.prototype%", internalSlotsList).
-    auto* collator = TRY(ordinary_create_from_constructor<Collator>(global_object, new_target, &GlobalObject::intl_collator_prototype));
+    auto* collator = TRY(ordinary_create_from_constructor<Collator>(vm, new_target, &GlobalObject::intl_collator_prototype));
 
     // 6. Return ? InitializeCollator(collator, locales, options).
-    return TRY(initialize_collator(global_object, *collator, locales, options));
+    return TRY(initialize_collator(vm, *collator, locales, options));
 }
 
 // 10.2.2 Intl.Collator.supportedLocalesOf ( locales [ , options ] ), https://tc39.es/ecma402/#sec-intl.collator.supportedlocalesof
@@ -189,10 +186,10 @@ JS_DEFINE_NATIVE_FUNCTION(CollatorConstructor::supported_locales_of)
     // 1. Let availableLocales be %Collator%.[[AvailableLocales]].
 
     // 2. Let requestedLocales be ? CanonicalizeLocaleList(locales).
-    auto requested_locales = TRY(canonicalize_locale_list(global_object, locales));
+    auto requested_locales = TRY(canonicalize_locale_list(vm, locales));
 
     // 3. Return ? SupportedLocales(availableLocales, requestedLocales, options).
-    return TRY(supported_locales(global_object, requested_locales, options));
+    return TRY(supported_locales(vm, requested_locales, options));
 }
 
 }

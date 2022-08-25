@@ -14,8 +14,8 @@ class WebAssemblyInstanceConstructor : public JS::NativeFunction {
     JS_OBJECT(WebAssemblyInstanceConstructor, JS::NativeFunction);
 
 public:
-    explicit WebAssemblyInstanceConstructor(JS::GlobalObject&);
-    virtual void initialize(JS::GlobalObject&) override;
+    explicit WebAssemblyInstanceConstructor(JS::Realm&);
+    virtual void initialize(JS::Realm&) override;
     virtual ~WebAssemblyInstanceConstructor() override;
 
     virtual JS::ThrowCompletionOr<JS::Value> call() override;

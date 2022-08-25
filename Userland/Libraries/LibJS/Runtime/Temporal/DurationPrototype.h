@@ -15,8 +15,8 @@ class DurationPrototype final : public PrototypeObject<DurationPrototype, Durati
     JS_PROTOTYPE_OBJECT(DurationPrototype, Duration, Temporal.Duration);
 
 public:
-    explicit DurationPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit DurationPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~DurationPrototype() override = default;
 
 private:

@@ -15,8 +15,8 @@ class ErrorConstructor final : public NativeFunction {
     JS_OBJECT(ErrorConstructor, NativeFunction);
 
 public:
-    explicit ErrorConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit ErrorConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~ErrorConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
@@ -31,8 +31,8 @@ private:
         JS_OBJECT(ConstructorName, NativeFunction);                                             \
                                                                                                 \
     public:                                                                                     \
-        explicit ConstructorName(GlobalObject&);                                                \
-        virtual void initialize(GlobalObject&) override;                                        \
+        explicit ConstructorName(Realm&);                                                       \
+        virtual void initialize(Realm&) override;                                               \
         virtual ~ConstructorName() override;                                                    \
         virtual ThrowCompletionOr<Value> call() override;                                       \
         virtual ThrowCompletionOr<Object*> construct(FunctionObject& new_target) override;      \

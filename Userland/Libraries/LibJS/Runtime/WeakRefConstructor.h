@@ -14,8 +14,8 @@ class WeakRefConstructor final : public NativeFunction {
     JS_OBJECT(WeakRefConstructor, NativeFunction);
 
 public:
-    explicit WeakRefConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit WeakRefConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~WeakRefConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;

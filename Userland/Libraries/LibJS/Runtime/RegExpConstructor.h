@@ -14,8 +14,8 @@ class RegExpConstructor final : public NativeFunction {
     JS_OBJECT(RegExpConstructor, NativeFunction);
 
 public:
-    explicit RegExpConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit RegExpConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~RegExpConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;

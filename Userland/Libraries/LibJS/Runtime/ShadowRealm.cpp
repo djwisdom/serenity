@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/Interpreter.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
@@ -33,10 +34,8 @@ void ShadowRealm::visit_edges(Visitor& visitor)
 }
 
 // 3.1.2 CopyNameAndLength ( F: a function object, Target: a function object, optional prefix: a String, optional argCount: a Number, ), https://tc39.es/proposal-shadowrealm/#sec-copynameandlength
-ThrowCompletionOr<void> copy_name_and_length(GlobalObject& global_object, FunctionObject& function, FunctionObject& target, Optional<StringView> prefix, Optional<unsigned> arg_count)
+ThrowCompletionOr<void> copy_name_and_length(VM& vm, FunctionObject& function, FunctionObject& target, Optional<StringView> prefix, Optional<unsigned> arg_count)
 {
-    auto& vm = global_object.vm();
-
     // 1. If argCount is undefined, then set argCount to 0.
     if (!arg_count.has_value())
         arg_count = 0;
@@ -65,7 +64,7 @@ ThrowCompletionOr<void> copy_name_and_length(GlobalObject& global_object, Functi
             // iii. Else,
             else {
                 // 1. Let targetLenAsInt be ! ToIntegerOrInfinity(targetLen).
-                auto target_length_as_int = MUST(target_length.to_integer_or_infinity(global_object));
+                auto target_length_as_int = MUST(target_length.to_integer_or_infinity(vm));
 
                 // 2. Assert: targetLenAsInt is finite.
                 VERIFY(!isinf(target_length_as_int));
@@ -93,10 +92,8 @@ ThrowCompletionOr<void> copy_name_and_length(GlobalObject& global_object, Functi
 }
 
 // 3.1.3 PerformShadowRealmEval ( sourceText: a String, callerRealm: a Realm Record, evalRealm: a Realm Record, ), https://tc39.es/proposal-shadowrealm/#sec-performshadowrealmeval
-ThrowCompletionOr<Value> perform_shadow_realm_eval(GlobalObject& global_object, StringView source_text, Realm& caller_realm, Realm& eval_realm)
+ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, StringView source_text, Realm& caller_realm, Realm& eval_realm)
 {
-    auto& vm = global_object.vm();
-
     // FIXME: Needs to be updated to latest ECMA-262. See: https://github.com/tc39/proposal-shadowrealm/issues/367
     // 1. Perform ? HostEnsureCanCompileStrings(callerRealm, evalRealm).
     TRY(vm.host_ensure_can_compile_strings(eval_realm));
@@ -110,7 +107,7 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(GlobalObject& global_object, 
     // b. If script is a List of errors, throw a SyntaxError exception.
     if (parser.has_errors()) {
         auto& error = parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(global_object, error.to_string());
+        return vm.throw_completion<SyntaxError>(error.to_string());
     }
 
     // c. If script Contains ScriptBody is false, return undefined.
@@ -164,18 +161,21 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(GlobalObject& global_object, 
     eval_context.is_strict_mode = strict_eval;
 
     // 15. Push evalContext onto the execution context stack; evalContext is now the running execution context.
-    TRY(vm.push_execution_context(eval_context, eval_realm.global_object()));
+    TRY(vm.push_execution_context(eval_context, {}));
 
     // 16. Let result be Completion(EvalDeclarationInstantiation(body, varEnv, lexEnv, null, strictEval)).
-    auto eval_result = eval_declaration_instantiation(vm, eval_realm.global_object(), program, variable_environment, lexical_environment, nullptr, strict_eval);
+    auto eval_result = eval_declaration_instantiation(vm, program, variable_environment, lexical_environment, nullptr, strict_eval);
 
     Completion result;
 
     // 17. If result.[[Type]] is normal, then
     if (!eval_result.is_throw_completion()) {
+        // FIXME: Remove once everything uses the VM's current realm.
+        auto eval_realm_interpreter = Interpreter::create_with_existing_realm(eval_realm);
+
         // TODO: Optionally use bytecode interpreter?
         // a. Set result to the result of evaluating body.
-        result = program->execute(vm.interpreter(), eval_realm.global_object());
+        result = program->execute(*eval_realm_interpreter);
     }
 
     // 18. If result.[[Type]] is normal and result.[[Value]] is empty, then
@@ -193,30 +193,33 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(GlobalObject& global_object, 
 
     // 21. If result.[[Type]] is not normal, throw a TypeError exception.
     if (result.type() != Completion::Type::Normal)
-        return vm.throw_completion<TypeError>(global_object, ErrorType::ShadowRealmEvaluateAbruptCompletion);
+        return vm.throw_completion<TypeError>(ErrorType::ShadowRealmEvaluateAbruptCompletion);
 
     // 22. Return ? GetWrappedValue(callerRealm, result.[[Value]]).
-    return get_wrapped_value(global_object, caller_realm, *result.value());
+    return get_wrapped_value(vm, caller_realm, *result.value());
 
     // NOTE: Also see "Editor's Note" in the spec regarding the TypeError above.
 }
 
 // 3.1.4 ShadowRealmImportValue ( specifierString: a String, exportNameString: a String, callerRealm: a Realm Record, evalRealm: a Realm Record, evalContext: an execution context, ), https://tc39.es/proposal-shadowrealm/#sec-shadowrealmimportvalue
-ThrowCompletionOr<Value> shadow_realm_import_value(GlobalObject& global_object, String specifier_string, String export_name_string, Realm& caller_realm, Realm& eval_realm, ExecutionContext& eval_context)
+ThrowCompletionOr<Value> shadow_realm_import_value(VM& vm, String specifier_string, String export_name_string, Realm& caller_realm, Realm& eval_realm, ExecutionContext& eval_context)
 {
-    auto& vm = global_object.vm();
+    // FIXME: evalRealm isn't being used anywhere in this AO (spec issue)
+    (void)eval_realm;
+
+    auto& realm = *vm.current_realm();
 
     // 1. Assert: evalContext is an execution context associated to a ShadowRealm instance's [[ExecutionContext]].
 
     // 2. Let innerCapability be ! NewPromiseCapability(%Promise%).
-    auto inner_capability = MUST(new_promise_capability(global_object, global_object.promise_constructor()));
+    auto inner_capability = MUST(new_promise_capability(vm, realm.global_object().promise_constructor()));
 
     // 3. Let runningContext be the running execution context.
     // 4. If runningContext is not already suspended, suspend runningContext.
     // NOTE: We don't support this concept yet.
 
     // 5. Push evalContext onto the execution context stack; evalContext is now the running execution context.
-    TRY(vm.push_execution_context(eval_context, eval_realm.global_object()));
+    TRY(vm.push_execution_context(eval_context, {}));
 
     // 6. Perform HostImportModuleDynamically(null, specifierString, innerCapability).
     vm.host_import_module_dynamically(Empty {}, ModuleRequest { move(specifier_string) }, inner_capability);
@@ -229,7 +232,7 @@ ThrowCompletionOr<Value> shadow_realm_import_value(GlobalObject& global_object, 
     // NOTE: We don't support this concept yet.
 
     // 9. Let steps be the steps of an ExportGetter function as described below.
-    auto steps = [string = move(export_name_string)](auto& vm, auto& global_object) -> ThrowCompletionOr<Value> {
+    auto steps = [string = move(export_name_string)](auto& vm) -> ThrowCompletionOr<Value> {
         // 1. Assert: exports is a module namespace exotic object.
         VERIFY(vm.argument(0).is_object());
         auto& exports = vm.argument(0).as_object();
@@ -246,7 +249,7 @@ ThrowCompletionOr<Value> shadow_realm_import_value(GlobalObject& global_object, 
 
         // 6. If hasOwn is false, throw a TypeError exception.
         if (!has_own)
-            return vm.template throw_completion<TypeError>(global_object, ErrorType::MissingRequiredProperty, string);
+            return vm.template throw_completion<TypeError>(ErrorType::MissingRequiredProperty, string);
 
         // 7. Let value be ? Get(exports, string).
         auto value = TRY(exports.get(string));
@@ -256,20 +259,20 @@ ThrowCompletionOr<Value> shadow_realm_import_value(GlobalObject& global_object, 
         VERIFY(realm);
 
         // 9. Return ? GetWrappedValue(realm, value).
-        return get_wrapped_value(global_object, *realm, value);
+        return get_wrapped_value(vm, *realm, value);
     };
 
     // 10. Let onFulfilled be CreateBuiltinFunction(steps, 1, "", « [[ExportNameString]] », callerRealm).
     // 11. Set onFulfilled.[[ExportNameString]] to exportNameString.
-    auto* on_fulfilled = NativeFunction::create(global_object, move(steps), 1, "", &caller_realm);
+    auto* on_fulfilled = NativeFunction::create(realm, move(steps), 1, "", &caller_realm);
 
     // 12. Let promiseCapability be ! NewPromiseCapability(%Promise%).
-    auto promise_capability = MUST(new_promise_capability(global_object, global_object.promise_constructor()));
+    auto promise_capability = MUST(new_promise_capability(vm, realm.global_object().promise_constructor()));
 
     // NOTE: Even though the spec tells us to use %ThrowTypeError%, it's not observable if we actually do.
     // Throw a nicer TypeError forwarding the import error message instead (we know the argument is an Error object).
-    auto* throw_type_error = NativeFunction::create(global_object, {}, [](auto& vm, auto& global_object) -> ThrowCompletionOr<Value> {
-        return vm.template throw_completion<TypeError>(global_object, vm.argument(0).as_object().get_without_side_effects(vm.names.message).as_string().string());
+    auto* throw_type_error = NativeFunction::create(realm, {}, [](auto& vm) -> ThrowCompletionOr<Value> {
+        return vm.template throw_completion<TypeError>(vm.argument(0).as_object().get_without_side_effects(vm.names.message).as_string().string());
     });
 
     // 13. Return PerformPromiseThen(innerCapability.[[Promise]], onFulfilled, callerRealm.[[Intrinsics]].[[%ThrowTypeError%]], promiseCapability).
@@ -277,18 +280,18 @@ ThrowCompletionOr<Value> shadow_realm_import_value(GlobalObject& global_object, 
 }
 
 // 3.1.5 GetWrappedValue ( callerRealm: a Realm Record, value: unknown, ), https://tc39.es/proposal-shadowrealm/#sec-getwrappedvalue
-ThrowCompletionOr<Value> get_wrapped_value(GlobalObject& global_object, Realm& caller_realm, Value value)
+ThrowCompletionOr<Value> get_wrapped_value(VM& vm, Realm& caller_realm, Value value)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. If Type(value) is Object, then
     if (value.is_object()) {
         // a. If IsCallable(value) is false, throw a TypeError exception.
         if (!value.is_function())
-            return vm.throw_completion<TypeError>(global_object, ErrorType::ShadowRealmWrappedValueNonFunctionObject, value);
+            return vm.throw_completion<TypeError>(ErrorType::ShadowRealmWrappedValueNonFunctionObject, value);
 
         // b. Return ? WrappedFunctionCreate(callerRealm, value).
-        return TRY(WrappedFunction::create(global_object, caller_realm, value.as_function()));
+        return TRY(WrappedFunction::create(realm, caller_realm, value.as_function()));
     }
 
     // 2. Return value.

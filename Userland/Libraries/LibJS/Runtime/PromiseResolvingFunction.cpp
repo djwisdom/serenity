@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,9 +11,9 @@
 
 namespace JS {
 
-PromiseResolvingFunction* PromiseResolvingFunction::create(GlobalObject& global_object, Promise& promise, AlreadyResolved& already_resolved, FunctionType function)
+PromiseResolvingFunction* PromiseResolvingFunction::create(Realm& realm, Promise& promise, AlreadyResolved& already_resolved, FunctionType function)
 {
-    return global_object.heap().allocate<PromiseResolvingFunction>(global_object, promise, already_resolved, move(function), *global_object.function_prototype());
+    return realm.heap().allocate<PromiseResolvingFunction>(realm, promise, already_resolved, move(function), *realm.global_object().function_prototype());
 }
 
 PromiseResolvingFunction::PromiseResolvingFunction(Promise& promise, AlreadyResolved& already_resolved, FunctionType native_function, Object& prototype)
@@ -24,15 +24,15 @@ PromiseResolvingFunction::PromiseResolvingFunction(Promise& promise, AlreadyReso
 {
 }
 
-void PromiseResolvingFunction::initialize(GlobalObject& global_object)
+void PromiseResolvingFunction::initialize(Realm& realm)
 {
-    Base::initialize(global_object);
+    Base::initialize(realm);
     define_direct_property(vm().names.length, Value(1), Attribute::Configurable);
 }
 
 ThrowCompletionOr<Value> PromiseResolvingFunction::call()
 {
-    return m_native_function(vm(), global_object(), m_promise, m_already_resolved);
+    return m_native_function(vm(), m_promise, m_already_resolved);
 }
 
 void PromiseResolvingFunction::visit_edges(Cell::Visitor& visitor)

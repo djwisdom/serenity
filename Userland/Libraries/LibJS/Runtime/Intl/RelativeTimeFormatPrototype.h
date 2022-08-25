@@ -15,8 +15,8 @@ class RelativeTimeFormatPrototype final : public PrototypeObject<RelativeTimeFor
     JS_PROTOTYPE_OBJECT(RelativeTimeFormatPrototype, RelativeTimeFormat, Intl.RelativeTimeFormat);
 
 public:
-    explicit RelativeTimeFormatPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit RelativeTimeFormatPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~RelativeTimeFormatPrototype() override = default;
 
 private:

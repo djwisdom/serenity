@@ -113,23 +113,23 @@ ErrorOr<String, ParseRegexPatternError> parse_regex_pattern(StringView pattern, 
     return builder.build();
 }
 
-ThrowCompletionOr<String> parse_regex_pattern(StringView pattern, VM& vm, GlobalObject& global_object, bool unicode, bool unicode_sets)
+ThrowCompletionOr<String> parse_regex_pattern(VM& vm, StringView pattern, bool unicode, bool unicode_sets)
 {
     auto result = parse_regex_pattern(pattern, unicode, unicode_sets);
     if (result.is_error())
-        return vm.throw_completion<JS::SyntaxError>(global_object, result.release_error().error);
+        return vm.throw_completion<JS::SyntaxError>(result.release_error().error);
 
     return result.release_value();
 }
 
-RegExpObject* RegExpObject::create(GlobalObject& global_object)
+RegExpObject* RegExpObject::create(Realm& realm)
 {
-    return global_object.heap().allocate<RegExpObject>(global_object, *global_object.regexp_prototype());
+    return realm.heap().allocate<RegExpObject>(realm, *realm.global_object().regexp_prototype());
 }
 
-RegExpObject* RegExpObject::create(GlobalObject& global_object, Regex<ECMA262> regex, String pattern, String flags)
+RegExpObject* RegExpObject::create(Realm& realm, Regex<ECMA262> regex, String pattern, String flags)
 {
-    return global_object.heap().allocate<RegExpObject>(global_object, move(regex), move(pattern), move(flags), *global_object.regexp_prototype());
+    return realm.heap().allocate<RegExpObject>(realm, move(regex), move(pattern), move(flags), *realm.global_object().regexp_prototype());
 }
 
 RegExpObject::RegExpObject(Object& prototype)
@@ -146,23 +146,21 @@ RegExpObject::RegExpObject(Regex<ECMA262> regex, String pattern, String flags, O
     VERIFY(m_regex->parser_result.error == regex::Error::NoError);
 }
 
-void RegExpObject::initialize(GlobalObject& global_object)
+void RegExpObject::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(global_object);
+    Object::initialize(realm);
     define_direct_property(vm.names.lastIndex, Value(0), Attribute::Writable);
 }
 
 // 22.2.3.2.2 RegExpInitialize ( obj, pattern, flags ), https://tc39.es/ecma262/#sec-regexpinitialize
-ThrowCompletionOr<RegExpObject*> RegExpObject::regexp_initialize(GlobalObject& global_object, Value pattern, Value flags)
+ThrowCompletionOr<RegExpObject*> RegExpObject::regexp_initialize(VM& vm, Value pattern, Value flags)
 {
-    auto& vm = global_object.vm();
-
     String f;
     if (flags.is_undefined()) {
         f = String::empty();
     } else {
-        f = TRY(flags.to_string(global_object));
+        f = TRY(flags.to_string(vm));
     }
 
     String original_pattern;
@@ -172,19 +170,19 @@ ThrowCompletionOr<RegExpObject*> RegExpObject::regexp_initialize(GlobalObject& g
         original_pattern = String::empty();
         parsed_pattern = String::empty();
     } else {
-        original_pattern = TRY(pattern.to_string(global_object));
+        original_pattern = TRY(pattern.to_string(vm));
         bool unicode = f.find('u').has_value();
         bool unicode_sets = f.find('v').has_value();
-        parsed_pattern = TRY(parse_regex_pattern(original_pattern, vm, global_object, unicode, unicode_sets));
+        parsed_pattern = TRY(parse_regex_pattern(vm, original_pattern, unicode, unicode_sets));
     }
 
     auto parsed_flags_or_error = regex_flags_from_string(f);
     if (parsed_flags_or_error.is_error())
-        return vm.throw_completion<SyntaxError>(global_object, parsed_flags_or_error.release_error());
+        return vm.throw_completion<SyntaxError>(parsed_flags_or_error.release_error());
 
     Regex<ECMA262> regex(move(parsed_pattern), parsed_flags_or_error.release_value());
     if (regex.parser_result.error != regex::Error::NoError)
-        return vm.throw_completion<SyntaxError>(global_object, ErrorType::RegExpCompileError, regex.error_string());
+        return vm.throw_completion<SyntaxError>(ErrorType::RegExpCompileError, regex.error_string());
 
     m_pattern = move(original_pattern);
     m_flags = move(f);
@@ -205,10 +203,11 @@ String RegExpObject::escape_regexp_pattern() const
 }
 
 // 22.2.3.2.4 RegExpCreate ( P, F ), https://tc39.es/ecma262/#sec-regexpcreate
-ThrowCompletionOr<RegExpObject*> regexp_create(GlobalObject& global_object, Value pattern, Value flags)
+ThrowCompletionOr<RegExpObject*> regexp_create(VM& vm, Value pattern, Value flags)
 {
-    auto* regexp_object = RegExpObject::create(global_object);
-    return TRY(regexp_object->regexp_initialize(global_object, pattern, flags));
+    auto& realm = *vm.current_realm();
+    auto* regexp_object = RegExpObject::create(realm);
+    return TRY(regexp_object->regexp_initialize(vm, pattern, flags));
 }
 
 }

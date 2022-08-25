@@ -15,8 +15,8 @@ class TypedArrayConstructor : public NativeFunction {
 
 public:
     TypedArrayConstructor(FlyString const& name, Object& prototype);
-    explicit TypedArrayConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit TypedArrayConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~TypedArrayConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;

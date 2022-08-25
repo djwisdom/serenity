@@ -91,11 +91,11 @@ static ThrowCompletionOr<String> get_function_property_name(PropertyKey key)
 
 // 14.2.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-block-runtime-semantics-evaluation
 // StatementList : StatementList StatementListItem
-Completion ScopeNode::evaluate_statements(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ScopeNode::evaluate_statements(Interpreter& interpreter) const
 {
     auto completion = normal_completion({});
     for (auto const& node : children()) {
-        completion = node.execute(interpreter, global_object).update_empty(completion.value());
+        completion = node.execute(interpreter).update_empty(completion.value());
         if (completion.is_abrupt())
             break;
     }
@@ -104,10 +104,10 @@ Completion ScopeNode::evaluate_statements(Interpreter& interpreter, GlobalObject
 
 // 14.13.4 Runtime Semantics: LabelledEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-labelledevaluation
 // BreakableStatement : IterationStatement
-static Completion labelled_evaluation(Interpreter& interpreter, GlobalObject& global_object, IterationStatement const& statement, Vector<FlyString> const& label_set)
+static Completion labelled_evaluation(Interpreter& interpreter, IterationStatement const& statement, Vector<FlyString> const& label_set)
 {
     // 1. Let stmtResult be Completion(LoopEvaluation of IterationStatement with argument labelSet).
-    auto result = statement.loop_evaluation(interpreter, global_object, label_set);
+    auto result = statement.loop_evaluation(interpreter, label_set);
 
     // 2. If stmtResult.[[Type]] is break, then
     if (result.type() == Completion::Type::Break) {
@@ -125,10 +125,10 @@ static Completion labelled_evaluation(Interpreter& interpreter, GlobalObject& gl
 
 // 14.13.4 Runtime Semantics: LabelledEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-labelledevaluation
 // BreakableStatement : SwitchStatement
-static Completion labelled_evaluation(Interpreter& interpreter, GlobalObject& global_object, SwitchStatement const& statement, Vector<FlyString> const&)
+static Completion labelled_evaluation(Interpreter& interpreter, SwitchStatement const& statement, Vector<FlyString> const&)
 {
     // 1. Let stmtResult be the result of evaluating SwitchStatement.
-    auto result = statement.execute_impl(interpreter, global_object);
+    auto result = statement.execute_impl(interpreter);
 
     // 2. If stmtResult.[[Type]] is break, then
     if (result.type() == Completion::Type::Break) {
@@ -146,7 +146,7 @@ static Completion labelled_evaluation(Interpreter& interpreter, GlobalObject& gl
 
 // 14.13.4 Runtime Semantics: LabelledEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-labelledevaluation
 // LabelledStatement : LabelIdentifier : LabelledItem
-static Completion labelled_evaluation(Interpreter& interpreter, GlobalObject& global_object, LabelledStatement const& statement, Vector<FlyString> const& label_set)
+static Completion labelled_evaluation(Interpreter& interpreter, LabelledStatement const& statement, Vector<FlyString> const& label_set)
 {
     auto const& labelled_item = *statement.labelled_item();
 
@@ -164,13 +164,13 @@ static Completion labelled_evaluation(Interpreter& interpreter, GlobalObject& gl
     // 3. Let stmtResult be Completion(LabelledEvaluation of LabelledItem with argument newLabelSet).
     Completion result;
     if (is<IterationStatement>(labelled_item))
-        result = labelled_evaluation(interpreter, global_object, static_cast<IterationStatement const&>(labelled_item), *new_label_set);
+        result = labelled_evaluation(interpreter, static_cast<IterationStatement const&>(labelled_item), *new_label_set);
     else if (is<SwitchStatement>(labelled_item))
-        result = labelled_evaluation(interpreter, global_object, static_cast<SwitchStatement const&>(labelled_item), *new_label_set);
+        result = labelled_evaluation(interpreter, static_cast<SwitchStatement const&>(labelled_item), *new_label_set);
     else if (is<LabelledStatement>(labelled_item))
-        result = labelled_evaluation(interpreter, global_object, static_cast<LabelledStatement const&>(labelled_item), *new_label_set);
+        result = labelled_evaluation(interpreter, static_cast<LabelledStatement const&>(labelled_item), *new_label_set);
     else
-        result = labelled_item.execute(interpreter, global_object);
+        result = labelled_item.execute(interpreter);
 
     // 4. If stmtResult.[[Type]] is break and SameValue(stmtResult.[[Target]], label) is true, then
     if (result.type() == Completion::Type::Break && result.target() == label) {
@@ -183,12 +183,12 @@ static Completion labelled_evaluation(Interpreter& interpreter, GlobalObject& gl
 }
 
 // 14.13.3 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-labelled-statements-runtime-semantics-evaluation
-Completion LabelledStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion LabelledStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Return ? LabelledEvaluation of this LabelledStatement with argument « ».
-    return labelled_evaluation(interpreter, global_object, *this, {});
+    return labelled_evaluation(interpreter, *this, {});
 }
 
 void LabelledStatement::dump(int indent) const
@@ -206,17 +206,17 @@ void LabelledStatement::dump(int indent) const
 }
 
 // 10.2.1.3 Runtime Semantics: EvaluateBody, https://tc39.es/ecma262/#sec-runtime-semantics-evaluatebody
-Completion FunctionBody::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion FunctionBody::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // Note: Scoping should have already been set up by whoever is calling this FunctionBody.
     // 1. Return ? EvaluateFunctionBody of FunctionBody with arguments functionObject and argumentsList.
-    return evaluate_statements(interpreter, global_object);
+    return evaluate_statements(interpreter);
 }
 
 // 14.2.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-block-runtime-semantics-evaluation
-Completion BlockStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion BlockStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -231,26 +231,27 @@ Completion BlockStatement::execute(Interpreter& interpreter, GlobalObject& globa
     if (has_lexical_declarations()) {
         old_environment = vm.running_execution_context().lexical_environment;
         auto* block_environment = new_declarative_environment(*old_environment);
-        block_declaration_instantiation(global_object, block_environment);
+        block_declaration_instantiation(interpreter, block_environment);
         vm.running_execution_context().lexical_environment = block_environment;
     } else {
         restore_environment.disarm();
     }
 
-    return evaluate_statements(interpreter, global_object);
+    return evaluate_statements(interpreter);
 }
 
-Completion Program::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion Program::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
-    return evaluate_statements(interpreter, global_object);
+    return evaluate_statements(interpreter);
 }
 
 // 15.2.6 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-function-definitions-runtime-semantics-evaluation
-Completion FunctionDeclaration::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion FunctionDeclaration::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     if (m_is_hoisted) {
         // Perform special annexB steps see step 3 of: https://tc39.es/ecma262/#sec-web-compat-functiondeclarationinstantiation
@@ -262,10 +263,10 @@ Completion FunctionDeclaration::execute(Interpreter& interpreter, GlobalObject& 
         auto* lexical_environment = interpreter.vm().running_execution_context().lexical_environment;
 
         // iii. Let fobj be ! benv.GetBindingValue(F, false).
-        auto function_object = MUST(lexical_environment->get_binding_value(global_object, name(), false));
+        auto function_object = MUST(lexical_environment->get_binding_value(vm, name(), false));
 
         // iv. Perform ? genv.SetMutableBinding(F, fobj, false).
-        TRY(variable_environment->set_mutable_binding(global_object, name(), function_object, false));
+        TRY(variable_environment->set_mutable_binding(vm, name(), function_object, false));
 
         // v. Return unused.
         return Optional<Value> {};
@@ -276,17 +277,20 @@ Completion FunctionDeclaration::execute(Interpreter& interpreter, GlobalObject& 
 }
 
 // 15.2.6 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-function-definitions-runtime-semantics-evaluation
-Completion FunctionExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion FunctionExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Return InstantiateOrdinaryFunctionExpression of FunctionExpression.
-    return instantiate_ordinary_function_expression(interpreter, global_object, name());
+    return instantiate_ordinary_function_expression(interpreter, name());
 }
 
 // 15.2.5 Runtime Semantics: InstantiateOrdinaryFunctionExpression, https://tc39.es/ecma262/#sec-runtime-semantics-instantiateordinaryfunctionexpression
-Value FunctionExpression::instantiate_ordinary_function_expression(Interpreter& interpreter, GlobalObject& global_object, FlyString given_name) const
+Value FunctionExpression::instantiate_ordinary_function_expression(Interpreter& interpreter, FlyString given_name) const
 {
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
+
     if (given_name.is_empty())
         given_name = "";
     auto has_own_name = !name().is_empty();
@@ -296,45 +300,46 @@ Value FunctionExpression::instantiate_ordinary_function_expression(Interpreter& 
     if (has_own_name) {
         VERIFY(environment);
         environment = new_declarative_environment(*environment);
-        MUST(environment->create_immutable_binding(global_object, name(), false));
+        MUST(environment->create_immutable_binding(vm, name(), false));
     }
 
-    auto* private_environment = interpreter.vm().running_execution_context().private_environment;
+    auto* private_environment = vm.running_execution_context().private_environment;
 
-    auto closure = ECMAScriptFunctionObject::create(global_object, used_name, source_text(), body(), parameters(), function_length(), environment, private_environment, kind(), is_strict_mode(), might_need_arguments_object(), contains_direct_call_to_eval(), is_arrow_function());
+    auto closure = ECMAScriptFunctionObject::create(realm, used_name, source_text(), body(), parameters(), function_length(), environment, private_environment, kind(), is_strict_mode(), might_need_arguments_object(), contains_direct_call_to_eval(), is_arrow_function());
 
     // FIXME: 6. Perform SetFunctionName(closure, name).
     // FIXME: 7. Perform MakeConstructor(closure).
 
     if (has_own_name)
-        MUST(environment->initialize_binding(global_object, name(), closure));
+        MUST(environment->initialize_binding(vm, name(), closure));
 
     return closure;
 }
 
 // 14.4.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-empty-statement-runtime-semantics-evaluation
-Completion EmptyStatement::execute(Interpreter&, GlobalObject&) const
+Completion EmptyStatement::execute(Interpreter&) const
 {
     // 1. Return empty.
     return Optional<Value> {};
 }
 
 // 14.5.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-expression-statement-runtime-semantics-evaluation
-Completion ExpressionStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ExpressionStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Let exprRef be the result of evaluating Expression.
     // 2. Return ? GetValue(exprRef).
-    return m_expression->execute(interpreter, global_object);
+    return m_expression->execute(interpreter);
 }
 
 // TODO: This shouldn't exist. Refactor into EvaluateCall.
-ThrowCompletionOr<CallExpression::ThisAndCallee> CallExpression::compute_this_and_callee(Interpreter& interpreter, GlobalObject& global_object, Reference const& callee_reference) const
+ThrowCompletionOr<CallExpression::ThisAndCallee> CallExpression::compute_this_and_callee(Interpreter& interpreter, Reference const& callee_reference) const
 {
+    auto& vm = interpreter.vm();
     if (callee_reference.is_property_reference()) {
         auto this_value = callee_reference.get_this_value();
-        auto callee = TRY(callee_reference.get_value(global_object));
+        auto callee = TRY(callee_reference.get_value(vm));
 
         return ThisAndCallee { this_value, callee };
     }
@@ -349,20 +354,21 @@ ThrowCompletionOr<CallExpression::ThisAndCallee> CallExpression::compute_this_an
     return ThisAndCallee {
         this_value,
         callee_reference.is_unresolvable()
-            ? TRY(m_callee->execute(interpreter, global_object)).release_value()
-            : TRY(callee_reference.get_value(global_object))
+            ? TRY(m_callee->execute(interpreter)).release_value()
+            : TRY(callee_reference.get_value(vm))
     };
 }
 
 // 13.3.8.1 Runtime Semantics: ArgumentListEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-argumentlistevaluation
-static ThrowCompletionOr<void> argument_list_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<CallExpression::Argument> const& arguments, MarkedVector<Value>& list)
+static ThrowCompletionOr<void> argument_list_evaluation(Interpreter& interpreter, Vector<CallExpression::Argument> const& arguments, MarkedVector<Value>& list)
 {
+    auto& vm = interpreter.vm();
     list.ensure_capacity(arguments.size());
 
     for (auto& argument : arguments) {
-        auto value = TRY(argument.value->execute(interpreter, global_object)).release_value();
+        auto value = TRY(argument.value->execute(interpreter)).release_value();
         if (argument.is_spread) {
-            TRY(get_iterator_values(global_object, value, [&](Value iterator_value) -> Optional<Completion> {
+            TRY(get_iterator_values(vm, value, [&](Value iterator_value) -> Optional<Completion> {
                 list.append(iterator_value);
                 return {};
             }));
@@ -375,32 +381,33 @@ static ThrowCompletionOr<void> argument_list_evaluation(Interpreter& interpreter
 
 // 13.3.5.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-new-operator-runtime-semantics-evaluation
 // 13.3.5.1.1 EvaluateNew ( constructExpr, arguments ), https://tc39.es/ecma262/#sec-evaluatenew
-Completion NewExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion NewExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
     auto& vm = interpreter.vm();
 
     // 1. Let ref be the result of evaluating constructExpr.
     // 2. Let constructor be ? GetValue(ref).
-    auto constructor = TRY(m_callee->execute(interpreter, global_object)).release_value();
+    auto constructor = TRY(m_callee->execute(interpreter)).release_value();
 
     // 3. If arguments is empty, let argList be a new empty List.
     // 4. Else,
     //    a. Let argList be ? ArgumentListEvaluation of arguments.
     MarkedVector<Value> arg_list(vm.heap());
-    TRY(argument_list_evaluation(interpreter, global_object, m_arguments, arg_list));
+    TRY(argument_list_evaluation(interpreter, m_arguments, arg_list));
 
     // 5. If IsConstructor(constructor) is false, throw a TypeError exception.
     if (!constructor.is_constructor())
-        return throw_type_error_for_callee(interpreter, global_object, constructor, "constructor"sv);
+        return throw_type_error_for_callee(interpreter, constructor, "constructor"sv);
 
     // 6. Return ? Construct(constructor, argList).
-    return Value { TRY(construct(global_object, constructor.as_function(), move(arg_list))) };
+    return Value { TRY(construct(vm, constructor.as_function(), move(arg_list))) };
 }
 
-Completion CallExpression::throw_type_error_for_callee(Interpreter& interpreter, GlobalObject& global_object, Value callee_value, StringView call_type) const
+Completion CallExpression::throw_type_error_for_callee(Interpreter& interpreter, Value callee_value, StringView call_type) const
 {
     auto& vm = interpreter.vm();
+
     if (is<Identifier>(*m_callee) || is<MemberExpression>(*m_callee)) {
         String expression_string;
         if (is<Identifier>(*m_callee)) {
@@ -408,46 +415,48 @@ Completion CallExpression::throw_type_error_for_callee(Interpreter& interpreter,
         } else {
             expression_string = static_cast<MemberExpression const&>(*m_callee).to_string_approximation();
         }
-        return vm.throw_completion<TypeError>(global_object, ErrorType::IsNotAEvaluatedFrom, callee_value.to_string_without_side_effects(), call_type, expression_string);
+        return vm.throw_completion<TypeError>(ErrorType::IsNotAEvaluatedFrom, callee_value.to_string_without_side_effects(), call_type, expression_string);
     } else {
-        return vm.throw_completion<TypeError>(global_object, ErrorType::IsNotA, callee_value.to_string_without_side_effects(), call_type);
+        return vm.throw_completion<TypeError>(ErrorType::IsNotA, callee_value.to_string_without_side_effects(), call_type);
     }
 }
 
 // 13.3.6.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-function-calls-runtime-semantics-evaluation
-Completion CallExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion CallExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
     auto& vm = interpreter.vm();
-    auto callee_reference = TRY(m_callee->to_reference(interpreter, global_object));
+    auto& realm = *vm.current_realm();
 
-    auto [this_value, callee] = TRY(compute_this_and_callee(interpreter, global_object, callee_reference));
+    auto callee_reference = TRY(m_callee->to_reference(interpreter));
+
+    auto [this_value, callee] = TRY(compute_this_and_callee(interpreter, callee_reference));
 
     VERIFY(!callee.is_empty());
 
     MarkedVector<Value> arg_list(vm.heap());
-    TRY(argument_list_evaluation(interpreter, global_object, m_arguments, arg_list));
+    TRY(argument_list_evaluation(interpreter, m_arguments, arg_list));
 
     if (!callee.is_function())
-        return throw_type_error_for_callee(interpreter, global_object, callee, "function"sv);
+        return throw_type_error_for_callee(interpreter, callee, "function"sv);
 
     auto& function = callee.as_function();
 
-    if (&function == global_object.eval_function()
+    if (&function == realm.global_object().eval_function()
         && callee_reference.is_environment_reference()
         && callee_reference.name().is_string()
         && callee_reference.name().as_string() == vm.names.eval.as_string()) {
 
         auto script_value = arg_list.size() == 0 ? js_undefined() : arg_list[0];
-        return perform_eval(global_object, script_value, vm.in_strict_mode() ? CallerMode::Strict : CallerMode::NonStrict, EvalMode::Direct);
+        return perform_eval(vm, script_value, vm.in_strict_mode() ? CallerMode::Strict : CallerMode::NonStrict, EvalMode::Direct);
     }
 
-    return call(global_object, function, this_value, move(arg_list));
+    return call(vm, function, this_value, move(arg_list));
 }
 
 // 13.3.7.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-super-keyword-runtime-semantics-evaluation
 // SuperCall : super Arguments
-Completion SuperCall::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion SuperCall::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
     auto& vm = interpreter.vm();
@@ -469,29 +478,29 @@ Completion SuperCall::execute(Interpreter& interpreter, GlobalObject& global_obj
         VERIFY(m_arguments.size() == 1);
         VERIFY(m_arguments[0].is_spread);
         auto const& argument = m_arguments[0];
-        auto value = MUST(argument.value->execute(interpreter, global_object)).release_value();
+        auto value = MUST(argument.value->execute(interpreter)).release_value();
         VERIFY(value.is_object() && is<Array>(value.as_object()));
 
         auto& array_value = static_cast<Array const&>(value.as_object());
-        auto length = MUST(length_of_array_like(global_object, array_value));
+        auto length = MUST(length_of_array_like(vm, array_value));
         for (size_t i = 0; i < length; ++i)
             arg_list.append(array_value.get_without_side_effects(PropertyKey { i }));
     } else {
-        TRY(argument_list_evaluation(interpreter, global_object, m_arguments, arg_list));
+        TRY(argument_list_evaluation(interpreter, m_arguments, arg_list));
     }
 
     // 5. If IsConstructor(func) is false, throw a TypeError exception.
     if (!func || !Value(func).is_constructor())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAConstructor, "Super constructor");
+        return vm.throw_completion<TypeError>(ErrorType::NotAConstructor, "Super constructor");
 
     // 6. Let result be ? Construct(func, argList, newTarget).
-    auto* result = TRY(construct(global_object, static_cast<FunctionObject&>(*func), move(arg_list), &new_target.as_function()));
+    auto* result = TRY(construct(vm, static_cast<FunctionObject&>(*func), move(arg_list), &new_target.as_function()));
 
     // 7. Let thisER be GetThisEnvironment().
-    auto& this_er = verify_cast<FunctionEnvironment>(get_this_environment(interpreter.vm()));
+    auto& this_er = verify_cast<FunctionEnvironment>(get_this_environment(vm));
 
     // 8. Perform ? thisER.BindThisValue(result).
-    TRY(this_er.bind_this_value(global_object, result));
+    TRY(this_er.bind_this_value(vm, result));
 
     // 9. Let F be thisER.[[FunctionObject]].
     // 10. Assert: F is an ECMAScript function object.
@@ -506,27 +515,28 @@ Completion SuperCall::execute(Interpreter& interpreter, GlobalObject& global_obj
 }
 
 // 15.5.5 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-generator-function-definitions-runtime-semantics-evaluation
-Completion YieldExpression::execute(Interpreter&, GlobalObject&) const
+Completion YieldExpression::execute(Interpreter&) const
 {
     // This should be transformed to a return.
     VERIFY_NOT_REACHED();
 }
 
 // 15.8.5 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-async-function-definitions-runtime-semantics-evaluation
-Completion AwaitExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion AwaitExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // 1. Let exprRef be the result of evaluating UnaryExpression.
     // 2. Let value be ? GetValue(exprRef).
-    auto value = TRY(m_argument->execute(interpreter, global_object)).release_value();
+    auto value = TRY(m_argument->execute(interpreter)).release_value();
 
     // 3. Return ? Await(value).
-    return await(global_object, value);
+    return await(vm, value);
 }
 
 // 14.10.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-return-statement-runtime-semantics-evaluation
-Completion ReturnStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ReturnStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -539,7 +549,7 @@ Completion ReturnStatement::execute(Interpreter& interpreter, GlobalObject& glob
     // ReturnStatement : return Expression ;
     // 1. Let exprRef be the result of evaluating Expression.
     // 2. Let exprValue be ? GetValue(exprRef).
-    auto value = TRY(m_argument->execute(interpreter, global_object));
+    auto value = TRY(m_argument->execute(interpreter));
 
     // NOTE: Generators are not supported in the AST interpreter
     // 3. If GetGeneratorKind() is async, set exprValue to ? Await(exprValue).
@@ -549,27 +559,27 @@ Completion ReturnStatement::execute(Interpreter& interpreter, GlobalObject& glob
 }
 
 // 14.6.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-if-statement-runtime-semantics-evaluation
-Completion IfStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion IfStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // IfStatement : if ( Expression ) Statement else Statement
     // 1. Let exprRef be the result of evaluating Expression.
     // 2. Let exprValue be ToBoolean(? GetValue(exprRef)).
-    auto predicate_result = TRY(m_predicate->execute(interpreter, global_object)).release_value();
+    auto predicate_result = TRY(m_predicate->execute(interpreter)).release_value();
 
     // 3. If exprValue is true, then
     if (predicate_result.to_boolean()) {
         // a. Let stmtCompletion be the result of evaluating the first Statement.
         // 5. Return ? UpdateEmpty(stmtCompletion, undefined).
-        return m_consequent->execute(interpreter, global_object).update_empty(js_undefined());
+        return m_consequent->execute(interpreter).update_empty(js_undefined());
     }
 
     // 4. Else,
     if (m_alternate) {
         // a. Let stmtCompletion be the result of evaluating the second Statement.
         // 5. Return ? UpdateEmpty(stmtCompletion, undefined).
-        return m_alternate->execute(interpreter, global_object).update_empty(js_undefined());
+        return m_alternate->execute(interpreter).update_empty(js_undefined());
     }
 
     // IfStatement : if ( Expression ) Statement
@@ -580,30 +590,31 @@ Completion IfStatement::execute(Interpreter& interpreter, GlobalObject& global_o
 
 // 14.11.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-with-statement-runtime-semantics-evaluation
 // WithStatement : with ( Expression ) Statement
-Completion WithStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion WithStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // 1. Let value be the result of evaluating Expression.
-    auto value = TRY(m_object->execute(interpreter, global_object)).release_value();
+    auto value = TRY(m_object->execute(interpreter)).release_value();
 
     // 2. Let obj be ? ToObject(? GetValue(value)).
-    auto* object = TRY(value.to_object(global_object));
+    auto* object = TRY(value.to_object(vm));
 
     // 3. Let oldEnv be the running execution context's LexicalEnvironment.
-    auto* old_environment = interpreter.vm().running_execution_context().lexical_environment;
+    auto* old_environment = vm.running_execution_context().lexical_environment;
 
     // 4. Let newEnv be NewObjectEnvironment(obj, true, oldEnv).
     auto* new_environment = new_object_environment(*object, true, old_environment);
 
     // 5. Set the running execution context's LexicalEnvironment to newEnv.
-    interpreter.vm().running_execution_context().lexical_environment = new_environment;
+    vm.running_execution_context().lexical_environment = new_environment;
 
     // 6. Let C be the result of evaluating Statement.
-    auto result = m_body->execute(interpreter, global_object);
+    auto result = m_body->execute(interpreter);
 
     // 7. Set the running execution context's LexicalEnvironment to oldEnv.
-    interpreter.vm().running_execution_context().lexical_environment = old_environment;
+    vm.running_execution_context().lexical_environment = old_environment;
 
     // 8. Return ? UpdateEmpty(C, undefined).
     return result.update_empty(js_undefined());
@@ -634,15 +645,15 @@ static bool loop_continues(Completion const& completion, Vector<FlyString> const
 
 // 14.1.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-statement-semantics-runtime-semantics-evaluation
 // BreakableStatement : IterationStatement
-Completion WhileStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion WhileStatement::execute(Interpreter& interpreter) const
 {
     // 1. Let newLabelSet be a new empty List.
     // 2. Return ? LabelledEvaluation of this BreakableStatement with argument newLabelSet.
-    return labelled_evaluation(interpreter, global_object, *this, {});
+    return labelled_evaluation(interpreter, *this, {});
 }
 
 // 14.7.3.2 Runtime Semantics: WhileLoopEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-whileloopevaluation
-Completion WhileStatement::loop_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<FlyString> const& label_set) const
+Completion WhileStatement::loop_evaluation(Interpreter& interpreter, Vector<FlyString> const& label_set) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -653,14 +664,14 @@ Completion WhileStatement::loop_evaluation(Interpreter& interpreter, GlobalObjec
     for (;;) {
         // a. Let exprRef be the result of evaluating Expression.
         // b. Let exprValue be ? GetValue(exprRef).
-        auto test_result = TRY(m_test->execute(interpreter, global_object)).release_value();
+        auto test_result = TRY(m_test->execute(interpreter)).release_value();
 
         // c. If ToBoolean(exprValue) is false, return V.
         if (!test_result.to_boolean())
             return last_value;
 
         // d. Let stmtResult be the result of evaluating Statement.
-        auto body_result = m_body->execute(interpreter, global_object);
+        auto body_result = m_body->execute(interpreter);
 
         // e. If LoopContinues(stmtResult, labelSet) is false, return ? UpdateEmpty(stmtResult, V).
         if (!loop_continues(body_result, label_set))
@@ -676,15 +687,15 @@ Completion WhileStatement::loop_evaluation(Interpreter& interpreter, GlobalObjec
 
 // 14.1.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-statement-semantics-runtime-semantics-evaluation
 // BreakableStatement : IterationStatement
-Completion DoWhileStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion DoWhileStatement::execute(Interpreter& interpreter) const
 {
     // 1. Let newLabelSet be a new empty List.
     // 2. Return ? LabelledEvaluation of this BreakableStatement with argument newLabelSet.
-    return labelled_evaluation(interpreter, global_object, *this, {});
+    return labelled_evaluation(interpreter, *this, {});
 }
 
 // 14.7.2.2 Runtime Semantics: DoWhileLoopEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-dowhileloopevaluation
-Completion DoWhileStatement::loop_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<FlyString> const& label_set) const
+Completion DoWhileStatement::loop_evaluation(Interpreter& interpreter, Vector<FlyString> const& label_set) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -694,7 +705,7 @@ Completion DoWhileStatement::loop_evaluation(Interpreter& interpreter, GlobalObj
     // 2. Repeat,
     for (;;) {
         // a. Let stmtResult be the result of evaluating Statement.
-        auto body_result = m_body->execute(interpreter, global_object);
+        auto body_result = m_body->execute(interpreter);
 
         // b. If LoopContinues(stmtResult, labelSet) is false, return ? UpdateEmpty(stmtResult, V).
         if (!loop_continues(body_result, label_set))
@@ -706,7 +717,7 @@ Completion DoWhileStatement::loop_evaluation(Interpreter& interpreter, GlobalObj
 
         // d. Let exprRef be the result of evaluating Expression.
         // e. Let exprValue be ? GetValue(exprRef).
-        auto test_result = TRY(m_test->execute(interpreter, global_object)).release_value();
+        auto test_result = TRY(m_test->execute(interpreter)).release_value();
 
         // f. If ToBoolean(exprValue) is false, return V.
         if (!test_result.to_boolean())
@@ -718,17 +729,18 @@ Completion DoWhileStatement::loop_evaluation(Interpreter& interpreter, GlobalObj
 
 // 14.1.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-statement-semantics-runtime-semantics-evaluation
 // BreakableStatement : IterationStatement
-Completion ForStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ForStatement::execute(Interpreter& interpreter) const
 {
     // 1. Let newLabelSet be a new empty List.
     // 2. Return ? LabelledEvaluation of this BreakableStatement with argument newLabelSet.
-    return labelled_evaluation(interpreter, global_object, *this, {});
+    return labelled_evaluation(interpreter, *this, {});
 }
 
 // 14.7.4.2 Runtime Semantics: ForLoopEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-forloopevaluation
-Completion ForStatement::loop_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<FlyString> const& label_set) const
+Completion ForStatement::loop_evaluation(Interpreter& interpreter, Vector<FlyString> const& label_set) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // Note we don't always set a new environment but to use RAII we must do this here.
     auto* old_environment = interpreter.lexical_environment();
@@ -744,9 +756,9 @@ Completion ForStatement::loop_evaluation(Interpreter& interpreter, GlobalObject&
             auto& declaration = static_cast<VariableDeclaration const&>(*m_init);
             declaration.for_each_bound_name([&](auto const& name) {
                 if (declaration.declaration_kind() == DeclarationKind::Const) {
-                    MUST(loop_environment->create_immutable_binding(global_object, name, true));
+                    MUST(loop_environment->create_immutable_binding(vm, name, true));
                 } else {
-                    MUST(loop_environment->create_mutable_binding(global_object, name, false));
+                    MUST(loop_environment->create_mutable_binding(vm, name, false));
                     ++per_iteration_bindings_size;
                 }
             });
@@ -754,7 +766,7 @@ Completion ForStatement::loop_evaluation(Interpreter& interpreter, GlobalObject&
             interpreter.vm().running_execution_context().lexical_environment = loop_environment;
         }
 
-        (void)TRY(m_init->execute(interpreter, global_object));
+        (void)TRY(m_init->execute(interpreter));
     }
 
     // 14.7.4.4 CreatePerIterationEnvironment ( perIterationBindings ), https://tc39.es/ecma262/#sec-createperiterationenvironment
@@ -805,7 +817,7 @@ Completion ForStatement::loop_evaluation(Interpreter& interpreter, GlobalObject&
         if (m_test) {
             // i. Let testRef be the result of evaluating test.
             // ii. Let testValue be ? GetValue(testRef).
-            auto test_value = TRY(m_test->execute(interpreter, global_object)).release_value();
+            auto test_value = TRY(m_test->execute(interpreter)).release_value();
 
             // iii. If ToBoolean(testValue) is false, return V.
             if (!test_value.to_boolean())
@@ -813,7 +825,7 @@ Completion ForStatement::loop_evaluation(Interpreter& interpreter, GlobalObject&
         }
 
         // b. Let result be the result of evaluating stmt.
-        auto result = m_body->execute(interpreter, global_object);
+        auto result = m_body->execute(interpreter);
 
         // c. If LoopContinues(result, labelSet) is false, return ? UpdateEmpty(result, V).
         if (!loop_continues(result, label_set))
@@ -830,7 +842,7 @@ Completion ForStatement::loop_evaluation(Interpreter& interpreter, GlobalObject&
         if (m_update) {
             // i. Let incRef be the result of evaluating increment.
             // ii. Perform ? GetValue(incRef).
-            (void)TRY(m_update->execute(interpreter, global_object));
+            (void)TRY(m_update->execute(interpreter));
         }
     }
 
@@ -865,9 +877,11 @@ struct ForInOfHeadState {
 
     // 14.7.5.7 ForIn/OfBodyEvaluation ( lhs, stmt, iteratorRecord, iterationKind, lhsKind, labelSet [ , iteratorKind ] ), https://tc39.es/ecma262/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
     // Note: This is only steps 6.g through 6.j of the method because we currently implement for-in without an iterator so to prevent duplicated code we do this part here.
-    ThrowCompletionOr<void> execute_head(Interpreter& interpreter, GlobalObject& global_object, Value next_value) const
+    ThrowCompletionOr<void> execute_head(Interpreter& interpreter, Value next_value) const
     {
         VERIFY(!next_value.is_empty());
+
+        auto& vm = interpreter.vm();
 
         Optional<Reference> lhs_reference;
         Environment* iteration_environment = nullptr;
@@ -879,11 +893,11 @@ struct ForInOfHeadState {
                 if (is<VariableDeclaration>(*expression_lhs)) {
                     auto& declaration = static_cast<VariableDeclaration const&>(*expression_lhs);
                     VERIFY(declaration.declarations().first().target().has<NonnullRefPtr<Identifier>>());
-                    lhs_reference = TRY(declaration.declarations().first().target().get<NonnullRefPtr<Identifier>>()->to_reference(interpreter, global_object));
+                    lhs_reference = TRY(declaration.declarations().first().target().get<NonnullRefPtr<Identifier>>()->to_reference(interpreter));
                 } else {
                     VERIFY(is<Identifier>(*expression_lhs) || is<MemberExpression>(*expression_lhs) || is<CallExpression>(*expression_lhs));
                     auto& expression = static_cast<Expression const&>(*expression_lhs);
-                    lhs_reference = TRY(expression.to_reference(interpreter, global_object));
+                    lhs_reference = TRY(expression.to_reference(interpreter));
                 }
             }
         }
@@ -894,9 +908,9 @@ struct ForInOfHeadState {
             auto& for_declaration = static_cast<VariableDeclaration const&>(*expression_lhs);
             for_declaration.for_each_bound_name([&](auto const& name) {
                 if (for_declaration.declaration_kind() == DeclarationKind::Const)
-                    MUST(iteration_environment->create_immutable_binding(global_object, name, false));
+                    MUST(iteration_environment->create_immutable_binding(vm, name, false));
                 else
-                    MUST(iteration_environment->create_mutable_binding(global_object, name, true));
+                    MUST(iteration_environment->create_mutable_binding(vm, name, true));
             });
             interpreter.vm().running_execution_context().lexical_environment = iteration_environment;
 
@@ -910,15 +924,15 @@ struct ForInOfHeadState {
         if (!destructuring) {
             VERIFY(lhs_reference.has_value());
             if (lhs_kind == LexicalBinding)
-                return lhs_reference->initialize_referenced_binding(global_object, next_value);
+                return lhs_reference->initialize_referenced_binding(vm, next_value);
             else
-                return lhs_reference->put_value(global_object, next_value);
+                return lhs_reference->put_value(vm, next_value);
         }
 
         // j. Else,
         if (lhs_kind == Assignment) {
             VERIFY(pattern_lhs);
-            return interpreter.vm().destructuring_assignment_evaluation(*pattern_lhs, next_value, global_object);
+            return interpreter.vm().destructuring_assignment_evaluation(*pattern_lhs, next_value);
         }
         VERIFY(expression_lhs && is<VariableDeclaration>(*expression_lhs));
         auto& for_declaration = static_cast<VariableDeclaration const&>(*expression_lhs);
@@ -927,7 +941,7 @@ struct ForInOfHeadState {
 
         // At this point iteration_environment is undefined if lhs_kind == VarBinding which means this does both
         // branch j.ii and j.iii because ForBindingInitialization is just a forwarding call to BindingInitialization.
-        return interpreter.vm().binding_initialization(binding_pattern, next_value, iteration_environment, global_object);
+        return interpreter.vm().binding_initialization(binding_pattern, next_value, iteration_environment);
     }
 };
 
@@ -935,8 +949,10 @@ struct ForInOfHeadState {
 // 14.7.5.6 ForIn/OfHeadEvaluation ( uninitializedBoundNames, expr, iterationKind ), https://tc39.es/ecma262/#sec-runtime-semantics-forinofheadevaluation
 // This method combines ForInOfLoopEvaluation and ForIn/OfHeadEvaluation for similar reason as ForIn/OfBodyEvaluation, to prevent code duplication.
 // For the same reason we also skip step 6 and 7 of ForIn/OfHeadEvaluation as this is done by the appropriate for loop type.
-static ThrowCompletionOr<ForInOfHeadState> for_in_of_head_execute(Interpreter& interpreter, GlobalObject& global_object, Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> lhs, Expression const& rhs)
+static ThrowCompletionOr<ForInOfHeadState> for_in_of_head_execute(Interpreter& interpreter, Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> lhs, Expression const& rhs)
 {
+    auto& vm = interpreter.vm();
+
     ForInOfHeadState state(lhs);
     if (auto* ast_ptr = lhs.get_pointer<NonnullRefPtr<ASTNode>>(); ast_ptr && is<VariableDeclaration>(*(*ast_ptr))) {
         // Runtime Semantics: ForInOfLoopEvaluation, for any of:
@@ -959,14 +975,14 @@ static ThrowCompletionOr<ForInOfHeadState> for_in_of_head_execute(Interpreter& i
                 VERIFY(variable.target().has<NonnullRefPtr<Identifier>>());
                 auto& binding_id = variable.target().get<NonnullRefPtr<Identifier>>()->string();
                 auto reference = TRY(interpreter.vm().resolve_binding(binding_id));
-                auto result = TRY(interpreter.vm().named_evaluation_if_anonymous_function(global_object, *variable.init(), binding_id));
-                TRY(reference.put_value(global_object, result));
+                auto result = TRY(interpreter.vm().named_evaluation_if_anonymous_function(*variable.init(), binding_id));
+                TRY(reference.put_value(vm, result));
             }
         } else {
             state.lhs_kind = ForInOfHeadState::LexicalBinding;
             new_environment = new_declarative_environment(*interpreter.lexical_environment());
             variable_declaration.for_each_bound_name([&](auto const& name) {
-                MUST(new_environment->create_mutable_binding(global_object, name, false));
+                MUST(new_environment->create_mutable_binding(vm, name, false));
             });
         }
 
@@ -976,7 +992,7 @@ static ThrowCompletionOr<ForInOfHeadState> for_in_of_head_execute(Interpreter& i
 
             // 3. Let exprRef be the result of evaluating expr.
             // 5. Let exprValue be ? GetValue(exprRef).
-            state.rhs_value = TRY(rhs.execute(interpreter, global_object)).release_value();
+            state.rhs_value = TRY(rhs.execute(interpreter)).release_value();
 
             // Note that since a reference stores its environment it doesn't matter we only reset
             // this after step 5. (Also we have no way of separating these steps at this point)
@@ -984,7 +1000,7 @@ static ThrowCompletionOr<ForInOfHeadState> for_in_of_head_execute(Interpreter& i
         } else {
             // 3. Let exprRef be the result of evaluating expr.
             // 5. Let exprValue be ? GetValue(exprRef).
-            state.rhs_value = TRY(rhs.execute(interpreter, global_object)).release_value();
+            state.rhs_value = TRY(rhs.execute(interpreter)).release_value();
         }
 
         return state;
@@ -999,25 +1015,26 @@ static ThrowCompletionOr<ForInOfHeadState> for_in_of_head_execute(Interpreter& i
     // We can skip step 1, 2 and 4 here (on top of already skipping step 6 and 7).
     // 3. Let exprRef be the result of evaluating expr.
     // 5. Let exprValue be ? GetValue(exprRef).
-    state.rhs_value = TRY(rhs.execute(interpreter, global_object)).release_value();
+    state.rhs_value = TRY(rhs.execute(interpreter)).release_value();
     return state;
 }
 
 // 14.1.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-statement-semantics-runtime-semantics-evaluation
 // BreakableStatement : IterationStatement
-Completion ForInStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ForInStatement::execute(Interpreter& interpreter) const
 {
     // 1. Let newLabelSet be a new empty List.
     // 2. Return ? LabelledEvaluation of this BreakableStatement with argument newLabelSet.
-    return labelled_evaluation(interpreter, global_object, *this, {});
+    return labelled_evaluation(interpreter, *this, {});
 }
 
 // 14.7.5.5 Runtime Semantics: ForInOfLoopEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-forinofloopevaluation
-Completion ForInStatement::loop_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<FlyString> const& label_set) const
+Completion ForInStatement::loop_evaluation(Interpreter& interpreter, Vector<FlyString> const& label_set) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
-    auto for_in_head_state = TRY(for_in_of_head_execute(interpreter, global_object, m_lhs, *m_rhs));
+    auto for_in_head_state = TRY(for_in_of_head_execute(interpreter, m_lhs, *m_rhs));
 
     auto rhs_result = for_in_head_state.rhs_value;
 
@@ -1030,27 +1047,27 @@ Completion ForInStatement::loop_evaluation(Interpreter& interpreter, GlobalObjec
     }
 
     // b. Let obj be ! ToObject(exprValue).
-    auto* object = MUST(rhs_result.to_object(global_object));
+    auto* object = MUST(rhs_result.to_object(vm));
 
     // 14.7.5.7 ForIn/OfBodyEvaluation ( lhs, stmt, iteratorRecord, iterationKind, lhsKind, labelSet [ , iteratorKind ] ), https://tc39.es/ecma262/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
 
     // 2. Let oldEnv be the running execution context's LexicalEnvironment.
     Environment* old_environment = interpreter.lexical_environment();
     auto restore_scope = ScopeGuard([&] {
-        interpreter.vm().running_execution_context().lexical_environment = old_environment;
+        vm.running_execution_context().lexical_environment = old_environment;
     });
 
     // 3. Let V be undefined.
     auto last_value = js_undefined();
 
     auto result = object->enumerate_object_properties([&](auto value) -> Optional<Completion> {
-        TRY(for_in_head_state.execute_head(interpreter, global_object, value));
+        TRY(for_in_head_state.execute_head(interpreter, value));
 
         // l. Let result be the result of evaluating stmt.
-        auto result = m_body->execute(interpreter, global_object);
+        auto result = m_body->execute(interpreter);
 
         // m. Set the running execution context's LexicalEnvironment to oldEnv.
-        interpreter.vm().running_execution_context().lexical_environment = old_environment;
+        vm.running_execution_context().lexical_environment = old_environment;
 
         // n. If LoopContinues(result, labelSet) is false, then
         if (!loop_continues(result, label_set)) {
@@ -1070,19 +1087,20 @@ Completion ForInStatement::loop_evaluation(Interpreter& interpreter, GlobalObjec
 
 // 14.1.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-statement-semantics-runtime-semantics-evaluation
 // BreakableStatement : IterationStatement
-Completion ForOfStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ForOfStatement::execute(Interpreter& interpreter) const
 {
     // 1. Let newLabelSet be a new empty List.
     // 2. Return ? LabelledEvaluation of this BreakableStatement with argument newLabelSet.
-    return labelled_evaluation(interpreter, global_object, *this, {});
+    return labelled_evaluation(interpreter, *this, {});
 }
 
 // 14.7.5.5 Runtime Semantics: ForInOfLoopEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-forinofloopevaluation
-Completion ForOfStatement::loop_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<FlyString> const& label_set) const
+Completion ForOfStatement::loop_evaluation(Interpreter& interpreter, Vector<FlyString> const& label_set) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
-    auto for_of_head_state = TRY(for_in_of_head_execute(interpreter, global_object, m_lhs, m_rhs));
+    auto for_of_head_state = TRY(for_in_of_head_execute(interpreter, m_lhs, m_rhs));
 
     auto rhs_result = for_of_head_state.rhs_value;
 
@@ -1092,7 +1110,7 @@ Completion ForOfStatement::loop_evaluation(Interpreter& interpreter, GlobalObjec
     // 2. Let oldEnv be the running execution context's LexicalEnvironment.
     Environment* old_environment = interpreter.lexical_environment();
     auto restore_scope = ScopeGuard([&] {
-        interpreter.vm().running_execution_context().lexical_environment = old_environment;
+        vm.running_execution_context().lexical_environment = old_environment;
     });
 
     // 3. Let V be undefined.
@@ -1100,14 +1118,14 @@ Completion ForOfStatement::loop_evaluation(Interpreter& interpreter, GlobalObjec
 
     Optional<Completion> status;
 
-    (void)TRY(get_iterator_values(global_object, rhs_result, [&](Value value) -> Optional<Completion> {
-        TRY(for_of_head_state.execute_head(interpreter, global_object, value));
+    (void)TRY(get_iterator_values(vm, rhs_result, [&](Value value) -> Optional<Completion> {
+        TRY(for_of_head_state.execute_head(interpreter, value));
 
         // l. Let result be the result of evaluating stmt.
-        auto result = m_body->execute(interpreter, global_object);
+        auto result = m_body->execute(interpreter);
 
         // m. Set the running execution context's LexicalEnvironment to oldEnv.
-        interpreter.vm().running_execution_context().lexical_environment = old_environment;
+        vm.running_execution_context().lexical_environment = old_environment;
 
         // n. If LoopContinues(result, labelSet) is false, then
         if (!loop_continues(result, label_set)) {
@@ -1133,36 +1151,35 @@ Completion ForOfStatement::loop_evaluation(Interpreter& interpreter, GlobalObjec
 
 // 14.1.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-statement-semantics-runtime-semantics-evaluation
 // BreakableStatement : IterationStatement
-Completion ForAwaitOfStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ForAwaitOfStatement::execute(Interpreter& interpreter) const
 {
     // 1. Let newLabelSet be a new empty List.
     // 2. Return ? LabelledEvaluation of this BreakableStatement with argument newLabelSet.
-    return labelled_evaluation(interpreter, global_object, *this, {});
+    return labelled_evaluation(interpreter, *this, {});
 }
 
 // 14.7.5.5 Runtime Semantics: ForInOfLoopEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-forinofloopevaluation
-Completion ForAwaitOfStatement::loop_evaluation(Interpreter& interpreter, GlobalObject& global_object, Vector<FlyString> const& label_set) const
+Completion ForAwaitOfStatement::loop_evaluation(Interpreter& interpreter, Vector<FlyString> const& label_set) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // 14.7.5.6 ForIn/OfHeadEvaluation ( uninitializedBoundNames, expr, iterationKind ), https://tc39.es/ecma262/#sec-runtime-semantics-forinofheadevaluation
     // Note: Performs only steps 1 through 5.
-    auto for_of_head_state = TRY(for_in_of_head_execute(interpreter, global_object, m_lhs, m_rhs));
+    auto for_of_head_state = TRY(for_in_of_head_execute(interpreter, m_lhs, m_rhs));
 
     auto rhs_result = for_of_head_state.rhs_value;
 
     // NOTE: Perform step 7 from ForIn/OfHeadEvaluation. And since this is always async we only have to do step 7.d.
     // d. Return ? GetIterator(exprValue, iteratorHint).
-    auto iterator = TRY(get_iterator(global_object, rhs_result, IteratorHint::Async));
-
-    auto& vm = interpreter.vm();
+    auto iterator = TRY(get_iterator(vm, rhs_result, IteratorHint::Async));
 
     // 14.7.5.7 ForIn/OfBodyEvaluation ( lhs, stmt, iteratorRecord, iterationKind, lhsKind, labelSet [ , iteratorKind ] ), https://tc39.es/ecma262/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
     // NOTE: Here iteratorKind is always async.
     // 2. Let oldEnv be the running execution context's LexicalEnvironment.
     Environment* old_environment = interpreter.lexical_environment();
     auto restore_scope = ScopeGuard([&] {
-        interpreter.vm().running_execution_context().lexical_environment = old_environment;
+        vm.running_execution_context().lexical_environment = old_environment;
     });
     // 3. Let V be undefined.
     auto last_value = js_undefined();
@@ -1173,30 +1190,30 @@ Completion ForAwaitOfStatement::loop_evaluation(Interpreter& interpreter, Global
     // 6. Repeat,
     while (true) {
         // a. Let nextResult be ? Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]]).
-        auto next_result = TRY(call(global_object, iterator.next_method, iterator.iterator));
+        auto next_result = TRY(call(vm, iterator.next_method, iterator.iterator));
 
         // b. If iteratorKind is async, set nextResult to ? Await(nextResult).
-        next_result = TRY(await(global_object, next_result));
+        next_result = TRY(await(vm, next_result));
 
         // c. If Type(nextResult) is not Object, throw a TypeError exception.
         if (!next_result.is_object())
-            return vm.throw_completion<TypeError>(global_object, ErrorType::IterableNextBadReturn);
+            return vm.throw_completion<TypeError>(ErrorType::IterableNextBadReturn);
 
         // d. Let done be ? IteratorComplete(nextResult).
-        auto done = TRY(iterator_complete(global_object, next_result.as_object()));
+        auto done = TRY(iterator_complete(vm, next_result.as_object()));
 
         // e. If done is true, return V.
         if (done)
             return last_value;
 
         // f. Let nextValue be ? IteratorValue(nextResult).
-        auto next_value = TRY(iterator_value(global_object, next_result.as_object()));
+        auto next_value = TRY(iterator_value(vm, next_result.as_object()));
 
         // NOTE: This performs steps g. through to k.
-        TRY(for_of_head_state.execute_head(interpreter, global_object, next_value));
+        TRY(for_of_head_state.execute_head(interpreter, next_value));
 
         // l. Let result be the result of evaluating stmt.
-        auto result = m_body->execute(interpreter, global_object);
+        auto result = m_body->execute(interpreter);
 
         // m. Set the running execution context's LexicalEnvironment to oldEnv.
         interpreter.vm().running_execution_context().lexical_environment = old_environment;
@@ -1207,7 +1224,7 @@ Completion ForAwaitOfStatement::loop_evaluation(Interpreter& interpreter, Global
             auto status = result.update_empty(last_value);
 
             // 3. If iteratorKind is async, return ? AsyncIteratorClose(iteratorRecord, status).
-            return async_iterator_close(global_object, iterator, move(status));
+            return async_iterator_close(vm, iterator, move(status));
         }
 
         // o. If result.[[Value]] is not empty, set V to result.[[Value]].
@@ -1227,85 +1244,86 @@ Completion ForAwaitOfStatement::loop_evaluation(Interpreter& interpreter, Global
 // 13.9.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-unsigned-right-shift-operator-runtime-semantics-evaluation
 // 13.10.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-relational-operators-runtime-semantics-evaluation
 // 13.11.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-equality-operators-runtime-semantics-evaluation
-Completion BinaryExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion BinaryExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // Special case in which we cannot execute the lhs.  RelationalExpression : PrivateIdentifier in ShiftExpression
     //  RelationalExpression : PrivateIdentifier in ShiftExpression, https://tc39.es/ecma262/#sec-relational-operators-runtime-semantics-evaluation
     if (m_op == BinaryOp::In && is<PrivateIdentifier>(*m_lhs)) {
         auto& private_identifier = static_cast<PrivateIdentifier const&>(*m_lhs).string();
 
-        auto rhs_result = TRY(m_rhs->execute(interpreter, global_object)).release_value();
+        auto rhs_result = TRY(m_rhs->execute(interpreter)).release_value();
         if (!rhs_result.is_object())
-            return interpreter.vm().throw_completion<TypeError>(global_object, ErrorType::InOperatorWithObject);
+            return interpreter.vm().throw_completion<TypeError>(ErrorType::InOperatorWithObject);
         auto* private_environment = interpreter.vm().running_execution_context().private_environment;
         VERIFY(private_environment);
         auto private_name = private_environment->resolve_private_identifier(private_identifier);
         return Value(rhs_result.as_object().private_element_find(private_name) != nullptr);
     }
 
-    auto lhs_result = TRY(m_lhs->execute(interpreter, global_object)).release_value();
-    auto rhs_result = TRY(m_rhs->execute(interpreter, global_object)).release_value();
+    auto lhs_result = TRY(m_lhs->execute(interpreter)).release_value();
+    auto rhs_result = TRY(m_rhs->execute(interpreter)).release_value();
 
     switch (m_op) {
     case BinaryOp::Addition:
-        return TRY(add(global_object, lhs_result, rhs_result));
+        return TRY(add(vm, lhs_result, rhs_result));
     case BinaryOp::Subtraction:
-        return TRY(sub(global_object, lhs_result, rhs_result));
+        return TRY(sub(vm, lhs_result, rhs_result));
     case BinaryOp::Multiplication:
-        return TRY(mul(global_object, lhs_result, rhs_result));
+        return TRY(mul(vm, lhs_result, rhs_result));
     case BinaryOp::Division:
-        return TRY(div(global_object, lhs_result, rhs_result));
+        return TRY(div(vm, lhs_result, rhs_result));
     case BinaryOp::Modulo:
-        return TRY(mod(global_object, lhs_result, rhs_result));
+        return TRY(mod(vm, lhs_result, rhs_result));
     case BinaryOp::Exponentiation:
-        return TRY(exp(global_object, lhs_result, rhs_result));
+        return TRY(exp(vm, lhs_result, rhs_result));
     case BinaryOp::StrictlyEquals:
         return Value(is_strictly_equal(lhs_result, rhs_result));
     case BinaryOp::StrictlyInequals:
         return Value(!is_strictly_equal(lhs_result, rhs_result));
     case BinaryOp::LooselyEquals:
-        return Value(TRY(is_loosely_equal(global_object, lhs_result, rhs_result)));
+        return Value(TRY(is_loosely_equal(vm, lhs_result, rhs_result)));
     case BinaryOp::LooselyInequals:
-        return Value(!TRY(is_loosely_equal(global_object, lhs_result, rhs_result)));
+        return Value(!TRY(is_loosely_equal(vm, lhs_result, rhs_result)));
     case BinaryOp::GreaterThan:
-        return TRY(greater_than(global_object, lhs_result, rhs_result));
+        return TRY(greater_than(vm, lhs_result, rhs_result));
     case BinaryOp::GreaterThanEquals:
-        return TRY(greater_than_equals(global_object, lhs_result, rhs_result));
+        return TRY(greater_than_equals(vm, lhs_result, rhs_result));
     case BinaryOp::LessThan:
-        return TRY(less_than(global_object, lhs_result, rhs_result));
+        return TRY(less_than(vm, lhs_result, rhs_result));
     case BinaryOp::LessThanEquals:
-        return TRY(less_than_equals(global_object, lhs_result, rhs_result));
+        return TRY(less_than_equals(vm, lhs_result, rhs_result));
     case BinaryOp::BitwiseAnd:
-        return TRY(bitwise_and(global_object, lhs_result, rhs_result));
+        return TRY(bitwise_and(vm, lhs_result, rhs_result));
     case BinaryOp::BitwiseOr:
-        return TRY(bitwise_or(global_object, lhs_result, rhs_result));
+        return TRY(bitwise_or(vm, lhs_result, rhs_result));
     case BinaryOp::BitwiseXor:
-        return TRY(bitwise_xor(global_object, lhs_result, rhs_result));
+        return TRY(bitwise_xor(vm, lhs_result, rhs_result));
     case BinaryOp::LeftShift:
-        return TRY(left_shift(global_object, lhs_result, rhs_result));
+        return TRY(left_shift(vm, lhs_result, rhs_result));
     case BinaryOp::RightShift:
-        return TRY(right_shift(global_object, lhs_result, rhs_result));
+        return TRY(right_shift(vm, lhs_result, rhs_result));
     case BinaryOp::UnsignedRightShift:
-        return TRY(unsigned_right_shift(global_object, lhs_result, rhs_result));
+        return TRY(unsigned_right_shift(vm, lhs_result, rhs_result));
     case BinaryOp::In:
-        return TRY(in(global_object, lhs_result, rhs_result));
+        return TRY(in(vm, lhs_result, rhs_result));
     case BinaryOp::InstanceOf:
-        return TRY(instance_of(global_object, lhs_result, rhs_result));
+        return TRY(instance_of(vm, lhs_result, rhs_result));
     }
 
     VERIFY_NOT_REACHED();
 }
 
 // 13.13.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-binary-logical-operators-runtime-semantics-evaluation
-Completion LogicalExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion LogicalExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Let lref be the result of evaluating <Expression>.
     // 2. Let lval be ? GetValue(lref).
-    auto lhs_result = TRY(m_lhs->execute(interpreter, global_object)).release_value();
+    auto lhs_result = TRY(m_lhs->execute(interpreter)).release_value();
 
     switch (m_op) {
     // LogicalANDExpression : LogicalANDExpression && BitwiseORExpression
@@ -1317,7 +1335,7 @@ Completion LogicalExpression::execute(Interpreter& interpreter, GlobalObject& gl
 
         // 5. Let rref be the result of evaluating BitwiseORExpression.
         // 6. Return ? GetValue(rref).
-        return m_rhs->execute(interpreter, global_object);
+        return m_rhs->execute(interpreter);
 
     // LogicalORExpression : LogicalORExpression || LogicalANDExpression
     case LogicalOp::Or:
@@ -1328,7 +1346,7 @@ Completion LogicalExpression::execute(Interpreter& interpreter, GlobalObject& gl
 
         // 5. Let rref be the result of evaluating LogicalANDExpression.
         // 6. Return ? GetValue(rref).
-        return m_rhs->execute(interpreter, global_object);
+        return m_rhs->execute(interpreter);
 
     // CoalesceExpression : CoalesceExpressionHead ?? BitwiseORExpression
     case LogicalOp::NullishCoalescing:
@@ -1336,7 +1354,7 @@ Completion LogicalExpression::execute(Interpreter& interpreter, GlobalObject& gl
         if (lhs_result.is_nullish()) {
             // a. Let rref be the result of evaluating BitwiseORExpression.
             // b. Return ? GetValue(rref).
-            return m_rhs->execute(interpreter, global_object);
+            return m_rhs->execute(interpreter);
         }
 
         // 4. Otherwise, return lval.
@@ -1346,12 +1364,12 @@ Completion LogicalExpression::execute(Interpreter& interpreter, GlobalObject& gl
     VERIFY_NOT_REACHED();
 }
 
-ThrowCompletionOr<Reference> Expression::to_reference(Interpreter&, GlobalObject&) const
+ThrowCompletionOr<Reference> Expression::to_reference(Interpreter&) const
 {
     return Reference {};
 }
 
-ThrowCompletionOr<Reference> Identifier::to_reference(Interpreter& interpreter, GlobalObject&) const
+ThrowCompletionOr<Reference> Identifier::to_reference(Interpreter& interpreter) const
 {
     if (m_cached_environment_coordinate.has_value()) {
         auto* environment = interpreter.vm().running_execution_context().lexical_environment;
@@ -1371,17 +1389,20 @@ ThrowCompletionOr<Reference> Identifier::to_reference(Interpreter& interpreter, 
     return reference;
 }
 
-ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpreter, GlobalObject& global_object) const
+ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpreter) const
 {
+    auto& vm = interpreter.vm();
+
     // 13.3.7.1 Runtime Semantics: Evaluation
     // SuperProperty : super [ Expression ]
     // SuperProperty : super . IdentifierName
     // https://tc39.es/ecma262/#sec-super-keyword-runtime-semantics-evaluation
     if (is<SuperExpression>(object())) {
         // 1. Let env be GetThisEnvironment().
-        auto& environment = get_this_environment(interpreter.vm());
+        auto& environment = get_this_environment(vm);
+
         // 2. Let actualThis be ? env.GetThisBinding().
-        auto actual_this = TRY(environment.get_this_binding(global_object));
+        auto actual_this = TRY(environment.get_this_binding(vm));
 
         PropertyKey property_key;
 
@@ -1390,10 +1411,10 @@ ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpr
 
             // 3. Let propertyNameReference be the result of evaluating Expression.
             // 4. Let propertyNameValue be ? GetValue(propertyNameReference).
-            auto property_name_value = TRY(m_property->execute(interpreter, global_object)).release_value();
+            auto property_name_value = TRY(m_property->execute(interpreter)).release_value();
 
             // 5. Let propertyKey be ? ToPropertyKey(propertyNameValue).
-            property_key = TRY(property_name_value.to_property_key(global_object));
+            property_key = TRY(property_name_value.to_property_key(vm));
         } else {
             // SuperProperty : super . IdentifierName
 
@@ -1406,17 +1427,17 @@ ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpr
         bool strict = interpreter.vm().in_strict_mode();
 
         // 7. Return ? MakeSuperPropertyReference(actualThis, propertyKey, strict).
-        return TRY(make_super_property_reference(global_object, actual_this, property_key, strict));
+        return TRY(make_super_property_reference(vm, actual_this, property_key, strict));
     }
 
-    auto base_reference = TRY(m_object->to_reference(interpreter, global_object));
+    auto base_reference = TRY(m_object->to_reference(interpreter));
 
     Value base_value;
 
     if (base_reference.is_valid_reference())
-        base_value = TRY(base_reference.get_value(global_object));
+        base_value = TRY(base_reference.get_value(vm));
     else
-        base_value = TRY(m_object->execute(interpreter, global_object)).release_value();
+        base_value = TRY(m_object->execute(interpreter)).release_value();
 
     VERIFY(!base_value.is_empty());
 
@@ -1425,18 +1446,18 @@ ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpr
     PropertyKey property_key;
     if (is_computed()) {
         // Weird order which I can't quite find from the specs.
-        auto value = TRY(m_property->execute(interpreter, global_object)).release_value();
+        auto value = TRY(m_property->execute(interpreter)).release_value();
         VERIFY(!value.is_empty());
 
-        TRY(require_object_coercible(global_object, base_value));
+        TRY(require_object_coercible(vm, base_value));
 
-        property_key = TRY(PropertyKey::from_value(global_object, value));
+        property_key = TRY(PropertyKey::from_value(vm, value));
     } else if (is<PrivateIdentifier>(*m_property)) {
         auto& private_identifier = static_cast<PrivateIdentifier const&>(*m_property);
         return make_private_reference(interpreter.vm(), base_value, private_identifier.string());
     } else {
         property_key = verify_cast<Identifier>(*m_property).string();
-        TRY(require_object_coercible(global_object, base_value));
+        TRY(require_object_coercible(vm, base_value));
     }
     if (!property_key.is_valid())
         return Reference {};
@@ -1452,39 +1473,39 @@ ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpr
 // 13.5.5.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-unary-minus-operator-runtime-semantics-evaluation
 // 13.5.6.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-bitwise-not-operator-runtime-semantics-evaluation
 // 13.5.7.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-logical-not-operator-runtime-semantics-evaluation
-Completion UnaryExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion UnaryExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
-
     auto& vm = interpreter.vm();
+
     if (m_op == UnaryOp::Delete) {
-        auto reference = TRY(m_lhs->to_reference(interpreter, global_object));
-        return Value(TRY(reference.delete_(global_object)));
+        auto reference = TRY(m_lhs->to_reference(interpreter));
+        return Value(TRY(reference.delete_(vm)));
     }
 
     Value lhs_result;
     if (m_op == UnaryOp::Typeof && is<Identifier>(*m_lhs)) {
-        auto reference = TRY(m_lhs->to_reference(interpreter, global_object));
+        auto reference = TRY(m_lhs->to_reference(interpreter));
 
         if (reference.is_unresolvable())
             lhs_result = js_undefined();
         else
-            lhs_result = TRY(reference.get_value(global_object));
+            lhs_result = TRY(reference.get_value(vm));
         VERIFY(!lhs_result.is_empty());
     } else {
         // 1. Let expr be the result of evaluating UnaryExpression.
-        lhs_result = TRY(m_lhs->execute(interpreter, global_object)).release_value();
+        lhs_result = TRY(m_lhs->execute(interpreter)).release_value();
     }
 
     switch (m_op) {
     case UnaryOp::BitwiseNot:
-        return TRY(bitwise_not(global_object, lhs_result));
+        return TRY(bitwise_not(vm, lhs_result));
     case UnaryOp::Not:
         return Value(!lhs_result.to_boolean());
     case UnaryOp::Plus:
-        return TRY(unary_plus(global_object, lhs_result));
+        return TRY(unary_plus(vm, lhs_result));
     case UnaryOp::Minus:
-        return TRY(unary_minus(global_object, lhs_result));
+        return TRY(unary_minus(vm, lhs_result));
     case UnaryOp::Typeof:
         return Value { js_string(vm, lhs_result.typeof()) };
     case UnaryOp::Void:
@@ -1496,20 +1517,22 @@ Completion UnaryExpression::execute(Interpreter& interpreter, GlobalObject& glob
     VERIFY_NOT_REACHED();
 }
 
-Completion SuperExpression::execute(Interpreter&, GlobalObject&) const
+Completion SuperExpression::execute(Interpreter&) const
 {
     // The semantics for SuperExpression are handled in CallExpression and SuperCall.
     VERIFY_NOT_REACHED();
 }
 
-Completion ClassElement::execute(Interpreter&, GlobalObject&) const
+Completion ClassElement::execute(Interpreter&) const
 {
     // Note: The semantics of class element are handled in class_element_evaluation
     VERIFY_NOT_REACHED();
 }
 
-static ThrowCompletionOr<ClassElementName> class_key_to_property_name(Interpreter& interpreter, GlobalObject& global_object, Expression const& key)
+static ThrowCompletionOr<ClassElementName> class_key_to_property_name(Interpreter& interpreter, Expression const& key)
 {
+    auto& vm = interpreter.vm();
+
     if (is<PrivateIdentifier>(key)) {
         auto& private_identifier = static_cast<PrivateIdentifier const&>(key);
         auto* private_environment = interpreter.vm().running_execution_context().private_environment;
@@ -1517,21 +1540,21 @@ static ThrowCompletionOr<ClassElementName> class_key_to_property_name(Interprete
         return ClassElementName { private_environment->resolve_private_identifier(private_identifier.string()) };
     }
 
-    auto prop_key = TRY(key.execute(interpreter, global_object)).release_value();
+    auto prop_key = TRY(key.execute(interpreter)).release_value();
 
     if (prop_key.is_object())
-        prop_key = TRY(prop_key.to_primitive(global_object, Value::PreferredType::String));
+        prop_key = TRY(prop_key.to_primitive(vm, Value::PreferredType::String));
 
-    auto property_key = TRY(PropertyKey::from_value(global_object, prop_key));
+    auto property_key = TRY(PropertyKey::from_value(vm, prop_key));
     return ClassElementName { property_key };
 }
 
 // 15.4.5 Runtime Semantics: MethodDefinitionEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-methoddefinitionevaluation
-ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluation(Interpreter& interpreter, GlobalObject& global_object, Object& target) const
+ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluation(Interpreter& interpreter, Object& target) const
 {
-    auto property_key_or_private_name = TRY(class_key_to_property_name(interpreter, global_object, *m_key));
+    auto property_key_or_private_name = TRY(class_key_to_property_name(interpreter, *m_key));
 
-    auto method_value = TRY(m_function->execute(interpreter, global_object)).release_value();
+    auto method_value = TRY(m_function->execute(interpreter)).release_value();
 
     auto function_handle = make_handle(&method_value.as_function());
 
@@ -1606,7 +1629,7 @@ public:
     {
     }
 
-    Completion execute(Interpreter& interpreter, GlobalObject& global_object) const override
+    Completion execute(Interpreter& interpreter) const override
     {
         // 1. Assert: argumentsList is empty.
         VERIFY(interpreter.vm().argument_count() == 0);
@@ -1619,7 +1642,7 @@ public:
         // 4. Else,
         //    a. Let rhs be the result of evaluating AssignmentExpression.
         //    b. Let value be ? GetValue(rhs).
-        auto value = TRY(interpreter.vm().named_evaluation_if_anonymous_function(global_object, m_expression, m_class_field_identifier_name));
+        auto value = TRY(interpreter.vm().named_evaluation_if_anonymous_function(m_expression, m_class_field_identifier_name));
 
         // 5. Return Completion Record { [[Type]]: return, [[Value]]: value, [[Target]]: empty }.
         return { Completion::Type::Return, value, {} };
@@ -1637,9 +1660,12 @@ private:
 };
 
 // 15.7.10 Runtime Semantics: ClassFieldDefinitionEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-classfielddefinitionevaluation
-ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation(Interpreter& interpreter, GlobalObject& global_object, Object& target) const
+ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation(Interpreter& interpreter, Object& target) const
 {
-    auto property_key_or_private_name = TRY(class_key_to_property_name(interpreter, global_object, *m_key));
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
+
+    auto property_key_or_private_name = TRY(class_key_to_property_name(interpreter, *m_key));
     Handle<ECMAScriptFunctionObject> initializer {};
     if (m_initializer) {
         auto copy_initializer = m_initializer;
@@ -1653,7 +1679,7 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation
 
         // FIXME: A potential optimization is not creating the functions here since these are never directly accessible.
         auto function_code = create_ast_node<ClassFieldInitializerStatement>(m_initializer->source_range(), copy_initializer.release_nonnull(), name);
-        initializer = make_handle(ECMAScriptFunctionObject::create(interpreter.global_object(), String::empty(), String::empty(), *function_code, {}, 0, interpreter.lexical_environment(), interpreter.vm().running_execution_context().private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false, property_key_or_private_name));
+        initializer = make_handle(ECMAScriptFunctionObject::create(realm, String::empty(), String::empty(), *function_code, {}, 0, interpreter.lexical_environment(), interpreter.vm().running_execution_context().private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false, property_key_or_private_name));
         initializer->make_method(target);
     }
 
@@ -1683,8 +1709,11 @@ Optional<FlyString> ClassMethod::private_bound_identifier() const
 }
 
 // 15.7.11 Runtime Semantics: ClassStaticBlockDefinitionEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-classstaticblockdefinitionevaluation
-ThrowCompletionOr<ClassElement::ClassValue> StaticInitializer::class_element_evaluation(Interpreter& interpreter, GlobalObject& global_object, Object& home_object) const
+ThrowCompletionOr<ClassElement::ClassValue> StaticInitializer::class_element_evaluation(Interpreter& interpreter, Object& home_object) const
 {
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
+
     // 1. Let lex be the running execution context's LexicalEnvironment.
     auto* lexical_environment = interpreter.vm().running_execution_context().lexical_environment;
 
@@ -1695,7 +1724,7 @@ ThrowCompletionOr<ClassElement::ClassValue> StaticInitializer::class_element_eva
     // 4. Let formalParameters be an instance of the production FormalParameters : [empty] .
     // 5. Let bodyFunction be OrdinaryFunctionCreate(%Function.prototype%, sourceText, formalParameters, ClassStaticBlockBody, non-lexical-this, lex, privateEnv).
     // Note: The function bodyFunction is never directly accessible to ECMAScript code.
-    auto* body_function = ECMAScriptFunctionObject::create(global_object, String::empty(), String::empty(), *m_function_body, {}, 0, lexical_environment, private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false);
+    auto* body_function = ECMAScriptFunctionObject::create(realm, String::empty(), String::empty(), *m_function_body, {}, 0, lexical_environment, private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false);
 
     // 6. Perform MakeMethod(bodyFunction, homeObject).
     body_function->make_method(home_object);
@@ -1706,13 +1735,13 @@ ThrowCompletionOr<ClassElement::ClassValue> StaticInitializer::class_element_eva
 
 // 15.7.16 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-class-definitions-runtime-semantics-evaluation
 // ClassExpression : class BindingIdentifier ClassTail
-Completion ClassExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ClassExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Let className be StringValue of BindingIdentifier.
     // 2. Let value be ? ClassDefinitionEvaluation of ClassTail with arguments className and className.
-    auto* value = TRY(class_definition_evaluation(interpreter, global_object, m_name, m_name.is_null() ? "" : m_name));
+    auto* value = TRY(class_definition_evaluation(interpreter, m_name, m_name.is_null() ? "" : m_name));
 
     // 3. Set value.[[SourceText]] to the source text matched by ClassExpression.
     value->set_source_text(m_source_text);
@@ -1722,12 +1751,14 @@ Completion ClassExpression::execute(Interpreter& interpreter, GlobalObject& glob
 }
 
 // 15.7.15 Runtime Semantics: BindingClassDeclarationEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-bindingclassdeclarationevaluation
-static ThrowCompletionOr<Value> binding_class_declaration_evaluation(Interpreter& interpreter, GlobalObject& global_object, ClassExpression const& class_expression)
+static ThrowCompletionOr<Value> binding_class_declaration_evaluation(Interpreter& interpreter, ClassExpression const& class_expression)
 {
+    auto& vm = interpreter.vm();
+
     // ClassDeclaration : class ClassTail
     if (!class_expression.has_name()) {
         // 1. Let value be ? ClassDefinitionEvaluation of ClassTail with arguments undefined and "default".
-        auto value = TRY(class_expression.class_definition_evaluation(interpreter, global_object, {}, "default"));
+        auto value = TRY(class_expression.class_definition_evaluation(interpreter, {}, "default"));
 
         // 2. Set value.[[SourceText]] to the source text matched by ClassDeclaration.
         value->set_source_text(class_expression.source_text());
@@ -1743,7 +1774,7 @@ static ThrowCompletionOr<Value> binding_class_declaration_evaluation(Interpreter
     VERIFY(!class_name.is_empty());
 
     // 2. Let value be ? ClassDefinitionEvaluation of ClassTail with arguments className and className.
-    auto value = TRY(class_expression.class_definition_evaluation(interpreter, global_object, class_name, class_name));
+    auto value = TRY(class_expression.class_definition_evaluation(interpreter, class_name, class_name));
 
     // 3. Set value.[[SourceText]] to the source text matched by ClassDeclaration.
     value->set_source_text(class_expression.source_text());
@@ -1752,7 +1783,7 @@ static ThrowCompletionOr<Value> binding_class_declaration_evaluation(Interpreter
     auto* env = interpreter.lexical_environment();
 
     // 5. Perform ? InitializeBoundName(className, value, env).
-    TRY(initialize_bound_name(global_object, class_name, value, env));
+    TRY(initialize_bound_name(vm, class_name, value, env));
 
     // 6. Return value.
     return value;
@@ -1760,21 +1791,23 @@ static ThrowCompletionOr<Value> binding_class_declaration_evaluation(Interpreter
 
 // 15.7.16 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-class-definitions-runtime-semantics-evaluation
 // ClassDeclaration : class BindingIdentifier ClassTail
-Completion ClassDeclaration::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ClassDeclaration::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Perform ? BindingClassDeclarationEvaluation of this ClassDeclaration.
-    (void)TRY(binding_class_declaration_evaluation(interpreter, global_object, m_class_expression));
+    (void)TRY(binding_class_declaration_evaluation(interpreter, m_class_expression));
 
     // 2. Return empty.
     return Optional<Value> {};
 }
 
 // 15.7.14 Runtime Semantics: ClassDefinitionEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
-ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_evaluation(Interpreter& interpreter, GlobalObject& global_object, FlyString const& binding_name, FlyString const& class_name) const
+ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_evaluation(Interpreter& interpreter, FlyString const& binding_name, FlyString const& class_name) const
 {
     auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
+
     auto* environment = vm.lexical_environment();
     VERIFY(environment);
     auto* class_environment = new_declarative_environment(*environment);
@@ -1785,7 +1818,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
     };
 
     if (!binding_name.is_null())
-        MUST(class_environment->create_immutable_binding(global_object, binding_name, true));
+        MUST(class_environment->create_immutable_binding(vm, binding_name, true));
 
     auto* outer_private_environment = vm.running_execution_context().private_environment;
     auto* class_private_environment = new_private_environment(vm, outer_private_environment);
@@ -1807,22 +1840,22 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
 
         Value super_class;
 
-        auto reference = TRY(m_super_class->to_reference(interpreter, global_object));
+        auto reference = TRY(m_super_class->to_reference(interpreter));
         if (reference.is_valid_reference()) {
-            super_class = TRY(reference.get_value(global_object));
+            super_class = TRY(reference.get_value(vm));
         } else {
-            super_class = TRY(m_super_class->execute(interpreter, global_object)).release_value();
+            super_class = TRY(m_super_class->execute(interpreter)).release_value();
         }
         vm.running_execution_context().lexical_environment = environment;
 
         if (super_class.is_null()) {
             proto_parent = nullptr;
         } else if (!super_class.is_constructor()) {
-            return vm.throw_completion<TypeError>(global_object, ErrorType::ClassExtendsValueNotAConstructorOrNull, super_class.to_string_without_side_effects());
+            return vm.throw_completion<TypeError>(ErrorType::ClassExtendsValueNotAConstructorOrNull, super_class.to_string_without_side_effects());
         } else {
-            auto super_class_prototype = TRY(super_class.get(global_object, vm.names.prototype));
+            auto super_class_prototype = TRY(super_class.get(vm, vm.names.prototype));
             if (!super_class_prototype.is_null() && !super_class_prototype.is_object())
-                return vm.throw_completion<TypeError>(global_object, ErrorType::ClassExtendsValueInvalidPrototype, super_class_prototype.to_string_without_side_effects());
+                return vm.throw_completion<TypeError>(ErrorType::ClassExtendsValueInvalidPrototype, super_class_prototype.to_string_without_side_effects());
 
             if (super_class_prototype.is_null())
                 proto_parent = nullptr;
@@ -1833,7 +1866,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
         }
     }
 
-    auto* prototype = Object::create(global_object, proto_parent);
+    auto* prototype = Object::create(realm, proto_parent);
     VERIFY(prototype);
 
     vm.running_execution_context().lexical_environment = class_environment;
@@ -1843,7 +1876,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
     };
 
     // FIXME: Step 14.a is done in the parser. By using a synthetic super(...args) which does not call @@iterator of %Array.prototype%
-    auto class_constructor_value = TRY(m_constructor->execute(interpreter, global_object)).release_value();
+    auto class_constructor_value = TRY(m_constructor->execute(interpreter)).release_value();
 
     update_function_name(class_constructor_value, class_name);
 
@@ -1868,7 +1901,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
 
     for (auto const& element : m_elements) {
         // Note: All ClassElementEvaluation start with evaluating the name (or we fake it).
-        auto element_value = TRY(element.class_element_evaluation(interpreter, global_object, element.is_static() ? *class_constructor : *prototype));
+        auto element_value = TRY(element.class_element_evaluation(interpreter, element.is_static() ? *class_constructor : *prototype));
 
         if (element_value.has<PrivateElement>()) {
             auto& container = element.is_static() ? static_private_methods : instance_private_methods;
@@ -1910,7 +1943,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
     restore_environment.disarm();
 
     if (!binding_name.is_null())
-        MUST(class_environment->initialize_binding(global_object, binding_name, class_constructor));
+        MUST(class_environment->initialize_binding(vm, binding_name, class_constructor));
 
     for (auto& field : instance_fields)
         class_constructor->add_field(field);
@@ -1929,7 +1962,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
             [&](Handle<ECMAScriptFunctionObject> static_block_function) -> ThrowCompletionOr<void> {
                 VERIFY(!static_block_function.is_null());
                 // We discard any value returned here.
-                TRY(call(global_object, *static_block_function.cell(), class_constructor_value));
+                TRY(call(vm, *static_block_function.cell(), class_constructor_value));
                 return {};
             }));
     }
@@ -2496,16 +2529,17 @@ void ForAwaitOfStatement::dump(int indent) const
 }
 
 // 13.1.3 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-identifiers-runtime-semantics-evaluation
-Completion Identifier::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion Identifier::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // 1. Return ? ResolveBinding(StringValue of Identifier).
-    auto reference = TRY(interpreter.vm().resolve_binding(m_string));
+    auto reference = TRY(vm.resolve_binding(m_string));
 
     // NOTE: The spec wants us to return the reference directly; this is not possible with ASTNode::execute() (short of letting it return a variant).
     // So, instead of calling GetValue at the call site, we do it here.
-    return TRY(reference.get_value(global_object));
+    return TRY(reference.get_value(vm));
 }
 
 void Identifier::dump(int indent) const
@@ -2514,7 +2548,7 @@ void Identifier::dump(int indent) const
     outln("Identifier \"{}\"", m_string);
 }
 
-Completion PrivateIdentifier::execute(Interpreter&, GlobalObject&) const
+Completion PrivateIdentifier::execute(Interpreter&) const
 {
     // Note: This should be handled by either the member expression this is part of
     //       or the binary expression in the case of `#foo in bar`.
@@ -2533,19 +2567,20 @@ void SpreadExpression::dump(int indent) const
     m_target->dump(indent + 1);
 }
 
-Completion SpreadExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion SpreadExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
-    return m_target->execute(interpreter, global_object);
+    return m_target->execute(interpreter);
 }
 
 // 13.2.1.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-this-keyword-runtime-semantics-evaluation
-Completion ThisExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ThisExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // 1. Return ? ResolveThisBinding().
-    return interpreter.vm().resolve_this_binding(global_object);
+    return vm.resolve_this_binding();
 }
 
 void ThisExpression::dump(int indent) const
@@ -2554,9 +2589,10 @@ void ThisExpression::dump(int indent) const
 }
 
 // 13.15.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-assignment-operators-runtime-semantics-evaluation
-Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion AssignmentExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     if (m_op == AssignmentOp::Assignment) {
         // AssignmentExpression : LeftHandSideExpression = AssignmentExpression
@@ -2565,7 +2601,7 @@ Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject&
             [&](NonnullRefPtr<Expression> const& lhs) -> ThrowCompletionOr<Value> {
                 // a. Let lref be the result of evaluating LeftHandSideExpression.
                 // b. ReturnIfAbrupt(lref).
-                auto reference = TRY(lhs->to_reference(interpreter, global_object));
+                auto reference = TRY(lhs->to_reference(interpreter));
 
                 Value rhs_result;
 
@@ -2573,17 +2609,17 @@ Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject&
                 if (lhs->is_identifier()) {
                     // i. Let rval be ? NamedEvaluation of AssignmentExpression with argument lref.[[ReferencedName]].
                     auto& identifier_name = static_cast<Identifier const&>(*lhs).string();
-                    rhs_result = TRY(interpreter.vm().named_evaluation_if_anonymous_function(global_object, m_rhs, identifier_name));
+                    rhs_result = TRY(vm.named_evaluation_if_anonymous_function(m_rhs, identifier_name));
                 }
                 // d. Else,
                 else {
                     // i. Let rref be the result of evaluating AssignmentExpression.
                     // ii. Let rval be ? GetValue(rref).
-                    rhs_result = TRY(m_rhs->execute(interpreter, global_object)).release_value();
+                    rhs_result = TRY(m_rhs->execute(interpreter)).release_value();
                 }
 
                 // e. Perform ? PutValue(lref, rval).
-                TRY(reference.put_value(global_object, rhs_result));
+                TRY(reference.put_value(vm, rhs_result));
 
                 // f. Return rval.
                 return rhs_result;
@@ -2592,10 +2628,10 @@ Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject&
             [&](NonnullRefPtr<BindingPattern> const& pattern) -> ThrowCompletionOr<Value> {
                 // 3. Let rref be the result of evaluating AssignmentExpression.
                 // 4. Let rval be ? GetValue(rref).
-                auto rhs_result = TRY(m_rhs->execute(interpreter, global_object)).release_value();
+                auto rhs_result = TRY(m_rhs->execute(interpreter)).release_value();
 
                 // 5. Perform ? DestructuringAssignmentEvaluation of assignmentPattern with argument rval.
-                TRY(interpreter.vm().destructuring_assignment_evaluation(pattern, rhs_result, global_object));
+                TRY(vm.destructuring_assignment_evaluation(pattern, rhs_result));
 
                 // 6. Return rval.
                 return rhs_result;
@@ -2605,10 +2641,10 @@ Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject&
 
     // 1. Let lref be the result of evaluating LeftHandSideExpression.
     auto& lhs_expression = *m_lhs.get<NonnullRefPtr<Expression>>();
-    auto reference = TRY(lhs_expression.to_reference(interpreter, global_object));
+    auto reference = TRY(lhs_expression.to_reference(interpreter));
 
     // 2. Let lval be ? GetValue(lref).
-    auto lhs_result = TRY(reference.get_value(global_object));
+    auto lhs_result = TRY(reference.get_value(vm));
 
     //  AssignmentExpression : LeftHandSideExpression {&&=, ||=, ??=} AssignmentExpression
     if (m_op == AssignmentOp::AndAssignment || m_op == AssignmentOp::OrAssignment || m_op == AssignmentOp::NullishAssignment) {
@@ -2646,17 +2682,17 @@ Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject&
         if (lhs_expression.is_identifier()) {
             // a. Let rval be ? NamedEvaluation of AssignmentExpression with argument lref.[[ReferencedName]].
             auto& identifier_name = static_cast<Identifier const&>(lhs_expression).string();
-            rhs_result = TRY(interpreter.vm().named_evaluation_if_anonymous_function(global_object, m_rhs, identifier_name));
+            rhs_result = TRY(interpreter.vm().named_evaluation_if_anonymous_function(m_rhs, identifier_name));
         }
         // 6. Else,
         else {
             // a. Let rref be the result of evaluating AssignmentExpression.
             // b. Let rval be ? GetValue(rref).
-            rhs_result = TRY(m_rhs->execute(interpreter, global_object)).release_value();
+            rhs_result = TRY(m_rhs->execute(interpreter)).release_value();
         }
 
         // 7. Perform ? PutValue(lref, rval).
-        TRY(reference.put_value(global_object, rhs_result));
+        TRY(reference.put_value(vm, rhs_result));
 
         // 8. Return rval.
         return rhs_result;
@@ -2666,47 +2702,47 @@ Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject&
 
     // 3. Let rref be the result of evaluating AssignmentExpression.
     // 4. Let rval be ? GetValue(rref).
-    auto rhs_result = TRY(m_rhs->execute(interpreter, global_object)).release_value();
+    auto rhs_result = TRY(m_rhs->execute(interpreter)).release_value();
 
     // 5. Let assignmentOpText be the source text matched by AssignmentOperator.
     // 6. Let opText be the sequence of Unicode code points associated with assignmentOpText in the following table:
     // 7. Let r be ? ApplyStringOrNumericBinaryOperator(lval, opText, rval).
     switch (m_op) {
     case AssignmentOp::AdditionAssignment:
-        rhs_result = TRY(add(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(add(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::SubtractionAssignment:
-        rhs_result = TRY(sub(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(sub(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::MultiplicationAssignment:
-        rhs_result = TRY(mul(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(mul(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::DivisionAssignment:
-        rhs_result = TRY(div(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(div(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::ModuloAssignment:
-        rhs_result = TRY(mod(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(mod(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::ExponentiationAssignment:
-        rhs_result = TRY(exp(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(exp(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::BitwiseAndAssignment:
-        rhs_result = TRY(bitwise_and(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(bitwise_and(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::BitwiseOrAssignment:
-        rhs_result = TRY(bitwise_or(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(bitwise_or(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::BitwiseXorAssignment:
-        rhs_result = TRY(bitwise_xor(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(bitwise_xor(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::LeftShiftAssignment:
-        rhs_result = TRY(left_shift(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(left_shift(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::RightShiftAssignment:
-        rhs_result = TRY(right_shift(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(right_shift(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::UnsignedRightShiftAssignment:
-        rhs_result = TRY(unsigned_right_shift(global_object, lhs_result, rhs_result));
+        rhs_result = TRY(unsigned_right_shift(vm, lhs_result, rhs_result));
         break;
     case AssignmentOp::Assignment:
     case AssignmentOp::AndAssignment:
@@ -2716,7 +2752,7 @@ Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject&
     }
 
     // 8. Perform ? PutValue(lref, r).
-    TRY(reference.put_value(global_object, rhs_result));
+    TRY(reference.put_value(vm, rhs_result));
 
     // 9. Return r.
     return rhs_result;
@@ -2726,16 +2762,17 @@ Completion AssignmentExpression::execute(Interpreter& interpreter, GlobalObject&
 // 13.4.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-postfix-decrement-operator-runtime-semantics-evaluation
 // 13.4.4.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-prefix-increment-operator-runtime-semantics-evaluation
 // 13.4.5.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-prefix-decrement-operator-runtime-semantics-evaluation
-Completion UpdateExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion UpdateExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // 1. Let expr be the result of evaluating <Expression>.
-    auto reference = TRY(m_argument->to_reference(interpreter, global_object));
+    auto reference = TRY(m_argument->to_reference(interpreter));
 
     // 2. Let oldValue be ? ToNumeric(? GetValue(expr)).
-    auto old_value = TRY(reference.get_value(global_object));
-    old_value = TRY(old_value.to_numeric(global_object));
+    auto old_value = TRY(reference.get_value(vm));
+    old_value = TRY(old_value.to_numeric(vm));
 
     Value new_value;
     switch (m_op) {
@@ -2770,7 +2807,7 @@ Completion UpdateExpression::execute(Interpreter& interpreter, GlobalObject& glo
     }
 
     // 5. Perform ? PutValue(expr, newValue).
-    TRY(reference.put_value(global_object, new_value));
+    TRY(reference.put_value(vm, new_value));
 
     // 6. Return newValue.
     // 6. Return oldValue.
@@ -2864,41 +2901,42 @@ void UpdateExpression::dump(int indent) const
 
 // 14.3.1.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-let-and-const-declarations-runtime-semantics-evaluation
 // 14.3.2.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-variable-statement-runtime-semantics-evaluation
-Completion VariableDeclaration::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion VariableDeclaration::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     for (auto& declarator : m_declarations) {
         if (auto* init = declarator.init()) {
             TRY(declarator.target().visit(
                 [&](NonnullRefPtr<Identifier> const& id) -> ThrowCompletionOr<void> {
-                    auto reference = TRY(id->to_reference(interpreter, global_object));
-                    auto initializer_result = TRY(interpreter.vm().named_evaluation_if_anonymous_function(global_object, *init, id->string()));
+                    auto reference = TRY(id->to_reference(interpreter));
+                    auto initializer_result = TRY(interpreter.vm().named_evaluation_if_anonymous_function(*init, id->string()));
                     VERIFY(!initializer_result.is_empty());
 
                     if (m_declaration_kind == DeclarationKind::Var)
-                        return reference.put_value(global_object, initializer_result);
+                        return reference.put_value(vm, initializer_result);
                     else
-                        return reference.initialize_referenced_binding(global_object, initializer_result);
+                        return reference.initialize_referenced_binding(vm, initializer_result);
                 },
                 [&](NonnullRefPtr<BindingPattern> const& pattern) -> ThrowCompletionOr<void> {
-                    auto initializer_result = TRY(init->execute(interpreter, global_object)).release_value();
+                    auto initializer_result = TRY(init->execute(interpreter)).release_value();
 
                     Environment* environment = m_declaration_kind == DeclarationKind::Var ? nullptr : interpreter.lexical_environment();
 
-                    return interpreter.vm().binding_initialization(pattern, initializer_result, environment, global_object);
+                    return vm.binding_initialization(pattern, initializer_result, environment);
                 }));
         } else if (m_declaration_kind != DeclarationKind::Var) {
             VERIFY(declarator.target().has<NonnullRefPtr<Identifier>>());
             auto& identifier = declarator.target().get<NonnullRefPtr<Identifier>>();
-            auto reference = TRY(identifier->to_reference(interpreter, global_object));
-            TRY(reference.initialize_referenced_binding(global_object, js_undefined()));
+            auto reference = TRY(identifier->to_reference(interpreter));
+            TRY(reference.initialize_referenced_binding(vm, js_undefined()));
         }
     }
     return normal_completion({});
 }
 
-Completion VariableDeclarator::execute(Interpreter& interpreter, GlobalObject&) const
+Completion VariableDeclarator::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -2982,7 +3020,7 @@ void ExpressionStatement::dump(int indent) const
     m_expression->dump(indent + 1);
 }
 
-Completion ObjectProperty::execute(Interpreter& interpreter, GlobalObject&) const
+Completion ObjectProperty::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -2991,27 +3029,29 @@ Completion ObjectProperty::execute(Interpreter& interpreter, GlobalObject&) cons
 }
 
 // 13.2.5.4 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-object-initializer-runtime-semantics-evaluation
-Completion ObjectExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ObjectExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let obj be OrdinaryObjectCreate(%Object.prototype%).
-    auto* object = Object::create(global_object, global_object.object_prototype());
+    auto* object = Object::create(realm, realm.global_object().object_prototype());
 
     // 2. Perform ? PropertyDefinitionEvaluation of PropertyDefinitionList with argument obj.
     for (auto& property : m_properties) {
-        auto key = TRY(property.key().execute(interpreter, global_object)).release_value();
+        auto key = TRY(property.key().execute(interpreter)).release_value();
 
         // PropertyDefinition : ... AssignmentExpression
         if (property.type() == ObjectProperty::Type::Spread) {
             // 4. Perform ? CopyDataProperties(object, fromValue, excludedNames).
-            TRY(object->copy_data_properties(key, {}, global_object));
+            TRY(object->copy_data_properties(vm, key, {}));
 
             // 5. Return unused.
             continue;
         }
 
-        auto value = TRY(property.value().execute(interpreter, global_object)).release_value();
+        auto value = TRY(property.value().execute(interpreter)).release_value();
 
         // 8. If isProtoSetter is true, then
         if (property.type() == ObjectProperty::Type::ProtoSetter) {
@@ -3027,7 +3067,7 @@ Completion ObjectExpression::execute(Interpreter& interpreter, GlobalObject& glo
         if (value.is_function() && property.is_method())
             static_cast<ECMAScriptFunctionObject&>(value.as_function()).set_home_object(object);
 
-        auto property_key = TRY(PropertyKey::from_value(global_object, key));
+        auto property_key = TRY(PropertyKey::from_value(vm, key));
         auto name = TRY(get_function_property_name(property_key));
         if (property.type() == ObjectProperty::Type::Getter) {
             name = String::formatted("get {}", name);
@@ -3078,12 +3118,13 @@ String MemberExpression::to_string_approximation() const
 }
 
 // 13.3.2.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-property-accessors-runtime-semantics-evaluation
-Completion MemberExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion MemberExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
-    auto reference = TRY(to_reference(interpreter, global_object));
-    return TRY(reference.get_value(global_object));
+    auto reference = TRY(to_reference(interpreter));
+    return TRY(reference.get_value(vm));
 }
 
 bool MemberExpression::ends_in_private_name() const
@@ -3128,12 +3169,14 @@ void OptionalChain::dump(int indent) const
     }
 }
 
-ThrowCompletionOr<OptionalChain::ReferenceAndValue> OptionalChain::to_reference_and_value(Interpreter& interpreter, GlobalObject& global_object) const
+ThrowCompletionOr<OptionalChain::ReferenceAndValue> OptionalChain::to_reference_and_value(Interpreter& interpreter) const
 {
-    auto base_reference = TRY(m_base->to_reference(interpreter, global_object));
+    auto& vm = interpreter.vm();
+
+    auto base_reference = TRY(m_base->to_reference(interpreter));
     auto base = base_reference.is_unresolvable()
-        ? TRY(m_base->execute(interpreter, global_object)).release_value()
-        : TRY(base_reference.get_value(global_object));
+        ? TRY(m_base->execute(interpreter)).release_value()
+        : TRY(base_reference.get_value(vm));
 
     for (auto& reference : m_references) {
         auto is_optional = reference.visit([](auto& ref) { return ref.mode; }) == Mode::Optional;
@@ -3166,10 +3209,10 @@ ThrowCompletionOr<OptionalChain::ReferenceAndValue> OptionalChain::to_reference_
             });
         if (is<CallExpression>(*expression)) {
             base_reference = JS::Reference {};
-            base = TRY(expression->execute(interpreter, global_object)).release_value();
+            base = TRY(expression->execute(interpreter)).release_value();
         } else {
-            base_reference = TRY(expression->to_reference(interpreter, global_object));
-            base = TRY(base_reference.get_value(global_object));
+            base_reference = TRY(expression->to_reference(interpreter));
+            base = TRY(base_reference.get_value(vm));
         }
     }
 
@@ -3177,15 +3220,15 @@ ThrowCompletionOr<OptionalChain::ReferenceAndValue> OptionalChain::to_reference_
 }
 
 // 13.3.9.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-optional-chaining-evaluation
-Completion OptionalChain::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion OptionalChain::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
-    return TRY(to_reference_and_value(interpreter, global_object)).value;
+    return TRY(to_reference_and_value(interpreter)).value;
 }
 
-ThrowCompletionOr<JS::Reference> OptionalChain::to_reference(Interpreter& interpreter, GlobalObject& global_object) const
+ThrowCompletionOr<JS::Reference> OptionalChain::to_reference(Interpreter& interpreter) const
 {
-    return TRY(to_reference_and_value(interpreter, global_object)).reference;
+    return TRY(to_reference_and_value(interpreter)).reference;
 }
 
 void MetaProperty::dump(int indent) const
@@ -3202,9 +3245,11 @@ void MetaProperty::dump(int indent) const
 }
 
 // 13.3.12.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-meta-properties-runtime-semantics-evaluation
-Completion MetaProperty::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion MetaProperty::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
 
     // NewTarget : new . target
     if (m_type == MetaProperty::Type::NewTarget) {
@@ -3229,7 +3274,7 @@ Completion MetaProperty::execute(Interpreter& interpreter, GlobalObject& global_
         // 4. If importMeta is empty, then
         if (import_meta == nullptr) {
             // a. Set importMeta to OrdinaryObjectCreate(null).
-            import_meta = Object::create(global_object, nullptr);
+            import_meta = Object::create(realm, nullptr);
 
             // b. Let importMetaValues be HostGetImportMetaProperties(module).
             auto import_meta_values = interpreter.vm().host_get_import_meta_properties(module);
@@ -3276,35 +3321,37 @@ void ImportCall::dump(int indent) const
 
 // 13.3.10.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-import-call-runtime-semantics-evaluation
 // Also includes assertions from proposal: https://tc39.es/proposal-import-assertions/#sec-import-call-runtime-semantics-evaluation
-Completion ImportCall::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ImportCall::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
 
     // 2.1.1.1 EvaluateImportCall ( specifierExpression [ , optionsExpression ] ), https://tc39.es/proposal-import-assertions/#sec-evaluate-import-call
     //  1. Let referencingScriptOrModule be GetActiveScriptOrModule().
-    auto referencing_script_or_module = interpreter.vm().get_active_script_or_module();
+    auto referencing_script_or_module = vm.get_active_script_or_module();
 
     // 2. Let specifierRef be the result of evaluating specifierExpression.
     // 3. Let specifier be ? GetValue(specifierRef).
-    auto specifier = TRY(m_specifier->execute(interpreter, global_object));
+    auto specifier = TRY(m_specifier->execute(interpreter));
 
     auto options_value = js_undefined();
     // 4. If optionsExpression is present, then
     if (m_options) {
         // a. Let optionsRef be the result of evaluating optionsExpression.
         // b. Let options be ? GetValue(optionsRef).
-        options_value = TRY(m_options->execute(interpreter, global_object)).release_value();
+        options_value = TRY(m_options->execute(interpreter)).release_value();
     }
     // 5. Else,
     // a. Let options be undefined.
     // Note: options_value is undefined by default.
 
     // 6. Let promiseCapability be ! NewPromiseCapability(%Promise%).
-    auto promise_capability = MUST(new_promise_capability(global_object, global_object.promise_constructor()));
+    auto promise_capability = MUST(new_promise_capability(vm, realm.global_object().promise_constructor()));
 
     // 7. Let specifierString be Completion(ToString(specifier)).
     // 8. IfAbruptRejectPromise(specifierString, promiseCapability).
-    auto specifier_string = TRY_OR_REJECT_WITH_VALUE(global_object, promise_capability, specifier->to_string(global_object));
+    auto specifier_string = TRY_OR_REJECT_WITH_VALUE(vm, promise_capability, specifier->to_string(vm));
 
     // 9. Let assertions be a new empty List.
     Vector<ModuleRequest::Assertion> assertions;
@@ -3313,9 +3360,9 @@ Completion ImportCall::execute(Interpreter& interpreter, GlobalObject& global_ob
     if (!options_value.is_undefined()) {
         // a. If Type(options) is not Object,
         if (!options_value.is_object()) {
-            auto* error = TypeError::create(global_object, String::formatted(ErrorType::NotAnObject.message(), "ImportOptions"));
+            auto* error = TypeError::create(realm, String::formatted(ErrorType::NotAnObject.message(), "ImportOptions"));
             // i. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
-            MUST(call(global_object, *promise_capability.reject, js_undefined(), error));
+            MUST(call(vm, *promise_capability.reject, js_undefined(), error));
 
             // ii. Return promiseCapability.[[Promise]].
             return Value { promise_capability.promise };
@@ -3323,15 +3370,15 @@ Completion ImportCall::execute(Interpreter& interpreter, GlobalObject& global_ob
 
         // b. Let assertionsObj be Get(options, "assert").
         // c. IfAbruptRejectPromise(assertionsObj, promiseCapability).
-        auto assertion_object = TRY_OR_REJECT_WITH_VALUE(global_object, promise_capability, options_value.get(global_object, interpreter.vm().names.assert));
+        auto assertion_object = TRY_OR_REJECT_WITH_VALUE(vm, promise_capability, options_value.get(vm, vm.names.assert));
 
         // d. If assertionsObj is not undefined,
         if (!assertion_object.is_undefined()) {
             // i. If Type(assertionsObj) is not Object,
             if (!assertion_object.is_object()) {
-                auto* error = TypeError::create(global_object, String::formatted(ErrorType::NotAnObject.message(), "ImportOptionsAssertions"));
+                auto* error = TypeError::create(realm, String::formatted(ErrorType::NotAnObject.message(), "ImportOptionsAssertions"));
                 // 1. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
-                MUST(call(global_object, *promise_capability.reject, js_undefined(), error));
+                MUST(call(vm, *promise_capability.reject, js_undefined(), error));
 
                 // 2. Return promiseCapability.[[Promise]].
                 return Value { promise_capability.promise };
@@ -3339,24 +3386,24 @@ Completion ImportCall::execute(Interpreter& interpreter, GlobalObject& global_ob
 
             // ii. Let keys be EnumerableOwnPropertyNames(assertionsObj, key).
             // iii. IfAbruptRejectPromise(keys, promiseCapability).
-            auto keys = TRY_OR_REJECT_WITH_VALUE(global_object, promise_capability, assertion_object.as_object().enumerable_own_property_names(Object::PropertyKind::Key));
+            auto keys = TRY_OR_REJECT_WITH_VALUE(vm, promise_capability, assertion_object.as_object().enumerable_own_property_names(Object::PropertyKind::Key));
 
             // iv. Let supportedAssertions be ! HostGetSupportedImportAssertions().
-            auto supported_assertions = interpreter.vm().host_get_supported_import_assertions();
+            auto supported_assertions = vm.host_get_supported_import_assertions();
 
             // v. For each String key of keys,
             for (auto const& key : keys) {
-                auto property_key = MUST(key.to_property_key(global_object));
+                auto property_key = MUST(key.to_property_key(vm));
 
                 // 1. Let value be Get(assertionsObj, key).
                 // 2. IfAbruptRejectPromise(value, promiseCapability).
-                auto value = TRY_OR_REJECT_WITH_VALUE(global_object, promise_capability, assertion_object.get(global_object, property_key));
+                auto value = TRY_OR_REJECT_WITH_VALUE(vm, promise_capability, assertion_object.get(vm, property_key));
 
                 // 3. If Type(value) is not String, then
                 if (!value.is_string()) {
-                    auto* error = TypeError::create(global_object, String::formatted(ErrorType::NotAString.message(), "Import Assertion option value"));
+                    auto* error = TypeError::create(realm, String::formatted(ErrorType::NotAString.message(), "Import Assertion option value"));
                     // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
-                    MUST(call(global_object, *promise_capability.reject, js_undefined(), error));
+                    MUST(call(vm, *promise_capability.reject, js_undefined(), error));
 
                     // b. Return promiseCapability.[[Promise]].
                     return Value { promise_capability.promise };
@@ -3384,7 +3431,7 @@ Completion ImportCall::execute(Interpreter& interpreter, GlobalObject& global_ob
 }
 
 // 13.2.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-literals-runtime-semantics-evaluation
-Completion StringLiteral::execute(Interpreter& interpreter, GlobalObject&) const
+Completion StringLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -3393,7 +3440,7 @@ Completion StringLiteral::execute(Interpreter& interpreter, GlobalObject&) const
 }
 
 // 13.2.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-literals-runtime-semantics-evaluation
-Completion NumericLiteral::execute(Interpreter& interpreter, GlobalObject&) const
+Completion NumericLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -3402,7 +3449,7 @@ Completion NumericLiteral::execute(Interpreter& interpreter, GlobalObject&) cons
 }
 
 // 13.2.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-literals-runtime-semantics-evaluation
-Completion BigIntLiteral::execute(Interpreter& interpreter, GlobalObject&) const
+Completion BigIntLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -3421,7 +3468,7 @@ Completion BigIntLiteral::execute(Interpreter& interpreter, GlobalObject&) const
 }
 
 // 13.2.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-literals-runtime-semantics-evaluation
-Completion BooleanLiteral::execute(Interpreter& interpreter, GlobalObject&) const
+Completion BooleanLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -3431,7 +3478,7 @@ Completion BooleanLiteral::execute(Interpreter& interpreter, GlobalObject&) cons
 }
 
 // 13.2.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-literals-runtime-semantics-evaluation
-Completion NullLiteral::execute(Interpreter& interpreter, GlobalObject&) const
+Completion NullLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -3446,9 +3493,11 @@ void RegExpLiteral::dump(int indent) const
 }
 
 // 13.2.7.3 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-regular-expression-literals-runtime-semantics-evaluation
-Completion RegExpLiteral::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion RegExpLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let pattern be CodePointsToString(BodyText of RegularExpressionLiteral).
     auto pattern = this->pattern();
@@ -3458,7 +3507,7 @@ Completion RegExpLiteral::execute(Interpreter& interpreter, GlobalObject& global
 
     // 3. Return ! RegExpCreate(pattern, flags).
     Regex<ECMA262> regex(parsed_regex(), parsed_pattern(), parsed_flags());
-    return Value { RegExpObject::create(global_object, move(regex), move(pattern), move(flags)) };
+    return Value { RegExpObject::create(realm, move(regex), move(pattern), move(flags)) };
 }
 
 void ArrayExpression::dump(int indent) const
@@ -3475,12 +3524,14 @@ void ArrayExpression::dump(int indent) const
 }
 
 // 13.2.4.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-array-initializer-runtime-semantics-evaluation
-Completion ArrayExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ArrayExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let array be ! ArrayCreate(0).
-    auto* array = MUST(Array::create(global_object, 0));
+    auto* array = MUST(Array::create(realm, 0));
 
     // 2. Perform ? ArrayAccumulation of ElementList with arguments array and 0.
 
@@ -3489,10 +3540,10 @@ Completion ArrayExpression::execute(Interpreter& interpreter, GlobalObject& glob
     for (auto& element : m_elements) {
         auto value = Value();
         if (element) {
-            value = TRY(element->execute(interpreter, global_object)).release_value();
+            value = TRY(element->execute(interpreter)).release_value();
 
             if (is<SpreadExpression>(*element)) {
-                (void)TRY(get_iterator_values(global_object, value, [&](Value iterator_value) -> Optional<Completion> {
+                (void)TRY(get_iterator_values(vm, value, [&](Value iterator_value) -> Optional<Completion> {
                     array->indexed_properties().put(index++, iterator_value, default_attributes);
                     return {};
                 }));
@@ -3514,9 +3565,10 @@ void TemplateLiteral::dump(int indent) const
 }
 
 // 13.2.8.5 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-template-literals-runtime-semantics-evaluation
-Completion TemplateLiteral::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion TemplateLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     StringBuilder string_builder;
 
@@ -3525,10 +3577,10 @@ Completion TemplateLiteral::execute(Interpreter& interpreter, GlobalObject& glob
 
         // 2. Let subRef be the result of evaluating Expression.
         // 3. Let sub be ? GetValue(subRef).
-        auto sub = TRY(expression.execute(interpreter, global_object)).release_value();
+        auto sub = TRY(expression.execute(interpreter)).release_value();
 
         // 4. Let middle be ? ToString(sub).
-        auto string = TRY(sub.to_string(global_object));
+        auto string = TRY(sub.to_string(vm));
         string_builder.append(string);
 
         // 5. Let tail be the result of evaluating TemplateSpans.
@@ -3551,9 +3603,10 @@ void TaggedTemplateLiteral::dump(int indent) const
 }
 
 // 13.3.11.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-tagged-templates-runtime-semantics-evaluation
-Completion TaggedTemplateLiteral::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion TaggedTemplateLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // NOTE: This is both
     //  MemberExpression : MemberExpression TemplateLiteral
@@ -3564,7 +3617,7 @@ Completion TaggedTemplateLiteral::execute(Interpreter& interpreter, GlobalObject
     // 1. Let tagRef be ? Evaluation of CallExpression.
 
     // 2. Let tagFunc be ? GetValue(tagRef).
-    auto tag = TRY(m_tag->execute(interpreter, global_object)).release_value();
+    auto tag = TRY(m_tag->execute(interpreter)).release_value();
 
     // 3. Let thisCall be this CallExpression.
     // 3. Let thisCall be this MemberExpression.
@@ -3573,7 +3626,7 @@ Completion TaggedTemplateLiteral::execute(Interpreter& interpreter, GlobalObject
     // NOTE: A tagged template is a function call where the arguments of the call are derived from a
     //       TemplateLiteral (13.2.8). The actual arguments include a template object (13.2.8.3)
     //       and the values produced by evaluating the expressions embedded within the TemplateLiteral.
-    auto template_ = TRY(get_template_object(interpreter, global_object));
+    auto template_ = TRY(get_template_object(interpreter));
     MarkedVector<Value> arguments(interpreter.vm().heap());
     arguments.append(template_);
 
@@ -3583,17 +3636,19 @@ Completion TaggedTemplateLiteral::execute(Interpreter& interpreter, GlobalObject
     // tag`foo${bar}baz${qux}` -> "foo", bar, "baz", qux, "" -> tag(["foo", "baz", ""], bar, qux)
     // So we want all the odd expressions
     for (size_t i = 1; i < expressions.size(); i += 2)
-        arguments.append(TRY(expressions[i].execute(interpreter, global_object)).release_value());
+        arguments.append(TRY(expressions[i].execute(interpreter)).release_value());
 
     // 5. Return ? EvaluateCall(tagFunc, tagRef, TemplateLiteral, tailCall).
-    return call(global_object, tag, js_undefined(), move(arguments));
+    return call(vm, tag, js_undefined(), move(arguments));
 }
 
 // 13.2.8.3 GetTemplateObject ( templateLiteral ), https://tc39.es/ecma262/#sec-gettemplateobject
-ThrowCompletionOr<Value> TaggedTemplateLiteral::get_template_object(Interpreter& interpreter, GlobalObject& global_object) const
+ThrowCompletionOr<Value> TaggedTemplateLiteral::get_template_object(Interpreter& interpreter) const
 {
+    auto& vm = interpreter.vm();
+
     // 1. Let realm be the current Realm Record.
-    auto* realm = global_object.associated_realm();
+    auto& realm = *vm.current_realm();
 
     // 2. Let templateRegistry be realm.[[TemplateMap]].
     // 3. For each element e of templateRegistry, do
@@ -3601,7 +3656,7 @@ ThrowCompletionOr<Value> TaggedTemplateLiteral::get_template_object(Interpreter&
     //        i. Return e.[[Array]].
     // NOTE: Instead of caching on the realm we cache on the Parse Node side as
     //       this makes it easier to track whether it is the same parse node.
-    if (auto cached_value_or_end = m_cached_values.find(realm); cached_value_or_end != m_cached_values.end())
+    if (auto cached_value_or_end = m_cached_values.find(&realm); cached_value_or_end != m_cached_values.end())
         return Value { cached_value_or_end->value.cell() };
 
     // 4. Let rawStrings be TemplateStrings of templateLiteral with argument true.
@@ -3622,10 +3677,10 @@ ThrowCompletionOr<Value> TaggedTemplateLiteral::get_template_object(Interpreter&
     // 8. Let template be ! ArrayCreate(count).
     // NOTE: We don't set count since we push the values using append which
     //       would then append after count. Same for 9.
-    auto* template_ = MUST(Array::create(global_object, 0));
+    auto* template_ = MUST(Array::create(realm, 0));
 
     // 9. Let rawObj be ! ArrayCreate(count).
-    auto* raw_obj = MUST(Array::create(global_object, 0));
+    auto* raw_obj = MUST(Array::create(realm, 0));
 
     // 10. Let index be 0.
     // 11. Repeat, while index < count,
@@ -3633,7 +3688,7 @@ ThrowCompletionOr<Value> TaggedTemplateLiteral::get_template_object(Interpreter&
         auto cooked_string_index = i * 2;
         // a. Let prop be ! ToString(𝔽(index)).
         // b. Let cookedValue be cookedStrings[index].
-        auto cooked_value = TRY(expressions[cooked_string_index].execute(interpreter, global_object)).release_value();
+        auto cooked_value = TRY(expressions[cooked_string_index].execute(interpreter)).release_value();
 
         // NOTE: If the string contains invalid escapes we get a null expression here,
         //       which we then convert to the expected `undefined` TV. See
@@ -3646,7 +3701,7 @@ ThrowCompletionOr<Value> TaggedTemplateLiteral::get_template_object(Interpreter&
 
         // d. Let rawValue be the String value rawStrings[index].
         // e. Perform ! DefinePropertyOrThrow(rawObj, prop, PropertyDescriptor { [[Value]]: rawValue, [[Writable]]: false, [[Enumerable]]: true, [[Configurable]]: false }).
-        raw_obj->indexed_properties().append(TRY(raw_strings[i].execute(interpreter, global_object)).release_value());
+        raw_obj->indexed_properties().append(TRY(raw_strings[i].execute(interpreter)).release_value());
 
         // f. Set index to index + 1.
     }
@@ -3661,7 +3716,7 @@ ThrowCompletionOr<Value> TaggedTemplateLiteral::get_template_object(Interpreter&
     MUST(template_->set_integrity_level(Object::IntegrityLevel::Frozen));
 
     // 15. Append the Record { [[Site]]: templateLiteral, [[Array]]: template } to templateRegistry.
-    m_cached_values.set(realm, make_handle(template_));
+    m_cached_values.set(&realm, make_handle(template_));
 
     // 16. Return template.
     return template_;
@@ -3714,10 +3769,9 @@ void ThrowStatement::dump(int indent) const
 }
 
 // 14.15.3 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-try-statement-runtime-semantics-evaluation
-Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion TryStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
-
     auto& vm = interpreter.vm();
 
     // 14.15.2 Runtime Semantics: CatchClauseEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-catchclauseevaluation
@@ -3732,13 +3786,13 @@ Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_
             [&](FlyString const& parameter) {
                 // 3. For each element argName of the BoundNames of CatchParameter, do
                 // a. Perform ! catchEnv.CreateMutableBinding(argName, false).
-                MUST(catch_environment->create_mutable_binding(global_object, parameter, false));
+                MUST(catch_environment->create_mutable_binding(vm, parameter, false));
             },
             [&](NonnullRefPtr<BindingPattern> const& pattern) {
                 // 3. For each element argName of the BoundNames of CatchParameter, do
                 pattern->for_each_bound_name([&](auto& name) {
                     // a. Perform ! catchEnv.CreateMutableBinding(argName, false).
-                    MUST(catch_environment->create_mutable_binding(global_object, name, false));
+                    MUST(catch_environment->create_mutable_binding(vm, name, false));
                 });
             });
 
@@ -3748,10 +3802,10 @@ Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_
         // 5. Let status be Completion(BindingInitialization of CatchParameter with arguments thrownValue and catchEnv).
         auto status = m_handler->parameter().visit(
             [&](FlyString const& parameter) {
-                return catch_environment->initialize_binding(global_object, parameter, thrown_value);
+                return catch_environment->initialize_binding(vm, parameter, thrown_value);
             },
             [&](NonnullRefPtr<BindingPattern> const& pattern) {
-                return vm.binding_initialization(pattern, thrown_value, catch_environment, global_object);
+                return vm.binding_initialization(pattern, thrown_value, catch_environment);
             });
 
         // 6. If status is an abrupt completion, then
@@ -3764,7 +3818,7 @@ Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_
         }
 
         // 7. Let B be the result of evaluating Block.
-        auto handler_result = m_handler->body().execute(interpreter, global_object);
+        auto handler_result = m_handler->body().execute(interpreter);
 
         // 8. Set the running execution context's LexicalEnvironment to oldEnv.
         vm.running_execution_context().lexical_environment = old_environment;
@@ -3776,7 +3830,7 @@ Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_
     Completion result;
 
     // 1. Let B be the result of evaluating Block.
-    auto block_result = m_block->execute(interpreter, global_object);
+    auto block_result = m_block->execute(interpreter);
 
     // TryStatement : try Block Catch
     // TryStatement : try Block Catch Finally
@@ -3797,7 +3851,7 @@ Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_
     // TryStatement : try Block Catch Finally
     if (m_finalizer) {
         // 4. Let F be the result of evaluating Finally.
-        auto finalizer_result = m_finalizer->execute(interpreter, global_object);
+        auto finalizer_result = m_finalizer->execute(interpreter);
 
         // 5. If F.[[Type]] is normal, set F to C.
         if (finalizer_result.type() == Completion::Type::Normal)
@@ -3811,7 +3865,7 @@ Completion TryStatement::execute(Interpreter& interpreter, GlobalObject& global_
     return result.update_empty(js_undefined());
 }
 
-Completion CatchClause::execute(Interpreter& interpreter, GlobalObject&) const
+Completion CatchClause::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -3821,13 +3875,13 @@ Completion CatchClause::execute(Interpreter& interpreter, GlobalObject&) const
 }
 
 // 14.14.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-throw-statement-runtime-semantics-evaluation
-Completion ThrowStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ThrowStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Let exprRef be the result of evaluating Expression.
     // 2. Let exprValue be ? GetValue(exprRef).
-    auto value = TRY(m_argument->execute(interpreter, global_object)).release_value();
+    auto value = TRY(m_argument->execute(interpreter)).release_value();
 
     // 3. Return ThrowCompletion(exprValue).
     return throw_completion(value);
@@ -3835,17 +3889,17 @@ Completion ThrowStatement::execute(Interpreter& interpreter, GlobalObject& globa
 
 // 14.1.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-statement-semantics-runtime-semantics-evaluation
 // BreakableStatement : SwitchStatement
-Completion SwitchStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion SwitchStatement::execute(Interpreter& interpreter) const
 {
     // 1. Let newLabelSet be a new empty List.
     // 2. Return ? LabelledEvaluation of this BreakableStatement with argument newLabelSet.
-    return labelled_evaluation(interpreter, global_object, *this, {});
+    return labelled_evaluation(interpreter, *this, {});
 }
 
 // NOTE: Since we don't have the 'BreakableStatement' from the spec as a separate ASTNode that wraps IterationStatement / SwitchStatement,
 // execute() needs to take care of LabelledEvaluation, which in turn calls execute_impl().
 // 14.12.4 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-switch-statement-runtime-semantics-evaluation
-Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject& global_object) const
+Completion SwitchStatement::execute_impl(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -3858,7 +3912,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
 
         // 2. Let exprRef be the result of evaluating the Expression of C.
         // 3. Let clauseSelector be ? GetValue(exprRef).
-        auto clause_selector = TRY(case_clause.test()->execute(interpreter, global_object)).release_value();
+        auto clause_selector = TRY(case_clause.test()->execute(interpreter)).release_value();
 
         // 4. Return IsStrictlyEqual(input, clauseSelector).
         return is_strictly_equal(input, clause_selector);
@@ -3909,7 +3963,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
                 // b. If found is true, then
                 if (found) {
                     // i. Let R be the result of evaluating C.
-                    auto result = case_clause.evaluate_statements(interpreter, global_object);
+                    auto result = case_clause.evaluate_statements(interpreter);
 
                     // ii. If R.[[Value]] is not empty, set V to R.[[Value]].
                     if (result.value().has_value())
@@ -3949,7 +4003,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
                 // b. If found is true, then
                 if (found) {
                     // i. Let R be the result of evaluating C.
-                    auto result = case_clause.evaluate_statements(interpreter, global_object);
+                    auto result = case_clause.evaluate_statements(interpreter);
 
                     // ii. If R.[[Value]] is not empty, set V to R.[[Value]].
                     if (result.value().has_value())
@@ -3983,7 +4037,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
                     // ii. If foundInB is true, then
                     if (found_in_b) {
                         // 1. Let R be the result of evaluating CaseClause C.
-                        auto result = case_clause.evaluate_statements(interpreter, global_object);
+                        auto result = case_clause.evaluate_statements(interpreter);
 
                         // 2. If R.[[Value]] is not empty, set V to R.[[Value]].
                         if (result.value().has_value())
@@ -4001,7 +4055,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
                 return last_value;
 
             // 11. Let R be the result of evaluating DefaultClause.
-            auto result = default_clause->evaluate_statements(interpreter, global_object);
+            auto result = default_clause->evaluate_statements(interpreter);
 
             // 12. If R.[[Value]] is not empty, set V to R.[[Value]].
             if (result.value().has_value())
@@ -4015,7 +4069,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
             // 15. For each CaseClause C of B, do
             for (auto const& case_clause : case_clauses_2) {
                 // a. Let R be the result of evaluating CaseClause C.
-                result = case_clause.evaluate_statements(interpreter, global_object);
+                result = case_clause.evaluate_statements(interpreter);
 
                 // b. If R.[[Value]] is not empty, set V to R.[[Value]].
                 if (result.value().has_value())
@@ -4036,7 +4090,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
     // SwitchStatement : switch ( Expression ) CaseBlock
     // 1. Let exprRef be the result of evaluating Expression.
     // 2. Let switchValue be ? GetValue(exprRef).
-    auto switch_value = TRY(m_discriminant->execute(interpreter, global_object)).release_value();
+    auto switch_value = TRY(m_discriminant->execute(interpreter)).release_value();
 
     // 3. Let oldEnv be the running execution context's LexicalEnvironment.
     auto* old_environment = interpreter.lexical_environment();
@@ -4047,7 +4101,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
         auto* block_environment = new_declarative_environment(*old_environment);
 
         // 5. Perform BlockDeclarationInstantiation(CaseBlock, blockEnv).
-        block_declaration_instantiation(global_object, block_environment);
+        block_declaration_instantiation(interpreter, block_environment);
 
         // 6. Set the running execution context's LexicalEnvironment to blockEnv.
         vm.running_execution_context().lexical_environment = block_environment;
@@ -4063,7 +4117,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter, GlobalObject&
     return result;
 }
 
-Completion SwitchCase::execute(Interpreter& interpreter, GlobalObject&) const
+Completion SwitchCase::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -4073,7 +4127,7 @@ Completion SwitchCase::execute(Interpreter& interpreter, GlobalObject&) const
 }
 
 // 14.9.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-break-statement-runtime-semantics-evaluation
-Completion BreakStatement::execute(Interpreter& interpreter, GlobalObject&) const
+Completion BreakStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -4090,7 +4144,7 @@ Completion BreakStatement::execute(Interpreter& interpreter, GlobalObject&) cons
 }
 
 // 14.8.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-continue-statement-runtime-semantics-evaluation
-Completion ContinueStatement::execute(Interpreter& interpreter, GlobalObject&) const
+Completion ContinueStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -4130,25 +4184,25 @@ void SwitchCase::dump(int indent) const
 }
 
 // 13.14.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-conditional-operator-runtime-semantics-evaluation
-Completion ConditionalExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ConditionalExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
     // 1. Let lref be the result of evaluating ShortCircuitExpression.
     // 2. Let lval be ToBoolean(? GetValue(lref)).
-    auto test_result = TRY(m_test->execute(interpreter, global_object)).release_value();
+    auto test_result = TRY(m_test->execute(interpreter)).release_value();
 
     // 3. If lval is true, then
     if (test_result.to_boolean()) {
         // a. Let trueRef be the result of evaluating the first AssignmentExpression.
         // b. Return ? GetValue(trueRef).
-        return m_consequent->execute(interpreter, global_object);
+        return m_consequent->execute(interpreter);
     }
     // 4. Else,
     else {
         // a. Let falseRef be the result of evaluating the second AssignmentExpression.
         // b. Return ? GetValue(falseRef).
-        return m_alternate->execute(interpreter, global_object);
+        return m_alternate->execute(interpreter);
     }
 }
 
@@ -4174,7 +4228,7 @@ void SequenceExpression::dump(int indent) const
 }
 
 // 13.16.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-comma-operator-runtime-semantics-evaluation
-Completion SequenceExpression::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion SequenceExpression::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -4185,12 +4239,12 @@ Completion SequenceExpression::execute(Interpreter& interpreter, GlobalObject& g
     // 4. Return ? GetValue(rref).
     Value last_value;
     for (auto const& expression : m_expressions)
-        last_value = TRY(expression.execute(interpreter, global_object)).release_value();
+        last_value = TRY(expression.execute(interpreter)).release_value();
     return { move(last_value) };
 }
 
 // 14.16.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-debugger-statement-runtime-semantics-evaluation
-Completion DebuggerStatement::execute(Interpreter& interpreter, GlobalObject&) const
+Completion DebuggerStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -4283,7 +4337,7 @@ void ScopeNode::add_hoisted_function(NonnullRefPtr<FunctionDeclaration> declarat
 }
 
 // 16.2.1.11 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-module-semantics-runtime-semantics-evaluation
-Completion ImportStatement::execute(Interpreter& interpreter, GlobalObject&) const
+Completion ImportStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
 
@@ -4294,14 +4348,15 @@ Completion ImportStatement::execute(Interpreter& interpreter, GlobalObject&) con
 FlyString ExportStatement::local_name_for_default = "*default*";
 
 // 16.2.3.7 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-exports-runtime-semantics-evaluation
-Completion ExportStatement::execute(Interpreter& interpreter, GlobalObject& global_object) const
+Completion ExportStatement::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     if (!is_default_export()) {
         if (m_statement) {
             // 1. Return the result of evaluating <Thing>.
-            return m_statement->execute(interpreter, global_object);
+            return m_statement->execute(interpreter);
         }
 
         // 1. Return empty.
@@ -4313,7 +4368,7 @@ Completion ExportStatement::execute(Interpreter& interpreter, GlobalObject& glob
     // ExportDeclaration : export default HoistableDeclaration
     if (is<FunctionDeclaration>(*m_statement)) {
         // 1. Return the result of evaluating HoistableDeclaration.
-        return m_statement->execute(interpreter, global_object);
+        return m_statement->execute(interpreter);
     }
 
     // ExportDeclaration : export default ClassDeclaration
@@ -4322,7 +4377,7 @@ Completion ExportStatement::execute(Interpreter& interpreter, GlobalObject& glob
         auto const& class_declaration = static_cast<ClassDeclaration const&>(*m_statement);
 
         // 1. Let value be ? BindingClassDeclarationEvaluation of ClassDeclaration.
-        auto value = TRY(binding_class_declaration_evaluation(interpreter, global_object, class_declaration.m_class_expression));
+        auto value = TRY(binding_class_declaration_evaluation(interpreter, class_declaration.m_class_expression));
 
         // 2. Let className be the sole element of BoundNames of ClassDeclaration.
         // 3. If className is "*default*", then
@@ -4339,7 +4394,7 @@ Completion ExportStatement::execute(Interpreter& interpreter, GlobalObject& glob
         auto& class_expression = static_cast<ClassExpression const&>(*m_statement);
 
         // 1. Let value be ? BindingClassDeclarationEvaluation of ClassDeclaration.
-        auto value = TRY(binding_class_declaration_evaluation(interpreter, global_object, class_expression));
+        auto value = TRY(binding_class_declaration_evaluation(interpreter, class_expression));
 
         // 2. Let className be the sole element of BoundNames of ClassDeclaration.
         // 3. If className is "*default*", then
@@ -4350,7 +4405,7 @@ Completion ExportStatement::execute(Interpreter& interpreter, GlobalObject& glob
             auto* env = interpreter.lexical_environment();
 
             // b. Perform ? InitializeBoundName("*default*", value, env).
-            TRY(initialize_bound_name(global_object, ExportStatement::local_name_for_default, value, env));
+            TRY(initialize_bound_name(vm, ExportStatement::local_name_for_default, value, env));
         }
 
         // 4. Return empty.
@@ -4364,13 +4419,13 @@ Completion ExportStatement::execute(Interpreter& interpreter, GlobalObject& glob
     // 2. Else,
     //     a. Let rhs be the result of evaluating AssignmentExpression.
     //     b. Let value be ? GetValue(rhs).
-    auto value = TRY(interpreter.vm().named_evaluation_if_anonymous_function(global_object, *m_statement, "default"));
+    auto value = TRY(vm.named_evaluation_if_anonymous_function(*m_statement, "default"));
 
     // 3. Let env be the running execution context's LexicalEnvironment.
     auto* env = interpreter.lexical_environment();
 
     // 4. Perform ? InitializeBoundName("*default*", value, env).
-    TRY(initialize_bound_name(global_object, ExportStatement::local_name_for_default, value, env));
+    TRY(initialize_bound_name(vm, ExportStatement::local_name_for_default, value, env));
 
     // 5. Return empty.
     return Optional<Value> {};
@@ -4455,53 +4510,59 @@ bool ImportStatement::has_bound_name(FlyString const& name) const
 }
 
 // 14.2.3 BlockDeclarationInstantiation ( code, env ), https://tc39.es/ecma262/#sec-blockdeclarationinstantiation
-void ScopeNode::block_declaration_instantiation(GlobalObject& global_object, Environment* environment) const
+void ScopeNode::block_declaration_instantiation(Interpreter& interpreter, Environment* environment) const
 {
     // See also B.3.2.6 Changes to BlockDeclarationInstantiation, https://tc39.es/ecma262/#sec-web-compat-blockdeclarationinstantiation
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
+
     VERIFY(environment);
-    auto* private_environment = global_object.vm().running_execution_context().private_environment;
+    auto* private_environment = vm.running_execution_context().private_environment;
     // Note: All the calls here are ! and thus we do not need to TRY this callback.
     for_each_lexically_scoped_declaration([&](Declaration const& declaration) {
         auto is_constant_declaration = declaration.is_constant_declaration();
         declaration.for_each_bound_name([&](auto const& name) {
             if (is_constant_declaration) {
-                MUST(environment->create_immutable_binding(global_object, name, true));
+                MUST(environment->create_immutable_binding(vm, name, true));
             } else {
                 if (!MUST(environment->has_binding(name)))
-                    MUST(environment->create_mutable_binding(global_object, name, false));
+                    MUST(environment->create_mutable_binding(vm, name, false));
             }
         });
 
         if (is<FunctionDeclaration>(declaration)) {
             auto& function_declaration = static_cast<FunctionDeclaration const&>(declaration);
-            auto* function = ECMAScriptFunctionObject::create(global_object, function_declaration.name(), function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
+            auto* function = ECMAScriptFunctionObject::create(realm, function_declaration.name(), function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
             VERIFY(is<DeclarativeEnvironment>(*environment));
-            static_cast<DeclarativeEnvironment&>(*environment).initialize_or_set_mutable_binding({}, global_object, function_declaration.name(), function);
+            static_cast<DeclarativeEnvironment&>(*environment).initialize_or_set_mutable_binding({}, vm, function_declaration.name(), function);
         }
     });
 }
 
 // 16.1.7 GlobalDeclarationInstantiation ( script, env ), https://tc39.es/ecma262/#sec-globaldeclarationinstantiation
-ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& interpreter, GlobalObject& global_object, GlobalEnvironment& global_environment) const
+ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& interpreter, GlobalEnvironment& global_environment) const
 {
+    auto& vm = interpreter.vm();
+    auto& realm = *vm.current_realm();
+
     // 1. Let lexNames be the LexicallyDeclaredNames of script.
     // 2. Let varNames be the VarDeclaredNames of script.
     // 3. For each element name of lexNames, do
     TRY(for_each_lexically_declared_name([&](FlyString const& name) -> ThrowCompletionOr<void> {
         // a. If env.HasVarDeclaration(name) is true, throw a SyntaxError exception.
         if (global_environment.has_var_declaration(name))
-            return interpreter.vm().throw_completion<SyntaxError>(global_object, ErrorType::TopLevelVariableAlreadyDeclared, name);
+            return vm.throw_completion<SyntaxError>(ErrorType::TopLevelVariableAlreadyDeclared, name);
 
         // b. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
         if (global_environment.has_lexical_declaration(name))
-            return interpreter.vm().throw_completion<SyntaxError>(global_object, ErrorType::TopLevelVariableAlreadyDeclared, name);
+            return vm.throw_completion<SyntaxError>(ErrorType::TopLevelVariableAlreadyDeclared, name);
 
         // c. Let hasRestrictedGlobal be ? env.HasRestrictedGlobalProperty(name).
         auto has_restricted_global = TRY(global_environment.has_restricted_global_property(name));
 
         // d. If hasRestrictedGlobal is true, throw a SyntaxError exception.
         if (has_restricted_global)
-            return interpreter.vm().throw_completion<SyntaxError>(global_object, ErrorType::RestrictedGlobalProperty, name);
+            return vm.throw_completion<SyntaxError>(ErrorType::RestrictedGlobalProperty, name);
 
         return {};
     }));
@@ -4510,7 +4571,7 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& i
     TRY(for_each_var_declared_name([&](auto const& name) -> ThrowCompletionOr<void> {
         // a. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
         if (global_environment.has_lexical_declaration(name))
-            return interpreter.vm().throw_completion<SyntaxError>(global_object, ErrorType::TopLevelVariableAlreadyDeclared, name);
+            return vm.throw_completion<SyntaxError>(ErrorType::TopLevelVariableAlreadyDeclared, name);
 
         return {};
     }));
@@ -4542,7 +4603,7 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& i
 
         // 2. If fnDefinable is false, throw a TypeError exception.
         if (!function_definable)
-            return interpreter.vm().throw_completion<TypeError>(global_object, ErrorType::CannotDeclareGlobalFunction, function.name());
+            return vm.throw_completion<TypeError>(ErrorType::CannotDeclareGlobalFunction, function.name());
 
         // 3. Append fn to declaredFunctionNames.
         // Note: Already done in step iv. above.
@@ -4571,7 +4632,7 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& i
 
             // b. If vnDefinable is false, throw a TypeError exception.
             if (!var_definable)
-                return interpreter.vm().throw_completion<TypeError>(global_object, ErrorType::CannotDeclareGlobalVariable, name);
+                return vm.throw_completion<TypeError>(ErrorType::CannotDeclareGlobalVariable, name);
 
             // c. If vn is not an element of declaredVarNames, then
             // i. Append vn to declaredVarNames.
@@ -4645,12 +4706,12 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& i
             // i. If IsConstantDeclaration of d is true, then
             if (declaration.is_constant_declaration()) {
                 // 1. Perform ? env.CreateImmutableBinding(dn, true).
-                TRY(global_environment.create_immutable_binding(global_object, name, true));
+                TRY(global_environment.create_immutable_binding(vm, name, true));
             }
             // ii. Else,
             else {
                 // 1. Perform ? env.CreateMutableBinding(dn, false).
-                TRY(global_environment.create_mutable_binding(global_object, name, false));
+                TRY(global_environment.create_mutable_binding(vm, name, false));
             }
 
             return {};
@@ -4661,7 +4722,7 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& i
     for (auto& declaration : functions_to_initialize) {
         // a. Let fn be the sole element of the BoundNames of f.
         // b. Let fo be InstantiateFunctionObject of f with arguments env and privateEnv.
-        auto* function = ECMAScriptFunctionObject::create(global_object, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), &global_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object(), declaration.contains_direct_call_to_eval());
+        auto* function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), &global_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object(), declaration.contains_direct_call_to_eval());
 
         // c. Perform ? env.CreateGlobalFunctionBinding(fn, fo, false).
         TRY(global_environment.create_global_function_binding(declaration.name(), function, false));

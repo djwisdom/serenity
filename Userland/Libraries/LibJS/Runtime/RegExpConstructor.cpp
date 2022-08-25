@@ -11,20 +11,20 @@
 
 namespace JS {
 
-RegExpConstructor::RegExpConstructor(GlobalObject& global_object)
-    : NativeFunction(vm().names.RegExp.as_string(), *global_object.function_prototype())
+RegExpConstructor::RegExpConstructor(Realm& realm)
+    : NativeFunction(vm().names.RegExp.as_string(), *realm.global_object().function_prototype())
 {
 }
 
-void RegExpConstructor::initialize(GlobalObject& global_object)
+void RegExpConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     // 22.2.4.1 RegExp.prototype, https://tc39.es/ecma262/#sec-regexp.prototype
-    define_direct_property(vm.names.prototype, global_object.regexp_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.global_object().regexp_prototype(), 0);
 
-    define_native_accessor(*vm.well_known_symbol_species(), symbol_species_getter, {}, Attribute::Configurable);
+    define_native_accessor(realm, *vm.well_known_symbol_species(), symbol_species_getter, {}, Attribute::Configurable);
 
     define_direct_property(vm.names.length, Value(2), Attribute::Configurable);
 }
@@ -33,12 +33,11 @@ void RegExpConstructor::initialize(GlobalObject& global_object)
 ThrowCompletionOr<Value> RegExpConstructor::call()
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
     auto pattern = vm.argument(0);
     auto flags = vm.argument(1);
 
-    bool pattern_is_regexp = TRY(pattern.is_regexp(global_object));
+    bool pattern_is_regexp = TRY(pattern.is_regexp(vm));
 
     if (pattern_is_regexp && flags.is_undefined()) {
         auto pattern_constructor = TRY(pattern.as_object().get(vm.names.constructor));
@@ -53,12 +52,11 @@ ThrowCompletionOr<Value> RegExpConstructor::call()
 ThrowCompletionOr<Object*> RegExpConstructor::construct(FunctionObject&)
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
     auto pattern = vm.argument(0);
     auto flags = vm.argument(1);
 
-    bool pattern_is_regexp = TRY(pattern.is_regexp(global_object));
+    bool pattern_is_regexp = TRY(pattern.is_regexp(vm));
 
     Value pattern_value;
     Value flags_value;
@@ -84,13 +82,13 @@ ThrowCompletionOr<Object*> RegExpConstructor::construct(FunctionObject&)
         flags_value = flags;
     }
 
-    return TRY(regexp_create(global_object, pattern_value, flags_value));
+    return TRY(regexp_create(vm, pattern_value, flags_value));
 }
 
 // 22.2.4.2 get RegExp [ @@species ], https://tc39.es/ecma262/#sec-get-regexp-@@species
 JS_DEFINE_NATIVE_FUNCTION(RegExpConstructor::symbol_species_getter)
 {
-    return vm.this_value(global_object);
+    return vm.this_value();
 }
 
 }

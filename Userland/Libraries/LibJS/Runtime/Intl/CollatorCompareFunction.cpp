@@ -11,20 +11,20 @@
 
 namespace JS::Intl {
 
-CollatorCompareFunction* CollatorCompareFunction::create(GlobalObject& global_object, Collator& collator)
+CollatorCompareFunction* CollatorCompareFunction::create(Realm& realm, Collator& collator)
 {
-    return global_object.heap().allocate<CollatorCompareFunction>(global_object, global_object, collator);
+    return realm.heap().allocate<CollatorCompareFunction>(realm, realm, collator);
 }
 
-CollatorCompareFunction::CollatorCompareFunction(GlobalObject& global_object, Collator& collator)
-    : NativeFunction(*global_object.function_prototype())
+CollatorCompareFunction::CollatorCompareFunction(Realm& realm, Collator& collator)
+    : NativeFunction(*realm.global_object().function_prototype())
     , m_collator(collator)
 {
 }
 
-void CollatorCompareFunction::initialize(GlobalObject& global_object)
+void CollatorCompareFunction::initialize(Realm&)
 {
-    auto& vm = global_object.vm();
+    auto& vm = this->vm();
     define_direct_property(vm.names.length, Value(2), Attribute::Configurable);
     define_direct_property(vm.names.name, js_string(vm, String::empty()), Attribute::Configurable);
 }
@@ -51,7 +51,6 @@ double compare_strings(Collator& collator, Utf8View const& x, Utf8View const& y)
 ThrowCompletionOr<Value> CollatorCompareFunction::call()
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
     // 1. Let collator be F.[[Collator]].
     // 2. Assert: Type(collator) is Object and collator has an [[InitializedCollator]] internal slot.
@@ -59,9 +58,9 @@ ThrowCompletionOr<Value> CollatorCompareFunction::call()
     // 4. If y is not provided, let y be undefined.
 
     // 5. Let X be ? ToString(x).
-    auto x = TRY(vm.argument(0).to_string(global_object));
+    auto x = TRY(vm.argument(0).to_string(vm));
     // 6. Let Y be ? ToString(y).
-    auto y = TRY(vm.argument(1).to_string(global_object));
+    auto y = TRY(vm.argument(1).to_string(vm));
 
     // 7. Return CompareStrings(collator, X, Y).
     return compare_strings(m_collator, Utf8View(x), Utf8View(y));

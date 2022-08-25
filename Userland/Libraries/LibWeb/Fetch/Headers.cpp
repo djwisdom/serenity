@@ -158,14 +158,13 @@ DOM::ExceptionOr<void> Headers::set(String const& name_string, String const& val
 // https://webidl.spec.whatwg.org/#es-iterable, Step 4
 JS::ThrowCompletionOr<void> Headers::for_each(ForEachCallback callback)
 {
-    auto& global_object = wrapper()->global_object();
-    auto& vm = global_object.vm();
+    auto& vm = wrapper()->vm();
 
     // The value pairs to iterate over are the return value of running sort and combine with this’s header list.
     auto value_pairs_to_iterate_over = [&]() -> JS::ThrowCompletionOr<Vector<Fetch::Infrastructure::Header>> {
         auto headers_or_error = m_header_list.sort_and_combine();
         if (headers_or_error.is_error())
-            return vm.throw_completion<JS::InternalError>(global_object, JS::ErrorType::NotEnoughMemoryToAllocate);
+            return vm.throw_completion<JS::InternalError>(JS::ErrorType::NotEnoughMemoryToAllocate);
         return headers_or_error.release_value();
     };
 

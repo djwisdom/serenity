@@ -19,12 +19,12 @@ class WebAssemblyMemoryPrototype final : public JS::Object {
     JS_OBJECT(WebAssemblyMemoryPrototype, JS::Object);
 
 public:
-    explicit WebAssemblyMemoryPrototype(JS::GlobalObject& global_object)
-        : JS::Object(global_object)
+    explicit WebAssemblyMemoryPrototype(JS::Realm& realm)
+        : JS::Object(*realm.global_object().object_prototype())
     {
     }
 
-    virtual void initialize(JS::GlobalObject&) override;
+    virtual void initialize(JS::Realm&) override;
 
 private:
     JS_DECLARE_NATIVE_FUNCTION(grow);

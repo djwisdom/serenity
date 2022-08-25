@@ -11,9 +11,9 @@
 namespace JS {
 
 // 3.1.1 WrappedFunctionCreate ( callerRealm: a Realm Record, Target: a function object, ), https://tc39.es/proposal-shadowrealm/#sec-wrappedfunctioncreate
-ThrowCompletionOr<WrappedFunction*> WrappedFunction::create(GlobalObject& global_object, Realm& caller_realm, FunctionObject& target)
+ThrowCompletionOr<WrappedFunction*> WrappedFunction::create(Realm& realm, Realm& caller_realm, FunctionObject& target)
 {
-    auto& vm = global_object.vm();
+    auto& vm = realm.vm();
 
     // 1. Let internalSlotsList be the internal slots listed in Table 2, plus [[Prototype]] and [[Extensible]].
     // 2. Let wrapped be MakeBasicObject(internalSlotsList).
@@ -22,14 +22,14 @@ ThrowCompletionOr<WrappedFunction*> WrappedFunction::create(GlobalObject& global
     // 5. Set wrapped.[[WrappedTargetFunction]] to Target.
     // 6. Set wrapped.[[Realm]] to callerRealm.
     auto& prototype = *caller_realm.global_object().function_prototype();
-    auto* wrapped = global_object.heap().allocate<WrappedFunction>(global_object, caller_realm, target, prototype);
+    auto* wrapped = vm.heap().allocate<WrappedFunction>(realm, caller_realm, target, prototype);
 
     // 7. Let result be CopyNameAndLength(wrapped, Target).
-    auto result = copy_name_and_length(global_object, *wrapped, target);
+    auto result = copy_name_and_length(vm, *wrapped, target);
 
     // 8. If result is an Abrupt Completion, throw a TypeError exception.
     if (result.is_throw_completion())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::WrappedFunctionCopyNameAndLengthThrowCompletion);
+        return vm.throw_completion<TypeError>(ErrorType::WrappedFunctionCopyNameAndLengthThrowCompletion);
 
     // 9. Return wrapped.
     return wrapped;
@@ -94,10 +94,10 @@ ThrowCompletionOr<Value> ordinary_wrapped_function_call(WrappedFunction const& f
     auto* caller_realm = function.realm();
 
     // 4. NOTE: Any exception objects produced after this point are associated with callerRealm.
-    auto& global_object = caller_realm->global_object();
+    VERIFY(vm.current_realm() == caller_realm);
 
     // 5. Let targetRealm be ? GetFunctionRealm(target).
-    auto* target_realm = TRY(get_function_realm(global_object, target));
+    auto* target_realm = TRY(get_function_realm(vm, target));
 
     // 6. Let wrappedArgs be a new empty List.
     auto wrapped_args = MarkedVector<Value> { vm.heap() };
@@ -106,27 +106,27 @@ ThrowCompletionOr<Value> ordinary_wrapped_function_call(WrappedFunction const& f
     // 7. For each element arg of argumentsList, do
     for (auto const& arg : arguments_list) {
         // a. Let wrappedValue be ? GetWrappedValue(targetRealm, arg).
-        auto wrapped_value = TRY(get_wrapped_value(global_object, *target_realm, arg));
+        auto wrapped_value = TRY(get_wrapped_value(vm, *target_realm, arg));
 
         // b. Append wrappedValue to wrappedArgs.
         wrapped_args.append(wrapped_value);
     }
 
     // 8. Let wrappedThisArgument to ? GetWrappedValue(targetRealm, thisArgument).
-    auto wrapped_this_argument = TRY(get_wrapped_value(global_object, *target_realm, this_argument));
+    auto wrapped_this_argument = TRY(get_wrapped_value(vm, *target_realm, this_argument));
 
     // 9. Let result be the Completion Record of Call(target, wrappedThisArgument, wrappedArgs).
-    auto result = call(global_object, &target, wrapped_this_argument, move(wrapped_args));
+    auto result = call(vm, &target, wrapped_this_argument, move(wrapped_args));
 
     // 10. If result.[[Type]] is normal or result.[[Type]] is return, then
     if (!result.is_throw_completion()) {
         // a. Return ? GetWrappedValue(callerRealm, result.[[Value]]).
-        return get_wrapped_value(global_object, *caller_realm, result.value());
+        return get_wrapped_value(vm, *caller_realm, result.value());
     }
     // 11. Else,
     else {
         // a. Throw a TypeError exception.
-        return vm.throw_completion<TypeError>(caller_realm->global_object(), ErrorType::WrappedFunctionCallThrowCompletion);
+        return vm.throw_completion<TypeError>(ErrorType::WrappedFunctionCallThrowCompletion);
     }
 
     // NOTE: Also see "Editor's Note" in the spec regarding the TypeError above.

@@ -10,17 +10,17 @@
 
 namespace JS {
 
-ArgumentsObject::ArgumentsObject(GlobalObject& global_object, Environment& environment)
-    : Object(*global_object.object_prototype())
+ArgumentsObject::ArgumentsObject(Realm& realm, Environment& environment)
+    : Object(*realm.global_object().object_prototype())
     , m_environment(environment)
 {
 }
 
-void ArgumentsObject::initialize(GlobalObject& global_object)
+void ArgumentsObject::initialize(Realm& realm)
 {
-    Base::initialize(global_object);
+    Base::initialize(realm);
     set_has_parameter_map();
-    m_parameter_map = Object::create(global_object, nullptr);
+    m_parameter_map = Object::create(realm, nullptr);
 }
 
 void ArgumentsObject::visit_edges(Cell::Visitor& visitor)

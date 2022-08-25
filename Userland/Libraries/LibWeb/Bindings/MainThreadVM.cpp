@@ -128,7 +128,7 @@ JS::VM& main_thread_vm()
         };
 
         // 8.1.5.3.1 HostCallJobCallback(callback, V, argumentsList), https://html.spec.whatwg.org/multipage/webappapis.html#hostcalljobcallback
-        vm->host_call_job_callback = [](JS::GlobalObject& global_object, JS::JobCallback& callback, JS::Value this_value, JS::MarkedVector<JS::Value> arguments_list) {
+        vm->host_call_job_callback = [](JS::JobCallback& callback, JS::Value this_value, JS::MarkedVector<JS::Value> arguments_list) {
             auto& callback_host_defined = verify_cast<WebEngineCustomJobCallbackData>(*callback.custom_data);
 
             // 1. Let incumbent settings be callback.[[HostDefined]].[[IncumbentSettings]]. (NOTE: Not necessary)
@@ -142,7 +142,7 @@ JS::VM& main_thread_vm()
                 vm->push_execution_context(*callback_host_defined.active_script_context);
 
             // 5. Let result be Call(callback.[[Callback]], V, argumentsList).
-            auto result = JS::call(global_object, *callback.callback.cell(), this_value, move(arguments_list));
+            auto result = JS::call(*vm, *callback.callback.cell(), this_value, move(arguments_list));
 
             // 6. If script execution context is not null, then pop script execution context from the JavaScript execution context stack.
             if (callback_host_defined.active_script_context) {
@@ -284,7 +284,7 @@ JS::VM& main_thread_vm()
         // FIXME: Implement 8.1.5.4.4 HostGetSupportedImportAssertions(), https://html.spec.whatwg.org/multipage/webappapis.html#hostgetsupportedimportassertions
 
         vm->host_resolve_imported_module = [&](JS::ScriptOrModule, JS::ModuleRequest const&) -> JS::ThrowCompletionOr<NonnullRefPtr<JS::Module>> {
-            return vm->throw_completion<JS::InternalError>(vm->current_realm()->global_object(), JS::ErrorType::NotImplemented, "Modules in the browser");
+            return vm->throw_completion<JS::InternalError>(JS::ErrorType::NotImplemented, "Modules in the browser");
         };
 
         // NOTE: We push a dummy execution context onto the JS execution context stack,
@@ -299,7 +299,6 @@ JS::VM& main_thread_vm()
 // https://dom.spec.whatwg.org/#queue-a-mutation-observer-compound-microtask
 void queue_mutation_observer_microtask(DOM::Document& document)
 {
-    // FIXME: Is this the correct VM?
     auto& vm = main_thread_vm();
     auto& custom_data = verify_cast<WebEngineCustomData>(*vm.custom_data());
 
@@ -344,17 +343,17 @@ void queue_mutation_observer_microtask(DOM::Document& document)
             // 4. If records is not empty, then invoke mo’s callback with « records, mo », and mo. If this throws an exception, catch it, and report the exception.
             if (!records.is_empty()) {
                 auto& callback = mutation_observer.callback();
-                auto& global_object = callback.callback_context.global_object();
+                auto& realm = callback.callback_context.realm();
 
-                auto* wrapped_records = MUST(JS::Array::create(global_object, 0));
+                auto* wrapped_records = MUST(JS::Array::create(realm, 0));
                 for (size_t i = 0; i < records.size(); ++i) {
                     auto& record = records.at(i);
-                    auto* wrapped_record = Bindings::wrap(global_object, record);
+                    auto* wrapped_record = Bindings::wrap(realm, record);
                     auto property_index = JS::PropertyKey { i };
                     MUST(wrapped_records->create_data_property(property_index, wrapped_record));
                 }
 
-                auto* wrapped_mutation_observer = Bindings::wrap(global_object, mutation_observer);
+                auto* wrapped_mutation_observer = Bindings::wrap(realm, mutation_observer);
 
                 auto result = IDL::invoke_callback(callback, wrapped_mutation_observer, wrapped_records, wrapped_mutation_observer);
                 if (result.is_abrupt())

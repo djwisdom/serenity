@@ -12,9 +12,9 @@ namespace JS::Intl {
 
 // 15.5.2 Number Format Functions, https://tc39.es/ecma402/#sec-number-format-functions
 // 1.1.4 Number Format Functions, https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-number-format-functions
-NumberFormatFunction* NumberFormatFunction::create(GlobalObject& global_object, NumberFormat& number_format)
+NumberFormatFunction* NumberFormatFunction::create(Realm& realm, NumberFormat& number_format)
 {
-    return global_object.heap().allocate<NumberFormatFunction>(global_object, number_format, *global_object.function_prototype());
+    return realm.heap().allocate<NumberFormatFunction>(realm, number_format, *realm.global_object().function_prototype());
 }
 
 NumberFormatFunction::NumberFormatFunction(NumberFormat& number_format, Object& prototype)
@@ -23,19 +23,18 @@ NumberFormatFunction::NumberFormatFunction(NumberFormat& number_format, Object& 
 {
 }
 
-void NumberFormatFunction::initialize(GlobalObject& global_object)
+void NumberFormatFunction::initialize(Realm& realm)
 {
     auto& vm = this->vm();
 
-    Base::initialize(global_object);
+    Base::initialize(realm);
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
     define_direct_property(vm.names.name, js_string(vm, String::empty()), Attribute::Configurable);
 }
 
 ThrowCompletionOr<Value> NumberFormatFunction::call()
 {
-    auto& global_object = this->global_object();
-    auto& vm = global_object.vm();
+    auto& vm = this->vm();
 
     // 1. Let nf be F.[[NumberFormat]].
     // 2. Assert: Type(nf) is Object and nf has an [[InitializedNumberFormat]] internal slot.
@@ -43,11 +42,11 @@ ThrowCompletionOr<Value> NumberFormatFunction::call()
     auto value = vm.argument(0);
 
     // 4. Let x be ? ToIntlMathematicalValue(value).
-    auto mathematical_value = TRY(to_intl_mathematical_value(global_object, value));
+    auto mathematical_value = TRY(to_intl_mathematical_value(vm, value));
 
     // 5. Return ? FormatNumeric(nf, x).
     // Note: Our implementation of FormatNumeric does not throw.
-    auto formatted = format_numeric(global_object, m_number_format, move(mathematical_value));
+    auto formatted = format_numeric(vm, m_number_format, move(mathematical_value));
     return js_string(vm, move(formatted));
 }
 

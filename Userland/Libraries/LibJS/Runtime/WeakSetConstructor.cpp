@@ -13,18 +13,18 @@
 
 namespace JS {
 
-WeakSetConstructor::WeakSetConstructor(GlobalObject& global_object)
-    : NativeFunction(vm().names.WeakSet.as_string(), *global_object.function_prototype())
+WeakSetConstructor::WeakSetConstructor(Realm& realm)
+    : NativeFunction(vm().names.WeakSet.as_string(), *realm.global_object().function_prototype())
 {
 }
 
-void WeakSetConstructor::initialize(GlobalObject& global_object)
+void WeakSetConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     // 24.4.2.1 WeakSet.prototype, https://tc39.es/ecma262/#sec-weakset.prototype
-    define_direct_property(vm.names.prototype, global_object.weak_set_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.global_object().weak_set_prototype(), 0);
 
     define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
 }
@@ -33,26 +33,25 @@ void WeakSetConstructor::initialize(GlobalObject& global_object)
 ThrowCompletionOr<Value> WeakSetConstructor::call()
 {
     auto& vm = this->vm();
-    return vm.throw_completion<TypeError>(global_object(), ErrorType::ConstructorWithoutNew, vm.names.WeakSet);
+    return vm.throw_completion<TypeError>(ErrorType::ConstructorWithoutNew, vm.names.WeakSet);
 }
 
 // 24.4.1.1 WeakSet ( [ iterable ] ), https://tc39.es/ecma262/#sec-weakset-iterable
 ThrowCompletionOr<Object*> WeakSetConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
-    auto* weak_set = TRY(ordinary_create_from_constructor<WeakSet>(global_object, new_target, &GlobalObject::weak_set_prototype));
+    auto* weak_set = TRY(ordinary_create_from_constructor<WeakSet>(vm, new_target, &GlobalObject::weak_set_prototype));
 
     if (vm.argument(0).is_nullish())
         return weak_set;
 
     auto adder = TRY(weak_set->get(vm.names.add));
     if (!adder.is_function())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAFunction, "'add' property of WeakSet");
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, "'add' property of WeakSet");
 
-    (void)TRY(get_iterator_values(global_object, vm.argument(0), [&](Value iterator_value) -> Optional<Completion> {
-        TRY(JS::call(global_object, adder.as_function(), weak_set, iterator_value));
+    (void)TRY(get_iterator_values(vm, vm.argument(0), [&](Value iterator_value) -> Optional<Completion> {
+        TRY(JS::call(vm, adder.as_function(), weak_set, iterator_value));
         return {};
     }));
 

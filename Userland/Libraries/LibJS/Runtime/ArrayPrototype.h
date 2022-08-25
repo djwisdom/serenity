@@ -15,8 +15,8 @@ class ArrayPrototype final : public Array {
     JS_OBJECT(ArrayPrototype, Array);
 
 public:
-    ArrayPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    ArrayPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~ArrayPrototype() override = default;
 
 private:
@@ -62,6 +62,6 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(with);
 };
 
-ThrowCompletionOr<void> array_merge_sort(GlobalObject&, Function<ThrowCompletionOr<double>(Value, Value)> const& compare_func, MarkedVector<Value>& arr_to_sort);
+ThrowCompletionOr<void> array_merge_sort(VM&, Function<ThrowCompletionOr<double>(Value, Value)> const& compare_func, MarkedVector<Value>& arr_to_sort);
 
 }

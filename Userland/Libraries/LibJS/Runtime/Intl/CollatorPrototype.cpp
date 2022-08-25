@@ -12,14 +12,14 @@
 namespace JS::Intl {
 
 // 10.3 Properties of the Intl.Collator Prototype Object, https://tc39.es/ecma402/#sec-properties-of-the-intl-collator-prototype-object
-CollatorPrototype::CollatorPrototype(GlobalObject& global_object)
-    : PrototypeObject(*global_object.object_prototype())
+CollatorPrototype::CollatorPrototype(Realm& realm)
+    : PrototypeObject(*realm.global_object().object_prototype())
 {
 }
 
-void CollatorPrototype::initialize(GlobalObject& global_object)
+void CollatorPrototype::initialize(Realm& realm)
 {
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
     auto& vm = this->vm();
 
@@ -27,22 +27,24 @@ void CollatorPrototype::initialize(GlobalObject& global_object)
     define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Intl.Collator"), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_accessor(vm.names.compare, compare_getter, {}, attr);
-    define_native_function(vm.names.resolvedOptions, resolved_options, 0, attr);
+    define_native_accessor(realm, vm.names.compare, compare_getter, {}, attr);
+    define_native_function(realm, vm.names.resolvedOptions, resolved_options, 0, attr);
 }
 
 // 10.3.3 get Intl.Collator.prototype.compare, https://tc39.es/ecma402/#sec-intl.collator.prototype.compare
 JS_DEFINE_NATIVE_FUNCTION(CollatorPrototype::compare_getter)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let collator be the this value.
     // 2. Perform ? RequireInternalSlot(collator, [[InitializedCollator]]).
-    auto* collator = TRY(typed_this_object(global_object));
+    auto* collator = TRY(typed_this_object(vm));
 
     // 3. If collator.[[BoundCompare]] is undefined, then
     if (!collator->bound_compare()) {
         // a. Let F be a new built-in function object as defined in 10.3.3.1.
         // b. Set F.[[Collator]] to collator.
-        auto* function = CollatorCompareFunction::create(global_object, *collator);
+        auto* function = CollatorCompareFunction::create(realm, *collator);
 
         // c. Set collator.[[BoundCompare]] to F.
         collator->set_bound_compare(function);
@@ -55,12 +57,14 @@ JS_DEFINE_NATIVE_FUNCTION(CollatorPrototype::compare_getter)
 // 10.3.4 Intl.Collator.prototype.resolvedOptions ( ), https://tc39.es/ecma402/#sec-intl.collator.prototype.resolvedoptions
 JS_DEFINE_NATIVE_FUNCTION(CollatorPrototype::resolved_options)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let collator be the this value.
     // 2. Perform ? RequireInternalSlot(collator, [[InitializedCollator]]).
-    auto* collator = TRY(typed_this_object(global_object));
+    auto* collator = TRY(typed_this_object(vm));
 
     // 3. Let options be OrdinaryObjectCreate(%Object.prototype%).
-    auto* options = Object::create(global_object, global_object.object_prototype());
+    auto* options = Object::create(realm, realm.global_object().object_prototype());
 
     // 4. For each row of Table 3, except the header row, in table order, do
     //     a. Let p be the Property value of the current row.

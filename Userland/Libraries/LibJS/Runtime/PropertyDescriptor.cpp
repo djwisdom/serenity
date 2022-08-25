@@ -65,12 +65,13 @@ bool PropertyDescriptor::is_generic_descriptor() const
 }
 
 // 6.2.5.4 FromPropertyDescriptor ( Desc ), https://tc39.es/ecma262/#sec-frompropertydescriptor
-Value from_property_descriptor(GlobalObject& global_object, Optional<PropertyDescriptor> const& property_descriptor)
+Value from_property_descriptor(VM& vm, Optional<PropertyDescriptor> const& property_descriptor)
 {
+    auto& realm = *vm.current_realm();
+
     if (!property_descriptor.has_value())
         return js_undefined();
-    auto& vm = global_object.vm();
-    auto* object = Object::create(global_object, global_object.object_prototype());
+    auto* object = Object::create(realm, realm.global_object().object_prototype());
     if (property_descriptor->value.has_value())
         MUST(object->create_data_property_or_throw(vm.names.value, *property_descriptor->value));
     if (property_descriptor->writable.has_value())
@@ -87,13 +88,11 @@ Value from_property_descriptor(GlobalObject& global_object, Optional<PropertyDes
 }
 
 // 6.2.5.5 ToPropertyDescriptor ( Obj ), https://tc39.es/ecma262/#sec-topropertydescriptor
-ThrowCompletionOr<PropertyDescriptor> to_property_descriptor(GlobalObject& global_object, Value argument)
+ThrowCompletionOr<PropertyDescriptor> to_property_descriptor(VM& vm, Value argument)
 {
-    auto& vm = global_object.vm();
-
     // 1. If Type(Obj) is not Object, throw a TypeError exception.
     if (!argument.is_object())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObject, argument.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, argument.to_string_without_side_effects());
 
     auto& object = argument.as_object();
 
@@ -158,7 +157,7 @@ ThrowCompletionOr<PropertyDescriptor> to_property_descriptor(GlobalObject& globa
 
         // b. If IsCallable(getter) is false and getter is not undefined, throw a TypeError exception.
         if (!getter.is_function() && !getter.is_undefined())
-            return vm.throw_completion<TypeError>(global_object, ErrorType::AccessorBadField, "get");
+            return vm.throw_completion<TypeError>(ErrorType::AccessorBadField, "get");
 
         // c. Set desc.[[Get]] to getter.
         descriptor.get = getter.is_function() ? &getter.as_function() : nullptr;
@@ -174,7 +173,7 @@ ThrowCompletionOr<PropertyDescriptor> to_property_descriptor(GlobalObject& globa
 
         // b. If IsCallable(setter) is false and setter is not undefined, throw a TypeError exception.
         if (!setter.is_function() && !setter.is_undefined())
-            return vm.throw_completion<TypeError>(global_object, ErrorType::AccessorBadField, "set");
+            return vm.throw_completion<TypeError>(ErrorType::AccessorBadField, "set");
 
         // c. Set desc.[[Set]] to setter.
         descriptor.set = setter.is_function() ? &setter.as_function() : nullptr;
@@ -184,7 +183,7 @@ ThrowCompletionOr<PropertyDescriptor> to_property_descriptor(GlobalObject& globa
     if (descriptor.get.has_value() || descriptor.set.has_value()) {
         // a. If desc has a [[Value]] field or desc has a [[Writable]] field, throw a TypeError exception.
         if (descriptor.value.has_value() || descriptor.writable.has_value())
-            return vm.throw_completion<TypeError>(global_object, ErrorType::AccessorValueOrWritable);
+            return vm.throw_completion<TypeError>(ErrorType::AccessorValueOrWritable);
     }
 
     // 16. Return desc.

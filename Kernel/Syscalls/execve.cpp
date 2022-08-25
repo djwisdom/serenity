@@ -551,7 +551,7 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     // This ensures that the process always has a valid page directory.
     Memory::MemoryManager::enter_address_space(*load_result.space);
 
-    m_space = load_result.space.release_nonnull();
+    m_space.with([&](auto& space) { space = load_result.space.release_nonnull(); });
 
     m_executable.with([&](auto& executable) { executable = main_program_description->custody(); });
     m_arguments = move(arguments);
@@ -598,7 +598,8 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     }
     VERIFY(new_main_thread);
 
-    auto auxv = generate_auxiliary_vector(load_result.load_base, load_result.entry_eip, uid(), euid(), gid(), egid(), path->view(), main_program_fd_allocation);
+    auto credentials = this->credentials();
+    auto auxv = generate_auxiliary_vector(load_result.load_base, load_result.entry_eip, credentials->uid(), credentials->euid(), credentials->gid(), credentials->egid(), path->view(), main_program_fd_allocation);
 
     // NOTE: We create the new stack before disabling interrupts since it will zero-fault
     //       and we don't want to deal with faults after this point.
@@ -660,7 +661,7 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     regs.rip = load_result.entry_eip;
     regs.rsp = new_userspace_sp;
 #endif
-    regs.cr3 = address_space().page_directory().cr3();
+    regs.cr3 = address_space().with([](auto& space) { return space->page_directory().cr3(); });
 
     {
         TemporaryChange profiling_disabler(m_profiling, was_profiling);

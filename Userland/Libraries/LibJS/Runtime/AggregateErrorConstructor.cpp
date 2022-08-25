@@ -14,18 +14,18 @@
 
 namespace JS {
 
-AggregateErrorConstructor::AggregateErrorConstructor(GlobalObject& global_object)
-    : NativeFunction(*static_cast<Object*>(global_object.error_constructor()))
+AggregateErrorConstructor::AggregateErrorConstructor(Realm& realm)
+    : NativeFunction(static_cast<Object&>(*realm.global_object().error_constructor()))
 {
 }
 
-void AggregateErrorConstructor::initialize(GlobalObject& global_object)
+void AggregateErrorConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     // 20.5.7.2.1 AggregateError.prototype, https://tc39.es/ecma262/#sec-aggregate-error.prototype
-    define_direct_property(vm.names.prototype, global_object.aggregate_error_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.global_object().aggregate_error_prototype(), 0);
 
     define_direct_property(vm.names.length, Value(2), Attribute::Configurable);
 }
@@ -40,20 +40,20 @@ ThrowCompletionOr<Value> AggregateErrorConstructor::call()
 ThrowCompletionOr<Object*> AggregateErrorConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
+    auto& realm = *vm.current_realm();
 
-    auto* aggregate_error = TRY(ordinary_create_from_constructor<AggregateError>(global_object, new_target, &GlobalObject::aggregate_error_prototype));
+    auto* aggregate_error = TRY(ordinary_create_from_constructor<AggregateError>(vm, new_target, &GlobalObject::aggregate_error_prototype));
 
     if (!vm.argument(1).is_undefined()) {
-        auto message = TRY(vm.argument(1).to_string(global_object));
+        auto message = TRY(vm.argument(1).to_string(vm));
         aggregate_error->create_non_enumerable_data_property_or_throw(vm.names.message, js_string(vm, message));
     }
 
     TRY(aggregate_error->install_error_cause(vm.argument(2)));
 
-    auto errors_list = TRY(iterable_to_list(global_object, vm.argument(0)));
+    auto errors_list = TRY(iterable_to_list(vm, vm.argument(0)));
 
-    MUST(aggregate_error->define_property_or_throw(vm.names.errors, { .value = Array::create_from(global_object, errors_list), .writable = true, .enumerable = false, .configurable = true }));
+    MUST(aggregate_error->define_property_or_throw(vm.names.errors, { .value = Array::create_from(realm, errors_list), .writable = true, .enumerable = false, .configurable = true }));
 
     return aggregate_error;
 }

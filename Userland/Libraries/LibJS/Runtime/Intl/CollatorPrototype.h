@@ -15,8 +15,8 @@ class CollatorPrototype final : public PrototypeObject<CollatorPrototype, Collat
     JS_PROTOTYPE_OBJECT(CollatorPrototype, Collator, Collator);
 
 public:
-    explicit CollatorPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit CollatorPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~CollatorPrototype() override = default;
 
 private:

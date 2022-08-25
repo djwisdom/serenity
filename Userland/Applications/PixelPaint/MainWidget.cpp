@@ -450,7 +450,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     m_view_menu->add_action(*m_zoom_out_action);
     m_view_menu->add_action(*m_reset_zoom_action);
     m_view_menu->add_action(GUI::Action::create(
-        "Fit Image To &View", [&](auto&) {
+        "Fit Image To &View", g_icon_bag.fit_image_to_view, [&](auto&) {
             auto* editor = current_image_editor();
             VERIFY(editor);
             editor->fit_image_to_view();
@@ -506,31 +506,35 @@ void MainWidget::initialize_menubar(GUI::Window& window)
 
     m_image_menu = window.add_menu("&Image");
     m_image_menu->add_action(GUI::Action::create(
-        "Flip &Vertically", g_icon_bag.edit_flip_vertical, [&](auto&) {
+        "Flip Image &Vertically", g_icon_bag.edit_flip_vertical, [&](auto&) {
             auto* editor = current_image_editor();
             VERIFY(editor);
             editor->image().flip(Gfx::Orientation::Vertical);
+            editor->did_complete_action("Flip Image Vertically"sv);
         }));
     m_image_menu->add_action(GUI::Action::create(
-        "Flip &Horizontally", g_icon_bag.edit_flip_horizontal, [&](auto&) {
+        "Flip Image &Horizontally", g_icon_bag.edit_flip_horizontal, [&](auto&) {
             auto* editor = current_image_editor();
             VERIFY(editor);
             editor->image().flip(Gfx::Orientation::Horizontal);
+            editor->did_complete_action("Flip Image Horizontally"sv);
         }));
     m_image_menu->add_separator();
 
-    m_image_menu->add_action(GUI::CommonActions::make_rotate_counterclockwise_action(
+    m_image_menu->add_action(GUI::Action::create("Rotate Image &Counterclockwise", { Mod_Ctrl | Mod_Shift, Key_LessThan }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-rotate-ccw.png"sv).release_value_but_fixme_should_propagate_errors(),
         [&](auto&) {
             auto* editor = current_image_editor();
             VERIFY(editor);
             editor->image().rotate(Gfx::RotationDirection::CounterClockwise);
+            editor->did_complete_action("Rotate Image Counterclockwise"sv);
         }));
 
-    m_image_menu->add_action(GUI::CommonActions::make_rotate_clockwise_action(
+    m_image_menu->add_action(GUI::Action::create("Rotate Image Clock&wise", { Mod_Ctrl | Mod_Shift, Key_GreaterThan }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-rotate-cw.png"sv).release_value_but_fixme_should_propagate_errors(),
         [&](auto&) {
             auto* editor = current_image_editor();
             VERIFY(editor);
             editor->image().rotate(Gfx::RotationDirection::Clockwise);
+            editor->did_complete_action("Rotate Image Clockwise"sv);
         }));
     m_image_menu->add_separator();
     m_image_menu->add_action(GUI::Action::create(
@@ -538,11 +542,13 @@ void MainWidget::initialize_menubar(GUI::Window& window)
             auto* editor = current_image_editor();
             VERIFY(editor);
             auto dialog = PixelPaint::ResizeImageDialog::construct(editor->image().size(), &window);
-            if (dialog->exec() == GUI::Dialog::ExecResult::OK)
+            if (dialog->exec() == GUI::Dialog::ExecResult::OK) {
                 editor->image().resize(dialog->desired_size(), dialog->scaling_mode());
+                editor->did_complete_action("Resize Image"sv);
+            }
         }));
     m_image_menu->add_action(GUI::Action::create(
-        "&Crop To Selection", g_icon_bag.crop, [&](auto&) {
+        "&Crop Image to Selection", g_icon_bag.crop, [&](auto&) {
             auto* editor = current_image_editor();
             VERIFY(editor);
             // FIXME: disable this action if there is no selection
@@ -551,6 +557,20 @@ void MainWidget::initialize_menubar(GUI::Window& window)
             auto crop_rect = editor->image().rect().intersected(editor->selection().bounding_rect());
             editor->image().crop(crop_rect);
             editor->selection().clear();
+            editor->did_complete_action("Crop Image to Selection"sv);
+        }));
+
+    m_image_menu->add_action(GUI::Action::create(
+        "&Crop Image to Content", g_icon_bag.crop, [&](auto&) {
+            auto* editor = current_image_editor();
+            VERIFY(editor);
+
+            auto content_bounding_rect = editor->image().nonempty_content_bounding_rect();
+            if (!content_bounding_rect.has_value())
+                return;
+
+            editor->image().crop(content_bounding_rect.value());
+            editor->did_complete_action("Crop Image to Content"sv);
         }));
 
     m_layer_menu = window.add_menu("&Layer");
@@ -567,13 +587,14 @@ void MainWidget::initialize_menubar(GUI::Window& window)
                 }
                 editor->image().add_layer(layer_or_error.release_value());
                 editor->layers_did_change();
+                editor->did_complete_action("New Layer"sv);
                 m_layer_list_widget->select_top_layer();
             }
         }));
 
     m_layer_menu->add_separator();
     m_layer_menu->add_action(GUI::Action::create(
-        "Add M&ask", { Mod_Ctrl | Mod_Shift, Key_M }, nullptr, [&](auto&) {
+        "Add M&ask", { Mod_Ctrl | Mod_Shift, Key_M }, g_icon_bag.add_mask, [&](auto&) {
             auto* editor = current_image_editor();
             VERIFY(editor);
             auto active_layer = editor->active_layer();
@@ -670,7 +691,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     };
     m_layer_menu->add_separator();
     m_layer_menu->add_action(GUI::Action::create(
-        "Fl&atten Image", { Mod_Ctrl, Key_F }, [&](auto&) {
+        "Fl&atten Image", { Mod_Ctrl, Key_F }, g_icon_bag.flatten_image, [&](auto&) {
             auto* editor = current_image_editor();
             VERIFY(editor);
             editor->image().flatten_all_layers();
@@ -707,6 +728,51 @@ void MainWidget::initialize_menubar(GUI::Window& window)
             editor->did_complete_action("Merge Active Layer Down"sv);
         }));
 
+    m_layer_menu->add_separator();
+    m_layer_menu->add_action(GUI::Action::create(
+        "Flip Layer &Vertically", g_icon_bag.edit_flip_vertical, [&](auto&) {
+            auto* editor = current_image_editor();
+            VERIFY(editor);
+            auto active_layer = editor->active_layer();
+            if (!active_layer)
+                return;
+            active_layer->flip(Gfx::Orientation::Vertical);
+            editor->did_complete_action("Flip Layer Vertically"sv);
+        }));
+    m_layer_menu->add_action(GUI::Action::create(
+        "Flip Layer &Horizontally", g_icon_bag.edit_flip_horizontal, [&](auto&) {
+            auto* editor = current_image_editor();
+            VERIFY(editor);
+            auto active_layer = editor->active_layer();
+            if (!active_layer)
+                return;
+            active_layer->flip(Gfx::Orientation::Horizontal);
+            editor->did_complete_action("Flip Layer Horizontally"sv);
+        }));
+    m_layer_menu->add_separator();
+
+    m_layer_menu->add_action(GUI::Action::create("Rotate Layer &Counterclockwise", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-rotate-ccw.png"sv).release_value_but_fixme_should_propagate_errors(),
+        [&](auto&) {
+            auto* editor = current_image_editor();
+            VERIFY(editor);
+            auto active_layer = editor->active_layer();
+            if (!active_layer)
+                return;
+            active_layer->rotate(Gfx::RotationDirection::CounterClockwise);
+            editor->did_complete_action("Rotate Layer Counterclockwise"sv);
+        }));
+
+    m_layer_menu->add_action(GUI::Action::create("Rotate Layer Clock&wise", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-rotate-cw.png"sv).release_value_but_fixme_should_propagate_errors(),
+        [&](auto&) {
+            auto* editor = current_image_editor();
+            VERIFY(editor);
+            auto active_layer = editor->active_layer();
+            if (!active_layer)
+                return;
+            active_layer->rotate(Gfx::RotationDirection::Clockwise);
+            editor->did_complete_action("Rotate Layer Clockwise"sv);
+        }));
+
     m_filter_menu = window.add_menu("&Filter");
 
     m_filter_menu->add_action(GUI::Action::create("Filter &Gallery", g_icon_bag.filter, [&](auto&) {
@@ -718,7 +784,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     }));
 
     m_filter_menu->add_separator();
-    m_filter_menu->add_action(GUI::Action::create("Generic 5x5 &Convolution", [&](auto&) {
+    m_filter_menu->add_action(GUI::Action::create("Generic 5x5 &Convolution", g_icon_bag.generic_5x5_convolution, [&](auto&) {
         auto* editor = current_image_editor();
         VERIFY(editor);
         if (auto* layer = editor->active_layer()) {
@@ -843,7 +909,7 @@ void MainWidget::create_default_image()
 
     auto bg_layer = Layer::try_create_with_size(*image, image->size(), "Background").release_value_but_fixme_should_propagate_errors();
     image->add_layer(*bg_layer);
-    bg_layer->content_bitmap().fill(Color::White);
+    bg_layer->content_bitmap().fill(Color::Transparent);
 
     m_layer_list_widget->set_image(image);
 

@@ -14,8 +14,8 @@ class MapConstructor final : public NativeFunction {
     JS_OBJECT(MapConstructor, NativeFunction);
 
 public:
-    explicit MapConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit MapConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~MapConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;

@@ -12,7 +12,7 @@
 namespace JS {
 
 // 10.4.1.3 BoundFunctionCreate ( targetFunction, boundThis, boundArgs ), https://tc39.es/ecma262/#sec-boundfunctioncreate
-ThrowCompletionOr<BoundFunction*> BoundFunction::create(GlobalObject& global_object, FunctionObject& target_function, Value bound_this, Vector<Value> bound_arguments)
+ThrowCompletionOr<BoundFunction*> BoundFunction::create(Realm& realm, FunctionObject& target_function, Value bound_this, Vector<Value> bound_arguments)
 {
     // 1. Let proto be ? targetFunction.[[GetPrototypeOf]]().
     auto* prototype = TRY(target_function.internal_get_prototype_of());
@@ -26,14 +26,14 @@ ThrowCompletionOr<BoundFunction*> BoundFunction::create(GlobalObject& global_obj
     // 7. Set obj.[[BoundTargetFunction]] to targetFunction.
     // 8. Set obj.[[BoundThis]] to boundThis.
     // 9. Set obj.[[BoundArguments]] to boundArgs.
-    auto* object = global_object.heap().allocate<BoundFunction>(global_object, global_object, target_function, bound_this, move(bound_arguments), prototype);
+    auto* object = realm.heap().allocate<BoundFunction>(realm, realm, target_function, bound_this, move(bound_arguments), prototype);
 
     // 10. Return obj.
     return object;
 }
 
-BoundFunction::BoundFunction(GlobalObject& global_object, FunctionObject& bound_target_function, Value bound_this, Vector<Value> bound_arguments, Object* prototype)
-    : FunctionObject(global_object, prototype)
+BoundFunction::BoundFunction(Realm& realm, FunctionObject& bound_target_function, Value bound_this, Vector<Value> bound_arguments, Object* prototype)
+    : FunctionObject(realm, prototype)
     , m_bound_target_function(&bound_target_function)
     , m_bound_this(bound_this)
     , m_bound_arguments(move(bound_arguments))
@@ -45,6 +45,8 @@ BoundFunction::BoundFunction(GlobalObject& global_object, FunctionObject& bound_
 // 10.4.1.1 [[Call]] ( thisArgument, argumentsList ), https://tc39.es/ecma262/#sec-bound-function-exotic-objects-call-thisargument-argumentslist
 ThrowCompletionOr<Value> BoundFunction::internal_call([[maybe_unused]] Value this_argument, MarkedVector<Value> arguments_list)
 {
+    auto& vm = this->vm();
+
     // 1. Let target be F.[[BoundTargetFunction]].
     auto& target = *m_bound_target_function;
 
@@ -60,12 +62,14 @@ ThrowCompletionOr<Value> BoundFunction::internal_call([[maybe_unused]] Value thi
     args.extend(move(arguments_list));
 
     // 5. Return ? Call(target, boundThis, args).
-    return call(global_object(), &target, bound_this, move(args));
+    return call(vm, &target, bound_this, move(args));
 }
 
 // 10.4.1.2 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-bound-function-exotic-objects-construct-argumentslist-newtarget
 ThrowCompletionOr<Object*> BoundFunction::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
 {
+    auto& vm = this->vm();
+
     // 1. Let target be F.[[BoundTargetFunction]].
     auto& target = *m_bound_target_function;
 
@@ -86,7 +90,7 @@ ThrowCompletionOr<Object*> BoundFunction::internal_construct(MarkedVector<Value>
         final_new_target = &target;
 
     // 6. Return ? Construct(target, args, newTarget).
-    return construct(global_object(), target, move(args), final_new_target);
+    return construct(vm, target, move(args), final_new_target);
 }
 
 void BoundFunction::visit_edges(Visitor& visitor)

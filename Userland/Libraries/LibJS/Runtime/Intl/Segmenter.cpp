@@ -45,9 +45,9 @@ StringView Segmenter::segmenter_granularity_string() const
 }
 
 // 18.7.1 CreateSegmentDataObject ( segmenter, string, startIndex, endIndex ), https://tc39.es/ecma402/#sec-createsegmentdataobject
-Object* create_segment_data_object(GlobalObject& global_object, Segmenter const& segmenter, Utf16View const& string, double start_index, double end_index)
+Object* create_segment_data_object(VM& vm, Segmenter const& segmenter, Utf16View const& string, double start_index, double end_index)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let len be the length of string.
     auto length = string.length_in_code_units();
@@ -62,7 +62,7 @@ Object* create_segment_data_object(GlobalObject& global_object, Segmenter const&
     VERIFY(start_index < end_index);
 
     // 5. Let result be OrdinaryObjectCreate(%Object.prototype%).
-    auto* result = Object::create(global_object, global_object.object_prototype());
+    auto* result = Object::create(realm, realm.global_object().object_prototype());
 
     // 6. Let segment be the substring of string from startIndex to endIndex.
     auto segment = string.substring_view(start_index, end_index - start_index);

@@ -145,9 +145,9 @@ ErrorOr<void> ProcFSGlobalInode::truncate(u64 size)
     return m_associated_component->truncate(size);
 }
 
-ErrorOr<void> ProcFSGlobalInode::set_mtime(time_t time)
+ErrorOr<void> ProcFSGlobalInode::update_timestamps(Optional<time_t>, Optional<time_t>, Optional<time_t>)
 {
-    return m_associated_component->set_mtime(time);
+    return {};
 }
 
 InodeMetadata ProcFSGlobalInode::metadata() const

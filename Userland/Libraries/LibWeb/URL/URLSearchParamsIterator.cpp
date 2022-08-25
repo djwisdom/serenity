@@ -14,19 +14,19 @@ namespace Web::URL {
 
 JS::Object* URLSearchParamsIterator::next()
 {
-    auto& global_object = wrapper()->global_object();
-    auto& vm = global_object.vm();
+    auto& vm = wrapper()->vm();
+    auto& realm = *vm.current_realm();
 
     if (m_index >= m_url_search_params.m_list.size())
-        return create_iterator_result_object(global_object, JS::js_undefined(), true);
+        return create_iterator_result_object(vm, JS::js_undefined(), true);
 
     auto& entry = m_url_search_params.m_list[m_index++];
     if (m_iteration_kind == JS::Object::PropertyKind::Key)
-        return create_iterator_result_object(global_object, JS::js_string(vm, entry.name), false);
+        return create_iterator_result_object(vm, JS::js_string(vm, entry.name), false);
     else if (m_iteration_kind == JS::Object::PropertyKind::Value)
-        return create_iterator_result_object(global_object, JS::js_string(vm, entry.value), false);
+        return create_iterator_result_object(vm, JS::js_string(vm, entry.value), false);
 
-    return create_iterator_result_object(global_object, JS::Array::create_from(global_object, { JS::js_string(vm, entry.name), JS::js_string(vm, entry.value) }), false);
+    return create_iterator_result_object(vm, JS::Array::create_from(realm, { JS::js_string(vm, entry.name), JS::js_string(vm, entry.value) }), false);
 }
 
 void URLSearchParamsIterator::visit_edges(JS::Cell::Visitor& visitor)

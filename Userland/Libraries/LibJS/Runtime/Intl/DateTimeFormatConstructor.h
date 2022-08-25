@@ -14,8 +14,8 @@ class DateTimeFormatConstructor final : public NativeFunction {
     JS_OBJECT(DateTimeFormatConstructor, NativeFunction);
 
 public:
-    explicit DateTimeFormatConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit DateTimeFormatConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~DateTimeFormatConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
@@ -27,6 +27,6 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(supported_locales_of);
 };
 
-ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(GlobalObject& global_object, DateTimeFormat& date_time_format, Value locales_value, Value options_value);
+ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM&, DateTimeFormat&, Value locales_value, Value options_value);
 
 }

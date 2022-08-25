@@ -110,7 +110,7 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
                 TODO();
             // FIXME: Make and use subclasses of WorkerGlobalScope, however this requires JS::GlobalObject to
             //        play nicely with the IDL interpreter, to make spec-compliant extensions, which it currently does not.
-            m_worker_scope = m_worker_vm->heap().allocate_without_global_object<JS::GlobalObject>(realm);
+            m_worker_scope = m_worker_vm->heap().allocate_without_realm<JS::GlobalObject>(realm);
             return m_worker_scope;
         },
         nullptr);
@@ -122,7 +122,9 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
     // FIXME: This should be done with IDL
     u8 attr = JS::Attribute::Writable | JS::Attribute::Enumerable | JS::Attribute::Configurable;
     m_worker_scope->define_native_function(
-        "postMessage", [this](auto& vm, auto&) {
+        m_worker_scope->shape().realm(),
+        "postMessage",
+        [this](auto& vm) {
             // This is the implementation of the function that the spawned worked calls
 
             // https://html.spec.whatwg.org/multipage/workers.html#dom-dedicatedworkerglobalscope-postmessage
@@ -314,9 +316,9 @@ void Worker::post_message(JS::Value message, JS::Value)
     target_port->post_message(message);
 }
 
-JS::Object* Worker::create_wrapper(JS::GlobalObject& global_object)
+JS::Object* Worker::create_wrapper(JS::Realm& realm)
 {
-    return wrap(global_object, *this);
+    return wrap(realm, *this);
 }
 
 #undef __ENUMERATE

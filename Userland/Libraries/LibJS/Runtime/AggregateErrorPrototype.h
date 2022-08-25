@@ -14,8 +14,8 @@ class AggregateErrorPrototype final : public Object {
     JS_OBJECT(AggregateErrorPrototype, Object);
 
 public:
-    explicit AggregateErrorPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit AggregateErrorPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~AggregateErrorPrototype() override = default;
 };
 
