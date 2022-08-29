@@ -17,10 +17,10 @@ class AsyncFromSyncIterator final : public Object {
     JS_OBJECT(AsyncFromSyncIterator, Object);
 
 public:
-    static AsyncFromSyncIterator* create(GlobalObject&, Iterator sync_iterator_record);
+    static AsyncFromSyncIterator* create(Realm&, Iterator sync_iterator_record);
 
-    explicit AsyncFromSyncIterator(GlobalObject&, Iterator sync_iterator_record);
-    virtual void initialize(GlobalObject&) override;
+    explicit AsyncFromSyncIterator(Realm&, Iterator sync_iterator_record);
+    virtual void initialize(Realm&) override;
     virtual ~AsyncFromSyncIterator() override = default;
 
     void visit_edges(Visitor& visitor) override;

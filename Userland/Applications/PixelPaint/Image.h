@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "Selection.h"
 #include <AK/HashTable.h>
 #include <AK/JsonObjectSerializer.h>
 #include <AK/NonnullRefPtrVector.h>
@@ -55,6 +56,9 @@ public:
     ErrorOr<NonnullRefPtr<Gfx::Bitmap>> try_compose_bitmap(Gfx::BitmapFormat format) const;
     RefPtr<Gfx::Bitmap> try_copy_bitmap(Selection const&) const;
 
+    Selection& selection() { return m_selection; }
+    Selection const& selection() const { return m_selection; }
+
     size_t layer_count() const { return m_layers.size(); }
     Layer const& layer(size_t index) const { return m_layers.at(index); }
     Layer& layer(size_t index) { return m_layers.at(index); }
@@ -99,6 +103,8 @@ public:
     void crop(Gfx::IntRect const& rect);
     void resize(Gfx::IntSize const& new_size, Gfx::Painter::ScalingMode scaling_mode);
 
+    Optional<Gfx::IntRect> nonempty_content_bounding_rect() const;
+
     Color color_at(Gfx::IntPoint const& point) const;
 
 private:
@@ -112,6 +118,8 @@ private:
     NonnullRefPtrVector<Layer> m_layers;
 
     HashTable<ImageClient*> m_clients;
+
+    Selection m_selection;
 };
 
 class ImageUndoCommand : public GUI::Command {

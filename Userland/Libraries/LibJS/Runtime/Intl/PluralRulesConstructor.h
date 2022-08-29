@@ -14,8 +14,8 @@ class PluralRulesConstructor final : public NativeFunction {
     JS_OBJECT(PluralRulesConstructor, NativeFunction);
 
 public:
-    explicit PluralRulesConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit PluralRulesConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~PluralRulesConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
@@ -27,6 +27,6 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(supported_locales_of);
 };
 
-ThrowCompletionOr<PluralRules*> initialize_plural_rules(GlobalObject& global_object, PluralRules& plural_rules, Value locales_value, Value options_value);
+ThrowCompletionOr<PluralRules*> initialize_plural_rules(VM&, PluralRules&, Value locales_value, Value options_value);
 
 }

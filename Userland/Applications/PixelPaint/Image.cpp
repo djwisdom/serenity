@@ -37,6 +37,7 @@ ErrorOr<NonnullRefPtr<Image>> Image::try_create_with_size(Gfx::IntSize const& si
 
 Image::Image(Gfx::IntSize const& size)
     : m_size(size)
+    , m_selection(*this)
 {
 }
 
@@ -244,6 +245,7 @@ ErrorOr<NonnullRefPtr<Image>> Image::take_snapshot() const
         auto layer_snapshot = TRY(Layer::try_create_snapshot(*snapshot, layer));
         snapshot->add_layer(move(layer_snapshot));
     }
+    snapshot->m_selection.set_mask(m_selection.mask());
     return snapshot;
 }
 
@@ -265,6 +267,11 @@ ErrorOr<void> Image::restore_snapshot(Image const& snapshot)
     if (!layer_selected)
         select_layer(&layer(0));
 
+    m_size = snapshot.size();
+
+    m_selection.set_mask(snapshot.m_selection.mask());
+
+    did_change_rect();
     did_modify_layer_stack();
     return {};
 }
@@ -521,11 +528,38 @@ void Image::rotate(Gfx::RotationDirection direction)
 void Image::crop(Gfx::IntRect const& cropped_rect)
 {
     for (auto& layer : m_layers) {
-        layer.crop(cropped_rect);
+        auto layer_location = layer.location();
+        auto layer_local_crop_rect = layer.relative_rect().intersected(cropped_rect).translated(-layer_location.x(), -layer_location.y());
+        layer.crop(layer_local_crop_rect);
+
+        auto new_layer_x = max(0, layer_location.x() - cropped_rect.x());
+        auto new_layer_y = max(0, layer_location.y() - cropped_rect.y());
+
+        layer.set_location({ new_layer_x, new_layer_y });
     }
 
     m_size = { cropped_rect.width(), cropped_rect.height() };
     did_change_rect(cropped_rect);
+}
+
+Optional<Gfx::IntRect> Image::nonempty_content_bounding_rect() const
+{
+    if (m_layers.is_empty())
+        return {};
+
+    Optional<Gfx::IntRect> bounding_rect;
+    for (auto& layer : m_layers) {
+        auto layer_content_rect_in_layer_coordinates = layer.nonempty_content_bounding_rect();
+        if (!layer_content_rect_in_layer_coordinates.has_value())
+            continue;
+        auto layer_content_rect_in_image_coordinates = layer_content_rect_in_layer_coordinates->translated(layer.location());
+        if (!bounding_rect.has_value())
+            bounding_rect = layer_content_rect_in_image_coordinates;
+        else
+            bounding_rect = bounding_rect->united(layer_content_rect_in_image_coordinates);
+    }
+
+    return bounding_rect;
 }
 
 void Image::resize(Gfx::IntSize const& new_size, Gfx::Painter::ScalingMode scaling_mode)

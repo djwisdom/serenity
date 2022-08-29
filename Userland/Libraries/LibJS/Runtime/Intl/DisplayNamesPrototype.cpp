@@ -14,14 +14,14 @@
 namespace JS::Intl {
 
 // 12.3 Properties of the Intl.DisplayNames Prototype Object, https://tc39.es/ecma402/#sec-properties-of-intl-displaynames-prototype-object
-DisplayNamesPrototype::DisplayNamesPrototype(GlobalObject& global_object)
-    : PrototypeObject(*global_object.object_prototype())
+DisplayNamesPrototype::DisplayNamesPrototype(Realm& realm)
+    : PrototypeObject(*realm.intrinsics().object_prototype())
 {
 }
 
-void DisplayNamesPrototype::initialize(GlobalObject& global_object)
+void DisplayNamesPrototype::initialize(Realm& realm)
 {
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
     auto& vm = this->vm();
 
@@ -29,8 +29,8 @@ void DisplayNamesPrototype::initialize(GlobalObject& global_object)
     define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Intl.DisplayNames"), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.of, of, 1, attr);
-    define_native_function(vm.names.resolvedOptions, resolved_options, 0, attr);
+    define_native_function(realm, vm.names.of, of, 1, attr);
+    define_native_function(realm, vm.names.resolvedOptions, resolved_options, 0, attr);
 }
 
 // 12.3.3 Intl.DisplayNames.prototype.of ( code ), https://tc39.es/ecma402/#sec-Intl.DisplayNames.prototype.of
@@ -40,14 +40,14 @@ JS_DEFINE_NATIVE_FUNCTION(DisplayNamesPrototype::of)
 
     // 1. Let displayNames be this value.
     // 2. Perform ? RequireInternalSlot(displayNames, [[InitializedDisplayNames]]).
-    auto* display_names = TRY(typed_this_object(global_object));
+    auto* display_names = TRY(typed_this_object(vm));
 
     // 3. Let code be ? ToString(code).
-    auto code_string = TRY(code.to_string(global_object));
+    auto code_string = TRY(code.to_string(vm));
     code = js_string(vm, move(code_string));
 
     // 4. Let code be ? CanonicalCodeForDisplayNames(displayNames.[[Type]], code).
-    code = TRY(canonical_code_for_display_names(global_object, display_names->type(), code.as_string().string()));
+    code = TRY(canonical_code_for_display_names(vm, display_names->type(), code.as_string().string()));
 
     // 5. Let fields be displayNames.[[Fields]].
     // 6. If fields has a field [[<code>]], return fields.[[<code>]].
@@ -124,12 +124,14 @@ JS_DEFINE_NATIVE_FUNCTION(DisplayNamesPrototype::of)
 // 12.3.4 Intl.DisplayNames.prototype.resolvedOptions ( ), https://tc39.es/ecma402/#sec-Intl.DisplayNames.prototype.resolvedOptions
 JS_DEFINE_NATIVE_FUNCTION(DisplayNamesPrototype::resolved_options)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let displayNames be this value.
     // 2. Perform ? RequireInternalSlot(displayNames, [[InitializedDisplayNames]]).
-    auto* display_names = TRY(typed_this_object(global_object));
+    auto* display_names = TRY(typed_this_object(vm));
 
     // 3. Let options be OrdinaryObjectCreate(%Object.prototype%).
-    auto* options = Object::create(global_object, global_object.object_prototype());
+    auto* options = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 4. For each row of Table 8, except the header row, in table order, do
     //     a. Let p be the Property value of the current row.

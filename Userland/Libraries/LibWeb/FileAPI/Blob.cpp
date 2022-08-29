@@ -221,15 +221,16 @@ DOM::ExceptionOr<NonnullRefPtr<Blob>> Blob::slice(Optional<i64> start, Optional<
 // https://w3c.github.io/FileAPI/#dom-blob-text
 JS::Promise* Blob::text()
 {
-    auto& global_object = wrapper()->global_object();
+    auto& vm = wrapper()->vm();
+    auto& realm = *vm.current_realm();
 
     // FIXME: 1. Let stream be the result of calling get stream on this.
     // FIXME: 2. Let reader be the result of getting a reader from stream. If that threw an exception, return a new promise rejected with that exception.
 
     // FIXME: We still need to implement ReadableStream for this step to be fully valid.
     // 3. Let promise be the result of reading all bytes from stream with reader
-    auto* promise = JS::Promise::create(global_object);
-    auto* result = JS::js_string(global_object.heap(), String { m_byte_buffer.bytes() });
+    auto* promise = JS::Promise::create(realm);
+    auto* result = JS::js_string(vm, String { m_byte_buffer.bytes() });
 
     // 4. Return the result of transforming promise by a fulfillment handler that returns the result of running UTF-8 decode on its first argument.
     promise->fulfill(result);
@@ -239,15 +240,16 @@ JS::Promise* Blob::text()
 // https://w3c.github.io/FileAPI/#dom-blob-arraybuffer
 JS::Promise* Blob::array_buffer()
 {
-    auto& global_object = wrapper()->global_object();
+    auto& vm = wrapper()->vm();
+    auto& realm = *vm.current_realm();
 
     // FIXME: 1. Let stream be the result of calling get stream on this.
     // FIXME: 2. Let reader be the result of getting a reader from stream. If that threw an exception, return a new promise rejected with that exception.
 
     // FIXME: We still need to implement ReadableStream for this step to be fully valid.
     // 3. Let promise be the result of reading all bytes from stream with reader.
-    auto* promise = JS::Promise::create(global_object);
-    auto buffer_result = JS::ArrayBuffer::create(global_object, m_byte_buffer.size());
+    auto* promise = JS::Promise::create(realm);
+    auto buffer_result = JS::ArrayBuffer::create(realm, m_byte_buffer.size());
     if (buffer_result.is_error()) {
         promise->reject(buffer_result.release_error().value().release_value());
         return promise;
@@ -260,9 +262,9 @@ JS::Promise* Blob::array_buffer()
     return promise;
 }
 
-JS::Object* Blob::create_wrapper(JS::GlobalObject& global_object)
+JS::Object* Blob::create_wrapper(JS::Realm& realm)
 {
-    return wrap(global_object, *this);
+    return wrap(realm, *this);
 }
 
 }

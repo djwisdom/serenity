@@ -197,11 +197,11 @@ ThrowCompletionOr<Promise*> CyclicModule::evaluate(VM& vm)
     // 5. Let stack be a new empty List.
     Vector<Module*> stack;
 
-    auto& global_object = realm().global_object();
+    auto& realm = *vm.current_realm();
 
     // 6. Let capability be ! NewPromiseCapability(%Promise%).
     // 7. Set module.[[TopLevelCapability]] to capability.
-    m_top_level_capability = MUST(new_promise_capability(global_object, global_object.promise_constructor()));
+    m_top_level_capability = MUST(new_promise_capability(vm, realm.intrinsics().promise_constructor()));
 
     // 8. Let result be Completion(InnerModuleEvaluation(module, stack, 0)).
     auto result = inner_module_evaluation(vm, stack, 0);
@@ -234,7 +234,7 @@ ThrowCompletionOr<Promise*> CyclicModule::evaluate(VM& vm)
         VERIFY(m_evaluation_error.is_error() && same_value(*m_evaluation_error.throw_completion().value(), *result.throw_completion().value()));
 
         // d. Perform ! Call(capability.[[Reject]], undefined, « result.[[Value]] »).
-        MUST(call(global_object, m_top_level_capability->reject, js_undefined(), *result.throw_completion().value()));
+        MUST(call(vm, m_top_level_capability->reject, js_undefined(), *result.throw_completion().value()));
     }
     // 10. Else,
     else {
@@ -248,7 +248,7 @@ ThrowCompletionOr<Promise*> CyclicModule::evaluate(VM& vm)
             // i. Assert: module.[[Status]] is evaluated.
             VERIFY(m_status == ModuleStatus::Evaluated);
             // ii. Perform ! Call(capability.[[Resolve]], undefined, « undefined »).
-            MUST(call(global_object, m_top_level_capability->resolve, js_undefined(), js_undefined()));
+            MUST(call(vm, m_top_level_capability->resolve, js_undefined(), js_undefined()));
         }
 
         // d. Assert: stack is empty.
@@ -433,19 +433,19 @@ ThrowCompletionOr<void> CyclicModule::execute_module(VM&, Optional<PromiseCapabi
 // 16.2.1.5.2.2 ExecuteAsyncModule ( module ), https://tc39.es/ecma262/#sec-execute-async-module
 void CyclicModule::execute_async_module(VM& vm)
 {
+    auto& realm = *vm.current_realm();
+
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] executing async module {}", filename());
     // 1. Assert: module.[[Status]] is evaluating or evaluating-async.
     VERIFY(m_status == ModuleStatus::Evaluating || m_status == ModuleStatus::EvaluatingAsync);
     // 2. Assert: module.[[HasTLA]] is true.
     VERIFY(m_has_top_level_await);
 
-    auto& global_object = realm().global_object();
-
     // 3. Let capability be ! NewPromiseCapability(%Promise%).
-    auto capability = MUST(new_promise_capability(global_object, global_object.promise_constructor()));
+    auto capability = MUST(new_promise_capability(vm, realm.intrinsics().promise_constructor()));
 
     // 4. Let fulfilledClosure be a new Abstract Closure with no parameters that captures module and performs the following steps when called:
-    auto fulfilled_closure = [&](VM& vm, GlobalObject&) -> ThrowCompletionOr<Value> {
+    auto fulfilled_closure = [&](VM& vm) -> ThrowCompletionOr<Value> {
         // a. Perform AsyncModuleExecutionFulfilled(module).
         async_module_execution_fulfilled(vm);
 
@@ -454,10 +454,10 @@ void CyclicModule::execute_async_module(VM& vm)
     };
 
     // 5. Let onFulfilled be CreateBuiltinFunction(fulfilledClosure, 0, "", « »).
-    auto* on_fulfilled = NativeFunction::create(global_object, move(fulfilled_closure), 0, "");
+    auto* on_fulfilled = NativeFunction::create(realm, move(fulfilled_closure), 0, "");
 
     // 6. Let rejectedClosure be a new Abstract Closure with parameters (error) that captures module and performs the following steps when called:
-    auto rejected_closure = [&](VM& vm, GlobalObject&) -> ThrowCompletionOr<Value> {
+    auto rejected_closure = [&](VM& vm) -> ThrowCompletionOr<Value> {
         auto error = vm.argument(0);
 
         // a. Perform AsyncModuleExecutionRejected(module, error).
@@ -468,7 +468,7 @@ void CyclicModule::execute_async_module(VM& vm)
     };
 
     // 7. Let onRejected be CreateBuiltinFunction(rejectedClosure, 0, "", « »).
-    auto* on_rejected = NativeFunction::create(global_object, move(rejected_closure), 0, "");
+    auto* on_rejected = NativeFunction::create(realm, move(rejected_closure), 0, "");
 
     VERIFY(is<Promise>(*capability.promise));
 
@@ -550,9 +550,8 @@ void CyclicModule::async_module_execution_fulfilled(VM& vm)
         // a. Assert: module.[[CycleRoot]] is module.
         VERIFY(m_cycle_root == this);
 
-        VERIFY(vm.current_realm());
         // b. Perform ! Call(module.[[TopLevelCapability]].[[Resolve]], undefined, « undefined »).
-        MUST(call(vm.current_realm()->global_object(), m_top_level_capability->resolve, js_undefined(), js_undefined()));
+        MUST(call(vm, m_top_level_capability->resolve, js_undefined(), js_undefined()));
     }
 
     // 8. Let execList be a new empty List.
@@ -599,9 +598,8 @@ void CyclicModule::async_module_execution_fulfilled(VM& vm)
                     // a. Assert: m.[[CycleRoot]] is m.
                     VERIFY(module->m_cycle_root == module);
 
-                    VERIFY(vm.current_realm());
                     // b. Perform ! Call(m.[[TopLevelCapability]].[[Resolve]], undefined, « undefined »).
-                    MUST(call(vm.current_realm()->global_object(), module->m_top_level_capability->resolve, js_undefined(), js_undefined()));
+                    MUST(call(vm, module->m_top_level_capability->resolve, js_undefined(), js_undefined()));
                 }
             }
         }
@@ -649,9 +647,8 @@ void CyclicModule::async_module_execution_rejected(VM& vm, Value error)
         // a. Assert: module.[[CycleRoot]] is module.
         VERIFY(m_cycle_root == this);
 
-        VERIFY(vm.current_realm());
         // b. Perform ! Call(module.[[TopLevelCapability]].[[Reject]], undefined, « error »).
-        MUST(call(vm.current_realm()->global_object(), m_top_level_capability->reject, js_undefined(), error));
+        MUST(call(vm, m_top_level_capability->reject, js_undefined(), error));
     }
 
     // 9. Return unused.

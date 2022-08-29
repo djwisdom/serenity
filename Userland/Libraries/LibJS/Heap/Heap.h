@@ -34,7 +34,7 @@ public:
     ~Heap();
 
     template<typename T, typename... Args>
-    T* allocate_without_global_object(Args&&... args)
+    T* allocate_without_realm(Args&&... args)
     {
         auto* memory = allocate_cell(sizeof(T));
         new (memory) T(forward<Args>(args)...);
@@ -42,12 +42,12 @@ public:
     }
 
     template<typename T, typename... Args>
-    T* allocate(GlobalObject& global_object, Args&&... args)
+    T* allocate(Realm& realm, Args&&... args)
     {
         auto* memory = allocate_cell(sizeof(T));
         new (memory) T(forward<Args>(args)...);
         auto* cell = static_cast<T*>(memory);
-        cell->initialize(global_object);
+        memory->initialize(realm);
         return cell;
     }
 

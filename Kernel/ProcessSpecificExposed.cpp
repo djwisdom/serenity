@@ -25,7 +25,8 @@ ErrorOr<void> Process::procfs_get_thread_stack(ThreadID thread_id, KBufferBuilde
     auto thread = Thread::from_tid(thread_id);
     if (!thread)
         return ESRCH;
-    bool show_kernel_addresses = Process::current().is_superuser();
+    auto current_process_credentials = Process::current().credentials();
+    bool show_kernel_addresses = current_process_credentials->is_superuser();
     bool kernel_address_added = false;
     for (auto address : TRY(Processor::capture_stack_trace(*thread, 1024))) {
         if (!show_kernel_addresses && !Memory::is_user_address(VirtualAddress { address })) {
@@ -266,10 +267,10 @@ ErrorOr<void> Process::procfs_get_fds_stats(KBufferBuilder& builder) const
 ErrorOr<void> Process::procfs_get_virtual_memory_stats(KBufferBuilder& builder) const
 {
     auto array = TRY(JsonArraySerializer<>::try_create(builder));
-    {
-        SpinlockLocker lock(address_space().get_lock());
-        for (auto const& region : address_space().regions()) {
-            if (!region.is_user() && !Process::current().is_superuser())
+    TRY(address_space().with([&](auto& space) -> ErrorOr<void> {
+        for (auto const& region : space->region_tree().regions()) {
+            auto current_process_credentials = Process::current().credentials();
+            if (!region.is_user() && !current_process_credentials->is_superuser())
                 continue;
             auto region_object = TRY(array.add_object());
             TRY(region_object.add("readable"sv, region.is_readable()));
@@ -304,7 +305,8 @@ ErrorOr<void> Process::procfs_get_virtual_memory_stats(KBufferBuilder& builder) 
             TRY(region_object.add("pagemap"sv, pagemap_builder.string_view()));
             TRY(region_object.finish());
         }
-    }
+        return {};
+    }));
     TRY(array.finish());
     return {};
 }

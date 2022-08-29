@@ -201,15 +201,15 @@ String format_list(ListFormat const& list_format, Vector<String> const& list)
 }
 
 // 13.5.4 FormatListToParts ( listFormat, list ), https://tc39.es/ecma402/#sec-formatlisttoparts
-Array* format_list_to_parts(GlobalObject& global_object, ListFormat const& list_format, Vector<String> const& list)
+Array* format_list_to_parts(VM& vm, ListFormat const& list_format, Vector<String> const& list)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let parts be ! CreatePartsFromList(listFormat, list).
     auto parts = create_parts_from_list(list_format, list);
 
     // 2. Let result be ! ArrayCreate(0).
-    auto* result = MUST(Array::create(global_object, 0));
+    auto* result = MUST(Array::create(realm, 0));
 
     // 3. Let n be 0.
     size_t n = 0;
@@ -217,7 +217,7 @@ Array* format_list_to_parts(GlobalObject& global_object, ListFormat const& list_
     // 4. For each Record { [[Type]], [[Value]] } part in parts, do
     for (auto& part : parts) {
         // a. Let O be OrdinaryObjectCreate(%Object.prototype%).
-        auto* object = Object::create(global_object, global_object.object_prototype());
+        auto* object = Object::create(realm, realm.intrinsics().object_prototype());
 
         // b. Perform ! CreateDataPropertyOrThrow(O, "type", part.[[Type]]).
         MUST(object->create_data_property_or_throw(vm.names.type, js_string(vm, part.type)));
@@ -237,10 +237,8 @@ Array* format_list_to_parts(GlobalObject& global_object, ListFormat const& list_
 }
 
 // 13.5.5 StringListFromIterable ( iterable ), https://tc39.es/ecma402/#sec-createstringlistfromiterable
-ThrowCompletionOr<Vector<String>> string_list_from_iterable(GlobalObject& global_object, Value iterable)
+ThrowCompletionOr<Vector<String>> string_list_from_iterable(VM& vm, Value iterable)
 {
-    auto& vm = global_object.vm();
-
     // 1. If iterable is undefined, then
     if (iterable.is_undefined()) {
         // a. Return a new empty List.
@@ -248,7 +246,7 @@ ThrowCompletionOr<Vector<String>> string_list_from_iterable(GlobalObject& global
     }
 
     // 2. Let iteratorRecord be ? GetIterator(iterable).
-    auto iterator_record = TRY(get_iterator(global_object, iterable));
+    auto iterator_record = TRY(get_iterator(vm, iterable));
 
     // 3. Let list be a new empty List.
     Vector<String> list;
@@ -259,20 +257,20 @@ ThrowCompletionOr<Vector<String>> string_list_from_iterable(GlobalObject& global
     // 5. Repeat, while next is not false,
     do {
         // a. Set next to ? IteratorStep(iteratorRecord).
-        next = TRY(iterator_step(global_object, iterator_record));
+        next = TRY(iterator_step(vm, iterator_record));
 
         // b. If next is not false, then
         if (next != nullptr) {
             // i. Let nextValue be ? IteratorValue(next).
-            auto next_value = TRY(iterator_value(global_object, *next));
+            auto next_value = TRY(iterator_value(vm, *next));
 
             // ii. If Type(nextValue) is not String, then
             if (!next_value.is_string()) {
                 // 1. Let error be ThrowCompletion(a newly created TypeError object).
-                auto error = vm.throw_completion<TypeError>(global_object, ErrorType::NotAString, next_value);
+                auto error = vm.throw_completion<TypeError>(ErrorType::NotAString, next_value);
 
                 // 2. Return ? IteratorClose(iteratorRecord, error).
-                return iterator_close(global_object, iterator_record, move(error));
+                return iterator_close(vm, iterator_record, move(error));
             }
 
             // iii. Append nextValue to the end of the List list.

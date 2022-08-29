@@ -14,16 +14,16 @@
 
 namespace Web::Bindings {
 
-ImageConstructor::ImageConstructor(JS::GlobalObject& global_object)
-    : NativeFunction(*global_object.function_prototype())
+ImageConstructor::ImageConstructor(JS::Realm& realm)
+    : NativeFunction(*realm.intrinsics().function_prototype())
 {
 }
 
-void ImageConstructor::initialize(JS::GlobalObject& global_object)
+void ImageConstructor::initialize(JS::Realm& realm)
 {
     auto& vm = this->vm();
-    auto& window = static_cast<WindowObject&>(global_object);
-    NativeFunction::initialize(global_object);
+    auto& window = static_cast<WindowObject&>(realm.global_object());
+    NativeFunction::initialize(realm);
 
     define_direct_property(vm.names.prototype, &window.ensure_web_prototype<HTMLImageElementPrototype>("HTMLImageElement"), 0);
     define_direct_property(vm.names.length, JS::Value(0), JS::Attribute::Configurable);
@@ -31,12 +31,15 @@ void ImageConstructor::initialize(JS::GlobalObject& global_object)
 
 JS::ThrowCompletionOr<JS::Value> ImageConstructor::call()
 {
-    return vm().throw_completion<JS::TypeError>(global_object(), JS::ErrorType::ConstructorWithoutNew, "Image");
+    return vm().throw_completion<JS::TypeError>(JS::ErrorType::ConstructorWithoutNew, "Image");
 }
 
 // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-image
 JS::ThrowCompletionOr<JS::Object*> ImageConstructor::construct(FunctionObject&)
 {
+    auto& vm = this->vm();
+    auto& realm = *vm.current_realm();
+
     // 1. Let document be the current global object's associated Document.
     auto& window = static_cast<WindowObject&>(HTML::current_global_object());
     auto& document = window.impl().associated_document();
@@ -45,19 +48,19 @@ JS::ThrowCompletionOr<JS::Object*> ImageConstructor::construct(FunctionObject&)
     auto image_element = DOM::create_element(document, HTML::TagNames::img, Namespace::HTML);
 
     // 3. If width is given, then set an attribute value for img using "width" and width.
-    if (vm().argument_count() > 0) {
-        u32 width = TRY(vm().argument(0).to_u32(global_object()));
+    if (vm.argument_count() > 0) {
+        u32 width = TRY(vm.argument(0).to_u32(vm));
         image_element->set_attribute(HTML::AttributeNames::width, String::formatted("{}", width));
     }
 
     // 4. If height is given, then set an attribute value for img using "height" and height.
-    if (vm().argument_count() > 1) {
-        u32 height = TRY(vm().argument(1).to_u32(global_object()));
+    if (vm.argument_count() > 1) {
+        u32 height = TRY(vm.argument(1).to_u32(vm));
         image_element->set_attribute(HTML::AttributeNames::height, String::formatted("{}", height));
     }
 
     // 5. Return img.
-    return wrap(global_object(), image_element);
+    return wrap(realm, image_element);
 }
 
 }

@@ -82,16 +82,17 @@ DOM::ExceptionOr<String> XMLHttpRequest::response_text() const
 // https://xhr.spec.whatwg.org/#response
 DOM::ExceptionOr<JS::Value> XMLHttpRequest::response()
 {
-    auto& global_object = wrapper()->global_object();
+    auto& vm = wrapper()->vm();
+    auto& realm = *vm.current_realm();
 
     // 1. If this’s response type is the empty string or "text", then:
     if (m_response_type == Bindings::XMLHttpRequestResponseType::Empty || m_response_type == Bindings::XMLHttpRequestResponseType::Text) {
         // 1. If this’s state is not loading or done, then return the empty string.
         if (m_ready_state != ReadyState::Loading && m_ready_state != ReadyState::Done)
-            return JS::Value(JS::js_string(global_object.heap(), ""));
+            return JS::Value(JS::js_string(vm, ""));
 
         // 2. Return the result of getting a text response for this.
-        return JS::Value(JS::js_string(global_object.heap(), get_text_response()));
+        return JS::Value(JS::js_string(vm, get_text_response()));
     }
     // 2. If this’s state is not done, then return null.
     if (m_ready_state != ReadyState::Done)
@@ -108,7 +109,7 @@ DOM::ExceptionOr<JS::Value> XMLHttpRequest::response()
     // 5. If this’s response type is "arraybuffer",
     if (m_response_type == Bindings::XMLHttpRequestResponseType::Arraybuffer) {
         // then set this’s response object to a new ArrayBuffer object representing this’s received bytes. If this throws an exception, then set this’s response object to failure and return null.
-        auto buffer_result = JS::ArrayBuffer::create(global_object, m_received_bytes.size());
+        auto buffer_result = JS::ArrayBuffer::create(realm, m_received_bytes.size());
         if (buffer_result.is_error()) {
             m_response_object = Failure();
             return JS::js_null();
@@ -122,7 +123,7 @@ DOM::ExceptionOr<JS::Value> XMLHttpRequest::response()
     else if (m_response_type == Bindings::XMLHttpRequestResponseType::Blob) {
         auto blob_part = TRY_OR_RETURN_OOM(try_make_ref_counted<FileAPI::Blob>(m_received_bytes, get_final_mime_type().type()));
         auto blob = TRY(FileAPI::Blob::create(Vector<FileAPI::BlobPart> { move(blob_part) }));
-        m_response_object = JS::make_handle(JS::Value(blob->create_wrapper(global_object)));
+        m_response_object = JS::make_handle(JS::Value(blob->create_wrapper(realm)));
     }
     // 7. Otherwise, if this’s response type is "document", set a document response for this.
     else if (m_response_type == Bindings::XMLHttpRequestResponseType::Document) {
@@ -142,7 +143,7 @@ DOM::ExceptionOr<JS::Value> XMLHttpRequest::response()
         // 3. Let jsonObject be the result of running parse JSON from bytes on this’s received bytes. If that threw an exception, then return null.
         TextCodec::UTF8Decoder decoder;
 
-        auto json_object_result = JS::call(global_object, global_object.json_parse_function(), JS::js_undefined(), JS::js_string(global_object.heap(), decoder.to_utf8({ m_received_bytes.data(), m_received_bytes.size() })));
+        auto json_object_result = JS::call(vm, realm.intrinsics().json_parse_function(), JS::js_undefined(), JS::js_string(vm, decoder.to_utf8({ m_received_bytes.data(), m_received_bytes.size() })));
         if (json_object_result.is_error())
             return JS::Value(JS::js_null());
 
@@ -566,9 +567,9 @@ DOM::ExceptionOr<void> XMLHttpRequest::send(Optional<XMLHttpRequestBodyInit> bod
     return {};
 }
 
-JS::Object* XMLHttpRequest::create_wrapper(JS::GlobalObject& global_object)
+JS::Object* XMLHttpRequest::create_wrapper(JS::Realm& realm)
 {
-    return wrap(global_object, *this);
+    return wrap(realm, *this);
 }
 
 Bindings::CallbackType* XMLHttpRequest::onreadystatechange()
@@ -621,8 +622,7 @@ DOM::ExceptionOr<void> XMLHttpRequest::set_timeout(u32 timeout)
 {
     // 1. If the current global object is a Window object and this’s synchronous flag is set,
     //    then throw an "InvalidAccessError" DOMException.
-    auto& global_object = wrapper()->global_object();
-    if (global_object.class_name() == "WindowObject" && m_synchronous)
+    if (is<Bindings::WindowObject>(HTML::current_global_object()) && m_synchronous)
         return DOM::InvalidAccessError::create("Use of XMLHttpRequest's timeout attribute is not supported in the synchronous mode in window context.");
 
     // 2. Set this’s timeout to the given value.

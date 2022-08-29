@@ -9,14 +9,14 @@
 
 namespace Kernel::Memory {
 
-InodeVMObject::InodeVMObject(Inode& inode, FixedArray<LockRefPtr<PhysicalPage>>&& new_physical_pages, Bitmap dirty_pages)
+InodeVMObject::InodeVMObject(Inode& inode, FixedArray<RefPtr<PhysicalPage>>&& new_physical_pages, Bitmap dirty_pages)
     : VMObject(move(new_physical_pages))
     , m_inode(inode)
     , m_dirty_pages(move(dirty_pages))
 {
 }
 
-InodeVMObject::InodeVMObject(InodeVMObject const& other, FixedArray<LockRefPtr<PhysicalPage>>&& new_physical_pages, Bitmap dirty_pages)
+InodeVMObject::InodeVMObject(InodeVMObject const& other, FixedArray<RefPtr<PhysicalPage>>&& new_physical_pages, Bitmap dirty_pages)
     : VMObject(move(new_physical_pages))
     , m_inode(other.m_inode)
     , m_dirty_pages(move(dirty_pages))
@@ -91,16 +91,6 @@ u32 InodeVMObject::writable_mappings() const
     u32 count = 0;
     const_cast<InodeVMObject&>(*this).for_each_region([&](auto& region) {
         if (region.is_writable())
-            ++count;
-    });
-    return count;
-}
-
-u32 InodeVMObject::executable_mappings() const
-{
-    u32 count = 0;
-    const_cast<InodeVMObject&>(*this).for_each_region([&](auto& region) {
-        if (region.is_executable())
             ++count;
     });
     return count;

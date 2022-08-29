@@ -15,8 +15,8 @@ class SegmenterPrototype final : public PrototypeObject<SegmenterPrototype, Segm
     JS_PROTOTYPE_OBJECT(SegmenterPrototype, Segmenter, Segmenter);
 
 public:
-    explicit SegmenterPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit SegmenterPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~SegmenterPrototype() override = default;
 
 private:

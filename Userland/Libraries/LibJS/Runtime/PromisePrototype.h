@@ -14,8 +14,8 @@ class PromisePrototype final : public PrototypeObject<PromisePrototype, Promise>
     JS_PROTOTYPE_OBJECT(PromisePrototype, Promise, Promise);
 
 public:
-    PromisePrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    PromisePrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~PromisePrototype() override = default;
 
 private:

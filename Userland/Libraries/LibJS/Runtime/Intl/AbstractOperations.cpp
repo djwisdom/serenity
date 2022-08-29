@@ -183,9 +183,9 @@ bool is_well_formed_unit_identifier(StringView unit_identifier)
 }
 
 // 9.2.1 CanonicalizeLocaleList ( locales ), https://tc39.es/ecma402/#sec-canonicalizelocalelist
-ThrowCompletionOr<Vector<String>> canonicalize_locale_list(GlobalObject& global_object, Value locales)
+ThrowCompletionOr<Vector<String>> canonicalize_locale_list(VM& vm, Value locales)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. If locales is undefined, then
     if (locales.is_undefined()) {
@@ -200,17 +200,17 @@ ThrowCompletionOr<Vector<String>> canonicalize_locale_list(GlobalObject& global_
     // 3. If Type(locales) is String or Type(locales) is Object and locales has an [[InitializedLocale]] internal slot, then
     if (locales.is_string() || (locales.is_object() && is<Locale>(locales.as_object()))) {
         // a. Let O be CreateArrayFromList(« locales »).
-        object = Array::create_from(global_object, { locales });
+        object = Array::create_from(realm, { locales });
     }
     // 4. Else,
     else {
         // a. Let O be ? ToObject(locales).
-        object = TRY(locales.to_object(global_object));
+        object = TRY(locales.to_object(vm));
     }
 
     // 5. Let len be ? ToLength(? Get(O, "length")).
     auto length_value = TRY(object->get(vm.names.length));
-    auto length = TRY(length_value.to_length(global_object));
+    auto length = TRY(length_value.to_length(vm));
 
     // 6. Let k be 0.
     // 7. Repeat, while k < len,
@@ -228,7 +228,7 @@ ThrowCompletionOr<Vector<String>> canonicalize_locale_list(GlobalObject& global_
 
             // ii. If Type(kValue) is not String or Object, throw a TypeError exception.
             if (!key_value.is_string() && !key_value.is_object())
-                return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObjectOrString, key_value.to_string_without_side_effects());
+                return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOrString, key_value.to_string_without_side_effects());
 
             String tag;
 
@@ -240,13 +240,13 @@ ThrowCompletionOr<Vector<String>> canonicalize_locale_list(GlobalObject& global_
             // iv. Else,
             else {
                 // 1. Let tag be ? ToString(kValue).
-                tag = TRY(key_value.to_string(global_object));
+                tag = TRY(key_value.to_string(vm));
             }
 
             // v. If ! IsStructurallyValidLanguageTag(tag) is false, throw a RangeError exception.
             auto locale_id = is_structurally_valid_language_tag(tag);
             if (!locale_id.has_value())
-                return vm.throw_completion<RangeError>(global_object, ErrorType::IntlInvalidLanguageTag, tag);
+                return vm.throw_completion<RangeError>(ErrorType::IntlInvalidLanguageTag, tag);
 
             // vi. Let canonicalizedTag be ! CanonicalizeUnicodeLocaleId(tag).
             auto canonicalized_tag = JS::Intl::canonicalize_unicode_locale_id(*locale_id);
@@ -565,15 +565,15 @@ Vector<String> best_fit_supported_locales(Vector<String> const& requested_locale
 }
 
 // 9.2.10 SupportedLocales ( availableLocales, requestedLocales, options ), https://tc39.es/ecma402/#sec-supportedlocales
-ThrowCompletionOr<Array*> supported_locales(GlobalObject& global_object, Vector<String> const& requested_locales, Value options)
+ThrowCompletionOr<Array*> supported_locales(VM& vm, Vector<String> const& requested_locales, Value options)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Set options to ? CoerceOptionsToObject(options).
-    auto* options_object = TRY(coerce_options_to_object(global_object, options));
+    auto* options_object = TRY(coerce_options_to_object(vm, options));
 
     // 2. Let matcher be ? GetOption(options, "localeMatcher", "string", « "lookup", "best fit" », "best fit").
-    auto matcher = TRY(get_option(global_object, *options_object, vm.names.localeMatcher, OptionType::String, { "lookup"sv, "best fit"sv }, "best fit"sv));
+    auto matcher = TRY(get_option(vm, *options_object, vm.names.localeMatcher, OptionType::String, { "lookup"sv, "best fit"sv }, "best fit"sv));
 
     Vector<String> supported_locales;
 
@@ -589,26 +589,28 @@ ThrowCompletionOr<Array*> supported_locales(GlobalObject& global_object, Vector<
     }
 
     // 5. Return CreateArrayFromList(supportedLocales).
-    return Array::create_from<String>(global_object, supported_locales, [&vm](auto& locale) { return js_string(vm, locale); });
+    return Array::create_from<String>(realm, supported_locales, [&vm](auto& locale) { return js_string(vm, locale); });
 }
 
 // 9.2.12 CoerceOptionsToObject ( options ), https://tc39.es/ecma402/#sec-coerceoptionstoobject
-ThrowCompletionOr<Object*> coerce_options_to_object(GlobalObject& global_object, Value options)
+ThrowCompletionOr<Object*> coerce_options_to_object(VM& vm, Value options)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. If options is undefined, then
     if (options.is_undefined()) {
         // a. Return OrdinaryObjectCreate(null).
-        return Object::create(global_object, nullptr);
+        return Object::create(realm, nullptr);
     }
 
     // 2. Return ? ToObject(options).
-    return TRY(options.to_object(global_object));
+    return TRY(options.to_object(vm));
 }
 
 // NOTE: 9.2.13 GetOption has been removed and is being pulled in from ECMA-262 in the Temporal proposal.
 
 // 1.2.12 GetStringOrBooleanOption ( options, property, values, trueValue, falsyValue, fallback ), https://tc39.es/proposal-intl-numberformat-v3/out/negotiation/proposed.html#sec-getstringorbooleanoption
-ThrowCompletionOr<StringOrBoolean> get_string_or_boolean_option(GlobalObject& global_object, Object const& options, PropertyKey const& property, Span<StringView const> values, StringOrBoolean true_value, StringOrBoolean falsy_value, StringOrBoolean fallback)
+ThrowCompletionOr<StringOrBoolean> get_string_or_boolean_option(VM& vm, Object const& options, PropertyKey const& property, Span<StringView const> values, StringOrBoolean true_value, StringOrBoolean falsy_value, StringOrBoolean fallback)
 {
     // 1. Let value be ? Get(options, property).
     auto value = TRY(options.get(property));
@@ -629,7 +631,7 @@ ThrowCompletionOr<StringOrBoolean> get_string_or_boolean_option(GlobalObject& gl
         return falsy_value;
 
     // 6. Let value be ? ToString(value).
-    auto value_string = TRY(value.to_string(global_object));
+    auto value_string = TRY(value.to_string(vm));
 
     // 7. If values does not contain an element equal to value, return fallback.
     auto it = find(values.begin(), values.end(), value_string);
@@ -641,27 +643,25 @@ ThrowCompletionOr<StringOrBoolean> get_string_or_boolean_option(GlobalObject& gl
 }
 
 // 9.2.14 DefaultNumberOption ( value, minimum, maximum, fallback ), https://tc39.es/ecma402/#sec-defaultnumberoption
-ThrowCompletionOr<Optional<int>> default_number_option(GlobalObject& global_object, Value value, int minimum, int maximum, Optional<int> fallback)
+ThrowCompletionOr<Optional<int>> default_number_option(VM& vm, Value value, int minimum, int maximum, Optional<int> fallback)
 {
-    auto& vm = global_object.vm();
-
     // 1. If value is undefined, return fallback.
     if (value.is_undefined())
         return fallback;
 
     // 2. Set value to ? ToNumber(value).
-    value = TRY(value.to_number(global_object));
+    value = TRY(value.to_number(vm));
 
     // 3. If value is NaN or less than minimum or greater than maximum, throw a RangeError exception.
     if (value.is_nan() || (value.as_double() < minimum) || (value.as_double() > maximum))
-        return vm.throw_completion<RangeError>(global_object, ErrorType::IntlNumberIsNaNOrOutOfRange, value, minimum, maximum);
+        return vm.throw_completion<RangeError>(ErrorType::IntlNumberIsNaNOrOutOfRange, value, minimum, maximum);
 
     // 4. Return floor(value).
     return floor(value.as_double());
 }
 
 // 9.2.15 GetNumberOption ( options, property, minimum, maximum, fallback ), https://tc39.es/ecma402/#sec-getnumberoption
-ThrowCompletionOr<Optional<int>> get_number_option(GlobalObject& global_object, Object const& options, PropertyKey const& property, int minimum, int maximum, Optional<int> fallback)
+ThrowCompletionOr<Optional<int>> get_number_option(VM& vm, Object const& options, PropertyKey const& property, int minimum, int maximum, Optional<int> fallback)
 {
     // 1. Assert: Type(options) is Object.
 
@@ -669,7 +669,7 @@ ThrowCompletionOr<Optional<int>> get_number_option(GlobalObject& global_object, 
     auto value = TRY(options.get(property));
 
     // 3. Return ? DefaultNumberOption(value, minimum, maximum, fallback).
-    return default_number_option(global_object, value, minimum, maximum, move(fallback));
+    return default_number_option(vm, value, minimum, maximum, move(fallback));
 }
 
 // 9.2.16 PartitionPattern ( pattern ), https://tc39.es/ecma402/#sec-partitionpattern

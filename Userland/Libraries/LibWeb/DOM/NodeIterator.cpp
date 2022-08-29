@@ -118,11 +118,12 @@ JS::ThrowCompletionOr<RefPtr<Node>> NodeIterator::traverse(Direction direction)
 JS::ThrowCompletionOr<NodeFilter::Result> NodeIterator::filter(Node& node)
 {
     VERIFY(wrapper());
-    auto& global_object = wrapper()->global_object();
+    auto& vm = wrapper()->vm();
+    auto& realm = *vm.current_realm();
 
     // 1. If traverser’s active flag is set, then throw an "InvalidStateError" DOMException.
     if (m_active)
-        return JS::throw_completion(wrap(global_object, InvalidStateError::create("NodeIterator is already active")));
+        return JS::throw_completion(wrap(realm, InvalidStateError::create("NodeIterator is already active")));
 
     // 2. Let n be node’s nodeType attribute value − 1.
     auto n = node.node_type() - 1;
@@ -140,7 +141,7 @@ JS::ThrowCompletionOr<NodeFilter::Result> NodeIterator::filter(Node& node)
 
     // 6. Let result be the return value of call a user object’s operation with traverser’s filter, "acceptNode", and « node ».
     //    If this throws an exception, then unset traverser’s active flag and rethrow the exception.
-    auto result = Bindings::IDL::call_user_object_operation(m_filter->callback(), "acceptNode", {}, wrap(global_object, node));
+    auto result = Bindings::IDL::call_user_object_operation(m_filter->callback(), "acceptNode", {}, wrap(realm, node));
     if (result.is_abrupt()) {
         m_active = false;
         return result;
@@ -150,7 +151,7 @@ JS::ThrowCompletionOr<NodeFilter::Result> NodeIterator::filter(Node& node)
     m_active = false;
 
     // 8. Return result.
-    auto result_value = TRY(result.value()->to_i32(global_object));
+    auto result_value = TRY(result.value()->to_i32(vm));
     return static_cast<NodeFilter::Result>(result_value);
 }
 

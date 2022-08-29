@@ -12,21 +12,21 @@
 
 namespace JS {
 
-AsyncGeneratorFunctionConstructor::AsyncGeneratorFunctionConstructor(GlobalObject& global_object)
-    : NativeFunction(vm().names.AsyncGeneratorFunction.as_string(), *global_object.function_prototype())
+AsyncGeneratorFunctionConstructor::AsyncGeneratorFunctionConstructor(Realm& realm)
+    : NativeFunction(vm().names.AsyncGeneratorFunction.as_string(), *realm.intrinsics().function_prototype())
 {
 }
 
-void AsyncGeneratorFunctionConstructor::initialize(GlobalObject& global_object)
+void AsyncGeneratorFunctionConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     // 27.4.2.1 AsyncGeneratorFunction.length, https://tc39.es/ecma262/#sec-asyncgeneratorfunction-length
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
 
     // 27.4.2.2 AsyncGeneratorFunction.prototype, https://tc39.es/ecma262/#sec-asyncgeneratorfunction-prototype
-    define_direct_property(vm.names.prototype, global_object.async_generator_function_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.intrinsics().async_generator_function_prototype(), 0);
 }
 
 // 27.4.1.1 AsyncGeneratorFunction ( p1, p2, … , pn, body ), https://tc39.es/ecma262/#sec-asyncgeneratorfunction
@@ -39,7 +39,6 @@ ThrowCompletionOr<Value> AsyncGeneratorFunctionConstructor::call()
 ThrowCompletionOr<Object*> AsyncGeneratorFunctionConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
     // 1. Let C be the active function object.
     auto* constructor = vm.active_function_object();
@@ -48,7 +47,7 @@ ThrowCompletionOr<Object*> AsyncGeneratorFunctionConstructor::construct(Function
     auto& args = vm.running_execution_context().arguments;
 
     // 3. Return ? CreateDynamicFunction(C, NewTarget, asyncGenerator, args).
-    return TRY(FunctionConstructor::create_dynamic_function(global_object, *constructor, &new_target, FunctionKind::AsyncGenerator, args));
+    return TRY(FunctionConstructor::create_dynamic_function(vm, *constructor, &new_target, FunctionKind::AsyncGenerator, args));
 }
 
 }

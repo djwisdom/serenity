@@ -40,6 +40,8 @@ set(SOURCES
     CSS/Display.cpp
     CSS/FontFace.cpp
     CSS/Frequency.cpp
+    CSS/GridTrackPlacement.cpp
+    CSS/GridTrackSize.cpp
     CSS/Length.cpp
     CSS/MediaList.cpp
     CSS/MediaQuery.cpp
@@ -266,6 +268,7 @@ set(SOURCES
     Layout/FlexFormattingContext.cpp
     Layout/FormattingContext.cpp
     Layout/FrameBox.cpp
+    Layout/GridFormattingContext.cpp
     Layout/ImageBox.cpp
     Layout/InitialContainingBlock.cpp
     Layout/InlineFormattingContext.cpp

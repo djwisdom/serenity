@@ -29,20 +29,20 @@ Completion::Completion(ThrowCompletionOr<Value> const& throw_completion_or_value
 }
 
 // 6.2.3.1 Await, https://tc39.es/ecma262/#await
-ThrowCompletionOr<Value> await(GlobalObject& global_object, Value value)
+ThrowCompletionOr<Value> await(VM& vm, Value value)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let asyncContext be the running execution context.
     // NOTE: This is not needed, as we don't suspend anything.
 
     // 2. Let promise be ? PromiseResolve(%Promise%, value).
-    auto* promise_object = TRY(promise_resolve(global_object, *global_object.promise_constructor(), value));
+    auto* promise_object = TRY(promise_resolve(vm, *realm.intrinsics().promise_constructor(), value));
 
     Optional<bool> success;
     Value result;
     // 3. Let fulfilledClosure be a new Abstract Closure with parameters (value) that captures asyncContext and performs the following steps when called:
-    auto fulfilled_closure = [&success, &result](VM& vm, GlobalObject&) -> ThrowCompletionOr<Value> {
+    auto fulfilled_closure = [&success, &result](VM& vm) -> ThrowCompletionOr<Value> {
         // a. Let prevContext be the running execution context.
         // b. Suspend prevContext.
         // FIXME: We don't have this concept yet.
@@ -63,10 +63,10 @@ ThrowCompletionOr<Value> await(GlobalObject& global_object, Value value)
     };
 
     // 4. Let onFulfilled be CreateBuiltinFunction(fulfilledClosure, 1, "", « »).
-    auto* on_fulfilled = NativeFunction::create(global_object, move(fulfilled_closure), 1, "");
+    auto* on_fulfilled = NativeFunction::create(realm, move(fulfilled_closure), 1, "");
 
     // 5. Let rejectedClosure be a new Abstract Closure with parameters (reason) that captures asyncContext and performs the following steps when called:
-    auto rejected_closure = [&success, &result](VM& vm, GlobalObject&) -> ThrowCompletionOr<Value> {
+    auto rejected_closure = [&success, &result](VM& vm) -> ThrowCompletionOr<Value> {
         // a. Let prevContext be the running execution context.
         // b. Suspend prevContext.
         // FIXME: We don't have this concept yet.
@@ -87,7 +87,7 @@ ThrowCompletionOr<Value> await(GlobalObject& global_object, Value value)
     };
 
     // 6. Let onRejected be CreateBuiltinFunction(rejectedClosure, 1, "", « »).
-    auto* on_rejected = NativeFunction::create(global_object, move(rejected_closure), 1, "");
+    auto* on_rejected = NativeFunction::create(realm, move(rejected_closure), 1, "");
 
     // 7. Perform PerformPromiseThen(promise, onFulfilled, onRejected).
     auto* promise = verify_cast<Promise>(promise_object);

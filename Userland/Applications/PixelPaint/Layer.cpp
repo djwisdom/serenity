@@ -269,4 +269,34 @@ void Layer::set_edit_mode(Layer::EditMode mode)
     m_edit_mode = mode;
 }
 
+Optional<Gfx::IntRect> Layer::nonempty_content_bounding_rect() const
+{
+    Optional<int> min_content_y;
+    Optional<int> min_content_x;
+    Optional<int> max_content_y;
+    Optional<int> max_content_x;
+
+    for (int y = 0; y < m_content_bitmap->height(); ++y) {
+        for (int x = 0; x < m_content_bitmap->width(); ++x) {
+            auto color = m_content_bitmap->get_pixel(x, y);
+            if (color.alpha() == 0)
+                continue;
+            min_content_x = min(min_content_x.value_or(x), x);
+            min_content_y = min(min_content_y.value_or(y), y);
+            max_content_x = max(max_content_x.value_or(x), x);
+            max_content_y = max(max_content_y.value_or(y), y);
+        }
+    }
+
+    if (!min_content_x.has_value())
+        return {};
+
+    return Gfx::IntRect {
+        *min_content_x,
+        *min_content_y,
+        *max_content_x - *min_content_x + 1,
+        *max_content_y - *min_content_y + 1
+    };
+}
+
 }

@@ -20,21 +20,21 @@
 
 namespace JS {
 
-FunctionPrototype::FunctionPrototype(GlobalObject& global_object)
-    : FunctionObject(*global_object.object_prototype())
+FunctionPrototype::FunctionPrototype(Realm& realm)
+    : FunctionObject(*realm.intrinsics().object_prototype())
 {
 }
 
-void FunctionPrototype::initialize(GlobalObject& global_object)
+void FunctionPrototype::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Base::initialize(global_object);
+    Base::initialize(realm);
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.apply, apply, 2, attr);
-    define_native_function(vm.names.bind, bind, 1, attr);
-    define_native_function(vm.names.call, call, 1, attr);
-    define_native_function(vm.names.toString, to_string, 0, attr);
-    define_native_function(*vm.well_known_symbol_has_instance(), symbol_has_instance, 1, 0);
+    define_native_function(realm, vm.names.apply, apply, 2, attr);
+    define_native_function(realm, vm.names.bind, bind, 1, attr);
+    define_native_function(realm, vm.names.call, call, 1, attr);
+    define_native_function(realm, vm.names.toString, to_string, 0, attr);
+    define_native_function(realm, *vm.well_known_symbol_has_instance(), symbol_has_instance, 1, 0);
     define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
     define_direct_property(vm.names.name, js_string(heap(), ""), Attribute::Configurable);
 }
@@ -50,11 +50,11 @@ ThrowCompletionOr<Value> FunctionPrototype::internal_call(Value, MarkedVector<Va
 JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::apply)
 {
     // 1. Let func be the this value.
-    auto function_value = vm.this_value(global_object);
+    auto function_value = vm.this_value();
 
     // 2. If IsCallable(func) is false, throw a TypeError exception.
     if (!function_value.is_function())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAFunction, function_value.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, function_value.to_string_without_side_effects());
 
     auto& function = static_cast<FunctionObject&>(function_value.as_object());
 
@@ -66,30 +66,32 @@ JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::apply)
         // FIXME: a. Perform PrepareForTailCall().
 
         // b. Return ? Call(func, thisArg).
-        return TRY(JS::call(global_object, function, this_arg));
+        return TRY(JS::call(vm, function, this_arg));
     }
 
     // 4. Let argList be ? CreateListFromArrayLike(argArray).
-    auto arguments = TRY(create_list_from_array_like(global_object, arg_array));
+    auto arguments = TRY(create_list_from_array_like(vm, arg_array));
 
     // FIXME: 5. Perform PrepareForTailCall().
 
     // 6. Return ? Call(func, thisArg, argList).
-    return TRY(JS::call(global_object, function, this_arg, move(arguments)));
+    return TRY(JS::call(vm, function, this_arg, move(arguments)));
 }
 
 // 20.2.3.2 Function.prototype.bind ( thisArg, ...args ), https://tc39.es/ecma262/#sec-function.prototype.bind
 // 3.1.2.1 Function.prototype.bind ( thisArg, ...args ), https://tc39.es/proposal-shadowrealm/#sec-function.prototype.bind
 JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::bind)
 {
+    auto& realm = *vm.current_realm();
+
     auto this_argument = vm.argument(0);
 
     // 1. Let Target be the this value.
-    auto target_value = vm.this_value(global_object);
+    auto target_value = vm.this_value();
 
     // 2. If IsCallable(Target) is false, throw a TypeError exception.
     if (!target_value.is_function())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAFunction, target_value.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, target_value.to_string_without_side_effects());
 
     auto& target = static_cast<FunctionObject&>(target_value.as_object());
 
@@ -100,13 +102,13 @@ JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::bind)
     }
 
     // 3. Let F be ? BoundFunctionCreate(Target, thisArg, args).
-    auto* function = TRY(BoundFunction::create(global_object, target, this_argument, move(arguments)));
+    auto* function = TRY(BoundFunction::create(realm, target, this_argument, move(arguments)));
 
     // 4. Let argCount be the number of elements in args.
     auto arg_count = vm.argument_count() > 0 ? vm.argument_count() - 1 : 0;
 
     // 5. Perform ? CopyNameAndLength(F, Target, "bound", argCount).
-    TRY(copy_name_and_length(global_object, *function, target, "bound"sv, arg_count));
+    TRY(copy_name_and_length(vm, *function, target, "bound"sv, arg_count));
 
     // 6. Return F.
     return function;
@@ -116,11 +118,11 @@ JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::bind)
 JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::call)
 {
     // 1. Let func be the this value.
-    auto function_value = vm.this_value(global_object);
+    auto function_value = vm.this_value();
 
     // 2. If IsCallable(func) is false, throw a TypeError exception.
     if (!function_value.is_function())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAFunction, function_value.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, function_value.to_string_without_side_effects());
 
     auto& function = static_cast<FunctionObject&>(function_value.as_object());
 
@@ -134,19 +136,19 @@ JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::call)
     }
 
     // 4. Return ? Call(func, thisArg, args).
-    return TRY(JS::call(global_object, function, this_arg, move(arguments)));
+    return TRY(JS::call(vm, function, this_arg, move(arguments)));
 }
 
 // 20.2.3.5 Function.prototype.toString ( ), https://tc39.es/ecma262/#sec-function.prototype.tostring
 JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::to_string)
 {
     // 1. Let func be the this value.
-    auto function_value = vm.this_value(global_object);
+    auto function_value = vm.this_value();
 
     // If func is not a function, let's bail out early. The order of this step is not observable.
     if (!function_value.is_function()) {
         // 5. Throw a TypeError exception.
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObjectOfType, "Function");
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOfType, "Function");
     }
 
     auto& function = function_value.as_function();
@@ -173,7 +175,7 @@ JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::to_string)
 // 20.2.3.6 Function.prototype [ @@hasInstance ] ( V ), https://tc39.es/ecma262/#sec-function.prototype-@@hasinstance
 JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::symbol_has_instance)
 {
-    return TRY(ordinary_has_instance(global_object, vm.argument(0), vm.this_value(global_object)));
+    return TRY(ordinary_has_instance(vm, vm.argument(0), vm.this_value()));
 }
 
 }

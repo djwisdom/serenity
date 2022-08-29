@@ -1,11 +1,12 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/Memory.h>
 #include <AK/StringView.h>
+#include <Kernel/Arch/InterruptDisabler.h>
 #include <Kernel/Arch/PageDirectory.h>
 #include <Kernel/Arch/PageFault.h>
 #include <Kernel/Debug.h>
@@ -69,8 +70,7 @@ Region::~Region()
         if (!is_readable() && !is_writable() && !is_executable()) {
             // If the region is "PROT_NONE", we didn't map it in the first place.
         } else {
-            SpinlockLocker mm_locker(s_mm_lock);
-            unmap_with_locks_held(ShouldFlushTLB::Yes, pd_locker, mm_locker);
+            unmap_with_locks_held(ShouldFlushTLB::Yes, pd_locker);
             VERIFY(!m_page_directory);
         }
     }
@@ -106,7 +106,7 @@ ErrorOr<NonnullOwnPtr<Region>> Region::try_clone()
 
         auto region = TRY(Region::try_create_user_accessible(
             m_range, vmobject(), m_offset_in_vmobject, move(region_name), access(), m_cacheable ? Cacheable::Yes : Cacheable::No, m_shared));
-        region->set_mmap(m_mmap);
+        region->set_mmap(m_mmap, m_mmapped_from_readable, m_mmapped_from_writable);
         region->set_shared(m_shared);
         region->set_syscall_region(is_syscall_region());
         return region;
@@ -133,7 +133,7 @@ ErrorOr<NonnullOwnPtr<Region>> Region::try_clone()
         clone_region->set_stack(true);
     }
     clone_region->set_syscall_region(is_syscall_region());
-    clone_region->set_mmap(m_mmap);
+    clone_region->set_mmap(m_mmap, m_mmapped_from_readable, m_mmapped_from_writable);
     return clone_region;
 }
 
@@ -202,7 +202,7 @@ ErrorOr<void> Region::set_should_cow(size_t page_index, bool cow)
     return {};
 }
 
-bool Region::map_individual_page_impl(size_t page_index, LockRefPtr<PhysicalPage> page)
+bool Region::map_individual_page_impl(size_t page_index, RefPtr<PhysicalPage> page)
 {
     VERIFY(m_page_directory->get_lock().is_locked_by_current_processor());
 
@@ -213,7 +213,6 @@ bool Region::map_individual_page_impl(size_t page_index, LockRefPtr<PhysicalPage
         PANIC("About to map mmap'ed page at a kernel address");
     }
 
-    SpinlockLocker lock(s_mm_lock);
     auto* pte = MM.ensure_pte(*m_page_directory, page_vaddr);
     if (!pte)
         return false;
@@ -241,7 +240,7 @@ bool Region::map_individual_page_impl(size_t page_index, LockRefPtr<PhysicalPage
 
 bool Region::map_individual_page_impl(size_t page_index)
 {
-    LockRefPtr<PhysicalPage> page;
+    RefPtr<PhysicalPage> page;
     {
         SpinlockLocker vmobject_locker(vmobject().m_lock);
         page = physical_page(page_index);
@@ -250,7 +249,7 @@ bool Region::map_individual_page_impl(size_t page_index)
     return map_individual_page_impl(page_index, page);
 }
 
-bool Region::remap_vmobject_page(size_t page_index, NonnullLockRefPtr<PhysicalPage> physical_page)
+bool Region::remap_vmobject_page(size_t page_index, NonnullRefPtr<PhysicalPage> physical_page)
 {
     SpinlockLocker page_lock(m_page_directory->get_lock());
 
@@ -268,11 +267,10 @@ void Region::unmap(ShouldFlushTLB should_flush_tlb)
     if (!m_page_directory)
         return;
     SpinlockLocker pd_locker(m_page_directory->get_lock());
-    SpinlockLocker mm_locker(s_mm_lock);
-    unmap_with_locks_held(should_flush_tlb, pd_locker, mm_locker);
+    unmap_with_locks_held(should_flush_tlb, pd_locker);
 }
 
-void Region::unmap_with_locks_held(ShouldFlushTLB should_flush_tlb, SpinlockLocker<RecursiveSpinlock>&, SpinlockLocker<RecursiveSpinlock>&)
+void Region::unmap_with_locks_held(ShouldFlushTLB should_flush_tlb, SpinlockLocker<RecursiveSpinlock>&)
 {
     if (!m_page_directory)
         return;
@@ -410,7 +408,7 @@ PageFaultResponse Region::handle_zero_fault(size_t page_index_in_region, Physica
     if (current_thread != nullptr)
         current_thread->did_zero_fault();
 
-    LockRefPtr<PhysicalPage> new_physical_page;
+    RefPtr<PhysicalPage> new_physical_page;
 
     if (page_in_slot_at_time_of_fault.is_lazy_committed_page()) {
         VERIFY(m_vmobject->is_anonymous());
@@ -467,7 +465,6 @@ PageFaultResponse Region::handle_cow_fault(size_t page_index_in_region)
 PageFaultResponse Region::handle_inode_fault(size_t page_index_in_region)
 {
     VERIFY(vmobject().is_inode());
-    VERIFY(!s_mm_lock.is_locked_by_current_processor());
     VERIFY(!g_scheduler_lock.is_locked_by_current_processor());
 
     auto& inode_vmobject = static_cast<InodeVMObject&>(vmobject());
@@ -517,8 +514,7 @@ PageFaultResponse Region::handle_inode_fault(size_t page_index_in_region)
     }
     auto new_physical_page = new_physical_page_or_error.release_value();
     {
-        // NOTE: The MM lock is required for quick-mapping.
-        SpinlockLocker mm_locker(s_mm_lock);
+        InterruptDisabler disabler;
         u8* dest_ptr = MM.quickmap_page(*new_physical_page);
         memcpy(dest_ptr, page_buffer, PAGE_SIZE);
         MM.unquickmap_page();
@@ -546,14 +542,14 @@ PageFaultResponse Region::handle_inode_fault(size_t page_index_in_region)
     return PageFaultResponse::Continue;
 }
 
-LockRefPtr<PhysicalPage> Region::physical_page(size_t index) const
+RefPtr<PhysicalPage> Region::physical_page(size_t index) const
 {
     SpinlockLocker vmobject_locker(vmobject().m_lock);
     VERIFY(index < page_count());
     return vmobject().physical_pages()[first_page_index() + index];
 }
 
-LockRefPtr<PhysicalPage>& Region::physical_page_slot(size_t index)
+RefPtr<PhysicalPage>& Region::physical_page_slot(size_t index)
 {
     VERIFY(vmobject().m_lock.is_locked_by_current_processor());
     VERIFY(index < page_count());

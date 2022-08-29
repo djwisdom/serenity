@@ -672,8 +672,6 @@ ErrorOr<int> run_in_windowed_mode(String const& initial_location, String const& 
         if (!segment_index.has_value() || *segment_index >= breadcrumbbar.segment_count() - 1)
             return;
         breadcrumbbar.set_selected_segment(*segment_index + 1);
-        if (breadcrumbbar.on_segment_click)
-            breadcrumbbar.on_segment_click(*segment_index + 1);
     });
 
     RefPtr<GUI::Action> layout_toolbar_action;
@@ -1073,6 +1071,20 @@ ErrorOr<int> run_in_windowed_mode(String const& initial_location, String const& 
     (void)TRY(main_toolbar.try_add_action(directory_view->view_as_table_action()));
     (void)TRY(main_toolbar.try_add_action(directory_view->view_as_columns_action()));
 
+    breadcrumbbar.on_segment_change = [&](auto segment_index) {
+        if (!segment_index.has_value())
+            return;
+        auto selected_path = breadcrumbbar.segment_data(*segment_index);
+        if (Core::File::is_directory(selected_path)) {
+            directory_view->open(selected_path);
+        } else {
+            dbgln("Breadcrumb path '{}' doesn't exist", selected_path);
+            breadcrumbbar.remove_end_segments(*segment_index);
+            auto existing_path_segment = breadcrumbbar.find_segment_with_data(directory_view->path());
+            breadcrumbbar.set_selected_segment(existing_path_segment.value());
+        }
+    };
+
     directory_view->on_path_change = [&](String const& new_path, bool can_read_in_path, bool can_write_in_path) {
         auto icon = GUI::FileIconProvider::icon_for_path(new_path);
         auto* bitmap = icon.bitmap_for_size(16);
@@ -1112,18 +1124,6 @@ ErrorOr<int> run_in_windowed_mode(String const& initial_location, String const& 
                 }
 
                 breadcrumbbar.set_selected_segment(breadcrumbbar.segment_count() - 1);
-
-                breadcrumbbar.on_segment_click = [&](size_t segment_index) {
-                    auto selected_path = breadcrumbbar.segment_data(segment_index);
-                    if (Core::File::is_directory(selected_path)) {
-                        directory_view->open(selected_path);
-                    } else {
-                        dbgln("Breadcrumb path '{}' doesn't exist", selected_path);
-                        breadcrumbbar.remove_end_segments(segment_index);
-                        auto existing_path_segment = breadcrumbbar.find_segment_with_data(directory_view->path());
-                        breadcrumbbar.set_selected_segment(existing_path_segment.value());
-                    }
-                };
             }
         }
 
@@ -1141,6 +1141,7 @@ ErrorOr<int> run_in_windowed_mode(String const& initial_location, String const& 
         go_forward_action->set_enabled(directory_view->path_history_position() < directory_view->path_history_size() - 1);
         go_back_action->set_enabled(directory_view->path_history_position() > 0);
         open_parent_directory_action->set_enabled(new_path != "/");
+        open_child_directory_action->set_enabled(breadcrumbbar.selected_segment().has_value() && *breadcrumbbar.selected_segment() < breadcrumbbar.segment_count() - 1);
         directory_view->view_as_table_action().set_enabled(can_read_in_path);
         directory_view->view_as_icons_action().set_enabled(can_read_in_path);
         directory_view->view_as_columns_action().set_enabled(can_read_in_path);

@@ -10,6 +10,7 @@
 #include <AK/RedBlackTree.h>
 #include <AK/Vector.h>
 #include <Kernel/Library/LockWeakPtr.h>
+#include <Kernel/Locking/SpinlockProtected.h>
 #include <Kernel/Memory/AllocationStrategy.h>
 #include <Kernel/Memory/PageDirectory.h>
 #include <Kernel/Memory/Region.h>
@@ -26,8 +27,8 @@ public:
     PageDirectory& page_directory() { return *m_page_directory; }
     PageDirectory const& page_directory() const { return *m_page_directory; }
 
-    auto& regions() { return m_region_tree.regions(); }
-    auto const& regions() const { return m_region_tree.regions(); }
+    RegionTree& region_tree() { return m_region_tree; }
+    RegionTree const& region_tree() const { return m_region_tree; }
 
     void dump_regions();
 
@@ -52,8 +53,6 @@ public:
 
     void remove_all_regions(Badge<Process>);
 
-    RecursiveSpinlock& get_lock() const { return m_lock; }
-
     ErrorOr<size_t> amount_clean_inode() const;
     size_t amount_dirty_private() const;
     size_t amount_virtual() const;
@@ -62,12 +61,8 @@ public:
     size_t amount_purgeable_volatile() const;
     size_t amount_purgeable_nonvolatile() const;
 
-    auto& region_tree() { return m_region_tree; }
-
 private:
     AddressSpace(NonnullLockRefPtr<PageDirectory>, VirtualRange total_range);
-
-    mutable RecursiveSpinlock m_lock { LockRank::None };
 
     LockRefPtr<PageDirectory> m_page_directory;
 

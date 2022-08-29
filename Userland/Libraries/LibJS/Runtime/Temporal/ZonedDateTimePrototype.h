@@ -15,8 +15,8 @@ class ZonedDateTimePrototype final : public PrototypeObject<ZonedDateTimePrototy
     JS_PROTOTYPE_OBJECT(ZonedDateTimePrototype, ZonedDateTime, Temporal.ZonedDateTime);
 
 public:
-    explicit ZonedDateTimePrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit ZonedDateTimePrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~ZonedDateTimePrototype() override = default;
 
 private:

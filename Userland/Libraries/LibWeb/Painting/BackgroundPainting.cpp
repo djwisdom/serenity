@@ -104,7 +104,6 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
 
     // Note: Background layers are ordered front-to-back, so we paint them in reverse
     for (auto& layer : background_layers->in_reverse()) {
-        // TODO: Gradients!
         if (!layer_is_paintable(layer))
             continue;
         Gfx::PainterStateSaver state { painter };
@@ -136,9 +135,13 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
             break;
         }
 
-        // FIXME: Implement proper derault sizing algorithm: https://drafts.csswg.org/css-images/#default-sizing
+        // FIXME: Implement proper default sizing algorithm: https://drafts.csswg.org/css-images/#default-sizing
         auto natural_image_width = image.natural_width().value_or(background_positioning_area.width());
         auto natural_image_height = image.natural_height().value_or(background_positioning_area.height());
+
+        // If any of these are zero, the NaNs will pop up in the painting code.
+        if (background_positioning_area.is_empty() || natural_image_height <= 0 || natural_image_width <= 0)
+            continue;
 
         // Size
         Gfx::FloatRect image_rect;
@@ -180,6 +183,10 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
             break;
         }
         }
+
+        // If after sizing we have a 0px image, we're done. Attempting to paint this would be an infinite loop.
+        if (image_rect.is_empty())
+            continue;
 
         // If background-repeat is round for one (or both) dimensions, there is a second step.
         // The UA must scale the image in that dimension (or both dimensions) so that it fits a

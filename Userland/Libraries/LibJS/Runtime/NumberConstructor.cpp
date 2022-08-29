@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -23,26 +23,26 @@ constexpr double const MIN_SAFE_INTEGER_VALUE { -(__builtin_exp2(53) - 1) };
 
 namespace JS {
 
-NumberConstructor::NumberConstructor(GlobalObject& global_object)
-    : NativeFunction(vm().names.Number.as_string(), *global_object.function_prototype())
+NumberConstructor::NumberConstructor(Realm& realm)
+    : NativeFunction(vm().names.Number.as_string(), *realm.intrinsics().function_prototype())
 {
 }
 
-void NumberConstructor::initialize(GlobalObject& global_object)
+void NumberConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     // 21.1.2.15 Number.prototype, https://tc39.es/ecma262/#sec-number.prototype
-    define_direct_property(vm.names.prototype, global_object.number_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.intrinsics().number_prototype(), 0);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.isFinite, is_finite, 1, attr);
-    define_native_function(vm.names.isInteger, is_integer, 1, attr);
-    define_native_function(vm.names.isNaN, is_nan, 1, attr);
-    define_native_function(vm.names.isSafeInteger, is_safe_integer, 1, attr);
-    define_direct_property(vm.names.parseInt, global_object.get_without_side_effects(vm.names.parseInt), attr);
-    define_direct_property(vm.names.parseFloat, global_object.get_without_side_effects(vm.names.parseFloat), attr);
+    define_native_function(realm, vm.names.isFinite, is_finite, 1, attr);
+    define_native_function(realm, vm.names.isInteger, is_integer, 1, attr);
+    define_native_function(realm, vm.names.isNaN, is_nan, 1, attr);
+    define_native_function(realm, vm.names.isSafeInteger, is_safe_integer, 1, attr);
+    define_direct_property(vm.names.parseInt, realm.intrinsics().parse_int_function(), attr);
+    define_direct_property(vm.names.parseFloat, realm.intrinsics().parse_float_function(), attr);
     define_direct_property(vm.names.EPSILON, Value(EPSILON_VALUE), 0);
     define_direct_property(vm.names.MAX_VALUE, Value(NumericLimits<double>::max()), 0);
     define_direct_property(vm.names.MIN_VALUE, Value(NumericLimits<double>::min()), 0);
@@ -56,21 +56,26 @@ void NumberConstructor::initialize(GlobalObject& global_object)
 }
 
 // Most of 21.1.1.1 Number ( value ) factored into a separate function for sharing between call() and construct().
-static ThrowCompletionOr<Value> get_value_from_constructor_argument(GlobalObject& global_object)
+static ThrowCompletionOr<Value> get_value_from_constructor_argument(VM& vm)
 {
-    auto& vm = global_object.vm();
-
     Value number;
+    // 1. If value is present, then
     if (vm.argument_count() > 0) {
-        auto primitive = TRY(vm.argument(0).to_numeric(global_object));
+        // a. Let prim be ? ToNumeric(value).
+        auto primitive = TRY(vm.argument(0).to_numeric(vm));
+
+        // b. If Type(prim) is BigInt, let n be 𝔽(ℝ(prim)).
         if (primitive.is_bigint()) {
-            // FIXME: How should huge values be handled here?
-            auto& big_integer = primitive.as_bigint().big_integer();
-            number = Value(static_cast<double>(big_integer.unsigned_value().to_u64()) * (big_integer.is_negative() ? -1.0 : 1.0));
-        } else {
+            number = Value(primitive.as_bigint().big_integer().to_double(Crypto::UnsignedBigInteger::RoundingMode::ECMAScriptNumberValueFor));
+        }
+        // c. Otherwise, let n be prim.
+        else {
             number = primitive;
         }
-    } else {
+    }
+    // 2. Else,
+    else {
+        // a. Let n be +0𝔽.
         number = Value(0);
     }
     return number;
@@ -79,16 +84,22 @@ static ThrowCompletionOr<Value> get_value_from_constructor_argument(GlobalObject
 // 21.1.1.1 Number ( value ), https://tc39.es/ecma262/#sec-number-constructor-number-value
 ThrowCompletionOr<Value> NumberConstructor::call()
 {
-    return get_value_from_constructor_argument(global_object());
+    // NOTE: get_value_from_constructor_argument performs steps 1 and 2 and returns n.
+    // 3. If NewTarget is undefined, return n.
+    return get_value_from_constructor_argument(vm());
 }
 
 // 21.1.1.1 Number ( value ), https://tc39.es/ecma262/#sec-number-constructor-number-value
 ThrowCompletionOr<Object*> NumberConstructor::construct(FunctionObject& new_target)
 {
-    auto& global_object = this->global_object();
+    auto& vm = this->vm();
+    // NOTE: get_value_from_constructor_argument performs steps 1 and 2 and returns n.
+    auto number = TRY(get_value_from_constructor_argument(vm));
 
-    auto number = TRY(get_value_from_constructor_argument(global_object));
-    return TRY(ordinary_create_from_constructor<NumberObject>(global_object, new_target, &GlobalObject::number_prototype, number.as_double()));
+    // 4. Let O be ? OrdinaryCreateFromConstructor(NewTarget, "%Number.prototype%", « [[NumberData]] »).
+    // 5. Set O.[[NumberData]] to n.
+    // 6. Return O.
+    return TRY(ordinary_create_from_constructor<NumberObject>(vm, new_target, &Intrinsics::number_prototype, number.as_double()));
 }
 
 // 21.1.2.2 Number.isFinite ( number ), https://tc39.es/ecma262/#sec-number.isfinite

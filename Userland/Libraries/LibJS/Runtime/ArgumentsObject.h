@@ -16,9 +16,9 @@ class ArgumentsObject final : public Object {
     JS_OBJECT(ArgumentsObject, Object);
 
 public:
-    ArgumentsObject(GlobalObject&, Environment&);
+    ArgumentsObject(Realm&, Environment&);
 
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~ArgumentsObject() override = default;
 
     Environment& environment() { return m_environment; }

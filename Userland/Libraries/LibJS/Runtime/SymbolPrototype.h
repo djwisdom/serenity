@@ -14,8 +14,8 @@ class SymbolPrototype final : public Object {
     JS_OBJECT(SymbolPrototype, Object);
 
 public:
-    explicit SymbolPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit SymbolPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~SymbolPrototype() override = default;
 
 private:

@@ -131,13 +131,11 @@ StringView DurationFormat::display_to_string(Display display)
 }
 
 // 1.1.3 ToDurationRecord ( input ), https://tc39.es/proposal-intl-duration-format/#sec-todurationrecord
-ThrowCompletionOr<Temporal::DurationRecord> to_duration_record(GlobalObject& global_object, Value input)
+ThrowCompletionOr<Temporal::DurationRecord> to_duration_record(VM& vm, Value input)
 {
-    auto& vm = global_object.vm();
-
     // 1. If Type(input) is not Object, throw a TypeError exception.
     if (!input.is_object())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObject, input);
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, input);
     auto& input_object = input.as_object();
 
     // 2. Let result be a new Record.
@@ -163,7 +161,7 @@ ThrowCompletionOr<Temporal::DurationRecord> to_duration_record(GlobalObject& glo
             // i. Set any to true.
             any = true;
             // ii. Set value to ? ToIntegerWithoutRounding(value).
-            value_number = TRY(Temporal::to_integer_without_rounding(global_object, value, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, unit, value));
+            value_number = TRY(Temporal::to_integer_without_rounding(vm, value, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, unit, value));
         }
         // e. Else,
         else {
@@ -177,7 +175,7 @@ ThrowCompletionOr<Temporal::DurationRecord> to_duration_record(GlobalObject& glo
 
     // 5. If any is false, throw a TypeError exception.
     if (!any)
-        return vm.throw_completion<TypeError>(global_object, ErrorType::TemporalInvalidDurationLikeObject);
+        return vm.throw_completion<TypeError>(ErrorType::TemporalInvalidDurationLikeObject);
 
     // 6. Return result.
     return result;
@@ -239,12 +237,10 @@ bool is_valid_duration_record(Temporal::DurationRecord const& record)
 }
 
 // 1.1.6 GetDurationUnitOptions ( unit, options, baseStyle, stylesList, digitalBase, prevStyle ), https://tc39.es/proposal-intl-duration-format/#sec-getdurationunitoptions
-ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(GlobalObject& global_object, String const& unit, Object const& options, StringView base_style, Span<StringView const> styles_list, StringView digital_base, Optional<String> const& previous_style)
+ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(VM& vm, String const& unit, Object const& options, StringView base_style, Span<StringView const> styles_list, StringView digital_base, Optional<String> const& previous_style)
 {
-    auto& vm = global_object.vm();
-
     // 1. Let style be ? GetOption(options, unit, "string", stylesList, undefined).
-    auto style_value = TRY(get_option(global_object, options, unit, OptionType::String, styles_list, Empty {}));
+    auto style_value = TRY(get_option(vm, options, unit, OptionType::String, styles_list, Empty {}));
 
     // 2. Let displayDefault be "always".
     auto display_default = "always"sv;
@@ -274,14 +270,14 @@ ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(GlobalObject& g
     auto display_field = String::formatted("{}Display", unit);
 
     // 5. Let display be ? GetOption(options, displayField, "string", « "auto", "always" », displayDefault).
-    auto display = TRY(get_option(global_object, options, display_field, OptionType::String, { "auto"sv, "always"sv }, display_default));
+    auto display = TRY(get_option(vm, options, display_field, OptionType::String, { "auto"sv, "always"sv }, display_default));
 
     // 6. If prevStyle is "numeric" or "2-digit", then
     if (previous_style == "numeric"sv || previous_style == "2-digit"sv) {
         // a. If style is not "numeric" or "2-digit", then
         if (style != "numeric"sv && style != "2-digit"sv) {
             // i. Throw a RangeError exception.
-            return vm.throw_completion<RangeError>(global_object, ErrorType::IntlNonNumericOr2DigitAfterNumericOr2Digit);
+            return vm.throw_completion<RangeError>(ErrorType::IntlNonNumericOr2DigitAfterNumericOr2Digit);
         }
         // b. Else if unit is "minutes" or "seconds", then
         else if (unit == "minutes"sv || unit == "seconds"sv) {
@@ -308,9 +304,9 @@ static String convert_number_format_pattern_to_duration_format_template(Unicode:
 }
 
 // 1.1.7 PartitionDurationFormatPattern ( durationFormat, duration ), https://tc39.es/proposal-intl-duration-format/#sec-partitiondurationformatpattern
-ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(GlobalObject& global_object, DurationFormat const& duration_format, Temporal::DurationRecord const& duration)
+ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(VM& vm, DurationFormat const& duration_format, Temporal::DurationRecord const& duration)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let result be a new empty List.
     Vector<PatternPartition> result;
@@ -349,7 +345,7 @@ ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(Gl
         }
 
         // h. Let nfOpts be ! OrdinaryObjectCreate(null).
-        auto* number_format_options = Object::create(global_object, nullptr);
+        auto* number_format_options = Object::create(realm, nullptr);
 
         // i. Let value be 0.
         auto value = Value(0);
@@ -406,11 +402,11 @@ ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(Gl
         }
 
         // o. Let nf be ? Construct(%NumberFormat%, « durationFormat.[[Locale]], nfOpts »).
-        auto* number_format = static_cast<Intl::NumberFormat*>(TRY(construct(global_object, *global_object.intl_number_format_constructor(), js_string(vm, duration_format.locale()), number_format_options)));
+        auto* number_format = static_cast<NumberFormat*>(TRY(construct(vm, *realm.intrinsics().intl_number_format_constructor(), js_string(vm, duration_format.locale()), number_format_options)));
 
         // FIXME: durationFormat.[[NumberFormat]] is not a thing, the spec likely means 'nf' in this case
         // p. Let num be ! FormatNumeric(durationFormat.[[NumberFormat]], value).
-        auto number = format_numeric(global_object, *number_format, value);
+        auto number = format_numeric(vm, *number_format, value);
 
         // q. Let dataLocale be durationFormat.[[DataLocale]].
         auto const& data_locale = duration_format.data_locale();
@@ -435,7 +431,7 @@ ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(Gl
         // t. Else,
         else {
             // i. Let pr be ? Construct(%PluralRules%, « durationFormat.[[Locale]] »).
-            auto* plural_rules = TRY(construct(global_object, *global_object.intl_plural_rules_constructor(), js_string(vm, duration_format.locale())));
+            auto* plural_rules = TRY(construct(vm, *realm.intrinsics().intl_plural_rules_constructor(), js_string(vm, duration_format.locale())));
 
             // ii. Let prv be ! ResolvePlural(pr, value).
             auto plurality = resolve_plural(static_cast<PluralRules&>(*plural_rules), value);
@@ -449,7 +445,7 @@ ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(Gl
             auto template_ = convert_number_format_pattern_to_duration_format_template(*pattern);
 
             // FIXME: MakePartsList takes a list, not a string, so likely missing spec step: Let fv be ! PartitionNumberPattern(nf, value).
-            auto formatted_value = partition_number_pattern(global_object, *number_format, value);
+            auto formatted_value = partition_number_pattern(vm, *number_format, value);
 
             // FIXME: Spec issue - see above, fv instead of num
             // iv. Let parts be ! MakePartsList(template, unit, num).
@@ -483,7 +479,7 @@ ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(Gl
     }
 
     // 3. Let lf be ? Construct(%ListFormat%, « durationFormat.[[Locale]] »).
-    auto* list_format = static_cast<Intl::ListFormat*>(TRY(construct(global_object, *global_object.intl_list_format_constructor(), js_string(vm, duration_format.locale()))));
+    auto* list_format = static_cast<ListFormat*>(TRY(construct(vm, *realm.intrinsics().intl_list_format_constructor(), js_string(vm, duration_format.locale()))));
 
     // FIXME: CreatePartsFromList expects a list of strings and creates a list of Pattern Partition records, but we already created a list of Pattern Partition records
     //  so we try to hack something together from it that looks mostly right

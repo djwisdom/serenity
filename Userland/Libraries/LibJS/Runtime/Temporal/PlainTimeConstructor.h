@@ -14,8 +14,8 @@ class PlainTimeConstructor final : public NativeFunction {
     JS_OBJECT(PlainTimeConstructor, NativeFunction);
 
 public:
-    explicit PlainTimeConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit PlainTimeConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~PlainTimeConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;

@@ -15,8 +15,8 @@ class PluralRulesPrototype final : public PrototypeObject<PluralRulesPrototype, 
     JS_PROTOTYPE_OBJECT(PluralRulesPrototype, PluralRules, Intl.PluralRules);
 
 public:
-    explicit PluralRulesPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit PluralRulesPrototype(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~PluralRulesPrototype() override = default;
 
 private:

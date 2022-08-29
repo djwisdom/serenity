@@ -10,8 +10,8 @@
 
 namespace JS {
 
-ModuleNamespaceObject::ModuleNamespaceObject(GlobalObject& global_object, Module* module, Vector<FlyString> exports)
-    : Object(*global_object.object_prototype())
+ModuleNamespaceObject::ModuleNamespaceObject(Realm& realm, Module* module, Vector<FlyString> exports)
+    : Object(*realm.intrinsics().object_prototype())
     , m_module(module)
     , m_exports(move(exports))
 {
@@ -22,9 +22,9 @@ ModuleNamespaceObject::ModuleNamespaceObject(GlobalObject& global_object, Module
     });
 }
 
-void ModuleNamespaceObject::initialize(GlobalObject& global_object)
+void ModuleNamespaceObject::initialize(Realm& realm)
 {
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
     // 28.3.1 @@toStringTag, https://tc39.es/ecma262/#sec-@@tostringtag
     define_direct_property(*vm().well_known_symbol_to_string_tag(), js_string(vm(), "Module"sv), 0);
@@ -136,6 +136,8 @@ ThrowCompletionOr<bool> ModuleNamespaceObject::internal_has_property(PropertyKey
 // 10.4.6.8 [[Get]] ( P, Receiver ), https://tc39.es/ecma262/#sec-module-namespace-exotic-objects-get-p-receiver
 ThrowCompletionOr<Value> ModuleNamespaceObject::internal_get(PropertyKey const& property_key, Value receiver) const
 {
+    auto& vm = this->vm();
+
     // 1. If Type(P) is Symbol, then
     if (property_key.is_symbol()) {
         // a. Return ! OrdinaryGet(O, P, Receiver).
@@ -150,7 +152,7 @@ ThrowCompletionOr<Value> ModuleNamespaceObject::internal_get(PropertyKey const& 
 
     // 4. Let m be O.[[Module]].
     // 5. Let binding be ! m.ResolveExport(P).
-    auto binding = MUST(m_module->resolve_export(vm(), property_key.to_string()));
+    auto binding = MUST(m_module->resolve_export(vm, property_key.to_string()));
 
     // 6. Assert: binding is a ResolvedBinding Record.
     VERIFY(binding.is_valid());
@@ -164,7 +166,7 @@ ThrowCompletionOr<Value> ModuleNamespaceObject::internal_get(PropertyKey const& 
     // 9. If binding.[[BindingName]] is namespace, then
     if (binding.is_namespace()) {
         // a. Return ? GetModuleNamespace(targetModule).
-        return TRY(target_module->get_module_namespace(vm()));
+        return TRY(target_module->get_module_namespace(vm));
     }
 
     // 10. Let targetEnv be targetModule.[[Environment]].
@@ -172,10 +174,10 @@ ThrowCompletionOr<Value> ModuleNamespaceObject::internal_get(PropertyKey const& 
 
     // 11. If targetEnv is empty, throw a ReferenceError exception.
     if (!target_environment)
-        return vm().throw_completion<ReferenceError>(global_object(), ErrorType::ModuleNoEnvironment);
+        return vm.throw_completion<ReferenceError>(ErrorType::ModuleNoEnvironment);
 
     // 12. Return ? targetEnv.GetBindingValue(binding.[[BindingName]], true).
-    return target_environment->get_binding_value(global_object(), binding.export_name, true);
+    return target_environment->get_binding_value(vm, binding.export_name, true);
 }
 
 // 10.4.6.9 [[Set]] ( P, V, Receiver ), https://tc39.es/ecma262/#sec-module-namespace-exotic-objects-set-p-v-receiver

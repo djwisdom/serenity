@@ -10,15 +10,17 @@
 
 namespace Web::HTML {
 
-RefPtr<ImageData> ImageData::create_with_size(JS::GlobalObject& global_object, int width, int height)
+RefPtr<ImageData> ImageData::create_with_size(JS::VM& vm, int width, int height)
 {
+    auto& realm = *vm.current_realm();
+
     if (width <= 0 || height <= 0)
         return nullptr;
 
     if (width > 16384 || height > 16384)
         return nullptr;
 
-    auto data_or_error = JS::Uint8ClampedArray::create(global_object, width * height * 4);
+    auto data_or_error = JS::Uint8ClampedArray::create(realm, width * height * 4);
     if (data_or_error.is_error())
         return nullptr;
     auto* data = data_or_error.release_value();

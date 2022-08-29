@@ -13,33 +13,34 @@
 
 namespace JS {
 
-ThrowCompletionOr<GeneratorObject*> GeneratorObject::create(GlobalObject& global_object, Value initial_value, ECMAScriptFunctionObject* generating_function, ExecutionContext execution_context, Bytecode::RegisterWindow frame)
+ThrowCompletionOr<GeneratorObject*> GeneratorObject::create(Realm& realm, Value initial_value, ECMAScriptFunctionObject* generating_function, ExecutionContext execution_context, Bytecode::RegisterWindow frame)
 {
+    auto& vm = realm.vm();
     // This is "g1.prototype" in figure-2 (https://tc39.es/ecma262/img/figure-2.png)
     Value generating_function_prototype;
     if (generating_function->kind() == FunctionKind::Async) {
         // We implement async functions by transforming them to generator function in the bytecode
         // interpreter. However an async function does not have a prototype and should not be
         // changed thus we hardcode the prototype.
-        generating_function_prototype = global_object.generator_prototype();
+        generating_function_prototype = realm.intrinsics().generator_prototype();
     } else {
-        generating_function_prototype = TRY(generating_function->get(global_object.vm().names.prototype));
+        generating_function_prototype = TRY(generating_function->get(vm.names.prototype));
     }
-    auto* generating_function_prototype_object = TRY(generating_function_prototype.to_object(global_object));
-    auto object = global_object.heap().allocate<GeneratorObject>(global_object, global_object, *generating_function_prototype_object, move(execution_context));
+    auto* generating_function_prototype_object = TRY(generating_function_prototype.to_object(vm));
+    auto object = realm.heap().allocate<GeneratorObject>(realm, realm, *generating_function_prototype_object, move(execution_context));
     object->m_generating_function = generating_function;
     object->m_frame = move(frame);
     object->m_previous_value = initial_value;
     return object;
 }
 
-GeneratorObject::GeneratorObject(GlobalObject&, Object& prototype, ExecutionContext context)
+GeneratorObject::GeneratorObject(Realm&, Object& prototype, ExecutionContext context)
     : Object(prototype)
     , m_execution_context(move(context))
 {
 }
 
-void GeneratorObject::initialize(GlobalObject&)
+void GeneratorObject::initialize(Realm&)
 {
 }
 
@@ -50,8 +51,9 @@ void GeneratorObject::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_previous_value);
 }
 
-ThrowCompletionOr<Value> GeneratorObject::next_impl(VM& vm, GlobalObject& global_object, Optional<Value> next_argument, Optional<Value> value_to_throw)
+ThrowCompletionOr<Value> GeneratorObject::next_impl(VM& vm, Optional<Value> next_argument, Optional<Value> value_to_throw)
 {
+    auto& realm = *vm.current_realm();
     auto bytecode_interpreter = Bytecode::Interpreter::current();
     VERIFY(bytecode_interpreter);
 
@@ -64,14 +66,14 @@ ThrowCompletionOr<Value> GeneratorObject::next_impl(VM& vm, GlobalObject& global
     auto generated_continuation = [&](Value value) -> ThrowCompletionOr<Bytecode::BasicBlock const*> {
         if (value.is_object()) {
             auto number_value = TRY(value.as_object().get("continuation"));
-            return reinterpret_cast<Bytecode::BasicBlock const*>(static_cast<u64>(TRY(number_value.to_double(global_object))));
+            return reinterpret_cast<Bytecode::BasicBlock const*>(static_cast<u64>(TRY(number_value.to_double(vm))));
         }
         return nullptr;
     };
 
     auto previous_generated_value = TRY(generated_value(m_previous_value));
 
-    auto result = Object::create(global_object, global_object.object_prototype());
+    auto result = Object::create(realm, realm.intrinsics().object_prototype());
     result->define_direct_property("value", previous_generated_value, default_attributes);
 
     if (m_done) {
@@ -93,7 +95,7 @@ ThrowCompletionOr<Value> GeneratorObject::next_impl(VM& vm, GlobalObject& global
     VERIFY(!m_generating_function->bytecode_executable()->basic_blocks.find_if([next_block](auto& block) { return block == next_block; }).is_end());
 
     // Temporarily switch to the captured execution context
-    TRY(vm.push_execution_context(m_execution_context, global_object));
+    TRY(vm.push_execution_context(m_execution_context, {}));
 
     // Pretend that 'yield' returned the passed value, or threw
     if (value_to_throw.has_value()) {

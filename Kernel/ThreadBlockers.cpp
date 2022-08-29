@@ -164,7 +164,7 @@ void Thread::FutexBlocker::finish_requeue(FutexQueue& futex_queue)
     VERIFY(m_lock.is_locked_by_current_processor());
     set_blocker_set_raw_locked(&futex_queue);
     // We can now release the lock
-    m_lock.unlock(m_relock_flags);
+    m_lock.unlock(m_previous_interrupts_state);
 }
 
 bool Thread::FutexBlocker::unblock_bitset(u32 bitset)
@@ -783,10 +783,11 @@ bool Thread::WaitBlocker::unblock(Process& process, UnblockFlags flags, u8 signa
         siginfo_t siginfo {};
         {
             SpinlockLocker lock(g_scheduler_lock);
+            auto credentials = process.credentials();
             // We need to gather the information before we release the scheduler lock!
             siginfo.si_signo = SIGCHLD;
             siginfo.si_pid = process.pid().value();
-            siginfo.si_uid = process.uid().value();
+            siginfo.si_uid = credentials->uid().value();
             siginfo.si_status = signal;
 
             switch (flags) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,15 +10,15 @@
 
 namespace JS {
 
-AggregateErrorPrototype::AggregateErrorPrototype(GlobalObject& global_object)
-    : Object(*global_object.error_prototype())
+AggregateErrorPrototype::AggregateErrorPrototype(Realm& realm)
+    : Object(*realm.intrinsics().error_prototype())
 {
 }
 
-void AggregateErrorPrototype::initialize(GlobalObject& global_object)
+void AggregateErrorPrototype::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(global_object);
+    Object::initialize(realm);
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_direct_property(vm.names.name, js_string(vm, "AggregateError"), attr);
     define_direct_property(vm.names.message, js_string(vm, ""), attr);

@@ -235,13 +235,6 @@ public:
 
     NonnullRefPtr<Credentials> credentials() const;
 
-    UserID euid() const;
-    GroupID egid() const;
-    UserID uid() const;
-    GroupID gid() const;
-    UserID suid() const;
-    GroupID sgid() const;
-
     bool is_dumpable() const
     {
         return with_protected_data([](auto& protected_data) { return protected_data.dumpable; });
@@ -252,8 +245,6 @@ public:
     {
         return with_protected_data([](auto& protected_data) { return protected_data.umask; });
     }
-
-    bool in_group(GroupID) const;
 
     // Breakable iteration functions
     template<IteratorFunction<Process&> Callback>
@@ -425,6 +416,7 @@ public:
     ErrorOr<FlatPtr> sys$getkeymap(Userspace<Syscall::SC_getkeymap_params const*>);
     ErrorOr<FlatPtr> sys$setkeymap(Userspace<Syscall::SC_setkeymap_params const*>);
     ErrorOr<FlatPtr> sys$profiling_enable(pid_t, Userspace<u64 const*>);
+    ErrorOr<FlatPtr> profiling_enable(pid_t, u64 event_mask);
     ErrorOr<FlatPtr> sys$profiling_disable(pid_t);
     ErrorOr<FlatPtr> sys$profiling_free_buffer(pid_t);
     ErrorOr<FlatPtr> sys$futex(Userspace<Syscall::SC_futex_params const*>);
@@ -475,8 +467,6 @@ public:
     ErrorOr<void> exec(NonnullOwnPtr<KString> path, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment, Thread*& new_main_thread, u32& prev_flags, int recursion_depth = 0);
 
     ErrorOr<LoadResult> load(NonnullLockRefPtr<OpenFileDescription> main_program_description, LockRefPtr<OpenFileDescription> interpreter_description, const ElfW(Ehdr) & main_program_header);
-
-    bool is_superuser() const { return euid() == 0; }
 
     void terminate_due_to_signal(u8 signal);
     ErrorOr<void> send_signal(u8 signal, Process* sender);
@@ -568,8 +558,8 @@ public:
     PerformanceEventBuffer* perf_events() { return m_perf_event_buffer; }
     PerformanceEventBuffer const* perf_events() const { return m_perf_event_buffer; }
 
-    Memory::AddressSpace& address_space() { return *m_space; }
-    Memory::AddressSpace const& address_space() const { return *m_space; }
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>>& address_space() { return m_space; }
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>> const& address_space() const { return m_space; }
 
     VirtualAddress signal_trampoline() const
     {
@@ -580,7 +570,7 @@ public:
     ErrorOr<void> require_no_promises() const;
 
     ErrorOr<void> validate_mmap_prot(int prot, bool map_stack, bool map_anonymous, Memory::Region const* region = nullptr) const;
-    ErrorOr<void> validate_inode_mmap_prot(int prot, Inode const& inode, bool map_shared) const;
+    ErrorOr<void> validate_inode_mmap_prot(int prot, bool description_readable, bool description_writable, bool map_shared) const;
 
 private:
     friend class MemoryManager;
@@ -666,7 +656,7 @@ private:
 
     NonnullOwnPtr<KString> m_name;
 
-    OwnPtr<Memory::AddressSpace> m_space;
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>> m_space;
 
     LockRefPtr<ProcessGroup> m_pg;
 
@@ -925,7 +915,6 @@ extern RecursiveSpinlock g_profiling_lock;
 template<IteratorFunction<Process&> Callback>
 inline void Process::for_each(Callback callback)
 {
-    VERIFY_INTERRUPTS_DISABLED();
     Process::all_instances().with([&](auto const& list) {
         for (auto it = list.begin(); it != list.end();) {
             auto& process = *it;

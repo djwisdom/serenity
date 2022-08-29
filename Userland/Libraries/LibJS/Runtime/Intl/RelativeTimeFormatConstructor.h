@@ -14,8 +14,8 @@ class RelativeTimeFormatConstructor final : public NativeFunction {
     JS_OBJECT(RelativeTimeFormatConstructor, NativeFunction);
 
 public:
-    explicit RelativeTimeFormatConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit RelativeTimeFormatConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~RelativeTimeFormatConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
@@ -27,6 +27,6 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(supported_locales_of);
 };
 
-ThrowCompletionOr<RelativeTimeFormat*> initialize_relative_time_format(GlobalObject& global_object, RelativeTimeFormat& relative_time_format, Value locales_value, Value options_value);
+ThrowCompletionOr<RelativeTimeFormat*> initialize_relative_time_format(VM& vm, RelativeTimeFormat& relative_time_format, Value locales_value, Value options_value);
 
 }

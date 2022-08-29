@@ -84,12 +84,6 @@ UNMAP_AFTER_INIT void Process::initialize()
     create_signal_trampoline();
 }
 
-bool Process::in_group(GroupID gid) const
-{
-    auto credentials = this->credentials();
-    return credentials->gid() == gid || credentials->extra_gids().contains_slow(gid);
-}
-
 void Process::kill_threads_except_self()
 {
     InterruptDisabler disabler;
@@ -224,16 +218,25 @@ void Process::unprotect_data()
 
 ErrorOr<NonnullLockRefPtr<Process>> Process::try_create(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, UserID uid, GroupID gid, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, Process* fork_parent)
 {
-    auto space = TRY(Memory::AddressSpace::try_create(fork_parent ? &fork_parent->address_space() : nullptr));
+    OwnPtr<Memory::AddressSpace> new_address_space;
+    if (fork_parent) {
+        TRY(fork_parent->address_space().with([&](auto& parent_address_space) -> ErrorOr<void> {
+            new_address_space = TRY(Memory::AddressSpace::try_create(parent_address_space.ptr()));
+            return {};
+        }));
+    } else {
+        new_address_space = TRY(Memory::AddressSpace::try_create(nullptr));
+    }
     auto unveil_tree = UnveilNode { TRY(KString::try_create("/"sv)), UnveilMetadata(TRY(KString::try_create("/"sv))) };
     auto credentials = TRY(Credentials::create(uid, gid, uid, gid, uid, gid, {}));
     auto process = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) Process(move(name), move(credentials), ppid, is_kernel_process, move(current_directory), move(executable), tty, move(unveil_tree))));
-    TRY(process->attach_resources(move(space), first_thread, fork_parent));
+    TRY(process->attach_resources(new_address_space.release_nonnull(), first_thread, fork_parent));
     return process;
 }
 
 Process::Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials> credentials, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree)
     : m_name(move(name))
+    , m_space(LockRank::None)
     , m_protected_data_lock(LockRank::None)
     , m_is_kernel_process(is_kernel_process)
     , m_executable(LockRank::None, move(executable))
@@ -254,7 +257,9 @@ Process::Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials> credent
 
 ErrorOr<void> Process::attach_resources(NonnullOwnPtr<Memory::AddressSpace>&& preallocated_space, LockRefPtr<Thread>& first_thread, Process* fork_parent)
 {
-    m_space = move(preallocated_space);
+    m_space.with([&](auto& space) {
+        space = move(preallocated_space);
+    });
 
     auto create_first_thread = [&] {
         if (fork_parent) {
@@ -407,7 +412,7 @@ void Process::crash(int signal, FlatPtr ip, bool out_of_memory)
         protected_data.termination_signal = signal;
     });
     set_should_generate_coredump(!out_of_memory);
-    address_space().dump_regions();
+    address_space().with([](auto& space) { space->dump_regions(); });
     VERIFY(is_user_process());
     die();
     // We can not return from here, as there is nowhere
@@ -522,10 +527,11 @@ Time kgettimeofday()
 
 siginfo_t Process::wait_info() const
 {
+    auto credentials = this->credentials();
     siginfo_t siginfo {};
     siginfo.si_signo = SIGCHLD;
     siginfo.si_pid = pid().value();
-    siginfo.si_uid = uid().value();
+    siginfo.si_uid = credentials->uid().value();
 
     with_protected_data([&](auto& protected_data) {
         if (protected_data.termination_signal != 0) {
@@ -667,7 +673,7 @@ void Process::finalize()
 
     unblock_waiters(Thread::WaitBlocker::UnblockFlags::Terminated);
 
-    m_space->remove_all_regions({});
+    m_space.with([](auto& space) { space->remove_all_regions({}); });
 
     VERIFY(ref_count() > 0);
     // WaitBlockerSet::finalize will be in charge of dropping the last
@@ -939,36 +945,6 @@ ErrorOr<void> Process::require_promise(Pledge promise)
     Thread::current()->set_promise_violation_pending(true);
     (void)try_set_coredump_property("pledge_violation"sv, to_string(promise));
     return EPROMISEVIOLATION;
-}
-
-UserID Process::uid() const
-{
-    return credentials()->uid();
-}
-
-GroupID Process::gid() const
-{
-    return credentials()->gid();
-}
-
-UserID Process::euid() const
-{
-    return credentials()->euid();
-}
-
-GroupID Process::egid() const
-{
-    return credentials()->egid();
-}
-
-UserID Process::suid() const
-{
-    return credentials()->suid();
-}
-
-GroupID Process::sgid() const
-{
-    return credentials()->sgid();
 }
 
 NonnullRefPtr<Credentials> Process::credentials() const

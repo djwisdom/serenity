@@ -14,8 +14,8 @@ class DurationFormatConstructor final : public NativeFunction {
     JS_OBJECT(DurationFormatConstructor, NativeFunction);
 
 public:
-    explicit DurationFormatConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit DurationFormatConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~DurationFormatConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;

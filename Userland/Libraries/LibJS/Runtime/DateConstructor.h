@@ -14,8 +14,8 @@ class DateConstructor final : public NativeFunction {
     JS_OBJECT(DateConstructor, NativeFunction);
 
 public:
-    explicit DateConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    explicit DateConstructor(Realm&);
+    virtual void initialize(Realm&) override;
     virtual ~DateConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;

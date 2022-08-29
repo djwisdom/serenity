@@ -63,8 +63,11 @@ public:
 
     void gather_roots(HashTable<Cell*>&);
 
-#define __JS_ENUMERATE(SymbolName, snake_name) \
-    Symbol* well_known_symbol_##snake_name() const { return m_well_known_symbol_##snake_name; }
+#define __JS_ENUMERATE(SymbolName, snake_name)     \
+    Symbol* well_known_symbol_##snake_name() const \
+    {                                              \
+        return m_well_known_symbol_##snake_name;   \
+    }
     JS_ENUMERATE_WELL_KNOWN_SYMBOLS
 #undef __JS_ENUMERATE
 
@@ -90,11 +93,14 @@ public:
         m_execution_context_stack.append(&context);
     }
 
-    ThrowCompletionOr<void> push_execution_context(ExecutionContext& context, GlobalObject& global_object)
+    // TODO: Rename this function instead of providing a second argument, now that the global object is no longer passed in.
+    struct CheckStackSpaceLimitTag { };
+
+    ThrowCompletionOr<void> push_execution_context(ExecutionContext& context, CheckStackSpaceLimitTag)
     {
         // Ensure we got some stack space left, so the next function call doesn't kill us.
         if (did_reach_stack_space_limit())
-            return throw_completion<InternalError>(global_object, ErrorType::CallStackSizeExceeded);
+            return throw_completion<InternalError>(ErrorType::CallStackSizeExceeded);
         m_execution_context_stack.append(&context);
         return {};
     }
@@ -144,14 +150,13 @@ public:
         return index < arguments.size() ? arguments[index] : js_undefined();
     }
 
-    Value this_value(Object& global_object) const
+    Value this_value() const
     {
-        if (m_execution_context_stack.is_empty())
-            return &global_object;
+        VERIFY(!m_execution_context_stack.is_empty());
         return running_execution_context().this_value;
     }
 
-    ThrowCompletionOr<Value> resolve_this_binding(GlobalObject&);
+    ThrowCompletionOr<Value> resolve_this_binding();
 
     StackInfo const& stack_info() const { return m_stack_info; };
 
@@ -163,15 +168,16 @@ public:
 
     // 5.2.3.2 Throw an Exception, https://tc39.es/ecma262/#sec-throw-an-exception
     template<typename T, typename... Args>
-    Completion throw_completion(GlobalObject& global_object, Args&&... args)
+    Completion throw_completion(Args&&... args)
     {
-        return JS::throw_completion(T::create(global_object, forward<Args>(args)...));
+        auto& realm = *current_realm();
+        return JS::throw_completion(T::create(realm, forward<Args>(args)...));
     }
 
     template<typename T, typename... Args>
-    Completion throw_completion(GlobalObject& global_object, ErrorType type, Args&&... args)
+    Completion throw_completion(ErrorType type, Args&&... args)
     {
-        return throw_completion<T>(global_object, String::formatted(type.message(), forward<Args>(args)...));
+        return throw_completion<T>(String::formatted(type.message(), forward<Args>(args)...));
     }
 
     Value construct(FunctionObject&, FunctionObject& new_target, Optional<MarkedVector<Value>> arguments);
@@ -179,6 +185,8 @@ public:
     String join_arguments(size_t start_index = 0) const;
 
     Value get_new_target();
+
+    Object& get_global_object();
 
     CommonPropertyNames names;
 
@@ -198,11 +206,11 @@ public:
 
     CustomData* custom_data() { return m_custom_data; }
 
-    ThrowCompletionOr<void> destructuring_assignment_evaluation(NonnullRefPtr<BindingPattern> const& target, Value value, GlobalObject& global_object);
-    ThrowCompletionOr<void> binding_initialization(FlyString const& target, Value value, Environment* environment, GlobalObject& global_object);
-    ThrowCompletionOr<void> binding_initialization(NonnullRefPtr<BindingPattern> const& target, Value value, Environment* environment, GlobalObject& global_object);
+    ThrowCompletionOr<void> destructuring_assignment_evaluation(NonnullRefPtr<BindingPattern> const& target, Value value);
+    ThrowCompletionOr<void> binding_initialization(FlyString const& target, Value value, Environment* environment);
+    ThrowCompletionOr<void> binding_initialization(NonnullRefPtr<BindingPattern> const& target, Value value, Environment* environment);
 
-    ThrowCompletionOr<Value> named_evaluation_if_anonymous_function(GlobalObject& global_object, ASTNode const& expression, FlyString const& name);
+    ThrowCompletionOr<Value> named_evaluation_if_anonymous_function(ASTNode const& expression, FlyString const& name);
 
     void save_execution_context_stack();
     void restore_execution_context_stack();
@@ -224,7 +232,7 @@ public:
     void enable_default_host_import_module_dynamically_hook();
 
     Function<void(Promise&, Promise::RejectionOperation)> host_promise_rejection_tracker;
-    Function<ThrowCompletionOr<Value>(GlobalObject&, JobCallback&, Value, MarkedVector<Value>)> host_call_job_callback;
+    Function<ThrowCompletionOr<Value>(JobCallback&, Value, MarkedVector<Value>)> host_call_job_callback;
     Function<void(FinalizationRegistry&)> host_enqueue_finalization_registry_cleanup_job;
     Function<void(Function<ThrowCompletionOr<Value>()>, Realm*)> host_enqueue_promise_job;
     Function<JobCallback(FunctionObject&)> host_make_job_callback;
@@ -234,8 +242,8 @@ public:
 private:
     explicit VM(OwnPtr<CustomData>);
 
-    ThrowCompletionOr<void> property_binding_initialization(BindingPattern const& binding, Value value, Environment* environment, GlobalObject& global_object);
-    ThrowCompletionOr<void> iterator_binding_initialization(BindingPattern const& binding, Iterator& iterator_record, Environment* environment, GlobalObject& global_object);
+    ThrowCompletionOr<void> property_binding_initialization(BindingPattern const& binding, Value value, Environment* environment);
+    ThrowCompletionOr<void> iterator_binding_initialization(BindingPattern const& binding, Iterator& iterator_record, Environment* environment);
 
     ThrowCompletionOr<NonnullRefPtr<Module>> resolve_imported_module(ScriptOrModule referencing_script_or_module, ModuleRequest const& module_request);
     ThrowCompletionOr<void> link_and_eval_module(Module& module);

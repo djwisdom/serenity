@@ -2509,15 +2509,16 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
         auto& token = tokens.next_token();
 
         Gfx::Color color;
-        Optional<LengthPercentage> length;
+        Optional<LengthPercentage> position;
+        Optional<LengthPercentage> second_position;
         auto dimension = parse_dimension(token);
         if (dimension.has_value() && dimension->is_length_percentage()) {
             // [<length-percentage> <color>] or [<length-percentage>]
-            length = dimension->length_percentage();
+            position = dimension->length_percentage();
             tokens.skip_whitespace();
             // <length-percentage>
             if (!tokens.has_next_token() || tokens.peek_token().is(Token::Type::Comma)) {
-                element.transition_hint = GradientColorHint { *length };
+                element.transition_hint = GradientColorHint { *position };
                 return ElementType::ColorHint;
             }
             // <length-percentage> <color>
@@ -2532,16 +2533,21 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
                 return ElementType::Garbage;
             color = *maybe_color;
             tokens.skip_whitespace();
-            if (tokens.has_next_token() && !tokens.peek_token().is(Token::Type::Comma)) {
-                auto token = tokens.next_token();
-                auto dimension = parse_dimension(token);
-                if (!dimension.has_value() || !dimension->is_length_percentage())
-                    return ElementType::Garbage;
-                length = dimension->length_percentage();
+            // Allow up to [<color> <length-percentage> <length-percentage>] (double-position color stops)
+            // Note: Double-position color stops only appear to be valid in this order.
+            for (auto stop_position : Array { &position, &second_position }) {
+                if (tokens.has_next_token() && !tokens.peek_token().is(Token::Type::Comma)) {
+                    auto token = tokens.next_token();
+                    auto dimension = parse_dimension(token);
+                    if (!dimension.has_value() || !dimension->is_length_percentage())
+                        return ElementType::Garbage;
+                    *stop_position = dimension->length_percentage();
+                    tokens.skip_whitespace();
+                }
             }
         }
 
-        element.color_stop = GradientColorStop { color, length };
+        element.color_stop = GradientColorStop { color, position, second_position };
         return ElementType::ColorStop;
     };
 
@@ -5295,6 +5301,97 @@ RefPtr<StyleValue> Parser::parse_as_css_value(PropertyID property_id)
     return parsed_value.release_value();
 }
 
+RefPtr<StyleValue> Parser::parse_grid_track_sizes(Vector<ComponentValue> const& component_values)
+{
+    Vector<CSS::GridTrackSize> params;
+    for (auto& component_value : component_values) {
+        // FIXME: Incomplete as a GridTrackSize can be a function like minmax(min, max), etc.
+        if (component_value.is_function()) {
+            params.append(Length::make_auto());
+            continue;
+        }
+        if (component_value.is(Token::Type::Ident) && component_value.token().ident().equals_ignoring_case("auto"sv)) {
+            params.append(Length::make_auto());
+            continue;
+        }
+        auto dimension = parse_dimension(component_value);
+        if (!dimension.has_value())
+            return GridTrackSizeStyleValue::create({});
+        if (dimension->is_length())
+            params.append(dimension->length());
+        if (dimension->is_percentage())
+            params.append(dimension->percentage());
+    }
+    return GridTrackSizeStyleValue::create(params);
+}
+
+RefPtr<StyleValue> Parser::parse_grid_track_placement(Vector<ComponentValue> const& component_values)
+{
+    auto tokens = TokenStream { component_values };
+    auto current_token = tokens.next_token().token();
+
+    if (!tokens.has_next_token()) {
+        if (current_token.to_string() == "auto"sv)
+            return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement());
+        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+            return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement(static_cast<int>(current_token.number_value())));
+        return {};
+    }
+
+    auto first_grid_track_placement = CSS::GridTrackPlacement();
+    if (current_token.to_string() == "span"sv) {
+        first_grid_track_placement.set_has_span(true);
+        tokens.skip_whitespace();
+        current_token = tokens.next_token().token();
+    }
+    if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+        first_grid_track_placement.set_position(static_cast<int>(current_token.number_value()));
+
+    if (!tokens.has_next_token())
+        return GridTrackPlacementStyleValue::create(first_grid_track_placement);
+    return {};
+}
+
+RefPtr<StyleValue> Parser::parse_grid_track_placement_shorthand_value(Vector<ComponentValue> const& component_values)
+{
+    auto tokens = TokenStream { component_values };
+    auto current_token = tokens.next_token().token();
+
+    if (!tokens.has_next_token()) {
+        if (current_token.to_string() == "auto"sv)
+            return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement::make_auto());
+        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+            return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement(current_token.number_value()));
+        return {};
+    }
+
+    auto calculate_grid_track_placement = [](auto& current_token, auto& tokens) -> CSS::GridTrackPlacement {
+        auto grid_track_placement = CSS::GridTrackPlacement();
+        if (current_token.to_string() == "span"sv) {
+            grid_track_placement.set_has_span(true);
+            tokens.skip_whitespace();
+            current_token = tokens.next_token().token();
+        }
+        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+            grid_track_placement.set_position(static_cast<int>(current_token.number_value()));
+        return grid_track_placement;
+    };
+
+    auto first_grid_track_placement = calculate_grid_track_placement(current_token, tokens);
+    if (!tokens.has_next_token())
+        return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement(first_grid_track_placement));
+
+    tokens.skip_whitespace();
+    current_token = tokens.next_token().token();
+    tokens.skip_whitespace();
+    current_token = tokens.next_token().token();
+
+    auto second_grid_track_placement = calculate_grid_track_placement(current_token, tokens);
+    if (!tokens.has_next_token())
+        return GridTrackPlacementShorthandStyleValue::create(GridTrackPlacementStyleValue::create(first_grid_track_placement), GridTrackPlacementStyleValue::create(second_grid_track_placement));
+    return {};
+}
+
 Parser::ParseErrorOr<NonnullRefPtr<StyleValue>> Parser::parse_css_value(PropertyID property_id, TokenStream<ComponentValue>& tokens)
 {
     auto function_contains_var_or_attr = [](Function const& function, auto&& recurse) -> bool {
@@ -5423,6 +5520,38 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue>> Parser::parse_css_value(Property
         return ParseError::SyntaxError;
     case PropertyID::FontFamily:
         if (auto parsed_value = parse_font_family_value(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridColumn:
+        if (auto parsed_value = parse_grid_track_placement_shorthand_value(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridColumnEnd:
+        if (auto parsed_value = parse_grid_track_placement(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridColumnStart:
+        if (auto parsed_value = parse_grid_track_placement(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridRow:
+        if (auto parsed_value = parse_grid_track_placement_shorthand_value(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridRowEnd:
+        if (auto parsed_value = parse_grid_track_placement(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridRowStart:
+        if (auto parsed_value = parse_grid_track_placement(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridTemplateColumns:
+        if (auto parsed_value = parse_grid_track_sizes(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridTemplateRows:
+        if (auto parsed_value = parse_grid_track_sizes(component_values))
             return parsed_value.release_nonnull();
         return ParseError::SyntaxError;
     case PropertyID::ListStyle:

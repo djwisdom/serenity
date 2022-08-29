@@ -20,12 +20,12 @@ class NativeFunction : public FunctionObject {
     JS_OBJECT(NativeFunction, FunctionObject);
 
 public:
-    static NativeFunction* create(GlobalObject&, Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)> behaviour, i32 length, PropertyKey const& name, Optional<Realm*> = {}, Optional<Object*> prototype = {}, Optional<StringView> const& prefix = {});
-    static NativeFunction* create(GlobalObject&, FlyString const& name, Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)>);
+    static NativeFunction* create(Realm&, Function<ThrowCompletionOr<Value>(VM&)> behaviour, i32 length, PropertyKey const& name, Optional<Realm*> = {}, Optional<Object*> prototype = {}, Optional<StringView> const& prefix = {});
+    static NativeFunction* create(Realm&, FlyString const& name, Function<ThrowCompletionOr<Value>(VM&)>);
 
-    NativeFunction(GlobalObject&, Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)>, Object* prototype, Realm& realm);
-    NativeFunction(FlyString name, Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)>, Object& prototype);
-    virtual void initialize(GlobalObject&) override { }
+    NativeFunction(Function<ThrowCompletionOr<Value>(VM&)>, Object* prototype, Realm& realm);
+    NativeFunction(FlyString name, Function<ThrowCompletionOr<Value>(VM&)>, Object& prototype);
+    virtual void initialize(Realm&) override { }
     virtual ~NativeFunction() override = default;
 
     virtual ThrowCompletionOr<Value> internal_call(Value this_argument, MarkedVector<Value> arguments_list) override;
@@ -53,7 +53,7 @@ private:
 
     FlyString m_name;
     Optional<FlyString> m_initial_name; // [[InitialName]]
-    Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)> m_native_function;
+    Function<ThrowCompletionOr<Value>(VM&)> m_native_function;
     Realm* m_realm { nullptr };
 };
 

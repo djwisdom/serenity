@@ -13,24 +13,24 @@
 namespace JS {
 
 // 6.2.4.6 PutValue ( V, W ), https://tc39.es/ecma262/#sec-putvalue
-ThrowCompletionOr<void> Reference::put_value(GlobalObject& global_object, Value value)
+ThrowCompletionOr<void> Reference::put_value(VM& vm, Value value)
 {
-    auto& vm = global_object.vm();
-
     // 1. ReturnIfAbrupt(V).
     // 2. ReturnIfAbrupt(W).
 
     // 3. If V is not a Reference Record, throw a ReferenceError exception.
     if (!is_valid_reference())
-        return vm.throw_completion<ReferenceError>(global_object, ErrorType::InvalidLeftHandAssignment);
+        return vm.throw_completion<ReferenceError>(ErrorType::InvalidLeftHandAssignment);
 
     // 4. If IsUnresolvableReference(V) is true, then
     if (is_unresolvable()) {
         // a. If V.[[Strict]] is true, throw a ReferenceError exception.
         if (m_strict)
-            return throw_reference_error(global_object);
+            return throw_reference_error(vm);
 
         // b. Let globalObj be GetGlobalObject().
+        auto& global_object = vm.get_global_object();
+
         // c. Perform ? Set(globalObj, V.[[ReferencedName]], W, false).
         TRY(global_object.set(m_name, value, Object::ShouldThrowExceptions::No));
 
@@ -41,7 +41,7 @@ ThrowCompletionOr<void> Reference::put_value(GlobalObject& global_object, Value 
     // 5. If IsPropertyReference(V) is true, then
     if (is_property_reference()) {
         // a. Let baseObj be ? ToObject(V.[[Base]]).
-        auto* base_obj = TRY(m_base_value.to_object(global_object));
+        auto* base_obj = TRY(m_base_value.to_object(vm));
 
         // b. If IsPrivateReference(V) is true, then
         if (is_private_reference()) {
@@ -54,7 +54,7 @@ ThrowCompletionOr<void> Reference::put_value(GlobalObject& global_object, Value 
 
         // d. If succeeded is false and V.[[Strict]] is true, throw a TypeError exception.
         if (!succeeded && m_strict)
-            return vm.throw_completion<TypeError>(global_object, ErrorType::ReferenceNullishSetProperty, m_name, m_base_value.to_string_without_side_effects());
+            return vm.throw_completion<TypeError>(ErrorType::ReferenceNullishSetProperty, m_name, m_base_value.to_string_without_side_effects());
 
         // e. Return unused.
         return {};
@@ -69,29 +69,30 @@ ThrowCompletionOr<void> Reference::put_value(GlobalObject& global_object, Value 
 
     // c. Return ? base.SetMutableBinding(V.[[ReferencedName]], W, V.[[Strict]]) (see 9.1).
     if (m_environment_coordinate.has_value())
-        return static_cast<DeclarativeEnvironment*>(m_base_environment)->set_mutable_binding_direct(global_object, m_environment_coordinate->index, value, m_strict);
+        return static_cast<DeclarativeEnvironment*>(m_base_environment)->set_mutable_binding_direct(vm, m_environment_coordinate->index, value, m_strict);
     else
-        return m_base_environment->set_mutable_binding(global_object, m_name.as_string(), value, m_strict);
+        return m_base_environment->set_mutable_binding(vm, m_name.as_string(), value, m_strict);
 }
 
-Completion Reference::throw_reference_error(GlobalObject& global_object) const
+Completion Reference::throw_reference_error(VM& vm) const
 {
-    auto& vm = global_object.vm();
     if (!m_name.is_valid())
-        return vm.throw_completion<ReferenceError>(global_object, ErrorType::ReferenceUnresolvable);
+        return vm.throw_completion<ReferenceError>(ErrorType::ReferenceUnresolvable);
     else
-        return vm.throw_completion<ReferenceError>(global_object, ErrorType::UnknownIdentifier, m_name.to_string_or_symbol().to_display_string());
+        return vm.throw_completion<ReferenceError>(ErrorType::UnknownIdentifier, m_name.to_string_or_symbol().to_display_string());
 }
 
 // 6.2.4.5 GetValue ( V ), https://tc39.es/ecma262/#sec-getvalue
-ThrowCompletionOr<Value> Reference::get_value(GlobalObject& global_object) const
+ThrowCompletionOr<Value> Reference::get_value(VM& vm) const
 {
+    auto& realm = *vm.current_realm();
+
     // 1. ReturnIfAbrupt(V).
     // 2. If V is not a Reference Record, return V.
 
     // 3. If IsUnresolvableReference(V) is true, throw a ReferenceError exception.
     if (!is_valid_reference() || is_unresolvable())
-        return throw_reference_error(global_object);
+        return throw_reference_error(vm);
 
     // 4. If IsPropertyReference(V) is true, then
     if (is_property_reference()) {
@@ -105,7 +106,7 @@ ThrowCompletionOr<Value> Reference::get_value(GlobalObject& global_object) const
             // as things currently stand this does the "wrong thing" but
             // the error is unobservable
 
-            auto* base_obj = TRY(m_base_value.to_object(global_object));
+            auto* base_obj = TRY(m_base_value.to_object(vm));
 
             // i. Return ? PrivateGet(baseObj, V.[[ReferencedName]]).
             return base_obj->private_get(m_private_name);
@@ -114,16 +115,16 @@ ThrowCompletionOr<Value> Reference::get_value(GlobalObject& global_object) const
         // OPTIMIZATION: For various primitives we can avoid actually creating a new object for them.
         Object* base_obj = nullptr;
         if (m_base_value.is_string()) {
-            auto string_value = m_base_value.as_string().get(global_object, m_name);
+            auto string_value = m_base_value.as_string().get(vm, m_name);
             if (string_value.has_value())
                 return *string_value;
-            base_obj = global_object.string_prototype();
+            base_obj = realm.intrinsics().string_prototype();
         } else if (m_base_value.is_number())
-            base_obj = global_object.number_prototype();
+            base_obj = realm.intrinsics().number_prototype();
         else if (m_base_value.is_boolean())
-            base_obj = global_object.boolean_prototype();
+            base_obj = realm.intrinsics().boolean_prototype();
         else
-            base_obj = TRY(m_base_value.to_object(global_object));
+            base_obj = TRY(m_base_value.to_object(vm));
 
         // c. Return ? baseObj.[[Get]](V.[[ReferencedName]], GetThisValue(V)).
         return base_obj->internal_get(m_name, get_this_value());
@@ -138,12 +139,12 @@ ThrowCompletionOr<Value> Reference::get_value(GlobalObject& global_object) const
 
     // c. Return ? base.GetBindingValue(V.[[ReferencedName]], V.[[Strict]]) (see 9.1).
     if (m_environment_coordinate.has_value())
-        return static_cast<DeclarativeEnvironment*>(m_base_environment)->get_binding_value_direct(global_object, m_environment_coordinate->index, m_strict);
-    return m_base_environment->get_binding_value(global_object, m_name.as_string(), m_strict);
+        return static_cast<DeclarativeEnvironment*>(m_base_environment)->get_binding_value_direct(vm, m_environment_coordinate->index, m_strict);
+    return m_base_environment->get_binding_value(vm, m_name.as_string(), m_strict);
 }
 
 // 13.5.1.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-delete-operator-runtime-semantics-evaluation
-ThrowCompletionOr<bool> Reference::delete_(GlobalObject& global_object)
+ThrowCompletionOr<bool> Reference::delete_(VM& vm)
 {
     // 13.5.1.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-delete-operator-runtime-semantics-evaluation
     // UnaryExpression : delete UnaryExpression
@@ -161,8 +162,6 @@ ThrowCompletionOr<bool> Reference::delete_(GlobalObject& global_object)
         return true;
     }
 
-    auto& vm = global_object.vm();
-
     // 5. If IsPropertyReference(ref) is true, then
     if (is_property_reference()) {
         // a. Assert: IsPrivateReference(ref) is false.
@@ -170,17 +169,17 @@ ThrowCompletionOr<bool> Reference::delete_(GlobalObject& global_object)
 
         // b. If IsSuperReference(ref) is true, throw a ReferenceError exception.
         if (is_super_reference())
-            return vm.throw_completion<ReferenceError>(global_object, ErrorType::UnsupportedDeleteSuperProperty);
+            return vm.throw_completion<ReferenceError>(ErrorType::UnsupportedDeleteSuperProperty);
 
         // c. Let baseObj be ! ToObject(ref.[[Base]]).
-        auto* base_obj = MUST(m_base_value.to_object(global_object));
+        auto* base_obj = MUST(m_base_value.to_object(vm));
 
         // d. Let deleteStatus be ? baseObj.[[Delete]](ref.[[ReferencedName]]).
         bool delete_status = TRY(base_obj->internal_delete(m_name));
 
         // e. If deleteStatus is false and ref.[[Strict]] is true, throw a TypeError exception.
         if (!delete_status && m_strict)
-            return vm.throw_completion<TypeError>(global_object, ErrorType::ReferenceNullishDeleteProperty, m_name, m_base_value.to_string_without_side_effects());
+            return vm.throw_completion<TypeError>(ErrorType::ReferenceNullishDeleteProperty, m_name, m_base_value.to_string_without_side_effects());
 
         // f. Return deleteStatus.
         return delete_status;
@@ -193,7 +192,7 @@ ThrowCompletionOr<bool> Reference::delete_(GlobalObject& global_object)
     VERIFY(m_base_type == BaseType::Environment);
 
     //    c. Return ? base.DeleteBinding(ref.[[ReferencedName]]).
-    return m_base_environment->delete_binding(global_object, m_name.as_string());
+    return m_base_environment->delete_binding(vm, m_name.as_string());
 }
 
 String Reference::to_string() const
@@ -230,6 +229,14 @@ String Reference::to_string() const
 
     builder.append(" }"sv);
     return builder.to_string();
+}
+
+// 6.2.4.8 InitializeReferencedBinding ( V, W ), https://tc39.es/ecma262/#sec-object.prototype.hasownproperty
+ThrowCompletionOr<void> Reference::initialize_referenced_binding(VM& vm, Value value) const
+{
+    VERIFY(!is_unresolvable());
+    VERIFY(m_base_type == BaseType::Environment);
+    return m_base_environment->initialize_binding(vm, m_name.as_string(), value);
 }
 
 // 6.2.4.9 MakePrivateReference ( baseValue, privateIdentifier ), https://tc39.es/ecma262/#sec-makeprivatereference

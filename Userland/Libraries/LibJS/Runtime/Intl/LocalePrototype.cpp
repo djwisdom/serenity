@@ -14,50 +14,52 @@
 namespace JS::Intl {
 
 // 14.3 Properties of the Intl.Locale Prototype Object, https://tc39.es/ecma402/#sec-properties-of-intl-locale-prototype-object
-LocalePrototype::LocalePrototype(GlobalObject& global_object)
-    : PrototypeObject(*global_object.object_prototype())
+LocalePrototype::LocalePrototype(Realm& realm)
+    : PrototypeObject(*realm.intrinsics().object_prototype())
 {
 }
 
-void LocalePrototype::initialize(GlobalObject& global_object)
+void LocalePrototype::initialize(Realm& realm)
 {
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
     auto& vm = this->vm();
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.maximize, maximize, 0, attr);
-    define_native_function(vm.names.minimize, minimize, 0, attr);
-    define_native_function(vm.names.toString, to_string, 0, attr);
+    define_native_function(realm, vm.names.maximize, maximize, 0, attr);
+    define_native_function(realm, vm.names.minimize, minimize, 0, attr);
+    define_native_function(realm, vm.names.toString, to_string, 0, attr);
 
     // 14.3.2 Intl.Locale.prototype[ @@toStringTag ], https://tc39.es/ecma402/#sec-Intl.Locale.prototype-@@tostringtag
     define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Intl.Locale"), Attribute::Configurable);
 
-    define_native_accessor(vm.names.baseName, base_name, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.calendar, calendar, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.calendars, calendars, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.caseFirst, case_first, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.collation, collation, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.collations, collations, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.hourCycle, hour_cycle, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.hourCycles, hour_cycles, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.numberingSystem, numbering_system, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.numberingSystems, numbering_systems, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.numeric, numeric, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.language, language, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.script, script, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.region, region, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.timeZones, time_zones, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.textInfo, text_info, {}, Attribute::Configurable);
-    define_native_accessor(vm.names.weekInfo, week_info, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.baseName, base_name, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.calendar, calendar, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.calendars, calendars, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.caseFirst, case_first, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.collation, collation, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.collations, collations, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.hourCycle, hour_cycle, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.hourCycles, hour_cycles, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.numberingSystem, numbering_system, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.numberingSystems, numbering_systems, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.numeric, numeric, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.language, language, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.script, script, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.region, region, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.timeZones, time_zones, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.textInfo, text_info, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.names.weekInfo, week_info, {}, Attribute::Configurable);
 }
 
 // 14.3.3 Intl.Locale.prototype.maximize ( ), https://tc39.es/ecma402/#sec-Intl.Locale.prototype.maximize
 JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::maximize)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     auto locale = Unicode::parse_unicode_locale_id(locale_object->locale());
     VERIFY(locale.has_value());
@@ -67,15 +69,17 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::maximize)
         locale->language_id = maximal.release_value();
 
     // 4. Return ! Construct(%Locale%, maximal).
-    return Locale::create(global_object, *locale);
+    return Locale::create(realm, *locale);
 }
 
 // 14.3.4 Intl.Locale.prototype.minimize ( ), https://tc39.es/ecma402/#sec-Intl.Locale.prototype.minimize
 JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::minimize)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     auto locale = Unicode::parse_unicode_locale_id(locale_object->locale());
     VERIFY(locale.has_value());
@@ -85,7 +89,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::minimize)
         locale->language_id = minimal.release_value();
 
     // 4. Return ! Construct(%Locale%, minimal).
-    return Locale::create(global_object, *locale);
+    return Locale::create(realm, *locale);
 }
 
 // 14.3.5 Intl.Locale.prototype.toString ( ), https://tc39.es/ecma402/#sec-Intl.Locale.prototype.toString
@@ -93,7 +97,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::to_string)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Return loc.[[Locale]].
     return js_string(vm, locale_object->locale());
@@ -104,7 +108,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::base_name)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
     auto locale = Unicode::parse_unicode_locale_id(locale_object->locale());
@@ -126,13 +130,13 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::base_name)
 // 14.3.9 get Intl.Locale.prototype.collation, https://tc39.es/ecma402/#sec-Intl.Locale.prototype.collation
 // 14.3.10 get Intl.Locale.prototype.hourCycle, https://tc39.es/ecma402/#sec-Intl.Locale.prototype.hourCycle
 // 14.3.12 get Intl.Locale.prototype.numberingSystem, https://tc39.es/ecma402/#sec-Intl.Locale.prototype.numberingSystem
-#define __JS_ENUMERATE(keyword)                                      \
-    JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::keyword)              \
-    {                                                                \
-        auto* locale_object = TRY(typed_this_object(global_object)); \
-        if (!locale_object->has_##keyword())                         \
-            return js_undefined();                                   \
-        return js_string(vm, locale_object->keyword());              \
+#define __JS_ENUMERATE(keyword)                           \
+    JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::keyword)   \
+    {                                                     \
+        auto* locale_object = TRY(typed_this_object(vm)); \
+        if (!locale_object->has_##keyword())              \
+            return js_undefined();                        \
+        return js_string(vm, locale_object->keyword());   \
     }
 JS_ENUMERATE_LOCALE_KEYWORD_PROPERTIES
 #undef __JS_ENUMERATE
@@ -142,7 +146,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::numeric)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Return loc.[[Numeric]].
     return Value(locale_object->numeric());
@@ -153,7 +157,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::language)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
     auto locale = Unicode::parse_unicode_locale_id(locale_object->locale());
@@ -170,7 +174,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::script)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
     auto locale = Unicode::parse_unicode_locale_id(locale_object->locale());
@@ -191,7 +195,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::region)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
     auto locale = Unicode::parse_unicode_locale_id(locale_object->locale());
@@ -217,11 +221,11 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::region)
 // 1.4.17 get Intl.Locale.prototype.collations, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.collations
 // 1.4.18 get Intl.Locale.prototype.hourCycles, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.hourCycles
 // 1.4.19 get Intl.Locale.prototype.numberingSystems, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.numberingSystems
-#define __JS_ENUMERATE(keyword)                                      \
-    JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::keyword)              \
-    {                                                                \
-        auto* locale_object = TRY(typed_this_object(global_object)); \
-        return keyword##_of_locale(global_object, *locale_object);   \
+#define __JS_ENUMERATE(keyword)                           \
+    JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::keyword)   \
+    {                                                     \
+        auto* locale_object = TRY(typed_this_object(vm)); \
+        return keyword##_of_locale(vm, *locale_object);   \
     }
 JS_ENUMERATE_LOCALE_INFO_PROPERTIES
 #undef __JS_ENUMERATE
@@ -231,7 +235,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::time_zones)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
     auto locale = Unicode::parse_unicode_locale_id(locale_object->locale());
@@ -241,18 +245,20 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::time_zones)
         return js_undefined();
 
     // 5. Return ! TimeZonesOfLocale(loc).
-    return time_zones_of_locale(global_object, locale->language_id.region.value());
+    return time_zones_of_locale(vm, locale->language_id.region.value());
 }
 
 // 1.4.21 get Intl.Locale.prototype.textInfo, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.textInfo
 JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::text_info)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(global_object));
+    auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Let info be ! ObjectCreate(%Object.prototype%).
-    auto* info = Object::create(global_object, global_object.object_prototype());
+    auto* info = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 4. Let dir be ! CharacterDirectionOfLocale(loc).
     auto direction = character_direction_of_locale(*locale_object);
@@ -267,18 +273,20 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::text_info)
 // 1.4.22 get Intl.Locale.prototype.weekInfo, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.weekInfo
 JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::week_info)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    [[maybe_unused]] auto* locale_object = TRY(typed_this_object(global_object));
+    [[maybe_unused]] auto* locale_object = TRY(typed_this_object(vm));
 
     // 3. Let info be ! ObjectCreate(%Object.prototype%).
-    auto* info = Object::create(global_object, global_object.object_prototype());
+    auto* info = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 4. Let wi be ! WeekInfoOfLocale(loc).
     auto week_info = week_info_of_locale(*locale_object);
 
     // 5. Let we be ! CreateArrayFromList( wi.[[Weekend]] ).
-    auto weekend = Array::create_from<u8>(global_object, week_info.weekend, [](auto day) { return Value(day); });
+    auto weekend = Array::create_from<u8>(realm, week_info.weekend, [](auto day) { return Value(day); });
 
     // 6. Perform ! CreateDataPropertyOrThrow(info, "firstDay", wi.[[FirstDay]]).
     MUST(info->create_data_property_or_throw(vm.names.firstDay, Value(week_info.first_day)));

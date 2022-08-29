@@ -11,8 +11,8 @@
 
 namespace Web::Bindings {
 
-WindowConstructor::WindowConstructor(JS::GlobalObject& global_object)
-    : NativeFunction(*global_object.function_prototype())
+WindowConstructor::WindowConstructor(JS::Realm& realm)
+    : NativeFunction(*realm.intrinsics().function_prototype())
 {
 }
 
@@ -20,20 +20,20 @@ WindowConstructor::~WindowConstructor() = default;
 
 JS::ThrowCompletionOr<JS::Value> WindowConstructor::call()
 {
-    return vm().throw_completion<JS::TypeError>(global_object(), JS::ErrorType::ConstructorWithoutNew, "Window");
+    return vm().throw_completion<JS::TypeError>(JS::ErrorType::ConstructorWithoutNew, "Window");
 }
 
 JS::ThrowCompletionOr<JS::Object*> WindowConstructor::construct(FunctionObject&)
 {
-    return vm().throw_completion<JS::TypeError>(global_object(), JS::ErrorType::NotAConstructor, "Window");
+    return vm().throw_completion<JS::TypeError>(JS::ErrorType::NotAConstructor, "Window");
 }
 
-void WindowConstructor::initialize(JS::GlobalObject& global_object)
+void WindowConstructor::initialize(JS::Realm& realm)
 {
     auto& vm = this->vm();
-    auto& window = static_cast<WindowObject&>(global_object);
+    auto& window = static_cast<WindowObject&>(realm.global_object());
 
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
     define_direct_property(vm.names.prototype, &window.ensure_web_prototype<WindowPrototype>("Window"), 0);
     define_direct_property(vm.names.length, JS::Value(0), JS::Attribute::Configurable);
 }

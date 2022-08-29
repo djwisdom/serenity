@@ -33,7 +33,7 @@ class WindowObject
 
 public:
     explicit WindowObject(JS::Realm&, HTML::Window&);
-    virtual void initialize_global_object() override;
+    virtual void initialize(JS::Realm&) override;
     virtual ~WindowObject() override = default;
 
     HTML::Window& impl() { return *m_impl; }
@@ -53,7 +53,8 @@ public:
         auto it = m_prototypes.find(class_name);
         if (it != m_prototypes.end())
             return *it->value;
-        auto* prototype = heap().allocate<T>(*this, *this);
+        auto& realm = shape().realm();
+        auto* prototype = heap().allocate<T>(realm, realm);
         m_prototypes.set(class_name, prototype);
         return *prototype;
     }
@@ -64,7 +65,8 @@ public:
         auto it = m_constructors.find(class_name);
         if (it != m_constructors.end())
             return *it->value;
-        auto* constructor = heap().allocate<T>(*this, *this);
+        auto& realm = shape().realm();
+        auto* constructor = heap().allocate<T>(realm, realm);
         m_constructors.set(class_name, constructor);
         define_direct_property(class_name, JS::Value(constructor), JS::Attribute::Writable | JS::Attribute::Configurable);
         return *constructor;

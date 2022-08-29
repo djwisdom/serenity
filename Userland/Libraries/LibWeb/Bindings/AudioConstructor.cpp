@@ -14,16 +14,16 @@
 
 namespace Web::Bindings {
 
-AudioConstructor::AudioConstructor(JS::GlobalObject& global_object)
-    : NativeFunction(*global_object.function_prototype())
+AudioConstructor::AudioConstructor(JS::Realm& realm)
+    : NativeFunction(*realm.intrinsics().function_prototype())
 {
 }
 
-void AudioConstructor::initialize(JS::GlobalObject& global_object)
+void AudioConstructor::initialize(JS::Realm& realm)
 {
     auto& vm = this->vm();
-    auto& window = static_cast<WindowObject&>(global_object);
-    NativeFunction::initialize(global_object);
+    auto& window = static_cast<WindowObject&>(realm.global_object());
+    NativeFunction::initialize(realm);
 
     define_direct_property(vm.names.prototype, &window.ensure_web_prototype<HTMLAudioElementPrototype>("HTMLAudioElement"), 0);
     define_direct_property(vm.names.length, JS::Value(0), JS::Attribute::Configurable);
@@ -31,12 +31,15 @@ void AudioConstructor::initialize(JS::GlobalObject& global_object)
 
 JS::ThrowCompletionOr<JS::Value> AudioConstructor::call()
 {
-    return vm().throw_completion<JS::TypeError>(global_object(), JS::ErrorType::ConstructorWithoutNew, "Audio");
+    return vm().throw_completion<JS::TypeError>(JS::ErrorType::ConstructorWithoutNew, "Audio");
 }
 
 // https://html.spec.whatwg.org/multipage/media.html#dom-audio
 JS::ThrowCompletionOr<JS::Object*> AudioConstructor::construct(FunctionObject&)
 {
+    auto& vm = this->vm();
+    auto& realm = *vm.current_realm();
+
     // 1. Let document be the current global object's associated Document.
     auto& window = static_cast<WindowObject&>(HTML::current_global_object());
     auto& document = window.impl().associated_document();
@@ -47,17 +50,17 @@ JS::ThrowCompletionOr<JS::Object*> AudioConstructor::construct(FunctionObject&)
     // 3. Set an attribute value for audio using "preload" and "auto".
     audio->set_attribute(HTML::AttributeNames::preload, "auto"sv);
 
-    auto src_value = vm().argument(0);
+    auto src_value = vm.argument(0);
 
     // 4. If src is given, then set an attribute value for audio using "src" and src.
     //    (This will cause the user agent to invoke the object's resource selection algorithm before returning.)
     if (!src_value.is_undefined()) {
-        auto src = TRY(src_value.to_string(global_object()));
+        auto src = TRY(src_value.to_string(vm));
         audio->set_attribute(HTML::AttributeNames::src, move(src));
     }
 
     // 5. Return audio.
-    return wrap(global_object(), audio);
+    return wrap(realm, audio);
 }
 
 }

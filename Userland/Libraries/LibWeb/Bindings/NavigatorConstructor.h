@@ -14,8 +14,8 @@ class NavigatorConstructor : public JS::NativeFunction {
     JS_OBJECT(NavigatorConstructor, JS::NativeFunction);
 
 public:
-    explicit NavigatorConstructor(JS::GlobalObject&);
-    virtual void initialize(JS::GlobalObject&) override;
+    explicit NavigatorConstructor(JS::Realm&);
+    virtual void initialize(JS::Realm&) override;
     virtual ~NavigatorConstructor() override;
 
     virtual JS::ThrowCompletionOr<JS::Value> call() override;
