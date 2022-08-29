@@ -17,6 +17,7 @@
 #include <WindowServer/Menubar.h>
 #include <WindowServer/Screen.h>
 #include <WindowServer/WindowFrame.h>
+#include <WindowServer/WindowMode.h>
 #include <WindowServer/WindowType.h>
 
 namespace WindowServer {
@@ -109,7 +110,7 @@ public:
     void set_resizable(bool);
 
     bool is_maximized() const { return m_tile_type == WindowTileType::Maximized; }
-    void set_maximized(bool, Optional<Gfx::IntPoint> fixed_point = {});
+    void set_maximized(bool);
 
     bool is_always_on_top() const { return m_always_on_top; }
     void set_always_on_top(bool);
@@ -122,7 +123,7 @@ public:
     void set_tiled(WindowTileType);
     WindowTileType tile_type_based_on_rect(Gfx::IntRect const&) const;
     void check_untile_due_to_resize(Gfx::IntRect const&);
-    bool set_untiled(Optional<Gfx::IntPoint> fixed_point = {});
+    bool set_untiled();
 
     Gfx::IntRect floating_rect() const { return m_floating_rect; }
     void set_floating_rect(Gfx::IntRect rect) { m_floating_rect = rect; }
@@ -133,15 +134,10 @@ public:
     bool is_occluded() const { return m_occluded; }
     void set_occluded(bool);
 
-    bool is_movable() const
-    {
-        return m_type == WindowType::Normal || m_type == WindowType::ToolWindow;
-    }
+    bool is_movable() const { return m_type == WindowType::Normal; }
 
     WindowFrame& frame() { return m_frame; }
     WindowFrame const& frame() const { return m_frame; }
-
-    Window* blocking_modal_window();
 
     ConnectionFromClient* client() { return m_client; }
     ConnectionFromClient const* client() const { return m_client; }
@@ -182,8 +178,18 @@ public:
     bool is_visible() const { return m_visible; }
     void set_visible(bool);
 
-    bool is_modal() const;
-    bool is_modal_dont_unparent() const { return m_modal && m_parent_window; }
+    bool is_modal() const { return m_mode != WindowMode::Modeless; }
+    bool is_passive() { return m_mode == WindowMode::Passive; }
+    bool is_rendering_above() { return m_mode == WindowMode::RenderAbove; }
+
+    bool is_capturing_input() const { return m_mode == WindowMode::CaptureInput; }
+    bool is_capturing_active_input_from(Window const&) const;
+
+    bool is_blocking() const { return m_mode == WindowMode::Blocking; }
+    Window* blocking_modal_window();
+
+    WindowMode mode() const { return m_mode; }
+    Window* modeless_ancestor();
 
     Gfx::IntRect rect() const { return m_rect; }
     Gfx::IntRect rect_adjusted_for_hit_test() const { return m_rect.inflated(-4, -4); }
@@ -191,7 +197,6 @@ public:
     void set_rect(int x, int y, int width, int height) { set_rect({ x, y, width, height }); }
     void set_rect_without_repaint(Gfx::IntRect const&);
     bool apply_minimum_size(Gfx::IntRect&);
-    void nudge_into_desktop(Screen*, bool force_titlebar_visible = true);
 
     Gfx::IntSize minimum_size() const { return m_minimum_size; }
     void set_minimum_size(Gfx::IntSize const&);
@@ -267,7 +272,7 @@ public:
         // The screen can change, so "tiled" and "fixed aspect ratio" are mutually exclusive.
         // Similarly for "maximized" and "fixed aspect ratio".
         // In order to resolve this, undo those properties first:
-        set_untiled(position());
+        set_untiled();
         set_maximized(false);
         m_resize_aspect_ratio = ratio;
     }
@@ -288,7 +293,6 @@ public:
     void request_update(Gfx::IntRect const&, bool ignore_occlusion = false);
     Gfx::DisjointRectSet take_pending_paint_rects() { return move(m_pending_paint_rects); }
 
-    bool has_taskbar_rect() const { return m_have_taskbar_rect; };
     void start_minimize_animation();
 
     void start_launch_animation(Gfx::IntRect const&);
@@ -307,14 +311,7 @@ public:
     Vector<WeakPtr<Window>>& child_windows() { return m_child_windows; }
     Vector<WeakPtr<Window>> const& child_windows() const { return m_child_windows; }
 
-    Vector<WeakPtr<Window>>& accessory_windows() { return m_accessory_windows; }
-    Vector<WeakPtr<Window>> const& accessory_windows() const { return m_accessory_windows; }
-
     bool is_descendant_of(Window&) const;
-
-    void set_accessory(bool accessory) { m_accessory = accessory; }
-    bool is_accessory() const;
-    bool is_accessory_of(Window&) const;
 
     void set_frameless(bool);
     bool is_frameless() const { return m_frameless; }
@@ -382,14 +379,13 @@ public:
     bool is_stealable_by_client(i32 client_id) const { return m_stealable_by_client_ids.contains_slow(client_id); }
 
 private:
-    Window(ConnectionFromClient&, WindowType, int window_id, bool modal, bool minimizable, bool closeable, bool frameless, bool resizable, bool fullscreen, bool accessory, Window* parent_window = nullptr);
+    Window(ConnectionFromClient&, WindowType, WindowMode, int window_id, bool minimizable, bool closeable, bool frameless, bool resizable, bool fullscreen, Window* parent_window = nullptr);
     Window(Core::Object&, WindowType);
 
     virtual void event(Core::Event&) override;
     void handle_mouse_event(MouseEvent const&);
     void handle_keydown_event(KeyEvent const&);
     void add_child_window(Window&);
-    void add_accessory_window(Window&);
     void ensure_window_menu();
     void update_window_menu_items();
     void modal_unparented();
@@ -398,7 +394,6 @@ private:
 
     WeakPtr<Window> m_parent_window;
     Vector<WeakPtr<Window>> m_child_windows;
-    Vector<WeakPtr<Window>> m_accessory_windows;
 
     Menubar m_menubar;
 
@@ -413,10 +408,10 @@ private:
     Gfx::DisjointRectSet m_transparency_wallpaper_rects;
     HashMap<Window*, Gfx::DisjointRectSet> m_affected_transparency_rects;
     WindowType m_type { WindowType::Normal };
+    WindowMode m_mode { WindowMode::Modeless };
     bool m_automatic_cursor_tracking_enabled { false };
     bool m_visible { true };
     bool m_has_alpha_channel { false };
-    bool m_modal { false };
     bool m_minimizable { false };
     bool m_closeable { false };
     bool m_frameless { false };
@@ -425,10 +420,8 @@ private:
     Optional<Gfx::IntSize> m_resize_aspect_ratio {};
     WindowMinimizedState m_minimized_state { WindowMinimizedState::None };
     bool m_fullscreen { false };
-    bool m_accessory { false };
     bool m_destroyed { false };
     bool m_default_positioned { false };
-    bool m_have_taskbar_rect { false };
     bool m_invalidated { true };
     bool m_invalidated_all { true };
     bool m_invalidated_frame { true };
@@ -451,13 +444,12 @@ private:
     float m_alpha_hit_threshold { 0.0f };
     Gfx::IntSize m_size_increment;
     Gfx::IntSize m_base_size;
-    Gfx::IntSize m_minimum_size { 1, 1 };
+    Gfx::IntSize m_minimum_size { 0, 0 };
     NonnullRefPtr<Gfx::Bitmap> m_icon;
     RefPtr<Cursor> m_cursor;
     RefPtr<Cursor> m_cursor_override;
     WindowFrame m_frame;
     Gfx::DisjointRectSet m_pending_paint_rects;
-    Gfx::IntRect m_unmaximized_rect;
     Gfx::IntRect m_rect_in_applet_area;
     RefPtr<Menu> m_window_menu;
     MenuItem* m_window_menu_minimize_item { nullptr };

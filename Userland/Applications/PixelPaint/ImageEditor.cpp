@@ -25,14 +25,16 @@
 
 namespace PixelPaint {
 
+constexpr int marching_ant_length = 4;
+
 ImageEditor::ImageEditor(NonnullRefPtr<Image> image)
     : m_image(move(image))
     , m_title("Untitled")
-    , m_selection(*this)
 {
     set_focus_policy(GUI::FocusPolicy::StrongFocus);
     m_undo_stack.push(make<ImageUndoCommand>(*m_image, String()));
     m_image->add_client(*this);
+    m_image->selection().add_client(*this);
     set_original_rect(m_image->rect());
     set_scale_bounds(0.1f, 100.0f);
 
@@ -41,10 +43,19 @@ ImageEditor::ImageEditor(NonnullRefPtr<Image> image)
 
     m_show_rulers = Config::read_bool("PixelPaint"sv, "Rulers"sv, "Show"sv, true);
     m_show_guides = Config::read_bool("PixelPaint"sv, "Guides"sv, "Show"sv, true);
+
+    m_marching_ants_timer = Core::Timer::create_repeating(80, [this] {
+        ++m_marching_ants_offset;
+        m_marching_ants_offset %= (marching_ant_length * 2);
+        if (!m_image->selection().is_empty() || m_image->selection().in_interactive_selection())
+            update();
+    });
+    m_marching_ants_timer->start();
 }
 
 ImageEditor::~ImageEditor()
 {
+    m_image->selection().remove_client(*this);
     m_image->remove_client(*this);
 }
 
@@ -158,8 +169,7 @@ void ImageEditor::paint_event(GUI::PaintEvent& event)
         }
     }
 
-    if (!m_selection.is_empty())
-        m_selection.paint(painter);
+    paint_selection(painter);
 
     if (m_show_rulers) {
         auto const ruler_bg_color = palette().color(Gfx::ColorRole::InactiveSelection);
@@ -261,7 +271,7 @@ GUI::MouseEvent ImageEditor::event_with_pan_and_scale_applied(GUI::MouseEvent co
     auto image_position = frame_to_content_position(event.position());
     return {
         static_cast<GUI::Event::Type>(event.type()),
-        Gfx::IntPoint(image_position.x(), image_position.y()),
+        image_position.to_rounded<int>(),
         event.buttons(),
         event.button(),
         event.modifiers(),
@@ -278,7 +288,7 @@ GUI::MouseEvent ImageEditor::event_adjusted_for_layer(GUI::MouseEvent const& eve
     image_position.translate_by(-layer.location().x(), -layer.location().y());
     return {
         static_cast<GUI::Event::Type>(event.type()),
-        Gfx::IntPoint(image_position.x(), image_position.y()),
+        image_position.to_rounded<int>(),
         event.buttons(),
         event.button(),
         event.modifiers(),
@@ -363,8 +373,8 @@ void ImageEditor::context_menu_event(GUI::ContextMenuEvent& event)
 
 void ImageEditor::keydown_event(GUI::KeyEvent& event)
 {
-    if (event.key() == Key_Delete && !selection().is_empty() && active_layer()) {
-        active_layer()->erase_selection(selection());
+    if (event.key() == Key_Delete && !m_image->selection().is_empty() && active_layer()) {
+        active_layer()->erase_selection(m_image->selection());
         return;
     }
 
@@ -649,6 +659,102 @@ void ImageEditor::set_show_active_layer_boundary(bool show)
 void ImageEditor::set_loaded_from_image(bool loaded_from_image)
 {
     m_loaded_from_image = loaded_from_image;
+}
+
+void ImageEditor::paint_selection(Gfx::Painter& painter)
+{
+    if (m_image->selection().is_empty())
+        return;
+
+    draw_marching_ants(painter, m_image->selection().mask());
+}
+
+void ImageEditor::draw_marching_ants(Gfx::Painter& painter, Gfx::IntRect const& rect) const
+{
+    // Top line
+    for (int x = rect.left(); x <= rect.right(); ++x)
+        draw_marching_ants_pixel(painter, x, rect.top());
+
+    // Right line
+    for (int y = rect.top() + 1; y <= rect.bottom(); ++y)
+        draw_marching_ants_pixel(painter, rect.right(), y);
+
+    // Bottom line
+    for (int x = rect.right() - 1; x >= rect.left(); --x)
+        draw_marching_ants_pixel(painter, x, rect.bottom());
+
+    // Left line
+    for (int y = rect.bottom() - 1; y > rect.top(); --y)
+        draw_marching_ants_pixel(painter, rect.left(), y);
+}
+
+void ImageEditor::draw_marching_ants(Gfx::Painter& painter, Mask const& mask) const
+{
+    // If the zoom is < 100%, we can skip pixels to save a lot of time drawing the ants
+    int step = max(1, (int)floorf(1.0f / scale()));
+
+    // Only check the visible selection area when drawing for performance
+    auto rect = this->rect();
+    rect = Gfx::enclosing_int_rect(frame_to_content_rect(rect));
+    rect.inflate(step * 2, step * 2); // prevent borders from having visible ants if the selection extends beyond it
+
+    // Scan the image horizontally to find vertical borders
+    for (int y = rect.top(); y <= rect.bottom(); y += step) {
+
+        bool previous_selected = false;
+        for (int x = rect.left(); x <= rect.right(); x += step) {
+            bool this_selected = mask.get(x, y) > 0;
+
+            if (this_selected != previous_selected) {
+                Gfx::IntRect image_pixel { x, y, 1, 1 };
+                auto pixel = content_to_frame_rect(image_pixel).to_type<int>();
+                auto end = max(pixel.top(), pixel.bottom()); // for when the zoom is < 100%
+
+                for (int pixel_y = pixel.top(); pixel_y <= end; pixel_y++) {
+                    draw_marching_ants_pixel(painter, pixel.left(), pixel_y);
+                }
+            }
+
+            previous_selected = this_selected;
+        }
+    }
+
+    // Scan the image vertically to find horizontal borders
+    for (int x = rect.left(); x <= rect.right(); x += step) {
+
+        bool previous_selected = false;
+        for (int y = rect.top(); y <= rect.bottom(); y += step) {
+            bool this_selected = mask.get(x, y) > 0;
+
+            if (this_selected != previous_selected) {
+                Gfx::IntRect image_pixel { x, y, 1, 1 };
+                auto pixel = content_to_frame_rect(image_pixel).to_type<int>();
+                auto end = max(pixel.left(), pixel.right()); // for when the zoom is < 100%
+
+                for (int pixel_x = pixel.left(); pixel_x <= end; pixel_x++) {
+                    draw_marching_ants_pixel(painter, pixel_x, pixel.top());
+                }
+            }
+
+            previous_selected = this_selected;
+        }
+    }
+}
+
+void ImageEditor::draw_marching_ants_pixel(Gfx::Painter& painter, int x, int y) const
+{
+    int pattern_index = x + y + m_marching_ants_offset;
+
+    if (pattern_index % (marching_ant_length * 2) < marching_ant_length) {
+        painter.set_pixel(x, y, Color::Black);
+    } else {
+        painter.set_pixel(x, y, Color::White);
+    }
+}
+
+void ImageEditor::selection_did_change()
+{
+    update();
 }
 
 }

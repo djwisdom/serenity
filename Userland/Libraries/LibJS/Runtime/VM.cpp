@@ -336,7 +336,7 @@ ThrowCompletionOr<void> VM::property_binding_initialization(BindingPattern const
                 VERIFY_NOT_REACHED();
             }
 
-            auto* rest_object = Object::create(realm, realm.global_object().object_prototype());
+            auto* rest_object = Object::create(realm, realm.intrinsics().object_prototype());
             VERIFY(rest_object);
 
             TRY(rest_object->copy_data_properties(vm, object, seen_names));
@@ -644,7 +644,7 @@ Value VM::get_new_target()
 }
 
 // 9.4.5 GetGlobalObject ( ), https://tc39.es/ecma262/#sec-getglobalobject
-GlobalObject& VM::get_global_object()
+Object& VM::get_global_object()
 {
     // 1. Let currentRealm be the current Realm Record.
     auto& current_realm = *this->current_realm();

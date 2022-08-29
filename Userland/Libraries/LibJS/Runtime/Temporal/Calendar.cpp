@@ -70,11 +70,11 @@ ThrowCompletionOr<Calendar*> create_temporal_calendar(VM& vm, String const& iden
 
     // 2. If newTarget is not provided, set newTarget to %Temporal.Calendar%.
     if (!new_target)
-        new_target = realm.global_object().temporal_calendar_constructor();
+        new_target = realm.intrinsics().temporal_calendar_constructor();
 
     // 3. Let object be ? OrdinaryCreateFromConstructor(newTarget, "%Temporal.Calendar.prototype%", « [[InitializedTemporalCalendar]], [[Identifier]] »).
     // 4. Set object.[[Identifier]] to identifier.
-    auto* object = TRY(ordinary_create_from_constructor<Calendar>(vm, *new_target, &GlobalObject::temporal_calendar_prototype, identifier));
+    auto* object = TRY(ordinary_create_from_constructor<Calendar>(vm, *new_target, &Intrinsics::temporal_calendar_prototype, identifier));
 
     // 5. Return object.
     return object;
@@ -502,7 +502,24 @@ ThrowCompletionOr<PlainMonthDay*> calendar_month_day_from_fields(VM& vm, Object&
     return static_cast<PlainMonthDay*>(month_day_object);
 }
 
-// 12.2.26 FormatCalendarAnnotation ( id, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-formatcalendarannotation
+// 12.2.26 MaybeFormatCalendarAnnotation ( calendarObject, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-maybeformatcalendarannotation
+ThrowCompletionOr<String> maybe_format_calendar_annotation(VM& vm, Object const* calendar_object, StringView show_calendar)
+{
+    // 1. If showCalendar is "never", return the empty String.
+    if (show_calendar == "never"sv)
+        return String::empty();
+
+    // 2. Assert: Type(calendarObject) is Object.
+    VERIFY(calendar_object);
+
+    // 3. Let calendarID be ? ToString(calendarObject).
+    auto calendar_id = TRY(Value(calendar_object).to_string(vm));
+
+    // 4. Return FormatCalendarAnnotation(calendarID, showCalendar).
+    return format_calendar_annotation(calendar_id, show_calendar);
+}
+
+// 12.2.27 FormatCalendarAnnotation ( id, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-formatcalendarannotation
 String format_calendar_annotation(StringView id, StringView show_calendar)
 {
     // 1. Assert: showCalendar is "auto", "always", or "never".
@@ -520,7 +537,7 @@ String format_calendar_annotation(StringView id, StringView show_calendar)
     return String::formatted("[u-ca={}]", id);
 }
 
-// 12.2.27 CalendarEquals ( one, two ), https://tc39.es/proposal-temporal/#sec-temporal-calendarequals
+// 12.2.28 CalendarEquals ( one, two ), https://tc39.es/proposal-temporal/#sec-temporal-calendarequals
 ThrowCompletionOr<bool> calendar_equals(VM& vm, Object& one, Object& two)
 {
     // 1. If one and two are the same Object value, return true.
@@ -541,7 +558,7 @@ ThrowCompletionOr<bool> calendar_equals(VM& vm, Object& one, Object& two)
     return false;
 }
 
-// 12.2.28 ConsolidateCalendars ( one, two ), https://tc39.es/proposal-temporal/#sec-temporal-consolidatecalendars
+// 12.2.29 ConsolidateCalendars ( one, two ), https://tc39.es/proposal-temporal/#sec-temporal-consolidatecalendars
 ThrowCompletionOr<Object*> consolidate_calendars(VM& vm, Object& one, Object& two)
 {
     // 1. If one and two are the same Object value, return two.
@@ -570,7 +587,7 @@ ThrowCompletionOr<Object*> consolidate_calendars(VM& vm, Object& one, Object& tw
     return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidCalendar);
 }
 
-// 12.2.29 ISODaysInMonth ( year, month ), https://tc39.es/proposal-temporal/#sec-temporal-isodaysinmonth
+// 12.2.30 ISODaysInMonth ( year, month ), https://tc39.es/proposal-temporal/#sec-temporal-isodaysinmonth
 u8 iso_days_in_month(i32 year, u8 month)
 {
     // 1. Assert: year is an integer.
@@ -590,42 +607,85 @@ u8 iso_days_in_month(i32 year, u8 month)
     return 28 + JS::in_leap_year(time_from_year(year));
 }
 
-// 12.2.30 ToISOWeekOfYear ( year, month, day ), https://tc39.es/proposal-temporal/#sec-temporal-toisoweekofyear
+// 12.2.31 ToISOWeekOfYear ( year, month, day ), https://tc39.es/proposal-temporal/#sec-temporal-toisoweekofyear
 u8 to_iso_week_of_year(i32 year, u8 month, u8 day)
 {
-    // 1. Assert: year is an integer.
-    // 2. Assert: month is an integer.
-    // 3. Assert: day is an integer.
+    // 1. Assert: IsValidISODate(year, month, day) is true.
+    VERIFY(is_valid_iso_date(year, month, day));
 
-    // 4. Let date be the date given by year, month, and day.
-    // 5. Return date's week number according to ISO-8601 as an integer.
-    auto t = make_date(make_day(year, month - 1, day), 0);
-    auto day_of_year = day_within_year(t) + 1;
-    auto day_of_week = week_day(t);
-    if (day_of_week == 0)
-        day_of_week = 7;
-    auto week = (day_of_year - day_of_week + 10) / 7;
+    // 2. Let wednesday be 3.
+    constexpr auto wednesday = 3;
 
+    // 3. Let thursday be 4.
+    constexpr auto thursday = 4;
+
+    // 4. Let friday be 5.
+    constexpr auto friday = 5;
+
+    // 5. Let saturday be 6.
+    constexpr auto saturday = 6;
+
+    // 6. Let daysInWeek be 7.
+    constexpr auto days_in_week = 7;
+
+    // 7. Let maxWeekNumber be 53.
+    constexpr auto max_week_number = 53;
+
+    // 8. Let dayOfYear be ToISODayOfYear(year, month, day).
+    auto day_of_year = to_iso_day_of_year(year, month, day);
+
+    // 9. Let dayOfWeek be ToISODayOfWeek(year, month, day).
+    auto day_of_week = to_iso_day_of_week(year, month, day);
+
+    // 10. Let week be floor((dayOfYear + daysInWeek - dayOfWeek + wednesday ) / daysInWeek).
+    auto week = static_cast<i32>(floor(static_cast<double>(day_of_year + days_in_week - day_of_week + wednesday) / days_in_week));
+
+    // 11. If week < 1, then
     if (week < 1) {
-        // NOTE: The resulting week is actually part of the previous year. If that year ends with a
-        // Thursday (i.e. the first day of the given year is a Friday, or day 5), or the previous
-        // year is a leap year and ends with a Friday (i.e. the first day of the given year is a
-        // Saturday, or day 6), it has 53 weeks, and 52 weeks otherwise.
-        auto day_of_jump = week_day(make_date(make_day(year, 0, 1), 0));
-        if (day_of_jump == 5 || (in_leap_year(time_from_year(year - 1)) && day_of_jump == 6))
-            return 53;
-        else
-            return 52;
-    } else if (week == 53) {
-        auto days_in_year = JS::days_in_year(year);
-        if (days_in_year - day_of_year < 4 - day_of_week)
-            return 1;
+        // a. NOTE: This is the last week of the previous year.
+
+        // b. Let dayOfJan1st be ToISODayOfWeek(year, 1, 1).
+        auto day_of_jan_1st = to_iso_day_of_week(year, 1, 1);
+
+        // c. If dayOfJan1st is friday, then
+        if (day_of_jan_1st == friday) {
+            // i. Return maxWeekNumber.
+            return max_week_number;
+        }
+
+        // d. If dayOfJan1st is saturday, and InLeapYear(TimeFromYear(𝔽(year - 1))) is 1𝔽, then
+        if (day_of_jan_1st == saturday && in_leap_year(time_from_year(year - 1))) {
+            // i. Return maxWeekNumber.
+            return max_week_number;
+        }
+
+        // e. Return maxWeekNumber - 1.
+        return max_week_number - 1;
     }
 
+    // 12. If week is maxWeekNumber, then
+    if (week == max_week_number) {
+        // a. Let daysInYear be DaysInYear(𝔽(year)).
+        auto days_in_year = JS::days_in_year(year);
+
+        // b. Let daysLaterInYear be daysInYear - dayOfYear.
+        auto days_later_in_year = days_in_year - day_of_year;
+
+        // c. Let daysAfterThursday be thursday - dayOfWeek.
+        auto days_after_thursday = thursday - day_of_week;
+
+        // d. If daysLaterInYear < daysAfterThursday, then
+        if (days_later_in_year < days_after_thursday) {
+            // i. Return 1.
+            return 1;
+        }
+    }
+
+    // 13. Return week.
     return week;
 }
 
-// 12.2.31 BuildISOMonthCode ( month ), https://tc39.es/proposal-temporal/#sec-buildisomonthcode
+// 12.2.32 BuildISOMonthCode ( month ), https://tc39.es/proposal-temporal/#sec-buildisomonthcode
 String build_iso_month_code(u8 month)
 {
     // 1. Let numberPart be ToZeroPaddedDecimalString(month, 2).
@@ -633,7 +693,7 @@ String build_iso_month_code(u8 month)
     return String::formatted("M{:02}", month);
 }
 
-// 12.2.32 ResolveISOMonth ( fields ), https://tc39.es/proposal-temporal/#sec-temporal-resolveisomonth
+// 12.2.33 ResolveISOMonth ( fields ), https://tc39.es/proposal-temporal/#sec-temporal-resolveisomonth
 ThrowCompletionOr<double> resolve_iso_month(VM& vm, Object const& fields)
 {
     // 1. Assert: fields is an ordinary object with no more and no less than the own data properties listed in Table 13.
@@ -694,7 +754,7 @@ ThrowCompletionOr<double> resolve_iso_month(VM& vm, Object const& fields)
     return number_part_integer;
 }
 
-// 12.2.33 ISODateFromFields ( fields, options ), https://tc39.es/proposal-temporal/#sec-temporal-isodatefromfields
+// 12.2.34 ISODateFromFields ( fields, options ), https://tc39.es/proposal-temporal/#sec-temporal-isodatefromfields
 ThrowCompletionOr<ISODateRecord> iso_date_from_fields(VM& vm, Object const& fields, Object const& options)
 {
     // 1. Assert: Type(fields) is Object.
@@ -724,7 +784,7 @@ ThrowCompletionOr<ISODateRecord> iso_date_from_fields(VM& vm, Object const& fiel
     return regulate_iso_date(vm, year.as_double(), month, day.as_double(), overflow);
 }
 
-// 12.2.34 ISOYearMonthFromFields ( fields, options ), https://tc39.es/proposal-temporal/#sec-temporal-isoyearmonthfromfields
+// 12.2.35 ISOYearMonthFromFields ( fields, options ), https://tc39.es/proposal-temporal/#sec-temporal-isoyearmonthfromfields
 ThrowCompletionOr<ISOYearMonth> iso_year_month_from_fields(VM& vm, Object const& fields, Object const& options)
 {
     // 1. Assert: Type(fields) is Object.
@@ -751,7 +811,7 @@ ThrowCompletionOr<ISOYearMonth> iso_year_month_from_fields(VM& vm, Object const&
     return ISOYearMonth { .year = result.year, .month = result.month, .reference_iso_day = 1 };
 }
 
-// 12.2.35 ISOMonthDayFromFields ( fields, options ), https://tc39.es/proposal-temporal/#sec-temporal-isomonthdayfromfields
+// 12.2.36 ISOMonthDayFromFields ( fields, options ), https://tc39.es/proposal-temporal/#sec-temporal-isomonthdayfromfields
 ThrowCompletionOr<ISOMonthDay> iso_month_day_from_fields(VM& vm, Object const& fields, Object const& options)
 {
     // 1. Assert: Type(fields) is Object.
@@ -809,7 +869,7 @@ ThrowCompletionOr<ISOMonthDay> iso_month_day_from_fields(VM& vm, Object const& f
     return ISOMonthDay { .month = result->month, .day = result->day, .reference_iso_year = reference_iso_year };
 }
 
-// 12.2.36 ISOYear ( temporalObject ), https://tc39.es/proposal-temporal/#sec-temporal-isoyear
+// 12.2.37 ISOYear ( temporalObject ), https://tc39.es/proposal-temporal/#sec-temporal-isoyear
 i32 iso_year(Object& temporal_object)
 {
     // 1. Assert: temporalObject has an [[ISOYear]] internal slot.
@@ -827,7 +887,7 @@ i32 iso_year(Object& temporal_object)
     VERIFY_NOT_REACHED();
 }
 
-// 12.2.37 ISOMonth ( temporalObject ), https://tc39.es/proposal-temporal/#sec-temporal-isomonth
+// 12.2.38 ISOMonth ( temporalObject ), https://tc39.es/proposal-temporal/#sec-temporal-isomonth
 u8 iso_month(Object& temporal_object)
 {
     // 1. Assert: temporalObject has an [[ISOMonth]] internal slot.
@@ -845,7 +905,7 @@ u8 iso_month(Object& temporal_object)
     VERIFY_NOT_REACHED();
 }
 
-// 12.2.38 ISOMonthCode ( temporalObject ), https://tc39.es/proposal-temporal/#sec-temporal-isomonthcode
+// 12.2.39 ISOMonthCode ( temporalObject ), https://tc39.es/proposal-temporal/#sec-temporal-isomonthcode
 String iso_month_code(Object& temporal_object)
 {
     // 1. Assert: temporalObject has an [[ISOMonth]] internal slot.
@@ -863,7 +923,7 @@ String iso_month_code(Object& temporal_object)
     VERIFY_NOT_REACHED();
 }
 
-// 12.2.49 ISODay ( temporalObject ), https://tc39.es/proposal-temporal/#sec-temporal-isomonthcode
+// 12.2.40 ISODay ( temporalObject ), https://tc39.es/proposal-temporal/#sec-temporal-isomonthcode
 u8 iso_day(Object& temporal_object)
 {
     // 1. Assert: temporalObject has an [[ISODay]] internal slot.
@@ -881,13 +941,13 @@ u8 iso_day(Object& temporal_object)
     VERIFY_NOT_REACHED();
 }
 
-// 12.2.40 DefaultMergeCalendarFields ( fields, additionalFields ), https://tc39.es/proposal-temporal/#sec-temporal-defaultmergecalendarfields
+// 12.2.41 DefaultMergeCalendarFields ( fields, additionalFields ), https://tc39.es/proposal-temporal/#sec-temporal-defaultmergecalendarfields
 ThrowCompletionOr<Object*> default_merge_calendar_fields(VM& vm, Object const& fields, Object const& additional_fields)
 {
     auto& realm = *vm.current_realm();
 
     // 1. Let merged be OrdinaryObjectCreate(%Object.prototype%).
-    auto* merged = Object::create(realm, realm.global_object().object_prototype());
+    auto* merged = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 2. Let fieldsKeys be ? EnumerableOwnPropertyNames(fields, key).
     auto fields_keys = TRY(fields.enumerable_own_property_names(Object::PropertyKind::Key));
@@ -955,6 +1015,45 @@ ThrowCompletionOr<Object*> default_merge_calendar_fields(VM& vm, Object const& f
 
     // 7. Return merged.
     return merged;
+}
+
+// 12.2.42 ToISODayOfYear ( year, month, day ), https://tc39.es/proposal-temporal/#sec-temporal-toisodayofyear
+u16 to_iso_day_of_year(i32 year, u8 month, u8 day)
+{
+    // 1. Assert: IsValidISODate(year, month, day) is true.
+    VERIFY(is_valid_iso_date(year, month, day));
+
+    // 2. Let epochDays be MakeDay(𝔽(year), 𝔽(month - 1), 𝔽(day)).
+    auto epoch_days = make_day(year, month - 1, day);
+
+    // 3. Assert: epochDays is finite.
+    VERIFY(isfinite(epoch_days));
+
+    // 4. Return ℝ(DayWithinYear(MakeDate(epochDays, +0𝔽))) + 1.
+    return day_within_year(make_date(epoch_days, 0)) + 1;
+}
+
+// 12.2.43 ToISODayOfWeek ( year, month, day ), https://tc39.es/proposal-temporal/#sec-temporal-toisodayofweek
+u8 to_iso_day_of_week(i32 year, u8 month, u8 day)
+{
+    // 1. Assert: IsValidISODate(year, month, day) is true.
+    VERIFY(is_valid_iso_date(year, month, day));
+
+    // 2. Let epochDays be MakeDay(𝔽(year), 𝔽(month - 1), 𝔽(day)).
+    auto epoch_days = make_day(year, month - 1, day);
+
+    // 3. Assert: epochDays is finite.
+    VERIFY(isfinite(epoch_days));
+
+    // 4. Let dayOfWeek be WeekDay(MakeDate(epochDays, +0𝔽)).
+    auto day_of_week = week_day(make_date(epoch_days, 0));
+
+    // 5. If dayOfWeek = +0𝔽, return 7.
+    if (day_of_week == 0)
+        return 7;
+
+    // 6. Return ℝ(dayOfWeek).
+    return day_of_week;
 }
 
 }

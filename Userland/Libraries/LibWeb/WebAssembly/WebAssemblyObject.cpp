@@ -26,7 +26,7 @@
 namespace Web::Bindings {
 
 WebAssemblyObject::WebAssemblyObject(JS::Realm& realm)
-    : Object(*realm.global_object().object_prototype())
+    : Object(*realm.intrinsics().object_prototype())
 {
     s_abstract_machine.enable_instruction_count_limit();
 }
@@ -370,7 +370,7 @@ JS::Value to_js_value(JS::VM& vm, Wasm::Value& wasm_value)
     auto& realm = *vm.current_realm();
     switch (wasm_value.type().kind()) {
     case Wasm::ValueType::I64:
-        return realm.heap().allocate<JS::BigInt>(realm, ::Crypto::SignedBigInteger::create_from(wasm_value.to<i64>().value()));
+        return realm.heap().allocate<JS::BigInt>(realm, ::Crypto::SignedBigInteger { wasm_value.to<i64>().value() });
     case Wasm::ValueType::I32:
         return JS::Value(wasm_value.to<i32>().value());
     case Wasm::ValueType::F64:

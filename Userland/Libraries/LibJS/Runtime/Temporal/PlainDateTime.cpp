@@ -63,7 +63,8 @@ BigInt* get_epoch_from_iso_parts(VM& vm, i32 year, u8 month, u8 day, u8 hour, u8
     VERIFY(isfinite(ms));
 
     // 6. Return ℤ(ℝ(ms) × 10^6 + microsecond × 10^3 + nanosecond).
-    return js_bigint(vm, Crypto::SignedBigInteger::create_from(static_cast<i64>(ms)).multiplied_by(Crypto::UnsignedBigInteger { 1'000'000 }).plus(Crypto::SignedBigInteger::create_from((i64)microsecond * 1000)).plus(Crypto::SignedBigInteger(nanosecond)));
+    i32 signed_nanoseconds = nanosecond;
+    return js_bigint(vm, Crypto::SignedBigInteger { ms }.multiplied_by(Crypto::UnsignedBigInteger { 1'000'000 }).plus(Crypto::SignedBigInteger { microsecond * 1000 }).plus(Crypto::SignedBigInteger { signed_nanoseconds }));
 }
 
 // nsMinInstant - nsPerDay
@@ -248,7 +249,7 @@ ThrowCompletionOr<PlainDateTime*> create_temporal_date_time(VM& vm, i32 iso_year
 
     // 6. If newTarget is not present, set newTarget to %Temporal.PlainDateTime%.
     if (!new_target)
-        new_target = realm.global_object().temporal_plain_date_time_constructor();
+        new_target = realm.intrinsics().temporal_plain_date_time_constructor();
 
     // 7. Let object be ? OrdinaryCreateFromConstructor(newTarget, "%Temporal.PlainDateTime.prototype%", « [[InitializedTemporalDateTime]], [[ISOYear]], [[ISOMonth]], [[ISODay]], [[ISOHour]], [[ISOMinute]], [[ISOSecond]], [[ISOMillisecond]], [[ISOMicrosecond]], [[ISONanosecond]], [[Calendar]] »).
     // 8. Set object.[[ISOYear]] to isoYear.
@@ -261,14 +262,14 @@ ThrowCompletionOr<PlainDateTime*> create_temporal_date_time(VM& vm, i32 iso_year
     // 15. Set object.[[ISOMicrosecond]] to microsecond.
     // 16. Set object.[[ISONanosecond]] to nanosecond.
     // 17. Set object.[[Calendar]] to calendar.
-    auto* object = TRY(ordinary_create_from_constructor<PlainDateTime>(vm, *new_target, &GlobalObject::temporal_plain_date_prototype, iso_year, iso_month, iso_day, hour, minute, second, millisecond, microsecond, nanosecond, calendar));
+    auto* object = TRY(ordinary_create_from_constructor<PlainDateTime>(vm, *new_target, &Intrinsics::temporal_plain_date_prototype, iso_year, iso_month, iso_day, hour, minute, second, millisecond, microsecond, nanosecond, calendar));
 
     // 18. Return object.
     return object;
 }
 
 // 5.5.7 TemporalDateTimeToString ( isoYear, isoMonth, isoDay, hour, minute, second, millisecond, microsecond, nanosecond, calendar, precision, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-temporaldatetimetostring
-ThrowCompletionOr<String> temporal_date_time_to_string(VM& vm, i32 iso_year, u8 iso_month, u8 iso_day, u8 hour, u8 minute, u8 second, u16 millisecond, u16 microsecond, u16 nanosecond, Value calendar, Variant<StringView, u8> const& precision, StringView show_calendar)
+ThrowCompletionOr<String> temporal_date_time_to_string(VM& vm, i32 iso_year, u8 iso_month, u8 iso_day, u8 hour, u8 minute, u8 second, u16 millisecond, u16 microsecond, u16 nanosecond, Object const* calendar, Variant<StringView, u8> const& precision, StringView show_calendar)
 {
     // 1. Assert: isoYear, isoMonth, isoDay, hour, minute, second, millisecond, microsecond, and nanosecond are integers.
 
@@ -281,13 +282,10 @@ ThrowCompletionOr<String> temporal_date_time_to_string(VM& vm, i32 iso_year, u8 
     // 7. Let seconds be ! FormatSecondsStringPart(second, millisecond, microsecond, nanosecond, precision).
     auto seconds = format_seconds_string_part(second, millisecond, microsecond, nanosecond, precision);
 
-    // 8. Let calendarID be ? ToString(calendar).
-    auto calendar_id = TRY(calendar.to_string(vm));
+    // 8. Let calendarString be ? MaybeFormatCalendarAnnotation(calendar, showCalendar).
+    auto calendar_string = TRY(maybe_format_calendar_annotation(vm, calendar, show_calendar));
 
-    // 9. Let calendarString be ! FormatCalendarAnnotation(calendarID, showCalendar).
-    auto calendar_string = format_calendar_annotation(calendar_id, show_calendar);
-
-    // 10. Return the string-concatenation of year, the code unit 0x002D (HYPHEN-MINUS), month, the code unit 0x002D (HYPHEN-MINUS), day, 0x0054 (LATIN CAPITAL LETTER T), hour, the code unit 0x003A (COLON), minute, seconds, and calendarString.
+    // 9. Return the string-concatenation of year, the code unit 0x002D (HYPHEN-MINUS), month, the code unit 0x002D (HYPHEN-MINUS), day, 0x0054 (LATIN CAPITAL LETTER T), hour, the code unit 0x003A (COLON), minute, seconds, and calendarString.
     return String::formatted("{}-{:02}-{:02}T{:02}:{:02}{}{}", pad_iso_year(iso_year), iso_month, iso_day, hour, minute, seconds, calendar_string);
 }
 
@@ -380,7 +378,7 @@ ThrowCompletionOr<DurationRecord> difference_iso_date_time(VM& vm, i32 year1, u8
         adjusted_date = balance_iso_date(adjusted_date.year, adjusted_date.month, adjusted_date.day - time_sign);
 
         // b. Set timeDifference to ! BalanceDuration(-timeSign, timeDifference.[[Hours]], timeDifference.[[Minutes]], timeDifference.[[Seconds]], timeDifference.[[Milliseconds]], timeDifference.[[Microseconds]], timeDifference.[[Nanoseconds]], largestUnit).
-        time_difference = MUST(balance_duration(vm, -time_sign, time_difference.hours, time_difference.minutes, time_difference.seconds, time_difference.milliseconds, time_difference.microseconds, Crypto::SignedBigInteger { (i32)time_difference.nanoseconds }, largest_unit));
+        time_difference = MUST(balance_duration(vm, -time_sign, time_difference.hours, time_difference.minutes, time_difference.seconds, time_difference.milliseconds, time_difference.microseconds, Crypto::SignedBigInteger { time_difference.nanoseconds }, largest_unit));
     }
 
     // 8. Let date1 be ! CreateTemporalDate(adjustedDate.[[Year]], adjustedDate.[[Month]], adjustedDate.[[Day]], calendar).
@@ -399,7 +397,7 @@ ThrowCompletionOr<DurationRecord> difference_iso_date_time(VM& vm, i32 year1, u8
     auto* date_difference = TRY(calendar_date_until(vm, calendar, date1, date2, *until_options));
 
     // 13. Let balanceResult be ? BalanceDuration(dateDifference.[[Days]], timeDifference.[[Hours]], timeDifference.[[Minutes]], timeDifference.[[Seconds]], timeDifference.[[Milliseconds]], timeDifference.[[Microseconds]], timeDifference.[[Nanoseconds]], largestUnit).
-    auto balance_result = TRY(balance_duration(vm, date_difference->days(), time_difference.hours, time_difference.minutes, time_difference.seconds, time_difference.milliseconds, time_difference.microseconds, Crypto::SignedBigInteger { (i32)time_difference.nanoseconds }, largest_unit));
+    auto balance_result = TRY(balance_duration(vm, date_difference->days(), time_difference.hours, time_difference.minutes, time_difference.seconds, time_difference.milliseconds, time_difference.microseconds, Crypto::SignedBigInteger { time_difference.nanoseconds }, largest_unit));
 
     // 14. Return ! CreateDurationRecord(dateDifference.[[Years]], dateDifference.[[Months]], dateDifference.[[Weeks]], balanceResult.[[Days]], balanceResult.[[Hours]], balanceResult.[[Minutes]], balanceResult.[[Seconds]], balanceResult.[[Milliseconds]], balanceResult.[[Microseconds]], balanceResult.[[Nanoseconds]]).
     return create_duration_record(date_difference->years(), date_difference->months(), date_difference->weeks(), balance_result.days, balance_result.hours, balance_result.minutes, balance_result.seconds, balance_result.milliseconds, balance_result.microseconds, balance_result.nanoseconds);
@@ -431,8 +429,7 @@ ThrowCompletionOr<Duration*> difference_temporal_plain_date_time(VM& vm, Differe
     auto round_result = TRY(round_duration(vm, diff.years, diff.months, diff.weeks, diff.days, diff.hours, diff.minutes, diff.seconds, diff.milliseconds, diff.microseconds, diff.nanoseconds, settings.rounding_increment, settings.smallest_unit, settings.rounding_mode, relative_to)).duration_record;
 
     // 8. Let result be ? BalanceDuration(roundResult.[[Days]], roundResult.[[Hours]], roundResult.[[Minutes]], roundResult.[[Seconds]], roundResult.[[Milliseconds]], roundResult.[[Microseconds]], roundResult.[[Nanoseconds]], settings.[[LargestUnit]]).
-    // FIXME: Narrowing conversion from 'double' to 'i64'
-    auto result = MUST(balance_duration(vm, round_result.days, round_result.hours, round_result.minutes, round_result.seconds, round_result.milliseconds, round_result.microseconds, Crypto::SignedBigInteger::create_from((i64)round_result.nanoseconds), settings.largest_unit));
+    auto result = MUST(balance_duration(vm, round_result.days, round_result.hours, round_result.minutes, round_result.seconds, round_result.milliseconds, round_result.microseconds, Crypto::SignedBigInteger { round_result.nanoseconds }, settings.largest_unit));
 
     // 9. Return ! CreateTemporalDuration(sign × roundResult.[[Years]], sign × roundResult.[[Months]], sign × roundResult.[[Weeks]], sign × result.[[Days]], sign × result.[[Hours]], sign × result.[[Minutes]], sign × result.[[Seconds]], sign × result.[[Milliseconds]], sign × result.[[Microseconds]], sign × result.[[Nanoseconds]]).
     return MUST(create_temporal_duration(vm, sign * round_result.years, sign * round_result.months, sign * round_result.weeks, sign * result.days, sign * result.hours, sign * result.minutes, sign * result.seconds, sign * result.milliseconds, sign * result.microseconds, sign * result.nanoseconds));

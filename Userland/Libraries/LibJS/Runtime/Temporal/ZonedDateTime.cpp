@@ -61,8 +61,7 @@ ThrowCompletionOr<BigInt const*> interpret_iso_date_time_offset(VM& vm, i32 year
         auto* epoch_nanoseconds = get_epoch_from_iso_parts(vm, year, month, day, hour, minute, second, millisecond, microsecond, nanosecond);
 
         // b. Set epochNanoseconds to epochNanoseconds - ℤ(offsetNanoseconds).
-        // FIXME: Narrowing conversion from 'double' to 'i64'
-        auto offset_nanoseconds_bigint = Crypto::SignedBigInteger::create_from((i64)offset_nanoseconds);
+        auto offset_nanoseconds_bigint = Crypto::SignedBigInteger { offset_nanoseconds };
         epoch_nanoseconds = js_bigint(vm, epoch_nanoseconds->big_integer().minus(offset_nanoseconds_bigint));
 
         // c. If ! IsValidEpochNanoseconds(epochNanoseconds) is false, throw a RangeError exception.
@@ -274,13 +273,13 @@ ThrowCompletionOr<ZonedDateTime*> create_temporal_zoned_date_time(VM& vm, BigInt
 
     // 2. If newTarget is not present, set newTarget to %Temporal.ZonedDateTime%.
     if (!new_target)
-        new_target = realm.global_object().temporal_zoned_date_time_constructor();
+        new_target = realm.intrinsics().temporal_zoned_date_time_constructor();
 
     // 3. Let object be ? OrdinaryCreateFromConstructor(newTarget, "%Temporal.ZonedDateTime.prototype%", « [[InitializedTemporalZonedDateTime]], [[Nanoseconds]], [[TimeZone]], [[Calendar]] »).
     // 4. Set object.[[Nanoseconds]] to epochNanoseconds.
     // 5. Set object.[[TimeZone]] to timeZone.
     // 6. Set object.[[Calendar]] to calendar.
-    auto* object = TRY(ordinary_create_from_constructor<ZonedDateTime>(vm, *new_target, &GlobalObject::temporal_time_zone_prototype, epoch_nanoseconds, time_zone, calendar));
+    auto* object = TRY(ordinary_create_from_constructor<ZonedDateTime>(vm, *new_target, &Intrinsics::temporal_time_zone_prototype, epoch_nanoseconds, time_zone, calendar));
 
     // 7. Return object.
     return object;
@@ -351,13 +350,10 @@ ThrowCompletionOr<String> temporal_zoned_date_time_to_string(VM& vm, ZonedDateTi
         time_zone_string = String::formatted("[{}]", time_zone_id);
     }
 
-    // 14. Let calendarID be ? ToString(zonedDateTime.[[Calendar]]).
-    auto calendar_id = TRY(Value(&zoned_date_time.calendar()).to_string(vm));
+    // 14. Let calendarString be ? MaybeFormatCalendarAnnotation(zonedDateTime.[[Calendar]], showCalendar).
+    auto calendar_string = TRY(maybe_format_calendar_annotation(vm, &zoned_date_time.calendar(), show_calendar));
 
-    // 15. Let calendarString be ! FormatCalendarAnnotation(calendarID, showCalendar).
-    auto calendar_string = format_calendar_annotation(calendar_id, show_calendar);
-
-    // 16. Return the string-concatenation of dateTimeString, offsetString, timeZoneString, and calendarString.
+    // 15. Return the string-concatenation of dateTimeString, offsetString, timeZoneString, and calendarString.
     return String::formatted("{}{}{}{}", date_time_string, offset_string, time_zone_string, calendar_string);
 }
 
@@ -463,7 +459,7 @@ ThrowCompletionOr<NanosecondsToDaysResult> nanoseconds_to_days(VM& vm, Crypto::S
         // a. Return the Record { [[Days]]: RoundTowardsZero(nanoseconds / dayLengthNs), [[Nanoseconds]]: (abs(nanoseconds) modulo dayLengthNs) × sign, [[DayLength]]: dayLengthNs }.
         return NanosecondsToDaysResult {
             .days = nanoseconds.divided_by(day_length_ns).quotient.to_double(),
-            .nanoseconds = Crypto::SignedBigInteger { nanoseconds.unsigned_value() }.divided_by(day_length_ns).remainder.multiplied_by(Crypto::SignedBigInteger { (i32)sign }),
+            .nanoseconds = Crypto::SignedBigInteger { nanoseconds.unsigned_value() }.divided_by(day_length_ns).remainder.multiplied_by(Crypto::SignedBigInteger { sign }),
             .day_length = day_length_ns.to_double()
         };
     }
@@ -528,7 +524,7 @@ ThrowCompletionOr<NanosecondsToDaysResult> nanoseconds_to_days(VM& vm, Crypto::S
         day_length_ns = one_day_farther_ns.minus(intermediate_ns);
 
         // c. If (nanoseconds - dayLengthNs) × sign ≥ 0, then
-        if (nanoseconds.minus(day_length_ns).multiplied_by(Crypto::SignedBigInteger { (i32)sign }) >= "0"_sbigint) {
+        if (nanoseconds.minus(day_length_ns).multiplied_by(Crypto::SignedBigInteger { sign }) >= "0"_sbigint) {
             // i. Set nanoseconds to nanoseconds - dayLengthNs.
             nanoseconds = nanoseconds.minus(day_length_ns);
 

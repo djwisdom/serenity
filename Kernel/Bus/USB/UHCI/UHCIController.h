@@ -7,9 +7,9 @@
 
 #pragma once
 
-#include <AK/Platform.h>
-
+#include <AK/Array.h>
 #include <AK/NonnullOwnPtr.h>
+#include <AK/Platform.h>
 #include <Kernel/Arch/x86/IO.h>
 #include <Kernel/Bus/PCI/Device.h>
 #include <Kernel/Bus/USB/UHCI/UHCIDescriptorPool.h>
@@ -17,6 +17,7 @@
 #include <Kernel/Bus/USB/UHCI/UHCIRootHub.h>
 #include <Kernel/Bus/USB/USBController.h>
 #include <Kernel/Interrupts/IRQHandler.h>
+#include <Kernel/Locking/Spinlock.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 #include <Kernel/Process.h>
 #include <Kernel/Time/TimeManagement.h>
@@ -30,6 +31,7 @@ class UHCIController final
 
     static constexpr u8 MAXIMUM_NUMBER_OF_TDS = 128; // Upper pool limit. This consumes the second page we have allocated
     static constexpr u8 MAXIMUM_NUMBER_OF_QHS = 64;
+    static constexpr u8 NUMBER_OF_INTERRUPT_QHS = 11;
 
 public:
     static constexpr u8 NUMBER_OF_ROOT_PORTS = 2;
@@ -76,6 +78,10 @@ private:
 
     ErrorOr<void> create_structures();
     void setup_schedule();
+
+    void enqueue_qh(QueueHead* transfer_queue, QueueHead* anchor);
+    void dequeue_qh(QueueHead* transfer_queue);
+
     size_t poll_transfer_queue(QueueHead& transfer_queue);
 
     TransferDescriptor* create_transfer_descriptor(Pipe& pipe, PacketID direction, size_t data_len);
@@ -89,16 +95,20 @@ private:
 
     IOAddress m_io_base;
 
+    Spinlock m_schedule_lock;
+
     OwnPtr<UHCIRootHub> m_root_hub;
     OwnPtr<UHCIDescriptorPool<QueueHead>> m_queue_head_pool;
     OwnPtr<UHCIDescriptorPool<TransferDescriptor>> m_transfer_descriptor_pool;
     Vector<TransferDescriptor*> m_iso_td_list;
 
-    QueueHead* m_interrupt_transfer_queue;
-    QueueHead* m_lowspeed_control_qh;
-    QueueHead* m_fullspeed_control_qh;
-    QueueHead* m_bulk_qh;
-    QueueHead* m_dummy_qh; // Needed for PIIX4 hack
+    QueueHead* m_schedule_begin_anchor;
+    Array<QueueHead*, NUMBER_OF_INTERRUPT_QHS> m_interrupt_qh_anchor_arr;
+    QueueHead* m_ls_control_qh_anchor;
+    QueueHead* m_fs_control_qh_anchor;
+    // Always final queue in the schedule, may loop back to previous QH for bandwidth
+    // reclamation instead of actually terminating
+    QueueHead* m_bulk_qh_anchor;
 
     OwnPtr<Memory::Region> m_framelist;
     OwnPtr<Memory::Region> m_isochronous_transfer_pool;

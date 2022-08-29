@@ -11,6 +11,12 @@
 
 namespace Crypto {
 
+SignedBigInteger::SignedBigInteger(double value)
+    : m_sign(value < 0.0)
+    , m_unsigned_data(fabs(value))
+{
+}
+
 SignedBigInteger SignedBigInteger::import_data(u8 const* ptr, size_t length)
 {
     bool sign = *ptr;
@@ -65,9 +71,9 @@ u64 SignedBigInteger::to_u64() const
     return ~(unsigned_value - 1); // equivalent to `-unsigned_value`, but doesn't trigger UBSAN
 }
 
-double SignedBigInteger::to_double() const
+double SignedBigInteger::to_double(UnsignedBigInteger::RoundingMode rounding_mode) const
 {
-    double unsigned_value = m_unsigned_data.to_double();
+    double unsigned_value = m_unsigned_data.to_double(rounding_mode);
     if (!m_sign)
         return unsigned_value;
 

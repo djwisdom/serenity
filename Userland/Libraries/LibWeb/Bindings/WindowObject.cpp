@@ -57,9 +57,9 @@ WindowObject::WindowObject(JS::Realm& realm, HTML::Window& impl)
     impl.set_wrapper({}, *this);
 }
 
-void WindowObject::initialize_global_object(JS::Realm& realm)
+void WindowObject::initialize(JS::Realm& realm)
 {
-    Base::initialize_global_object(realm);
+    Base::initialize(realm);
 
     Object::set_prototype(&ensure_web_prototype<WindowPrototype>("Window"));
 
@@ -390,8 +390,11 @@ JS_DEFINE_NATIVE_FUNCTION(WindowObject::btoa)
     Vector<u8> byte_string;
     byte_string.ensure_capacity(string.length());
     for (u32 code_point : Utf8View(string)) {
-        if (code_point > 0xff)
-            return vm.throw_completion<JS::InvalidCharacterError>(JS::ErrorType::NotAByteString, "btoa");
+        if (code_point > 0xff) {
+            return Bindings::throw_dom_exception_if_needed(vm, [] {
+                return DOM::InvalidCharacterError::create("Data contains characters outside the range U+0000 and U+00FF");
+            }).release_error();
+        }
         byte_string.append(code_point);
     }
 

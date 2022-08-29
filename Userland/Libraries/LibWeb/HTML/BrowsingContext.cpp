@@ -52,14 +52,15 @@ static HTML::Origin url_origin(AK::URL const& url)
 
     if (url.scheme() == "file"sv) {
         // Unfortunate as it is, this is left as an exercise to the reader. When in doubt, return a new opaque origin.
-        return HTML::Origin {};
+        // Note: We must return an origin with the `file://' protocol for `file://' iframes to work from `file://' pages.
+        return HTML::Origin(url.protocol(), String(), 0);
     }
 
     return HTML::Origin {};
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#determining-the-origin
-static HTML::Origin determine_the_origin(BrowsingContext const& browsing_context, Optional<AK::URL> url, SandboxingFlagSet sandbox_flags, Optional<HTML::Origin> invocation_origin)
+HTML::Origin determine_the_origin(BrowsingContext const& browsing_context, Optional<AK::URL> url, SandboxingFlagSet sandbox_flags, Optional<HTML::Origin> invocation_origin)
 {
     // 1. If sandboxFlags has its sandboxed origin browsing context flag set, then return a new opaque origin.
     if (sandbox_flags.flags & SandboxingFlagSet::SandboxedOrigin) {

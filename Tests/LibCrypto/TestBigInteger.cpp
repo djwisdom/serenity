@@ -73,7 +73,7 @@ TEST_CASE(test_unsigned_bigint_basic_add_to_accumulator)
 
 TEST_CASE(test_unsigned_bigint_basic_add_to_empty_accumulator)
 {
-    Crypto::UnsignedBigInteger num1({});
+    Crypto::UnsignedBigInteger num1 {};
     Crypto::UnsignedBigInteger num2(10);
     Crypto::UnsignedBigIntegerAlgorithms::add_into_accumulator_without_allocation(num1, num2);
     EXPECT_EQ(num1.words(), Vector<u32> { 10 });
@@ -750,7 +750,7 @@ EXPECT_EQUAL_TO(zero, -0.0);
 TEST_CASE(to_double)
 {
 #define EXPECT_TO_EQUAL_DOUBLE(bigint, double_value) \
-    EXPECT_EQ((bigint).to_double(), double_value)
+    EXPECT_EQ((bigint).to_double(Crypto::UnsignedBigInteger::RoundingMode::RoundTowardZero), double_value)
 
     EXPECT_TO_EQUAL_DOUBLE(Crypto::UnsignedBigInteger(0), 0.0);
     // Make sure we don't get negative zero!
@@ -825,11 +825,119 @@ TEST_CASE(to_double)
     EXPECT_TO_EQUAL_DOUBLE(Crypto::SignedBigInteger::from_base(10, "2345678901234567890"sv),
         2345678901234567680.0);
 
-    EXPECT_EQ(1234567890123456800.0, 1234567890123456768.0);
+    EXPECT_EQ(
+        Crypto::UnsignedBigInteger::from_base(16, "1fffffffffffff00"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        2305843009213693696.0);
+
+    EXPECT_EQ(
+        Crypto::UnsignedBigInteger::from_base(16, "1fffffffffffff00"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::RoundTowardZero),
+        2305843009213693696.0);
+
+    EXPECT_EQ(
+        Crypto::UnsignedBigInteger::from_base(16, "1fffffffffffff80"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        2305843009213693952.0);
+
+    EXPECT_EQ(Crypto::UnsignedBigInteger::from_base(16, "20000000000001"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        9007199254740992.0);
+
+    EXPECT_EQ(Crypto::UnsignedBigInteger::from_base(16, "20000000000002"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        9007199254740994.0);
+
+    // 2^53 = 20000000000000, +3 Rounds up because of tiesRoundToEven
+    EXPECT_EQ(Crypto::UnsignedBigInteger::from_base(16, "20000000000003"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        9007199254740996.0);
+
+    // +4 is exactly 9007199254740996
+    EXPECT_EQ(Crypto::UnsignedBigInteger::from_base(16, "20000000000004"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        9007199254740996.0);
+
+    // +5 rounds down because of tiesRoundToEven
+    EXPECT_EQ(Crypto::UnsignedBigInteger::from_base(16, "20000000000005"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        9007199254740996.0);
+
+    EXPECT_EQ(Crypto::UnsignedBigInteger::from_base(16, "20000000000006"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        9007199254740998.0);
+
+    EXPECT_EQ(Crypto::UnsignedBigInteger::from_base(10, "98382635059784269824"sv).to_double(Crypto::UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa),
+        bit_cast<double>(0x4415555555555555ULL));
 
 #undef EXPECT_TO_EQUAL_DOUBLE
 }
 
+TEST_CASE(bigint_from_double)
+{
+    {
+        Crypto::UnsignedBigInteger from_zero { 0.0 };
+        EXPECT(from_zero.is_zero());
+        EXPECT(!from_zero.is_invalid());
+    }
+
+#define SURVIVES_ROUND_TRIP_UNSIGNED(double_value)            \
+    {                                                         \
+        Crypto::UnsignedBigInteger bigint { (double_value) }; \
+        EXPECT_EQ(bigint.to_double(), (double_value));        \
+    }
+
+    SURVIVES_ROUND_TRIP_UNSIGNED(0.0);
+    SURVIVES_ROUND_TRIP_UNSIGNED(1.0);
+    SURVIVES_ROUND_TRIP_UNSIGNED(100000.0);
+    SURVIVES_ROUND_TRIP_UNSIGNED(1000000000000.0);
+    SURVIVES_ROUND_TRIP_UNSIGNED(10000000000000000000.0);
+    SURVIVES_ROUND_TRIP_UNSIGNED(NumericLimits<double>::max());
+
+    SURVIVES_ROUND_TRIP_UNSIGNED(bit_cast<double>(0x4340000000000002ULL));
+    SURVIVES_ROUND_TRIP_UNSIGNED(bit_cast<double>(0x4340000000000001ULL));
+    SURVIVES_ROUND_TRIP_UNSIGNED(bit_cast<double>(0x4340000000000000ULL));
+
+    // Failed on last bits of mantissa
+    SURVIVES_ROUND_TRIP_UNSIGNED(bit_cast<double>(0x7EDFFFFFFFFFFFFFULL));
+    SURVIVES_ROUND_TRIP_UNSIGNED(bit_cast<double>(0x7ed5555555555555ULL));
+    SURVIVES_ROUND_TRIP_UNSIGNED(bit_cast<double>(0x7EDCBA9876543210ULL));
+
+    // Has exactly exponent of 32
+    SURVIVES_ROUND_TRIP_UNSIGNED(bit_cast<double>(0x41f22f74e0000000ULL));
+
+#define SURVIVES_ROUND_TRIP_SIGNED(double_value)                      \
+    {                                                                 \
+        Crypto::SignedBigInteger bigint_positive { (double_value) };  \
+        EXPECT_EQ(bigint_positive.to_double(), (double_value));       \
+        Crypto::SignedBigInteger bigint_negative { -(double_value) }; \
+        EXPECT_EQ(bigint_negative.to_double(), -(double_value));      \
+        EXPECT(bigint_positive != bigint_negative);                   \
+        bigint_positive.negate();                                     \
+        EXPECT(bigint_positive == bigint_negative);                   \
+    }
+
+    {
+        // Negative zero should be converted to positive zero
+        double const negative_zero = bit_cast<double>(0x8000000000000000);
+
+        // However it should give a bit exact +0.0
+        Crypto::SignedBigInteger from_negative_zero { negative_zero };
+        EXPECT(from_negative_zero.is_zero());
+        EXPECT(!from_negative_zero.is_negative());
+        double result = from_negative_zero.to_double();
+        EXPECT_EQ(result, 0.0);
+        EXPECT_EQ(bit_cast<u64>(result), 0ULL);
+    }
+
+    SURVIVES_ROUND_TRIP_SIGNED(1.0);
+    SURVIVES_ROUND_TRIP_SIGNED(100000.0);
+    SURVIVES_ROUND_TRIP_SIGNED(-1000000000000.0);
+    SURVIVES_ROUND_TRIP_SIGNED(10000000000000000000.0);
+    SURVIVES_ROUND_TRIP_SIGNED(NumericLimits<double>::max());
+    SURVIVES_ROUND_TRIP_SIGNED(NumericLimits<double>::lowest());
+
+    SURVIVES_ROUND_TRIP_SIGNED(bit_cast<double>(0x4340000000000002ULL));
+    SURVIVES_ROUND_TRIP_SIGNED(bit_cast<double>(0x4340000000000001ULL));
+    SURVIVES_ROUND_TRIP_SIGNED(bit_cast<double>(0x4340000000000000ULL));
+    SURVIVES_ROUND_TRIP_SIGNED(bit_cast<double>(0x7EDFFFFFFFFFFFFFULL));
+    SURVIVES_ROUND_TRIP_SIGNED(bit_cast<double>(0x7ed5555555555555ULL));
+    SURVIVES_ROUND_TRIP_SIGNED(bit_cast<double>(0x7EDCBA9876543210ULL));
+
+#undef SURVIVES_ROUND_TRIP_SIGNED
+#undef SURVIVES_ROUND_TRIP_UNSIGNED
+}
 namespace AK {
 
 template<>

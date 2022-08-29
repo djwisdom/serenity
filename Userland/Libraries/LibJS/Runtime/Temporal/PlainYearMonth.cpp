@@ -200,14 +200,14 @@ ThrowCompletionOr<PlainYearMonth*> create_temporal_year_month(VM& vm, i32 iso_ye
 
     // 5. If newTarget is not present, set newTarget to %Temporal.PlainYearMonth%.
     if (!new_target)
-        new_target = realm.global_object().temporal_plain_year_month_constructor();
+        new_target = realm.intrinsics().temporal_plain_year_month_constructor();
 
     // 6. Let object be ? OrdinaryCreateFromConstructor(newTarget, "%Temporal.PlainYearMonth.prototype%", « [[InitializedTemporalYearMonth]], [[ISOYear]], [[ISOMonth]], [[ISODay]], [[Calendar]] »).
     // 7. Set object.[[ISOYear]] to isoYear.
     // 8. Set object.[[ISOMonth]] to isoMonth.
     // 9. Set object.[[Calendar]] to calendar.
     // 10. Set object.[[ISODay]] to referenceISODay.
-    auto* object = TRY(ordinary_create_from_constructor<PlainYearMonth>(vm, *new_target, &GlobalObject::temporal_plain_year_month_prototype, iso_year, iso_month, reference_iso_day, calendar));
+    auto* object = TRY(ordinary_create_from_constructor<PlainYearMonth>(vm, *new_target, &Intrinsics::temporal_plain_year_month_prototype, iso_year, iso_month, reference_iso_day, calendar));
 
     // 11. Return object.
     return object;
@@ -315,7 +315,7 @@ ThrowCompletionOr<PlainYearMonth*> add_duration_to_or_subtract_duration_from_pla
     }
 
     // 3. Let balanceResult be ? BalanceDuration(duration.[[Days]], duration.[[Hours]], duration.[[Minutes]], duration.[[Seconds]], duration.[[Milliseconds]], duration.[[Microseconds]], duration.[[Nanoseconds]], "day").
-    auto balance_result = TRY(balance_duration(vm, duration->days(), duration->hours(), duration->minutes(), duration->seconds(), duration->milliseconds(), duration->microseconds(), Crypto::SignedBigInteger::create_from((i64)duration->nanoseconds()), "day"sv));
+    auto balance_result = TRY(balance_duration(vm, duration->days(), duration->hours(), duration->minutes(), duration->seconds(), duration->milliseconds(), duration->microseconds(), Crypto::SignedBigInteger { duration->nanoseconds() }, "day"sv));
 
     // 4. Set options to ? GetOptionsObject(options).
     auto* options = TRY(get_options_object(vm, options_value));

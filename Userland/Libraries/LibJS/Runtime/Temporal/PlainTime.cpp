@@ -320,7 +320,7 @@ ThrowCompletionOr<PlainTime*> create_temporal_time(VM& vm, u8 hour, u8 minute, u
 
     // 3. If newTarget is not present, set newTarget to %Temporal.PlainTime%.
     if (!new_target)
-        new_target = realm.global_object().temporal_plain_time_constructor();
+        new_target = realm.intrinsics().temporal_plain_time_constructor();
 
     // 4. Let object be ? OrdinaryCreateFromConstructor(newTarget, "%Temporal.PlainTime.prototype%", « [[InitializedTemporalTime]], [[ISOHour]], [[ISOMinute]], [[ISOSecond]], [[ISOMillisecond]], [[ISOMicrosecond]], [[ISONanosecond]], [[Calendar]] »).
     // 5. Set object.[[ISOHour]] to hour.
@@ -330,7 +330,7 @@ ThrowCompletionOr<PlainTime*> create_temporal_time(VM& vm, u8 hour, u8 minute, u
     // 9. Set object.[[ISOMicrosecond]] to microsecond.
     // 10. Set object.[[ISONanosecond]] to nanosecond.
     // 11. Set object.[[Calendar]] to ! GetISO8601Calendar().
-    auto* object = TRY(ordinary_create_from_constructor<PlainTime>(vm, *new_target, &GlobalObject::temporal_plain_time_prototype, hour, minute, second, millisecond, microsecond, nanosecond, *get_iso8601_calendar(vm)));
+    auto* object = TRY(ordinary_create_from_constructor<PlainTime>(vm, *new_target, &Intrinsics::temporal_plain_time_prototype, hour, minute, second, millisecond, microsecond, nanosecond, *get_iso8601_calendar(vm)));
 
     // 12. Return object.
     return object;
@@ -594,7 +594,7 @@ ThrowCompletionOr<Duration*> difference_temporal_plain_time(VM& vm, DifferenceOp
     auto rounded_result = MUST(round_duration(vm, 0, 0, 0, 0, result.hours, result.minutes, result.seconds, result.milliseconds, result.microseconds, result.nanoseconds, settings.rounding_increment, settings.smallest_unit, settings.rounding_mode)).duration_record;
 
     // 6. Set result to ! BalanceDuration(0, result.[[Hours]], result.[[Minutes]], result.[[Seconds]], result.[[Milliseconds]], result.[[Microseconds]], result.[[Nanoseconds]], settings.[[LargestUnit]]).
-    result = MUST(balance_duration(vm, 0, rounded_result.hours, rounded_result.minutes, rounded_result.seconds, rounded_result.milliseconds, rounded_result.microseconds, Crypto::SignedBigInteger { (i32)rounded_result.nanoseconds }, settings.largest_unit));
+    result = MUST(balance_duration(vm, 0, rounded_result.hours, rounded_result.minutes, rounded_result.seconds, rounded_result.milliseconds, rounded_result.microseconds, Crypto::SignedBigInteger { rounded_result.nanoseconds }, settings.largest_unit));
 
     // 7. Return ! CreateTemporalDuration(0, 0, 0, 0, sign × result.[[Hours]], sign × result.[[Minutes]], sign × result.[[Seconds]], sign × result.[[Milliseconds]], sign × result.[[Microseconds]], sign × result.[[Nanoseconds]]).
     return MUST(create_temporal_duration(vm, 0, 0, 0, 0, sign * result.hours, sign * result.minutes, sign * result.seconds, sign * result.milliseconds, sign * result.microseconds, sign * result.nanoseconds));

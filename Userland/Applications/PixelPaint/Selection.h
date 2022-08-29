@@ -13,7 +13,15 @@
 
 namespace PixelPaint {
 
-class ImageEditor;
+class Image;
+
+class SelectionClient {
+public:
+    virtual void selection_did_change() = 0;
+
+protected:
+    virtual ~SelectionClient() = default;
+};
 
 // Coordinates are image-relative.
 class Selection {
@@ -26,7 +34,7 @@ public:
         __Count,
     };
 
-    explicit Selection(ImageEditor&);
+    explicit Selection(Image&);
 
     bool is_empty() const { return m_mask.is_null(); }
     void clear();
@@ -40,22 +48,24 @@ public:
     [[nodiscard]] u8 get_selection_alpha(int x, int y) const { return m_mask.get(x, y); }
     [[nodiscard]] u8 get_selection_alpha(Gfx::IntPoint const& point) const { return get_selection_alpha(point.x(), point.y()); }
 
-    void paint(Gfx::Painter&);
-
-    void draw_marching_ants(Gfx::Painter&, Gfx::IntRect const&) const;
-    void draw_marching_ants(Gfx::Painter&, Mask const&) const;
+    Mask const& mask() const { return m_mask; }
+    void set_mask(Mask);
 
     void begin_interactive_selection() { m_in_interactive_selection = true; }
     void end_interactive_selection() { m_in_interactive_selection = false; }
 
-private:
-    ImageEditor& m_editor;
-    Mask m_mask;
-    RefPtr<Core::Timer> m_marching_ants_timer;
-    int m_marching_ants_offset { 0 };
-    bool m_in_interactive_selection { false };
+    bool in_interactive_selection() const { return m_in_interactive_selection; }
 
-    void draw_marching_ants_pixel(Gfx::Painter&, int x, int y) const;
+    void add_client(SelectionClient&);
+    void remove_client(SelectionClient&);
+
+private:
+    Image& m_image;
+    Mask m_mask;
+
+    HashTable<SelectionClient*> m_clients;
+
+    bool m_in_interactive_selection { false };
 };
 
 }

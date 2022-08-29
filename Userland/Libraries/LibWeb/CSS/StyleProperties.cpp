@@ -530,6 +530,8 @@ CSS::Display StyleProperties::display() const
         return CSS::Display::from_short(CSS::Display::Short::Flex);
     case CSS::ValueID::InlineFlex:
         return CSS::Display::from_short(CSS::Display::Short::InlineFlex);
+    case CSS::ValueID::Grid:
+        return CSS::Display::from_short(CSS::Display::Short::Grid);
     default:
         return CSS::Display::from_short(CSS::Display::Short::Block);
     }
@@ -651,6 +653,42 @@ Optional<CSS::FontVariant> StyleProperties::font_variant() const
 {
     auto value = property(CSS::PropertyID::FontVariant);
     return value_id_to_font_variant(value->to_identifier());
+}
+
+Vector<CSS::GridTrackSize> StyleProperties::grid_template_columns() const
+{
+    auto value = property(CSS::PropertyID::GridTemplateColumns);
+    return value->as_grid_track_size().grid_track_size();
+}
+
+Vector<CSS::GridTrackSize> StyleProperties::grid_template_rows() const
+{
+    auto value = property(CSS::PropertyID::GridTemplateRows);
+    return value->as_grid_track_size().grid_track_size();
+}
+
+CSS::GridTrackPlacement StyleProperties::grid_column_end() const
+{
+    auto value = property(CSS::PropertyID::GridColumnEnd);
+    return value->as_grid_track_placement().grid_track_placement();
+}
+
+CSS::GridTrackPlacement StyleProperties::grid_column_start() const
+{
+    auto value = property(CSS::PropertyID::GridColumnStart);
+    return value->as_grid_track_placement().grid_track_placement();
+}
+
+CSS::GridTrackPlacement StyleProperties::grid_row_end() const
+{
+    auto value = property(CSS::PropertyID::GridRowEnd);
+    return value->as_grid_track_placement().grid_track_placement();
+}
+
+CSS::GridTrackPlacement StyleProperties::grid_row_start() const
+{
+    auto value = property(CSS::PropertyID::GridRowStart);
+    return value->as_grid_track_placement().grid_track_placement();
 }
 
 }

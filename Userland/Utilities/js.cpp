@@ -27,6 +27,7 @@
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/AsyncGenerator.h>
 #include <LibJS/Runtime/BooleanObject.h>
+#include <LibJS/Runtime/ConsoleObject.h>
 #include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/DatePrototype.h>
@@ -96,7 +97,7 @@ public:
         : GlobalObject(realm)
     {
     }
-    virtual void initialize_global_object(JS::Realm&) override;
+    virtual void initialize(JS::Realm&) override;
     virtual ~ReplObject() override = default;
 
 private:
@@ -117,7 +118,7 @@ public:
         : JS::GlobalObject(realm)
     {
     }
-    virtual void initialize_global_object(JS::Realm&) override;
+    virtual void initialize(JS::Realm&) override;
     virtual ~ScriptObject() override = default;
 
 private:
@@ -1003,8 +1004,11 @@ static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects)
             return print_error(object, seen_objects);
 
         auto prototype_or_error = object.internal_get_prototype_of();
-        if (prototype_or_error.has_value() && prototype_or_error.value() == object.global_object().error_prototype())
-            return print_error(object, seen_objects);
+        if (prototype_or_error.has_value() && prototype_or_error.value() != nullptr) {
+            auto& prototype = *prototype_or_error.value();
+            if (&prototype == prototype.shape().realm().intrinsics().error_prototype())
+                return print_error(object, seen_objects);
+        }
 
         if (is<JS::RegExpObject>(object))
             return print_regexp_object(static_cast<JS::RegExpObject&>(object), seen_objects);
@@ -1272,9 +1276,9 @@ static JS::ThrowCompletionOr<JS::Value> load_ini_impl(JS::VM& vm)
         return vm.throw_completion<JS::Error>(String::formatted("Failed to open '{}': {}", filename, file->error_string()));
 
     auto config_file = MUST(Core::ConfigFile::open(filename, file->fd()));
-    auto* object = JS::Object::create(realm, realm.global_object().object_prototype());
+    auto* object = JS::Object::create(realm, realm.intrinsics().object_prototype());
     for (auto const& group : config_file->groups()) {
-        auto* group_object = JS::Object::create(realm, realm.global_object().object_prototype());
+        auto* group_object = JS::Object::create(realm, realm.intrinsics().object_prototype());
         for (auto const& key : config_file->keys(group)) {
             auto entry = config_file->read_entry(group, key);
             group_object->define_direct_property(key, js_string(vm, move(entry)), JS::Attribute::Enumerable | JS::Attribute::Configurable | JS::Attribute::Writable);
@@ -1297,9 +1301,10 @@ static JS::ThrowCompletionOr<JS::Value> load_json_impl(JS::VM& vm)
     return JS::JSONObject::parse_json_value(vm, json.value());
 }
 
-void ReplObject::initialize_global_object(JS::Realm& realm)
+void ReplObject::initialize(JS::Realm& realm)
 {
-    Base::initialize_global_object(realm);
+    Base::initialize(realm);
+
     define_direct_property("global", this, JS::Attribute::Enumerable);
     u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
     define_native_function(realm, "exit", exit_interpreter, 0, attr);
@@ -1376,9 +1381,10 @@ JS_DEFINE_NATIVE_FUNCTION(ReplObject::print)
     return JS::js_undefined();
 }
 
-void ScriptObject::initialize_global_object(JS::Realm& realm)
+void ScriptObject::initialize(JS::Realm& realm)
 {
-    Base::initialize_global_object(realm);
+    Base::initialize(realm);
+
     define_direct_property("global", this, JS::Attribute::Enumerable);
     u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
     define_native_function(realm, "loadINI", load_ini, 1, attr);
@@ -1556,8 +1562,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     if (evaluate_script.is_empty() && script_paths.is_empty()) {
         s_print_last_result = true;
         interpreter = JS::Interpreter::create<ReplObject>(*g_vm);
-        ReplConsoleClient console_client(interpreter->realm().global_object().console());
-        interpreter->realm().global_object().console().set_client(console_client);
+        auto& console_object = *interpreter->realm().intrinsics().console_object();
+        ReplConsoleClient console_client(console_object.console());
+        console_object.console().set_client(console_client);
         interpreter->heap().set_should_collect_on_every_allocation(gc_on_every_allocation);
 
         auto& global_environment = interpreter->realm().global_environment();
@@ -1766,8 +1773,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         s_editor->save_history(s_history_path);
     } else {
         interpreter = JS::Interpreter::create<ScriptObject>(*g_vm);
-        ReplConsoleClient console_client(interpreter->realm().global_object().console());
-        interpreter->realm().global_object().console().set_client(console_client);
+        auto& console_object = *interpreter->realm().intrinsics().console_object();
+        ReplConsoleClient console_client(console_object.console());
+        console_object.console().set_client(console_client);
         interpreter->heap().set_should_collect_on_every_allocation(gc_on_every_allocation);
 
         signal(SIGINT, [](int) {

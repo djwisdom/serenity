@@ -22,7 +22,7 @@
 namespace JS {
 
 RegExpPrototype::RegExpPrototype(Realm& realm)
-    : PrototypeObject(*realm.global_object().object_prototype())
+    : PrototypeObject(*realm.intrinsics().object_prototype())
 {
 }
 
@@ -418,7 +418,7 @@ size_t advance_string_index(Utf16View const& string, size_t index, bool unicode)
         /* 2. If R does not have an [[OriginalFlags]] internal slot, then */               \
         if (!is<RegExpObject>(regexp_object)) {                                            \
             /* a. If SameValue(R, %RegExp.prototype%) is true, return undefined. */        \
-            if (same_value(regexp_object, realm.global_object().regexp_prototype()))       \
+            if (same_value(regexp_object, realm.intrinsics().regexp_prototype()))          \
                 return js_undefined();                                                     \
             /* b. Otherwise, throw a TypeError exception. */                               \
             return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOfType, "RegExp"); \
@@ -485,7 +485,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::flags)
 }
 
 // 22.2.5.8 RegExp.prototype [ @@match ] ( string ), https://tc39.es/ecma262/#sec-regexp.prototype-@@match
-// With changes from https://arai-a.github.io/ecma262-compare/?pr=2418&id=sec-regexp.prototype-%2540%2540match
+// With changes from https://arai-a.github.io/ecma262-compare/?pr=2418&id=sec-regexp.prototype-%40%40match
 JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match)
 {
     auto& realm = *vm.current_realm();
@@ -497,35 +497,32 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match)
     // 3. Let S be ? ToString(string).
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
-    // 4. Let global be ToBoolean(? Get(rx, "global")).
-    bool global = TRY(regexp_object->get(vm.names.global)).to_boolean();
+    // 4. Let flags be ? ToString(? Get(rx, "flags")).
+    auto flags_value = TRY(regexp_object->get(vm.names.flags));
+    auto flags = TRY(flags_value.to_string(vm));
 
-    // 5. If global is false, then
-    if (!global) {
+    // 5. If flags does not contain "g", then
+    if (!flags.contains('g')) {
         // a. Return ? RegExpExec(rx, S).
         return TRY(regexp_exec(vm, *regexp_object, move(string)));
     }
 
     // 6. Else,
-    // a. Assert: global is true.
+    // a. If flags contains "u", let fullUnicode be true. Otherwise, let fullUnicode be false.
+    // FIXME: Update spec steps when https://github.com/tc39/ecma262/pull/2418 is rebased on the
+    //        current ECMA-262 main branch. According to the PR, this is how this step will look:
+    bool full_unicode = flags.contains('u') || flags.contains('v');
 
-    // b. Let fullUnicode be ToBoolean(? Get(rx, "unicodeSets")).
-    bool full_unicode = TRY(regexp_object->get(vm.names.unicodeSets)).to_boolean();
-
-    // c. If fullUnicode is false, set fullUnicode to ! ToBoolean(? Get(rx, "unicode")).
-    if (!full_unicode)
-        full_unicode = TRY(regexp_object->get(vm.names.unicode)).to_boolean();
-
-    // d. Perform ? Set(rx, "lastIndex", +0𝔽, true).
+    // b. Perform ? Set(rx, "lastIndex", +0𝔽, true).
     TRY(regexp_object->set(vm.names.lastIndex, Value(0), Object::ShouldThrowExceptions::Yes));
 
-    // e. Let A be ! ArrayCreate(0).
+    // c. Let A be ! ArrayCreate(0).
     auto* array = MUST(Array::create(realm, 0));
 
-    // f. Let n be 0.
+    // d. Let n be 0.
     size_t n = 0;
 
-    // g. Repeat,
+    // e. Repeat,
     while (true) {
         // i. Let result be ? RegExpExec(rx, S).
         auto result_value = TRY(regexp_exec(vm, *regexp_object, string));
@@ -577,7 +574,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match_all)
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
     // 4. Let C be ? SpeciesConstructor(R, %RegExp%).
-    auto* constructor = TRY(species_constructor(vm, *regexp_object, *realm.global_object().regexp_constructor()));
+    auto* constructor = TRY(species_constructor(vm, *regexp_object, *realm.intrinsics().regexp_constructor()));
 
     // 5. Let flags be ? ToString(? Get(R, "flags")).
     auto flags_value = TRY(regexp_object->get(vm.names.flags));
@@ -589,7 +586,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match_all)
     // 10. Else, let global be false.
     bool global = flags.contains('g');
 
-    // 11. If flags contains "u", let fullUnicode be true.
+    // 11. If flags contains "u" or flags contains "v", let fullUnicode be true.
     // 12. Else, let fullUnicode be false.
     bool full_unicode = flags.contains('u') || flags.contains('v');
 
@@ -608,7 +605,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match_all)
 }
 
 // 22.2.5.11 RegExp.prototype [ @@replace ] ( string, replaceValue ), https://tc39.es/ecma262/#sec-regexp.prototype-@@replace
-// With changes from https://arai-a.github.io/ecma262-compare/?pr=2418&id=sec-regexp.prototype-@@replace
+// With changes from https://arai-a.github.io/ecma262-compare/?pr=2418&id=sec-regexp.prototype-%40%40replace
 JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
 {
     auto string_value = vm.argument(0);
@@ -631,20 +628,22 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
         replace_value = js_string(vm, move(replace_string));
     }
 
-    // 7. Let global be ToBoolean(? Get(rx, "global")).
-    bool global = TRY(regexp_object->get(vm.names.global)).to_boolean();
+    // 7. Let flags be ? ToString(? Get(rx, "flags")).
+    auto flags_value = TRY(regexp_object->get(vm.names.flags));
+    auto flags = TRY(flags_value.to_string(vm));
+
+    // 8. If flags contains "g", let global be true. Otherwise, let global be false.
+    bool global = flags.contains('g');
     bool full_unicode = false;
 
     // 8. If global is true, then
     if (global) {
-        // a. Let fullUnicode be ToBoolean(? Get(rx, "unicodeSets")).
-        full_unicode = TRY(regexp_object->get(vm.names.unicodeSets)).to_boolean();
+        // a. If flags contains "u", let fullUnicode be true. Otherwise, let fullUnicode be false.
+        // FIXME: Update spec steps when https://github.com/tc39/ecma262/pull/2418 is rebased on the
+        //        current ECMA-262 main branch. According to the PR, this is how this step will look:
+        full_unicode = flags.contains('u') || flags.contains('v');
 
-        // b. If fullUnicode is false, set fullUnicode to ! ToBoolean(? Get(rx, "unicode")).
-        if (!full_unicode)
-            full_unicode = TRY(regexp_object->get(vm.names.unicode)).to_boolean();
-
-        // c. Perform ? Set(rx, "lastIndex", +0𝔽, true).
+        // b. Perform ? Set(rx, "lastIndex", +0𝔽, true).
         TRY(regexp_object->set(vm.names.lastIndex, Value(0), Object::ShouldThrowExceptions::Yes));
     }
 
@@ -852,7 +851,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::source)
     // 3. If R does not have an [[OriginalSource]] internal slot, then
     if (!is<RegExpObject>(regexp_object)) {
         // a. If SameValue(R, %RegExp.prototype%) is true, return "(?:)".
-        if (same_value(regexp_object, realm.global_object().regexp_prototype()))
+        if (same_value(regexp_object, realm.intrinsics().regexp_prototype()))
             return js_string(vm, "(?:)");
 
         // b. Otherwise, throw a TypeError exception.
@@ -867,6 +866,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::source)
 }
 
 // 22.2.5.14 RegExp.prototype [ @@split ] ( string, limit ), https://tc39.es/ecma262/#sec-regexp.prototype-@@split
+// With changes from https://arai-a.github.io/ecma262-compare/?pr=2418&id=sec-regexp.prototype-%40%40split
 JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_split)
 {
     auto& realm = *vm.current_realm();
@@ -879,13 +879,13 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_split)
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
     // 4. Let C be ? SpeciesConstructor(rx, %RegExp%).
-    auto* constructor = TRY(species_constructor(vm, *regexp_object, *realm.global_object().regexp_constructor()));
+    auto* constructor = TRY(species_constructor(vm, *regexp_object, *realm.intrinsics().regexp_constructor()));
 
     // 5. Let flags be ? ToString(? Get(rx, "flags")).
     auto flags_value = TRY(regexp_object->get(vm.names.flags));
     auto flags = TRY(flags_value.to_string(vm));
 
-    // 6. If flags contains "u", let unicodeMatching be true.
+    // 6. If flags contains "u" or flags contains "v", let unicodeMatching be true.
     // 7. Else, let unicodeMatching be false.
     bool unicode_matching = flags.contains('u') || flags.contains('v');
 

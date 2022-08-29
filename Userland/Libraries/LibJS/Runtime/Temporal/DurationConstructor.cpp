@@ -15,7 +15,7 @@ namespace JS::Temporal {
 
 // 7.1 The Temporal.Duration Constructor, https://tc39.es/proposal-temporal/#sec-temporal-duration-constructor
 DurationConstructor::DurationConstructor(Realm& realm)
-    : NativeFunction(vm().names.Duration.as_string(), *realm.global_object().function_prototype())
+    : NativeFunction(vm().names.Duration.as_string(), *realm.intrinsics().function_prototype())
 {
 }
 
@@ -26,7 +26,7 @@ void DurationConstructor::initialize(Realm& realm)
     auto& vm = this->vm();
 
     // 7.2.1 Temporal.Duration.prototype, https://tc39.es/proposal-temporal/#sec-temporal.duration.prototype
-    define_direct_property(vm.names.prototype, realm.global_object().temporal_duration_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.intrinsics().temporal_duration_prototype(), 0);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, vm.names.from, from, 1, attr);
@@ -149,10 +149,10 @@ JS_DEFINE_NATIVE_FUNCTION(DurationConstructor::compare)
     }
 
     // 9. Let ns1 be ! TotalDurationNanoseconds(days1, one.[[Hours]], one.[[Minutes]], one.[[Seconds]], one.[[Milliseconds]], one.[[Microseconds]], one.[[Nanoseconds]], shift1).
-    auto ns1 = total_duration_nanoseconds(days1, one->hours(), one->minutes(), one->seconds(), one->milliseconds(), one->microseconds(), Crypto::SignedBigInteger::create_from((i64)one->nanoseconds()), shift1);
+    auto ns1 = total_duration_nanoseconds(days1, one->hours(), one->minutes(), one->seconds(), one->milliseconds(), one->microseconds(), Crypto::SignedBigInteger { one->nanoseconds() }, shift1);
 
     // 10. Let ns2 be ! TotalDurationNanoseconds(days2, two.[[Hours]], two.[[Minutes]], two.[[Seconds]], two.[[Milliseconds]], two.[[Microseconds]], two.[[Nanoseconds]], shift2).
-    auto ns2 = total_duration_nanoseconds(days2, two->hours(), two->minutes(), two->seconds(), two->milliseconds(), two->microseconds(), Crypto::SignedBigInteger::create_from((i64)two->nanoseconds()), shift2);
+    auto ns2 = total_duration_nanoseconds(days2, two->hours(), two->minutes(), two->seconds(), two->milliseconds(), two->microseconds(), Crypto::SignedBigInteger { two->nanoseconds() }, shift2);
 
     // 11. If ns1 > ns2, return 1𝔽.
     if (ns1 > ns2)

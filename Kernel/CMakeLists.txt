@@ -202,6 +202,7 @@ set(KERNEL_SOURCES
     MiniStdLib.cpp
     Locking/LockRank.cpp
     Locking/Mutex.cpp
+    Locking/Spinlock.cpp
     Net/Intel/E1000ENetworkAdapter.cpp
     Net/Intel/E1000NetworkAdapter.cpp
     Net/NE2000/NetworkAdapter.cpp
@@ -329,9 +330,10 @@ set(KERNEL_SOURCES
 if ("${SERENITY_ARCH}" STREQUAL "i686" OR "${SERENITY_ARCH}" STREQUAL "x86_64")
     set(KERNEL_SOURCES
         ${KERNEL_SOURCES}
+        Arch/Processor.cpp
+
         Arch/x86/common/ScopedCritical.cpp
         Arch/x86/common/SmapDisabler.cpp
-        Arch/x86/common/Spinlock.cpp
     )
 
     set(KERNEL_SOURCES
@@ -443,6 +445,8 @@ else()
         ${AK_SOURCES}
         ${RPI_SOURCES}
 
+        Arch/Processor.cpp
+
         Arch/aarch64/boot.S
         Arch/aarch64/BootPPMParser.cpp
         Arch/aarch64/CrashHandler.cpp
@@ -460,7 +464,6 @@ else()
         Arch/aarch64/SafeMem.cpp
         Arch/aarch64/ScopedCritical.cpp
         Arch/aarch64/SmapDisabler.cpp
-        Arch/aarch64/Spinlock.cpp
         Arch/aarch64/vector_table.S
 
         # Files from base Kernel
@@ -470,6 +473,8 @@ else()
 
         Graphics/Console/BootFramebufferConsole.cpp
         Graphics/Console/GenericFramebufferConsole.cpp
+
+        Locking/Spinlock.cpp
 
         Memory/AddressSpace.cpp
         Memory/AnonymousVMObject.cpp

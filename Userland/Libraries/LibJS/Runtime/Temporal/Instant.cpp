@@ -61,11 +61,11 @@ ThrowCompletionOr<Instant*> create_temporal_instant(VM& vm, BigInt const& epoch_
 
     // 3. If newTarget is not present, set newTarget to %Temporal.Instant%.
     if (!new_target)
-        new_target = realm.global_object().temporal_instant_constructor();
+        new_target = realm.intrinsics().temporal_instant_constructor();
 
     // 4. Let object be ? OrdinaryCreateFromConstructor(newTarget, "%Temporal.Instant.prototype%", « [[InitializedTemporalInstant]], [[Nanoseconds]] »).
     // 5. Set object.[[Nanoseconds]] to epochNanoseconds.
-    auto* object = TRY(ordinary_create_from_constructor<Instant>(vm, *new_target, &GlobalObject::temporal_instant_prototype, epoch_nanoseconds));
+    auto* object = TRY(ordinary_create_from_constructor<Instant>(vm, *new_target, &Intrinsics::temporal_instant_prototype, epoch_nanoseconds));
 
     // 6. Return object.
     return object;
@@ -122,7 +122,7 @@ ThrowCompletionOr<BigInt*> parse_temporal_instant(VM& vm, String const& iso_stri
     auto offset_nanoseconds = TRY(parse_time_zone_offset_string(vm, *offset_string));
 
     // 7. Let result be utc - ℤ(offsetNanoseconds).
-    auto* result_ns = js_bigint(vm, utc->big_integer().minus(Crypto::SignedBigInteger::create_from(offset_nanoseconds)));
+    auto* result_ns = js_bigint(vm, utc->big_integer().minus(Crypto::SignedBigInteger { offset_nanoseconds }));
 
     // 8. If ! IsValidEpochNanoseconds(result) is false, then
     if (!is_valid_epoch_nanoseconds(*result_ns)) {
@@ -155,15 +155,14 @@ ThrowCompletionOr<BigInt*> add_instant(VM& vm, BigInt const& epoch_nanoseconds, 
     VERIFY(hours == trunc(hours) && minutes == trunc(minutes) && seconds == trunc(seconds) && milliseconds == trunc(milliseconds) && microseconds == trunc(microseconds) && nanoseconds == trunc(nanoseconds));
 
     // 1. Let result be epochNanoseconds + ℤ(nanoseconds) + ℤ(microseconds) × 1000ℤ + ℤ(milliseconds) × 10^6ℤ + ℤ(seconds) × 10^9ℤ + ℤ(minutes) × 60ℤ × 10^9ℤ + ℤ(hours) × 3600ℤ × 10^9ℤ.
-    // FIXME: Pretty sure i64's are not sufficient for the extreme cases.
     auto* result = js_bigint(vm,
         epoch_nanoseconds.big_integer()
-            .plus(Crypto::SignedBigInteger::create_from((i64)nanoseconds))
-            .plus(Crypto::SignedBigInteger::create_from((i64)microseconds).multiplied_by(Crypto::SignedBigInteger { 1'000 }))
-            .plus(Crypto::SignedBigInteger::create_from((i64)milliseconds).multiplied_by(Crypto::SignedBigInteger { 1'000'000 }))
-            .plus(Crypto::SignedBigInteger::create_from((i64)seconds).multiplied_by(Crypto::SignedBigInteger { 1'000'000'000 }))
-            .plus(Crypto::SignedBigInteger::create_from((i64)minutes).multiplied_by(Crypto::SignedBigInteger { 60 }).multiplied_by(Crypto::SignedBigInteger { 1'000'000'000 }))
-            .plus(Crypto::SignedBigInteger::create_from((i64)hours).multiplied_by(Crypto::SignedBigInteger { 3600 }).multiplied_by(Crypto::SignedBigInteger { 1'000'000'000 })));
+            .plus(Crypto::SignedBigInteger { nanoseconds })
+            .plus(Crypto::SignedBigInteger { microseconds }.multiplied_by(Crypto::SignedBigInteger { 1'000 }))
+            .plus(Crypto::SignedBigInteger { milliseconds }.multiplied_by(Crypto::SignedBigInteger { 1'000'000 }))
+            .plus(Crypto::SignedBigInteger { seconds }.multiplied_by(Crypto::SignedBigInteger { 1'000'000'000 }))
+            .plus(Crypto::SignedBigInteger { minutes }.multiplied_by(Crypto::SignedBigInteger { 60 }).multiplied_by(Crypto::SignedBigInteger { 1'000'000'000 }))
+            .plus(Crypto::SignedBigInteger { hours }.multiplied_by(Crypto::SignedBigInteger { 3600 }).multiplied_by(Crypto::SignedBigInteger { 1'000'000'000 })));
 
     // 2. If ! IsValidEpochNanoseconds(result) is false, throw a RangeError exception.
     if (!is_valid_epoch_nanoseconds(*result))
@@ -249,7 +248,7 @@ ThrowCompletionOr<String> temporal_instant_to_string(VM& vm, Instant& instant, V
     auto* date_time = TRY(builtin_time_zone_get_plain_date_time_for(vm, output_time_zone, instant, *iso_calendar));
 
     // 7. Let dateTimeString be ? TemporalDateTimeToString(dateTime.[[ISOYear]], dateTime.[[ISOMonth]], dateTime.[[ISODay]], dateTime.[[ISOHour]], dateTime.[[ISOMinute]], dateTime.[[ISOSecond]], dateTime.[[ISOMillisecond]], dateTime.[[ISOMicrosecond]], dateTime.[[ISONanosecond]], undefined, precision, "never").
-    auto date_time_string = TRY(temporal_date_time_to_string(vm, date_time->iso_year(), date_time->iso_month(), date_time->iso_day(), date_time->iso_hour(), date_time->iso_minute(), date_time->iso_second(), date_time->iso_millisecond(), date_time->iso_microsecond(), date_time->iso_nanosecond(), js_undefined(), precision, "never"sv));
+    auto date_time_string = TRY(temporal_date_time_to_string(vm, date_time->iso_year(), date_time->iso_month(), date_time->iso_day(), date_time->iso_hour(), date_time->iso_minute(), date_time->iso_second(), date_time->iso_millisecond(), date_time->iso_microsecond(), date_time->iso_nanosecond(), nullptr, precision, "never"sv));
 
     String time_zone_string;
 

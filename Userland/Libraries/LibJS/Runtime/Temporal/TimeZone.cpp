@@ -69,10 +69,10 @@ ThrowCompletionOr<TimeZone*> create_temporal_time_zone(VM& vm, String const& ide
 
     // 1. If newTarget is not present, set newTarget to %Temporal.TimeZone%.
     if (!new_target)
-        new_target = realm.global_object().temporal_time_zone_constructor();
+        new_target = realm.intrinsics().temporal_time_zone_constructor();
 
     // 2. Let object be ? OrdinaryCreateFromConstructor(newTarget, "%Temporal.TimeZone.prototype%", « [[InitializedTemporalTimeZone]], [[Identifier]], [[OffsetNanoseconds]] »).
-    auto* object = TRY(ordinary_create_from_constructor<TimeZone>(vm, *new_target, &GlobalObject::temporal_time_zone_prototype));
+    auto* object = TRY(ordinary_create_from_constructor<TimeZone>(vm, *new_target, &Intrinsics::temporal_time_zone_prototype));
 
     // 3. Let offsetNanosecondsResult be Completion(ParseTimeZoneOffsetString(identifier)).
     auto offset_nanoseconds_result = parse_time_zone_offset_string(vm, identifier);
@@ -182,9 +182,9 @@ i64 get_iana_time_zone_offset_nanoseconds(BigInt const& epoch_nanoseconds, Strin
     // get_time_zone_offset(). We can safely assume that the TZDB has no useful information that far
     // into the past and future anyway, so clamp it to the i64 range.
     Time time;
-    if (seconds < Crypto::SignedBigInteger::create_from(NumericLimits<i64>::min()))
+    if (seconds < Crypto::SignedBigInteger { NumericLimits<i64>::min() })
         time = Time::min();
-    else if (seconds > Crypto::SignedBigInteger::create_from(NumericLimits<i64>::max()))
+    else if (seconds > Crypto::SignedBigInteger { NumericLimits<i64>::max() })
         time = Time::max();
     else
         time = Time::from_seconds(*seconds.to_base(10).to_int<i64>());
