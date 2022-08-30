@@ -35,7 +35,6 @@ public:
         return Array::create_from(realm, values);
     }
 
-    explicit Array(Object& prototype);
     virtual ~Array() override = default;
 
     virtual ThrowCompletionOr<Optional<PropertyDescriptor>> internal_get_own_property(PropertyKey const&) const override;
@@ -44,6 +43,9 @@ public:
     virtual ThrowCompletionOr<MarkedVector<Value>> internal_own_property_keys() const override;
 
     [[nodiscard]] bool length_is_writable() const { return m_length_writable; };
+
+protected:
+    explicit Array(Object& prototype);
 
 private:
     ThrowCompletionOr<bool> set_length(PropertyDescriptor const&);

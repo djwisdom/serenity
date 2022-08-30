@@ -17,12 +17,11 @@ struct Variable {
     DeclarationKind declaration_kind;
 };
 
-#define JS_ENVIRONMENT(class_, base_class) \
-public:                                    \
-    using Base = base_class;               \
-    virtual StringView class_name() const override { return #class_##sv; }
+#define JS_ENVIRONMENT(class_, base_class) JS_CELL(class_, base_class)
 
 class Environment : public Cell {
+    JS_CELL(Environment, Cell);
+
 public:
     virtual bool has_this_binding() const { return false; }
     virtual ThrowCompletionOr<Value> get_this_binding(VM&) const { return Value {}; }
@@ -47,8 +46,6 @@ public:
 
     template<typename T>
     bool fast_is() const = delete;
-
-    virtual StringView class_name() const override { return "Environment"sv; }
 
     // This flag is set on the entire variable environment chain when direct eval() is performed.
     // It is used to disable non-local variable access caching.
