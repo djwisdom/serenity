@@ -25,13 +25,7 @@
 
 namespace JS {
 
-#define JS_OBJECT(class_, base_class)              \
-public:                                            \
-    using Base = base_class;                       \
-    virtual StringView class_name() const override \
-    {                                              \
-        return #class_##sv;                        \
-    }
+#define JS_OBJECT(class_, base_class) JS_CELL(class_, base_class)
 
 struct PrivateElement {
     enum class Kind {
@@ -46,12 +40,11 @@ struct PrivateElement {
 };
 
 class Object : public Cell {
+    JS_CELL(Object, Cell);
+
 public:
     static Object* create(Realm&, Object* prototype);
 
-    Object(Realm&, Object* prototype);
-    explicit Object(Object& prototype);
-    explicit Object(Shape&);
     virtual void initialize(Realm&) override;
     virtual ~Object() = default;
 
@@ -174,7 +167,6 @@ public:
     bool has_parameter_map() const { return m_has_parameter_map; }
     void set_has_parameter_map() { m_has_parameter_map = true; }
 
-    virtual StringView class_name() const override { return "Object"sv; }
     virtual void visit_edges(Cell::Visitor&) override;
 
     Value get_direct(size_t index) const { return m_storage[index]; }
@@ -194,8 +186,12 @@ public:
 protected:
     enum class GlobalObjectTag { Tag };
     enum class ConstructWithoutPrototypeTag { Tag };
+
     Object(GlobalObjectTag, Realm&);
     Object(ConstructWithoutPrototypeTag, Realm&);
+    Object(Realm&, Object* prototype);
+    explicit Object(Object& prototype);
+    explicit Object(Shape&);
 
     void set_prototype(Object*);
 

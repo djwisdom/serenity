@@ -471,6 +471,92 @@ FLATTEN ThrowCompletionOr<Value> Value::to_numeric(VM& vm) const
     return primitive.to_number(vm);
 }
 
+constexpr bool is_ascii_number(u32 code_point)
+{
+    return is_ascii_digit(code_point) || code_point == '.' || (code_point == 'e' || code_point == 'E') || code_point == '+' || code_point == '-';
+}
+
+struct NumberParseResult {
+    StringView literal;
+    u8 base;
+};
+
+static Optional<NumberParseResult> parse_number_text(StringView text)
+{
+    NumberParseResult result {};
+
+    auto check_prefix = [&](auto lower_prefix, auto upper_prefix) {
+        if (text.length() <= 2)
+            return false;
+        if (!text.starts_with(lower_prefix) && !text.starts_with(upper_prefix))
+            return false;
+        return true;
+    };
+
+    // https://tc39.es/ecma262/#sec-tonumber-applied-to-the-string-type
+    if (check_prefix("0b"sv, "0B"sv)) {
+        if (!all_of(text.substring_view(2), is_ascii_binary_digit))
+            return {};
+
+        result.literal = text.substring_view(2);
+        result.base = 2;
+    } else if (check_prefix("0o"sv, "0O"sv)) {
+        if (!all_of(text.substring_view(2), is_ascii_octal_digit))
+            return {};
+
+        result.literal = text.substring_view(2);
+        result.base = 8;
+    } else if (check_prefix("0x"sv, "0X"sv)) {
+        if (!all_of(text.substring_view(2), is_ascii_hex_digit))
+            return {};
+
+        result.literal = text.substring_view(2);
+        result.base = 16;
+    } else {
+        if (!all_of(text, is_ascii_number))
+            return {};
+
+        result.literal = text;
+        result.base = 10;
+    }
+
+    return result;
+}
+
+// 7.1.4.1.1 StringToNumber ( str ), https://tc39.es/ecma262/#sec-stringtonumber
+static Optional<Value> string_to_number(StringView string)
+{
+    // 1. Let text be StringToCodePoints(str).
+    String text = Utf8View(string).trim(whitespace_characters, AK::TrimMode::Both).as_string();
+
+    // 2. Let literal be ParseText(text, StringNumericLiteral).
+    if (text.is_empty())
+        return Value(0);
+    if (text == "Infinity" || text == "+Infinity")
+        return js_infinity();
+    if (text == "-Infinity")
+        return js_negative_infinity();
+
+    auto result = parse_number_text(text);
+
+    // 3. If literal is a List of errors, return NaN.
+    if (!result.has_value())
+        return js_nan();
+
+    // 4. Return StringNumericValue of literal.
+    if (result->base != 10) {
+        auto bigint = Crypto::UnsignedBigInteger::from_base(result->base, result->literal);
+        return Value(bigint.to_double());
+    }
+
+    char* endptr;
+    auto parsed_double = strtod(text.characters(), &endptr);
+    if (*endptr)
+        return js_nan();
+
+    return Value(parsed_double);
+}
+
 // 7.1.4 ToNumber ( argument ), https://tc39.es/ecma262/#sec-tonumber
 ThrowCompletionOr<Value> Value::to_number(VM& vm) const
 {
@@ -485,25 +571,8 @@ ThrowCompletionOr<Value> Value::to_number(VM& vm) const
         return Value(0);
     case BOOLEAN_TAG:
         return Value(as_bool() ? 1 : 0);
-    case STRING_TAG: {
-        String string = Utf8View(as_string().string()).trim(whitespace_characters, AK::TrimMode::Both).as_string();
-        if (string.is_empty())
-            return Value(0);
-        if (string == "Infinity" || string == "+Infinity")
-            return js_infinity();
-        if (string == "-Infinity")
-            return js_negative_infinity();
-        char* endptr;
-        auto parsed_double = strtod(string.characters(), &endptr);
-        if (*endptr)
-            return js_nan();
-        // NOTE: Per the spec only exactly [+-]Infinity should result in infinity
-        //       but strtod gives infinity for any case-insensitive 'infinity' or 'inf' string.
-        if (isinf(parsed_double) && string.contains('i', AK::CaseSensitivity::CaseInsensitive))
-            return js_nan();
-
-        return Value(parsed_double);
-    }
+    case STRING_TAG:
+        return string_to_number(as_string().string().view());
     case SYMBOL_TAG:
         return vm.throw_completion<TypeError>(ErrorType::Convert, "symbol", "number");
     case BIGINT_TAG:
@@ -516,6 +585,8 @@ ThrowCompletionOr<Value> Value::to_number(VM& vm) const
         VERIFY_NOT_REACHED();
     }
 }
+
+static Optional<BigInt*> string_to_bigint(VM& vm, StringView string);
 
 // 7.1.13 ToBigInt ( argument ), https://tc39.es/ecma262/#sec-tobigint
 ThrowCompletionOr<BigInt*> Value::to_bigint(VM& vm) const
@@ -539,7 +610,7 @@ ThrowCompletionOr<BigInt*> Value::to_bigint(VM& vm) const
         return &primitive.as_bigint();
     case STRING_TAG: {
         // 1. Let n be ! StringToBigInt(prim).
-        auto bigint = primitive.string_to_bigint(vm);
+        auto bigint = string_to_bigint(vm, primitive.as_string().string());
 
         // 2. If n is undefined, throw a SyntaxError exception.
         if (!bigint.has_value())
@@ -601,12 +672,10 @@ static Optional<BigIntParseResult> parse_bigint_text(StringView text)
 }
 
 // 7.1.14 StringToBigInt ( str ), https://tc39.es/ecma262/#sec-stringtobigint
-Optional<BigInt*> Value::string_to_bigint(VM& vm) const
+static Optional<BigInt*> string_to_bigint(VM& vm, StringView string)
 {
-    VERIFY(is_string());
-
     // 1. Let text be StringToCodePoints(str).
-    auto text = as_string().string().view().trim_whitespace();
+    auto text = Utf8View(string).trim(whitespace_characters, AK::TrimMode::Both).as_string();
 
     // 2. Let literal be ParseText(text, StringIntegerLiteral).
     auto result = parse_bigint_text(text);
@@ -1418,7 +1487,7 @@ ThrowCompletionOr<bool> is_loosely_equal(VM& vm, Value lhs, Value rhs)
     // 7. If Type(x) is BigInt and Type(y) is String, then
     if (lhs.is_bigint() && rhs.is_string()) {
         // a. Let n be StringToBigInt(y).
-        auto bigint = rhs.string_to_bigint(vm);
+        auto bigint = string_to_bigint(vm, rhs.as_string().string());
 
         // b. If n is undefined, return false.
         if (!bigint.has_value())
@@ -1515,7 +1584,7 @@ ThrowCompletionOr<TriState> is_less_than(VM& vm, Value lhs, Value rhs, bool left
     }
 
     if (x_primitive.is_bigint() && y_primitive.is_string()) {
-        auto y_bigint = y_primitive.string_to_bigint(vm);
+        auto y_bigint = string_to_bigint(vm, y_primitive.as_string().string());
         if (!y_bigint.has_value())
             return TriState::Unknown;
 
@@ -1525,7 +1594,7 @@ ThrowCompletionOr<TriState> is_less_than(VM& vm, Value lhs, Value rhs, bool left
     }
 
     if (x_primitive.is_string() && y_primitive.is_bigint()) {
-        auto x_bigint = x_primitive.string_to_bigint(vm);
+        auto x_bigint = string_to_bigint(vm, x_primitive.as_string().string());
         if (!x_bigint.has_value())
             return TriState::Unknown;
 

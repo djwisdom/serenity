@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, Idan Horowitz <idan.horowitz@serenityos.org>
+ * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -63,10 +64,10 @@ ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& 
     // 6. Let numberingSystem be ? GetOption(options, "numberingSystem", "string", undefined, undefined).
     auto numbering_system = TRY(get_option(vm, *options, vm.names.numberingSystem, OptionType::String, {}, Empty {}));
 
-    // FIXME: Missing spec step - If numberingSystem is not undefined, then
+    // 7. If numberingSystem is not undefined, then
     if (!numbering_system.is_undefined()) {
-        // 7. If numberingSystem does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
-        if (numbering_system.is_undefined() || !Unicode::is_type_identifier(numbering_system.as_string().string()))
+        // a. If numberingSystem does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
+        if (!Unicode::is_type_identifier(numbering_system.as_string().string()))
             return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, numbering_system, "numberingSystem"sv);
     }
 
@@ -88,8 +89,8 @@ ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& 
     if (result.nu.has_value())
         duration_format->set_numbering_system(result.nu.release_value());
 
-    // 13. Let style be ? GetOption(options, "style", "string", « "long", "short", "narrow", "digital" », "long").
-    auto style = TRY(get_option(vm, *options, vm.names.style, OptionType::String, { "long"sv, "short"sv, "narrow"sv, "digital"sv }, "long"sv));
+    // 13. Let style be ? GetOption(options, "style", "string", « "long", "short", "narrow", "digital" », "short").
+    auto style = TRY(get_option(vm, *options, vm.names.style, OptionType::String, { "long"sv, "short"sv, "narrow"sv, "digital"sv }, "short"sv));
 
     // 14. Set durationFormat.[[Style]] to style.
     duration_format->set_style(style.as_string().string());
@@ -97,15 +98,15 @@ ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& 
     // 15. Set durationFormat.[[DataLocale]] to r.[[dataLocale]].
     duration_format->set_data_locale(move(result.data_locale));
 
-    // 16. Let prevStyle be undefined.
-    Optional<String> previous_style;
+    // 16. Let prevStyle be the empty String.
+    auto previous_style = String::empty();
 
-    // 17. For each row in Table 1, except the header row, in table order, do
+    // 17. For each row of Table 1, except the header row, in table order, do
     for (auto const& duration_instances_component : duration_instances_components) {
-        // a. Let styleSlot be the Style Slot value.
+        // a. Let styleSlot be the Style Slot value of the current row.
         auto style_slot = duration_instances_component.set_style_slot;
 
-        // b. Let displaySlot be the Display Slot value.
+        // b. Let displaySlot be the Display Slot value of the current row.
         auto display_slot = duration_instances_component.set_display_slot;
 
         // c. Let unit be the Unit value.
@@ -133,8 +134,8 @@ ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& 
         }
     }
 
-    // 18. Set durationFormat.[[FractionalDigits]] to ? GetNumberOption(options, "fractionalDigits", 0, 9, undefined).
-    duration_format->set_fractional_digits(Optional<u8>(TRY(get_number_option(vm, *options, vm.names.fractionalDigits, 0, 9, {}))));
+    // 18. Set durationFormat.[[FractionalDigits]] to ? GetNumberOption(options, "fractionalDigits", 0, 9, 0).
+    duration_format->set_fractional_digits(Optional<u8>(TRY(get_number_option(vm, *options, vm.names.fractionalDigits, 0, 9, 0))));
 
     // 19. Return durationFormat.
     return duration_format;

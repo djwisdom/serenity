@@ -12,9 +12,9 @@
 namespace JS {
 
 struct AlreadyResolved final : public Cell {
-    bool value { false };
+    JS_CELL(AlreadyResolved, Cell);
 
-    virtual StringView class_name() const override { return "AlreadyResolved"sv; }
+    bool value { false };
 
 protected:
     // Allocated cells must be >= sizeof(FreelistEntry), which is 24 bytes -
@@ -30,13 +30,14 @@ public:
 
     static PromiseResolvingFunction* create(Realm&, Promise&, AlreadyResolved&, FunctionType);
 
-    explicit PromiseResolvingFunction(Promise&, AlreadyResolved&, FunctionType, Object& prototype);
     virtual void initialize(Realm&) override;
     virtual ~PromiseResolvingFunction() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
 
 private:
+    explicit PromiseResolvingFunction(Promise&, AlreadyResolved&, FunctionType, Object& prototype);
+
     virtual void visit_edges(Visitor&) override;
 
     Promise& m_promise;
