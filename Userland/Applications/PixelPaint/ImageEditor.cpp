@@ -269,9 +269,11 @@ void ImageEditor::second_paint_event(GUI::PaintEvent& event)
 GUI::MouseEvent ImageEditor::event_with_pan_and_scale_applied(GUI::MouseEvent const& event) const
 {
     auto image_position = frame_to_content_position(event.position());
+    auto tool_adjusted_image_position = m_active_tool->point_position_to_preferred_cell(image_position);
+
     return {
         static_cast<GUI::Event::Type>(event.type()),
-        image_position.to_rounded<int>(),
+        tool_adjusted_image_position,
         event.buttons(),
         event.button(),
         event.modifiers(),
@@ -286,9 +288,11 @@ GUI::MouseEvent ImageEditor::event_adjusted_for_layer(GUI::MouseEvent const& eve
 {
     auto image_position = frame_to_content_position(event.position());
     image_position.translate_by(-layer.location().x(), -layer.location().y());
+    auto tool_adjusted_image_position = m_active_tool->point_position_to_preferred_cell(image_position);
+
     return {
         static_cast<GUI::Event::Type>(event.type()),
-        image_position.to_rounded<int>(),
+        tool_adjusted_image_position,
         event.buttons(),
         event.button(),
         event.modifiers(),
@@ -335,13 +339,13 @@ void ImageEditor::mousemove_event(GUI::MouseEvent& event)
         return;
     }
 
+    if (!m_active_tool)
+        return;
+
     auto image_event = event_with_pan_and_scale_applied(event);
     if (on_image_mouse_position_change) {
         on_image_mouse_position_change(image_event.position());
     }
-
-    if (!m_active_tool)
-        return;
 
     auto layer_event = m_active_layer ? event_adjusted_for_layer(event, *m_active_layer) : event;
     Tool::MouseEvent tool_event(Tool::MouseEvent::Action::MouseDown, layer_event, image_event, event);
@@ -484,6 +488,8 @@ void ImageEditor::set_pixel_grid_visibility(bool show_pixel_grid)
 
 void ImageEditor::layers_did_change()
 {
+    if (on_modified_change)
+        on_modified_change(true);
     update();
 }
 

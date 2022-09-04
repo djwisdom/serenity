@@ -354,7 +354,7 @@ void glFinish()
     g_gl_context->gl_finish();
 }
 
-void glFogfv(GLenum pname, GLfloat* params)
+void glFogfv(GLenum pname, GLfloat const* params)
 {
     g_gl_context->gl_fogfv(pname, params);
 }
@@ -444,9 +444,14 @@ void glGetMaterialiv(GLenum face, GLenum pname, GLint* params)
     g_gl_context->gl_get_material(face, pname, params, GL_INT);
 }
 
-GLubyte* glGetString(GLenum name)
+GLubyte const* glGetString(GLenum name)
 {
     return g_gl_context->gl_get_string(name);
+}
+
+void glGetTexImage(GLenum target, GLint level, GLenum format, GLenum type, void* pixels)
+{
+    g_gl_context->gl_get_tex_image(target, level, format, type, pixels);
 }
 
 void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint* params)

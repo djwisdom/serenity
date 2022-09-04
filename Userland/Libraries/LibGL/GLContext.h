@@ -113,7 +113,7 @@ public:
     void gl_frustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble near_val, GLdouble far_val);
     void gl_gen_textures(GLsizei n, GLuint* textures);
     GLenum gl_get_error();
-    GLubyte* gl_get_string(GLenum name);
+    GLubyte const* gl_get_string(GLenum name);
     void gl_load_identity();
     void gl_load_matrix(FloatMatrix4x4 const& matrix);
     void gl_matrix_mode(GLenum mode);
@@ -177,7 +177,7 @@ public:
     void gl_depth_func(GLenum func);
     void gl_polygon_mode(GLenum face, GLenum mode);
     void gl_polygon_offset(GLfloat factor, GLfloat units);
-    void gl_fogfv(GLenum pname, GLfloat* params);
+    void gl_fogfv(GLenum pname, GLfloat const* params);
     void gl_fogf(GLenum pname, GLfloat param);
     void gl_fogi(GLenum pname, GLint param);
     void gl_pixel_storei(GLenum pname, GLint param);
@@ -194,6 +194,7 @@ public:
     void gl_light_model(GLenum pname, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
     void gl_bitmap(GLsizei width, GLsizei height, GLfloat xorig, GLfloat yorig, GLfloat xmove, GLfloat ymove, GLubyte const* bitmap);
     void gl_copy_tex_image_2d(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
+    void gl_get_tex_image(GLenum target, GLint level, GLenum format, GLenum type, void* pixels);
     void gl_get_tex_parameter_integerv(GLenum target, GLint level, GLenum pname, GLint* params);
     void gl_rect(GLdouble x1, GLdouble y1, GLdouble x2, GLdouble y2);
     void gl_tex_gen(GLenum coord, GLenum pname, GLint param);

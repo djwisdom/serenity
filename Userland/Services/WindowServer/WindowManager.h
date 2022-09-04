@@ -96,6 +96,8 @@ public:
     void start_dnd_drag(ConnectionFromClient&, String const& text, Gfx::Bitmap const*, Core::MimeData const&);
     void end_dnd_drag();
 
+    void set_accepts_drag(bool);
+
     Window* active_window()
     {
         VERIFY(m_current_window_stack);
@@ -149,6 +151,7 @@ public:
     Cursor const& disallowed_cursor() const { return *m_disallowed_cursor; }
     Cursor const& move_cursor() const { return *m_move_cursor; }
     Cursor const& drag_cursor() const { return *m_drag_cursor; }
+    Cursor const& drag_copy_cursor() const { return *m_drag_copy_cursor; }
     Cursor const& wait_cursor() const { return *m_wait_cursor; }
     Cursor const& eyedropper_cursor() const { return *m_eyedropper_cursor; }
     Cursor const& zoom_cursor() const { return *m_zoom_cursor; }
@@ -390,6 +393,7 @@ private:
     RefPtr<Cursor> m_disallowed_cursor;
     RefPtr<Cursor> m_move_cursor;
     RefPtr<Cursor> m_drag_cursor;
+    RefPtr<Cursor> m_drag_copy_cursor;
     RefPtr<Cursor> m_wait_cursor;
     RefPtr<Cursor> m_crosshair_cursor;
     RefPtr<Cursor> m_eyedropper_cursor;
@@ -478,6 +482,7 @@ private:
     OwnPtr<DndOverlay> m_dnd_overlay;
     WeakPtr<ConnectionFromClient> m_dnd_client;
     String m_dnd_text;
+    bool m_dnd_accepts_drag { false };
 
     RefPtr<Core::MimeData> m_dnd_mime_data;
 

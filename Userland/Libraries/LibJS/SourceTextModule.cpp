@@ -174,6 +174,13 @@ Result<NonnullRefPtr<SourceTextModule>, Vector<Parser::Error>> SourceTextModule:
 
         for (auto const& export_entry : export_statement.entries()) {
 
+            // Special case, export {} from "module" should add "module" to
+            // required_modules but not any import or export so skip here.
+            if (export_entry.kind == ExportStatement::ExportEntry::Kind::EmptyNamedExport) {
+                VERIFY(export_statement.entries().size() == 1);
+                break;
+            }
+
             // a. If ee.[[ModuleRequest]] is null, then
             if (!export_entry.is_module_request()) {
 
@@ -195,8 +202,6 @@ Result<NonnullRefPtr<SourceTextModule>, Vector<Parser::Error>> SourceTextModule:
                     // 2. If ie.[[ImportName]] is namespace-object, then
                     if (import_entry.is_namespace) {
                         // a. NOTE: This is a re-export of an imported module namespace object.
-                        VERIFY(export_entry.is_module_request() && export_entry.kind != ExportStatement::ExportEntry::Kind::NamedExport);
-
                         // b. Append ee to localExportEntries.
                         local_export_entries.empend(export_entry);
                     }
@@ -455,7 +460,12 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
                 auto const& function_declaration = static_cast<FunctionDeclaration const&>(declaration);
 
                 // 1. Let fo be InstantiateFunctionObject of d with arguments env and privateEnv.
-                auto* function = ECMAScriptFunctionObject::create(realm(), function_declaration.name(), function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
+                // NOTE: Special case if the function is a default export of an anonymous function
+                //       it has name "*default*" but internally should have name "default".
+                FlyString function_name = function_declaration.name();
+                if (function_name == ExportStatement::local_name_for_default)
+                    function_name = "default"sv;
+                auto* function = ECMAScriptFunctionObject::create(realm(), function_name, function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
 
                 // 2. Perform ! env.InitializeBinding(dn, fo).
                 MUST(environment->initialize_binding(vm, name, function));

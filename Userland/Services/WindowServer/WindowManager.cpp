@@ -1016,20 +1016,19 @@ bool WindowManager::process_ongoing_drag(MouseEvent& event)
         m_dnd_overlay->cursor_moved();
 
         // We didn't let go of the drag yet, see if we should send some drag move events..
-        for_each_visible_window_from_front_to_back([&](Window& window) {
-            if (!window.rect().contains(event.position()))
-                return IterationDecision::Continue;
+        if (auto* window = hovered_window()) {
             event.set_drag(true);
             event.set_mime_data(*m_dnd_mime_data);
-            deliver_mouse_event(window, event, false);
-            return IterationDecision::Break;
-        });
+            deliver_mouse_event(*window, event, false);
+        } else {
+            set_accepts_drag(false);
+        }
     }
 
     if (!(event.type() == Event::MouseUp && event.button() == MouseButton::Primary))
         return true;
 
-    if (auto* window = current_window_stack().window_at(event.position())) {
+    if (auto* window = hovered_window()) {
         m_dnd_client->async_drag_accepted();
         if (window->client()) {
             auto translated_event = event.translated(-window->position());
@@ -1430,8 +1429,9 @@ void WindowManager::event(Core::Event& event)
 
         process_mouse_event(mouse_event);
         m_last_processed_buttons = mouse_event.buttons();
+        auto include_window_frame = m_dnd_client ? WindowStack::IncludeWindowFrame::Yes : WindowStack::IncludeWindowFrame::No;
         // TODO: handle transitioning between two stacks
-        set_hovered_window(current_window_stack().window_at(mouse_event.position(), WindowStack::IncludeWindowFrame::No));
+        set_hovered_window(current_window_stack().window_at(mouse_event.position(), include_window_frame));
         return;
     }
 
@@ -1918,8 +1918,11 @@ ConnectionFromClient const* WindowManager::active_client() const
 
 Cursor const& WindowManager::active_cursor() const
 {
-    if (m_dnd_client)
+    if (m_dnd_client) {
+        if (m_dnd_accepts_drag)
+            return *m_drag_copy_cursor;
         return *m_drag_cursor;
+    }
 
     if (m_move_window)
         return *m_move_cursor;
@@ -2061,6 +2064,14 @@ void WindowManager::end_dnd_drag()
     m_dnd_client = nullptr;
     m_dnd_text = {};
     m_dnd_overlay = nullptr;
+    m_dnd_accepts_drag = false;
+}
+
+void WindowManager::set_accepts_drag(bool accepts)
+{
+    VERIFY(m_dnd_client);
+    m_dnd_accepts_drag = accepts;
+    Compositor::the().invalidate_cursor();
 }
 
 void WindowManager::invalidate_after_theme_or_font_change()
@@ -2278,6 +2289,7 @@ void WindowManager::apply_cursor_theme(String const& theme_name)
     reload_cursor(m_disallowed_cursor, "Disallowed");
     reload_cursor(m_move_cursor, "Move");
     reload_cursor(m_drag_cursor, "Drag");
+    reload_cursor(m_drag_copy_cursor, "DragCopy");
     reload_cursor(m_wait_cursor, "Wait");
     reload_cursor(m_crosshair_cursor, "Crosshair");
     reload_cursor(m_eyedropper_cursor, "Eyedropper");
