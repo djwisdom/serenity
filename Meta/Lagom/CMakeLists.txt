@@ -424,7 +424,7 @@ if (BUILD_LAGOM)
     list(REMOVE_ITEM LIBJS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibJS/SyntaxHighlighter.cpp")
     lagom_lib(JS js
         SOURCES ${LIBJS_SOURCES} ${LIBJS_SUBDIR_SOURCES} ${LIBJS_SUBSUBDIR_SOURCES}
-        LIBS m LibCrypto LibRegex LibUnicode LibTextCodec
+        LIBS m LibCrypto LibRegex LibLocale LibUnicode LibTextCodec
     )
 
     # Line
@@ -432,6 +432,16 @@ if (BUILD_LAGOM)
     lagom_lib(Line line
         SOURCES ${LIBLINE_SOURCES}
     )
+
+    # Locale
+    include(locale_data)
+    file(GLOB LIBLOCALE_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibLocale/*.cpp")
+    lagom_lib(Locale locale
+        SOURCES ${LIBLOCALE_SOURCES} ${LOCALE_DATA_SOURCES}
+    )
+    target_compile_definitions(LibLocale PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
+    target_compile_options(LibLocale PRIVATE -Wno-parentheses-equality)
+    target_link_libraries(LibLocale LibTimeZone LibUnicode)
 
     # Markdown
     file(GLOB LIBMARKDOWN_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibMarkdown/*.cpp")
@@ -507,8 +517,6 @@ if (BUILD_LAGOM)
         SOURCES ${LIBUNICODE_SOURCES} ${UNICODE_DATA_SOURCES}
     )
     target_compile_definitions(LibUnicode PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
-    target_compile_options(LibUnicode PRIVATE -Wno-parentheses-equality)
-    target_link_libraries(LibUnicode LibTimeZone)
 
     # WASM
     file(GLOB LIBWASM_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWasm/*/*.cpp")
@@ -671,6 +679,12 @@ if (BUILD_LAGOM)
         file(GLOB LIBGL_TESTS CONFIGURE_DEPENDS "../../Tests/LibGL/*.cpp")
         foreach(source ${LIBGL_TESTS})
             lagom_test(${source} WORKING_DIRECTORY LIBS LibGL LibGPU LibSoftGPU)
+        endforeach()
+
+        # Locale
+        file(GLOB LIBLOCALE_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibLocale/*.cpp")
+        foreach(source ${LIBLOCALE_TEST_SOURCES})
+            lagom_test(${source} LIBS LibLocale LibUnicode)
         endforeach()
 
         # PDF
