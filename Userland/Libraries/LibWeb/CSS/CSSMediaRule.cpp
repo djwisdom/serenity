@@ -1,27 +1,41 @@
 /*
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <LibWeb/CSS/CSSMediaRule.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::CSS {
 
-CSSMediaRule::CSSMediaRule(NonnullRefPtr<MediaList>&& media, NonnullRefPtrVector<CSSRule>&& rules)
-    : CSSConditionRule(move(rules))
-    , m_media(move(media))
+CSSMediaRule* CSSMediaRule::create(HTML::Window& window_object, MediaList& media_queries, CSSRuleList& rules)
 {
+    return window_object.heap().allocate<CSSMediaRule>(window_object.realm(), window_object, media_queries, rules);
+}
+
+CSSMediaRule::CSSMediaRule(HTML::Window& window_object, MediaList& media, CSSRuleList& rules)
+    : CSSConditionRule(window_object, rules)
+    , m_media(media)
+{
+    set_prototype(&window_object.cached_web_prototype("CSSMediaRule"));
+}
+
+void CSSMediaRule::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(&m_media);
 }
 
 String CSSMediaRule::condition_text() const
 {
-    return m_media->media_text();
+    return m_media.media_text();
 }
 
 void CSSMediaRule::set_condition_text(String text)
 {
-    m_media->set_media_text(text);
+    m_media.set_media_text(text);
 }
 
 // https://www.w3.org/TR/cssom-1/#serialize-a-css-rule

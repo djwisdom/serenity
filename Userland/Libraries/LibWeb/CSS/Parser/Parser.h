@@ -34,7 +34,8 @@ namespace Web::CSS::Parser {
 
 class ParsingContext {
 public:
-    ParsingContext() = default;
+    ParsingContext();
+    explicit ParsingContext(HTML::Window&);
     explicit ParsingContext(DOM::Document const&);
     explicit ParsingContext(DOM::Document const&, AK::URL);
     explicit ParsingContext(DOM::ParentNode&);
@@ -46,7 +47,10 @@ public:
     PropertyID current_property_id() const { return m_current_property_id; }
     void set_current_property_id(PropertyID property_id) { m_current_property_id = property_id; }
 
+    HTML::Window& window_object() const { return m_window_object; }
+
 private:
+    HTML::Window& m_window_object;
     DOM::Document const* m_document { nullptr };
     PropertyID m_current_property_id { PropertyID::Invalid };
     AK::URL m_url;
@@ -122,9 +126,9 @@ public:
     Parser(ParsingContext const&, StringView input, String const& encoding = "utf-8");
     ~Parser() = default;
 
-    NonnullRefPtr<CSSStyleSheet> parse_as_css_stylesheet(Optional<AK::URL> location);
-    RefPtr<ElementInlineCSSStyleDeclaration> parse_as_style_attribute(DOM::Element&);
-    RefPtr<CSSRule> parse_as_css_rule();
+    CSSStyleSheet* parse_as_css_stylesheet(Optional<AK::URL> location);
+    ElementInlineCSSStyleDeclaration* parse_as_style_attribute(DOM::Element&);
+    CSSRule* parse_as_css_rule();
     Optional<StyleProperty> parse_as_supports_condition();
 
     enum class SelectorParsingMode {
@@ -232,11 +236,11 @@ private:
 
     Optional<GeneralEnclosed> parse_general_enclosed(TokenStream<ComponentValue>&);
 
-    RefPtr<CSSRule> parse_font_face_rule(TokenStream<ComponentValue>&);
+    CSSRule* parse_font_face_rule(TokenStream<ComponentValue>&);
     Vector<FontFace::Source> parse_font_face_src(TokenStream<ComponentValue>&);
 
-    RefPtr<CSSRule> convert_to_rule(NonnullRefPtr<Rule>);
-    RefPtr<PropertyOwningCSSStyleDeclaration> convert_to_style_declaration(Vector<DeclarationOrAtRule> declarations);
+    CSSRule* convert_to_rule(NonnullRefPtr<Rule>);
+    PropertyOwningCSSStyleDeclaration* convert_to_style_declaration(Vector<DeclarationOrAtRule> declarations);
     Optional<StyleProperty> convert_to_style_property(Declaration const&);
 
     class Dimension {
@@ -416,11 +420,11 @@ private:
 
 namespace Web {
 
-RefPtr<CSS::CSSStyleSheet> parse_css_stylesheet(CSS::Parser::ParsingContext const&, StringView, Optional<AK::URL> location = {});
-RefPtr<CSS::ElementInlineCSSStyleDeclaration> parse_css_style_attribute(CSS::Parser::ParsingContext const&, StringView, DOM::Element&);
+CSS::CSSStyleSheet* parse_css_stylesheet(CSS::Parser::ParsingContext const&, StringView, Optional<AK::URL> location = {});
+CSS::ElementInlineCSSStyleDeclaration* parse_css_style_attribute(CSS::Parser::ParsingContext const&, StringView, DOM::Element&);
 RefPtr<CSS::StyleValue> parse_css_value(CSS::Parser::ParsingContext const&, StringView, CSS::PropertyID property_id = CSS::PropertyID::Invalid);
 Optional<CSS::SelectorList> parse_selector(CSS::Parser::ParsingContext const&, StringView);
-RefPtr<CSS::CSSRule> parse_css_rule(CSS::Parser::ParsingContext const&, StringView);
+CSS::CSSRule* parse_css_rule(CSS::Parser::ParsingContext const&, StringView);
 RefPtr<CSS::MediaQuery> parse_media_query(CSS::Parser::ParsingContext const&, StringView);
 NonnullRefPtrVector<CSS::MediaQuery> parse_media_query_list(CSS::Parser::ParsingContext const&, StringView);
 RefPtr<CSS::Supports> parse_css_supports(CSS::Parser::ParsingContext const&, StringView);

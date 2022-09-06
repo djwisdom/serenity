@@ -8,7 +8,6 @@
 #include <LibJS/Runtime/ConsoleObject.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
-#include <LibWeb/Bindings/WorkerWrapper.h>
 #include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Worker.h>
@@ -18,19 +17,29 @@ namespace Web::HTML {
 
 // https://html.spec.whatwg.org/multipage/workers.html#dedicated-workers-and-the-worker-interface
 Worker::Worker(FlyString const& script_url, WorkerOptions const options, DOM::Document& document)
-    : m_script_url(script_url)
+    : DOM::EventTarget(document.realm())
+    , m_script_url(script_url)
     , m_options(options)
     , m_document(&document)
     , m_custom_data()
     , m_worker_vm(JS::VM::create(adopt_own(m_custom_data)))
     , m_interpreter(JS::Interpreter::create<JS::GlobalObject>(m_worker_vm))
     , m_interpreter_scope(*m_interpreter)
-    , m_implicit_port(MessagePort::create())
+    , m_implicit_port(MessagePort::create(document.window()))
 {
+    set_prototype(&document.window().cached_web_prototype("Worker"));
+}
+
+void Worker::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_document.ptr());
+    visitor.visit(m_implicit_port.ptr());
+    visitor.visit(m_outside_port.ptr());
 }
 
 // https://html.spec.whatwg.org/multipage/workers.html#dom-worker
-DOM::ExceptionOr<NonnullRefPtr<Worker>> Worker::create(FlyString const& script_url, WorkerOptions const options, DOM::Document& document)
+DOM::ExceptionOr<JS::NonnullGCPtr<Worker>> Worker::create(FlyString const& script_url, WorkerOptions const options, DOM::Document& document)
 {
     dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Creating worker with script_url = {}", script_url);
 
@@ -54,26 +63,26 @@ DOM::ExceptionOr<NonnullRefPtr<Worker>> Worker::create(FlyString const& script_u
     // 4. If this fails, throw a "SyntaxError" DOMException.
     if (!url.is_valid()) {
         dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Invalid URL loaded '{}'.", script_url);
-        return DOM::SyntaxError::create("url is not valid");
+        return DOM::SyntaxError::create(document.global_object(), "url is not valid");
     }
 
     // 5. Let worker URL be the resulting URL record.
 
     // 6. Let worker be a new Worker object.
-    auto worker = adopt_ref(*new Worker(script_url, options, document));
+    auto worker = document.heap().allocate<Worker>(document.realm(), script_url, options, document);
 
     // 7. Let outside port be a new MessagePort in outside settings's Realm.
-    auto outside_port = MessagePort::create();
+    auto outside_port = MessagePort::create(verify_cast<HTML::Window>(outside_settings.realm().global_object()));
 
     // 8. Associate the outside port with worker
     worker->m_outside_port = outside_port;
 
     // 9. Run this step in parallel:
     //    1. Run a worker given worker, worker URL, outside settings, outside port, and options.
-    worker->run_a_worker(url, outside_settings, outside_port, options);
+    worker->run_a_worker(url, outside_settings, *outside_port, options);
 
     // 10. Return worker
-    return worker;
+    return JS::NonnullGCPtr(*worker);
 }
 
 // https://html.spec.whatwg.org/multipage/workers.html#run-a-worker
@@ -103,7 +112,7 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
     // 7. Let realm execution context be the result of creating a new JavaScript realm given agent and the following customizations:
     auto realm_execution_context = Bindings::create_a_new_javascript_realm(
         *m_worker_vm,
-        [&](JS::Realm& realm) -> JS::GlobalObject* {
+        [&](JS::Realm& realm) -> JS::Object* {
             //      7a. For the global object, if is shared is true, create a new SharedWorkerGlobalScope object.
             //      7b. Otherwise, create a new DedicatedWorkerGlobalScope object.
             // FIXME: Proper support for both SharedWorkerGlobalScope and DedicatedWorkerGlobalScope
@@ -112,12 +121,17 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
             // FIXME: Make and use subclasses of WorkerGlobalScope, however this requires JS::GlobalObject to
             //        play nicely with the IDL interpreter, to make spec-compliant extensions, which it currently does not.
             m_worker_scope = m_worker_vm->heap().allocate_without_realm<JS::GlobalObject>(realm);
-            return m_worker_scope;
+            return m_worker_scope.ptr();
         },
         nullptr);
 
     auto& console_object = *realm_execution_context->realm->intrinsics().console_object();
     m_worker_realm = realm_execution_context->realm;
+
+    // FIXME: Remove this once we don't need a hack Window (for prototypes and constructors) in workers anymore.
+    m_worker_window = HTML::Window::create(*m_worker_realm);
+    m_worker_realm->set_global_object(m_worker_scope, nullptr);
+
     m_console = adopt_ref(*new WorkerDebugConsoleClient(console_object.console()));
     console_object.console().set_client(*m_console);
 
@@ -148,7 +162,7 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
                 MessageEventInit event_init {};
                 event_init.data = message;
                 event_init.origin = "<origin>";
-                dispatch_event(MessageEvent::create(HTML::EventNames::message, event_init));
+                dispatch_event(*MessageEvent::create(*m_worker_window, HTML::EventNames::message, event_init));
             }));
 
             return JS::js_undefined();
@@ -160,7 +174,7 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
 
     // 9. Set up a worker environment settings object with realm execution context,
     //    outside settings, and unsafeWorkerCreationTime, and let inside settings be the result.
-    m_inner_settings = WorkerEnvironmentSettingsObject::setup(*m_document, move(realm_execution_context));
+    m_inner_settings = WorkerEnvironmentSettingsObject::setup(move(realm_execution_context));
 
     // 10. Set worker global scope's name to the value of options's name member.
     // FIXME: name property requires the SharedWorkerGlobalScope or DedicatedWorkerGlobalScope child class to be used
@@ -245,7 +259,7 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
             // FIXME: Global scope association
 
             // 16. Let inside port be a new MessagePort object in inside settings's Realm.
-            auto inside_port = MessagePort::create();
+            auto inside_port = MessagePort::create(*m_worker_window);
 
             // 17. Associate inside port with worker global scope.
             // FIXME: Global scope association
@@ -318,20 +332,15 @@ void Worker::post_message(JS::Value message, JS::Value)
     target_port->post_message(message);
 }
 
-JS::Object* Worker::create_wrapper(JS::Realm& realm)
-{
-    return wrap(realm, *this);
-}
-
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                               \
-    void Worker::set_##attribute_name(Optional<Bindings::CallbackType> value) \
-    {                                                                         \
-        set_event_handler_attribute(event_name, move(value));                 \
-    }                                                                         \
-    Bindings::CallbackType* Worker::attribute_name()                          \
-    {                                                                         \
-        return event_handler_attribute(event_name);                           \
+#define __ENUMERATE(attribute_name, event_name)                      \
+    void Worker::set_##attribute_name(Bindings::CallbackType* value) \
+    {                                                                \
+        set_event_handler_attribute(event_name, move(value));        \
+    }                                                                \
+    Bindings::CallbackType* Worker::attribute_name()                 \
+    {                                                                \
+        return event_handler_attribute(event_name);                  \
     }
 ENUMERATE_WORKER_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE

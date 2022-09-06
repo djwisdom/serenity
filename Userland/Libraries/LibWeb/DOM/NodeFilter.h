@@ -6,23 +6,16 @@
 
 #pragma once
 
-#include <AK/RefCounted.h>
-#include <LibJS/Heap/Handle.h>
 #include <LibWeb/Bindings/CallbackType.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 
 namespace Web::DOM {
 
-class NodeFilter
-    : public RefCounted<NodeFilter>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::NodeFilterWrapper;
+class NodeFilter final : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(NodeFilter, Bindings::PlatformObject);
 
-    explicit NodeFilter(Bindings::CallbackType callback)
-        : m_callback(move(callback))
-    {
-    }
+public:
+    static JS::NonnullGCPtr<NodeFilter> create(JS::Realm&, Bindings::CallbackType&);
 
     virtual ~NodeFilter() = default;
 
@@ -35,12 +28,13 @@ public:
     };
 
 private:
-    Bindings::CallbackType m_callback;
+    NodeFilter(JS::Realm&, Bindings::CallbackType&);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    Bindings::CallbackType& m_callback;
 };
 
-inline JS::Object* wrap(JS::Realm&, Web::DOM::NodeFilter& filter)
-{
-    return filter.callback().callback.cell();
 }
 
-}
+WRAPPER_HACK(NodeFilter, Web::DOM)

@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/Bindings/AbortSignalWrapper.h>
-#include <LibWeb/Bindings/DOMExceptionWrapper.h>
-#include <LibWeb/Bindings/Wrapper.h>
 #include <LibWeb/DOM/AbortSignal.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/EventDispatcher.h>
@@ -14,14 +11,14 @@
 
 namespace Web::DOM {
 
-AbortSignal::AbortSignal()
-    : EventTarget()
+JS::NonnullGCPtr<AbortSignal> AbortSignal::create_with_global_object(HTML::Window& window)
 {
+    return *window.heap().allocate<AbortSignal>(window.realm(), window);
 }
 
-JS::Object* AbortSignal::create_wrapper(JS::Realm& realm)
+AbortSignal::AbortSignal(HTML::Window& window)
+    : EventTarget(window.realm())
 {
-    return wrap(realm, *this);
 }
 
 // https://dom.spec.whatwg.org/#abortsignal-add
@@ -38,10 +35,6 @@ void AbortSignal::add_abort_algorithm(Function<void()> abort_algorithm)
 // https://dom.spec.whatwg.org/#abortsignal-signal-abort
 void AbortSignal::signal_abort(JS::Value reason)
 {
-    VERIFY(wrapper());
-    auto& vm = wrapper()->vm();
-    auto& realm = *vm.current_realm();
-
     // 1. If signal is aborted, then return.
     if (aborted())
         return;
@@ -50,7 +43,7 @@ void AbortSignal::signal_abort(JS::Value reason)
     if (!reason.is_undefined())
         m_abort_reason = reason;
     else
-        m_abort_reason = wrap(realm, AbortError::create("Aborted without reason"));
+        m_abort_reason = AbortError::create(global_object(), "Aborted without reason").ptr();
 
     // 3. For each algorithm in signal’s abort algorithms: run algorithm.
     for (auto& algorithm : m_abort_algorithms)
@@ -60,12 +53,12 @@ void AbortSignal::signal_abort(JS::Value reason)
     m_abort_algorithms.clear();
 
     // 5. Fire an event named abort at signal.
-    dispatch_event(Event::create(HTML::EventNames::abort));
+    dispatch_event(*Event::create(global_object(), HTML::EventNames::abort));
 }
 
-void AbortSignal::set_onabort(Optional<Bindings::CallbackType> event_handler)
+void AbortSignal::set_onabort(Bindings::CallbackType* event_handler)
 {
-    set_event_handler_attribute(HTML::EventNames::abort, move(event_handler));
+    set_event_handler_attribute(HTML::EventNames::abort, event_handler);
 }
 
 Bindings::CallbackType* AbortSignal::onabort()
@@ -85,6 +78,7 @@ JS::ThrowCompletionOr<void> AbortSignal::throw_if_aborted() const
 
 void AbortSignal::visit_edges(JS::Cell::Visitor& visitor)
 {
+    Base::visit_edges(visitor);
     visitor.visit(m_abort_reason);
 }
 

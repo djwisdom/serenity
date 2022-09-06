@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <LibWeb/Bindings/EventTargetWrapperFactory.h>
 #include <LibWeb/DOM/EventDispatcher.h>
 #include <LibWeb/DOM/EventTarget.h>
 
@@ -21,32 +20,26 @@ namespace Web::XHR {
     E(ontimeout, XHR::EventNames::timeout)                        \
     E(onloadend, XHR::EventNames::loadend)
 
-class XMLHttpRequestEventTarget
-    : public DOM::EventTarget
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::XMLHttpRequestEventTargetWrapper;
+class XMLHttpRequestEventTarget : public DOM::EventTarget {
+    WEB_PLATFORM_OBJECT(XMLHttpRequestEventTarget, DOM::EventTarget);
 
+public:
     virtual ~XMLHttpRequestEventTarget() override {};
 
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                  \
-    void set_##attribute_name(Optional<Bindings::CallbackType>); \
+#define __ENUMERATE(attribute_name, event_name)         \
+    void set_##attribute_name(Bindings::CallbackType*); \
     Bindings::CallbackType* attribute_name();
     ENUMERATE_XML_HTTP_REQUEST_EVENT_TARGET_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE
 
 protected:
-    XMLHttpRequestEventTarget()
-        : DOM::EventTarget()
+    XMLHttpRequestEventTarget(JS::Realm& realm)
+        : DOM::EventTarget(realm)
     {
-    }
-
-private:
-    virtual JS::Object* create_wrapper(JS::Realm& realm) override
-    {
-        return wrap(realm, *this);
     }
 };
 
 }
+
+WRAPPER_HACK(XMLHttpRequestEventTarget, Web::XHR)

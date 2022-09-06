@@ -10,8 +10,6 @@
 #include <LibGfx/Painter.h>
 #include <LibGfx/Quad.h>
 #include <LibGfx/Rect.h>
-#include <LibWeb/Bindings/CanvasRenderingContext2DWrapper.h>
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/HTML/CanvasRenderingContext2D.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
@@ -24,26 +22,40 @@
 
 namespace Web::HTML {
 
-CanvasRenderingContext2D::CanvasRenderingContext2D(HTMLCanvasElement& element)
-    : RefCountForwarder(element)
+JS::NonnullGCPtr<CanvasRenderingContext2D> CanvasRenderingContext2D::create(HTML::Window& window, HTMLCanvasElement& element)
 {
+    return *window.heap().allocate<CanvasRenderingContext2D>(window.realm(), window, element);
+}
+
+CanvasRenderingContext2D::CanvasRenderingContext2D(HTML::Window& window, HTMLCanvasElement& element)
+    : PlatformObject(window.realm())
+    , CanvasPath(static_cast<Bindings::PlatformObject&>(*this))
+    , m_element(element)
+{
+    set_prototype(&window.cached_web_prototype("CanvasRenderingContext2D"));
 }
 
 CanvasRenderingContext2D::~CanvasRenderingContext2D() = default;
 
+void CanvasRenderingContext2D::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_element.ptr());
+}
+
 HTMLCanvasElement& CanvasRenderingContext2D::canvas_element()
 {
-    return ref_count_target();
+    return *m_element;
 }
 
 HTMLCanvasElement const& CanvasRenderingContext2D::canvas_element() const
 {
-    return ref_count_target();
+    return *m_element;
 }
 
-NonnullRefPtr<HTMLCanvasElement> CanvasRenderingContext2D::canvas_for_binding() const
+JS::NonnullGCPtr<HTMLCanvasElement> CanvasRenderingContext2D::canvas_for_binding() const
 {
-    return canvas_element();
+    return *m_element;
 }
 
 void CanvasRenderingContext2D::fill_rect(float x, float y, float width, float height)
@@ -305,29 +317,25 @@ void CanvasRenderingContext2D::fill(Path2D& path, String const& fill_rule)
     return fill_internal(transformed_path, fill_rule);
 }
 
-RefPtr<ImageData> CanvasRenderingContext2D::create_image_data(int width, int height) const
+JS::GCPtr<ImageData> CanvasRenderingContext2D::create_image_data(int width, int height) const
 {
-    if (!wrapper()) {
-        dbgln("Hmm! Attempted to create ImageData for wrapper-less CRC2D.");
-        return {};
-    }
-    return ImageData::create_with_size(wrapper()->vm(), width, height);
+    return ImageData::create_with_size(global_object(), width, height);
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-getimagedata
-DOM::ExceptionOr<RefPtr<ImageData>> CanvasRenderingContext2D::get_image_data(int x, int y, int width, int height) const
+DOM::ExceptionOr<JS::GCPtr<ImageData>> CanvasRenderingContext2D::get_image_data(int x, int y, int width, int height) const
 {
     // 1. If either the sw or sh arguments are zero, then throw an "IndexSizeError" DOMException.
     if (width == 0 || height == 0)
-        return DOM::IndexSizeError::create("Width and height must not be zero");
+        return DOM::IndexSizeError::create(global_object(), "Width and height must not be zero");
 
     // 2. If the CanvasRenderingContext2D's origin-clean flag is set to false, then throw a "SecurityError" DOMException.
     if (!m_origin_clean)
-        return DOM::SecurityError::create("CanvasRenderingContext2D is not origin-clean");
+        return DOM::SecurityError::create(global_object(), "CanvasRenderingContext2D is not origin-clean");
 
     // 3. Let imageData be a new ImageData object.
     // 4. Initialize imageData given sw, sh, settings set to settings, and defaultColorSpace set to this's color space.
-    auto image_data = ImageData::create_with_size(wrapper()->vm(), width, height);
+    auto image_data = ImageData::create_with_size(global_object(), width, height);
 
     // NOTE: We don't attempt to create the underlying bitmap here; if it doesn't exist, it's like copying only transparent black pixels (which is a no-op).
     if (!canvas_element().bitmap())
@@ -388,7 +396,7 @@ void CanvasRenderingContext2D::reset_to_default_state()
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-measuretext
-RefPtr<TextMetrics> CanvasRenderingContext2D::measure_text(String const& text)
+JS::NonnullGCPtr<TextMetrics> CanvasRenderingContext2D::measure_text(String const& text)
 {
     // The measureText(text) method steps are to run the text preparation
     // algorithm, passing it text and the object implementing the CanvasText
@@ -396,7 +404,7 @@ RefPtr<TextMetrics> CanvasRenderingContext2D::measure_text(String const& text)
     // TextMetrics object with members behaving as described in the following
     // list:
     auto prepared_text = prepare_text(text);
-    auto metrics = TextMetrics::create();
+    auto metrics = TextMetrics::create(global_object());
     // FIXME: Use the font that was used to create the glyphs in prepared_text.
     auto& font = Gfx::FontDatabase::default_font();
 
@@ -520,15 +528,15 @@ DOM::ExceptionOr<CanvasImageSourceUsability> check_usability_of_image(CanvasImag
     // 1. Switch on image:
     auto usability = TRY(image.visit(
         // HTMLOrSVGImageElement
-        [](HTMLImageElement const& image_element) -> DOM::ExceptionOr<Optional<CanvasImageSourceUsability>> {
+        [](JS::Handle<HTMLImageElement> const& image_element) -> DOM::ExceptionOr<Optional<CanvasImageSourceUsability>> {
             // FIXME: If image's current request's state is broken, then throw an "InvalidStateError" DOMException.
 
             // If image is not fully decodable, then return bad.
-            if (!image_element.bitmap())
+            if (!image_element->bitmap())
                 return { CanvasImageSourceUsability::Bad };
 
             // If image has an intrinsic width or intrinsic height (or both) equal to zero, then return bad.
-            if (image_element.bitmap()->width() == 0 || image_element.bitmap()->height() == 0)
+            if (image_element->bitmap()->width() == 0 || image_element->bitmap()->height() == 0)
                 return { CanvasImageSourceUsability::Bad };
             return Optional<CanvasImageSourceUsability> {};
         },
@@ -538,10 +546,10 @@ DOM::ExceptionOr<CanvasImageSourceUsability> check_usability_of_image(CanvasImag
 
         // HTMLCanvasElement
         // FIXME: OffscreenCanvas
-        [](HTMLCanvasElement const& canvas_element) -> DOM::ExceptionOr<Optional<CanvasImageSourceUsability>> {
+        [](JS::Handle<HTMLCanvasElement> const& canvas_element) -> DOM::ExceptionOr<Optional<CanvasImageSourceUsability>> {
             // If image has either a horizontal dimension or a vertical dimension equal to zero, then throw an "InvalidStateError" DOMException.
-            if (canvas_element.width() == 0 || canvas_element.height() == 0)
-                return DOM::InvalidStateError::create("Canvas width or height is zero");
+            if (canvas_element->width() == 0 || canvas_element->height() == 0)
+                return DOM::InvalidStateError::create(canvas_element->global_object(), "Canvas width or height is zero");
             return Optional<CanvasImageSourceUsability> {};
         }));
     if (usability.has_value())
@@ -557,7 +565,7 @@ bool image_is_not_origin_clean(CanvasImageSource const& image)
     // An object image is not origin-clean if, switching on image's type:
     return image.visit(
         // HTMLOrSVGImageElement
-        [](HTMLImageElement const&) {
+        [](JS::Handle<HTMLImageElement> const&) {
             // FIXME: image's current request's image data is CORS-cross-origin.
             return false;
         },
@@ -567,7 +575,7 @@ bool image_is_not_origin_clean(CanvasImageSource const& image)
 
         // HTMLCanvasElement
         // FIXME: ImageBitmap
-        [](HTMLCanvasElement const&) {
+        [](JS::Handle<HTMLCanvasElement> const&) {
             // FIXME: image's bitmap's origin-clean flag is false.
             return false;
         });

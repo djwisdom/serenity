@@ -12,21 +12,22 @@
 namespace Web::SVG {
 
 class SVGCircleElement final : public SVGGeometryElement {
-public:
-    using WrapperType = Bindings::SVGCircleElementWrapper;
+    WEB_PLATFORM_OBJECT(SVGCircleElement, SVGGraphicsElement);
 
-    SVGCircleElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~SVGCircleElement() override = default;
 
     virtual void parse_attribute(FlyString const& name, String const& value) override;
 
     virtual Gfx::Path& get_path() override;
 
-    NonnullRefPtr<SVGAnimatedLength> cx() const;
-    NonnullRefPtr<SVGAnimatedLength> cy() const;
-    NonnullRefPtr<SVGAnimatedLength> r() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> cx() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> cy() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> r() const;
 
 private:
+    SVGCircleElement(DOM::Document&, DOM::QualifiedName);
+
     Optional<Gfx::Path> m_path;
 
     Optional<float> m_center_x;
@@ -35,3 +36,5 @@ private:
 };
 
 }
+
+WRAPPER_HACK(SVGCircleElement, Web::SVG)

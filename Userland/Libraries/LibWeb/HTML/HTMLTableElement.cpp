@@ -12,6 +12,7 @@
 #include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/HTMLTableRowElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/Namespace.h>
 
 namespace Web::HTML {
@@ -19,6 +20,7 @@ namespace Web::HTML {
 HTMLTableElement::HTMLTableElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&window().cached_web_prototype("HTMLTableElement"));
 }
 
 HTMLTableElement::~HTMLTableElement() = default;
@@ -45,7 +47,7 @@ void HTMLTableElement::apply_presentational_hints(CSS::StyleProperties& style) c
     });
 }
 
-RefPtr<HTMLTableCaptionElement> HTMLTableElement::caption()
+JS::GCPtr<HTMLTableCaptionElement> HTMLTableElement::caption()
 {
     return first_child_of_type<HTMLTableCaptionElement>();
 }
@@ -62,7 +64,7 @@ void HTMLTableElement::set_caption(HTMLTableCaptionElement* caption)
     pre_insert(*caption, first_child());
 }
 
-NonnullRefPtr<HTMLTableCaptionElement> HTMLTableElement::create_caption()
+JS::NonnullGCPtr<HTMLTableCaptionElement> HTMLTableElement::create_caption()
 {
     auto maybe_caption = caption();
     if (maybe_caption) {
@@ -71,7 +73,7 @@ NonnullRefPtr<HTMLTableCaptionElement> HTMLTableElement::create_caption()
 
     auto caption = DOM::create_element(document(), TagNames::caption, Namespace::HTML);
     pre_insert(caption, first_child());
-    return static_ptr_cast<HTMLTableCaptionElement>(caption);
+    return static_cast<HTMLTableCaptionElement&>(*caption);
 }
 
 void HTMLTableElement::delete_caption()
@@ -82,7 +84,7 @@ void HTMLTableElement::delete_caption()
     }
 }
 
-RefPtr<HTMLTableSectionElement> HTMLTableElement::t_head()
+JS::GCPtr<HTMLTableSectionElement> HTMLTableElement::t_head()
 {
     for (auto* child = first_child(); child; child = child->next_sibling()) {
         if (is<HTMLTableSectionElement>(*child)) {
@@ -101,7 +103,7 @@ DOM::ExceptionOr<void> HTMLTableElement::set_t_head(HTMLTableSectionElement* the
     VERIFY(thead);
 
     if (thead->local_name() != TagNames::thead)
-        return DOM::HierarchyRequestError::create("Element is not thead");
+        return DOM::HierarchyRequestError::create(global_object(), "Element is not thead");
 
     // FIXME: The spec requires deleting the current thead if thead is null
     //        Currently the wrapper generator doesn't send us a nullable value
@@ -130,7 +132,7 @@ DOM::ExceptionOr<void> HTMLTableElement::set_t_head(HTMLTableSectionElement* the
     return {};
 }
 
-NonnullRefPtr<HTMLTableSectionElement> HTMLTableElement::create_t_head()
+JS::NonnullGCPtr<HTMLTableSectionElement> HTMLTableElement::create_t_head()
 {
     auto maybe_thead = t_head();
     if (maybe_thead)
@@ -158,7 +160,7 @@ NonnullRefPtr<HTMLTableSectionElement> HTMLTableElement::create_t_head()
 
     pre_insert(thead, child_to_append_after);
 
-    return static_ptr_cast<HTMLTableSectionElement>(thead);
+    return static_cast<HTMLTableSectionElement&>(*thead);
 }
 
 void HTMLTableElement::delete_t_head()
@@ -169,7 +171,7 @@ void HTMLTableElement::delete_t_head()
     }
 }
 
-RefPtr<HTMLTableSectionElement> HTMLTableElement::t_foot()
+JS::GCPtr<HTMLTableSectionElement> HTMLTableElement::t_foot()
 {
     for (auto* child = first_child(); child; child = child->next_sibling()) {
         if (is<HTMLTableSectionElement>(*child)) {
@@ -188,7 +190,7 @@ DOM::ExceptionOr<void> HTMLTableElement::set_t_foot(HTMLTableSectionElement* tfo
     VERIFY(tfoot);
 
     if (tfoot->local_name() != TagNames::tfoot)
-        return DOM::HierarchyRequestError::create("Element is not tfoot");
+        return DOM::HierarchyRequestError::create(global_object(), "Element is not tfoot");
 
     // FIXME: The spec requires deleting the current tfoot if tfoot is null
     //        Currently the wrapper generator doesn't send us a nullable value
@@ -200,7 +202,7 @@ DOM::ExceptionOr<void> HTMLTableElement::set_t_foot(HTMLTableSectionElement* tfo
     return {};
 }
 
-NonnullRefPtr<HTMLTableSectionElement> HTMLTableElement::create_t_foot()
+JS::NonnullGCPtr<HTMLTableSectionElement> HTMLTableElement::create_t_foot()
 {
     auto maybe_tfoot = t_foot();
     if (maybe_tfoot)
@@ -208,7 +210,7 @@ NonnullRefPtr<HTMLTableSectionElement> HTMLTableElement::create_t_foot()
 
     auto tfoot = DOM::create_element(document(), TagNames::tfoot, Namespace::HTML);
     append_child(tfoot);
-    return static_ptr_cast<HTMLTableSectionElement>(tfoot);
+    return static_cast<HTMLTableSectionElement&>(*tfoot);
 }
 
 void HTMLTableElement::delete_t_foot()
@@ -219,14 +221,14 @@ void HTMLTableElement::delete_t_foot()
     }
 }
 
-NonnullRefPtr<DOM::HTMLCollection> HTMLTableElement::t_bodies()
+JS::NonnullGCPtr<DOM::HTMLCollection> HTMLTableElement::t_bodies()
 {
     return DOM::HTMLCollection::create(*this, [](DOM::Element const& element) {
         return element.local_name() == TagNames::tbody;
     });
 }
 
-NonnullRefPtr<HTMLTableSectionElement> HTMLTableElement::create_t_body()
+JS::NonnullGCPtr<HTMLTableSectionElement> HTMLTableElement::create_t_body()
 {
     auto tbody = DOM::create_element(document(), TagNames::tbody, Namespace::HTML);
 
@@ -247,10 +249,10 @@ NonnullRefPtr<HTMLTableSectionElement> HTMLTableElement::create_t_body()
 
     pre_insert(tbody, child_to_append_after);
 
-    return static_ptr_cast<HTMLTableSectionElement>(tbody);
+    return static_cast<HTMLTableSectionElement&>(*tbody);
 }
 
-NonnullRefPtr<DOM::HTMLCollection> HTMLTableElement::rows()
+JS::NonnullGCPtr<DOM::HTMLCollection> HTMLTableElement::rows()
 {
     HTMLTableElement* table_node = this;
     // FIXME:  The elements in the collection must be ordered such that those elements whose parent is a thead are
@@ -278,15 +280,15 @@ NonnullRefPtr<DOM::HTMLCollection> HTMLTableElement::rows()
     });
 }
 
-DOM::ExceptionOr<NonnullRefPtr<HTMLTableRowElement>> HTMLTableElement::insert_row(long index)
+DOM::ExceptionOr<JS::NonnullGCPtr<HTMLTableRowElement>> HTMLTableElement::insert_row(long index)
 {
     auto rows = this->rows();
     auto rows_length = rows->length();
 
     if (index < -1 || index > (long)rows_length) {
-        return DOM::IndexSizeError::create("Index is negative or greater than the number of rows");
+        return DOM::IndexSizeError::create(global_object(), "Index is negative or greater than the number of rows");
     }
-    auto tr = static_ptr_cast<HTMLTableRowElement>(DOM::create_element(document(), TagNames::tr, Namespace::HTML));
+    auto& tr = static_cast<HTMLTableRowElement&>(*DOM::create_element(document(), TagNames::tr, Namespace::HTML));
     if (rows_length == 0 && !has_child_of_type<HTMLTableRowElement>()) {
         auto tbody = DOM::create_element(document(), TagNames::tbody, Namespace::HTML);
         tbody->append_child(tr);
@@ -300,7 +302,7 @@ DOM::ExceptionOr<NonnullRefPtr<HTMLTableRowElement>> HTMLTableElement::insert_ro
     } else {
         rows->item(index)->parent_element()->insert_before(tr, rows->item(index));
     }
-    return tr;
+    return JS::NonnullGCPtr(tr);
 }
 
 // https://html.spec.whatwg.org/multipage/tables.html#dom-table-deleterow
@@ -311,7 +313,7 @@ DOM::ExceptionOr<void> HTMLTableElement::delete_row(long index)
 
     // 1. If index is less than −1 or greater than or equal to the number of elements in the rows collection, then throw an "IndexSizeError" DOMException.
     if (index < -1 || index >= (long)rows_length)
-        return DOM::IndexSizeError::create("Index is negative or greater than or equal to the number of rows");
+        return DOM::IndexSizeError::create(global_object(), "Index is negative or greater than or equal to the number of rows");
 
     // 2. If index is −1, then remove the last element in the rows collection from its parent, or do nothing if the rows collection is empty.
     if (index == -1) {

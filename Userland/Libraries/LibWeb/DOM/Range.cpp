@@ -24,22 +24,24 @@ HashTable<Range*>& Range::live_ranges()
     return ranges;
 }
 
-NonnullRefPtr<Range> Range::create(HTML::Window& window)
+JS::NonnullGCPtr<Range> Range::create(HTML::Window& window)
 {
     return Range::create(window.associated_document());
 }
 
-NonnullRefPtr<Range> Range::create(Document& document)
+JS::NonnullGCPtr<Range> Range::create(Document& document)
 {
-    return adopt_ref(*new Range(document));
+    auto& window_object = document.window();
+    return *window_object.heap().allocate<Range>(window_object.realm(), document);
 }
 
-NonnullRefPtr<Range> Range::create(Node& start_container, u32 start_offset, Node& end_container, u32 end_offset)
+JS::NonnullGCPtr<Range> Range::create(Node& start_container, u32 start_offset, Node& end_container, u32 end_offset)
 {
-    return adopt_ref(*new Range(start_container, start_offset, end_container, end_offset));
+    auto& window_object = start_container.document().window();
+    return *window_object.heap().allocate<Range>(window_object.realm(), start_container, start_offset, end_container, end_offset);
 }
 
-NonnullRefPtr<Range> Range::create_with_global_object(Bindings::WindowObject& window)
+JS::NonnullGCPtr<Range> Range::create_with_global_object(HTML::Window& window)
 {
     return Range::create(window.impl());
 }
@@ -47,11 +49,13 @@ NonnullRefPtr<Range> Range::create_with_global_object(Bindings::WindowObject& wi
 Range::Range(Document& document)
     : Range(document, 0, document, 0)
 {
+    set_prototype(&document.window().cached_web_prototype("Range"));
 }
 
 Range::Range(Node& start_container, u32 start_offset, Node& end_container, u32 end_offset)
     : AbstractRange(start_container, start_offset, end_container, end_offset)
 {
+    set_prototype(&start_container.window().cached_web_prototype("Range"));
     live_ranges().set(this);
 }
 
@@ -109,13 +113,13 @@ static RelativeBoundaryPointPosition position_of_boundary_point_relative_to_othe
     // 4. If nodeA is an ancestor of nodeB:
     if (node_a.is_ancestor_of(node_b)) {
         // 1. Let child be nodeB.
-        NonnullRefPtr<Node> child = node_b;
+        JS::NonnullGCPtr<Node> child = node_b;
 
         // 2. While child is not a child of nodeA, set child to its parent.
         while (!node_a.is_parent_of(child)) {
             auto* parent = child->parent();
             VERIFY(parent);
-            child = *parent;
+            child = parent;
         }
 
         // 3. If child’s index is less than offsetA, then return after.
@@ -129,22 +133,15 @@ static RelativeBoundaryPointPosition position_of_boundary_point_relative_to_othe
 
 ExceptionOr<void> Range::set_start_or_end(Node& node, u32 offset, StartOrEnd start_or_end)
 {
-    // FIXME: If the incoming node is part of a document that's in the process of being destroyed,
-    //        we just ignore this. This prevents us from trying to re-ref a document during its
-    //        destruction process. This is a hack and should be replaced with some smarter form
-    //        of lifetime management.
-    if (node.document().in_removed_last_ref())
-        return {};
-
     // To set the start or end of a range to a boundary point (node, offset), run these steps:
 
     // 1. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(node))
-        return InvalidNodeTypeError::create("Node cannot be a DocumentType.");
+        return InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
 
     // 2. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
     if (offset > node.length())
-        return IndexSizeError::create(String::formatted("Node does not contain a child at offset {}", offset));
+        return IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
 
     // 3. Let bp be the boundary point (node, offset).
 
@@ -153,12 +150,12 @@ ExceptionOr<void> Range::set_start_or_end(Node& node, u32 offset, StartOrEnd sta
 
         // 1. If range’s root is not equal to node’s root, or if bp is after the range’s end, set range’s end to bp.
         if (&root() != &node.root() || position_of_boundary_point_relative_to_other_boundary_point(node, offset, m_end_container, m_end_offset) == RelativeBoundaryPointPosition::After) {
-            m_end_container = node;
+            m_end_container = &node;
             m_end_offset = offset;
         }
 
         // 2. Set range’s start to bp.
-        m_start_container = node;
+        m_start_container = &node;
         m_start_offset = offset;
     } else {
         // -> If these steps were invoked as "set the end"
@@ -166,12 +163,12 @@ ExceptionOr<void> Range::set_start_or_end(Node& node, u32 offset, StartOrEnd sta
 
         // 1. If range’s root is not equal to node’s root, or if bp is before the range’s start, set range’s start to bp.
         if (&root() != &node.root() || position_of_boundary_point_relative_to_other_boundary_point(node, offset, m_start_container, m_start_offset) == RelativeBoundaryPointPosition::Before) {
-            m_start_container = node;
+            m_start_container = &node;
             m_start_offset = offset;
         }
 
         // 2. Set range’s end to bp.
-        m_end_container = node;
+        m_end_container = &node;
         m_end_offset = offset;
     }
 
@@ -199,7 +196,7 @@ ExceptionOr<void> Range::set_start_before(Node& node)
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create("Given node has no parent.");
+        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Set the start of this to boundary point (parent, node’s index).
     return set_start_or_end(*parent, node.index(), StartOrEnd::Start);
@@ -213,7 +210,7 @@ ExceptionOr<void> Range::set_start_after(Node& node)
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create("Given node has no parent.");
+        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Set the start of this to boundary point (parent, node’s index plus 1).
     return set_start_or_end(*parent, node.index() + 1, StartOrEnd::Start);
@@ -227,7 +224,7 @@ ExceptionOr<void> Range::set_end_before(Node& node)
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create("Given node has no parent.");
+        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Set the end of this to boundary point (parent, node’s index).
     return set_start_or_end(*parent, node.index(), StartOrEnd::End);
@@ -241,7 +238,7 @@ ExceptionOr<void> Range::set_end_after(Node& node)
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create("Given node has no parent.");
+        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Set the end of this to boundary point (parent, node’s index plus 1).
     return set_start_or_end(*parent, node.index() + 1, StartOrEnd::End);
@@ -257,16 +254,16 @@ ExceptionOr<i16> Range::compare_boundary_points(u16 how, Range const& source_ran
     //      - END_TO_START,
     //    then throw a "NotSupportedError" DOMException.
     if (how != HowToCompareBoundaryPoints::START_TO_START && how != HowToCompareBoundaryPoints::START_TO_END && how != HowToCompareBoundaryPoints::END_TO_END && how != HowToCompareBoundaryPoints::END_TO_START)
-        return NotSupportedError::create(String::formatted("Expected 'how' to be one of START_TO_START (0), START_TO_END (1), END_TO_END (2) or END_TO_START (3), got {}", how));
+        return NotSupportedError::create(global_object(), String::formatted("Expected 'how' to be one of START_TO_START (0), START_TO_END (1), END_TO_END (2) or END_TO_START (3), got {}", how));
 
     // 2. If this’s root is not the same as sourceRange’s root, then throw a "WrongDocumentError" DOMException.
     if (&root() != &source_range.root())
-        return WrongDocumentError::create("This range is not in the same tree as the source range.");
+        return WrongDocumentError::create(global_object(), "This range is not in the same tree as the source range.");
 
-    RefPtr<Node> this_point_node;
+    JS::GCPtr<Node> this_point_node;
     u32 this_point_offset = 0;
 
-    RefPtr<Node> other_point_node;
+    JS::GCPtr<Node> other_point_node;
     u32 other_point_offset = 0;
 
     // 3. If how is:
@@ -342,17 +339,17 @@ ExceptionOr<void> Range::select(Node& node)
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create("Given node has no parent.");
+        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Let index be node’s index.
     auto index = node.index();
 
     // 4. Set range’s start to boundary point (parent, index).
-    m_start_container = *parent;
+    m_start_container = parent;
     m_start_offset = index;
 
     // 5. Set range’s end to boundary point (parent, index plus 1).
-    m_end_container = *parent;
+    m_end_container = parent;
     m_end_offset = index + 1;
 
     return {};
@@ -384,33 +381,33 @@ ExceptionOr<void> Range::select_node_contents(Node const& node)
 {
     // 1. If node is a doctype, throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(node))
-        return InvalidNodeTypeError::create("Node cannot be a DocumentType.");
+        return InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
 
     // 2. Let length be the length of node.
     auto length = node.length();
 
     // 3. Set start to the boundary point (node, 0).
-    m_start_container = node;
+    m_start_container = &node;
     m_start_offset = 0;
 
     // 4. Set end to the boundary point (node, length).
-    m_end_container = node;
+    m_end_container = &node;
     m_end_offset = length;
 
     return {};
 }
 
-NonnullRefPtr<Range> Range::clone_range() const
+JS::NonnullGCPtr<Range> Range::clone_range() const
 {
-    return adopt_ref(*new Range(const_cast<Node&>(*m_start_container), m_start_offset, const_cast<Node&>(*m_end_container), m_end_offset));
+    return *heap().allocate<Range>(shape().realm(), const_cast<Node&>(*m_start_container), m_start_offset, const_cast<Node&>(*m_end_container), m_end_offset);
 }
 
-NonnullRefPtr<Range> Range::inverted() const
+JS::NonnullGCPtr<Range> Range::inverted() const
 {
-    return adopt_ref(*new Range(const_cast<Node&>(*m_end_container), m_end_offset, const_cast<Node&>(*m_start_container), m_start_offset));
+    return *heap().allocate<Range>(shape().realm(), const_cast<Node&>(*m_end_container), m_end_offset, const_cast<Node&>(*m_start_container), m_start_offset);
 }
 
-NonnullRefPtr<Range> Range::normalized() const
+JS::NonnullGCPtr<Range> Range::normalized() const
 {
     if (m_start_container.ptr() == m_end_container.ptr()) {
         if (m_start_offset <= m_end_offset)
@@ -426,7 +423,7 @@ NonnullRefPtr<Range> Range::normalized() const
 }
 
 // https://dom.spec.whatwg.org/#dom-range-commonancestorcontainer
-NonnullRefPtr<Node> Range::common_ancestor_container() const
+JS::NonnullGCPtr<Node> Range::common_ancestor_container() const
 {
     // 1. Let container be start node.
     auto container = m_start_container;
@@ -434,7 +431,7 @@ NonnullRefPtr<Node> Range::common_ancestor_container() const
     // 2. While container is not an inclusive ancestor of end node, let container be container’s parent.
     while (!container->is_inclusive_ancestor_of(m_end_container)) {
         VERIFY(container->parent());
-        container = *container->parent();
+        container = container->parent();
     }
 
     // 3. Return container.
@@ -477,11 +474,11 @@ ExceptionOr<bool> Range::is_point_in_range(Node const& node, u32 offset) const
 
     // 2. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(node))
-        return InvalidNodeTypeError::create("Node cannot be a DocumentType.");
+        return InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
 
     // 3. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
     if (offset > node.length())
-        return IndexSizeError::create(String::formatted("Node does not contain a child at offset {}", offset));
+        return IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
 
     // 4. If (node, offset) is before start or after end, return false.
     auto relative_position_to_start = position_of_boundary_point_relative_to_other_boundary_point(node, offset, m_start_container, m_start_offset);
@@ -498,15 +495,15 @@ ExceptionOr<i16> Range::compare_point(Node const& node, u32 offset) const
 {
     // 1. If node’s root is different from this’s root, then throw a "WrongDocumentError" DOMException.
     if (&node.root() != &root())
-        return WrongDocumentError::create("Given node is not in the same document as the range.");
+        return WrongDocumentError::create(global_object(), "Given node is not in the same document as the range.");
 
     // 2. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(node))
-        return InvalidNodeTypeError::create("Node cannot be a DocumentType.");
+        return InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
 
     // 3. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
     if (offset > node.length())
-        return IndexSizeError::create(String::formatted("Node does not contain a child at offset {}", offset));
+        return IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
 
     // 4. If (node, offset) is before start, return −1.
     auto relative_position_to_start = position_of_boundary_point_relative_to_other_boundary_point(node, offset, m_start_container, m_start_offset);
@@ -552,26 +549,26 @@ String Range::to_string() const
 }
 
 // https://dom.spec.whatwg.org/#dom-range-extractcontents
-ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::extract_contents()
+ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::extract_contents()
 {
     return extract();
 }
 
 // https://dom.spec.whatwg.org/#concept-range-extract
-ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::extract()
+ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::extract()
 {
     // 1. Let fragment be a new DocumentFragment node whose node document is range’s start node’s node document.
-    auto fragment = adopt_ref(*new DocumentFragment(const_cast<Document&>(start_container()->document())));
+    auto* fragment = heap().allocate<DOM::DocumentFragment>(realm(), const_cast<Document&>(start_container()->document()));
 
     // 2. If range is collapsed, then return fragment.
     if (collapsed())
-        return fragment;
+        return JS::NonnullGCPtr(*fragment);
 
     // 3. Let original start node, original start offset, original end node, and original end offset
     //    be range’s start node, start offset, end node, and end offset, respectively.
-    NonnullRefPtr<Node> original_start_node = m_start_container;
+    JS::NonnullGCPtr<Node> original_start_node = m_start_container;
     auto original_start_offset = m_start_offset;
-    NonnullRefPtr<Node> original_end_node = m_end_container;
+    JS::NonnullGCPtr<Node> original_end_node = m_end_container;
     auto original_end_offset = m_end_offset;
 
     // 4. If original start node is original end node and it is a CharacterData node, then:
@@ -591,18 +588,18 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::extract()
         static_cast<CharacterData&>(*original_start_node).replace_data(original_start_offset, original_end_offset - original_start_offset, "");
 
         // 5. Return fragment.
-        return fragment;
+        return JS::NonnullGCPtr(*fragment);
     }
 
     // 5. Let common ancestor be original start node.
-    NonnullRefPtr<Node> common_ancestor = original_start_node;
+    JS::NonnullGCPtr<Node> common_ancestor = original_start_node;
 
     // 6. While common ancestor is not an inclusive ancestor of original end node, set common ancestor to its own parent.
     while (!common_ancestor->is_inclusive_ancestor_of(original_end_node))
-        common_ancestor = *common_ancestor->parent_node();
+        common_ancestor = common_ancestor->parent_node();
 
     // 7. Let first partially contained child be null.
-    RefPtr<Node> first_partially_contained_child;
+    JS::GCPtr<Node> first_partially_contained_child;
 
     // 8. If original start node is not an inclusive ancestor of original end node,
     //    set first partially contained child to the first child of common ancestor that is partially contained in range.
@@ -616,7 +613,7 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::extract()
     }
 
     // 9. Let last partially contained child be null.
-    RefPtr<Node> last_partially_contained_child;
+    JS::GCPtr<Node> last_partially_contained_child;
 
     // 10. If original end node is not an inclusive ancestor of original start node,
     //     set last partially contained child to the last child of common ancestor that is partially contained in range.
@@ -630,7 +627,7 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::extract()
     }
 
     // 11. Let contained children be a list of all children of common ancestor that are contained in range, in tree order.
-    Vector<NonnullRefPtr<Node>> contained_children;
+    Vector<JS::NonnullGCPtr<Node>> contained_children;
     for (Node const* node = common_ancestor->first_child(); node; node = node->next_sibling()) {
         if (contains_node(*node))
             contained_children.append(*node);
@@ -639,10 +636,10 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::extract()
     // 12. If any member of contained children is a doctype, then throw a "HierarchyRequestError" DOMException.
     for (auto const& child : contained_children) {
         if (is<DocumentType>(*child))
-            return DOM::HierarchyRequestError::create("Contained child is a DocumentType");
+            return DOM::HierarchyRequestError::create(global_object(), "Contained child is a DocumentType");
     }
 
-    RefPtr<Node> new_node;
+    JS::GCPtr<Node> new_node;
     size_t new_offset = 0;
 
     // 13. If original start node is an inclusive ancestor of original end node, set new node to original start node and new offset to original start offset.
@@ -653,7 +650,7 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::extract()
     // 14. Otherwise:
     else {
         // 1. Let reference node equal original start node.
-        RefPtr<Node> reference_node = original_start_node;
+        JS::GCPtr<Node> reference_node = original_start_node;
 
         // 2. While reference node’s parent is not null and is not an inclusive ancestor of original end node, set reference node to its parent.
         while (reference_node->parent_node() && !reference_node->parent_node()->is_inclusive_ancestor_of(original_end_node))
@@ -741,7 +738,7 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::extract()
     set_end(*new_node, new_offset);
 
     // 21. Return fragment.
-    return fragment;
+    return JS::NonnullGCPtr(*fragment);
 }
 
 // https://dom.spec.whatwg.org/#contained
@@ -774,23 +771,23 @@ bool Range::partially_contains_node(Node const& node) const
 }
 
 // https://dom.spec.whatwg.org/#dom-range-insertnode
-ExceptionOr<void> Range::insert_node(NonnullRefPtr<Node> node)
+ExceptionOr<void> Range::insert_node(JS::NonnullGCPtr<Node> node)
 {
     return insert(node);
 }
 
 // https://dom.spec.whatwg.org/#concept-range-insert
-ExceptionOr<void> Range::insert(NonnullRefPtr<Node> node)
+ExceptionOr<void> Range::insert(JS::NonnullGCPtr<Node> node)
 {
     // 1. If range’s start node is a ProcessingInstruction or Comment node, is a Text node whose parent is null, or is node, then throw a "HierarchyRequestError" DOMException.
     if ((is<ProcessingInstruction>(*m_start_container) || is<Comment>(*m_start_container))
         || (is<Text>(*m_start_container) && !m_start_container->parent_node())
-        || m_start_container == node.ptr()) {
-        return DOM::HierarchyRequestError::create("Range has inappropriate start node for insertion");
+        || m_start_container.ptr() == node.ptr()) {
+        return DOM::HierarchyRequestError::create(global_object(), "Range has inappropriate start node for insertion");
     }
 
     // 2. Let referenceNode be null.
-    RefPtr<Node> reference_node;
+    JS::GCPtr<Node> reference_node;
 
     // 3. If range’s start node is a Text node, set referenceNode to that Text node.
     if (is<Text>(*m_start_container)) {
@@ -802,7 +799,7 @@ ExceptionOr<void> Range::insert(NonnullRefPtr<Node> node)
     }
 
     // 5. Let parent be range’s start node if referenceNode is null, and referenceNode’s parent otherwise.
-    RefPtr<Node> parent;
+    JS::GCPtr<Node> parent;
     if (!reference_node)
         parent = m_start_container;
     else
@@ -847,7 +844,7 @@ ExceptionOr<void> Range::insert(NonnullRefPtr<Node> node)
 }
 
 // https://dom.spec.whatwg.org/#dom-range-surroundcontents
-ExceptionOr<void> Range::surround_contents(NonnullRefPtr<Node> new_parent)
+ExceptionOr<void> Range::surround_contents(JS::NonnullGCPtr<Node> new_parent)
 {
     // 1. If a non-Text node is partially contained in this, then throw an "InvalidStateError" DOMException.
     Node* start_non_text_node = start_container();
@@ -857,11 +854,11 @@ ExceptionOr<void> Range::surround_contents(NonnullRefPtr<Node> new_parent)
     if (is<Text>(*end_non_text_node))
         end_non_text_node = end_non_text_node->parent_node();
     if (start_non_text_node != end_non_text_node)
-        return InvalidStateError::create("Non-Text node is partially contained in range.");
+        return InvalidStateError::create(global_object(), "Non-Text node is partially contained in range.");
 
     // 2. If newParent is a Document, DocumentType, or DocumentFragment node, then throw an "InvalidNodeTypeError" DOMException.
     if (is<Document>(*new_parent) || is<DocumentType>(*new_parent) || is<DocumentFragment>(*new_parent))
-        return InvalidNodeTypeError::create("Invalid parent node type");
+        return InvalidNodeTypeError::create(global_object(), "Invalid parent node type");
 
     // 3. Let fragment be the result of extracting this.
     auto fragment = TRY(extract());
@@ -881,26 +878,26 @@ ExceptionOr<void> Range::surround_contents(NonnullRefPtr<Node> new_parent)
 }
 
 // https://dom.spec.whatwg.org/#dom-range-clonecontents
-ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::clone_contents()
+ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::clone_contents()
 {
     return clone_the_contents();
 }
 
 // https://dom.spec.whatwg.org/#concept-range-clone
-ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::clone_the_contents()
+ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::clone_the_contents()
 {
     // 1. Let fragment be a new DocumentFragment node whose node document is range’s start node’s node document.
-    auto fragment = adopt_ref(*new DocumentFragment(const_cast<Document&>(start_container()->document())));
+    auto* fragment = heap().allocate<DOM::DocumentFragment>(realm(), const_cast<Document&>(start_container()->document()));
 
     // 2. If range is collapsed, then return fragment.
     if (collapsed())
-        return fragment;
+        return JS::NonnullGCPtr(*fragment);
 
     // 3. Let original start node, original start offset, original end node, and original end offset
     //    be range’s start node, start offset, end node, and end offset, respectively.
-    NonnullRefPtr<Node> original_start_node = m_start_container;
+    JS::NonnullGCPtr<Node> original_start_node = m_start_container;
     auto original_start_offset = m_start_offset;
-    NonnullRefPtr<Node> original_end_node = m_end_container;
+    JS::NonnullGCPtr<Node> original_end_node = m_end_container;
     auto original_end_offset = m_end_offset;
 
     // 4. If original start node is original end node and it is a CharacterData node, then:
@@ -917,18 +914,18 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::clone_the_contents()
         fragment->append_child(clone);
 
         // 4. Return fragment.
-        return fragment;
+        return JS::NonnullGCPtr(*fragment);
     }
 
     // 5. Let common ancestor be original start node.
-    NonnullRefPtr<Node> common_ancestor = original_start_node;
+    JS::NonnullGCPtr<Node> common_ancestor = original_start_node;
 
     // 6. While common ancestor is not an inclusive ancestor of original end node, set common ancestor to its own parent.
     while (!common_ancestor->is_inclusive_ancestor_of(original_end_node))
-        common_ancestor = *common_ancestor->parent_node();
+        common_ancestor = common_ancestor->parent_node();
 
     // 7. Let first partially contained child be null.
-    RefPtr<Node> first_partially_contained_child;
+    JS::GCPtr<Node> first_partially_contained_child;
 
     // 8. If original start node is not an inclusive ancestor of original end node,
     //    set first partially contained child to the first child of common ancestor that is partially contained in range.
@@ -942,7 +939,7 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::clone_the_contents()
     }
 
     // 9. Let last partially contained child be null.
-    RefPtr<Node> last_partially_contained_child;
+    JS::GCPtr<Node> last_partially_contained_child;
 
     // 10. If original end node is not an inclusive ancestor of original start node,
     //     set last partially contained child to the last child of common ancestor that is partially contained in range.
@@ -956,7 +953,7 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::clone_the_contents()
     }
 
     // 11. Let contained children be a list of all children of common ancestor that are contained in range, in tree order.
-    Vector<NonnullRefPtr<Node>> contained_children;
+    Vector<JS::NonnullGCPtr<Node>> contained_children;
     for (Node const* node = common_ancestor->first_child(); node; node = node->next_sibling()) {
         if (contains_node(*node))
             contained_children.append(*node);
@@ -965,7 +962,7 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::clone_the_contents()
     // 12. If any member of contained children is a doctype, then throw a "HierarchyRequestError" DOMException.
     for (auto const& child : contained_children) {
         if (is<DocumentType>(*child))
-            return DOM::HierarchyRequestError::create("Contained child is a DocumentType");
+            return DOM::HierarchyRequestError::create(global_object(), "Contained child is a DocumentType");
     }
 
     // 13. If first partially contained child is a CharacterData node, then:
@@ -1039,7 +1036,7 @@ ExceptionOr<NonnullRefPtr<DocumentFragment>> Range::clone_the_contents()
     }
 
     // 18. Return fragment.
-    return fragment;
+    return JS::NonnullGCPtr(*fragment);
 }
 
 // https://dom.spec.whatwg.org/#dom-range-deletecontents
@@ -1050,9 +1047,9 @@ ExceptionOr<void> Range::delete_contents()
         return {};
 
     // 2. Let original start node, original start offset, original end node, and original end offset be this’s start node, start offset, end node, and end offset, respectively.
-    NonnullRefPtr<Node> original_start_node = m_start_container;
+    JS::NonnullGCPtr<Node> original_start_node = m_start_container;
     auto original_start_offset = m_start_offset;
-    NonnullRefPtr<Node> original_end_node = m_end_container;
+    JS::NonnullGCPtr<Node> original_end_node = m_end_container;
     auto original_end_offset = m_end_offset;
 
     // 3. If original start node is original end node and it is a CharacterData node, then replace data with node original start node, offset original start offset,
@@ -1063,13 +1060,13 @@ ExceptionOr<void> Range::delete_contents()
     }
 
     // 4. Let nodes to remove be a list of all the nodes that are contained in this, in tree order, omitting any node whose parent is also contained in this.
-    Vector<NonnullRefPtr<Node>> nodes_to_remove;
+    JS::MarkedVector<Node*> nodes_to_remove(heap());
     for (Node const* node = start_container(); node != end_container()->next_in_pre_order(); node = node->next_in_pre_order()) {
         if (contains_node(*node) && (!node->parent_node() || !contains_node(*node->parent_node())))
-            nodes_to_remove.append(*node);
+            nodes_to_remove.append(const_cast<Node*>(node));
     }
 
-    RefPtr<Node> new_node;
+    JS::GCPtr<Node> new_node;
     size_t new_offset = 0;
 
     // 5. If original start node is an inclusive ancestor of original end node, set new node to original start node and new offset to original start offset.
@@ -1084,7 +1081,7 @@ ExceptionOr<void> Range::delete_contents()
 
         // 2. While reference node’s parent is not null and is not an inclusive ancestor of original end node, set reference node to its parent.
         while (reference_node->parent_node() && !reference_node->parent_node()->is_inclusive_ancestor_of(original_end_node))
-            reference_node = *reference_node->parent_node();
+            reference_node = reference_node->parent_node();
 
         // 3. Set new node to the parent of reference node, and new offset to one plus the index of reference node.
         new_node = reference_node->parent_node();

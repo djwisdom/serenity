@@ -6,13 +6,20 @@
 
 #include <LibWeb/CSS/CSSSupportsRule.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::CSS {
 
-CSSSupportsRule::CSSSupportsRule(NonnullRefPtr<Supports>&& supports, NonnullRefPtrVector<CSSRule>&& rules)
-    : CSSConditionRule(move(rules))
+CSSSupportsRule* CSSSupportsRule::create(HTML::Window& window_object, NonnullRefPtr<Supports>&& supports, CSSRuleList& rules)
+{
+    return window_object.heap().allocate<CSSSupportsRule>(window_object.realm(), window_object, move(supports), rules);
+}
+
+CSSSupportsRule::CSSSupportsRule(HTML::Window& window_object, NonnullRefPtr<Supports>&& supports, CSSRuleList& rules)
+    : CSSConditionRule(window_object, rules)
     , m_supports(move(supports))
 {
+    set_prototype(&window_object.cached_web_prototype("CSSSupportsRule"));
 }
 
 String CSSSupportsRule::condition_text() const

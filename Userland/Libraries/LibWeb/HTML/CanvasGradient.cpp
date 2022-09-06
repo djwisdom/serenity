@@ -7,10 +7,11 @@
 #include <AK/QuickSort.h>
 #include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/HTML/CanvasGradient.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
-NonnullRefPtr<CanvasGradient> CanvasGradient::create_radial(double x0, double y0, double r0, double x1, double y1, double r1)
+JS::NonnullGCPtr<CanvasGradient> CanvasGradient::create_radial(HTML::Window& window, double x0, double y0, double r0, double x1, double y1, double r1)
 {
     (void)x0;
     (void)y0;
@@ -18,29 +19,31 @@ NonnullRefPtr<CanvasGradient> CanvasGradient::create_radial(double x0, double y0
     (void)x1;
     (void)y1;
     (void)r1;
-    return adopt_ref(*new CanvasGradient(Type::Radial));
+    return *window.heap().allocate<CanvasGradient>(window.realm(), window, Type::Radial);
 }
 
-NonnullRefPtr<CanvasGradient> CanvasGradient::create_linear(double x0, double y0, double x1, double y1)
+JS::NonnullGCPtr<CanvasGradient> CanvasGradient::create_linear(HTML::Window& window, double x0, double y0, double x1, double y1)
 {
     (void)x0;
     (void)y0;
     (void)x1;
     (void)y1;
-    return adopt_ref(*new CanvasGradient(Type::Linear));
+    return *window.heap().allocate<CanvasGradient>(window.realm(), window, Type::Linear);
 }
 
-NonnullRefPtr<CanvasGradient> CanvasGradient::create_conic(double start_angle, double x, double y)
+JS::NonnullGCPtr<CanvasGradient> CanvasGradient::create_conic(HTML::Window& window, double start_angle, double x, double y)
 {
     (void)start_angle;
     (void)x;
     (void)y;
-    return adopt_ref(*new CanvasGradient(Type::Conic));
+    return *window.heap().allocate<CanvasGradient>(window.realm(), window, Type::Conic);
 }
 
-CanvasGradient::CanvasGradient(Type type)
-    : m_type(type)
+CanvasGradient::CanvasGradient(HTML::Window& window, Type type)
+    : PlatformObject(window.realm())
+    , m_type(type)
 {
+    set_prototype(&window.cached_web_prototype("CanvasGradient"));
 }
 
 CanvasGradient::~CanvasGradient() = default;
@@ -50,14 +53,14 @@ DOM::ExceptionOr<void> CanvasGradient::add_color_stop(double offset, String cons
 {
     // 1. If the offset is less than 0 or greater than 1, then throw an "IndexSizeError" DOMException.
     if (offset < 0 || offset > 1)
-        return DOM::IndexSizeError::create("CanvasGradient color stop offset out of bounds");
+        return DOM::IndexSizeError::create(global_object(), "CanvasGradient color stop offset out of bounds");
 
     // 2. Let parsed color be the result of parsing color.
     auto parsed_color = Color::from_string(color);
 
     // 3. If parsed color is failure, throw a "SyntaxError" DOMException.
     if (!parsed_color.has_value())
-        return DOM::SyntaxError::create("Could not parse color for CanvasGradient");
+        return DOM::SyntaxError::create(global_object(), "Could not parse color for CanvasGradient");
 
     // 4. Place a new stop on the gradient, at offset offset relative to the whole gradient, and with the color parsed color.
     m_color_stops.append(ColorStop { offset, parsed_color.value() });

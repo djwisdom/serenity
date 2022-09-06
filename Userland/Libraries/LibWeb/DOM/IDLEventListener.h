@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,7 +9,6 @@
 #include <AK/RefCounted.h>
 #include <LibJS/Heap/Handle.h>
 #include <LibWeb/Bindings/CallbackType.h>
-#include <LibWeb/Bindings/Wrappable.h>
 #include <LibWeb/DOM/AbortSignal.h>
 
 namespace Web::DOM {
@@ -22,26 +21,26 @@ struct EventListenerOptions {
 struct AddEventListenerOptions : public EventListenerOptions {
     bool passive { false };
     bool once { false };
-    Optional<NonnullRefPtr<AbortSignal>> signal;
+    Optional<JS::NonnullGCPtr<AbortSignal>> signal;
 };
 
-class IDLEventListener
-    : public RefCounted<IDLEventListener>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::EventListenerWrapper;
+class IDLEventListener final : public JS::Object {
+    JS_OBJECT(IDLEventListener, JS::Object);
 
-    explicit IDLEventListener(Bindings::CallbackType callback)
-        : m_callback(move(callback))
-    {
-    }
+public:
+    static JS::NonnullGCPtr<IDLEventListener> create(JS::Realm&, JS::NonnullGCPtr<Bindings::CallbackType>);
+    IDLEventListener(JS::Realm&, JS::NonnullGCPtr<Bindings::CallbackType>);
 
     virtual ~IDLEventListener() = default;
 
-    Bindings::CallbackType& callback() { return m_callback; }
+    Bindings::CallbackType& callback() { return *m_callback; }
 
 private:
-    Bindings::CallbackType m_callback;
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    JS::NonnullGCPtr<Bindings::CallbackType> m_callback;
 };
 
 }
+
+WRAPPER_HACK(IDLEventListener, Web::DOM)

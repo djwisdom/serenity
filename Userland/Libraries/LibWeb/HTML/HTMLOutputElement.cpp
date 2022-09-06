@@ -5,12 +5,14 @@
  */
 
 #include <LibWeb/HTML/HTMLOutputElement.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
 HTMLOutputElement::HTMLOutputElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&window().cached_web_prototype("HTMLOutputElement"));
 }
 
 HTMLOutputElement::~HTMLOutputElement() = default;

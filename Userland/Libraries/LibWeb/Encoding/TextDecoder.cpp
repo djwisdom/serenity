@@ -7,10 +7,31 @@
 #include <AK/FlyString.h>
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibWeb/Bindings/IDLAbstractOperations.h>
-#include <LibWeb/Bindings/Wrapper.h>
 #include <LibWeb/Encoding/TextDecoder.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::Encoding {
+
+DOM::ExceptionOr<JS::NonnullGCPtr<TextDecoder>> TextDecoder::create_with_global_object(HTML::Window& window, FlyString encoding)
+{
+    auto decoder = TextCodec::decoder_for(encoding);
+    if (!decoder)
+        return DOM::SimpleException { DOM::SimpleExceptionType::TypeError, String::formatted("Invalid encoding {}", encoding) };
+
+    return JS::NonnullGCPtr(*window.heap().allocate<TextDecoder>(window.realm(), window, *decoder, move(encoding), false, false));
+}
+
+// https://encoding.spec.whatwg.org/#dom-textdecoder
+TextDecoder::TextDecoder(HTML::Window& window, TextCodec::Decoder& decoder, FlyString encoding, bool fatal, bool ignore_bom)
+    : PlatformObject(window.realm())
+    , m_decoder(decoder)
+    , m_encoding(move(encoding))
+    , m_fatal(fatal)
+    , m_ignore_bom(ignore_bom)
+{
+}
+
+TextDecoder::~TextDecoder() = default;
 
 // https://encoding.spec.whatwg.org/#dom-textdecoder-decode
 DOM::ExceptionOr<String> TextDecoder::decode(JS::Handle<JS::Object> const& input) const
@@ -19,7 +40,7 @@ DOM::ExceptionOr<String> TextDecoder::decode(JS::Handle<JS::Object> const& input
 
     auto data_buffer_or_error = Bindings::IDL::get_buffer_source_copy(*input.cell());
     if (data_buffer_or_error.is_error())
-        return DOM::OperationError::create("Failed to copy bytes from ArrayBuffer");
+        return DOM::OperationError::create(global_object(), "Failed to copy bytes from ArrayBuffer");
     auto& data_buffer = data_buffer_or_error.value();
     return m_decoder.to_utf8({ data_buffer.data(), data_buffer.size() });
 }

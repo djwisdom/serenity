@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/Layout/SVGGeometryBox.h>
 #include <LibWeb/SVG/SVGGeometryElement.h>
 
@@ -12,6 +13,7 @@ namespace Web::SVG {
 SVGGeometryElement::SVGGeometryElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : SVGGraphicsElement(document, move(qualified_name))
 {
+    set_prototype(&window().cached_web_prototype("SVGGeometryElement"));
 }
 
 RefPtr<Layout::Node> SVGGeometryElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
@@ -24,10 +26,10 @@ float SVGGeometryElement::get_total_length()
     return 0;
 }
 
-NonnullRefPtr<Geometry::DOMPoint> SVGGeometryElement::get_point_at_length(float distance)
+JS::NonnullGCPtr<Geometry::DOMPoint> SVGGeometryElement::get_point_at_length(float distance)
 {
     (void)distance;
-    return Geometry::DOMPoint::create(0, 0, 0, 0);
+    return Geometry::DOMPoint::create_with_global_object(window(), 0, 0, 0, 0);
 }
 
 }

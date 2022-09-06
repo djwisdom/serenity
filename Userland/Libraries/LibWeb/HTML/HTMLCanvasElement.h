@@ -14,11 +14,11 @@
 namespace Web::HTML {
 
 class HTMLCanvasElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLCanvasElementWrapper;
-    using RenderingContext = Variant<NonnullRefPtr<CanvasRenderingContext2D>, NonnullRefPtr<WebGL::WebGLRenderingContext>, Empty>;
+    WEB_PLATFORM_OBJECT(HTMLCanvasElement, HTMLElement);
 
-    HTMLCanvasElement(DOM::Document&, DOM::QualifiedName);
+public:
+    using RenderingContext = Variant<JS::Handle<CanvasRenderingContext2D>, JS::Handle<WebGL::WebGLRenderingContext>, Empty>;
+
     virtual ~HTMLCanvasElement() override;
 
     Gfx::Bitmap const* bitmap() const { return m_bitmap; }
@@ -38,6 +38,10 @@ public:
     void present();
 
 private:
+    HTMLCanvasElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
     virtual RefPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>) override;
 
     enum class HasOrCreatedContext {
@@ -50,7 +54,10 @@ private:
     void reset_context_to_default_state();
 
     RefPtr<Gfx::Bitmap> m_bitmap;
-    RenderingContext m_context;
+
+    Variant<JS::NonnullGCPtr<HTML::CanvasRenderingContext2D>, JS::NonnullGCPtr<WebGL::WebGLRenderingContext>, Empty> m_context;
 };
 
 }
+
+WRAPPER_HACK(HTMLCanvasElement, Web::HTML)

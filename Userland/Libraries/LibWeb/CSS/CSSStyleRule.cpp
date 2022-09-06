@@ -6,19 +6,33 @@
 
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::CSS {
 
-CSSStyleRule::CSSStyleRule(NonnullRefPtrVector<Selector>&& selectors, NonnullRefPtr<CSSStyleDeclaration>&& declaration)
-    : m_selectors(move(selectors))
-    , m_declaration(move(declaration))
+CSSStyleRule* CSSStyleRule::create(HTML::Window& window_object, NonnullRefPtrVector<Web::CSS::Selector>&& selectors, CSSStyleDeclaration& declaration)
 {
+    return window_object.heap().allocate<CSSStyleRule>(window_object.realm(), window_object, move(selectors), declaration);
+}
+
+CSSStyleRule::CSSStyleRule(HTML::Window& window_object, NonnullRefPtrVector<Selector>&& selectors, CSSStyleDeclaration& declaration)
+    : CSSRule(window_object)
+    , m_selectors(move(selectors))
+    , m_declaration(declaration)
+{
+    set_prototype(&window_object.cached_web_prototype("CSSStyleRule"));
+}
+
+void CSSStyleRule::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(&m_declaration);
 }
 
 // https://www.w3.org/TR/cssom/#dom-cssstylerule-style
 CSSStyleDeclaration* CSSStyleRule::style()
 {
-    return m_declaration;
+    return &m_declaration;
 }
 
 // https://www.w3.org/TR/cssom/#serialize-a-css-rule

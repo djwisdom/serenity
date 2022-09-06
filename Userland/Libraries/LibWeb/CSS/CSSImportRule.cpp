@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021, the SerenityOS developers.
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,14 +11,24 @@
 #include <LibWeb/CSS/CSSImportRule.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 
 namespace Web::CSS {
 
+CSSImportRule* CSSImportRule::create(AK::URL url, DOM::Document& document)
+{
+    auto& window_object = document.window();
+    return window_object.heap().allocate<CSSImportRule>(window_object.realm(), move(url), document);
+}
+
 CSSImportRule::CSSImportRule(AK::URL url, DOM::Document& document)
-    : m_url(move(url))
+    : CSSRule(document.window())
+    , m_url(move(url))
     , m_document(document)
 {
+    set_prototype(&document.window().cached_web_prototype("CSSImportRule"));
+
     dbgln_if(CSS_LOADER_DEBUG, "CSSImportRule: Loading import URL: {}", m_url);
     auto request = LoadRequest::create_for_url_on_page(m_url, document.page());
 
@@ -26,6 +37,13 @@ CSSImportRule::CSSImportRule(AK::URL url, DOM::Document& document)
     m_document_load_event_delayer.emplace(document);
 
     set_resource(ResourceLoader::the().load_resource(Resource::Type::Generic, request));
+}
+
+void CSSImportRule::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_document);
+    visitor.visit(m_style_sheet);
 }
 
 // https://www.w3.org/TR/cssom/#serialize-a-css-rule
@@ -73,13 +91,13 @@ void CSSImportRule::resource_did_load()
         dbgln_if(CSS_LOADER_DEBUG, "CSSImportRule: Resource did load, has encoded data. URL: {}", resource()->url());
     }
 
-    auto sheet = parse_css_stylesheet(CSS::Parser::ParsingContext(*m_document, resource()->url()), resource()->encoded_data());
+    auto* sheet = parse_css_stylesheet(CSS::Parser::ParsingContext(*m_document, resource()->url()), resource()->encoded_data());
     if (!sheet) {
         dbgln_if(CSS_LOADER_DEBUG, "CSSImportRule: Failed to parse stylesheet: {}", resource()->url());
         return;
     }
 
-    m_style_sheet = move(sheet);
+    m_style_sheet = sheet;
 
     m_document->style_computer().invalidate_rule_cache();
     m_document->invalidate_style();

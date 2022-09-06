@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
@@ -14,6 +14,14 @@ WindowEnvironmentSettingsObject::WindowEnvironmentSettingsObject(Window& window,
     : EnvironmentSettingsObject(move(execution_context))
     , m_window(window)
 {
+}
+
+WindowEnvironmentSettingsObject::~WindowEnvironmentSettingsObject() = default;
+
+void WindowEnvironmentSettingsObject::visit_edges(JS::Cell::Visitor& visitor)
+{
+    EnvironmentSettingsObject::visit_edges(visitor);
+    visitor.visit(m_window.ptr());
 }
 
 // https://html.spec.whatwg.org/multipage/window-object.html#set-up-a-window-environment-settings-object
@@ -25,7 +33,7 @@ void WindowEnvironmentSettingsObject::setup(AK::URL const& creation_url, Nonnull
 
     // 2. Let window be realm's global object.
     // NOTE: We want to store the Window impl rather than the WindowObject.
-    auto& window = verify_cast<Bindings::WindowObject>(realm->global_object()).impl();
+    auto& window = verify_cast<HTML::Window>(realm->global_object()).impl();
 
     // 3. Let settings object be a new environment settings object whose algorithms are defined as follows:
     // NOTE: See the functions defined for this class.
@@ -61,7 +69,7 @@ void WindowEnvironmentSettingsObject::setup(AK::URL const& creation_url, Nonnull
 }
 
 // https://html.spec.whatwg.org/multipage/window-object.html#script-settings-for-window-objects:responsible-document
-RefPtr<DOM::Document> WindowEnvironmentSettingsObject::responsible_document()
+JS::GCPtr<DOM::Document> WindowEnvironmentSettingsObject::responsible_document()
 {
     // Return window's associated Document.
     return m_window->associated_document();

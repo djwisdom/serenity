@@ -1,5 +1,6 @@
 #import <DOM/Event.idl>
 
+[]
 interface UIEvent : Event {
     constructor(DOMString type, optional UIEventInit eventInitDict = {});
     readonly attribute Window? view;

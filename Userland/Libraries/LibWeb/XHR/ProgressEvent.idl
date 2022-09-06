@@ -1,5 +1,6 @@
 #import <DOM/Event.idl>
 
+[]
 interface ProgressEvent : Event {
     constructor(DOMString type, optional ProgressEventInit eventInitDict = {});
 
