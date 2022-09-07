@@ -108,32 +108,25 @@ function (generate_js_wrappers target)
         cmake_parse_arguments(PARSE_ARGV 1 LIBWEB_WRAPPER "ITERABLE" "" "")
         get_filename_component(basename "${class}" NAME)
         set(BINDINGS_SOURCES
-            "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Wrapper.h"
-            "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Wrapper.cpp"
             "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Constructor.h"
             "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Constructor.cpp"
             "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Prototype.h"
             "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Prototype.cpp"
         )
         set(BINDINGS_TYPES
-            header
-            implementation
             constructor-header
             constructor-implementation
             prototype-header
             prototype-implementation
         )
+
         # FIXME: Instead of requiring a manual declaration of iterable wrappers, we should ask WrapperGenerator if it's iterable
         if(LIBWEB_WRAPPER_ITERABLE)
             list(APPEND BINDINGS_SOURCES
-                "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}IteratorWrapper.h"
-                "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}IteratorWrapper.cpp"
                 "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}IteratorPrototype.h"
                 "${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}IteratorPrototype.cpp"
             )
             list(APPEND BINDINGS_TYPES
-                iterator-header
-                iterator-implementation
                 iterator-prototype-header
                 iterator-prototype-implementation
             )
@@ -157,10 +150,6 @@ function (generate_js_wrappers target)
                 MAIN_DEPENDENCY ${LIBWEB_INPUT_FOLDER}/${class}.idl
             )
         endforeach()
-        add_custom_target(generate_${basename}Wrapper.h DEPENDS ${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Wrapper.h)
-        add_dependencies(all_generated generate_${basename}Wrapper.h)
-        add_custom_target(generate_${basename}Wrapper.cpp DEPENDS ${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Wrapper.cpp)
-        add_dependencies(all_generated generate_${basename}Wrapper.cpp)
         add_custom_target(generate_${basename}Constructor.h DEPENDS ${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Constructor.h)
         add_dependencies(all_generated generate_${basename}Constructor.h)
         add_custom_target(generate_${basename}Constructor.cpp DEPENDS ${LIBWEB_OUTPUT_FOLDER}Bindings/${basename}Constructor.cpp)

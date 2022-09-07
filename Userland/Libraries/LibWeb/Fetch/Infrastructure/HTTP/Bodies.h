@@ -11,6 +11,7 @@
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
 #include <AK/Variant.h>
+#include <LibJS/Heap/Handle.h>
 #include <LibWeb/FileAPI/Blob.h>
 
 namespace Web::Fetch::Infrastructure {
@@ -18,7 +19,7 @@ namespace Web::Fetch::Infrastructure {
 // https://fetch.spec.whatwg.org/#concept-body
 class Body final {
 public:
-    using SourceType = Variant<Empty, ByteBuffer, NonnullRefPtr<FileAPI::Blob>>;
+    using SourceType = Variant<Empty, ByteBuffer, JS::Handle<FileAPI::Blob>>;
 
     struct ReadableStreamDummy { };
 

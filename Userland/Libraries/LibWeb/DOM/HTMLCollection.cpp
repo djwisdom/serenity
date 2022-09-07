@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -8,24 +8,37 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/ParentNode.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/Namespace.h>
 
 namespace Web::DOM {
 
+JS::NonnullGCPtr<HTMLCollection> HTMLCollection::create(ParentNode& root, Function<bool(Element const&)> filter)
+{
+    return *root.heap().allocate<HTMLCollection>(root.realm(), root, move(filter));
+}
+
 HTMLCollection::HTMLCollection(ParentNode& root, Function<bool(Element const&)> filter)
-    : m_root(root)
+    : LegacyPlatformObject(root.window().cached_web_prototype("HTMLCollection"))
+    , m_root(root)
     , m_filter(move(filter))
 {
 }
 
 HTMLCollection::~HTMLCollection() = default;
 
-Vector<NonnullRefPtr<Element>> HTMLCollection::collect_matching_elements() const
+void HTMLCollection::visit_edges(Cell::Visitor& visitor)
 {
-    Vector<NonnullRefPtr<Element>> elements;
+    Base::visit_edges(visitor);
+    visitor.visit(m_root.ptr());
+}
+
+JS::MarkedVector<Element*> HTMLCollection::collect_matching_elements() const
+{
+    JS::MarkedVector<Element*> elements(m_root->heap());
     m_root->for_each_in_inclusive_subtree_of_type<Element>([&](auto& element) {
         if (m_filter(element))
-            elements.append(element);
+            elements.append(const_cast<Element*>(&element));
         return IterationDecision::Continue;
     });
     return elements;
@@ -109,4 +122,19 @@ bool HTMLCollection::is_supported_property_index(u32 index) const
     return index < elements.size();
 }
 
+JS::Value HTMLCollection::item_value(size_t index) const
+{
+    auto* element = item(index);
+    if (!element)
+        return JS::js_undefined();
+    return const_cast<Element*>(element);
+}
+
+JS::Value HTMLCollection::named_item_value(FlyString const& index) const
+{
+    auto* element = named_item(index);
+    if (!element)
+        return JS::js_undefined();
+    return const_cast<Element*>(element);
+}
 }

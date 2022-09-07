@@ -29,11 +29,9 @@ class Element
     : public ParentNode
     , public ChildNode<Element>
     , public NonDocumentTypeChildNode<Element> {
+    WEB_PLATFORM_OBJECT(Element, ParentNode);
 
 public:
-    using WrapperType = Bindings::ElementWrapper;
-
-    Element(Document&, DOM::QualifiedName);
     virtual ~Element() override;
 
     String const& qualified_name() const { return m_qualified_name.as_string(); }
@@ -59,10 +57,10 @@ public:
     void remove_attribute(FlyString const& name);
     DOM::ExceptionOr<bool> toggle_attribute(FlyString const& name, Optional<bool> force);
     size_t attribute_list_size() const { return m_attributes->length(); }
-    NonnullRefPtr<NamedNodeMap> const& attributes() const { return m_attributes; }
+    NamedNodeMap const* attributes() const { return m_attributes.ptr(); }
     Vector<String> get_attribute_names() const;
 
-    RefPtr<DOMTokenList> const& class_list();
+    DOMTokenList* class_list();
 
     DOM::ExceptionOr<bool> matches(StringView selectors) const;
     DOM::ExceptionOr<DOM::Element const*> closest(StringView selectors) const;
@@ -105,7 +103,7 @@ public:
 
     CSS::CSSStyleDeclaration const* inline_style() const;
 
-    NonnullRefPtr<CSS::CSSStyleDeclaration> style_for_bindings();
+    CSS::CSSStyleDeclaration* style_for_bindings();
 
     String inner_html() const;
     ExceptionOr<void> set_inner_html(String const&);
@@ -113,11 +111,11 @@ public:
     bool is_focused() const;
     bool is_active() const;
 
-    NonnullRefPtr<HTMLCollection> get_elements_by_class_name(FlyString const&);
+    JS::NonnullGCPtr<HTMLCollection> get_elements_by_class_name(FlyString const&);
 
-    ShadowRoot* shadow_root() { return m_shadow_root; }
-    ShadowRoot const* shadow_root() const { return m_shadow_root; }
-    void set_shadow_root(RefPtr<ShadowRoot>);
+    ShadowRoot* shadow_root() { return m_shadow_root.ptr(); }
+    ShadowRoot const* shadow_root() const { return m_shadow_root.ptr(); }
+    void set_shadow_root(JS::GCPtr<ShadowRoot>);
 
     void set_custom_properties(HashMap<FlyString, CSS::StyleProperty> custom_properties) { m_custom_properties = move(custom_properties); }
     HashMap<FlyString, CSS::StyleProperty> const& custom_properties() const { return m_custom_properties; }
@@ -127,8 +125,8 @@ public:
     bool is_void_element() const;
     bool serializes_as_void() const;
 
-    NonnullRefPtr<Geometry::DOMRect> get_bounding_client_rect() const;
-    NonnullRefPtr<Geometry::DOMRectList> get_client_rects() const;
+    JS::NonnullGCPtr<Geometry::DOMRect> get_bounding_client_rect() const;
+    JS::NonnullGCPtr<Geometry::DOMRectList> get_client_rects() const;
 
     virtual RefPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>);
 
@@ -143,24 +141,28 @@ public:
     void serialize_pseudo_elements_as_json(JsonArraySerializer<StringBuilder>& children_array) const;
 
 protected:
+    Element(Document&, DOM::QualifiedName);
+    virtual void initialize(JS::Realm&) override;
+
     virtual void children_changed() override;
+
+    virtual void visit_edges(Cell::Visitor&) override;
 
 private:
     void make_html_uppercased_qualified_name();
 
     QualifiedName m_qualified_name;
     String m_html_uppercased_qualified_name;
-    NonnullRefPtr<NamedNodeMap> m_attributes;
 
-    RefPtr<CSS::ElementInlineCSSStyleDeclaration> m_inline_style;
+    JS::GCPtr<NamedNodeMap> m_attributes;
+    JS::GCPtr<CSS::ElementInlineCSSStyleDeclaration> m_inline_style;
+    JS::GCPtr<DOMTokenList> m_class_list;
+    JS::GCPtr<ShadowRoot> m_shadow_root;
 
     RefPtr<CSS::StyleProperties> m_computed_css_values;
     HashMap<FlyString, CSS::StyleProperty> m_custom_properties;
 
-    RefPtr<DOMTokenList> m_class_list;
     Vector<FlyString> m_classes;
-
-    RefPtr<ShadowRoot> m_shadow_root;
 
     Array<RefPtr<Layout::Node>, CSS::Selector::PseudoElementCount> m_pseudo_element_nodes;
 };
@@ -168,6 +170,8 @@ private:
 template<>
 inline bool Node::fast_is<Element>() const { return is_element(); }
 
-ExceptionOr<QualifiedName> validate_and_extract(FlyString namespace_, FlyString qualified_name);
+ExceptionOr<QualifiedName> validate_and_extract(JS::Object& global_object, FlyString namespace_, FlyString qualified_name);
 
 }
+
+WRAPPER_HACK(Element, Web::DOM)

@@ -7,14 +7,13 @@
 
 #pragma once
 
-#include <AK/RefCountForwarder.h>
 #include <AK/Variant.h>
 #include <LibGfx/AffineTransform.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/Painter.h>
 #include <LibGfx/Path.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/HTML/Canvas/CanvasDrawImage.h>
 #include <LibWeb/HTML/Canvas/CanvasDrawPath.h>
@@ -34,11 +33,10 @@ namespace Web::HTML {
 
 // https://html.spec.whatwg.org/multipage/canvas.html#canvasimagesource
 // NOTE: This is the Variant created by the IDL wrapper generator, and needs to be updated accordingly.
-using CanvasImageSource = Variant<NonnullRefPtr<HTMLImageElement>, NonnullRefPtr<HTMLCanvasElement>>;
+using CanvasImageSource = Variant<JS::Handle<HTMLImageElement>, JS::Handle<HTMLCanvasElement>>;
 
 class CanvasRenderingContext2D
-    : public RefCountForwarder<HTMLCanvasElement>
-    , public Bindings::Wrappable
+    : public Bindings::PlatformObject
     , public CanvasPath
     , public CanvasState
     , public CanvasTransform<CanvasRenderingContext2D>
@@ -50,14 +48,11 @@ class CanvasRenderingContext2D
     , public CanvasImageData
     , public CanvasPathDrawingStyles<CanvasRenderingContext2D> {
 
-    AK_MAKE_NONCOPYABLE(CanvasRenderingContext2D);
-    AK_MAKE_NONMOVABLE(CanvasRenderingContext2D);
+    WEB_PLATFORM_OBJECT(CanvasRenderingContext2D, Bindings::PlatformObject);
 
 public:
-    using WrapperType = Bindings::CanvasRenderingContext2DWrapper;
-
-    static NonnullRefPtr<CanvasRenderingContext2D> create(HTMLCanvasElement& element) { return adopt_ref(*new CanvasRenderingContext2D(element)); }
-    ~CanvasRenderingContext2D();
+    static JS::NonnullGCPtr<CanvasRenderingContext2D> create(HTML::Window&, HTMLCanvasElement&);
+    virtual ~CanvasRenderingContext2D() override;
 
     virtual void fill_rect(float x, float y, float width, float height) override;
     virtual void stroke_rect(float x, float y, float width, float height) override;
@@ -75,20 +70,22 @@ public:
     virtual void fill(String const& fill_rule) override;
     virtual void fill(Path2D& path, String const& fill_rule) override;
 
-    virtual RefPtr<ImageData> create_image_data(int width, int height) const override;
-    virtual DOM::ExceptionOr<RefPtr<ImageData>> get_image_data(int x, int y, int width, int height) const override;
+    virtual JS::GCPtr<ImageData> create_image_data(int width, int height) const override;
+    virtual DOM::ExceptionOr<JS::GCPtr<ImageData>> get_image_data(int x, int y, int width, int height) const override;
     virtual void put_image_data(ImageData const&, float x, float y) override;
 
     virtual void reset_to_default_state() override;
 
-    NonnullRefPtr<HTMLCanvasElement> canvas_for_binding() const;
+    JS::NonnullGCPtr<HTMLCanvasElement> canvas_for_binding() const;
 
-    virtual RefPtr<TextMetrics> measure_text(String const& text) override;
+    virtual JS::NonnullGCPtr<TextMetrics> measure_text(String const& text) override;
 
     virtual void clip() override;
 
 private:
-    explicit CanvasRenderingContext2D(HTMLCanvasElement&);
+    explicit CanvasRenderingContext2D(HTML::Window&, HTMLCanvasElement&);
+
+    virtual void visit_edges(Cell::Visitor&) override;
 
     struct PreparedTextGlyph {
         unsigned int c;
@@ -112,6 +109,8 @@ private:
     void stroke_internal(Gfx::Path const&);
     void fill_internal(Gfx::Path&, String const& fill_rule);
 
+    JS::NonnullGCPtr<HTMLCanvasElement> m_element;
+
     // https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-origin-clean
     bool m_origin_clean { true };
 };
@@ -125,3 +124,5 @@ DOM::ExceptionOr<CanvasImageSourceUsability> check_usability_of_image(CanvasImag
 bool image_is_not_origin_clean(CanvasImageSource const&);
 
 }
+
+WRAPPER_HACK(CanvasRenderingContext2D, Web::HTML)

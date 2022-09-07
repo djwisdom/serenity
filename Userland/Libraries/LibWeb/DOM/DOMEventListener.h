@@ -7,13 +7,15 @@
 #pragma once
 
 #include <AK/FlyString.h>
+#include <LibJS/Heap/GCPtr.h>
+#include <LibJS/Runtime/Object.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::DOM {
 
 // https://dom.spec.whatwg.org/#concept-event-listener
 // NOTE: The spec calls this "event listener", and it's *importantly* not the same as "EventListener"
-class DOMEventListener : public RefCounted<DOMEventListener> {
+class DOMEventListener : public JS::Cell {
 public:
     DOMEventListener();
     ~DOMEventListener();
@@ -22,10 +24,10 @@ public:
     FlyString type;
 
     // callback (null or an EventListener object)
-    RefPtr<IDLEventListener> callback;
+    JS::GCPtr<IDLEventListener> callback;
 
     // signal (null or an AbortSignal object)
-    RefPtr<DOM::AbortSignal> signal;
+    JS::GCPtr<DOM::AbortSignal> signal;
 
     // capture (a boolean, initially false)
     bool capture { false };
@@ -38,6 +40,10 @@ public:
 
     // removed (a boolean for bookkeeping purposes, initially false)
     bool removed { false };
+
+private:
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual StringView class_name() const override { return "DOMEventListener"sv; }
 };
 
 }

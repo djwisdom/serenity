@@ -5,16 +5,16 @@
  */
 
 #include <LibWeb/DOM/CDATASection.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::DOM {
 
 CDATASection::CDATASection(Document& document, String const& data)
     : Text(document, NodeType::CDATA_SECTION_NODE, data)
 {
+    set_prototype(&window().cached_web_prototype("CDATASection"));
 }
 
-CDATASection::~CDATASection()
-{
-}
+CDATASection::~CDATASection() = default;
 
 }

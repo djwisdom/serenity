@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/CharacterDataPrototype.h>
 #include <LibWeb/DOM/CharacterData.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/MutationType.h>
@@ -16,6 +17,7 @@ CharacterData::CharacterData(Document& document, NodeType type, String const& da
     : Node(document, type)
     , m_data(data)
 {
+    set_prototype(&window().ensure_web_prototype<Bindings::CharacterDataPrototype>("CharacterData"));
 }
 
 // https://dom.spec.whatwg.org/#dom-characterdata-data
@@ -36,7 +38,7 @@ ExceptionOr<String> CharacterData::substring_data(size_t offset, size_t count) c
 
     // 2. If offset is greater than length, then throw an "IndexSizeError" DOMException.
     if (offset > length)
-        return DOM::IndexSizeError::create("Substring offset out of range.");
+        return DOM::IndexSizeError::create(global_object(), "Substring offset out of range.");
 
     // 3. If offset plus count is greater than length, return a string whose value is the code units from the offsetth code unit
     //    to the end of node’s data, and then return.
@@ -55,14 +57,14 @@ ExceptionOr<void> CharacterData::replace_data(size_t offset, size_t count, Strin
 
     // 2. If offset is greater than length, then throw an "IndexSizeError" DOMException.
     if (offset > length)
-        return DOM::IndexSizeError::create("Replacement offset out of range.");
+        return DOM::IndexSizeError::create(global_object(), "Replacement offset out of range.");
 
     // 3. If offset plus count is greater than length, then set count to length minus offset.
     if (offset + count > length)
         count = length - offset;
 
     // 4. Queue a mutation record of "characterData" for node with null, null, node’s data, « », « », null, and null.
-    queue_mutation_record(MutationType::characterData, {}, {}, m_data, StaticNodeList::create({}), StaticNodeList::create({}), nullptr, nullptr);
+    queue_mutation_record(MutationType::characterData, {}, {}, m_data, StaticNodeList::create(window(), {}), StaticNodeList::create(window(), {}), nullptr, nullptr);
 
     // 5. Insert data into node’s data after offset code units.
     // 6. Let delete offset be offset + data’s length.

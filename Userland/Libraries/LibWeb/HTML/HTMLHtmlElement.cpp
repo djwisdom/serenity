@@ -5,12 +5,14 @@
  */
 
 #include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
 HTMLHtmlElement::HTMLHtmlElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&window().cached_web_prototype("HTMLHtmlElement"));
 }
 
 HTMLHtmlElement::~HTMLHtmlElement() = default;

@@ -1,30 +1,23 @@
 /*
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/RefCounted.h>
-#include <AK/Weakable.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::HTML {
 
 // https://html.spec.whatwg.org/multipage/dom.html#domstringmap
-class DOMStringMap final
-    : public RefCounted<DOMStringMap>
-    , public Weakable<DOMStringMap>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::DOMStringMapWrapper;
+class DOMStringMap final : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(DOMStringMap, Bindings::PlatformObject);
 
-    static NonnullRefPtr<DOMStringMap> create(DOM::Element& associated_element)
-    {
-        return adopt_ref(*new DOMStringMap(associated_element));
-    }
+public:
+    static JS::NonnullGCPtr<DOMStringMap> create(DOM::Element&);
 
     virtual ~DOMStringMap() override;
 
@@ -38,7 +31,9 @@ public:
     bool delete_existing_named_property(String const&);
 
 private:
-    DOMStringMap(DOM::Element&);
+    explicit DOMStringMap(DOM::Element&);
+
+    virtual void visit_edges(Cell::Visitor&) override;
 
     struct NameValuePair {
         String name;
@@ -48,7 +43,9 @@ private:
     Vector<NameValuePair> get_name_value_pairs() const;
 
     // https://html.spec.whatwg.org/multipage/dom.html#concept-domstringmap-element
-    NonnullRefPtr<DOM::Element> m_associated_element;
+    JS::NonnullGCPtr<DOM::Element> m_associated_element;
 };
 
 }
+
+WRAPPER_HACK(DOMStringMap, Web::HTML)

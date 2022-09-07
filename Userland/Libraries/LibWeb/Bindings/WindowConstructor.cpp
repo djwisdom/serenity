@@ -6,8 +6,8 @@
 
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibWeb/Bindings/WindowConstructor.h>
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/Bindings/WindowPrototype.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::Bindings {
 
@@ -31,10 +31,10 @@ JS::ThrowCompletionOr<JS::Object*> WindowConstructor::construct(FunctionObject&)
 void WindowConstructor::initialize(JS::Realm& realm)
 {
     auto& vm = this->vm();
-    auto& window = static_cast<WindowObject&>(realm.global_object());
+    auto& window = verify_cast<HTML::Window>(realm.global_object());
 
     NativeFunction::initialize(realm);
-    define_direct_property(vm.names.prototype, &window.ensure_web_prototype<WindowPrototype>("Window"), 0);
+    define_direct_property(vm.names.prototype, &window.cached_web_prototype("Window"), 0);
     define_direct_property(vm.names.length, JS::Value(0), JS::Attribute::Configurable);
 }
 

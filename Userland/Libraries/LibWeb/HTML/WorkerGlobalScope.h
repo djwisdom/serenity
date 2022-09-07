@@ -9,7 +9,6 @@
 #include <AK/Optional.h>
 #include <AK/RefCounted.h>
 #include <AK/URL.h>
-#include <LibWeb/Bindings/Wrappable.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/Forward.h>
@@ -29,36 +28,25 @@ namespace Web::HTML {
 // https://html.spec.whatwg.org/multipage/workers.html#the-workerglobalscope-common-interface
 // WorkerGlobalScope is the base class of each real WorkerGlobalScope that will be created when the
 // user agent runs the run a worker algorithm.
-class WorkerGlobalScope
-    : public RefCounted<WorkerGlobalScope>
-    , public DOM::EventTarget
-    , public Bindings::Wrappable {
+class WorkerGlobalScope : public DOM::EventTarget {
+    WEB_PLATFORM_OBJECT(WorkerGlobalScope, DOM::EventTarget);
+
 public:
-    using WrapperType = Bindings::WorkerGlobalScopeWrapper;
-
-    using RefCounted::ref;
-    using RefCounted::unref;
-
     virtual ~WorkerGlobalScope() override;
-
-    // ^EventTarget
-    virtual void ref_event_target() override { ref(); }
-    virtual void unref_event_target() override { unref(); }
-    virtual JS::Object* create_wrapper(JS::Realm&) override;
 
     // Following methods are from the WorkerGlobalScope IDL definition
     // https://html.spec.whatwg.org/multipage/workers.html#the-workerglobalscope-common-interface
 
     // https://html.spec.whatwg.org/multipage/workers.html#dom-workerglobalscope-self
-    NonnullRefPtr<WorkerGlobalScope const> self() const { return *this; }
+    JS::NonnullGCPtr<WorkerGlobalScope> self() const { return *this; }
 
-    NonnullRefPtr<WorkerLocation const> location() const;
-    NonnullRefPtr<WorkerNavigator const> navigator() const;
+    JS::NonnullGCPtr<WorkerLocation> location() const;
+    JS::NonnullGCPtr<WorkerNavigator> navigator() const;
     DOM::ExceptionOr<void> import_scripts(Vector<String> urls);
 
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                  \
-    void set_##attribute_name(Optional<Bindings::CallbackType>); \
+#define __ENUMERATE(attribute_name, event_name)         \
+    void set_##attribute_name(Bindings::CallbackType*); \
     Bindings::CallbackType* attribute_name();
     ENUMERATE_WORKER_GLOBAL_SCOPE_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE
@@ -79,16 +67,20 @@ public:
 
     // Spec note: While the WorkerLocation object is created after the WorkerGlobalScope object,
     //            this is not problematic as it cannot be observed from script.
-    void set_location(NonnullRefPtr<WorkerLocation> loc) { m_location = move(loc); }
+    void set_location(JS::NonnullGCPtr<WorkerLocation> loc) { m_location = move(loc); }
 
 protected:
-    explicit WorkerGlobalScope();
+    explicit WorkerGlobalScope(JS::Realm&);
 
 private:
-    RefPtr<WorkerLocation> m_location;
+    virtual void initialize(JS::Realm&) override;
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    JS::GCPtr<WorkerLocation> m_location;
 
     // FIXME: Implement WorkerNavigator according to the spec
-    NonnullRefPtr<WorkerNavigator> m_navigator;
+    JS::GCPtr<WorkerNavigator> m_navigator;
 
     // FIXME: Add all these internal slots
 
@@ -124,3 +116,5 @@ private:
 };
 
 }
+
+WRAPPER_HACK(WorkerGlobalScope, Web::HTML)

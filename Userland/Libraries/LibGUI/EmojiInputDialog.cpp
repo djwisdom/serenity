@@ -6,21 +6,56 @@
  */
 
 #include <AK/LexicalPath.h>
+#include <AK/ScopeGuard.h>
 #include <AK/StringBuilder.h>
 #include <AK/Utf32View.h>
 #include <LibCore/DirIterator.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
 #include <LibGUI/EmojiInputDialog.h>
+#include <LibGUI/EmojiInputDialogGML.h>
 #include <LibGUI/Event.h>
 #include <LibGUI/Frame.h>
+#include <LibGUI/ScrollableContainerWidget.h>
+#include <LibGUI/TextBox.h>
+#include <LibUnicode/CharacterTypes.h>
 #include <stdlib.h>
 
 namespace GUI {
 
-static Vector<u32> supported_emoji_code_points()
+EmojiInputDialog::EmojiInputDialog(Window* parent_window)
+    : Dialog(parent_window)
 {
-    Vector<u32> code_points;
+    auto& main_widget = set_main_widget<Frame>();
+    if (!main_widget.load_from_gml(emoji_input_dialog_gml))
+        VERIFY_NOT_REACHED();
+
+    set_frameless(true);
+    resize(400, 300);
+
+    auto& scrollable_container = *main_widget.find_descendant_of_type_named<GUI::ScrollableContainerWidget>("scrollable_container"sv);
+    m_search_box = main_widget.find_descendant_of_type_named<GUI::TextBox>("search_box"sv);
+    m_emojis_widget = main_widget.find_descendant_of_type_named<GUI::Widget>("emojis"sv);
+    m_emojis = supported_emoji();
+
+    scrollable_container.horizontal_scrollbar().set_visible(false);
+    update_displayed_emoji();
+
+    on_active_window_change = [this](bool is_active_window) {
+        if (!is_active_window)
+            close();
+    };
+
+    m_search_box->on_change = [this]() {
+        update_displayed_emoji();
+    };
+}
+
+auto EmojiInputDialog::supported_emoji() -> Vector<Emoji>
+{
+    constexpr int button_size = 20;
+
+    Vector<Emoji> code_points;
     Core::DirIterator dt("/res/emoji", Core::DirIterator::SkipDots);
     while (dt.has_next()) {
         auto filename = dt.next_path();
@@ -33,70 +68,71 @@ static Vector<u32> supported_emoji_code_points()
         // FIXME: Handle multi code point emojis.
         if (basename.contains('_'))
             continue;
+
         u32 code_point = strtoul(basename.to_string().characters() + 2, nullptr, 16);
-        code_points.append(code_point);
+        auto name = Unicode::code_point_display_name(code_point);
+
+        // FIXME: Also emit U+FE0F for single code point emojis, currently
+        // they get shown as text glyphs if available.
+        // This will require buttons to don't calculate their length as 2,
+        // currently it just shows an ellipsis. It will also require some
+        // tweaking of the mechanism that is currently being used to insert
+        // which is a key event with a single code point.
+        StringBuilder builder;
+        builder.append(Utf32View(&code_point, 1));
+        auto emoji_text = builder.to_string();
+
+        auto button = Button::construct(move(emoji_text));
+        button->set_fixed_size(button_size, button_size);
+        button->set_button_style(Gfx::ButtonStyle::Coolbar);
+        button->on_click = [this, button = button](auto) {
+            m_selected_emoji_text = button->text();
+            done(ExecResult::OK);
+        };
+
+        if (name.has_value())
+            button->set_tooltip(name->to_titlecase());
+
+        code_points.empend(code_point, move(name), move(button));
     }
+
     return code_points;
 }
 
-EmojiInputDialog::EmojiInputDialog(Window* parent_window)
-    : Dialog(parent_window)
+void EmojiInputDialog::update_displayed_emoji()
 {
-    auto& main_widget = set_main_widget<Frame>();
-    main_widget.set_frame_shape(Gfx::FrameShape::Container);
-    main_widget.set_frame_shadow(Gfx::FrameShadow::Raised);
-    main_widget.set_fill_with_background_color(true);
-    auto& main_layout = main_widget.set_layout<VerticalBoxLayout>();
-    main_layout.set_margins(1);
-    main_layout.set_spacing(0);
+    ScopeGuard guard { [&] { m_emojis_widget->set_updates_enabled(true); } };
+    m_emojis_widget->set_updates_enabled(false);
 
-    auto code_points = supported_emoji_code_points();
+    m_emojis_widget->remove_all_children();
 
+    constexpr size_t columns = 18;
+    size_t rows = ceil_div(m_emojis.size(), columns);
     size_t index = 0;
-    size_t columns = 10;
-    size_t rows = ceil_div(code_points.size(), columns);
 
-    constexpr int button_size = 18;
-    // FIXME: I have no idea why this is needed, you'd think that button width * number of buttons would make them fit, but the last one gets cut off.
-    constexpr int magic_offset = 7;
-    int dialog_width = button_size * columns + magic_offset;
-    int dialog_height = button_size * rows;
+    for (size_t row = 0; row < rows && index < m_emojis.size(); ++row) {
+        auto& horizontal_container = m_emojis_widget->add<Widget>();
+        horizontal_container.set_preferred_height(SpecialDimension::Fit);
 
-    resize(dialog_width, dialog_height);
-    set_frameless(true);
-
-    for (size_t row = 0; row < rows && index < code_points.size(); ++row) {
-        auto& horizontal_container = main_widget.add<Widget>();
         auto& horizontal_layout = horizontal_container.set_layout<HorizontalBoxLayout>();
         horizontal_layout.set_spacing(0);
+
         for (size_t column = 0; column < columns; ++column) {
-            if (index < code_points.size()) {
-                // FIXME: Also emit U+FE0F for single code point emojis, currently
-                // they get shown as text glyphs if available.
-                // This will require buttons to don't calculate their length as 2,
-                // currently it just shows an ellipsis. It will also require some
-                // tweaking of the mechanism that is currently being used to insert
-                // which is a key event with a single code point.
-                StringBuilder builder;
-                builder.append(Utf32View(&code_points[index++], 1));
-                auto emoji_text = builder.to_string();
-                auto& button = horizontal_container.add<Button>(emoji_text);
-                button.set_fixed_size(button_size, button_size);
-                button.set_button_style(Gfx::ButtonStyle::Coolbar);
-                button.on_click = [this, button = &button](auto) {
-                    m_selected_emoji_text = button->text();
-                    done(ExecResult::OK);
-                };
-            } else {
-                horizontal_container.add<Widget>();
+            bool found_match = false;
+
+            while (!found_match && (index < m_emojis.size())) {
+                auto& emoji = m_emojis[index++];
+
+                if (emoji.name.has_value())
+                    found_match = emoji.name->contains(m_search_box->text(), CaseSensitivity::CaseInsensitive);
+                else
+                    found_match = m_search_box->text().is_empty();
+
+                if (found_match)
+                    horizontal_container.add_child(*emoji.button);
             }
         }
     }
-
-    on_active_window_change = [this](bool is_active_window) {
-        if (!is_active_window)
-            close();
-    };
 }
 
 void EmojiInputDialog::event(Core::Event& event)

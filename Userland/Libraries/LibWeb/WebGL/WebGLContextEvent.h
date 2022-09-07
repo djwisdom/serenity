@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,31 +16,22 @@ struct WebGLContextEventInit final : public DOM::EventInit {
 };
 
 class WebGLContextEvent final : public DOM::Event {
+    WEB_PLATFORM_OBJECT(WebGLContextEvent, DOM::Event);
+
 public:
-    using WrapperType = Bindings::WebGLContextEventWrapper;
+    static WebGLContextEvent* create(HTML::Window&, FlyString const& type, WebGLContextEventInit const& event_init);
+    static WebGLContextEvent* create_with_global_object(HTML::Window&, FlyString const& type, WebGLContextEventInit const& event_init);
 
-    static NonnullRefPtr<WebGLContextEvent> create(FlyString const& type, WebGLContextEventInit const& event_init)
-    {
-        return adopt_ref(*new WebGLContextEvent(type, event_init));
-    }
+    WebGLContextEvent(HTML::Window&, FlyString const& type, WebGLContextEventInit const& event_init);
 
-    static NonnullRefPtr<WebGLContextEvent> create_with_global_object(Bindings::WindowObject&, FlyString const& type, WebGLContextEventInit const& event_init)
-    {
-        return adopt_ref(*new WebGLContextEvent(type, event_init));
-    }
-
-    virtual ~WebGLContextEvent() override = default;
+    virtual ~WebGLContextEvent() override;
 
     String const& status_message() const { return m_status_message; }
 
 private:
-    WebGLContextEvent(FlyString const& type, WebGLContextEventInit const& event_init)
-        : DOM::Event(type, event_init)
-        , m_status_message(event_init.status_message)
-    {
-    }
-
     String m_status_message { String::empty() };
 };
 
 }
+
+WRAPPER_HACK(WebGLContextEvent, Web::WebGL)
