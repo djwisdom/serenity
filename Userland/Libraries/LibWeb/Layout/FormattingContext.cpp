@@ -286,7 +286,7 @@ float FormattingContext::compute_auto_height_for_block_level_element(LayoutState
                 continue;
 
             // FIXME: Handle margin collapsing.
-            return max(0, child_box_state.offset.y() + child_box_state.content_height() + child_box_state.margin_box_bottom());
+            return max(0.0f, child_box_state.offset.y() + child_box_state.content_height() + child_box_state.margin_box_bottom());
         }
     }
 
@@ -354,7 +354,7 @@ float FormattingContext::compute_auto_height_for_block_formatting_context_root(L
         return IterationDecision::Continue;
     });
 
-    return max(0, bottom.value_or(0) - top.value_or(0));
+    return max(0.0f, bottom.value_or(0) - top.value_or(0));
 }
 
 // 10.3.2 Inline, replaced elements, https://www.w3.org/TR/CSS22/visudet.html#inline-replaced-width
@@ -1111,13 +1111,22 @@ float FormattingContext::containing_block_height_for(Box const& box, LayoutState
     VERIFY_NOT_REACHED();
 }
 
+static Box const* previous_block_level_sibling(Box const& box)
+{
+    for (auto* sibling = box.previous_sibling_of_type<Box>(); sibling; sibling = sibling->previous_sibling_of_type<Box>()) {
+        if (sibling->computed_values().display().is_block_outside())
+            return sibling;
+    }
+    return nullptr;
+}
+
 float FormattingContext::compute_box_y_position_with_respect_to_siblings(Box const& child_box, LayoutState::UsedValues const& box_state)
 {
     float y = box_state.border_box_top();
 
     Vector<float> collapsible_margins;
 
-    auto* relevant_sibling = child_box.previous_sibling_of_type<Layout::BlockContainer>();
+    auto* relevant_sibling = previous_block_level_sibling(child_box);
     while (relevant_sibling != nullptr) {
         if (!relevant_sibling->is_absolutely_positioned() && !relevant_sibling->is_floating()) {
             auto const& relevant_sibling_state = m_state.get(*relevant_sibling);
@@ -1127,7 +1136,7 @@ float FormattingContext::compute_box_y_position_with_respect_to_siblings(Box con
                 break;
             collapsible_margins.append(relevant_sibling_state.margin_top);
         }
-        relevant_sibling = relevant_sibling->previous_sibling_of_type<Layout::BlockContainer>();
+        relevant_sibling = previous_block_level_sibling(*relevant_sibling);
     }
 
     if (relevant_sibling) {
