@@ -6,7 +6,10 @@
 
 #pragma once
 
+#include <AK/Optional.h>
+#include <AK/OwnPtr.h>
 #include <LibGUI/Dialog.h>
+#include <LibUnicode/Emoji.h>
 
 namespace GUI {
 
@@ -15,8 +18,8 @@ class EmojiInputDialog final : public Dialog {
 
     struct Emoji {
         u32 code_point { 0 };
-        Optional<String> name;
         RefPtr<Button> button;
+        Optional<Unicode::Emoji> emoji;
     };
 
 public:
@@ -29,7 +32,11 @@ private:
     Vector<Emoji> supported_emoji();
     void update_displayed_emoji();
 
+    OwnPtr<ActionGroup> m_category_action_group;
+    Optional<Unicode::EmojiGroup> m_selected_category;
+
     RefPtr<TextBox> m_search_box;
+    RefPtr<Toolbar> m_toolbar;
     RefPtr<Widget> m_emojis_widget;
     Vector<Emoji> m_emojis;
     String m_selected_emoji_text;

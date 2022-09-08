@@ -8,7 +8,19 @@
 
     @GUI::TextBox {
         name: "search_box"
+        placeholder: "Search emoji"
         fixed_height: 22
+    }
+
+    @GUI::ToolbarContainer {
+        @GUI::Toolbar {
+            name: "toolbar"
+
+            @GUI::Label {
+                text: "Category: "
+                autosize: true
+            }
+        }
     }
 
     @GUI::ScrollableContainerWidget {
