@@ -37,10 +37,17 @@ void EllipseTool::draw_using(GUI::Painter& painter, Gfx::IntPoint const& start_p
 
     switch (m_fill_mode) {
     case FillMode::Outline:
-        if (m_antialias_enabled)
+        if (m_antialias_enabled) {
             aa_painter.draw_ellipse(ellipse_intersecting_rect, m_editor->color_for(m_drawing_button), thickness);
-        else
+        } else {
+            // For some reason for non-AA draw_ellipse() the ellipse is outside of the rect (unlike all other ellipse drawing functions).
+            // Scale the ellipse rect by sqrt(2) to get an ellipse arc that appears as if it was inside of the rect.
+            // Ie. reduce the size by a factor of 1 - sqrt(1/2)
+            auto shrink_width = ellipse_intersecting_rect.width() * (1 - AK::Sqrt1_2<float>);
+            auto shrink_height = ellipse_intersecting_rect.height() * (1 - AK::Sqrt1_2<float>);
+            ellipse_intersecting_rect.shrink(shrink_width, shrink_height);
             painter.draw_ellipse_intersecting(ellipse_intersecting_rect, m_editor->color_for(m_drawing_button), thickness);
+        }
         break;
     case FillMode::Fill:
         if (m_antialias_enabled)
@@ -82,7 +89,7 @@ void EllipseTool::on_mouseup(Layer* layer, MouseEvent& event)
         m_drawing_button = GUI::MouseButton::None;
         layer->did_modify_bitmap();
         m_editor->update();
-        m_editor->did_complete_action();
+        m_editor->did_complete_action(tool_name());
     }
 }
 
@@ -110,6 +117,7 @@ void EllipseTool::on_second_paint(Layer const* layer, GUI::PaintEvent& event)
 
     GUI::Painter painter(*m_editor);
     painter.add_clip_rect(event.rect());
+    painter.translate(editor_layer_location(*layer));
     auto preview_start = m_editor->content_to_frame_position(m_ellipse_start_position).to_type<int>();
     auto preview_end = m_editor->content_to_frame_position(m_ellipse_end_position).to_type<int>();
     draw_using(painter, preview_start, preview_end, AK::max(m_thickness * m_editor->scale(), 1));

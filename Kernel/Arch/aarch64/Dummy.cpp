@@ -13,6 +13,7 @@
 #include <Kernel/Memory/SharedInodeVMObject.h>
 #include <Kernel/Panic.h>
 #include <Kernel/PhysicalAddress.h>
+#include <Kernel/Process.h>
 #include <Kernel/Random.h>
 #include <Kernel/Sections.h>
 #include <Kernel/UserOrKernelBuffer.h>
@@ -21,6 +22,7 @@
 namespace Kernel {
 
 READONLY_AFTER_INIT Thread* g_finalizer;
+RecursiveSpinlock g_scheduler_lock { LockRank::None };
 
 }
 
@@ -31,6 +33,39 @@ void get_fast_random_bytes(Bytes)
 {
     VERIFY_NOT_REACHED();
 }
+
+}
+
+// Mutex
+namespace Kernel {
+
+void Mutex::lock(Mode, [[maybe_unused]] LockLocation const& location)
+{
+    VERIFY_NOT_REACHED();
+}
+
+void Mutex::unlock()
+{
+    VERIFY_NOT_REACHED();
+}
+
+}
+
+// Process
+namespace Kernel {
+
+SpinlockProtected<Process::List>& Process::all_instances()
+{
+    VERIFY_NOT_REACHED();
+}
+
+}
+
+// LockRank
+namespace Kernel {
+
+void track_lock_acquire(LockRank) { }
+void track_lock_release(LockRank) { }
 
 }
 

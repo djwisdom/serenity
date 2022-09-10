@@ -134,7 +134,8 @@ void AbstractButton::mouseup_event(MouseEvent& event)
         bool was_being_pressed = m_being_pressed;
         m_being_pressed = false;
         m_pressed_mouse_button = MouseButton::None;
-        repaint();
+        if (!is_checkable() || is_checked())
+            repaint();
         if (was_being_pressed && !was_auto_repeating) {
             switch (event.button()) {
             case MouseButton::Primary:
@@ -212,7 +213,7 @@ void AbstractButton::keydown_event(KeyEvent& event)
             new_checked_index = this_index == 0 ? exclusive_siblings.size() - 1 : this_index - 1;
         else
             new_checked_index = this_index == exclusive_siblings.size() - 1 ? 0 : this_index + 1;
-        exclusive_siblings[new_checked_index].set_checked(true);
+        exclusive_siblings[new_checked_index].click();
         return;
     }
     Widget::keydown_event(event);
@@ -249,6 +250,8 @@ void AbstractButton::paint_text(Painter& painter, Gfx::IntRect const& rect, Gfx:
 void AbstractButton::change_event(Event& event)
 {
     if (event.type() == Event::Type::EnabledChange) {
+        if (m_auto_repeat_timer->is_active())
+            m_auto_repeat_timer->stop();
         if (!is_enabled()) {
             bool was_being_pressed = m_being_pressed;
             m_being_pressed = false;

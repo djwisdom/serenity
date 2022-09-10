@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,9 +12,9 @@
 namespace JS {
 
 struct AlreadyResolved final : public Cell {
-    bool value { false };
+    JS_CELL(AlreadyResolved, Cell);
 
-    virtual StringView class_name() const override { return "AlreadyResolved"sv; }
+    bool value { false };
 
 protected:
     // Allocated cells must be >= sizeof(FreelistEntry), which is 24 bytes -
@@ -26,17 +26,18 @@ class PromiseResolvingFunction final : public NativeFunction {
     JS_OBJECT(PromiseResolvingFunction, NativeFunction);
 
 public:
-    using FunctionType = Function<ThrowCompletionOr<Value>(VM&, GlobalObject&, Promise&, AlreadyResolved&)>;
+    using FunctionType = Function<ThrowCompletionOr<Value>(VM&, Promise&, AlreadyResolved&)>;
 
-    static PromiseResolvingFunction* create(GlobalObject&, Promise&, AlreadyResolved&, FunctionType);
+    static PromiseResolvingFunction* create(Realm&, Promise&, AlreadyResolved&, FunctionType);
 
-    explicit PromiseResolvingFunction(Promise&, AlreadyResolved&, FunctionType, Object& prototype);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~PromiseResolvingFunction() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
 
 private:
+    explicit PromiseResolvingFunction(Promise&, AlreadyResolved&, FunctionType, Object& prototype);
+
     virtual void visit_edges(Visitor&) override;
 
     Promise& m_promise;

@@ -45,12 +45,27 @@ namespace Web::DOM {
 Element::Element(Document& document, DOM::QualifiedName qualified_name)
     : ParentNode(document, NodeType::ELEMENT_NODE)
     , m_qualified_name(move(qualified_name))
-    , m_attributes(NamedNodeMap::create(*this))
 {
+    set_prototype(&window().cached_web_prototype("Element"));
     make_html_uppercased_qualified_name();
 }
 
 Element::~Element() = default;
+
+void Element::initialize(JS::Realm& realm)
+{
+    Base::initialize(realm);
+    m_attributes = NamedNodeMap::create(*this);
+}
+
+void Element::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_attributes.ptr());
+    visitor.visit(m_inline_style.ptr());
+    visitor.visit(m_class_list.ptr());
+    visitor.visit(m_shadow_root.ptr());
+}
 
 // https://dom.spec.whatwg.org/#dom-element-getattribute
 String Element::get_attribute(FlyString const& name) const
@@ -72,7 +87,7 @@ ExceptionOr<void> Element::set_attribute(FlyString const& name, String const& va
     // 1. If qualifiedName does not match the Name production in XML, then throw an "InvalidCharacterError" DOMException.
     // FIXME: Proper name validation
     if (name.is_empty())
-        return InvalidCharacterError::create("Attribute name must not be empty");
+        return InvalidCharacterError::create(global_object(), "Attribute name must not be empty");
 
     // 2. If this is in the HTML namespace and its node document is an HTML document, then set qualifiedName to qualifiedName in ASCII lowercase.
     // FIXME: Handle the second condition, assume it is an HTML document for now.
@@ -103,14 +118,14 @@ ExceptionOr<void> Element::set_attribute(FlyString const& name, String const& va
 }
 
 // https://dom.spec.whatwg.org/#validate-and-extract
-ExceptionOr<QualifiedName> validate_and_extract(FlyString namespace_, FlyString qualified_name)
+ExceptionOr<QualifiedName> validate_and_extract(JS::Object& global_object, FlyString namespace_, FlyString qualified_name)
 {
     // 1. If namespace is the empty string, then set it to null.
     if (namespace_.is_empty())
         namespace_ = {};
 
     // 2. Validate qualifiedName.
-    TRY(Document::validate_qualified_name(qualified_name));
+    TRY(Document::validate_qualified_name(global_object, qualified_name));
 
     // 3. Let prefix be null.
     FlyString prefix = {};
@@ -127,19 +142,19 @@ ExceptionOr<QualifiedName> validate_and_extract(FlyString namespace_, FlyString 
 
     // 6. If prefix is non-null and namespace is null, then throw a "NamespaceError" DOMException.
     if (!prefix.is_null() && namespace_.is_null())
-        return NamespaceError::create("Prefix is non-null and namespace is null.");
+        return NamespaceError::create(global_object, "Prefix is non-null and namespace is null.");
 
     // 7. If prefix is "xml" and namespace is not the XML namespace, then throw a "NamespaceError" DOMException.
     if (prefix == "xml"sv && namespace_ != Namespace::XML)
-        return NamespaceError::create("Prefix is 'xml' and namespace is not the XML namespace.");
+        return NamespaceError::create(global_object, "Prefix is 'xml' and namespace is not the XML namespace.");
 
     // 8. If either qualifiedName or prefix is "xmlns" and namespace is not the XMLNS namespace, then throw a "NamespaceError" DOMException.
     if ((qualified_name == "xmlns"sv || prefix == "xmlns"sv) && namespace_ != Namespace::XMLNS)
-        return NamespaceError::create("Either qualifiedName or prefix is 'xmlns' and namespace is not the XMLNS namespace.");
+        return NamespaceError::create(global_object, "Either qualifiedName or prefix is 'xmlns' and namespace is not the XMLNS namespace.");
 
     // 9. If namespace is the XMLNS namespace and neither qualifiedName nor prefix is "xmlns", then throw a "NamespaceError" DOMException.
     if (namespace_ == Namespace::XMLNS && !(qualified_name == "xmlns"sv || prefix == "xmlns"sv))
-        return NamespaceError::create("Namespace is the XMLNS namespace and neither qualifiedName nor prefix is 'xmlns'.");
+        return NamespaceError::create(global_object, "Namespace is the XMLNS namespace and neither qualifiedName nor prefix is 'xmlns'.");
 
     // 10. Return namespace, prefix, and localName.
     return QualifiedName { local_name, prefix, namespace_ };
@@ -149,7 +164,7 @@ ExceptionOr<QualifiedName> validate_and_extract(FlyString namespace_, FlyString 
 ExceptionOr<void> Element::set_attribute_ns(FlyString const& namespace_, FlyString const& qualified_name, String const& value)
 {
     // 1. Let namespace, prefix, and localName be the result of passing namespace and qualifiedName to validate and extract.
-    auto extracted_qualified_name = TRY(validate_and_extract(namespace_, qualified_name));
+    auto extracted_qualified_name = TRY(validate_and_extract(global_object(), namespace_, qualified_name));
 
     // FIXME: 2. Set an attribute value for this using localName, value, and also prefix and namespace.
 
@@ -180,7 +195,7 @@ DOM::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optional
     // 1. If qualifiedName does not match the Name production in XML, then throw an "InvalidCharacterError" DOMException.
     // FIXME: Proper name validation
     if (name.is_empty())
-        return InvalidCharacterError::create("Attribute name must not be empty");
+        return InvalidCharacterError::create(global_object(), "Attribute name must not be empty");
 
     // 2. If this is in the HTML namespace and its node document is an HTML document, then set qualifiedName to qualifiedName in ASCII lowercase.
     // FIXME: Handle the second condition, assume it is an HTML document for now.
@@ -287,7 +302,7 @@ RefPtr<Layout::Node> Element::create_layout_node_for_display_type(DOM::Document&
         return adopt_ref(*new Layout::InlineNode(document, element, move(style)));
     }
 
-    if (display.is_flow_inside() || display.is_flow_root_inside() || display.is_flex_inside())
+    if (display.is_flow_inside() || display.is_flow_root_inside() || display.is_flex_inside() || display.is_grid_inside())
         return adopt_ref(*new Layout::BlockContainer(document, element, move(style)));
 
     TODO();
@@ -295,7 +310,7 @@ RefPtr<Layout::Node> Element::create_layout_node_for_display_type(DOM::Document&
 
 CSS::CSSStyleDeclaration const* Element::inline_style() const
 {
-    return m_inline_style;
+    return m_inline_style.ptr();
 }
 
 void Element::parse_attribute(FlyString const& name, String const& value)
@@ -412,7 +427,7 @@ NonnullRefPtr<CSS::StyleProperties> Element::resolved_css_values()
     return properties;
 }
 
-RefPtr<DOMTokenList> const& Element::class_list()
+DOMTokenList* Element::class_list()
 {
     if (!m_class_list)
         m_class_list = DOMTokenList::create(*this, HTML::AttributeNames::class_);
@@ -424,7 +439,7 @@ DOM::ExceptionOr<bool> Element::matches(StringView selectors) const
 {
     auto maybe_selectors = parse_selector(CSS::Parser::ParsingContext(static_cast<ParentNode&>(const_cast<Element&>(*this))), selectors);
     if (!maybe_selectors.has_value())
-        return DOM::SyntaxError::create("Failed to parse selector");
+        return DOM::SyntaxError::create(global_object(), "Failed to parse selector");
 
     auto sel = maybe_selectors.value();
     for (auto& s : sel) {
@@ -439,7 +454,7 @@ DOM::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) con
 {
     auto maybe_selectors = parse_selector(CSS::Parser::ParsingContext(static_cast<ParentNode&>(const_cast<Element&>(*this))), selectors);
     if (!maybe_selectors.has_value())
-        return DOM::SyntaxError::create("Failed to parse selector");
+        return DOM::SyntaxError::create(global_object(), "Failed to parse selector");
 
     auto matches_selectors = [](CSS::SelectorList const& selector_list, Element const* element) {
         for (auto& selector : selector_list) {
@@ -488,14 +503,14 @@ bool Element::is_active() const
     return document().active_element() == this;
 }
 
-NonnullRefPtr<HTMLCollection> Element::get_elements_by_class_name(FlyString const& class_name)
+JS::NonnullGCPtr<HTMLCollection> Element::get_elements_by_class_name(FlyString const& class_name)
 {
     return HTMLCollection::create(*this, [class_name, quirks_mode = document().in_quirks_mode()](Element const& element) {
         return element.has_class(class_name, quirks_mode ? CaseSensitivity::CaseInsensitive : CaseSensitivity::CaseSensitive);
     });
 }
 
-void Element::set_shadow_root(RefPtr<ShadowRoot> shadow_root)
+void Element::set_shadow_root(JS::GCPtr<ShadowRoot> shadow_root)
 {
     if (m_shadow_root == shadow_root)
         return;
@@ -507,11 +522,11 @@ void Element::set_shadow_root(RefPtr<ShadowRoot> shadow_root)
     invalidate_style();
 }
 
-NonnullRefPtr<CSS::CSSStyleDeclaration> Element::style_for_bindings()
+CSS::CSSStyleDeclaration* Element::style_for_bindings()
 {
     if (!m_inline_style)
         m_inline_style = CSS::ElementInlineCSSStyleDeclaration::create(*this, {}, {});
-    return *m_inline_style;
+    return m_inline_style;
 }
 
 // https://dom.spec.whatwg.org/#element-html-uppercased-qualified-name
@@ -527,7 +542,7 @@ void Element::make_html_uppercased_qualified_name()
 // https://html.spec.whatwg.org/multipage/webappapis.html#queue-an-element-task
 void Element::queue_an_element_task(HTML::Task::Source source, Function<void()> steps)
 {
-    auto task = HTML::Task::create(source, &document(), [strong_this = NonnullRefPtr(*this), steps = move(steps)] {
+    auto task = HTML::Task::create(source, &document(), [strong_this = JS::make_handle(*this), steps = move(steps)] {
         steps();
     });
     HTML::main_thread_event_loop().task_queue().add(move(task));
@@ -546,7 +561,7 @@ bool Element::serializes_as_void() const
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getboundingclientrect
-NonnullRefPtr<Geometry::DOMRect> Element::get_bounding_client_rect() const
+JS::NonnullGCPtr<Geometry::DOMRect> Element::get_bounding_client_rect() const
 {
     // // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document()).update_layout();
@@ -554,22 +569,22 @@ NonnullRefPtr<Geometry::DOMRect> Element::get_bounding_client_rect() const
     // FIXME: Support inline layout nodes as well.
     auto* paint_box = this->paint_box();
     if (!paint_box)
-        return Geometry::DOMRect::create(0, 0, 0, 0);
+        return Geometry::DOMRect::create_with_global_object(window(), 0, 0, 0, 0);
 
     VERIFY(document().browsing_context());
     auto viewport_offset = document().browsing_context()->viewport_scroll_offset();
 
-    return Geometry::DOMRect::create(paint_box->absolute_rect().translated(-viewport_offset.x(), -viewport_offset.y()));
+    return Geometry::DOMRect::create(window(), paint_box->absolute_rect().translated(-viewport_offset.x(), -viewport_offset.y()));
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getclientrects
-NonnullRefPtr<Geometry::DOMRectList> Element::get_client_rects() const
+JS::NonnullGCPtr<Geometry::DOMRectList> Element::get_client_rects() const
 {
-    NonnullRefPtrVector<Geometry::DOMRect> rects;
+    Vector<JS::Handle<Geometry::DOMRect>> rects;
 
     // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList object and stop this algorithm.
     if (!layout_node() || !layout_node()->is_box())
-        return Geometry::DOMRectList::create(move(rects));
+        return Geometry::DOMRectList::create(window(), move(rects));
 
     // FIXME: 2. If the element has an associated SVG layout box return a DOMRectList object containing a single DOMRect object that describes
     // the bounding box of the element as defined by the SVG specification, applying the transforms that apply to the element and its ancestors.
@@ -582,12 +597,15 @@ NonnullRefPtr<Geometry::DOMRectList> Element::get_client_rects() const
     // - Replace each anonymous block box with its child box(es) and repeat this until no anonymous block boxes are left in the final list.
 
     auto bounding_rect = get_bounding_client_rect();
-    rects.append(bounding_rect);
-    return Geometry::DOMRectList::create(move(rects));
+    rects.append(*bounding_rect);
+    return Geometry::DOMRectList::create(window(), move(rects));
 }
 
 int Element::client_top() const
 {
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<Document&>(document()).update_layout();
+
     // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
     if (!layout_node() || !layout_node()->is_box())
         return 0;
@@ -601,6 +619,9 @@ int Element::client_top() const
 // https://drafts.csswg.org/cssom-view/#dom-element-clientleft
 int Element::client_left() const
 {
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<Document&>(document()).update_layout();
+
     // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
     if (!layout_node() || !layout_node()->is_box())
         return 0;
@@ -614,12 +635,7 @@ int Element::client_left() const
 // https://drafts.csswg.org/cssom-view/#dom-element-clientwidth
 int Element::client_width() const
 {
-    // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<Document&>(document()).update_layout();
-
-    // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
-    if (!paint_box())
-        return 0;
+    // NOTE: We do step 2 before step 1 here since step 2 can exit early without needing to perform layout.
 
     // 2. If the element is the root element and the element’s node document is not in quirks mode,
     //    or if the element is the HTML body element and the element’s node document is in quirks mode,
@@ -629,6 +645,13 @@ int Element::client_width() const
         return document().browsing_context()->viewport_rect().width();
     }
 
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<Document&>(document()).update_layout();
+
+    // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
+    if (!paint_box())
+        return 0;
+
     // 3. Return the width of the padding edge excluding the width of any rendered scrollbar between the padding edge and the border edge,
     // ignoring any transforms that apply to the element and its ancestors.
     return paint_box()->absolute_padding_box_rect().width();
@@ -637,12 +660,7 @@ int Element::client_width() const
 // https://drafts.csswg.org/cssom-view/#dom-element-clientheight
 int Element::client_height() const
 {
-    // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<Document&>(document()).update_layout();
-
-    // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
-    if (!paint_box())
-        return 0;
+    // NOTE: We do step 2 before step 1 here since step 2 can exit early without needing to perform layout.
 
     // 2. If the element is the root element and the element’s node document is not in quirks mode,
     //    or if the element is the HTML body element and the element’s node document is in quirks mode,
@@ -651,6 +669,13 @@ int Element::client_height() const
         || (is<HTML::HTMLBodyElement>(*this) && document().in_quirks_mode())) {
         return document().browsing_context()->viewport_rect().height();
     }
+
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<Document&>(document()).update_layout();
+
+    // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
+    if (!paint_box())
+        return 0;
 
     // 3. Return the height of the padding edge excluding the height of any rendered scrollbar between the padding edge and the border edge,
     //    ignoring any transforms that apply to the element and its ancestors.

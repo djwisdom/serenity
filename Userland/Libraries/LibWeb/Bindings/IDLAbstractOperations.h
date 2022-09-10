@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -54,11 +54,10 @@ JS::Completion call_user_object_operation(Bindings::CallbackType& callback, Stri
         this_argument = JS::js_undefined();
 
     // 3. Let O be the ECMAScript object corresponding to value.
-    auto& object = *callback.callback.cell();
+    auto& object = callback.callback;
 
     // 4. Let realm be O’s associated Realm.
-    auto& global_object = object.global_object();
-    auto& realm = *global_object.associated_realm();
+    auto& realm = object.shape().realm();
 
     // 5. Let relevant settings be realm’s settings object.
     auto& relevant_settings = verify_cast<HTML::EnvironmentSettingsObject>(*realm.host_defined());
@@ -88,7 +87,7 @@ JS::Completion call_user_object_operation(Bindings::CallbackType& callback, Stri
 
         // 4. If ! IsCallable(X) is false, then set completion to a new Completion{[[Type]]: throw, [[Value]]: a newly created TypeError object, [[Target]]: empty}, and jump to the step labeled return.
         if (!get_result.value().is_function()) {
-            completion = realm.vm().template throw_completion<JS::TypeError>(global_object, JS::ErrorType::NotAFunction, get_result.value().to_string_without_side_effects());
+            completion = realm.vm().template throw_completion<JS::TypeError>(JS::ErrorType::NotAFunction, get_result.value().to_string_without_side_effects());
             return clean_up_on_return(stored_settings, relevant_settings, completion);
         }
 
@@ -105,7 +104,8 @@ JS::Completion call_user_object_operation(Bindings::CallbackType& callback, Stri
 
     // 12. Let callResult be Call(X, thisArg, esArgs).
     VERIFY(actual_function_object);
-    auto call_result = JS::call(global_object, verify_cast<JS::FunctionObject>(*actual_function_object), this_argument.value(), forward<Args>(args)...);
+    auto& vm = object.vm();
+    auto call_result = JS::call(vm, verify_cast<JS::FunctionObject>(*actual_function_object), this_argument.value(), forward<Args>(args)...);
 
     // 13. If callResult is an abrupt completion, set completion to callResult and jump to the step labeled return.
     if (call_result.is_throw_completion()) {
@@ -126,10 +126,9 @@ JS::Completion invoke_callback(Bindings::CallbackType& callback, Optional<JS::Va
 template<typename... Args>
 JS::Completion invoke_callback(Bindings::CallbackType& callback, Optional<JS::Value> this_argument, Args&&... args)
 {
-    auto* function_object = callback.callback.cell();
-    VERIFY(function_object);
+    auto& function_object = callback.callback;
 
-    JS::MarkedVector<JS::Value> arguments_list { function_object->global_object().heap() };
+    JS::MarkedVector<JS::Value> arguments_list { function_object.vm().heap() };
     (arguments_list.append(forward<Args>(args)), ...);
 
     return invoke_callback(callback, move(this_argument), move(arguments_list));

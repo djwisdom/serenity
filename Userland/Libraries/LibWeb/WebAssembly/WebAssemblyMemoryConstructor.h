@@ -14,8 +14,8 @@ class WebAssemblyMemoryConstructor : public JS::NativeFunction {
     JS_OBJECT(WebAssemblyMemoryConstructor, JS::NativeFunction);
 
 public:
-    explicit WebAssemblyMemoryConstructor(JS::GlobalObject&);
-    virtual void initialize(JS::GlobalObject&) override;
+    explicit WebAssemblyMemoryConstructor(JS::Realm&);
+    virtual void initialize(JS::Realm&) override;
     virtual ~WebAssemblyMemoryConstructor() override;
 
     virtual JS::ThrowCompletionOr<JS::Value> call() override;

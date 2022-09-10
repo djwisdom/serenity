@@ -318,10 +318,13 @@ float BlockFormattingContext::compute_theoretical_height(LayoutState const& stat
     if (is<ReplacedBox>(box)) {
         height = compute_height_for_replaced_element(state, verify_cast<ReplacedBox>(box));
     } else {
-        if (box.computed_values().height().is_auto())
+        // NOTE: We treat percentage heights as "auto" if the containing block has indefinite height.
+        if (box.computed_values().height().is_auto()
+            || (box.computed_values().height().is_percentage() && !state.get(*box.containing_block()).has_definite_height())) {
             height = compute_auto_height_for_block_level_element(state, box);
-        else
+        } else {
             height = computed_values.height().resolved(box, containing_block_height).to_px(box);
+        }
     }
 
     auto specified_max_height = computed_values.max_height().resolved(box, containing_block_height).resolved(box);
@@ -386,7 +389,7 @@ void BlockFormattingContext::layout_inline_children(BlockContainer const& block_
     block_container_state.set_content_height(content_height);
 }
 
-void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContainer const& block_container, LayoutMode layout_mode, float& content_height)
+void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContainer const& block_container, LayoutMode layout_mode, float& bottom_of_lowest_margin_box)
 {
     auto& box_state = m_state.get_mutable(box);
 
@@ -401,7 +404,7 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
 
     if (box.is_floating()) {
         layout_floating_box(box, block_container, layout_mode);
-        content_height = max(content_height, box_state.offset.y() + box_state.content_height() + box_state.margin_box_bottom());
+        bottom_of_lowest_margin_box = max(bottom_of_lowest_margin_box, box_state.offset.y() + box_state.content_height() + box_state.margin_box_bottom());
         return;
     }
 
@@ -437,7 +440,7 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
         layout_list_item_marker(static_cast<ListItemBox const&>(box));
     }
 
-    content_height = max(content_height, box_state.offset.y() + box_state.content_height() + box_state.margin_box_bottom());
+    bottom_of_lowest_margin_box = max(bottom_of_lowest_margin_box, box_state.offset.y() + box_state.content_height() + box_state.margin_box_bottom());
 
     if (independent_formatting_context)
         independent_formatting_context->parent_context_did_dimension_child_root_box();
@@ -460,7 +463,7 @@ void BlockFormattingContext::layout_block_level_children(BlockContainer const& b
 {
     VERIFY(!block_container.children_are_inline());
 
-    float content_height = 0;
+    float bottom_of_lowest_margin_box = 0;
 
     if (layout_mode == LayoutMode::IntrinsicSizing) {
         auto& block_container_state = m_state.get_mutable(block_container);
@@ -471,7 +474,7 @@ void BlockFormattingContext::layout_block_level_children(BlockContainer const& b
     }
 
     block_container.for_each_child_of_type<Box>([&](Box& box) {
-        layout_block_level_box(box, block_container, layout_mode, content_height);
+        layout_block_level_box(box, block_container, layout_mode, bottom_of_lowest_margin_box);
         return IterationDecision::Continue;
     });
 
@@ -480,7 +483,7 @@ void BlockFormattingContext::layout_block_level_children(BlockContainer const& b
         if (block_container.computed_values().width().is_auto() || block_container_state.width_constraint != SizeConstraint::None)
             block_container_state.set_content_width(greatest_child_width(block_container));
         if (block_container.computed_values().height().is_auto() || block_container_state.height_constraint != SizeConstraint::None)
-            block_container_state.set_content_height(content_height);
+            block_container_state.set_content_height(bottom_of_lowest_margin_box);
     }
 }
 
@@ -626,7 +629,7 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
                 offset_from_edge = box_state.content_width() + box_state.margin_box_right();
         };
 
-        auto box_in_root_rect = margin_box_rect_in_ancestor_coordinate_space(box, root(), m_state);
+        auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(box, root(), m_state);
         float y_in_root = box_in_root_rect.y();
         float y = box_state.offset.y();
 
@@ -649,7 +652,7 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
             }
 
             if (fits_on_line) {
-                auto const previous_rect = margin_box_rect_in_ancestor_coordinate_space(previous_box.box, root(), m_state);
+                auto const previous_rect = border_box_rect_in_ancestor_coordinate_space(previous_box.box, root(), m_state);
                 if (previous_rect.contains_vertically(y_in_root + side_data.y_offset)) {
                     // This box touches another already floating box. Stack after others.
                     offset_from_edge = wanted_offset_from_edge;
@@ -663,13 +666,13 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
             } else {
                 // We ran out of horizontal space on this "float line", and need to break.
                 float_to_edge();
-                float lowest_border_edge = 0;
+                float lowest_margin_edge = 0;
                 for (auto const& box : side_data.current_boxes) {
                     auto const& box_state = m_state.get(box.box);
-                    lowest_border_edge = max(lowest_border_edge, box_state.border_box_height());
+                    lowest_margin_edge = max(lowest_margin_edge, box_state.margin_box_height());
                 }
 
-                side_data.y_offset += lowest_border_edge;
+                side_data.y_offset += lowest_margin_edge;
 
                 // Also, forget all previous boxes floated to this side while since they're no longer relevant.
                 side_data.clear();
@@ -747,7 +750,7 @@ BlockFormattingContext::SpaceUsedByFloats BlockFormattingContext::space_used_by_
     for (auto const& floating_box : m_left_floats.current_boxes.in_reverse()) {
         auto const& floating_box_state = m_state.get(floating_box.box);
         // NOTE: The floating box is *not* in the final horizontal position yet, but the size and vertical position is valid.
-        auto rect = margin_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
+        auto rect = border_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
         if (rect.contains_vertically(y)) {
             space_used_by_floats.left = floating_box.offset_from_edge
                 + floating_box_state.content_width()
@@ -759,7 +762,7 @@ BlockFormattingContext::SpaceUsedByFloats BlockFormattingContext::space_used_by_
     for (auto const& floating_box : m_right_floats.current_boxes.in_reverse()) {
         auto const& floating_box_state = m_state.get(floating_box.box);
         // NOTE: The floating box is *not* in the final horizontal position yet, but the size and vertical position is valid.
-        auto rect = margin_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
+        auto rect = border_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
         if (rect.contains_vertically(y)) {
             space_used_by_floats.right = floating_box.offset_from_edge
                 + floating_box_state.margin_box_left();

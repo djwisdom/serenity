@@ -53,9 +53,9 @@ public:
     void register_document(Badge<DOM::Document>, DOM::Document&);
     void unregister_document(Badge<DOM::Document>, DOM::Document&);
 
-    NonnullRefPtrVector<DOM::Document> documents_in_this_event_loop() const;
+    Vector<JS::Handle<DOM::Document>> documents_in_this_event_loop() const;
 
-    NonnullRefPtrVector<Window> same_loop_windows() const;
+    Vector<JS::Handle<HTML::Window>> same_loop_windows() const;
 
     void push_onto_backup_incumbent_settings_object_stack(Badge<EnvironmentSettingsObject>, EnvironmentSettingsObject& environment_settings_object);
     void pop_backup_incumbent_settings_object_stack(Badge<EnvironmentSettingsObject>);
@@ -84,7 +84,7 @@ private:
 
     JS::VM* m_vm { nullptr };
 
-    RefPtr<Core::Timer> m_system_event_loop_timer;
+    RefPtr<Platform::Timer> m_system_event_loop_timer;
 
     // https://html.spec.whatwg.org/#performing-a-microtask-checkpoint
     bool m_performing_a_microtask_checkpoint { false };
@@ -100,7 +100,7 @@ private:
 
 EventLoop& main_thread_event_loop();
 void old_queue_global_task_with_document(HTML::Task::Source, DOM::Document&, Function<void()> steps);
-void queue_global_task(HTML::Task::Source, JS::GlobalObject&, Function<void()> steps);
+void queue_global_task(HTML::Task::Source, JS::Object&, Function<void()> steps);
 void queue_a_microtask(DOM::Document*, Function<void()> steps);
 void perform_a_microtask_checkpoint();
 

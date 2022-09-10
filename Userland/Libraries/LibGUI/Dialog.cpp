@@ -17,8 +17,7 @@ Dialog::Dialog(Window* parent_window, ScreenPosition screen_position)
     : Window(parent_window)
     , m_screen_position(screen_position)
 {
-    set_modal(true);
-    set_minimizable(false);
+    set_window_mode(WindowMode::Blocking);
 }
 
 Dialog::ExecResult Dialog::exec()
@@ -122,7 +121,7 @@ void Dialog::done(ExecResult result)
 
 void Dialog::event(Core::Event& event)
 {
-    if (event.type() == Event::KeyUp || event.type() == Event::KeyDown) {
+    if (event.type() == Event::KeyDown) {
         auto& key_event = static_cast<KeyEvent&>(event);
         if (key_event.key() == KeyCode::Key_Escape) {
             done(ExecResult::Cancel);

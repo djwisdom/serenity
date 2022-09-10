@@ -8,15 +8,15 @@
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Intl/Locale.h>
+#include <LibLocale/DateTimeFormat.h>
+#include <LibLocale/Locale.h>
 #include <LibTimeZone/TimeZone.h>
-#include <LibUnicode/DateTimeFormat.h>
-#include <LibUnicode/Locale.h>
 
 namespace JS::Intl {
 
-Locale* Locale::create(GlobalObject& global_object, Unicode::LocaleID const& locale_id)
+Locale* Locale::create(Realm& realm, ::Locale::LocaleID const& locale_id)
 {
-    return global_object.heap().allocate<Locale>(global_object, locale_id, *global_object.intl_locale_prototype());
+    return realm.heap().allocate<Locale>(realm, locale_id, *realm.intrinsics().intl_locale_prototype());
 }
 
 // 14 Locale Objects, https://tc39.es/ecma402/#locale-objects
@@ -25,16 +25,16 @@ Locale::Locale(Object& prototype)
 {
 }
 
-Locale::Locale(Unicode::LocaleID const& locale_id, Object& prototype)
+Locale::Locale(::Locale::LocaleID const& locale_id, Object& prototype)
     : Object(prototype)
 {
     set_locale(locale_id.to_string());
 
     for (auto const& extension : locale_id.extensions) {
-        if (!extension.has<Unicode::LocaleExtension>())
+        if (!extension.has<::Locale::LocaleExtension>())
             continue;
 
-        for (auto const& keyword : extension.get<Unicode::LocaleExtension>().keywords) {
+        for (auto const& keyword : extension.get<::Locale::LocaleExtension>().keywords) {
             if (keyword.key == "ca"sv) {
                 set_calendar(keyword.value);
             } else if (keyword.key == "co"sv) {
@@ -55,9 +55,9 @@ Locale::Locale(Unicode::LocaleID const& locale_id, Object& prototype)
 }
 
 // 1.1.1 CreateArrayFromListOrRestricted ( list , restricted )
-static Array* create_array_from_list_or_restricted(GlobalObject& global_object, Vector<StringView> list, Optional<String> restricted)
+static Array* create_array_from_list_or_restricted(VM& vm, Vector<StringView> list, Optional<String> restricted)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. If restricted is not undefined, then
     if (restricted.has_value()) {
@@ -66,13 +66,13 @@ static Array* create_array_from_list_or_restricted(GlobalObject& global_object, 
     }
 
     // 2. Return ! CreateArrayFromList( list ).
-    return Array::create_from<StringView>(global_object, list, [&vm](auto value) {
+    return Array::create_from<StringView>(realm, list, [&vm](auto value) {
         return js_string(vm, value);
     });
 }
 
 // 1.1.2 CalendarsOfLocale ( loc ), https://tc39.es/proposal-intl-locale-info/#sec-calendars-of-locale
-Array* calendars_of_locale(GlobalObject& global_object, Locale const& locale_object)
+Array* calendars_of_locale(VM& vm, Locale const& locale_object)
 {
     // 1. Let restricted be loc.[[Calendar]].
     Optional<String> restricted = locale_object.has_calendar() ? locale_object.calendar() : Optional<String> {};
@@ -81,17 +81,17 @@ Array* calendars_of_locale(GlobalObject& global_object, Locale const& locale_obj
     auto const& locale = locale_object.locale();
 
     // 3. Assert: locale matches the unicode_locale_id production.
-    VERIFY(Unicode::parse_unicode_locale_id(locale).has_value());
+    VERIFY(::Locale::parse_unicode_locale_id(locale).has_value());
 
     // 4. Let list be a List of 1 or more unique canonical calendar identifiers, which must be lower case String values conforming to the type sequence from UTS 35 Unicode Locale Identifier, section 3.2, sorted in descending preference of those in common use for date and time formatting in locale.
-    auto list = Unicode::get_keywords_for_locale(locale, "ca"sv);
+    auto list = ::Locale::get_keywords_for_locale(locale, "ca"sv);
 
     // 5. Return ! CreateArrayFromListOrRestricted( list, restricted ).
-    return create_array_from_list_or_restricted(global_object, move(list), move(restricted));
+    return create_array_from_list_or_restricted(vm, move(list), move(restricted));
 }
 
 // 1.1.3 CollationsOfLocale ( loc ), https://tc39.es/proposal-intl-locale-info/#sec-collations-of-locale
-Array* collations_of_locale(GlobalObject& global_object, Locale const& locale_object)
+Array* collations_of_locale(VM& vm, Locale const& locale_object)
 {
     // 1. Let restricted be loc.[[Collation]].
     Optional<String> restricted = locale_object.has_collation() ? locale_object.collation() : Optional<String> {};
@@ -100,17 +100,17 @@ Array* collations_of_locale(GlobalObject& global_object, Locale const& locale_ob
     auto const& locale = locale_object.locale();
 
     // 3. Assert: locale matches the unicode_locale_id production.
-    VERIFY(Unicode::parse_unicode_locale_id(locale).has_value());
+    VERIFY(::Locale::parse_unicode_locale_id(locale).has_value());
 
     // 4. Let list be a List of 1 or more unique canonical collation identifiers, which must be lower case String values conforming to the type sequence from UTS 35 Unicode Locale Identifier, section 3.2, sorted in descending preference of those in common use for string comparison in locale. The values "standard" and "search" must be excluded from list.
-    auto list = Unicode::get_keywords_for_locale(locale, "co"sv);
+    auto list = ::Locale::get_keywords_for_locale(locale, "co"sv);
 
     // 5. Return ! CreateArrayFromListOrRestricted( list, restricted ).
-    return create_array_from_list_or_restricted(global_object, move(list), move(restricted));
+    return create_array_from_list_or_restricted(vm, move(list), move(restricted));
 }
 
 // 1.1.4 HourCyclesOfLocale ( loc ), https://tc39.es/proposal-intl-locale-info/#sec-hour-cycles-of-locale
-Array* hour_cycles_of_locale(GlobalObject& global_object, Locale const& locale_object)
+Array* hour_cycles_of_locale(VM& vm, Locale const& locale_object)
 {
     // 1. Let restricted be loc.[[HourCycle]].
     Optional<String> restricted = locale_object.has_hour_cycle() ? locale_object.hour_cycle() : Optional<String> {};
@@ -119,17 +119,17 @@ Array* hour_cycles_of_locale(GlobalObject& global_object, Locale const& locale_o
     auto const& locale = locale_object.locale();
 
     // 3. Assert: locale matches the unicode_locale_id production.
-    VERIFY(Unicode::parse_unicode_locale_id(locale).has_value());
+    VERIFY(::Locale::parse_unicode_locale_id(locale).has_value());
 
     // 4. Let list be a List of 1 or more unique hour cycle identifiers, which must be lower case String values indicating either the 12-hour format ("h11", "h12") or the 24-hour format ("h23", "h24"), sorted in descending preference of those in common use for date and time formatting in locale.
-    auto list = Unicode::get_keywords_for_locale(locale, "hc"sv);
+    auto list = ::Locale::get_keywords_for_locale(locale, "hc"sv);
 
     // 5. Return ! CreateArrayFromListOrRestricted( list, restricted ).
-    return create_array_from_list_or_restricted(global_object, move(list), move(restricted));
+    return create_array_from_list_or_restricted(vm, move(list), move(restricted));
 }
 
 // 1.1.5 NumberingSystemsOfLocale ( loc ), https://tc39.es/proposal-intl-locale-info/#sec-numbering-systems-of-locale
-Array* numbering_systems_of_locale(GlobalObject& global_object, Locale const& locale_object)
+Array* numbering_systems_of_locale(VM& vm, Locale const& locale_object)
 {
     // 1. Let restricted be loc.[[NumberingSystem]].
     Optional<String> restricted = locale_object.has_numbering_system() ? locale_object.numbering_system() : Optional<String> {};
@@ -138,20 +138,20 @@ Array* numbering_systems_of_locale(GlobalObject& global_object, Locale const& lo
     auto const& locale = locale_object.locale();
 
     // 3. Assert: locale matches the unicode_locale_id production.
-    VERIFY(Unicode::parse_unicode_locale_id(locale).has_value());
+    VERIFY(::Locale::parse_unicode_locale_id(locale).has_value());
 
     // 4. Let list be a List of 1 or more unique canonical numbering system identifiers, which must be lower case String values conforming to the type sequence from UTS 35 Unicode Locale Identifier, section 3.2, sorted in descending preference of those in common use for formatting numeric values in locale.
-    auto list = Unicode::get_keywords_for_locale(locale, "nu"sv);
+    auto list = ::Locale::get_keywords_for_locale(locale, "nu"sv);
 
     // 5. Return ! CreateArrayFromListOrRestricted( list, restricted ).
-    return create_array_from_list_or_restricted(global_object, move(list), move(restricted));
+    return create_array_from_list_or_restricted(vm, move(list), move(restricted));
 }
 
 // 1.1.6 TimeZonesOfLocale ( loc ), https://tc39.es/proposal-intl-locale-info/#sec-time-zones-of-locale
 // NOTE: Our implementation takes a region rather than a Locale object to avoid needlessly parsing the locale twice.
-Array* time_zones_of_locale(GlobalObject& global_object, StringView region)
+Array* time_zones_of_locale(VM& vm, StringView region)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let locale be loc.[[Locale]].
     // 2. Assert: locale matches the unicode_locale_id production.
@@ -162,7 +162,7 @@ Array* time_zones_of_locale(GlobalObject& global_object, StringView region)
     quick_sort(list);
 
     // 5. Return ! CreateArrayFromList( list ).
-    return Array::create_from<StringView>(global_object, list, [&vm](auto value) {
+    return Array::create_from<StringView>(realm, list, [&vm](auto value) {
         return js_string(vm, value);
     });
 }
@@ -174,36 +174,36 @@ StringView character_direction_of_locale(Locale const& locale_object)
     auto const& locale = locale_object.locale();
 
     // 2. Assert: locale matches the unicode_locale_id production.
-    VERIFY(Unicode::parse_unicode_locale_id(locale).has_value());
+    VERIFY(::Locale::parse_unicode_locale_id(locale).has_value());
 
     // 3. If the default general ordering of characters (characterOrder) within a line in locale is right-to-left, return "rtl".
     // NOTE: LibUnicode handles both LTR and RTL character orders in this call, not just RTL. We then fallback to LTR
     //       below if LibUnicode doesn't conclusively know the character order for this locale.
-    if (auto character_order = Unicode::character_order_for_locale(locale); character_order.has_value())
-        return Unicode::character_order_to_string(*character_order);
+    if (auto character_order = ::Locale::character_order_for_locale(locale); character_order.has_value())
+        return ::Locale::character_order_to_string(*character_order);
 
     // 4. Return "ltr".
     return "ltr"sv;
 }
 
-static u8 weekday_to_integer(Optional<Unicode::Weekday> weekday, Unicode::Weekday falllback)
+static u8 weekday_to_integer(Optional<::Locale::Weekday> weekday, ::Locale::Weekday falllback)
 {
     // NOTE: This fallback will be used if LibUnicode data generation is disabled. Its value should
     //       be that of the default region ("001") in the CLDR.
     switch (weekday.value_or(falllback)) {
-    case Unicode::Weekday::Monday:
+    case ::Locale::Weekday::Monday:
         return 1;
-    case Unicode::Weekday::Tuesday:
+    case ::Locale::Weekday::Tuesday:
         return 2;
-    case Unicode::Weekday::Wednesday:
+    case ::Locale::Weekday::Wednesday:
         return 3;
-    case Unicode::Weekday::Thursday:
+    case ::Locale::Weekday::Thursday:
         return 4;
-    case Unicode::Weekday::Friday:
+    case ::Locale::Weekday::Friday:
         return 5;
-    case Unicode::Weekday::Saturday:
+    case ::Locale::Weekday::Saturday:
         return 6;
-    case Unicode::Weekday::Sunday:
+    case ::Locale::Weekday::Sunday:
         return 7;
     }
 
@@ -212,8 +212,8 @@ static u8 weekday_to_integer(Optional<Unicode::Weekday> weekday, Unicode::Weekda
 
 static Vector<u8> weekend_of_locale(StringView locale)
 {
-    auto weekend_start = weekday_to_integer(Unicode::get_locale_weekend_start(locale), Unicode::Weekday::Saturday);
-    auto weekend_end = weekday_to_integer(Unicode::get_locale_weekend_end(locale), Unicode::Weekday::Sunday);
+    auto weekend_start = weekday_to_integer(::Locale::get_locale_weekend_start(locale), ::Locale::Weekday::Saturday);
+    auto weekend_end = weekday_to_integer(::Locale::get_locale_weekend_end(locale), ::Locale::Weekday::Sunday);
 
     // There currently aren't any regions in the CLDR which wrap around from Sunday (7) to Monday (1).
     // If this changes, this logic will need to be updated to handle that.
@@ -235,12 +235,12 @@ WeekInfo week_info_of_locale(Locale const& locale_object)
     auto const& locale = locale_object.locale();
 
     // 2. Assert: locale matches the unicode_locale_id production.
-    VERIFY(Unicode::parse_unicode_locale_id(locale).has_value());
+    VERIFY(::Locale::parse_unicode_locale_id(locale).has_value());
 
     // 3. Return a record whose fields are defined by Table 1, with values based on locale.
     WeekInfo week_info {};
-    week_info.minimal_days = Unicode::get_locale_minimum_days(locale).value_or(1);
-    week_info.first_day = weekday_to_integer(Unicode::get_locale_first_day(locale), Unicode::Weekday::Monday);
+    week_info.minimal_days = ::Locale::get_locale_minimum_days(locale).value_or(1);
+    week_info.first_day = weekday_to_integer(::Locale::get_locale_first_day(locale), ::Locale::Weekday::Monday);
     week_info.weekend = weekend_of_locale(locale);
 
     return week_info;

@@ -33,10 +33,11 @@ static void setup_socket_fd(Process::OpenFileDescriptions& fds, int fd, NonnullL
 
 ErrorOr<FlatPtr> Process::sys$socket(int domain, int type, int protocol)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     REQUIRE_PROMISE_FOR_SOCKET_DOMAIN(domain);
 
-    if ((type & SOCK_TYPE_MASK) == SOCK_RAW && !is_superuser())
+    auto credentials = this->credentials();
+    if ((type & SOCK_TYPE_MASK) == SOCK_RAW && !credentials->is_superuser())
         return EACCES;
 
     return m_fds.with_exclusive([&](auto& fds) -> ErrorOr<FlatPtr> {
@@ -56,7 +57,7 @@ ErrorOr<FlatPtr> Process::sys$bind(int sockfd, Userspace<sockaddr const*> addres
         return ENOTSOCK;
     auto& socket = *description->socket();
     REQUIRE_PROMISE_FOR_SOCKET_DOMAIN(socket.domain());
-    TRY(socket.bind(address, address_length));
+    TRY(socket.bind(credentials(), address, address_length));
     return 0;
 }
 
@@ -152,7 +153,7 @@ ErrorOr<FlatPtr> Process::sys$connect(int sockfd, Userspace<sockaddr const*> use
         return ENOTSOCK;
     auto& socket = *description->socket();
     REQUIRE_PROMISE_FOR_SOCKET_DOMAIN(socket.domain());
-    TRY(socket.connect(*description, user_address, user_address_size));
+    TRY(socket.connect(credentials(), *description, user_address, user_address_size));
     return 0;
 }
 
@@ -241,15 +242,10 @@ ErrorOr<FlatPtr> Process::sys$recvmsg(int sockfd, Userspace<struct msghdr*> user
     if (socket.is_shut_down_for_reading())
         return 0;
 
-    bool original_blocking = description->is_blocking();
-    if (flags & MSG_DONTWAIT)
-        description->set_blocking(false);
-
     auto data_buffer = TRY(UserOrKernelBuffer::for_user_buffer((u8*)iovs[0].iov_base, iovs[0].iov_len));
     Time timestamp {};
-    auto result = socket.recvfrom(*description, data_buffer, iovs[0].iov_len, flags, user_addr, user_addr_length, timestamp);
-    if (flags & MSG_DONTWAIT)
-        description->set_blocking(original_blocking);
+    bool blocking = (flags & MSG_DONTWAIT) ? false : description->is_blocking();
+    auto result = socket.recvfrom(*description, data_buffer, iovs[0].iov_len, flags, user_addr, user_addr_length, timestamp, blocking);
 
     if (result.is_error())
         return result.release_error();

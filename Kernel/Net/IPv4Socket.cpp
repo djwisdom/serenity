@@ -94,7 +94,7 @@ void IPv4Socket::get_peer_address(sockaddr* address, socklen_t* address_size)
     *address_size = sizeof(sockaddr_in);
 }
 
-ErrorOr<void> IPv4Socket::bind(Userspace<sockaddr const*> user_address, socklen_t address_size)
+ErrorOr<void> IPv4Socket::bind(Credentials const& credentials, Userspace<sockaddr const*> user_address, socklen_t address_size)
 {
     VERIFY(setup_state() == SetupState::Unstarted);
     if (address_size != sizeof(sockaddr_in))
@@ -107,9 +107,9 @@ ErrorOr<void> IPv4Socket::bind(Userspace<sockaddr const*> user_address, socklen_
         return set_so_error(EINVAL);
 
     auto requested_local_port = ntohs(address.sin_port);
-    if (!Process::current().is_superuser()) {
+    if (!credentials.is_superuser()) {
         if (requested_local_port > 0 && requested_local_port < 1024) {
-            dbgln("UID {} attempted to bind {} to port {}", Process::current().uid(), class_name(), requested_local_port);
+            dbgln("UID {} attempted to bind {} to port {}", credentials.uid(), class_name(), requested_local_port);
             return set_so_error(EACCES);
         }
     }
@@ -138,7 +138,7 @@ ErrorOr<void> IPv4Socket::listen(size_t backlog)
     return protocol_listen(result.did_allocate);
 }
 
-ErrorOr<void> IPv4Socket::connect(OpenFileDescription& description, Userspace<sockaddr const*> address, socklen_t address_size)
+ErrorOr<void> IPv4Socket::connect(Credentials const&, OpenFileDescription& description, Userspace<sockaddr const*> address, socklen_t address_size)
 {
     if (address_size != sizeof(sockaddr_in))
         return set_so_error(EINVAL);
@@ -246,7 +246,7 @@ ErrorOr<size_t> IPv4Socket::sendto(OpenFileDescription&, UserOrKernelBuffer cons
     return nsent_or_error;
 }
 
-ErrorOr<size_t> IPv4Socket::receive_byte_buffered(OpenFileDescription& description, UserOrKernelBuffer& buffer, size_t buffer_length, int flags, Userspace<sockaddr*>, Userspace<socklen_t*>)
+ErrorOr<size_t> IPv4Socket::receive_byte_buffered(OpenFileDescription& description, UserOrKernelBuffer& buffer, size_t buffer_length, int flags, Userspace<sockaddr*>, Userspace<socklen_t*>, bool blocking)
 {
     MutexLocker locker(mutex());
 
@@ -255,7 +255,7 @@ ErrorOr<size_t> IPv4Socket::receive_byte_buffered(OpenFileDescription& descripti
     if (m_receive_buffer->is_empty()) {
         if (protocol_is_disconnected())
             return 0;
-        if (!description.is_blocking())
+        if (!blocking)
             return set_so_error(EAGAIN);
 
         locker.unlock();
@@ -285,7 +285,7 @@ ErrorOr<size_t> IPv4Socket::receive_byte_buffered(OpenFileDescription& descripti
     return nreceived_or_error;
 }
 
-ErrorOr<size_t> IPv4Socket::receive_packet_buffered(OpenFileDescription& description, UserOrKernelBuffer& buffer, size_t buffer_length, int flags, Userspace<sockaddr*> addr, Userspace<socklen_t*> addr_length, Time& packet_timestamp)
+ErrorOr<size_t> IPv4Socket::receive_packet_buffered(OpenFileDescription& description, UserOrKernelBuffer& buffer, size_t buffer_length, int flags, Userspace<sockaddr*> addr, Userspace<socklen_t*> addr_length, Time& packet_timestamp, bool blocking)
 {
     MutexLocker locker(mutex());
     ReceivedPacket taken_packet;
@@ -296,7 +296,7 @@ ErrorOr<size_t> IPv4Socket::receive_packet_buffered(OpenFileDescription& descrip
             //        But if so, we still need to deliver at least one EOF read to userspace.. right?
             if (protocol_is_disconnected())
                 return 0;
-            if (!description.is_blocking())
+            if (!blocking)
                 return set_so_error(EAGAIN);
         }
 
@@ -380,7 +380,7 @@ ErrorOr<size_t> IPv4Socket::receive_packet_buffered(OpenFileDescription& descrip
     return protocol_receive(packet->data->bytes(), buffer, buffer_length, flags);
 }
 
-ErrorOr<size_t> IPv4Socket::recvfrom(OpenFileDescription& description, UserOrKernelBuffer& buffer, size_t buffer_length, int flags, Userspace<sockaddr*> user_addr, Userspace<socklen_t*> user_addr_length, Time& packet_timestamp)
+ErrorOr<size_t> IPv4Socket::recvfrom(OpenFileDescription& description, UserOrKernelBuffer& buffer, size_t buffer_length, int flags, Userspace<sockaddr*> user_addr, Userspace<socklen_t*> user_addr_length, Time& packet_timestamp, bool blocking)
 {
     if (user_addr_length) {
         socklen_t addr_length;
@@ -398,9 +398,9 @@ ErrorOr<size_t> IPv4Socket::recvfrom(OpenFileDescription& description, UserOrKer
 
         ErrorOr<size_t> nreceived = 0;
         if (buffer_mode() == BufferMode::Bytes)
-            nreceived = receive_byte_buffered(description, offset_buffer, offset_buffer_length, flags, user_addr, user_addr_length);
+            nreceived = receive_byte_buffered(description, offset_buffer, offset_buffer_length, flags, user_addr, user_addr_length, blocking);
         else
-            nreceived = receive_packet_buffered(description, offset_buffer, offset_buffer_length, flags, user_addr, user_addr_length, packet_timestamp);
+            nreceived = receive_packet_buffered(description, offset_buffer, offset_buffer_length, flags, user_addr, user_addr_length, packet_timestamp, blocking);
 
         if (nreceived.is_error())
             total_nreceived = nreceived;
@@ -625,7 +625,8 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
 
         switch (request) {
         case SIOCADDRT: {
-            if (!Process::current().is_superuser())
+            auto current_process_credentials = Process::current().credentials();
+            if (!current_process_credentials->is_superuser())
                 return EPERM;
             if (route.rt_gateway.sa_family != AF_INET)
                 return EAFNOSUPPORT;
@@ -639,7 +640,8 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
             return update_routing_table(destination, gateway, genmask, route.rt_flags, adapter, UpdateTable::Set);
         }
         case SIOCDELRT:
-            if (!Process::current().is_superuser())
+            auto current_process_credentials = Process::current().credentials();
+            if (!current_process_credentials->is_superuser())
                 return EPERM;
             if (route.rt_gateway.sa_family != AF_INET)
                 return EAFNOSUPPORT;
@@ -659,9 +661,11 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
         arpreq arp_req;
         TRY(copy_from_user(&arp_req, user_req));
 
+        auto current_process_credentials = Process::current().credentials();
+
         switch (request) {
         case SIOCSARP:
-            if (!Process::current().is_superuser())
+            if (!current_process_credentials->is_superuser())
                 return EPERM;
             if (arp_req.arp_pa.sa_family != AF_INET)
                 return EAFNOSUPPORT;
@@ -669,7 +673,7 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
             return {};
 
         case SIOCDARP:
-            if (!Process::current().is_superuser())
+            if (!current_process_credentials->is_superuser())
                 return EPERM;
             if (arp_req.arp_pa.sa_family != AF_INET)
                 return EAFNOSUPPORT;
@@ -693,9 +697,11 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
         if (!adapter)
             return ENODEV;
 
+        auto current_process_credentials = Process::current().credentials();
+
         switch (request) {
         case SIOCSIFADDR:
-            if (!Process::current().is_superuser())
+            if (!current_process_credentials->is_superuser())
                 return EPERM;
             if (ifr.ifr_addr.sa_family != AF_INET)
                 return EAFNOSUPPORT;
@@ -703,7 +709,7 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
             return {};
 
         case SIOCSIFNETMASK:
-            if (!Process::current().is_superuser())
+            if (!current_process_credentials->is_superuser())
                 return EPERM;
             if (ifr.ifr_addr.sa_family != AF_INET)
                 return EAFNOSUPPORT;

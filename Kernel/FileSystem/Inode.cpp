@@ -76,13 +76,13 @@ ErrorOr<NonnullOwnPtr<KBuffer>> Inode::read_entire(OpenFileDescription* descript
     return entire_file.release_nonnull();
 }
 
-ErrorOr<NonnullLockRefPtr<Custody>> Inode::resolve_as_link(Custody& base, LockRefPtr<Custody>* out_parent, int options, int symlink_recursion_level) const
+ErrorOr<NonnullRefPtr<Custody>> Inode::resolve_as_link(Credentials const& credentials, Custody& base, RefPtr<Custody>* out_parent, int options, int symlink_recursion_level) const
 {
     // The default implementation simply treats the stored
     // contents as a path and resolves that. That is, it
     // behaves exactly how you would expect a symlink to work.
     auto contents = TRY(read_entire());
-    return VirtualFileSystem::the().resolve_path(StringView { contents->bytes() }, base, out_parent, options, symlink_recursion_level);
+    return VirtualFileSystem::the().resolve_path(credentials, StringView { contents->bytes() }, base, out_parent, options, symlink_recursion_level);
 }
 
 Inode::Inode(FileSystem& fs, InodeIndex index)
@@ -106,17 +106,7 @@ void Inode::will_be_destroyed()
         (void)flush_metadata();
 }
 
-ErrorOr<void> Inode::set_atime(time_t)
-{
-    return ENOTIMPL;
-}
-
-ErrorOr<void> Inode::set_ctime(time_t)
-{
-    return ENOTIMPL;
-}
-
-ErrorOr<void> Inode::set_mtime(time_t)
+ErrorOr<void> Inode::update_timestamps([[maybe_unused]] Optional<time_t> atime, [[maybe_unused]] Optional<time_t> ctime, [[maybe_unused]] Optional<time_t> mtime)
 {
     return ENOTIMPL;
 }
@@ -236,8 +226,7 @@ void Inode::did_modify_contents()
     // FIXME: What happens if this fails?
     //        ENOTIMPL would be a meaningless error to return here
     auto time = kgettimeofday().to_truncated_seconds();
-    (void)set_mtime(time);
-    (void)set_ctime(time);
+    (void)update_timestamps({}, time, time);
 
     m_watchers.for_each([&](auto& watcher) {
         watcher->notify_inode_event({}, identifier(), InodeWatcherEvent::Type::ContentModified);

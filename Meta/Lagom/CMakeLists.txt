@@ -61,6 +61,7 @@ if (ENABLE_FUZZERS_LIBFUZZER OR ENABLE_FUZZERS_OSSFUZZ)
 endif()
 
 include(wasm_spec_tests)
+include(flac_spec_tests)
 include(lagom_compile_options)
 
 include(GNUInstallDirs) # make sure to include before we mess w/RPATH
@@ -155,10 +156,10 @@ set(Lagom_INSTALL_CMAKEDIR "${CMAKE_INSTALL_DATADIR}/${package}"
     CACHE PATH "CMake package config location relative to the install prefix")
 mark_as_advanced(Lagom_INSTALL_CMAKEDIR)
 
-configure_file("${SERENITY_PROJECT_ROOT}/Meta/CMake/lagom-install-config.cmake.in" "${package}Config.cmake" @ONLY)
 install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/${package}Config.cmake"
+    FILES "${SERENITY_PROJECT_ROOT}/Meta/CMake/lagom-install-config.cmake"
     DESTINATION "${Lagom_INSTALL_CMAKEDIR}"
+    RENAME "${package}Config.cmake"
     COMPONENT Lagom_Development
 )
 
@@ -423,7 +424,7 @@ if (BUILD_LAGOM)
     list(REMOVE_ITEM LIBJS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibJS/SyntaxHighlighter.cpp")
     lagom_lib(JS js
         SOURCES ${LIBJS_SOURCES} ${LIBJS_SUBDIR_SOURCES} ${LIBJS_SUBSUBDIR_SOURCES}
-        LIBS m LibCrypto LibRegex LibUnicode LibTextCodec
+        LIBS m LibCrypto LibRegex LibLocale LibUnicode LibTextCodec
     )
 
     # Line
@@ -431,6 +432,16 @@ if (BUILD_LAGOM)
     lagom_lib(Line line
         SOURCES ${LIBLINE_SOURCES}
     )
+
+    # Locale
+    include(locale_data)
+    file(GLOB LIBLOCALE_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibLocale/*.cpp")
+    lagom_lib(Locale locale
+        SOURCES ${LIBLOCALE_SOURCES} ${LOCALE_DATA_SOURCES}
+    )
+    target_compile_definitions(LibLocale PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
+    target_compile_options(LibLocale PRIVATE -Wno-parentheses-equality)
+    target_link_libraries(LibLocale LibTimeZone LibUnicode)
 
     # Markdown
     file(GLOB LIBMARKDOWN_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibMarkdown/*.cpp")
@@ -506,8 +517,6 @@ if (BUILD_LAGOM)
         SOURCES ${LIBUNICODE_SOURCES} ${UNICODE_DATA_SOURCES}
     )
     target_compile_definitions(LibUnicode PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
-    target_compile_options(LibUnicode PRIVATE -Wno-parentheses-equality)
-    target_link_libraries(LibUnicode LibTimeZone)
 
     # WASM
     file(GLOB LIBWASM_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWasm/*/*.cpp")
@@ -643,6 +652,12 @@ if (BUILD_LAGOM)
             lagom_test(${source} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../Tests/AK)
         endforeach()
 
+        # LibAudio
+        file(GLOB LIBAUDIO_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibAudio/*.cpp")
+        foreach(source ${LIBAUDIO_TEST_SOURCES})
+            lagom_test(${source} LIBS LibAudio WORKING_DIRECTORY ${FLAC_TEST_PATH})
+        endforeach()
+
         # LibCore
         lagom_test(../../Tests/LibCore/TestLibCoreIODevice.cpp WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../Tests/LibCore)
 
@@ -664,6 +679,12 @@ if (BUILD_LAGOM)
         file(GLOB LIBGL_TESTS CONFIGURE_DEPENDS "../../Tests/LibGL/*.cpp")
         foreach(source ${LIBGL_TESTS})
             lagom_test(${source} WORKING_DIRECTORY LIBS LibGL LibGPU LibSoftGPU)
+        endforeach()
+
+        # Locale
+        file(GLOB LIBLOCALE_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibLocale/*.cpp")
+        foreach(source ${LIBLOCALE_TEST_SOURCES})
+            lagom_test(${source} LIBS LibLocale LibUnicode)
         endforeach()
 
         # PDF
@@ -738,6 +759,7 @@ if (BUILD_LAGOM)
         # Extra tests from Tests/LibJS
         lagom_test(../../Tests/LibJS/test-invalid-unicode-js.cpp LIBS LibJS)
         lagom_test(../../Tests/LibJS/test-bytecode-js.cpp LIBS LibJS)
+        lagom_test(../../Tests/LibJS/test-value-js.cpp LIBS LibJS)
 
         # Spreadsheet
         add_executable(test-spreadsheet_lagom

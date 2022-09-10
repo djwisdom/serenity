@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,15 +14,15 @@
 
 namespace JS::Test262 {
 
-void GlobalObject::initialize_global_object()
+void GlobalObject::initialize(Realm& realm)
 {
-    Base::initialize_global_object();
+    Base::initialize(realm);
 
-    m_$262 = vm().heap().allocate<$262Object>(*this, *this);
+    m_$262 = vm().heap().allocate<$262Object>(realm, realm);
 
     // https://github.com/tc39/test262/blob/master/INTERPRETING.md#host-defined-functions
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function("print", print, 1, attr);
+    define_native_function(realm, "print", print, 1, attr);
     define_direct_property("$262", m_$262, attr);
 }
 
@@ -34,7 +34,7 @@ void GlobalObject::visit_edges(Cell::Visitor& visitor)
 
 JS_DEFINE_NATIVE_FUNCTION(GlobalObject::print)
 {
-    auto string = TRY(vm.argument(0).to_string(global_object));
+    auto string = TRY(vm.argument(0).to_string(vm));
     outln("{}", string);
     return js_undefined();
 }

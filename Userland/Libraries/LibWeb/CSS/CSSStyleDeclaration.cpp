@@ -1,17 +1,30 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::CSS {
 
-PropertyOwningCSSStyleDeclaration::PropertyOwningCSSStyleDeclaration(Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
-    : m_properties(move(properties))
+CSSStyleDeclaration::CSSStyleDeclaration(HTML::Window& window_object)
+    : PlatformObject(window_object.cached_web_prototype("CSSStyleDeclaration"))
+{
+}
+
+PropertyOwningCSSStyleDeclaration* PropertyOwningCSSStyleDeclaration::create(HTML::Window& window_object, Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
+{
+    return window_object.heap().allocate<PropertyOwningCSSStyleDeclaration>(window_object.realm(), window_object, move(properties), move(custom_properties));
+}
+
+PropertyOwningCSSStyleDeclaration::PropertyOwningCSSStyleDeclaration(HTML::Window& window_object, Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
+    : CSSStyleDeclaration(window_object)
+    , m_properties(move(properties))
     , m_custom_properties(move(custom_properties))
 {
 }
@@ -23,10 +36,22 @@ String PropertyOwningCSSStyleDeclaration::item(size_t index) const
     return CSS::string_from_property_id(m_properties[index].property_id);
 }
 
+ElementInlineCSSStyleDeclaration* ElementInlineCSSStyleDeclaration::create(DOM::Element& element, Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
+{
+    auto& window_object = element.document().window();
+    return window_object.heap().allocate<ElementInlineCSSStyleDeclaration>(window_object.realm(), element, move(properties), move(custom_properties));
+}
+
 ElementInlineCSSStyleDeclaration::ElementInlineCSSStyleDeclaration(DOM::Element& element, Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
-    : PropertyOwningCSSStyleDeclaration(move(properties), move(custom_properties))
+    : PropertyOwningCSSStyleDeclaration(element.document().window(), move(properties), move(custom_properties))
     , m_element(element.make_weak_ptr<DOM::Element>())
 {
+}
+
+void ElementInlineCSSStyleDeclaration::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_element.ptr());
 }
 
 size_t PropertyOwningCSSStyleDeclaration::length() const
@@ -282,6 +307,54 @@ String PropertyOwningCSSStyleDeclaration::serialized() const
     StringBuilder builder;
     builder.join(' ', list);
     return builder.to_string();
+}
+
+static CSS::PropertyID property_id_from_name(StringView name)
+{
+    // FIXME: Perhaps this should go in the code generator.
+    if (name == "cssFloat"sv)
+        return CSS::PropertyID::Float;
+
+    if (auto property_id = CSS::property_id_from_camel_case_string(name); property_id != CSS::PropertyID::Invalid)
+        return property_id;
+
+    if (auto property_id = CSS::property_id_from_string(name); property_id != CSS::PropertyID::Invalid)
+        return property_id;
+
+    return CSS::PropertyID::Invalid;
+}
+
+JS::ThrowCompletionOr<bool> CSSStyleDeclaration::internal_has_property(JS::PropertyKey const& name) const
+{
+    if (!name.is_string())
+        return Base::internal_has_property(name);
+    return property_id_from_name(name.to_string()) != CSS::PropertyID::Invalid;
+}
+
+JS::ThrowCompletionOr<JS::Value> CSSStyleDeclaration::internal_get(JS::PropertyKey const& name, JS::Value receiver) const
+{
+    if (!name.is_string())
+        return Base::internal_get(name, receiver);
+    auto property_id = property_id_from_name(name.to_string());
+    if (property_id == CSS::PropertyID::Invalid)
+        return Base::internal_get(name, receiver);
+    if (auto maybe_property = property(property_id); maybe_property.has_value())
+        return { js_string(vm(), maybe_property->value->to_string()) };
+    return { js_string(vm(), String::empty()) };
+}
+
+JS::ThrowCompletionOr<bool> CSSStyleDeclaration::internal_set(JS::PropertyKey const& name, JS::Value value, JS::Value receiver)
+{
+    if (!name.is_string())
+        return Base::internal_set(name, value, receiver);
+    auto property_id = property_id_from_name(name.to_string());
+    if (property_id == CSS::PropertyID::Invalid)
+        return Base::internal_set(name, value, receiver);
+
+    auto css_text = TRY(value.to_string(vm()));
+
+    impl().set_property(property_id, css_text);
+    return true;
 }
 
 }

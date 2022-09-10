@@ -12,24 +12,25 @@ namespace Web::SVG {
 
 // https://www.w3.org/TR/SVG11/shapes.html#RectElement
 class SVGRectElement final : public SVGGeometryElement {
-public:
-    using WrapperType = Bindings::SVGRectElementWrapper;
+    WEB_PLATFORM_OBJECT(SVGRectElement, SVGGeometryElement);
 
-    SVGRectElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~SVGRectElement() override = default;
 
     virtual void parse_attribute(FlyString const& name, String const& value) override;
 
     virtual Gfx::Path& get_path() override;
 
-    NonnullRefPtr<SVGAnimatedLength> x() const;
-    NonnullRefPtr<SVGAnimatedLength> y() const;
-    NonnullRefPtr<SVGAnimatedLength> width() const;
-    NonnullRefPtr<SVGAnimatedLength> height() const;
-    NonnullRefPtr<SVGAnimatedLength> rx() const;
-    NonnullRefPtr<SVGAnimatedLength> ry() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> x() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> y() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> width() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> height() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> rx() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> ry() const;
 
 private:
+    SVGRectElement(DOM::Document&, DOM::QualifiedName);
+
     Gfx::FloatPoint calculate_used_corner_radius_values();
 
     Optional<Gfx::Path> m_path;
@@ -43,3 +44,5 @@ private:
 };
 
 }
+
+WRAPPER_HACK(SVGRectElement, Web::SVG)

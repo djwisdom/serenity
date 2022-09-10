@@ -14,14 +14,15 @@ class ArrayBufferConstructor final : public NativeFunction {
     JS_OBJECT(ArrayBufferConstructor, NativeFunction);
 
 public:
-    explicit ArrayBufferConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~ArrayBufferConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
     virtual ThrowCompletionOr<Object*> construct(FunctionObject& new_target) override;
 
 private:
+    explicit ArrayBufferConstructor(Realm&);
+
     virtual bool has_constructor() const override { return true; }
 
     JS_DECLARE_NATIVE_FUNCTION(is_view);

@@ -19,6 +19,7 @@
 #include "ToolPropertiesWidget.h"
 #include "ToolboxWidget.h"
 #include "Tools/Tool.h"
+#include "VectorscopeWidget.h"
 #include <LibGUI/Action.h>
 #include <LibGUI/ComboBox.h>
 #include <LibGUI/Forward.h>
@@ -51,6 +52,8 @@ private:
     ImageEditor& create_new_editor(NonnullRefPtr<Image>);
     void create_image_from_clipboard();
 
+    void image_editor_did_update_undo_stack();
+
     void set_actions_enabled(bool enabled);
 
     virtual void drop_event(GUI::DropEvent&) override;
@@ -60,6 +63,7 @@ private:
     RefPtr<ToolboxWidget> m_toolbox;
     RefPtr<PaletteWidget> m_palette_widget;
     RefPtr<HistogramWidget> m_histogram_widget;
+    RefPtr<VectorscopeWidget> m_vectorscope_widget;
     RefPtr<LayerListWidget> m_layer_list_widget;
     RefPtr<LayerPropertiesWidget> m_layer_properties_widget;
     RefPtr<ToolPropertiesWidget> m_tool_properties_widget;

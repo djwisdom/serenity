@@ -17,20 +17,20 @@
 #include <Kernel/FileSystem/ProcFS.h>
 #include <Kernel/Library/LockRefPtr.h>
 #include <Kernel/Sections.h>
+#include <Kernel/Storage/StorageManagement.h>
 
 namespace Kernel {
-Atomic<u8> NVMeController::s_controller_id {};
 
 UNMAP_AFTER_INIT ErrorOr<NonnullLockRefPtr<NVMeController>> NVMeController::try_initialize(Kernel::PCI::DeviceIdentifier const& device_identifier, bool is_queue_polled)
 {
-    auto controller = TRY(adopt_nonnull_lock_ref_or_enomem(new NVMeController(device_identifier)));
+    auto controller = TRY(adopt_nonnull_lock_ref_or_enomem(new NVMeController(device_identifier, StorageManagement::generate_relative_nvme_controller_id({}))));
     TRY(controller->initialize(is_queue_polled));
-    NVMeController::s_controller_id++;
     return controller;
 }
 
-UNMAP_AFTER_INIT NVMeController::NVMeController(const PCI::DeviceIdentifier& device_identifier)
+UNMAP_AFTER_INIT NVMeController::NVMeController(const PCI::DeviceIdentifier& device_identifier, u32 hardware_relative_controller_id)
     : PCI::Device(device_identifier.address())
+    , StorageController(hardware_relative_controller_id)
     , m_pci_device_id(device_identifier)
 {
 }
@@ -152,7 +152,7 @@ UNMAP_AFTER_INIT u32 NVMeController::get_admin_q_dept()
 UNMAP_AFTER_INIT ErrorOr<void> NVMeController::identify_and_init_namespaces()
 {
 
-    LockRefPtr<Memory::PhysicalPage> prp_dma_buffer;
+    RefPtr<Memory::PhysicalPage> prp_dma_buffer;
     OwnPtr<Memory::Region> prp_dma_region;
     auto namespace_data_struct = TRY(ByteBuffer::create_zeroed(NVMe_IDENTIFY_SIZE));
     u32 active_namespace_list[NVMe_IDENTIFY_SIZE / sizeof(u32)];
@@ -207,7 +207,7 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::identify_and_init_namespaces()
 
             dbgln_if(NVME_DEBUG, "NVMe: Block count is {} and Block size is {}", block_counts, block_size);
 
-            m_namespaces.append(TRY(NVMeNameSpace::try_create(*this, m_queues, s_controller_id.load(), nsid, block_counts, block_size)));
+            m_namespaces.append(TRY(NVMeNameSpace::try_create(*this, m_queues, nsid, block_counts, block_size)));
             m_device_count++;
             dbgln_if(NVME_DEBUG, "NVMe: Initialized namespace with NSID: {}", nsid);
         }
@@ -259,9 +259,9 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_admin_queue(Optional<u8> i
 {
     auto qdepth = get_admin_q_dept();
     OwnPtr<Memory::Region> cq_dma_region;
-    NonnullLockRefPtrVector<Memory::PhysicalPage> cq_dma_pages;
+    NonnullRefPtrVector<Memory::PhysicalPage> cq_dma_pages;
     OwnPtr<Memory::Region> sq_dma_region;
-    NonnullLockRefPtrVector<Memory::PhysicalPage> sq_dma_pages;
+    NonnullRefPtrVector<Memory::PhysicalPage> sq_dma_pages;
     auto cq_size = round_up_to_power_of_two(CQ_SIZE(qdepth), 4096);
     auto sq_size = round_up_to_power_of_two(SQ_SIZE(qdepth), 4096);
     if (!reset_controller()) {
@@ -300,9 +300,9 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_admin_queue(Optional<u8> i
 UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_io_queue(u8 qid, Optional<u8> irq)
 {
     OwnPtr<Memory::Region> cq_dma_region;
-    NonnullLockRefPtrVector<Memory::PhysicalPage> cq_dma_pages;
+    NonnullRefPtrVector<Memory::PhysicalPage> cq_dma_pages;
     OwnPtr<Memory::Region> sq_dma_region;
-    NonnullLockRefPtrVector<Memory::PhysicalPage> sq_dma_pages;
+    NonnullRefPtrVector<Memory::PhysicalPage> sq_dma_pages;
     auto cq_size = round_up_to_power_of_two(CQ_SIZE(IO_QUEUE_SIZE), 4096);
     auto sq_size = round_up_to_power_of_two(SQ_SIZE(IO_QUEUE_SIZE), 4096);
 

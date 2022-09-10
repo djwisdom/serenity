@@ -11,6 +11,7 @@
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
+#include <LibGUI/EmojiInputDialog.h>
 #include <LibGUI/InputBox.h>
 #include <LibGUI/Label.h>
 #include <LibGUI/Menu.h>
@@ -38,7 +39,7 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
 
     auto& top_bar = container.add<GUI::Frame>();
     top_bar.set_layout<GUI::HorizontalBoxLayout>().set_spacing(1);
-    top_bar.set_fixed_height(26);
+    top_bar.set_preferred_height(26);
     auto& current_cell_label = top_bar.add<GUI::Label>("");
     current_cell_label.set_fixed_width(50);
 
@@ -53,6 +54,7 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
             auto docs = sheet_ptr->gather_documentation();
             auto help_window = HelpWindow::the(window());
             help_window->set_docs(move(docs));
+            help_window->set_window_mode(GUI::WindowMode::Modeless);
             help_window->show();
         }
     };
@@ -208,6 +210,30 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
     },
         window());
 
+    m_insert_emoji_action = GUI::CommonActions::make_insert_emoji_action([&](auto&) {
+        auto emoji_input_dialog = GUI::EmojiInputDialog::construct(window());
+        if (emoji_input_dialog->exec() != GUI::EmojiInputDialog::ExecResult::OK)
+            return;
+
+        auto emoji_code_point = emoji_input_dialog->selected_emoji_text();
+
+        if (m_cell_value_editor->has_focus_within()) {
+            m_cell_value_editor->insert_at_cursor_or_replace_selection(emoji_code_point);
+        }
+
+        auto* worksheet_ptr = current_worksheet_if_available();
+        if (!worksheet_ptr) {
+            GUI::MessageBox::show_error(window(), "There are no active worksheets"sv);
+            return;
+        }
+        auto& sheet = *worksheet_ptr;
+        for (auto& cell : sheet.selected_cells())
+            sheet.ensure(cell).set_data(emoji_code_point);
+
+        update();
+    },
+        window());
+
     m_undo_action = GUI::CommonActions::make_undo_action([&](auto&) {
         undo();
     });
@@ -237,7 +263,7 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
         },
         window());
 
-    m_about_action = GUI::CommonActions::make_about_action("Spreadsheet", GUI::Icon::default_icon("app-spreadsheet"sv), window());
+    m_about_action = GUI::CommonActions::make_about_action("Spreadsheet", GUI::Icon::default_icon("app-spreadsheet"sv), &parent_window);
 
     toolbar.add_action(*m_new_action);
     toolbar.add_action(*m_open_action);
@@ -252,6 +278,7 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
     m_cut_action->set_enabled(false);
     m_copy_action->set_enabled(false);
     m_paste_action->set_enabled(false);
+    m_insert_emoji_action->set_enabled(false);
 
     m_tab_widget->on_change = [this](auto& selected_widget) {
         // for keyboard shortcuts and command palette
@@ -304,6 +331,7 @@ void SpreadsheetWidget::setup_tabs(NonnullRefPtrVector<Sheet> new_sheets)
             m_cut_action->set_enabled(true);
             m_copy_action->set_enabled(true);
             m_paste_action->set_enabled(GUI::Clipboard::the().fetch_mime_type().starts_with("text/"sv));
+            m_insert_emoji_action->set_enabled(true);
             m_current_cell_label->set_enabled(true);
             m_cell_value_editor->set_enabled(true);
 
@@ -372,6 +400,7 @@ void SpreadsheetWidget::setup_tabs(NonnullRefPtrVector<Sheet> new_sheets)
             m_cut_action->set_enabled(false);
             m_copy_action->set_enabled(false);
             m_paste_action->set_enabled(false);
+            m_insert_emoji_action->set_enabled(false);
 
             static_cast<CellSyntaxHighlighter*>(const_cast<Syntax::Highlighter*>(m_cell_value_editor->syntax_highlighter()))->set_cell(nullptr);
         };
@@ -596,6 +625,7 @@ void SpreadsheetWidget::initialize_menubar(GUI::Window& window)
     edit_menu.add_action(*m_cut_action);
     edit_menu.add_action(*m_copy_action);
     edit_menu.add_action(*m_paste_action);
+    edit_menu.add_action(*m_insert_emoji_action);
 
     auto& help_menu = window.add_menu("&Help");
     help_menu.add_action(*m_functions_help_action);

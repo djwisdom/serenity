@@ -14,14 +14,14 @@
 
 namespace JS {
 
-ThrowCompletionOr<RegExpObject*> regexp_create(GlobalObject&, Value pattern, Value flags);
+ThrowCompletionOr<RegExpObject*> regexp_create(VM&, Value pattern, Value flags);
 
 Result<regex::RegexOptions<ECMAScriptFlags>, String> regex_flags_from_string(StringView flags);
 struct ParseRegexPatternError {
     String error;
 };
 ErrorOr<String, ParseRegexPatternError> parse_regex_pattern(StringView pattern, bool unicode, bool unicode_sets);
-ThrowCompletionOr<String> parse_regex_pattern(StringView pattern, VM& vm, GlobalObject& global_object, bool unicode, bool unicode_sets);
+ThrowCompletionOr<String> parse_regex_pattern(VM& vm, StringView pattern, bool unicode, bool unicode_sets);
 
 class RegExpObject : public Object {
     JS_OBJECT(RegExpObject, Object);
@@ -36,16 +36,13 @@ public:
         | regex::ECMAScriptFlags::BrowserExtended
     };
 
-    static RegExpObject* create(GlobalObject&);
-    static RegExpObject* create(GlobalObject&, Regex<ECMA262> regex, String pattern, String flags);
+    static RegExpObject* create(Realm&);
+    static RegExpObject* create(Realm&, Regex<ECMA262> regex, String pattern, String flags);
 
-    RegExpObject(Object& prototype);
-    RegExpObject(Regex<ECMA262> regex, String pattern, String flags, Object& prototype);
-
-    ThrowCompletionOr<RegExpObject*> regexp_initialize(GlobalObject&, Value pattern, Value flags);
+    ThrowCompletionOr<RegExpObject*> regexp_initialize(VM&, Value pattern, Value flags);
     String escape_regexp_pattern() const;
 
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~RegExpObject() override = default;
 
     String const& pattern() const { return m_pattern; }
@@ -54,6 +51,9 @@ public:
     Regex<ECMA262> const& regex() const { return *m_regex; }
 
 private:
+    RegExpObject(Object& prototype);
+    RegExpObject(Regex<ECMA262> regex, String pattern, String flags, Object& prototype);
+
     String m_pattern;
     String m_flags;
     Optional<Regex<ECMA262>> m_regex;

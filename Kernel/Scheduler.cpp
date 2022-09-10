@@ -261,10 +261,6 @@ void Scheduler::yield()
 
 void Scheduler::context_switch(Thread* thread)
 {
-    if (Memory::s_mm_lock.is_locked_by_current_processor()) {
-        PANIC("In context switch while holding Memory::s_mm_lock");
-    }
-
     thread->did_schedule();
 
     auto* from_thread = Thread::current();
@@ -331,13 +327,13 @@ void Scheduler::enter_current(Thread& prev_thread)
     }
 }
 
-void Scheduler::leave_on_first_switch(u32 flags)
+void Scheduler::leave_on_first_switch(InterruptsState previous_interrupts_state)
 {
     // This is called when a thread is switched into for the first time.
     // At this point, enter_current has already be called, but because
     // Scheduler::context_switch is not in the call stack we need to
     // clean up and release locks manually here
-    g_scheduler_lock.unlock(flags);
+    g_scheduler_lock.unlock(previous_interrupts_state);
 
     VERIFY(Processor::current_in_scheduler());
     Processor::set_current_in_scheduler(false);
@@ -548,26 +544,40 @@ void dump_thread_list(bool with_stack_traces)
     };
 
     Thread::for_each([&](Thread& thread) {
+        auto color = thread.process().is_kernel_process() ? "\x1b[34;1m"sv : "\x1b[33;1m"sv;
         switch (thread.state()) {
         case Thread::State::Dying:
-            dmesgln("  {:14} {:30} @ {:04x}:{:08x} Finalizable: {}, (nsched: {})",
-                thread.state_string(),
+            dmesgln("  {}{:30}\x1b[0m @ {:04x}:{:08x} is {:14} (Finalizable: {}, nsched: {})",
+                color,
                 thread,
                 get_cs(thread),
                 get_eip(thread),
+                thread.state_string(),
                 thread.is_finalizable(),
                 thread.times_scheduled());
             break;
         default:
-            dmesgln("  {:14} Pr:{:2} {:30} @ {:04x}:{:08x} (nsched: {})",
-                thread.state_string(),
-                thread.priority(),
+            dmesgln("  {}{:30}\x1b[0m @ {:04x}:{:08x} is {:14} (Pr:{:2}, nsched: {})",
+                color,
                 thread,
                 get_cs(thread),
                 get_eip(thread),
+                thread.state_string(),
+                thread.priority(),
                 thread.times_scheduled());
             break;
         }
+        if (thread.state() == Thread::State::Blocked && thread.blocking_mutex()) {
+            dmesgln("    Blocking on Mutex {:#x} ({})", thread.blocking_mutex(), thread.blocking_mutex()->name());
+        }
+        if (thread.state() == Thread::State::Blocked && thread.blocker()) {
+            dmesgln("    Blocking on Blocker {:#x}", thread.blocker());
+        }
+#if LOCK_DEBUG
+        thread.for_each_held_lock([](auto const& entry) {
+            dmesgln("    Holding lock {:#x} ({}) at {}", entry.lock, entry.lock->name(), entry.lock_location);
+        });
+#endif
         if (with_stack_traces) {
             auto trace_or_error = thread.backtrace();
             if (!trace_or_error.is_error()) {

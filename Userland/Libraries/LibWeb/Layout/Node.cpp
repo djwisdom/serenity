@@ -525,6 +525,12 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     do_border_style(computed_values.border_bottom(), CSS::PropertyID::BorderBottomWidth, CSS::PropertyID::BorderBottomColor, CSS::PropertyID::BorderBottomStyle);
 
     computed_values.set_content(computed_style.content());
+    computed_values.set_grid_template_columns(computed_style.grid_template_columns());
+    computed_values.set_grid_template_rows(computed_style.grid_template_rows());
+    computed_values.set_grid_column_end(computed_style.grid_column_end());
+    computed_values.set_grid_column_start(computed_style.grid_column_start());
+    computed_values.set_grid_row_end(computed_style.grid_row_end());
+    computed_values.set_grid_row_start(computed_style.grid_row_start());
 
     if (auto fill = computed_style.property(CSS::PropertyID::Fill); fill->has_color())
         computed_values.set_fill(fill->to_color(*this));
@@ -579,6 +585,7 @@ bool Node::is_inline_block() const
 NonnullRefPtr<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const
 {
     auto wrapper = adopt_ref(*new BlockContainer(const_cast<DOM::Document&>(document()), nullptr, m_computed_values.clone_inherited_values()));
+    static_cast<CSS::MutableComputedValues&>(wrapper->m_computed_values).set_display(CSS::Display(CSS::Display::Outside::Block, CSS::Display::Inside::Flow));
     wrapper->m_font = m_font;
     wrapper->m_line_height = m_line_height;
     return wrapper;
@@ -592,6 +599,31 @@ void Node::set_paintable(RefPtr<Painting::Paintable> paintable)
 RefPtr<Painting::Paintable> Node::create_paintable() const
 {
     return nullptr;
+}
+
+bool Node::is_anonymous() const
+{
+    return !m_dom_node.ptr();
+}
+
+DOM::Node const* Node::dom_node() const
+{
+    return m_dom_node.ptr();
+}
+
+DOM::Node* Node::dom_node()
+{
+    return m_dom_node.ptr();
+}
+
+DOM::Document& Node::document()
+{
+    return *m_document;
+}
+
+DOM::Document const& Node::document() const
+{
+    return *m_document;
 }
 
 }

@@ -120,6 +120,18 @@ FrequencyStyleValue const& StyleValue::as_frequency() const
     return static_cast<FrequencyStyleValue const&>(*this);
 }
 
+GridTrackPlacementShorthandStyleValue const& StyleValue::as_grid_track_placement_shorthand() const
+{
+    VERIFY(is_grid_track_placement_shorthand());
+    return static_cast<GridTrackPlacementShorthandStyleValue const&>(*this);
+}
+
+GridTrackPlacementStyleValue const& StyleValue::as_grid_track_placement() const
+{
+    VERIFY(is_grid_track_placement());
+    return static_cast<GridTrackPlacementStyleValue const&>(*this);
+}
+
 IdentifierStyleValue const& StyleValue::as_identifier() const
 {
     VERIFY(is_identifier());
@@ -148,6 +160,12 @@ LengthStyleValue const& StyleValue::as_length() const
 {
     VERIFY(is_length());
     return static_cast<LengthStyleValue const&>(*this);
+}
+
+GridTrackSizeStyleValue const& StyleValue::as_grid_track_size() const
+{
+    VERIFY(is_grid_track_size());
+    return static_cast<GridTrackSizeStyleValue const&>(*this);
 }
 
 LinearGradientStyleValue const& StyleValue::as_linear_gradient() const
@@ -1198,6 +1216,54 @@ bool FrequencyStyleValue::equals(StyleValue const& other) const
     return m_frequency == other.as_frequency().m_frequency;
 }
 
+String GridTrackPlacementShorthandStyleValue::to_string() const
+{
+    if (m_end->grid_track_placement().position() == 0)
+        return String::formatted("{}", m_start->grid_track_placement().to_string());
+    return String::formatted("{} / {}", m_start->grid_track_placement().to_string(), m_end->grid_track_placement().to_string());
+}
+
+bool GridTrackPlacementShorthandStyleValue::equals(StyleValue const& other) const
+{
+    if (type() != other.type())
+        return false;
+    auto const& typed_other = other.as_grid_track_placement_shorthand();
+    return m_start->equals(typed_other.m_start)
+        && m_end->equals(typed_other.m_end);
+}
+
+String GridTrackPlacementStyleValue::to_string() const
+{
+    return m_grid_track_placement.to_string();
+}
+
+bool GridTrackPlacementStyleValue::equals(StyleValue const& other) const
+{
+    if (type() != other.type())
+        return false;
+    auto const& typed_other = other.as_grid_track_placement();
+    return m_grid_track_placement == typed_other.grid_track_placement();
+}
+
+String GridTrackSizeStyleValue::to_string() const
+{
+    StringBuilder builder;
+    for (size_t i = 0; i < m_grid_track.size(); i++) {
+        builder.append(m_grid_track[i].to_string());
+        if (i != m_grid_track.size() - 1)
+            builder.append(" "sv);
+    }
+    return builder.to_string();
+}
+
+bool GridTrackSizeStyleValue::equals(StyleValue const& other) const
+{
+    if (type() != other.type())
+        return false;
+    auto const& typed_other = other.as_grid_track_size();
+    return m_grid_track == typed_other.grid_track_size();
+}
+
 String IdentifierStyleValue::to_string() const
 {
     return CSS::string_from_value_id(m_id);
@@ -1416,6 +1482,9 @@ void ImageStyleValue::load_any_resources(DOM::Document& document)
     if (m_bitmap)
         return;
 
+    if (resource())
+        return;
+
     m_document = &document;
     auto request = LoadRequest::create_for_url_on_page(m_url, document.page());
     set_resource(ResourceLoader::the().load_resource(Resource::Type::Image, request));
@@ -1512,8 +1581,9 @@ String LinearGradientStyleValue::to_string() const
         }
 
         serialize_a_srgb_value(builder, element.color_stop.color);
-        if (element.color_stop.length.has_value()) {
-            builder.appendff(" {}"sv, element.color_stop.length->to_string());
+        for (auto position : Array { &element.color_stop.position, &element.color_stop.second_position }) {
+            if (position->has_value())
+                builder.appendff(" {}"sv, (*position)->to_string());
         }
         first = false;
     }
@@ -1537,7 +1607,7 @@ static bool operator==(GradientColorHint a, GradientColorHint b)
 
 static bool operator==(GradientColorStop a, GradientColorStop b)
 {
-    return a.color == b.color && a.length == b.length;
+    return a.color == b.color && a.position == b.position && a.second_position == b.second_position;
 }
 
 static bool operator==(ColorStopListElement a, ColorStopListElement b)
@@ -1556,8 +1626,12 @@ bool LinearGradientStyleValue::equals(StyleValue const& other_) const
         return false;
     auto& other = other_.as_linear_gradient();
 
-    if (m_direction != other.m_direction || m_color_stop_list.size() != other.m_color_stop_list.size())
+    if (m_gradient_type != other.m_gradient_type
+        || m_repeating != other.m_repeating
+        || m_direction != other.m_direction
+        || m_color_stop_list.size() != other.m_color_stop_list.size()) {
         return false;
+    }
 
     for (size_t i = 0; i < m_color_stop_list.size(); i++) {
         if (m_color_stop_list[i] != other.m_color_stop_list[i])
@@ -1607,13 +1681,15 @@ float LinearGradientStyleValue::angle_degrees(Gfx::FloatSize const& gradient_siz
 
 void LinearGradientStyleValue::resolve_for_size(Layout::Node const& node, Gfx::FloatSize const& size) const
 {
-    m_resolved_data = Painting::resolve_linear_gradient_data(node, size, *this);
+    if (m_resolved.has_value() && m_resolved->size == size)
+        return;
+    m_resolved = ResolvedData { Painting::resolve_linear_gradient_data(node, size, *this), size };
 }
 
 void LinearGradientStyleValue::paint(PaintContext& context, Gfx::IntRect const& dest_rect, CSS::ImageRendering) const
 {
-    VERIFY(m_resolved_data.has_value());
-    Painting::paint_linear_gradient(context, dest_rect, *m_resolved_data);
+    VERIFY(m_resolved.has_value());
+    Painting::paint_linear_gradient(context, dest_rect, m_resolved->data);
 }
 
 bool InheritStyleValue::equals(StyleValue const& other) const
@@ -1897,6 +1973,16 @@ NonnullRefPtr<ColorStyleValue> ColorStyleValue::create(Color color)
     }
 
     return adopt_ref(*new ColorStyleValue(color));
+}
+
+NonnullRefPtr<GridTrackPlacementStyleValue> GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement grid_track_placement)
+{
+    return adopt_ref(*new GridTrackPlacementStyleValue(grid_track_placement));
+}
+
+NonnullRefPtr<GridTrackSizeStyleValue> GridTrackSizeStyleValue::create(Vector<CSS::GridTrackSize> grid_track_size)
+{
+    return adopt_ref(*new GridTrackSizeStyleValue(grid_track_size));
 }
 
 NonnullRefPtr<RectStyleValue> RectStyleValue::create(EdgeRect rect)

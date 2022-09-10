@@ -19,10 +19,12 @@ namespace JS {
 class Map : public Object {
     JS_OBJECT(Map, Object);
 
-public:
-    static Map* create(GlobalObject&);
+    // NOTE: This awkwardness is due to Set using a Map internally.
+    friend class Set;
 
-    explicit Map(Object& prototype);
+public:
+    static Map* create(Realm&);
+
     virtual ~Map() override = default;
 
     void map_clear();
@@ -106,6 +108,7 @@ public:
     EndIterator end() const { return {}; }
 
 private:
+    explicit Map(Object& prototype);
     virtual void visit_edges(Visitor& visitor) override;
 
     size_t m_next_insertion_id { 0 };

@@ -15,8 +15,7 @@ class ObjectPrototype final : public Object {
     JS_OBJECT(ObjectPrototype, Object);
 
 public:
-    explicit ObjectPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~ObjectPrototype() override = default;
 
     // 10.4.7 Immutable Prototype Exotic Objects, https://tc39.es/ecma262/#sec-immutable-prototype-exotic-objects
@@ -27,6 +26,8 @@ public:
     JS_DECLARE_NATIVE_FUNCTION(to_string);
 
 private:
+    explicit ObjectPrototype(Realm&);
+
     JS_DECLARE_NATIVE_FUNCTION(has_own_property);
     JS_DECLARE_NATIVE_FUNCTION(to_locale_string);
     JS_DECLARE_NATIVE_FUNCTION(value_of);

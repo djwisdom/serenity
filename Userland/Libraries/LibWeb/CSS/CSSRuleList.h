@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,8 +10,8 @@
 #include <AK/Function.h>
 #include <AK/Iterator.h>
 #include <AK/NonnullRefPtrVector.h>
-#include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
+#include <LibWeb/Bindings/LegacyPlatformObject.h>
 #include <LibWeb/CSS/CSSRule.h>
 #include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/Forward.h>
@@ -18,28 +19,34 @@
 namespace Web::CSS {
 
 // https://www.w3.org/TR/cssom/#the-cssrulelist-interface
-class CSSRuleList
-    : public RefCounted<CSSRuleList>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::CSSRuleListWrapper;
+class CSSRuleList : public Bindings::LegacyPlatformObject {
+    WEB_PLATFORM_OBJECT(CSSRuleList, Bindings::LegacyPlatformObject);
 
-    static NonnullRefPtr<CSSRuleList> create(NonnullRefPtrVector<CSSRule>&& rules)
-    {
-        return adopt_ref(*new CSSRuleList(move(rules)));
-    }
+public:
+    static CSSRuleList* create(HTML::Window&, JS::MarkedVector<CSSRule*> const&);
+    static CSSRuleList* create_empty(HTML::Window&);
+
+    explicit CSSRuleList(HTML::Window&);
     ~CSSRuleList() = default;
 
-    RefPtr<CSSRule> item(size_t index) const
+    CSSRule const* item(size_t index) const
     {
         if (index >= length())
             return nullptr;
-        return m_rules[index];
+        return &m_rules[index];
     }
+
+    CSSRule* item(size_t index)
+    {
+        if (index >= length())
+            return nullptr;
+        return &m_rules[index];
+    }
+
     size_t length() const { return m_rules.size(); }
 
-    using ConstIterator = AK::SimpleIterator<AK::NonnullPtrVector<NonnullRefPtr<CSSRule>> const, CSSRule const>;
-    using Iterator = AK::SimpleIterator<AK::NonnullPtrVector<NonnullRefPtr<CSSRule>>, CSSRule>;
+    using ConstIterator = AK::SimpleIterator<Vector<CSSRule&> const, CSSRule const>;
+    using Iterator = AK::SimpleIterator<Vector<CSSRule&>, CSSRule>;
 
     ConstIterator const begin() const { return m_rules.begin(); }
     Iterator begin() { return m_rules.begin(); }
@@ -47,19 +54,22 @@ public:
     ConstIterator const end() const { return m_rules.end(); }
     Iterator end() { return m_rules.end(); }
 
-    bool is_supported_property_index(u32 index) const;
+    virtual bool is_supported_property_index(u32 index) const override;
+    virtual JS::Value item_value(size_t index) const override;
 
     DOM::ExceptionOr<void> remove_a_css_rule(u32 index);
-    DOM::ExceptionOr<unsigned> insert_a_css_rule(Variant<StringView, NonnullRefPtr<CSSRule>>, u32 index);
+    DOM::ExceptionOr<unsigned> insert_a_css_rule(Variant<StringView, CSSRule*>, u32 index);
 
     void for_each_effective_style_rule(Function<void(CSSStyleRule const&)> const& callback) const;
     // Returns whether the match state of any media queries changed after evaluation.
     bool evaluate_media_queries(HTML::Window const&);
 
 private:
-    explicit CSSRuleList(NonnullRefPtrVector<CSSRule>&&);
+    virtual void visit_edges(Cell::Visitor&) override;
 
-    NonnullRefPtrVector<CSSRule> m_rules;
+    Vector<CSSRule&> m_rules;
 };
 
 }
+
+WRAPPER_HACK(CSSRuleList, Web::CSS)

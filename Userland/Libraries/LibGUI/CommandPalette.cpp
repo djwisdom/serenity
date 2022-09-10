@@ -176,6 +176,8 @@ CommandPalette::CommandPalette(GUI::Window& parent_window, ScreenPosition screen
     : GUI::Dialog(&parent_window, screen_position)
 {
     set_frameless(true);
+    set_blocks_command_palette(true);
+    set_blocks_emoji_input(true);
     resize(450, 300);
 
     collect_actions(parent_window);
@@ -223,8 +225,13 @@ CommandPalette::CommandPalette(GUI::Window& parent_window, ScreenPosition screen
 
     m_text_box->set_focus(true);
 
-    on_active_window_change = [this](bool is_active_window) {
-        if (!is_active_window)
+    on_active_input_change = [this](bool is_active_input) {
+        if (!is_active_input)
+            close();
+    };
+
+    on_input_preemption = [this](InputPreemptor preemptor) {
+        if (preemptor != InputPreemptor::ContextMenu)
             close();
     };
 }

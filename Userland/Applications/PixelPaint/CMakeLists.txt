@@ -52,6 +52,7 @@ set(SOURCES
     ProjectLoader.cpp
     ResizeImageDialog.cpp
     ResizeImageDialogGML.h
+    ScopeWidget.cpp
     Selection.cpp
     ToolPropertiesWidget.cpp
     ToolboxWidget.cpp
@@ -69,7 +70,9 @@ set(SOURCES
     Tools/RectangleTool.cpp
     Tools/SprayTool.cpp
     Tools/Tool.cpp
+    Tools/WandSelectTool.cpp
     Tools/ZoomTool.cpp
+    VectorscopeWidget.cpp
     main.cpp
     )
 

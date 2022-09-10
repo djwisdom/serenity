@@ -25,13 +25,7 @@
 
 namespace JS {
 
-#define JS_OBJECT(class_, base_class)              \
-public:                                            \
-    using Base = base_class;                       \
-    virtual StringView class_name() const override \
-    {                                              \
-        return #class_##sv;                        \
-    }
+#define JS_OBJECT(class_, base_class) JS_CELL(class_, base_class)
 
 struct PrivateElement {
     enum class Kind {
@@ -46,13 +40,12 @@ struct PrivateElement {
 };
 
 class Object : public Cell {
-public:
-    static Object* create(GlobalObject&, Object* prototype);
+    JS_CELL(Object, Cell);
 
-    Object(GlobalObject&, Object* prototype);
-    explicit Object(Object& prototype);
-    explicit Object(Shape&);
-    virtual void initialize(GlobalObject&) override;
+public:
+    static Object* create(Realm&, Object* prototype);
+
+    virtual void initialize(Realm&) override;
     virtual ~Object() = default;
 
     enum class PropertyKind {
@@ -106,7 +99,7 @@ public:
     ThrowCompletionOr<bool> set_integrity_level(IntegrityLevel);
     ThrowCompletionOr<bool> test_integrity_level(IntegrityLevel) const;
     ThrowCompletionOr<MarkedVector<Value>> enumerable_own_property_names(PropertyKind kind) const;
-    ThrowCompletionOr<void> copy_data_properties(Value source, HashTable<PropertyKey> const& seen_names, GlobalObject& global_object);
+    ThrowCompletionOr<void> copy_data_properties(VM&, Value source, HashTable<PropertyKey> const& seen_names);
 
     PrivateElement* private_element_find(PrivateName const& name);
     ThrowCompletionOr<void> private_field_add(PrivateName const& name, Value value);
@@ -157,8 +150,8 @@ public:
     void define_direct_property(PropertyKey const& property_key, Value value, PropertyAttributes attributes) { storage_set(property_key, { value, attributes }); };
     void define_direct_accessor(PropertyKey const&, FunctionObject* getter, FunctionObject* setter, PropertyAttributes attributes);
 
-    void define_native_function(PropertyKey const&, Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)>, i32 length, PropertyAttributes attributes);
-    void define_native_accessor(PropertyKey const&, Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)> getter, Function<ThrowCompletionOr<Value>(VM&, GlobalObject&)> setter, PropertyAttributes attributes);
+    void define_native_function(Realm&, PropertyKey const&, Function<ThrowCompletionOr<Value>(VM&)>, i32 length, PropertyAttributes attributes);
+    void define_native_accessor(Realm&, PropertyKey const&, Function<ThrowCompletionOr<Value>(VM&)> getter, Function<ThrowCompletionOr<Value>(VM&)> setter, PropertyAttributes attributes);
 
     virtual bool is_function() const { return false; }
     virtual bool is_typed_array() const { return false; }
@@ -174,7 +167,6 @@ public:
     bool has_parameter_map() const { return m_has_parameter_map; }
     void set_has_parameter_map() { m_has_parameter_map = true; }
 
-    virtual StringView class_name() const override { return "Object"sv; }
     virtual void visit_edges(Cell::Visitor&) override;
 
     Value get_direct(size_t index) const { return m_storage[index]; }
@@ -186,8 +178,6 @@ public:
     Shape& shape() { return *m_shape; }
     Shape const& shape() const { return *m_shape; }
 
-    GlobalObject& global_object() const;
-
     void ensure_shape_is_unique();
 
     template<typename T>
@@ -196,8 +186,12 @@ public:
 protected:
     enum class GlobalObjectTag { Tag };
     enum class ConstructWithoutPrototypeTag { Tag };
-    explicit Object(GlobalObjectTag, Realm&);
-    Object(ConstructWithoutPrototypeTag, GlobalObject&);
+
+    Object(GlobalObjectTag, Realm&);
+    Object(ConstructWithoutPrototypeTag, Realm&);
+    Object(Realm&, Object* prototype);
+    explicit Object(Object& prototype);
+    explicit Object(Shape&);
 
     void set_prototype(Object*);
 

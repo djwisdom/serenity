@@ -14,16 +14,12 @@
 namespace JS {
 
 class Accessor final : public Cell {
+    JS_CELL(Accessor, Cell);
+
 public:
     static Accessor* create(VM& vm, FunctionObject* getter, FunctionObject* setter)
     {
-        return vm.heap().allocate_without_global_object<Accessor>(getter, setter);
-    }
-
-    Accessor(FunctionObject* getter, FunctionObject* setter)
-        : m_getter(getter)
-        , m_setter(setter)
-    {
+        return vm.heap().allocate_without_realm<Accessor>(getter, setter);
     }
 
     FunctionObject* getter() const { return m_getter; }
@@ -39,7 +35,11 @@ public:
     }
 
 private:
-    StringView class_name() const override { return "Accessor"sv; };
+    Accessor(FunctionObject* getter, FunctionObject* setter)
+        : m_getter(getter)
+        , m_setter(setter)
+    {
+    }
 
     FunctionObject* m_getter { nullptr };
     FunctionObject* m_setter { nullptr };

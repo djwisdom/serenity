@@ -121,14 +121,14 @@ ErrorOr<void> SysFSInode::chown(UserID, GroupID)
     return EPERM;
 }
 
-ErrorOr<void> SysFSInode::set_mtime(time_t time)
-{
-    return m_associated_component->set_mtime(time);
-}
-
 ErrorOr<void> SysFSInode::truncate(u64 size)
 {
     return m_associated_component->truncate(size);
+}
+
+ErrorOr<void> SysFSInode::update_timestamps(Optional<time_t>, Optional<time_t>, Optional<time_t>)
+{
+    return {};
 }
 
 ErrorOr<NonnullLockRefPtr<SysFSLinkInode>> SysFSLinkInode::try_create(SysFS const& sysfs, SysFSComponent const& component)

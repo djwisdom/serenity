@@ -18,6 +18,7 @@
 #include <Applications/HexEditor/HexEditorWindowGML.h>
 #include <LibConfig/Client.h>
 #include <LibCore/File.h>
+#include <LibDesktop/Launcher.h>
 #include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/BoxLayout.h>
@@ -347,7 +348,7 @@ void HexEditorWidget::update_inspector_values(size_t position)
     if (byte_read_count % 2 == 0) {
         Utf16View utf16_view { Span<u16 const> { reinterpret_cast<u16 const*>(&unsigned_64_bit_int), 4 } };
         size_t valid_code_units;
-        utf8_view.validate(valid_code_units);
+        utf16_view.validate(valid_code_units);
         if (valid_code_units == 0)
             value_inspector_model->set_parsed_value(ValueInspectorModel::ValueType::UTF16, "");
         else
@@ -468,6 +469,9 @@ void HexEditorWidget::initialize_menubar(GUI::Window& window)
     little_endian_mode->set_checked(true);
 
     auto& help_menu = window.add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_help_action([](auto&) {
+        Desktop::Launcher::open(URL::create_with_file_protocol("/usr/share/man/man1/HexEditor.md"), "/bin/Help");
+    }));
     help_menu.add_action(GUI::CommonActions::make_about_action("Hex Editor", GUI::Icon::default_icon("app-hex-editor"sv), &window));
 }
 

@@ -15,11 +15,12 @@ class AgentObject final : public Object {
     JS_OBJECT(AgentObject, Object);
 
 public:
-    AgentObject(JS::GlobalObject&);
-    virtual void initialize(JS::GlobalObject&) override;
+    virtual void initialize(JS::Realm&) override;
     virtual ~AgentObject() override = default;
 
 private:
+    explicit AgentObject(Realm&);
+
     JS_DECLARE_NATIVE_FUNCTION(monotonic_now);
     JS_DECLARE_NATIVE_FUNCTION(sleep);
 };

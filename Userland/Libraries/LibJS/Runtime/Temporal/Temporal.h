@@ -14,9 +14,11 @@ class Temporal final : public Object {
     JS_OBJECT(Temporal, Object);
 
 public:
-    explicit Temporal(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~Temporal() override = default;
+
+private:
+    explicit Temporal(Realm&);
 };
 
 }

@@ -145,7 +145,7 @@ void ConnectionFromClient::add_menu_item(i32 menu_id, i32 identifier, i32 submen
     menu.add_item(move(menu_item));
 }
 
-void ConnectionFromClient::popup_menu(i32 menu_id, Gfx::IntPoint const& screen_position)
+void ConnectionFromClient::popup_menu(i32 menu_id, Gfx::IntPoint const& screen_position, Gfx::IntRect const& button_rect)
 {
     auto position = screen_position;
     auto it = m_menus.find(menu_id);
@@ -154,7 +154,10 @@ void ConnectionFromClient::popup_menu(i32 menu_id, Gfx::IntPoint const& screen_p
         return;
     }
     auto& menu = *(*it).value;
-    menu.popup(position);
+    if (!button_rect.is_null())
+        menu.open_button_menu(position, button_rect);
+    else
+        menu.popup(position);
 }
 
 void ConnectionFromClient::dismiss_menu(i32 menu_id)
@@ -191,6 +194,8 @@ void ConnectionFromClient::update_menu_item(i32 menu_id, i32 identifier, [[maybe
     menu_item->set_default(is_default);
     if (checkable)
         menu_item->set_checked(checked);
+
+    menu.redraw(*menu_item);
 }
 
 void ConnectionFromClient::remove_menu_item(i32 menu_id, i32 identifier)
@@ -451,7 +456,6 @@ Messages::WindowServer::SetWindowRectResponse ConnectionFromClient::set_window_r
     auto new_rect = rect;
     window.apply_minimum_size(new_rect);
     window.set_rect(new_rect);
-    window.nudge_into_desktop(nullptr);
     window.request_update(window.rect());
     return window.rect();
 }
@@ -468,9 +472,12 @@ Messages::WindowServer::GetWindowRectResponse ConnectionFromClient::get_window_r
 
 static Gfx::IntSize calculate_minimum_size_for_window(Window const& window)
 {
+    if (window.is_frameless())
+        return { 0, 0 };
+
     // NOTE: Windows with a title bar have a minimum size enforced by the system,
     //       because we want to always keep their title buttons accessible.
-    if (window.type() == WindowType::Normal || window.type() == WindowType::ToolWindow) {
+    if (window.type() == WindowType::Normal) {
         auto palette = WindowManager::the().palette();
 
         int required_width = 0;
@@ -518,7 +525,6 @@ void ConnectionFromClient::set_window_minimum_size(i32 window_id, Gfx::IntSize c
         auto new_rect = window.rect();
         bool did_size_clamp = window.apply_minimum_size(new_rect);
         window.set_rect(new_rect);
-        window.nudge_into_desktop(nullptr);
         window.request_update(window.rect());
 
         if (did_size_clamp)
@@ -560,10 +566,10 @@ Window* ConnectionFromClient::window_from_id(i32 window_id)
 }
 
 void ConnectionFromClient::create_window(i32 window_id, Gfx::IntRect const& rect,
-    bool auto_position, bool has_alpha_channel, bool modal, bool minimizable, bool closeable, bool resizable,
-    bool fullscreen, bool frameless, bool forced_shadow, bool accessory, float opacity,
+    bool auto_position, bool has_alpha_channel, bool minimizable, bool closeable, bool resizable,
+    bool fullscreen, bool frameless, bool forced_shadow, float opacity,
     float alpha_hit_threshold, Gfx::IntSize const& base_size, Gfx::IntSize const& size_increment,
-    Gfx::IntSize const& minimum_size, Optional<Gfx::IntSize> const& resize_aspect_ratio, i32 type,
+    Gfx::IntSize const& minimum_size, Optional<Gfx::IntSize> const& resize_aspect_ratio, i32 type, i32 mode,
     String const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
 {
     Window* parent_window = nullptr;
@@ -580,12 +586,17 @@ void ConnectionFromClient::create_window(i32 window_id, Gfx::IntRect const& rect
         return;
     }
 
+    if (mode < 0 || mode >= (i32)WindowMode::_Count) {
+        did_misbehave("CreateWindow with a bad mode");
+        return;
+    }
+
     if (m_windows.contains(window_id)) {
         did_misbehave("CreateWindow with already-used window ID");
         return;
     }
 
-    auto window = Window::construct(*this, (WindowType)type, window_id, modal, minimizable, closeable, frameless, resizable, fullscreen, accessory, parent_window);
+    auto window = Window::construct(*this, (WindowType)type, (WindowMode)mode, window_id, minimizable, closeable, frameless, resizable, fullscreen, parent_window);
 
     window->set_forced_shadow(forced_shadow);
 
@@ -605,7 +616,6 @@ void ConnectionFromClient::create_window(i32 window_id, Gfx::IntRect const& rect
             max(minimum_size.height(), system_window_minimum_size.height()) });
         bool did_size_clamp = window->apply_minimum_size(new_rect);
         window->set_rect(new_rect);
-        window->nudge_into_desktop(nullptr);
 
         if (did_size_clamp)
             window->refresh_client_size();
@@ -633,13 +643,6 @@ void ConnectionFromClient::destroy_window(Window& window, Vector<i32>& destroyed
             continue;
         VERIFY(child_window->window_id() != window.window_id());
         destroy_window(*child_window, destroyed_window_ids);
-    }
-
-    for (auto& accessory_window : window.accessory_windows()) {
-        if (!accessory_window)
-            continue;
-        VERIFY(accessory_window->window_id() != window.window_id());
-        destroy_window(*accessory_window, destroyed_window_ids);
     }
 
     destroyed_window_ids.append(window.window_id());
@@ -822,6 +825,13 @@ Messages::WindowServer::StartDragResponse ConnectionFromClient::start_drag(Strin
 
     wm.start_dnd_drag(*this, text, drag_bitmap.bitmap(), Core::MimeData::construct(mime_data));
     return true;
+}
+
+void ConnectionFromClient::set_accepts_drag(bool accepts)
+{
+    auto& wm = WindowManager::the();
+    VERIFY(wm.dnd_client());
+    wm.set_accepts_drag(accepts);
 }
 
 Messages::WindowServer::SetSystemThemeResponse ConnectionFromClient::set_system_theme(String const& theme_path, String const& theme_name, bool keep_desktop_background)

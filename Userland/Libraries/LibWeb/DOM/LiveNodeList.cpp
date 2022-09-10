@@ -1,26 +1,42 @@
 /*
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <LibWeb/DOM/LiveNodeList.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::DOM {
 
-LiveNodeList::LiveNodeList(Node& root, Function<bool(Node const&)> filter)
-    : m_root(root)
+JS::NonnullGCPtr<NodeList> LiveNodeList::create(HTML::Window& window, Node& root, Function<bool(Node const&)> filter)
+{
+    return *window.heap().allocate<LiveNodeList>(window.realm(), window, root, move(filter));
+}
+
+LiveNodeList::LiveNodeList(HTML::Window& window, Node& root, Function<bool(Node const&)> filter)
+    : NodeList(window)
+    , m_root(root)
     , m_filter(move(filter))
 {
 }
 
-NonnullRefPtrVector<Node> LiveNodeList::collection() const
+LiveNodeList::~LiveNodeList() = default;
+
+void LiveNodeList::visit_edges(Cell::Visitor& visitor)
 {
-    NonnullRefPtrVector<Node> nodes;
+    Base::visit_edges(visitor);
+    visitor.visit(m_root.ptr());
+}
+
+JS::MarkedVector<Node*> LiveNodeList::collection() const
+{
+    JS::MarkedVector<Node*> nodes(heap());
     m_root->for_each_in_inclusive_subtree([&](auto& node) {
         if (m_filter(node))
-            nodes.append(node);
+            nodes.append(const_cast<Node*>(&node));
 
         return IterationDecision::Continue;
     });
@@ -40,7 +56,7 @@ Node const* LiveNodeList::item(u32 index) const
     auto nodes = collection();
     if (index >= nodes.size())
         return nullptr;
-    return &nodes[index];
+    return nodes[index];
 }
 
 // https://dom.spec.whatwg.org/#ref-for-dfn-supported-property-indices

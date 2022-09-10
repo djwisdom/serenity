@@ -18,15 +18,16 @@ class AsyncFunctionDriverWrapper final : public Promise {
     JS_OBJECT(AsyncFunctionDriverWrapper, Promise);
 
 public:
-    static ThrowCompletionOr<Value> create(GlobalObject&, GeneratorObject*);
-    explicit AsyncFunctionDriverWrapper(GlobalObject&, GeneratorObject*);
+    static ThrowCompletionOr<Value> create(Realm&, GeneratorObject*);
 
     virtual ~AsyncFunctionDriverWrapper() override = default;
     void visit_edges(Cell::Visitor&) override;
 
-    ThrowCompletionOr<Value> react_to_async_task_completion(VM&, GlobalObject&, Value, bool is_successful);
+    ThrowCompletionOr<Value> react_to_async_task_completion(VM&, Value, bool is_successful);
 
 private:
+    AsyncFunctionDriverWrapper(Realm&, GeneratorObject*);
+
     GeneratorObject* m_generator_object { nullptr };
     NativeFunction* m_on_fulfillment { nullptr };
     NativeFunction* m_on_rejection { nullptr };

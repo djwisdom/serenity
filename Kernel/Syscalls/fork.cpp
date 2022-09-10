@@ -28,7 +28,8 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     };
 
     auto child_name = TRY(m_name->try_clone());
-    auto child = TRY(Process::try_create(child_first_thread, move(child_name), uid(), gid(), pid(), m_is_kernel_process, current_directory(), m_executable, m_tty, this));
+    auto credentials = this->credentials();
+    auto child = TRY(Process::try_create(child_first_thread, move(child_name), credentials->uid(), credentials->gid(), pid(), m_is_kernel_process, current_directory(), executable(), m_tty, this));
 
     // NOTE: All user processes have a leaked ref on them. It's balanced by Thread::WaitBlockerSet::finalize().
     child->ref();
@@ -49,21 +50,21 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 
     child->m_pg = m_pg;
 
-    {
-        ProtectedDataMutationScope scope { *child };
-        child->m_protected_values.promises = m_protected_values.promises.load();
-        child->m_protected_values.execpromises = m_protected_values.execpromises.load();
-        child->m_protected_values.has_promises = m_protected_values.has_promises.load();
-        child->m_protected_values.has_execpromises = m_protected_values.has_execpromises.load();
-        child->m_protected_values.sid = m_protected_values.sid;
-        child->m_protected_values.credentials = m_protected_values.credentials;
-        child->m_protected_values.umask = m_protected_values.umask;
-        child->m_protected_values.signal_trampoline = m_protected_values.signal_trampoline;
-        child->m_protected_values.dumpable = m_protected_values.dumpable;
-    }
+    with_protected_data([&](auto& my_protected_data) {
+        child->with_mutable_protected_data([&](auto& child_protected_data) {
+            child_protected_data.promises = my_protected_data.promises.load();
+            child_protected_data.execpromises = my_protected_data.execpromises.load();
+            child_protected_data.has_promises = my_protected_data.has_promises.load();
+            child_protected_data.has_execpromises = my_protected_data.has_execpromises.load();
+            child_protected_data.sid = my_protected_data.sid;
+            child_protected_data.credentials = my_protected_data.credentials;
+            child_protected_data.umask = my_protected_data.umask;
+            child_protected_data.signal_trampoline = my_protected_data.signal_trampoline;
+            child_protected_data.dumpable = my_protected_data.dumpable;
+        });
+    });
 
     dbgln_if(FORK_DEBUG, "fork: child={}", child);
-    child->address_space().set_enforces_syscall_regions(address_space().enforces_syscall_regions());
 
     // A child created via fork(2) inherits a copy of its parent's signal mask
     child_first_thread->update_signal_mask(Thread::current()->signal_mask());
@@ -121,19 +122,22 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 #    error Unknown architecture
 #endif
 
-    {
-        SpinlockLocker lock(address_space().get_lock());
-        for (auto& region : address_space().regions()) {
-            dbgln_if(FORK_DEBUG, "fork: cloning Region '{}' @ {}", region.name(), region.vaddr());
-            auto region_clone = TRY(region.try_clone());
-            TRY(region_clone->map(child->address_space().page_directory(), Memory::ShouldFlushTLB::No));
-            TRY(child->address_space().region_tree().place_specifically(*region_clone, region.range()));
-            auto* child_region = region_clone.leak_ptr();
+    TRY(address_space().with([&](auto& parent_space) {
+        return child->address_space().with([&](auto& child_space) -> ErrorOr<void> {
+            child_space->set_enforces_syscall_regions(parent_space->enforces_syscall_regions());
+            for (auto& region : parent_space->region_tree().regions()) {
+                dbgln_if(FORK_DEBUG, "fork: cloning Region '{}' @ {}", region.name(), region.vaddr());
+                auto region_clone = TRY(region.try_clone());
+                TRY(region_clone->map(child_space->page_directory(), Memory::ShouldFlushTLB::No));
+                TRY(child_space->region_tree().place_specifically(*region_clone, region.range()));
+                auto* child_region = region_clone.leak_ptr();
 
-            if (&region == m_master_tls_region.unsafe_ptr())
-                child->m_master_tls_region = TRY(child_region->try_make_weak_ptr());
-        }
-    }
+                if (&region == m_master_tls_region.unsafe_ptr())
+                    child->m_master_tls_region = TRY(child_region->try_make_weak_ptr());
+            }
+            return {};
+        });
+    }));
 
     thread_finalizer_guard.disarm();
 
@@ -149,5 +153,4 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 
     return child_pid;
 }
-
 }

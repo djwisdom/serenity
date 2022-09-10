@@ -19,6 +19,7 @@
 #include "Tools/RectangleSelectTool.h"
 #include "Tools/RectangleTool.h"
 #include "Tools/SprayTool.h"
+#include "Tools/WandSelectTool.h"
 #include "Tools/ZoomTool.h"
 #include <LibGUI/Action.h>
 #include <LibGUI/BoxLayout.h>
@@ -49,8 +50,8 @@ ToolboxWidget::ToolboxWidget()
 
 void ToolboxWidget::setup_tools()
 {
-    auto add_tool = [&](String name, StringView icon_name, GUI::Shortcut const& shortcut, NonnullOwnPtr<Tool> tool) {
-        auto action = GUI::Action::create_checkable(move(name), shortcut, Gfx::Bitmap::try_load_from_file(String::formatted("/res/icons/pixelpaint/{}.png", icon_name)).release_value_but_fixme_should_propagate_errors(),
+    auto add_tool = [&](StringView icon_name, GUI::Shortcut const& shortcut, NonnullOwnPtr<Tool> tool) {
+        auto action = GUI::Action::create_checkable(tool->tool_name(), shortcut, Gfx::Bitmap::try_load_from_file(String::formatted("/res/icons/pixelpaint/{}.png", icon_name)).release_value_but_fixme_should_propagate_errors(),
             [this, tool = tool.ptr()](auto& action) {
                 if (action.is_checked()) {
                     on_tool_selection(tool);
@@ -69,20 +70,21 @@ void ToolboxWidget::setup_tools()
         m_tools.append(move(tool));
     };
 
-    add_tool("Move", "move"sv, { 0, Key_M }, make<MoveTool>());
-    add_tool("Pen", "pen"sv, { 0, Key_N }, make<PenTool>());
-    add_tool("Brush", "brush"sv, { 0, Key_P }, make<BrushTool>());
-    add_tool("Bucket Fill", "bucket"sv, { Mod_Shift, Key_B }, make<BucketTool>());
-    add_tool("Spray", "spray"sv, { Mod_Shift, Key_S }, make<SprayTool>());
-    add_tool("Color Picker", "picker"sv, { 0, Key_O }, make<PickerTool>());
-    add_tool("Erase", "eraser"sv, { Mod_Shift, Key_E }, make<EraseTool>());
-    add_tool("Line", "line"sv, { Mod_Ctrl | Mod_Shift, Key_L }, make<LineTool>());
-    add_tool("Rectangle", "rectangle"sv, { Mod_Ctrl | Mod_Shift, Key_R }, make<RectangleTool>());
-    add_tool("Ellipse", "circle"sv, { Mod_Ctrl | Mod_Shift, Key_E }, make<EllipseTool>());
-    add_tool("Zoom", "zoom"sv, { 0, Key_Z }, make<ZoomTool>());
-    add_tool("Rectangle Select", "rectangle-select"sv, { 0, Key_R }, make<RectangleSelectTool>());
-    add_tool("Guides", "guides"sv, { 0, Key_G }, make<GuideTool>());
-    add_tool("Clone Tool", "clone"sv, { 0, Key_C }, make<CloneTool>());
+    add_tool("move"sv, { 0, Key_M }, make<MoveTool>());
+    add_tool("pen"sv, { 0, Key_N }, make<PenTool>());
+    add_tool("brush"sv, { 0, Key_P }, make<BrushTool>());
+    add_tool("bucket"sv, { Mod_Shift, Key_B }, make<BucketTool>());
+    add_tool("spray"sv, { Mod_Shift, Key_S }, make<SprayTool>());
+    add_tool("picker"sv, { 0, Key_O }, make<PickerTool>());
+    add_tool("eraser"sv, { Mod_Shift, Key_E }, make<EraseTool>());
+    add_tool("line"sv, { Mod_Ctrl | Mod_Shift, Key_L }, make<LineTool>());
+    add_tool("rectangle"sv, { Mod_Ctrl | Mod_Shift, Key_R }, make<RectangleTool>());
+    add_tool("circle"sv, { Mod_Ctrl | Mod_Shift, Key_E }, make<EllipseTool>());
+    add_tool("zoom"sv, { 0, Key_Z }, make<ZoomTool>());
+    add_tool("rectangle-select"sv, { 0, Key_R }, make<RectangleSelectTool>());
+    add_tool("wand-select"sv, { 0, Key_W }, make<WandSelectTool>());
+    add_tool("guides"sv, { 0, Key_G }, make<GuideTool>());
+    add_tool("clone"sv, { 0, Key_C }, make<CloneTool>());
 }
 
 }

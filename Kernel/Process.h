@@ -135,20 +135,19 @@ public:
     friend class Thread;
     friend class Coredump;
 
-    // Helper class to temporarily unprotect a process's protected data so you can write to it.
-    class ProtectedDataMutationScope {
-    public:
-        explicit ProtectedDataMutationScope(Process& process)
-            : m_process(process)
-        {
-            m_process.unprotect_data();
-        }
+    auto with_protected_data(auto&& callback) const
+    {
+        SpinlockLocker locker(m_protected_data_lock);
+        return callback(m_protected_values_do_not_access_directly);
+    }
 
-        ~ProtectedDataMutationScope() { m_process.protect_data(); }
-
-    private:
-        Process& m_process;
-    };
+    auto with_mutable_protected_data(auto&& callback)
+    {
+        SpinlockLocker locker(m_protected_data_lock);
+        unprotect_data();
+        auto guard = ScopeGuard([&] { protect_data(); });
+        return callback(m_protected_values_do_not_access_directly);
+    }
 
     enum class State : u8 {
         Running = 0,
@@ -218,28 +217,34 @@ public:
     static SessionID get_sid_from_pgid(ProcessGroupID pgid);
 
     StringView name() const { return m_name->view(); }
-    ProcessID pid() const { return m_protected_values.pid; }
-    SessionID sid() const { return m_protected_values.sid; }
+    ProcessID pid() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.pid; });
+    }
+    SessionID sid() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.sid; });
+    }
     bool is_session_leader() const { return sid().value() == pid().value(); }
     ProcessGroupID pgid() const { return m_pg ? m_pg->pgid() : 0; }
     bool is_group_leader() const { return pgid().value() == pid().value(); }
-    ProcessID ppid() const { return m_protected_values.ppid; }
+    ProcessID ppid() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.ppid; });
+    }
 
     NonnullRefPtr<Credentials> credentials() const;
 
-    UserID euid() const;
-    GroupID egid() const;
-    UserID uid() const;
-    GroupID gid() const;
-    UserID suid() const;
-    GroupID sgid() const;
-
-    bool is_dumpable() const { return m_protected_values.dumpable; }
+    bool is_dumpable() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.dumpable; });
+    }
     void set_dumpable(bool);
 
-    mode_t umask() const { return m_protected_values.umask; }
-
-    bool in_group(GroupID) const;
+    mode_t umask() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.umask; });
+    }
 
     // Breakable iteration functions
     template<IteratorFunction<Process&> Callback>
@@ -411,6 +416,7 @@ public:
     ErrorOr<FlatPtr> sys$getkeymap(Userspace<Syscall::SC_getkeymap_params const*>);
     ErrorOr<FlatPtr> sys$setkeymap(Userspace<Syscall::SC_setkeymap_params const*>);
     ErrorOr<FlatPtr> sys$profiling_enable(pid_t, Userspace<u64 const*>);
+    ErrorOr<FlatPtr> profiling_enable(pid_t, u64 event_mask);
     ErrorOr<FlatPtr> sys$profiling_disable(pid_t);
     ErrorOr<FlatPtr> sys$profiling_free_buffer(pid_t);
     ErrorOr<FlatPtr> sys$futex(Userspace<Syscall::SC_futex_params const*>);
@@ -449,9 +455,9 @@ public:
     u32 m_ticks_in_user_for_dead_children { 0 };
     u32 m_ticks_in_kernel_for_dead_children { 0 };
 
-    NonnullLockRefPtr<Custody> current_directory();
-    Custody* executable() { return m_executable.ptr(); }
-    Custody const* executable() const { return m_executable.ptr(); }
+    NonnullRefPtr<Custody> current_directory();
+    RefPtr<Custody> executable();
+    RefPtr<Custody const> executable() const;
 
     static constexpr size_t max_arguments_size = Thread::default_userspace_stack_size / 8;
     static constexpr size_t max_environment_size = Thread::default_userspace_stack_size / 8;
@@ -462,24 +468,40 @@ public:
 
     ErrorOr<LoadResult> load(NonnullLockRefPtr<OpenFileDescription> main_program_description, LockRefPtr<OpenFileDescription> interpreter_description, const ElfW(Ehdr) & main_program_header);
 
-    bool is_superuser() const { return euid() == 0; }
-
     void terminate_due_to_signal(u8 signal);
     ErrorOr<void> send_signal(u8 signal, Process* sender);
 
-    u8 termination_signal() const { return m_protected_values.termination_signal; }
-    u8 termination_status() const { return m_protected_values.termination_status; }
+    u8 termination_signal() const
+    {
+        return with_protected_data([](auto& protected_data) -> u8 {
+            return protected_data.termination_signal;
+        });
+    }
+    u8 termination_status() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.termination_status; });
+    }
 
     u16 thread_count() const
     {
-        return m_protected_values.thread_count.load(AK::MemoryOrder::memory_order_relaxed);
+        return with_protected_data([](auto& protected_data) {
+            return protected_data.thread_count.load(AK::MemoryOrder::memory_order_relaxed);
+        });
     }
 
     Mutex& big_lock() { return m_big_lock; }
     Mutex& ptrace_lock() { return m_ptrace_lock; }
 
-    bool has_promises() const { return m_protected_values.has_promises; }
-    bool has_promised(Pledge pledge) const { return (m_protected_values.promises & (1U << (u32)pledge)) != 0; }
+    bool has_promises() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.has_promises.load(); });
+    }
+    bool has_promised(Pledge pledge) const
+    {
+        return with_protected_data([&](auto& protected_data) {
+            return (protected_data.promises & (1U << (u32)pledge)) != 0;
+        });
+    }
 
     VeilState veil_state() const
     {
@@ -536,16 +558,19 @@ public:
     PerformanceEventBuffer* perf_events() { return m_perf_event_buffer; }
     PerformanceEventBuffer const* perf_events() const { return m_perf_event_buffer; }
 
-    Memory::AddressSpace& address_space() { return *m_space; }
-    Memory::AddressSpace const& address_space() const { return *m_space; }
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>>& address_space() { return m_space; }
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>> const& address_space() const { return m_space; }
 
-    VirtualAddress signal_trampoline() const { return m_protected_values.signal_trampoline; }
+    VirtualAddress signal_trampoline() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.signal_trampoline; });
+    }
 
     ErrorOr<void> require_promise(Pledge);
     ErrorOr<void> require_no_promises() const;
 
     ErrorOr<void> validate_mmap_prot(int prot, bool map_stack, bool map_anonymous, Memory::Region const* region = nullptr) const;
-    ErrorOr<void> validate_inode_mmap_prot(int prot, Inode const& inode, bool map_shared) const;
+    ErrorOr<void> validate_inode_mmap_prot(int prot, bool description_readable, bool description_writable, bool map_shared) const;
 
 private:
     friend class MemoryManager;
@@ -556,8 +581,8 @@ private:
     bool add_thread(Thread&);
     bool remove_thread(Thread&);
 
-    Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials>, ProcessID ppid, bool is_kernel_process, LockRefPtr<Custody> current_directory, LockRefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree);
-    static ErrorOr<NonnullLockRefPtr<Process>> try_create(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, UserID, GroupID, ProcessID ppid, bool is_kernel_process, LockRefPtr<Custody> current_directory = nullptr, LockRefPtr<Custody> executable = nullptr, TTY* = nullptr, Process* fork_parent = nullptr);
+    Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials>, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree);
+    static ErrorOr<NonnullLockRefPtr<Process>> try_create(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, UserID, GroupID, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory = nullptr, RefPtr<Custody> executable = nullptr, TTY* = nullptr, Process* fork_parent = nullptr);
     ErrorOr<void> attach_resources(NonnullOwnPtr<Memory::AddressSpace>&&, LockRefPtr<Thread>& first_thread, Process* fork_parent);
     static ProcessID allocate_pid();
 
@@ -631,10 +656,11 @@ private:
 
     NonnullOwnPtr<KString> m_name;
 
-    OwnPtr<Memory::AddressSpace> m_space;
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>> m_space;
 
     LockRefPtr<ProcessGroup> m_pg;
 
+    RecursiveSpinlock mutable m_protected_data_lock;
     AtomicEdgeAction<u32> m_protected_data_refs;
     void protect_data();
     void unprotect_data();
@@ -824,9 +850,9 @@ private:
     Atomic<bool, AK::MemoryOrder::memory_order_relaxed> m_is_stopped { false };
     bool m_should_generate_coredump { false };
 
-    LockRefPtr<Custody> m_executable;
+    SpinlockProtected<RefPtr<Custody>> m_executable;
 
-    SpinlockProtected<LockRefPtr<Custody>> m_current_directory;
+    SpinlockProtected<RefPtr<Custody>> m_current_directory;
 
     NonnullOwnPtrVector<KString> m_arguments;
     NonnullOwnPtrVector<KString> m_environment;
@@ -870,7 +896,7 @@ private:
     Array<SignalActionData, NSIG> m_signal_action_data;
 
     static_assert(sizeof(ProtectedValues) < (PAGE_SIZE));
-    alignas(4096) ProtectedValues m_protected_values;
+    alignas(4096) ProtectedValues m_protected_values_do_not_access_directly;
     u8 m_protected_values_padding[PAGE_SIZE - sizeof(ProtectedValues)];
 
 public:
@@ -889,7 +915,6 @@ extern RecursiveSpinlock g_profiling_lock;
 template<IteratorFunction<Process&> Callback>
 inline void Process::for_each(Callback callback)
 {
-    VERIFY_INTERRUPTS_DISABLED();
     Process::all_instances().with([&](auto const& list) {
         for (auto it = list.begin(); it != list.end();) {
             auto& process = *it;

@@ -6,7 +6,6 @@
  */
 
 #include <LibWeb/Bindings/MainThreadVM.h>
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/PromiseRejectionEvent.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
@@ -42,7 +41,7 @@ JS::Realm& EnvironmentSettingsObject::realm()
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#concept-settings-object-global
-JS::GlobalObject& EnvironmentSettingsObject::global_object()
+JS::Object& EnvironmentSettingsObject::global_object()
 {
     // An environment settings object's Realm then has a [[GlobalObject]] field, which contains the environment settings object's global object.
     return realm().global_object();
@@ -67,7 +66,7 @@ EventLoop& EnvironmentSettingsObject::responsible_event_loop()
 RunScriptDecision EnvironmentSettingsObject::can_run_script()
 {
     // 1. If the global object specified by settings is a Window object whose Document object is not fully active, then return "do not run".
-    if (is<Bindings::WindowObject>(global_object()) && !verify_cast<Bindings::WindowObject>(global_object()).impl().associated_document().is_fully_active())
+    if (is<HTML::Window>(global_object()) && !verify_cast<HTML::Window>(global_object()).associated_document().is_fully_active())
         return RunScriptDecision::DoNotRun;
 
     // 2. If scripting is disabled for settings, then return "do not run".
@@ -217,12 +216,12 @@ void EnvironmentSettingsObject::notify_about_rejected_promises(Badge<EventLoop>)
                 /* .promise = */ promise_handle,
                 /* .reason = */ promise.result(),
             };
-            auto promise_rejection_event = PromiseRejectionEvent::create(HTML::EventNames::unhandledrejection, event_init);
-
             // FIXME: This currently assumes that global is a WindowObject.
-            auto& window = verify_cast<Bindings::WindowObject>(*global.cell());
+            auto& window = verify_cast<HTML::Window>(*global.cell());
 
-            bool not_handled = window.impl().dispatch_event(move(promise_rejection_event));
+            auto promise_rejection_event = PromiseRejectionEvent::create(window, HTML::EventNames::unhandledrejection, event_init);
+
+            bool not_handled = window.dispatch_event(*promise_rejection_event);
 
             // 3. If notHandled is false, then the promise rejection is handled. Otherwise, the promise rejection is not handled.
 
@@ -244,6 +243,10 @@ bool EnvironmentSettingsObject::is_scripting_enabled() const
     // Scripting is enabled for an environment settings object settings when all of the following conditions are true:
     // The user agent supports scripting.
     // NOTE: This is always true in LibWeb :^)
+
+    // FIXME: Do the right thing for workers.
+    if (!is<HTML::Window>(m_realm_execution_context->realm->global_object()))
+        return true;
 
     // The user has not disabled scripting for settings at this time. (User agents may provide users with the option to disable scripting globally, or in a finer-grained manner, e.g., on a per-origin basis, down to the level of individual environment settings objects.)
     auto document = const_cast<EnvironmentSettingsObject&>(*this).responsible_document();
@@ -294,7 +297,7 @@ JS::Realm& incumbent_realm()
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#concept-incumbent-global
-JS::GlobalObject& incumbent_global_object()
+JS::Object& incumbent_global_object()
 {
     // Similarly, the incumbent global object is the global object of the incumbent settings object.
     return incumbent_settings_object().global_object();
@@ -311,7 +314,7 @@ EnvironmentSettingsObject& current_settings_object()
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#current-global-object
-JS::GlobalObject& current_global_object()
+JS::Object& current_global_object()
 {
     auto& event_loop = HTML::main_thread_event_loop();
     auto& vm = event_loop.vm();
@@ -324,7 +327,7 @@ JS::GlobalObject& current_global_object()
 JS::Realm& relevant_realm(JS::Object const& object)
 {
     // The relevant Realm for a platform object is the value of its [[Realm]] field.
-    return *object.global_object().associated_realm();
+    return object.shape().realm();
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#relevant-settings-object
@@ -341,7 +344,7 @@ EnvironmentSettingsObject& relevant_settings_object(DOM::Node const& node)
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#concept-relevant-global
-JS::GlobalObject& relevant_global_object(JS::Object const& object)
+JS::Object& relevant_global_object(JS::Object const& object)
 {
     // Similarly, the relevant global object for a platform object o is the global object of the relevant Realm for o.
     return relevant_realm(object).global_object();

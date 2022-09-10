@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,31 +7,24 @@
 #pragma once
 
 #include <LibJS/Forward.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 
 namespace Web::Crypto {
 
-class SubtleCrypto
-    : public Bindings::Wrappable
-    , public RefCounted<SubtleCrypto> {
-public:
-    using WrapperType = Bindings::SubtleCryptoWrapper;
+class SubtleCrypto final : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(SubtleCrypto, Bindings::PlatformObject);
 
-    static NonnullRefPtr<SubtleCrypto> create()
-    {
-        return adopt_ref(*new SubtleCrypto());
-    }
+public:
+    static JS::NonnullGCPtr<SubtleCrypto> create(HTML::Window&);
+
+    virtual ~SubtleCrypto() override;
 
     JS::Promise* digest(String const& algorithm, JS::Handle<JS::Object> const& data);
 
 private:
-    SubtleCrypto() = default;
+    explicit SubtleCrypto(HTML::Window&);
 };
 
 }
 
-namespace Web::Bindings {
-
-SubtleCryptoWrapper* wrap(JS::GlobalObject&, Crypto::SubtleCrypto&);
-
-}
+WRAPPER_HACK(SubtleCrypto, Web::Crypto)

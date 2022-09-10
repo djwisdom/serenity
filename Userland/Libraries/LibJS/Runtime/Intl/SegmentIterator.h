@@ -16,9 +16,8 @@ class SegmentIterator final : public Object {
     JS_OBJECT(SegmentIterator, Object);
 
 public:
-    static SegmentIterator* create(GlobalObject&, Segmenter&, Utf16View const&, Segments const&);
+    static SegmentIterator* create(Realm&, Segmenter&, Utf16View const&, Segments const&);
 
-    SegmentIterator(GlobalObject&, Segmenter&, Utf16View const&, Segments const&);
     virtual ~SegmentIterator() override = default;
 
     Segmenter const& iterating_segmenter() const { return m_iterating_segmenter; }
@@ -29,6 +28,8 @@ public:
     Segments const& segments() { return m_segments; }
 
 private:
+    SegmentIterator(Realm&, Segmenter&, Utf16View const&, Segments const&);
+
     virtual void visit_edges(Cell::Visitor&) override;
 
     Segmenter& m_iterating_segmenter;                            // [[IteratingSegmenter]]

@@ -12,13 +12,13 @@
 namespace JS {
 
 // 27.2.1.5 NewPromiseCapability ( C ), https://tc39.es/ecma262/#sec-newpromisecapability
-ThrowCompletionOr<PromiseCapability> new_promise_capability(GlobalObject& global_object, Value constructor)
+ThrowCompletionOr<PromiseCapability> new_promise_capability(VM& vm, Value constructor)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. If IsConstructor(C) is false, throw a TypeError exception.
     if (!constructor.is_constructor())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAConstructor, constructor.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAConstructor, constructor.to_string_without_side_effects());
 
     // 2. NOTE: C is assumed to be a constructor function that supports the parameter conventions of the Promise constructor (see 27.2.3.1).
 
@@ -31,18 +31,18 @@ ThrowCompletionOr<PromiseCapability> new_promise_capability(GlobalObject& global
     } promise_capability_functions;
 
     // 4. Let executorClosure be a new Abstract Closure with parameters (resolve, reject) that captures promiseCapability and performs the following steps when called:
-    auto executor_closure = [&promise_capability_functions](auto& vm, auto& global_object) -> ThrowCompletionOr<Value> {
+    auto executor_closure = [&promise_capability_functions](auto& vm) -> ThrowCompletionOr<Value> {
         auto resolve = vm.argument(0);
         auto reject = vm.argument(1);
 
         // No idea what other engines say here.
         // a. If promiseCapability.[[Resolve]] is not undefined, throw a TypeError exception.
         if (!promise_capability_functions.resolve.is_undefined())
-            return vm.template throw_completion<TypeError>(global_object, ErrorType::GetCapabilitiesExecutorCalledMultipleTimes);
+            return vm.template throw_completion<TypeError>(ErrorType::GetCapabilitiesExecutorCalledMultipleTimes);
 
         // b. If promiseCapability.[[Reject]] is not undefined, throw a TypeError exception.
         if (!promise_capability_functions.reject.is_undefined())
-            return vm.template throw_completion<TypeError>(global_object, ErrorType::GetCapabilitiesExecutorCalledMultipleTimes);
+            return vm.template throw_completion<TypeError>(ErrorType::GetCapabilitiesExecutorCalledMultipleTimes);
 
         // c. Set promiseCapability.[[Resolve]] to resolve.
         promise_capability_functions.resolve = resolve;
@@ -55,18 +55,18 @@ ThrowCompletionOr<PromiseCapability> new_promise_capability(GlobalObject& global
     };
 
     // 5. Let executor be CreateBuiltinFunction(executorClosure, 2, "", « »).
-    auto* executor = NativeFunction::create(global_object, move(executor_closure), 2, "");
+    auto* executor = NativeFunction::create(realm, move(executor_closure), 2, "");
 
     // 6. Let promise be ? Construct(C, « executor »).
-    auto* promise = TRY(construct(global_object, constructor.as_function(), executor));
+    auto* promise = TRY(construct(vm, constructor.as_function(), executor));
 
     // 7. If IsCallable(promiseCapability.[[Resolve]]) is false, throw a TypeError exception.
     if (!promise_capability_functions.resolve.is_function())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAFunction, promise_capability_functions.resolve.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, promise_capability_functions.resolve.to_string_without_side_effects());
 
     // 8. If IsCallable(promiseCapability.[[Reject]]) is false, throw a TypeError exception.
     if (!promise_capability_functions.reject.is_function())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAFunction, promise_capability_functions.reject.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, promise_capability_functions.reject.to_string_without_side_effects());
 
     // 9. Set promiseCapability.[[Promise]] to promise.
     // 10. Return promiseCapability.

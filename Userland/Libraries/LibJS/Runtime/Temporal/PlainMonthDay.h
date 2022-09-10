@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,7 +14,6 @@ class PlainMonthDay final : public Object {
     JS_OBJECT(PlainMonthDay, Object);
 
 public:
-    PlainMonthDay(u8 iso_month, u8 iso_day, i32 iso_year, Object& calendar, Object& prototype);
     virtual ~PlainMonthDay() override = default;
 
     [[nodiscard]] i32 iso_year() const { return m_iso_year; }
@@ -24,6 +23,8 @@ public:
     [[nodiscard]] Object& calendar() { return m_calendar; }
 
 private:
+    PlainMonthDay(u8 iso_month, u8 iso_day, i32 iso_year, Object& calendar, Object& prototype);
+
     virtual void visit_edges(Visitor&) override;
 
     // 10.4 Properties of Temporal.PlainMonthDay Instances, https://tc39.es/proposal-temporal/#sec-properties-of-temporal-plainmonthday-instances
@@ -39,8 +40,8 @@ struct ISOMonthDay {
     i32 reference_iso_year;
 };
 
-ThrowCompletionOr<PlainMonthDay*> to_temporal_month_day(GlobalObject&, Value item, Object const* options = nullptr);
-ThrowCompletionOr<PlainMonthDay*> create_temporal_month_day(GlobalObject&, u8 iso_month, u8 iso_day, Object& calendar, i32 reference_iso_year, FunctionObject const* new_target = nullptr);
-ThrowCompletionOr<String> temporal_month_day_to_string(GlobalObject&, PlainMonthDay&, StringView show_calendar);
+ThrowCompletionOr<PlainMonthDay*> to_temporal_month_day(VM&, Value item, Object const* options = nullptr);
+ThrowCompletionOr<PlainMonthDay*> create_temporal_month_day(VM&, u8 iso_month, u8 iso_day, Object& calendar, i32 reference_iso_year, FunctionObject const* new_target = nullptr);
+ThrowCompletionOr<String> temporal_month_day_to_string(VM&, PlainMonthDay&, StringView show_calendar);
 
 }

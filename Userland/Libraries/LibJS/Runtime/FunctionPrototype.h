@@ -14,14 +14,15 @@ class FunctionPrototype final : public FunctionObject {
     JS_OBJECT(FunctionPrototype, FunctionObject);
 
 public:
-    explicit FunctionPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~FunctionPrototype() override = default;
 
     virtual ThrowCompletionOr<Value> internal_call(Value this_argument, MarkedVector<Value> arguments_list) override;
     virtual FlyString const& name() const override { return m_name; }
 
 private:
+    explicit FunctionPrototype(Realm&);
+
     JS_DECLARE_NATIVE_FUNCTION(apply);
     JS_DECLARE_NATIVE_FUNCTION(bind);
     JS_DECLARE_NATIVE_FUNCTION(call);

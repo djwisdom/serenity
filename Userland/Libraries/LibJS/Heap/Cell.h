@@ -14,12 +14,21 @@
 
 namespace JS {
 
+#define JS_CELL(class_, base_class)                \
+public:                                            \
+    using Base = base_class;                       \
+    virtual StringView class_name() const override \
+    {                                              \
+        return #class_##sv;                        \
+    }                                              \
+    friend class JS::Heap;
+
 class Cell {
     AK_MAKE_NONCOPYABLE(Cell);
     AK_MAKE_NONMOVABLE(Cell);
 
 public:
-    virtual void initialize(GlobalObject&) { }
+    virtual void initialize(Realm&) { }
     virtual ~Cell() = default;
 
     bool is_marked() const { return m_mark; }
@@ -41,6 +50,10 @@ public:
         {
             if (cell)
                 visit_impl(*cell);
+        }
+        void visit(Cell& cell)
+        {
+            visit_impl(cell);
         }
         void visit(Value);
 

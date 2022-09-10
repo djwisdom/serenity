@@ -5,21 +5,39 @@
  */
 
 #include <LibWeb/Bindings/MainThreadVM.h>
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/DOM/MutationObserver.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::DOM {
 
-// https://dom.spec.whatwg.org/#dom-mutationobserver-mutationobserver
-MutationObserver::MutationObserver(Bindings::WindowObject& window_object, Bindings::CallbackType callback)
-    : m_callback(move(callback))
+JS::NonnullGCPtr<MutationObserver> MutationObserver::create_with_global_object(HTML::Window& window, JS::GCPtr<Bindings::CallbackType> callback)
 {
+    return *window.heap().allocate<MutationObserver>(window.realm(), window, callback);
+}
+
+// https://dom.spec.whatwg.org/#dom-mutationobserver-mutationobserver
+MutationObserver::MutationObserver(HTML::Window& window, JS::GCPtr<Bindings::CallbackType> callback)
+    : PlatformObject(window.realm())
+    , m_callback(move(callback))
+{
+    set_prototype(&window.cached_web_prototype("MutationObserver"));
+
     // 1. Set this’s callback to callback.
 
     // 2. Append this to this’s relevant agent’s mutation observers.
-    auto* agent_custom_data = verify_cast<Bindings::WebEngineCustomData>(window_object.vm().custom_data());
+    auto* agent_custom_data = verify_cast<Bindings::WebEngineCustomData>(window.vm().custom_data());
     agent_custom_data->mutation_observers.append(*this);
+}
+
+MutationObserver::~MutationObserver() = default;
+
+void MutationObserver::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_callback.ptr());
+    for (auto& record : m_record_queue)
+        visitor.visit(record.ptr());
 }
 
 // https://dom.spec.whatwg.org/#dom-mutationobserver-observe
@@ -55,7 +73,7 @@ ExceptionOr<void> MutationObserver::observe(Node& target, MutationObserverInit o
     // 7. For each registered of target’s registered observer list, if registered’s observer is this:
     bool updated_existing_observer = false;
     for (auto& registered_observer : target.registered_observers_list()) {
-        if (registered_observer.observer.ptr() != this)
+        if (registered_observer.observer().ptr() != this)
             continue;
 
         updated_existing_observer = true;
@@ -67,12 +85,12 @@ ExceptionOr<void> MutationObserver::observe(Node& target, MutationObserverInit o
                 continue;
 
             node->registered_observers_list().remove_all_matching([&registered_observer](RegisteredObserver& observer) {
-                return is<TransientRegisteredObserver>(observer) && verify_cast<TransientRegisteredObserver>(observer).source.ptr() == &registered_observer;
+                return is<TransientRegisteredObserver>(observer) && verify_cast<TransientRegisteredObserver>(observer).source().ptr() == &registered_observer;
             });
         }
 
         // 2. Set registered’s options to options.
-        registered_observer.options = options;
+        registered_observer.set_options(options);
         break;
     }
 
@@ -83,7 +101,7 @@ ExceptionOr<void> MutationObserver::observe(Node& target, MutationObserverInit o
         target.add_registered_observer(new_registered_observer);
 
         // 2. Append target to this’s node list.
-        m_node_list.append(target.make_weak_ptr());
+        m_node_list.append(target.make_weak_ptr<Node>());
     }
 
     return {};
@@ -99,7 +117,7 @@ void MutationObserver::disconnect()
             continue;
 
         node->registered_observers_list().remove_all_matching([this](RegisteredObserver& registered_observer) {
-            return registered_observer.observer.ptr() == this;
+            return registered_observer.observer().ptr() == this;
         });
     }
 
@@ -108,16 +126,56 @@ void MutationObserver::disconnect()
 }
 
 // https://dom.spec.whatwg.org/#dom-mutationobserver-takerecords
-NonnullRefPtrVector<MutationRecord> MutationObserver::take_records()
+Vector<JS::Handle<MutationRecord>> MutationObserver::take_records()
 {
     // 1. Let records be a clone of this’s record queue.
-    auto records = m_record_queue;
+    Vector<JS::Handle<MutationRecord>> records;
+    for (auto& record : m_record_queue)
+        records.append(*record);
 
     // 2. Empty this’s record queue.
     m_record_queue.clear();
 
     // 3. Return records.
     return records;
+}
+
+JS::NonnullGCPtr<RegisteredObserver> RegisteredObserver::create(MutationObserver& observer, MutationObserverInit const& options)
+{
+    return *observer.heap().allocate_without_realm<RegisteredObserver>(observer, options);
+}
+
+RegisteredObserver::RegisteredObserver(MutationObserver& observer, MutationObserverInit const& options)
+    : m_observer(observer)
+    , m_options(options)
+{
+}
+
+RegisteredObserver::~RegisteredObserver() = default;
+
+void RegisteredObserver::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_observer.ptr());
+}
+
+JS::NonnullGCPtr<TransientRegisteredObserver> TransientRegisteredObserver::create(MutationObserver& observer, MutationObserverInit const& options, RegisteredObserver& source)
+{
+    return *observer.heap().allocate_without_realm<TransientRegisteredObserver>(observer, options, source);
+}
+
+TransientRegisteredObserver::TransientRegisteredObserver(MutationObserver& observer, MutationObserverInit const& options, RegisteredObserver& source)
+    : RegisteredObserver(observer, options)
+    , m_source(source)
+{
+}
+
+TransientRegisteredObserver::~TransientRegisteredObserver() = default;
+
+void TransientRegisteredObserver::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_source.ptr());
 }
 
 }

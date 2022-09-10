@@ -87,12 +87,12 @@ Utf16View PrimitiveString::utf16_string_view() const
     return utf16_string().view();
 }
 
-Optional<Value> PrimitiveString::get(GlobalObject& global_object, PropertyKey const& property_key) const
+Optional<Value> PrimitiveString::get(VM& vm, PropertyKey const& property_key) const
 {
     if (property_key.is_symbol())
         return {};
     if (property_key.is_string()) {
-        if (property_key.as_string() == global_object.vm().names.length.as_string()) {
+        if (property_key.as_string() == vm.names.length.as_string()) {
             auto length = utf16_string().length_in_code_units();
             return Value(static_cast<double>(length));
         }
@@ -104,7 +104,7 @@ Optional<Value> PrimitiveString::get(GlobalObject& global_object, PropertyKey co
     auto length = str.length_in_code_units();
     if (length <= index.as_index())
         return {};
-    return js_string(vm(), str.substring_view(index.as_index(), 1));
+    return js_string(vm, str.substring_view(index.as_index(), 1));
 }
 
 PrimitiveString* js_string(Heap& heap, Utf16View const& view)
@@ -128,7 +128,7 @@ PrimitiveString* js_string(Heap& heap, Utf16String string)
             return &heap.vm().single_ascii_character_string(static_cast<u8>(code_unit));
     }
 
-    return heap.allocate_without_global_object<PrimitiveString>(move(string));
+    return heap.allocate_without_realm<PrimitiveString>(move(string));
 }
 
 PrimitiveString* js_string(VM& vm, Utf16String string)
@@ -150,7 +150,7 @@ PrimitiveString* js_string(Heap& heap, String string)
     auto& string_cache = heap.vm().string_cache();
     auto it = string_cache.find(string);
     if (it == string_cache.end()) {
-        auto* new_string = heap.allocate_without_global_object<PrimitiveString>(string);
+        auto* new_string = heap.allocate_without_realm<PrimitiveString>(string);
         string_cache.set(move(string), new_string);
         return new_string;
     }
@@ -179,7 +179,7 @@ PrimitiveString* js_rope_string(VM& vm, PrimitiveString& lhs, PrimitiveString& r
     if (rhs_empty)
         return &lhs;
 
-    return vm.heap().allocate_without_global_object<PrimitiveString>(lhs, rhs);
+    return vm.heap().allocate_without_realm<PrimitiveString>(lhs, rhs);
 }
 
 void PrimitiveString::resolve_rope_if_needed() const

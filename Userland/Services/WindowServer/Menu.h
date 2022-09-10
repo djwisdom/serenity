@@ -74,6 +74,9 @@ public:
     Gfx::IntRect rect_in_window_menubar() const { return m_rect_in_window_menubar; }
     void set_rect_in_window_menubar(Gfx::IntRect const& rect) { m_rect_in_window_menubar = rect; }
 
+    Gfx::IntPoint unadjusted_position() const { return m_unadjusted_position; }
+    void set_unadjusted_position(Gfx::IntPoint const& position) { m_unadjusted_position = position; }
+
     Window* menu_window() { return m_menu_window.ptr(); }
     Window& ensure_menu_window(Gfx::IntPoint const&);
 
@@ -115,6 +118,7 @@ public:
 
     void popup(Gfx::IntPoint const&);
     void do_popup(Gfx::IntPoint const&, bool make_input, bool as_submenu = false);
+    void open_button_menu(Gfx::IntPoint const& position, Gfx::IntRect const& button_rect);
 
     bool is_menu_ancestor_of(Menu const&) const;
 
@@ -149,6 +153,7 @@ private:
     String m_name;
     u32 m_alt_shortcut_character { 0 };
     Gfx::IntRect m_rect_in_window_menubar;
+    Gfx::IntPoint m_unadjusted_position;
     NonnullOwnPtrVector<MenuItem> m_items;
     RefPtr<Window> m_menu_window;
 

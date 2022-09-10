@@ -21,23 +21,21 @@ class CSSImportRule;
 class CSSStyleSheet final
     : public StyleSheet
     , public Weakable<CSSStyleSheet> {
+    WEB_PLATFORM_OBJECT(CSSStyleSheet, StyleSheet);
+
 public:
-    using WrapperType = Bindings::CSSStyleSheetWrapper;
+    static CSSStyleSheet* create(HTML::Window&, CSSRuleList& rules, Optional<AK::URL> location);
 
-    static NonnullRefPtr<CSSStyleSheet> create(NonnullRefPtrVector<CSSRule> rules, Optional<AK::URL> location)
-    {
-        return adopt_ref(*new CSSStyleSheet(move(rules), move(location)));
-    }
-
+    explicit CSSStyleSheet(HTML::Window&, CSSRuleList&, Optional<AK::URL> location);
     virtual ~CSSStyleSheet() override = default;
 
     void set_owner_css_rule(CSSRule* rule) { m_owner_css_rule = rule; }
 
     virtual String type() const override { return "text/css"; }
 
-    CSSRuleList const& rules() const { return m_rules; }
-    CSSRuleList& rules() { return m_rules; }
-    void set_rules(NonnullRefPtr<CSSRuleList> rules) { m_rules = move(rules); }
+    CSSRuleList const& rules() const { return *m_rules; }
+    CSSRuleList& rules() { return *m_rules; }
+    void set_rules(CSSRuleList& rules) { m_rules = &rules; }
 
     CSSRuleList* css_rules() { return m_rules; }
     CSSRuleList const* css_rules() const { return m_rules; }
@@ -53,19 +51,14 @@ public:
     void set_style_sheet_list(Badge<StyleSheetList>, StyleSheetList*);
 
 private:
-    explicit CSSStyleSheet(NonnullRefPtrVector<CSSRule>, Optional<AK::URL> location);
+    virtual void visit_edges(Cell::Visitor&) override;
 
-    NonnullRefPtr<CSSRuleList> m_rules;
+    CSSRuleList* m_rules { nullptr };
 
-    WeakPtr<CSSRule> m_owner_css_rule;
-
-    WeakPtr<StyleSheetList> m_style_sheet_list;
+    JS::GCPtr<StyleSheetList> m_style_sheet_list;
+    CSSRule* m_owner_css_rule { nullptr };
 };
 
 }
 
-namespace Web::Bindings {
-
-CSSStyleSheetWrapper* wrap(JS::GlobalObject&, CSS::CSSStyleSheet&);
-
-}
+WRAPPER_HACK(CSSStyleSheet, Web::CSS)

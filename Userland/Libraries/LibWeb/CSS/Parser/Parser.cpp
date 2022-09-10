@@ -13,6 +13,7 @@
 #include <AK/GenericLexer.h>
 #include <AK/NonnullRefPtrVector.h>
 #include <AK/SourceLocation.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/CSS/CSSFontFaceRule.h>
 #include <LibWeb/CSS/CSSImportRule.h>
 #include <LibWeb/CSS/CSSMediaRule.h>
@@ -38,20 +39,33 @@ static void log_parse_error(SourceLocation const& location = SourceLocation::cur
 
 namespace Web::CSS::Parser {
 
+ParsingContext::ParsingContext()
+    : m_window_object(Bindings::main_thread_internal_window_object())
+{
+}
+
+ParsingContext::ParsingContext(HTML::Window& window_object)
+    : m_window_object(window_object)
+{
+}
+
 ParsingContext::ParsingContext(DOM::Document const& document, AK::URL url)
-    : m_document(&document)
+    : m_window_object(const_cast<HTML::Window&>(document.window()))
+    , m_document(&document)
     , m_url(move(url))
 {
 }
 
 ParsingContext::ParsingContext(DOM::Document const& document)
-    : m_document(&document)
+    : m_window_object(const_cast<HTML::Window&>(document.window()))
+    , m_document(&document)
     , m_url(document.url())
 {
 }
 
 ParsingContext::ParsingContext(DOM::ParentNode& parent_node)
-    : m_document(&parent_node.document())
+    : m_window_object(parent_node.document().window())
+    , m_document(&parent_node.document())
     , m_url(parent_node.document().url())
 {
 }
@@ -179,21 +193,22 @@ Parser::ParsedStyleSheet Parser::parse_a_stylesheet(TokenStream<T>& tokens, Opti
 }
 
 // https://www.w3.org/TR/css-syntax-3/#parse-a-css-stylesheet
-NonnullRefPtr<CSSStyleSheet> Parser::parse_as_css_stylesheet(Optional<AK::URL> location)
+CSSStyleSheet* Parser::parse_as_css_stylesheet(Optional<AK::URL> location)
 {
     // To parse a CSS stylesheet, first parse a stylesheet.
     auto style_sheet = parse_a_stylesheet(m_token_stream, {});
 
     // Interpret all of the resulting top-level qualified rules as style rules, defined below.
-    NonnullRefPtrVector<CSSRule> rules;
+    JS::MarkedVector<CSSRule*> rules(m_context.window_object().heap());
     for (auto& raw_rule : style_sheet.rules) {
-        auto rule = convert_to_rule(raw_rule);
+        auto* rule = convert_to_rule(raw_rule);
         // If any style rule is invalid, or any at-rule is not recognized or is invalid according to its grammar or context, it’s a parse error. Discard that rule.
         if (rule)
-            rules.append(*rule);
+            rules.append(rule);
     }
 
-    return CSSStyleSheet::create(move(rules), move(location));
+    auto* rule_list = CSSRuleList::create(m_context.window_object(), move(rules));
+    return CSSStyleSheet::create(m_context.window_object(), *rule_list, move(location));
 }
 
 Optional<SelectorList> Parser::parse_as_selector(SelectorParsingMode parsing_mode)
@@ -2087,7 +2102,7 @@ Vector<DeclarationOrAtRule> Parser::consume_a_list_of_declarations(TokenStream<T
     }
 }
 
-RefPtr<CSSRule> Parser::parse_as_css_rule()
+CSSRule* Parser::parse_as_css_rule()
 {
     auto maybe_rule = parse_a_rule(m_token_stream);
     if (maybe_rule)
@@ -2305,7 +2320,7 @@ Vector<Vector<ComponentValue>> Parser::parse_a_comma_separated_list_of_component
     return list_of_component_value_lists;
 }
 
-RefPtr<ElementInlineCSSStyleDeclaration> Parser::parse_as_style_attribute(DOM::Element& element)
+ElementInlineCSSStyleDeclaration* Parser::parse_as_style_attribute(DOM::Element& element)
 {
     auto declarations_and_at_rules = parse_a_list_of_declarations(m_token_stream);
     auto [properties, custom_properties] = extract_properties(declarations_and_at_rules);
@@ -2509,15 +2524,16 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
         auto& token = tokens.next_token();
 
         Gfx::Color color;
-        Optional<LengthPercentage> length;
+        Optional<LengthPercentage> position;
+        Optional<LengthPercentage> second_position;
         auto dimension = parse_dimension(token);
         if (dimension.has_value() && dimension->is_length_percentage()) {
             // [<length-percentage> <color>] or [<length-percentage>]
-            length = dimension->length_percentage();
+            position = dimension->length_percentage();
             tokens.skip_whitespace();
             // <length-percentage>
             if (!tokens.has_next_token() || tokens.peek_token().is(Token::Type::Comma)) {
-                element.transition_hint = GradientColorHint { *length };
+                element.transition_hint = GradientColorHint { *position };
                 return ElementType::ColorHint;
             }
             // <length-percentage> <color>
@@ -2532,16 +2548,21 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
                 return ElementType::Garbage;
             color = *maybe_color;
             tokens.skip_whitespace();
-            if (tokens.has_next_token() && !tokens.peek_token().is(Token::Type::Comma)) {
-                auto token = tokens.next_token();
-                auto dimension = parse_dimension(token);
-                if (!dimension.has_value() || !dimension->is_length_percentage())
-                    return ElementType::Garbage;
-                length = dimension->length_percentage();
+            // Allow up to [<color> <length-percentage> <length-percentage>] (double-position color stops)
+            // Note: Double-position color stops only appear to be valid in this order.
+            for (auto stop_position : Array { &position, &second_position }) {
+                if (tokens.has_next_token() && !tokens.peek_token().is(Token::Type::Comma)) {
+                    auto token = tokens.next_token();
+                    auto dimension = parse_dimension(token);
+                    if (!dimension.has_value() || !dimension->is_length_percentage())
+                        return ElementType::Garbage;
+                    *stop_position = dimension->length_percentage();
+                    tokens.skip_whitespace();
+                }
             }
         }
 
-        element.color_stop = GradientColorStop { color, length };
+        element.color_stop = GradientColorStop { color, position, second_position };
         return ElementType::ColorStop;
     };
 
@@ -2578,7 +2599,7 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
     return LinearGradientStyleValue::create(gradient_direction, move(color_stops), gradient_type, repeating_gradient);
 }
 
-RefPtr<CSSRule> Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
+CSSRule* Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
 {
     if (rule->is_at_rule()) {
         if (has_ignored_vendor_prefix(rule->at_rule_name())) {
@@ -2610,8 +2631,7 @@ RefPtr<CSSRule> Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
 
             if (url.has_value())
                 return CSSImportRule::create(url.value(), const_cast<DOM::Document&>(*m_context.document()));
-            else
-                dbgln_if(CSS_PARSER_DEBUG, "Unable to parse url from @import rule");
+            dbgln_if(CSS_PARSER_DEBUG, "Unable to parse url from @import rule");
 
         } else if (rule->at_rule_name().equals_ignoring_case("media"sv)) {
 
@@ -2622,13 +2642,13 @@ RefPtr<CSSRule> Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
 
             auto child_tokens = TokenStream { rule->block()->values() };
             auto parser_rules = parse_a_list_of_rules(child_tokens);
-            NonnullRefPtrVector<CSSRule> child_rules;
+            JS::MarkedVector<CSSRule*> child_rules(m_context.window_object().heap());
             for (auto& raw_rule : parser_rules) {
                 if (auto child_rule = convert_to_rule(raw_rule))
-                    child_rules.append(*child_rule);
+                    child_rules.append(child_rule);
             }
-
-            return CSSMediaRule::create(MediaList::create(move(media_query_list)), move(child_rules));
+            auto* rule_list = CSSRuleList::create(m_context.window_object(), move(child_rules));
+            return CSSMediaRule::create(m_context.window_object(), *MediaList::create(m_context.window_object(), move(media_query_list)), *rule_list);
 
         } else if (rule->at_rule_name().equals_ignoring_case("supports"sv)) {
 
@@ -2646,13 +2666,14 @@ RefPtr<CSSRule> Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
                 return {};
             auto child_tokens = TokenStream { rule->block()->values() };
             auto parser_rules = parse_a_list_of_rules(child_tokens);
-            NonnullRefPtrVector<CSSRule> child_rules;
+            JS::MarkedVector<CSSRule*> child_rules(m_context.window_object().heap());
             for (auto& raw_rule : parser_rules) {
                 if (auto child_rule = convert_to_rule(raw_rule))
-                    child_rules.append(*child_rule);
+                    child_rules.append(child_rule);
             }
 
-            return CSSSupportsRule::create(supports.release_nonnull(), move(child_rules));
+            auto* rule_list = CSSRuleList::create(m_context.window_object(), move(child_rules));
+            return CSSSupportsRule::create(m_context.window_object(), supports.release_nonnull(), *rule_list);
 
         } else {
             dbgln_if(CSS_PARSER_DEBUG, "Unrecognized CSS at-rule: @{}", rule->at_rule_name());
@@ -2685,13 +2706,13 @@ RefPtr<CSSRule> Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
         auto stream = TokenStream(rule->block()->values());
         auto declarations_and_at_rules = parse_a_style_blocks_contents(stream);
 
-        auto declaration = convert_to_style_declaration(declarations_and_at_rules);
+        auto* declaration = convert_to_style_declaration(declarations_and_at_rules);
         if (!declaration) {
             dbgln_if(CSS_PARSER_DEBUG, "CSSParser: style rule declaration invalid; discarding.");
             return {};
         }
 
-        return CSSStyleRule::create(move(selectors.value()), move(*declaration));
+        return CSSStyleRule::create(m_context.window_object(), move(selectors.value()), *declaration);
     }
 
     return {};
@@ -2720,10 +2741,10 @@ auto Parser::extract_properties(Vector<DeclarationOrAtRule> const& declarations_
     return result;
 }
 
-RefPtr<PropertyOwningCSSStyleDeclaration> Parser::convert_to_style_declaration(Vector<DeclarationOrAtRule> declarations_and_at_rules)
+PropertyOwningCSSStyleDeclaration* Parser::convert_to_style_declaration(Vector<DeclarationOrAtRule> declarations_and_at_rules)
 {
     auto [properties, custom_properties] = extract_properties(declarations_and_at_rules);
-    return PropertyOwningCSSStyleDeclaration::create(move(properties), move(custom_properties));
+    return PropertyOwningCSSStyleDeclaration::create(m_context.window_object(), move(properties), move(custom_properties));
 }
 
 Optional<StyleProperty> Parser::convert_to_style_property(Declaration const& declaration)
@@ -4675,7 +4696,7 @@ RefPtr<StyleValue> Parser::parse_font_family_value(Vector<ComponentValue> const&
     return StyleValueList::create(move(font_families), StyleValueList::Separator::Comma);
 }
 
-RefPtr<CSSRule> Parser::parse_font_face_rule(TokenStream<ComponentValue>& tokens)
+CSSRule* Parser::parse_font_face_rule(TokenStream<ComponentValue>& tokens)
 {
     auto declarations_and_at_rules = parse_a_list_of_declarations(tokens);
 
@@ -4776,7 +4797,7 @@ RefPtr<CSSRule> Parser::parse_font_face_rule(TokenStream<ComponentValue>& tokens
         unicode_range.empend(0x0u, 0x10FFFFu);
     }
 
-    return CSSFontFaceRule::create(FontFace { font_family.release_value(), move(src), move(unicode_range) });
+    return CSSFontFaceRule::create(m_context.window_object(), FontFace { font_family.release_value(), move(src), move(unicode_range) });
 }
 
 Vector<FontFace::Source> Parser::parse_font_face_src(TokenStream<ComponentValue>& component_values)
@@ -5295,6 +5316,97 @@ RefPtr<StyleValue> Parser::parse_as_css_value(PropertyID property_id)
     return parsed_value.release_value();
 }
 
+RefPtr<StyleValue> Parser::parse_grid_track_sizes(Vector<ComponentValue> const& component_values)
+{
+    Vector<CSS::GridTrackSize> params;
+    for (auto& component_value : component_values) {
+        // FIXME: Incomplete as a GridTrackSize can be a function like minmax(min, max), etc.
+        if (component_value.is_function()) {
+            params.append(Length::make_auto());
+            continue;
+        }
+        if (component_value.is(Token::Type::Ident) && component_value.token().ident().equals_ignoring_case("auto"sv)) {
+            params.append(Length::make_auto());
+            continue;
+        }
+        auto dimension = parse_dimension(component_value);
+        if (!dimension.has_value())
+            return GridTrackSizeStyleValue::create({});
+        if (dimension->is_length())
+            params.append(dimension->length());
+        if (dimension->is_percentage())
+            params.append(dimension->percentage());
+    }
+    return GridTrackSizeStyleValue::create(params);
+}
+
+RefPtr<StyleValue> Parser::parse_grid_track_placement(Vector<ComponentValue> const& component_values)
+{
+    auto tokens = TokenStream { component_values };
+    auto current_token = tokens.next_token().token();
+
+    if (!tokens.has_next_token()) {
+        if (current_token.to_string() == "auto"sv)
+            return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement());
+        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+            return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement(static_cast<int>(current_token.number_value())));
+        return {};
+    }
+
+    auto first_grid_track_placement = CSS::GridTrackPlacement();
+    if (current_token.to_string() == "span"sv) {
+        first_grid_track_placement.set_has_span(true);
+        tokens.skip_whitespace();
+        current_token = tokens.next_token().token();
+    }
+    if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+        first_grid_track_placement.set_position(static_cast<int>(current_token.number_value()));
+
+    if (!tokens.has_next_token())
+        return GridTrackPlacementStyleValue::create(first_grid_track_placement);
+    return {};
+}
+
+RefPtr<StyleValue> Parser::parse_grid_track_placement_shorthand_value(Vector<ComponentValue> const& component_values)
+{
+    auto tokens = TokenStream { component_values };
+    auto current_token = tokens.next_token().token();
+
+    if (!tokens.has_next_token()) {
+        if (current_token.to_string() == "auto"sv)
+            return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement::make_auto());
+        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+            return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement(current_token.number_value()));
+        return {};
+    }
+
+    auto calculate_grid_track_placement = [](auto& current_token, auto& tokens) -> CSS::GridTrackPlacement {
+        auto grid_track_placement = CSS::GridTrackPlacement();
+        if (current_token.to_string() == "span"sv) {
+            grid_track_placement.set_has_span(true);
+            tokens.skip_whitespace();
+            current_token = tokens.next_token().token();
+        }
+        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+            grid_track_placement.set_position(static_cast<int>(current_token.number_value()));
+        return grid_track_placement;
+    };
+
+    auto first_grid_track_placement = calculate_grid_track_placement(current_token, tokens);
+    if (!tokens.has_next_token())
+        return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement(first_grid_track_placement));
+
+    tokens.skip_whitespace();
+    current_token = tokens.next_token().token();
+    tokens.skip_whitespace();
+    current_token = tokens.next_token().token();
+
+    auto second_grid_track_placement = calculate_grid_track_placement(current_token, tokens);
+    if (!tokens.has_next_token())
+        return GridTrackPlacementShorthandStyleValue::create(GridTrackPlacementStyleValue::create(first_grid_track_placement), GridTrackPlacementStyleValue::create(second_grid_track_placement));
+    return {};
+}
+
 Parser::ParseErrorOr<NonnullRefPtr<StyleValue>> Parser::parse_css_value(PropertyID property_id, TokenStream<ComponentValue>& tokens)
 {
     auto function_contains_var_or_attr = [](Function const& function, auto&& recurse) -> bool {
@@ -5423,6 +5535,38 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue>> Parser::parse_css_value(Property
         return ParseError::SyntaxError;
     case PropertyID::FontFamily:
         if (auto parsed_value = parse_font_family_value(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridColumn:
+        if (auto parsed_value = parse_grid_track_placement_shorthand_value(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridColumnEnd:
+        if (auto parsed_value = parse_grid_track_placement(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridColumnStart:
+        if (auto parsed_value = parse_grid_track_placement(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridRow:
+        if (auto parsed_value = parse_grid_track_placement_shorthand_value(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridRowEnd:
+        if (auto parsed_value = parse_grid_track_placement(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridRowStart:
+        if (auto parsed_value = parse_grid_track_placement(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridTemplateColumns:
+        if (auto parsed_value = parse_grid_track_sizes(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::GridTemplateRows:
+        if (auto parsed_value = parse_grid_track_sizes(component_values))
             return parsed_value.release_nonnull();
         return ParseError::SyntaxError;
     case PropertyID::ListStyle:
@@ -6244,15 +6388,15 @@ TimePercentage Parser::Dimension::time_percentage() const
 
 namespace Web {
 
-RefPtr<CSS::CSSStyleSheet> parse_css_stylesheet(CSS::Parser::ParsingContext const& context, StringView css, Optional<AK::URL> location)
+CSS::CSSStyleSheet* parse_css_stylesheet(CSS::Parser::ParsingContext const& context, StringView css, Optional<AK::URL> location)
 {
     if (css.is_empty())
-        return CSS::CSSStyleSheet::create({}, location);
+        return CSS::CSSStyleSheet::create(context.window_object(), *CSS::CSSRuleList::create_empty(context.window_object()), location);
     CSS::Parser::Parser parser(context, css);
     return parser.parse_as_css_stylesheet(location);
 }
 
-RefPtr<CSS::ElementInlineCSSStyleDeclaration> parse_css_style_attribute(CSS::Parser::ParsingContext const& context, StringView css, DOM::Element& element)
+CSS::ElementInlineCSSStyleDeclaration* parse_css_style_attribute(CSS::Parser::ParsingContext const& context, StringView css, DOM::Element& element)
 {
     if (css.is_empty())
         return CSS::ElementInlineCSSStyleDeclaration::create(element, {}, {});
@@ -6268,7 +6412,7 @@ RefPtr<CSS::StyleValue> parse_css_value(CSS::Parser::ParsingContext const& conte
     return parser.parse_as_css_value(property_id);
 }
 
-RefPtr<CSS::CSSRule> parse_css_rule(CSS::Parser::ParsingContext const& context, StringView css_text)
+CSS::CSSRule* parse_css_rule(CSS::Parser::ParsingContext const& context, StringView css_text)
 {
     CSS::Parser::Parser parser(context, css_text);
     return parser.parse_as_css_rule();

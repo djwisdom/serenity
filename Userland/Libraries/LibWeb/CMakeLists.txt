@@ -2,26 +2,21 @@ include(libweb_generators)
 
 set(SOURCES
     Bindings/AudioConstructor.cpp
-    Bindings/CrossOriginAbstractOperations.cpp
     Bindings/CSSNamespace.cpp
-    Bindings/CSSRuleWrapperFactory.cpp
-    Bindings/CSSStyleDeclarationWrapperCustom.cpp
-    Bindings/EventListenerWrapper.cpp
-    Bindings/EventTargetWrapperFactory.cpp
-    Bindings/EventWrapperFactory.cpp
+    Bindings/CallbackType.cpp
+    Bindings/CrossOriginAbstractOperations.cpp
     Bindings/IDLAbstractOperations.cpp
     Bindings/ImageConstructor.cpp
+    Bindings/LegacyPlatformObject.cpp
     Bindings/LocationConstructor.cpp
     Bindings/LocationObject.cpp
     Bindings/MainThreadVM.cpp
     Bindings/NavigatorConstructor.cpp
     Bindings/NavigatorObject.cpp
-    Bindings/NodeWrapperFactory.cpp
     Bindings/OptionConstructor.cpp
+    Bindings/PlatformObject.cpp
     Bindings/WindowConstructor.cpp
-    Bindings/WindowObject.cpp
     Bindings/WindowProxy.cpp
-    Bindings/Wrappable.cpp
     Crypto/Crypto.cpp
     Crypto/SubtleCrypto.cpp
     CSS/Angle.cpp
@@ -40,10 +35,13 @@ set(SOURCES
     CSS/Display.cpp
     CSS/FontFace.cpp
     CSS/Frequency.cpp
+    CSS/GridTrackPlacement.cpp
+    CSS/GridTrackSize.cpp
     CSS/Length.cpp
     CSS/MediaList.cpp
     CSS/MediaQuery.cpp
     CSS/MediaQueryList.cpp
+    CSS/MediaQueryListEvent.cpp
     CSS/Parser/Block.cpp
     CSS/Parser/ComponentValue.cpp
     CSS/Parser/Declaration.cpp
@@ -73,6 +71,7 @@ set(SOURCES
     Cookie/ParsedCookie.cpp
     DOM/AbortController.cpp
     DOM/AbortSignal.cpp
+    DOM/AbstractRange.cpp
     DOM/Attribute.cpp
     DOM/Attribute.idl
     DOM/CDATASection.cpp
@@ -81,6 +80,7 @@ set(SOURCES
     DOM/Comment.cpp
     DOM/CustomEvent.cpp
     DOM/DOMEventListener.cpp
+    DOM/DOMException.cpp
     DOM/DOMImplementation.cpp
     DOM/DOMTokenList.cpp
     DOM/DOMTokenList.idl
@@ -94,13 +94,16 @@ set(SOURCES
     DOM/EventDispatcher.cpp
     DOM/EventTarget.cpp
     DOM/HTMLCollection.cpp
+    DOM/IDLEventListener.cpp
     DOM/LiveNodeList.cpp
     DOM/MutationObserver.cpp
     DOM/MutationRecord.cpp
     DOM/MutationType.cpp
     DOM/NamedNodeMap.cpp
     DOM/Node.cpp
+    DOM/NodeFilter.cpp
     DOM/NodeIterator.cpp
+    DOM/NodeList.cpp
     DOM/NodeOperations.cpp
     DOM/ParentNode.cpp
     DOM/Position.cpp
@@ -131,7 +134,11 @@ set(SOURCES
     FileAPI/Blob.cpp
     FileAPI/File.cpp
     FontCache.cpp
+    Geometry/DOMPoint.cpp
+    Geometry/DOMPointReadOnly.cpp
+    Geometry/DOMRect.cpp
     Geometry/DOMRectList.cpp
+    Geometry/DOMRectReadOnly.cpp
     HTML/AttributeNames.cpp
     HTML/BrowsingContext.cpp
     HTML/BrowsingContextContainer.cpp
@@ -140,9 +147,12 @@ set(SOURCES
     HTML/Canvas/CanvasState.cpp
     HTML/CanvasGradient.cpp
     HTML/CanvasRenderingContext2D.cpp
+    HTML/CloseEvent.cpp
     HTML/CrossOrigin/Reporting.cpp
     HTML/DOMParser.cpp
     HTML/DOMStringMap.cpp
+    HTML/ErrorEvent.cpp
+    HTML/EventHandler.cpp
     HTML/EventLoop/EventLoop.cpp
     HTML/EventLoop/Task.cpp
     HTML/EventLoop/TaskQueue.cpp
@@ -226,7 +236,9 @@ set(SOURCES
     HTML/HTMLVideoElement.cpp
     HTML/ImageData.cpp
     HTML/MessageChannel.cpp
+    HTML/MessageEvent.cpp
     HTML/MessagePort.cpp
+    HTML/PageTransitionEvent.cpp
     HTML/Parser/Entities.cpp
     HTML/Parser/HTMLEncodingDetection.cpp
     HTML/Parser/HTMLParser.cpp
@@ -235,12 +247,14 @@ set(SOURCES
     HTML/Parser/ListOfActiveFormattingElements.cpp
     HTML/Parser/StackOfOpenElements.cpp
     HTML/Path2D.cpp
+    HTML/PromiseRejectionEvent.cpp
     HTML/Scripting/ClassicScript.cpp
     HTML/Scripting/Environments.cpp
     HTML/Scripting/ExceptionReporter.cpp
     HTML/Scripting/Script.cpp
     HTML/Scripting/WindowEnvironmentSettingsObject.cpp
     HTML/Storage.cpp
+    HTML/SubmitEvent.cpp
     HTML/SyntaxHighlighter/SyntaxHighlighter.cpp
     HTML/TagNames.cpp
     HTML/TextMetrics.cpp
@@ -251,6 +265,7 @@ set(SOURCES
     HTML/WorkerDebugConsoleClient.cpp
     HTML/WorkerGlobalScope.cpp
     HTML/WorkerLocation.cpp
+    HTML/WorkerNavigator.cpp
     HighResolutionTime/Performance.cpp
     ImageDecoding.cpp
     Infra/ByteSequences.cpp
@@ -266,6 +281,7 @@ set(SOURCES
     Layout/FlexFormattingContext.cpp
     Layout/FormattingContext.cpp
     Layout/FrameBox.cpp
+    Layout/GridFormattingContext.cpp
     Layout/ImageBox.cpp
     Layout/InitialContainingBlock.cpp
     Layout/InlineFormattingContext.cpp
@@ -335,6 +351,9 @@ set(SOURCES
     Painting/ShadowPainting.cpp
     Painting/StackingContext.cpp
     Painting/TextPaintable.cpp
+    Platform/EventLoopPlugin.cpp
+    Platform/FontPlugin.cpp
+    Platform/Timer.cpp
     RequestIdleCallback/IdleDeadline.cpp
     ResizeObserver/ResizeObserver.cpp
     SVG/AttributeNames.cpp
@@ -364,6 +383,7 @@ set(SOURCES
     UIEvents/FocusEvent.cpp
     UIEvents/KeyboardEvent.cpp
     UIEvents/MouseEvent.cpp
+    UIEvents/UIEvent.cpp
     URL/URL.cpp
     URL/URLSearchParams.cpp
     URL/URLSearchParamsIterator.cpp
@@ -379,10 +399,12 @@ set(SOURCES
     WebAssembly/WebAssemblyTableObject.cpp
     WebAssembly/WebAssemblyTablePrototype.cpp
     WebGL/WebGLContextAttributes.cpp
+    WebGL/WebGLContextEvent.cpp
     WebGL/WebGLRenderingContext.cpp
     WebGL/WebGLRenderingContextBase.cpp
     WebSockets/WebSocket.cpp
     XHR/EventNames.cpp
+    XHR/ProgressEvent.cpp
     XHR/XMLHttpRequest.cpp
     XHR/XMLHttpRequestEventTarget.cpp
     XML/XMLDocumentBuilder.cpp
@@ -404,7 +426,7 @@ serenity_lib(LibWeb web)
 
 # NOTE: We link with LibSoftGPU here instead of lazy loading it via dlopen() so that we do not have to unveil the library and pledge prot_exec.
 target_link_libraries(LibWeb LibCore LibJS LibMarkdown LibGemini LibGL LibGUI LibGfx LibSoftGPU LibTextCodec LibWasm LibXML)
-link_with_unicode_data(LibWeb)
+link_with_locale_data(LibWeb)
 
 generate_js_wrappers(LibWeb)
 

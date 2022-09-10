@@ -17,11 +17,22 @@ namespace JS {
 // 9.3.1 CreateRealm ( ), https://tc39.es/ecma262/#sec-createrealm
 Realm* Realm::create(VM& vm)
 {
-    return vm.heap().allocate_without_global_object<Realm>();
+    // 1. Let realmRec be a new Realm Record.
+    auto* realm = vm.heap().allocate_without_realm<Realm>();
+
+    // 2. Perform CreateIntrinsics(realmRec).
+    Intrinsics::create(*realm);
+
+    // 3. Set realmRec.[[GlobalObject]] to undefined.
+    // 4. Set realmRec.[[GlobalEnv]] to undefined.
+    // 5. Set realmRec.[[TemplateMap]] to a new empty List.
+
+    // 6. Return realmRec.
+    return realm;
 }
 
 // 9.6 InitializeHostDefinedRealm ( ), https://tc39.es/ecma262/#sec-initializehostdefinedrealm
-ThrowCompletionOr<NonnullOwnPtr<ExecutionContext>> Realm::initialize_host_defined_realm(VM& vm, Function<GlobalObject*(Realm&)> create_global_object, Function<GlobalObject*(Realm&)> create_global_this_value)
+ThrowCompletionOr<NonnullOwnPtr<ExecutionContext>> Realm::initialize_host_defined_realm(VM& vm, Function<Object*(Realm&)> create_global_object, Function<Object*(Realm&)> create_global_this_value)
 {
     DeferGC defer_gc(vm.heap());
 
@@ -46,32 +57,32 @@ ThrowCompletionOr<NonnullOwnPtr<ExecutionContext>> Realm::initialize_host_define
     // 7. If the host requires use of an exotic object to serve as realm's global object,
     //    let global be such an object created in a host-defined manner.
     //    Otherwise, let global be undefined, indicating that an ordinary object should be created as the global object.
-    GlobalObject* global = nullptr;
+    Object* global = nullptr;
     if (create_global_object)
         global = create_global_object(*realm);
 
     // 8. If the host requires that the this binding in realm's global scope return an object other than the global object,
     //    let thisValue be such an object created in a host-defined manner.
     //    Otherwise, let thisValue be undefined, indicating that realm's global this binding should be the global object.
-    GlobalObject* this_value = nullptr;
+    Object* this_value = nullptr;
     if (create_global_this_value)
         this_value = create_global_this_value(*realm);
 
     // 9. Perform SetRealmGlobalObject(realm, global, thisValue).
     realm->set_global_object(global, this_value);
 
-    // NOTE: Steps 10 & 11 are somewhat ad-hoc, since we store intrinsics on the global object.
-
     // 10. Let globalObj be ? SetDefaultGlobalBindings(realm).
+    auto& global_object = set_default_global_bindings(*realm);
+
     // 11. Create any host-defined global object properties on globalObj.
-    realm->global_object().initialize_global_object();
+    global_object.initialize(*realm);
 
     // 12. Return unused.
     return new_context;
 }
 
 // 9.3.3 SetRealmGlobalObject ( realmRec, globalObj, thisValue ), https://tc39.es/ecma262/#sec-setrealmglobalobject
-void Realm::set_global_object(GlobalObject* global_object, GlobalObject* this_value)
+void Realm::set_global_object(Object* global_object, Object* this_value)
 {
     // 1. If globalObj is undefined, then
     if (global_object == nullptr) {
@@ -79,14 +90,11 @@ void Realm::set_global_object(GlobalObject* global_object, GlobalObject* this_va
         // b. Set globalObj to OrdinaryObjectCreate(intrinsics.[[%Object.prototype%]]).
         // NOTE: We allocate a proper GlobalObject directly as this plain object is
         //       turned into one via SetDefaultGlobalBindings in the spec.
-        global_object = heap().allocate_without_global_object<GlobalObject>(*this);
+        global_object = heap().allocate_without_realm<GlobalObject>(*this);
     }
 
     // 2. Assert: Type(globalObj) is Object.
     VERIFY(global_object);
-
-    // Non-standard
-    global_object->set_associated_realm(*this);
 
     // 3. If thisValue is undefined, set thisValue to globalObj.
     if (this_value == nullptr)
@@ -100,15 +108,19 @@ void Realm::set_global_object(GlobalObject* global_object, GlobalObject* this_va
 
     // 5. Let newGlobalEnv be NewGlobalEnvironment(globalObj, thisValue).
     // 6. Set realmRec.[[GlobalEnv]] to newGlobalEnv.
-    m_global_environment = m_global_object->heap().allocate_without_global_object<GlobalEnvironment>(*global_object, *this_value);
+    m_global_environment = m_global_object->heap().allocate_without_realm<GlobalEnvironment>(*global_object, *this_value);
 
     // 7. Return unused.
 }
 
 void Realm::visit_edges(Visitor& visitor)
 {
+    Base::visit_edges(visitor);
+    visitor.visit(m_intrinsics);
     visitor.visit(m_global_object);
     visitor.visit(m_global_environment);
+    if (m_host_defined)
+        m_host_defined->visit_edges(visitor);
 }
 
 }

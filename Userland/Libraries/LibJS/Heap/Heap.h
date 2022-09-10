@@ -20,7 +20,6 @@
 #include <LibJS/Heap/CellAllocator.h>
 #include <LibJS/Heap/Handle.h>
 #include <LibJS/Heap/MarkedVector.h>
-#include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/WeakContainer.h>
 
 namespace JS {
@@ -34,7 +33,7 @@ public:
     ~Heap();
 
     template<typename T, typename... Args>
-    T* allocate_without_global_object(Args&&... args)
+    T* allocate_without_realm(Args&&... args)
     {
         auto* memory = allocate_cell(sizeof(T));
         new (memory) T(forward<Args>(args)...);
@@ -42,12 +41,12 @@ public:
     }
 
     template<typename T, typename... Args>
-    T* allocate(GlobalObject& global_object, Args&&... args)
+    T* allocate(Realm& realm, Args&&... args)
     {
         auto* memory = allocate_cell(sizeof(T));
         new (memory) T(forward<Args>(args)...);
         auto* cell = static_cast<T*>(memory);
-        cell->initialize(global_object);
+        memory->initialize(realm);
         return cell;
     }
 

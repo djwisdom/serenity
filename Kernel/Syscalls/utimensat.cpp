@@ -14,7 +14,7 @@ namespace Kernel {
 
 ErrorOr<FlatPtr> Process::sys$utimensat(Userspace<Syscall::SC_utimensat_params const*> user_params)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::fattr));
 
     auto params = TRY(copy_typed_from_user(user_params));
@@ -41,7 +41,7 @@ ErrorOr<FlatPtr> Process::sys$utimensat(Userspace<Syscall::SC_utimensat_params c
 
     OwnPtr<KString> path;
     LockRefPtr<OpenFileDescription> description;
-    LockRefPtr<Custody> base;
+    RefPtr<Custody> base;
 
     auto path_or_error = get_syscall_path_argument(params.path);
     if (path_or_error.is_error()) {
@@ -71,7 +71,7 @@ ErrorOr<FlatPtr> Process::sys$utimensat(Userspace<Syscall::SC_utimensat_params c
 
     auto& atime = times[0];
     auto& mtime = times[1];
-    TRY(VirtualFileSystem::the().utimensat(path->view(), *base, atime, mtime, follow_symlink));
+    TRY(VirtualFileSystem::the().utimensat(credentials(), path->view(), *base, atime, mtime, follow_symlink));
     return 0;
 }
 

@@ -831,13 +831,22 @@ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
 
             auto handlers = Desktop::Launcher::get_handlers_for_url(attribute.href);
             if (!handlers.is_empty()) {
-                auto path = URL(attribute.href).path();
-                auto name = LexicalPath::basename(path);
-                if (path == handlers[0]) {
-                    set_tooltip(String::formatted("Execute {}", name));
+                auto url = URL(attribute.href);
+                auto path = url.path();
+
+                auto app_file = Desktop::AppFile::get_for_app(LexicalPath::basename(handlers[0]));
+                auto app_name = app_file->is_valid() ? app_file->name() : LexicalPath::basename(handlers[0]);
+
+                if (url.scheme() == "file") {
+                    auto file_name = LexicalPath::basename(path);
+
+                    if (path == handlers[0]) {
+                        set_tooltip(String::formatted("Execute {}", app_name));
+                    } else {
+                        set_tooltip(String::formatted("Open {} with {}", file_name, app_name));
+                    }
                 } else {
-                    auto af = Desktop::AppFile::get_for_app(LexicalPath::basename(handlers[0]));
-                    set_tooltip(String::formatted("Open {} with {}", name, af->is_valid() ? af->name() : LexicalPath::basename(handlers[0])));
+                    set_tooltip(String::formatted("Open {} with {}", attribute.href, app_name));
                 }
             }
         } else {
@@ -1113,6 +1122,13 @@ void TerminalWidget::context_menu_event(GUI::ContextMenuEvent& event)
 
         m_context_menu_for_hyperlink->popup(event.screen_position(), context_menu_default_action);
     }
+}
+
+void TerminalWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/plain") || mime_types.contains_slow("text/uri-list"))
+        event.accept();
 }
 
 void TerminalWidget::drop_event(GUI::DropEvent& event)

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020, Itamar S. <itamar8910@gmail.com>
  * Copyright (c) 2022, the SerenityOS developers.
+ * Copyright (c) 2022, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -23,7 +24,13 @@ public:
     using Word = u32;
     static constexpr size_t BITS_IN_WORD = 32;
 
-    UnsignedBigInteger(Word x) { m_words.append(x); }
+    // This constructor accepts any unsigned with size up to Word.
+    template<typename T>
+    requires(IsIntegral<T> && sizeof(T) <= sizeof(Word))
+        UnsignedBigInteger(T value)
+    {
+        m_words.append(static_cast<Word>(value));
+    }
 
     explicit UnsignedBigInteger(Vector<Word, STARTING_WORD_SIZE>&& words)
         : m_words(move(words))
@@ -31,6 +38,16 @@ public:
     }
 
     explicit UnsignedBigInteger(u8 const* ptr, size_t length);
+
+    explicit UnsignedBigInteger(double value);
+
+    explicit UnsignedBigInteger(u64 value)
+    {
+        static_assert(sizeof(u64) == sizeof(Word) * 2);
+        m_words.resize_and_keep_capacity(2);
+        m_words[0] = static_cast<Word>(value & 0xFFFFFFFF);
+        m_words[1] = static_cast<Word>((value >> 32) & 0xFFFFFFFF);
+    }
 
     UnsignedBigInteger() = default;
 
@@ -42,23 +59,21 @@ public:
         return UnsignedBigInteger(ptr, length);
     }
 
-    [[nodiscard]] static UnsignedBigInteger create_from(u64 value)
-    {
-        VERIFY(sizeof(Word) == 4);
-        UnsignedBigInteger integer;
-        integer.m_words.resize(2);
-        integer.m_words[0] = static_cast<Word>(value & 0xFFFFFFFF);
-        integer.m_words[1] = static_cast<Word>((value >> 32) & 0xFFFFFFFF);
-        return integer;
-    }
-
     size_t export_data(Bytes, bool remove_leading_zeros = false) const;
 
     [[nodiscard]] static UnsignedBigInteger from_base(u16 N, StringView str);
     [[nodiscard]] String to_base(u16 N) const;
 
     [[nodiscard]] u64 to_u64() const;
-    [[nodiscard]] double to_double() const;
+
+    enum class RoundingMode {
+        IEEERoundAndTiesToEvenMantissa,
+        RoundTowardZero,
+        // “the Number value for x”, https://tc39.es/ecma262/#number-value-for
+        ECMAScriptNumberValueFor = IEEERoundAndTiesToEvenMantissa,
+    };
+
+    [[nodiscard]] double to_double(RoundingMode rounding_mode = RoundingMode::IEEERoundAndTiesToEvenMantissa) const;
 
     [[nodiscard]] Vector<Word, STARTING_WORD_SIZE> const& words() const { return m_words; }
 

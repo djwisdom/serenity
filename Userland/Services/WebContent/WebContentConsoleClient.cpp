@@ -9,31 +9,29 @@
 #include "WebContentConsoleClient.h"
 #include <LibJS/Interpreter.h>
 #include <LibJS/MarkupGenerator.h>
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
 #include <WebContent/ConsoleGlobalObject.h>
 
 namespace WebContent {
 
-WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, WeakPtr<JS::Interpreter> interpreter, ConnectionFromClient& client)
+WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, JS::Realm& realm, ConnectionFromClient& client)
     : ConsoleClient(console)
     , m_client(client)
-    , m_interpreter(interpreter)
+    , m_realm(realm)
 {
-    JS::DeferGC defer_gc(m_interpreter->heap());
+    JS::DeferGC defer_gc(realm.heap());
 
-    auto& vm = m_interpreter->vm();
-    auto& global_object = m_interpreter->global_object();
+    auto& vm = realm.vm();
+    auto& window = static_cast<Web::HTML::Window&>(realm.global_object());
 
-    auto console_global_object = m_interpreter->heap().allocate_without_global_object<ConsoleGlobalObject>(m_interpreter->realm(), static_cast<Web::Bindings::WindowObject&>(global_object));
+    auto console_global_object = realm.heap().allocate_without_realm<ConsoleGlobalObject>(realm, window);
 
     // NOTE: We need to push an execution context here for NativeFunction::create() to succeed during global object initialization.
-    // It gets removed immediately after creating the interpreter in Document::interpreter().
-    auto& eso = verify_cast<Web::HTML::EnvironmentSettingsObject>(*m_interpreter->realm().host_defined());
+    auto& eso = verify_cast<Web::HTML::EnvironmentSettingsObject>(*realm.host_defined());
     vm.push_execution_context(eso.realm_execution_context());
-    console_global_object->set_associated_realm(m_interpreter->realm());
-    console_global_object->initialize_global_object();
+    console_global_object->initialize(realm);
     vm.pop_execution_context();
 
     m_console_global_object = JS::make_handle(console_global_object);
@@ -41,7 +39,10 @@ WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, WeakPtr<J
 
 void WebContentConsoleClient::handle_input(String const& js_source)
 {
-    auto& settings = verify_cast<Web::HTML::EnvironmentSettingsObject>(*m_interpreter->realm().host_defined());
+    if (!m_realm)
+        return;
+
+    auto& settings = verify_cast<Web::HTML::EnvironmentSettingsObject>(*m_realm->host_defined());
     auto script = Web::HTML::ClassicScript::create("(console)", js_source, settings, settings.api_base_url());
 
     // FIXME: Add parse error printouts back once ClassicScript can report parse errors.

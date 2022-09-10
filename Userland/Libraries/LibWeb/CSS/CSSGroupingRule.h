@@ -15,17 +15,14 @@
 namespace Web::CSS {
 
 class CSSGroupingRule : public CSSRule {
-    AK_MAKE_NONCOPYABLE(CSSGroupingRule);
-    AK_MAKE_NONMOVABLE(CSSGroupingRule);
+    WEB_PLATFORM_OBJECT(CSSGroupingRule, CSSRule);
 
 public:
-    using WrapperType = Bindings::CSSGroupingRuleWrapper;
-
     virtual ~CSSGroupingRule() = default;
 
     CSSRuleList const& css_rules() const { return m_rules; }
     CSSRuleList& css_rules() { return m_rules; }
-    NonnullRefPtr<CSSRuleList> css_rules_for_bindings() { return m_rules; }
+    CSSRuleList* css_rules_for_bindings() { return &m_rules; }
     DOM::ExceptionOr<u32> insert_rule(StringView rule, u32 index = 0);
     DOM::ExceptionOr<void> delete_rule(u32 index);
 
@@ -34,10 +31,13 @@ public:
     virtual void set_parent_style_sheet(CSSStyleSheet*) override;
 
 protected:
-    explicit CSSGroupingRule(NonnullRefPtrVector<CSSRule>&&);
+    explicit CSSGroupingRule(HTML::Window&, CSSRuleList&);
+    virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    NonnullRefPtr<CSSRuleList> m_rules;
+    CSSRuleList& m_rules;
 };
 
 }
+
+WRAPPER_HACK(CSSGroupingRule, Web::CSS)

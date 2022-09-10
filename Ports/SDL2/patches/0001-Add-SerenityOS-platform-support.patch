@@ -16,27 +16,27 @@ Co-Authored-By: Stephan Unverwerth <s.unverwerth@gmx.de>
 Co-Authored-By: Tim Schumacher <timschumi@gmx.de>
 Co-Authored-By: circl <circl.lastname@gmail.com>
 ---
- CMakeLists.txt                                |  29 +-
+ CMakeLists.txt                                |  25 +-
  build-scripts/config.sub                      |   3 +
  cmake/sdlchecks.cmake                         |  20 +
  include/SDL_config.h.cmake                    |   2 +
- src/SDL_error.c                               |   9 +-
+ src/SDL_error.c                               |   7 +-
  src/audio/SDL_audio.c                         |   3 +
  src/audio/SDL_sysaudio.h                      |   1 +
- src/audio/serenity/SDL_serenityaudio.cpp      | 160 ++++
- src/audio/serenity/SDL_serenityaudio.h        |  38 +
+ src/audio/serenity/SDL_serenityaudio.cpp      | 160 +++++
+ src/audio/serenity/SDL_serenityaudio.h        |  38 ++
  src/stdlib/SDL_stdlib.c                       |   2 +-
  src/video/SDL_sysvideo.h                      |   1 +
  src/video/SDL_video.c                         |  13 +
  src/video/serenity/SDL_serenityevents.cpp     |  52 ++
  src/video/serenity/SDL_serenityevents_c.h     |  33 +
- src/video/serenity/SDL_serenitymessagebox.cpp |  40 +
- src/video/serenity/SDL_serenitymessagebox.h   |  38 +
- src/video/serenity/SDL_serenitymouse.cpp      | 142 ++++
- src/video/serenity/SDL_serenitymouse.h        |  39 +
- src/video/serenity/SDL_serenityvideo.cpp      | 720 ++++++++++++++++++
- src/video/serenity/SDL_serenityvideo.h        |  98 +++
- 20 files changed, 1414 insertions(+), 29 deletions(-)
+ src/video/serenity/SDL_serenitymessagebox.cpp |  40 ++
+ src/video/serenity/SDL_serenitymessagebox.h   |  38 ++
+ src/video/serenity/SDL_serenitymouse.cpp      | 142 +++++
+ src/video/serenity/SDL_serenitymouse.h        |  39 ++
+ src/video/serenity/SDL_serenityvideo.cpp      | 600 ++++++++++++++++++
+ src/video/serenity/SDL_serenityvideo.h        | 101 +++
+ 20 files changed, 1295 insertions(+), 25 deletions(-)
  create mode 100644 src/audio/serenity/SDL_serenityaudio.cpp
  create mode 100644 src/audio/serenity/SDL_serenityaudio.h
  create mode 100644 src/video/serenity/SDL_serenityevents.cpp
@@ -49,18 +49,10 @@ Co-Authored-By: circl <circl.lastname@gmail.com>
  create mode 100644 src/video/serenity/SDL_serenityvideo.h
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 644715a..2400d53 100644
+index 6b53699..e910dc4 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -1,7 +1,3 @@
--if(${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_BINARY_DIR})
--  message(FATAL_ERROR "Prevented in-tree build. Please create a build directory outside of the SDL source code and run \"cmake -S ${CMAKE_SOURCE_DIR} -B .\" from there")
--endif()
--
- cmake_minimum_required(VERSION 3.0.0)
- project(SDL2 C CXX)
- 
-@@ -17,6 +13,9 @@ endif()
+@@ -26,6 +26,9 @@ set(EXTRA_LDFLAGS)
  #  etc. See https://github.com/libsdl-org/SDL/issues/4150
  add_library(sdl-build-options INTERFACE)
  
@@ -70,7 +62,7 @@ index 644715a..2400d53 100644
  if(WINDOWS_STORE)
    cmake_minimum_required(VERSION 3.11.0)
    target_compile_definitions(sdl-build-options INTERFACE "-DSDL_BUILDING_WINRT=1")
-@@ -397,7 +396,7 @@ set_option(SDL_DUMMYVIDEO          "Use dummy video driver" ON)
+@@ -448,7 +451,7 @@ set_option(SDL_DUMMYVIDEO          "Use dummy video driver" ON)
  set_option(SDL_OPENGL              "Include OpenGL support" ON)
  set_option(SDL_OPENGLES            "Include OpenGL ES support" ON)
  set_option(SDL_PTHREADS            "Use POSIX threads for multi-threading" ${SDL_PTHREADS_ENABLED_BY_DEFAULT})
@@ -79,8 +71,8 @@ index 644715a..2400d53 100644
  dep_option(SDL_OSS                 "Support the OSS audio API" ON "UNIX_SYS OR RISCOS" OFF)
  set_option(SDL_ALSA                "Support the ALSA audio API" ${UNIX_SYS})
  dep_option(SDL_ALSA_SHARED         "Dynamically load ALSA audio support" ON "SDL_ALSA" OFF)
-@@ -1268,25 +1267,7 @@ elseif(UNIX AND NOT APPLE AND NOT ANDROID AND NOT RISCOS AND NOT HAIKU)
-     CheckLibSampleRate()
+@@ -1345,25 +1348,7 @@ elseif(UNIX AND NOT APPLE AND NOT RISCOS AND NOT HAIKU)
+     CheckFusionSound()
    endif()
  
 -  if(SDL_VIDEO)
@@ -121,10 +113,10 @@ index dba16e8..39c9ecb 100755
  		os=`echo "$os" | sed -e 's|sunos5|solaris2|'`
  		;;
 diff --git a/cmake/sdlchecks.cmake b/cmake/sdlchecks.cmake
-index 8dcb392..a34c781 100644
+index 7e25075..1d09487 100644
 --- a/cmake/sdlchecks.cmake
 +++ b/cmake/sdlchecks.cmake
-@@ -771,6 +771,26 @@ macro(CheckDirectFB)
+@@ -785,6 +785,26 @@ macro(CheckDirectFB)
    endif()
  endmacro()
  
@@ -152,10 +144,10 @@ index 8dcb392..a34c781 100644
  # - n/a
  macro(CheckVivante)
 diff --git a/include/SDL_config.h.cmake b/include/SDL_config.h.cmake
-index fcd18e5..d7b9cfc 100644
+index 2d21b37..370ffcf 100644
 --- a/include/SDL_config.h.cmake
 +++ b/include/SDL_config.h.cmake
-@@ -312,6 +312,7 @@
+@@ -318,6 +318,7 @@
  #cmakedefine SDL_AUDIO_DRIVER_PULSEAUDIO @SDL_AUDIO_DRIVER_PULSEAUDIO@
  #cmakedefine SDL_AUDIO_DRIVER_PULSEAUDIO_DYNAMIC @SDL_AUDIO_DRIVER_PULSEAUDIO_DYNAMIC@
  #cmakedefine SDL_AUDIO_DRIVER_QSA @SDL_AUDIO_DRIVER_QSA@
@@ -163,7 +155,7 @@ index fcd18e5..d7b9cfc 100644
  #cmakedefine SDL_AUDIO_DRIVER_SNDIO @SDL_AUDIO_DRIVER_SNDIO@
  #cmakedefine SDL_AUDIO_DRIVER_SNDIO_DYNAMIC @SDL_AUDIO_DRIVER_SNDIO_DYNAMIC@
  #cmakedefine SDL_AUDIO_DRIVER_SUNAUDIO @SDL_AUDIO_DRIVER_SUNAUDIO@
-@@ -394,6 +395,7 @@
+@@ -404,6 +405,7 @@
  #cmakedefine SDL_VIDEO_DRIVER_DIRECTFB_DYNAMIC @SDL_VIDEO_DRIVER_DIRECTFB_DYNAMIC@
  #cmakedefine SDL_VIDEO_DRIVER_DUMMY @SDL_VIDEO_DRIVER_DUMMY@
  #cmakedefine SDL_VIDEO_DRIVER_OFFSCREEN @SDL_VIDEO_DRIVER_OFFSCREEN@
@@ -172,37 +164,28 @@ index fcd18e5..d7b9cfc 100644
  #cmakedefine SDL_VIDEO_DRIVER_WINRT @SDL_VIDEO_DRIVER_WINRT@
  #cmakedefine SDL_VIDEO_DRIVER_WAYLAND @SDL_VIDEO_DRIVER_WAYLAND@
 diff --git a/src/SDL_error.c b/src/SDL_error.c
-index 4d25999..24491ee 100644
+index 1ca460a..b08d742 100644
 --- a/src/SDL_error.c
 +++ b/src/SDL_error.c
-@@ -33,6 +33,7 @@ SDL_SetError(SDL_PRINTF_FORMAT_STRING const char *fmt, ...)
-     /* Ignore call if invalid format pointer was passed */
-     if (fmt != NULL) {
-         va_list ap;
-+        char errmsg[SDL_ERRBUFIZE];
-         SDL_error *error = SDL_GetErrBuf();
+@@ -53,10 +53,9 @@ SDL_SetError(SDL_PRINTF_FORMAT_STRING const char *fmt, ...)
+         }
  
-         error->error = 1;  /* mark error as valid */
-@@ -41,10 +42,10 @@ SDL_SetError(SDL_PRINTF_FORMAT_STRING const char *fmt, ...)
-         SDL_vsnprintf(error->str, ERR_MAX_STRLEN, fmt, ap);
-         va_end(ap);
  
 -        if (SDL_LogGetPriority(SDL_LOG_CATEGORY_ERROR) <= SDL_LOG_PRIORITY_DEBUG) {
 -            /* If we are in debug mode, print out the error message */
 -            SDL_LogDebug(SDL_LOG_CATEGORY_ERROR, "%s", error->str);
 -        }
 +        // # HACK(SerenityOS): show everything that's going on
-+        SDL_GetErrorMsg(errmsg, sizeof(errmsg));
-+        dbgputstr(errmsg, strlen(errmsg));
++        dbgputstr(error->str, strlen(error->str));
 +        dbgputstr("\n", 1);
      }
  
      return -1;
 diff --git a/src/audio/SDL_audio.c b/src/audio/SDL_audio.c
-index fb363f7..59c36e5 100644
+index e2f7412..7181100 100644
 --- a/src/audio/SDL_audio.c
 +++ b/src/audio/SDL_audio.c
-@@ -121,6 +121,9 @@ static const AudioBootStrap *const bootstrap[] = {
+@@ -125,6 +125,9 @@ static const AudioBootStrap *const bootstrap[] = {
  #endif
  #if SDL_AUDIO_DRIVER_DUMMY
      &DUMMYAUDIO_bootstrap,
@@ -213,10 +196,10 @@ index fb363f7..59c36e5 100644
      NULL
  };
 diff --git a/src/audio/SDL_sysaudio.h b/src/audio/SDL_sysaudio.h
-index 8aa7298..c16af45 100644
+index 6afaae1..6c7009a 100644
 --- a/src/audio/SDL_sysaudio.h
 +++ b/src/audio/SDL_sysaudio.h
-@@ -208,6 +208,7 @@ extern AudioBootStrap PSPAUDIO_bootstrap;
+@@ -211,6 +211,7 @@ extern AudioBootStrap PSPAUDIO_bootstrap;
  extern AudioBootStrap VITAAUD_bootstrap;
  extern AudioBootStrap EMSCRIPTENAUDIO_bootstrap;
  extern AudioBootStrap OS2AUDIO_bootstrap;
@@ -435,12 +418,12 @@ index 0000000..8d152ca
 +    size_t mixlen { 0 };
 +};
 diff --git a/src/stdlib/SDL_stdlib.c b/src/stdlib/SDL_stdlib.c
-index 9d785aa..6c31981 100644
+index 2af18b1..fbef9e7 100644
 --- a/src/stdlib/SDL_stdlib.c
 +++ b/src/stdlib/SDL_stdlib.c
-@@ -533,7 +533,7 @@ int SDL_toupper(int x) { return ((x) >= 'a') && ((x) <= 'z') ? ('A'+((x)-'a')) :
- int SDL_tolower(int x) { return ((x) >= 'A') && ((x) <= 'Z') ? ('a'+((x)-'A')) : (x); }
- #endif
+@@ -637,7 +637,7 @@ SDL_memset(SDL_OUT_BYTECAP(len) void *dst, int c, size_t len)
+ #endif /* HAVE_MEMSET */
+ }
  
 -#if defined(HAVE_CTYPE_H) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
 +#if defined(HAVE_CTYPE_H) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L && !defined(__serenity__)
@@ -448,22 +431,22 @@ index 9d785aa..6c31981 100644
  #else
  int SDL_isblank(int x) { return ((x) == ' ') || ((x) == '\t'); }
 diff --git a/src/video/SDL_sysvideo.h b/src/video/SDL_sysvideo.h
-index 2384a64..5090f3e 100644
+index 4ea7705..83b9bba 100644
 --- a/src/video/SDL_sysvideo.h
 +++ b/src/video/SDL_sysvideo.h
-@@ -458,6 +458,7 @@ extern VideoBootStrap QNX_bootstrap;
- extern VideoBootStrap OFFSCREEN_bootstrap;
+@@ -470,6 +470,7 @@ extern VideoBootStrap OFFSCREEN_bootstrap;
+ extern VideoBootStrap NGAGE_bootstrap;
  extern VideoBootStrap OS2DIVE_bootstrap;
  extern VideoBootStrap OS2VMAN_bootstrap;
 +extern VideoBootStrap SERENITYVIDEO_bootstrap;
  
- extern SDL_VideoDevice *SDL_GetVideoDevice(void);
- extern int SDL_AddBasicVideoDisplay(const SDL_DisplayMode * desktop_mode);
+ /* Use SDL_OnVideoThread() sparingly, to avoid regressions in use cases that currently happen to work */
+ extern SDL_bool SDL_OnVideoThread(void);
 diff --git a/src/video/SDL_video.c b/src/video/SDL_video.c
-index 93c803e..36960a1 100644
+index 21c5162..2e765de 100644
 --- a/src/video/SDL_video.c
 +++ b/src/video/SDL_video.c
-@@ -122,6 +122,9 @@ static VideoBootStrap *bootstrap[] = {
+@@ -128,6 +128,9 @@ static VideoBootStrap *bootstrap[] = {
      &OS2DIVE_bootstrap,
      &OS2VMAN_bootstrap,
  #endif
@@ -472,8 +455,8 @@ index 93c803e..36960a1 100644
 +#endif
  #if SDL_VIDEO_DRIVER_DUMMY
      &DUMMY_bootstrap,
- #endif
-@@ -4146,6 +4149,10 @@ SDL_WM_SetIcon(SDL_Surface * icon, Uint8 * mask)
+ #if SDL_INPUT_LINUXEV
+@@ -4258,6 +4261,10 @@ SDL_WM_SetIcon(SDL_Surface * icon, Uint8 * mask)
      }
  }
  #endif
@@ -484,7 +467,7 @@ index 93c803e..36960a1 100644
  
  SDL_bool
  SDL_GetWindowWMInfo(SDL_Window * window, struct SDL_SysWMinfo *info)
-@@ -4425,6 +4432,12 @@ SDL_ShowMessageBox(const SDL_MessageBoxData *messageboxdata, int *buttonid)
+@@ -4543,6 +4550,12 @@ SDL_ShowMessageBox(const SDL_MessageBoxData *messageboxdata, int *buttonid)
          VITA_ShowMessageBox(messageboxdata, buttonid) == 0) {
          retval = 0;
      }
@@ -879,10 +862,10 @@ index 0000000..039f036
 +/* vi: set ts=4 sw=4 expandtab: */
 diff --git a/src/video/serenity/SDL_serenityvideo.cpp b/src/video/serenity/SDL_serenityvideo.cpp
 new file mode 100644
-index 0000000..494766f
+index 0000000..56e6e66
 --- /dev/null
 +++ b/src/video/serenity/SDL_serenityvideo.cpp
-@@ -0,0 +1,720 @@
+@@ -0,0 +1,600 @@
 +/*
 +  Simple DirectMedia Layer
 +  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
@@ -915,130 +898,20 @@ index 0000000..494766f
 +#    include "../SDL_sysvideo.h"
 +#    include "SDL_mouse.h"
 +#    include "SDL_video.h"
-+#    include "../../../include/SDL_scancode.h"
 +}
 +
 +#    include "SDL_serenityevents_c.h"
 +#    include "SDL_serenitymouse.h"
 +#    include "SDL_serenityvideo.h"
 +
-+#    include <dlfcn.h>
 +#    include <LibCore/EventLoop.h>
-+#    include <LibGfx/Bitmap.h>
 +#    include <LibGUI/Application.h>
 +#    include <LibGUI/Desktop.h>
 +#    include <LibGUI/Painter.h>
 +#    include <LibGUI/Widget.h>
 +#    include <LibGUI/Window.h>
-+
-+static int conversion_map[] = {
-+    SDLK_UNKNOWN,
-+    SDLK_ESCAPE,
-+    SDLK_TAB,
-+    SDLK_BACKSPACE,
-+    SDLK_RETURN,
-+    SDLK_INSERT,
-+    SDLK_DELETE,
-+    SDLK_PRINTSCREEN,
-+    SDLK_SYSREQ,
-+    SDLK_HOME,
-+    SDLK_END,
-+    SDLK_LEFT,
-+    SDLK_UP,
-+    SDLK_RIGHT,
-+    SDLK_DOWN,
-+    SDLK_PAGEUP,
-+    SDLK_PAGEDOWN,
-+    SDLK_LSHIFT,
-+    SDLK_RSHIFT,
-+    SDLK_LCTRL,
-+    SDLK_LALT,
-+    SDLK_CAPSLOCK,
-+    SDLK_NUMLOCKCLEAR,
-+    SDLK_SCROLLLOCK,
-+    SDLK_F1,
-+    SDLK_F2,
-+    SDLK_F3,
-+    SDLK_F4,
-+    SDLK_F5,
-+    SDLK_F6,
-+    SDLK_F7,
-+    SDLK_F8,
-+    SDLK_F9,
-+    SDLK_F10,
-+    SDLK_F11,
-+    SDLK_F12,
-+    SDLK_SPACE,
-+    SDLK_EXCLAIM,
-+    SDLK_QUOTE,
-+    SDLK_3,
-+    SDLK_4,
-+    SDLK_5,
-+    SDLK_7,
-+    SDLK_QUOTE,
-+    SDLK_9,
-+    SDLK_0,
-+    SDLK_8,
-+    SDLK_PLUS,
-+    SDLK_COMMA,
-+    SDLK_MINUS,
-+    SDLK_PERIOD,
-+    SDLK_SLASH,
-+    SDLK_0,
-+    SDLK_1,
-+    SDLK_2,
-+    SDLK_3,
-+    SDLK_4,
-+    SDLK_5,
-+    SDLK_6,
-+    SDLK_7,
-+    SDLK_8,
-+    SDLK_9,
-+    SDLK_SEMICOLON,
-+    SDLK_SEMICOLON,
-+    SDLK_COMMA,
-+    SDLK_EQUALS,
-+    SDLK_PERIOD,
-+    SDLK_SLASH,
-+    SDLK_2,
-+    SDLK_a,
-+    SDLK_b,
-+    SDLK_c,
-+    SDLK_d,
-+    SDLK_e,
-+    SDLK_f,
-+    SDLK_g,
-+    SDLK_h,
-+    SDLK_i,
-+    SDLK_j,
-+    SDLK_k,
-+    SDLK_l,
-+    SDLK_m,
-+    SDLK_n,
-+    SDLK_o,
-+    SDLK_p,
-+    SDLK_q,
-+    SDLK_r,
-+    SDLK_s,
-+    SDLK_t,
-+    SDLK_u,
-+    SDLK_v,
-+    SDLK_w,
-+    SDLK_x,
-+    SDLK_y,
-+    SDLK_z,
-+    SDLK_LEFTBRACKET,
-+    SDLK_RIGHTBRACKET,
-+    SDLK_BACKSLASH,
-+    SDLK_6,
-+    SDLK_MINUS,
-+    SDLK_LEFTBRACKET,
-+    SDLK_RIGHTBRACKET,
-+    SDLK_BACKSLASH,
-+    SDLK_BACKQUOTE,
-+    SDLK_BACKQUOTE,
-+    SDLK_UNKNOWN,
-+};
++#    include <LibGfx/Bitmap.h>
++#    include <dlfcn.h>
 +
 +static SDL_Scancode scancode_map[] = {
 +    SDL_SCANCODE_UNKNOWN,
@@ -1189,11 +1062,10 @@ index 0000000..494766f
 +extern int Serenity_GL_MakeCurrent(_THIS, SDL_Window* window, SDL_GLContext context);
 +extern int Serenity_GL_SwapWindow(_THIS, SDL_Window* window);
 +
-+static SDL_VideoDevice* SERENITY_CreateDevice(int devindex)
++static SDL_VideoDevice* SERENITY_CreateDevice(void)
 +{
 +    SDL_VideoDevice* device;
 +
-+    dbgln("SERENITY_CreateDevice {}", devindex);
 +    /* Initialize all variables that we clean on shutdown */
 +    device = (SDL_VideoDevice*)SDL_calloc(1, sizeof(SDL_VideoDevice));
 +    if (!device) {
@@ -1240,11 +1112,12 @@ index 0000000..494766f
 +
 +int SERENITY_VideoInit(_THIS)
 +{
-+    VERIFY(!g_app);
-+    g_app = GUI::Application::construct(0, nullptr);
-+    g_app->set_quit_when_last_window_deleted(false);
++    dbgln("{}: Initialising SDL application", __FUNCTION__);
 +
-+    dbgln("SDL2: Initialising SDL application");
++    if (!g_app) {
++        g_app = GUI::Application::construct(0, nullptr);
++        g_app->set_quit_when_last_window_deleted(false);
++    }
 +
 +    SERENITY_InitMouse(_this);
 +
@@ -1259,9 +1132,8 @@ index 0000000..494766f
 +    mode.refresh_rate = 60;
 +    mode.driverdata = nullptr;
 +
-+    if (SDL_AddBasicVideoDisplay(&mode) < 0) {
++    if (SDL_AddBasicVideoDisplay(&mode) < 0)
 +        return -1;
-+    }
 +
 +    SDL_AddDisplayMode(&_this->displays[0], &mode);
 +
@@ -1280,22 +1152,11 @@ index 0000000..494766f
 +{
 +    dbgln("SERENITY_VideoQuit");
 +    SERENITY_QuitMouse(_this);
-+    g_app->quit();
 +}
 +
-+SerenitySDLWidget::SerenitySDLWidget(SDL_Window* window)
-+    : m_sdl_window(window)
++SerenitySDLWidget::SerenitySDLWidget(SDL_Window* sdl_window)
++    : m_sdl_window(sdl_window)
 +{
-+    SDL_Keycode keymap[SDL_NUM_SCANCODES];
-+    SDL_GetDefaultKeymap(keymap);
-+
-+    for (int i = 0; i < (sizeof(scancode_map) / sizeof(SDL_Keycode)); ++i) {
-+        if (scancode_map[i] != SDL_SCANCODE_UNKNOWN)
-+            keymap[scancode_map[i]] = conversion_map[i];
-+    }
-+    SDL_SetKeymap(0, keymap, SDL_NUM_SCANCODES);
-+
-+    update();
 +}
 +
 +void SerenitySDLWidget::paint_event(GUI::PaintEvent& event)
@@ -1385,12 +1246,16 @@ index 0000000..494766f
 +
 +int Serenity_CreateWindow(_THIS, SDL_Window* window)
 +{
-+    dbgln("SDL2: Creating new window of size {}x{}", window->w, window->h);
++    dbgln("{}: Creating new window of size {}x{}", __FUNCTION__, window->w, window->h);
++
 +    auto w = new SerenityPlatformWindow(window);
 +    window->driverdata = w;
 +    w->window()->set_double_buffering_enabled(false);
 +    w->widget()->set_fill_with_background_color(false);
 +    w->window()->set_main_widget(w->widget());
++    w->window()->on_close = [&window] {
++        SDL_SendWindowEvent(window, SDL_WINDOWEVENT_CLOSE, 0, 0);
++    };
 +    w->window()->on_close_request = [] {
 +        if (SDL_SendQuit())
 +            return GUI::Window::CloseRequestDecision::Close;
@@ -1494,7 +1359,7 @@ index 0000000..494766f
 +int Serenity_CreateWindowFramebuffer(_THIS, SDL_Window* window, Uint32* format,
 +    void** pixels, int* pitch)
 +{
-+    dbgln("SDL2: Creating a new framebuffer of size {}x{}", window->w, window->h);
++    dbgln("{}: Creating a new framebuffer of size {}x{}", __FUNCTION__, window->w, window->h);
 +    auto win = SerenityPlatformWindow::from_sdl_window(window);
 +    *format = SDL_PIXELFORMAT_RGB888;
 +    auto bitmap_or_error = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, {window->w, window->h});
@@ -1503,7 +1368,6 @@ index 0000000..494766f
 +    win->widget()->m_buffer = bitmap_or_error.release_value();
 +    *pitch = win->widget()->m_buffer->pitch();
 +    *pixels = win->widget()->m_buffer->scanline(0);
-+    dbgln("Created framebuffer {}x{}", win->widget()->width(), win->widget()->height());
 +    return 0;
 +}
 +
@@ -1522,32 +1386,29 @@ index 0000000..494766f
 +void Serenity_DestroyWindowFramebuffer(_THIS, SDL_Window* window)
 +{
 +    auto widget = SerenityPlatformWindow::from_sdl_window(window)->widget();
-+    dbgln("SDL2: Destroy framebuffer {}", widget->m_buffer->size());
++    dbgln("{}: Destroy framebuffer {}", __FUNCTION__, widget->m_buffer->size());
 +    widget->m_buffer = nullptr;
 +}
 +
 +SDL_GLContext Serenity_GL_CreateContext(_THIS, SDL_Window* window)
 +{
-+    auto win = SerenityPlatformWindow::from_sdl_window(window);
++    auto platform_window = SerenityPlatformWindow::from_sdl_window(window);
 +
 +    Uint32 format;
 +    void* pixels;
 +    int pitch;
 +    Serenity_CreateWindowFramebuffer(_this, window, &format, &pixels, &pitch);
 +
-+    win->widget()->m_gl_context = GL::create_context(*win->widget()->m_buffer);
-+    GL::make_context_current(win->widget()->m_gl_context);
-+
-+    return new SerenityGLContext(*window);
++    auto gl_context = GL::create_context(*platform_window->widget()->m_buffer);
++    auto serenity_gl_context = new SerenityGLContext(move(gl_context));
++    platform_window->set_serenity_gl_context(serenity_gl_context);
++    GL::make_context_current(&serenity_gl_context->gl_context());
++    return serenity_gl_context;
 +}
 +
 +void Serenity_GL_DeleteContext(_THIS, SDL_GLContext context)
 +{
 +    auto platform_context = static_cast<SerenityGLContext*>(context);
-+    auto sdl_window = platform_context->sdl_window();
-+    auto platform_window = SerenityPlatformWindow::from_sdl_window(&sdl_window);
-+
-+    platform_window->widget()->m_gl_context = nullptr;
 +    delete platform_context;
 +}
 +
@@ -1586,17 +1447,19 @@ index 0000000..494766f
 +        return 0;
 +
 +    auto platform_window = SerenityPlatformWindow::from_sdl_window(window);
-+    GL::make_context_current(platform_window->widget()->m_gl_context);
++    auto serenity_gl_context = static_cast<SerenityGLContext*>(context);
++    platform_window->set_serenity_gl_context(serenity_gl_context);
++    GL::make_context_current(&serenity_gl_context->gl_context());
 +    return 0;
 +}
 +
 +int Serenity_GL_SwapWindow(_THIS, SDL_Window* window)
 +{
-+    auto win = SerenityPlatformWindow::from_sdl_window(window);
-+    if (win->widget()->m_gl_context)
-+        GL::present_context(win->widget()->m_gl_context);
++    auto platform_window = SerenityPlatformWindow::from_sdl_window(window);
++    if (platform_window->serenity_gl_context())
++        GL::present_context(&platform_window->serenity_gl_context()->gl_context());
 +
-+    win->widget()->repaint();
++    platform_window->widget()->repaint();
 +    return 0;
 +}
 +
@@ -1605,10 +1468,10 @@ index 0000000..494766f
 +/* vi: set ts=4 sw=4 expandtab: */
 diff --git a/src/video/serenity/SDL_serenityvideo.h b/src/video/serenity/SDL_serenityvideo.h
 new file mode 100644
-index 0000000..b5c6759
+index 0000000..f74e1bd
 --- /dev/null
 +++ b/src/video/serenity/SDL_serenityvideo.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,101 @@
 +/*
 +  Simple DirectMedia Layer
 +  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
@@ -1645,7 +1508,6 @@ index 0000000..b5c6759
 +public:
 +    explicit SerenitySDLWidget(SDL_Window*);
 +    RefPtr<Gfx::Bitmap> m_buffer;
-+    OwnPtr<GL::GLContext> m_gl_context;
 +
 +protected:
 +    void paint_event(GUI::PaintEvent&) override;
@@ -1668,11 +1530,24 @@ index 0000000..b5c6759
 +    SDL_Window* m_sdl_window = nullptr;
 +};
 +
++class SerenityGLContext final {
++public:
++    explicit SerenityGLContext(NonnullOwnPtr<GL::GLContext> gl_context)
++        : m_gl_context(move(gl_context))
++    {
++    }
++
++    GL::GLContext& gl_context() { return *m_gl_context; }
++
++private:
++    NonnullOwnPtr<GL::GLContext> m_gl_context;
++};
++
 +class SerenityPlatformWindow final {
 +public:
-+    SerenityPlatformWindow(SDL_Window* sdl_window)
-+        : m_window(GUI::Window::construct())
-+        , m_widget(SerenitySDLWidget::construct(sdl_window))
++    explicit SerenityPlatformWindow(SDL_Window* sdl_window)
++        : m_window(MUST(GUI::Window::try_create()))
++        , m_widget(MUST(SerenitySDLWidget::try_create(sdl_window)))
 +    {
 +        m_window->resize(sdl_window->w, sdl_window->h);
 +        m_window->set_resizable(false);
@@ -1683,25 +1558,16 @@ index 0000000..b5c6759
 +        return static_cast<SerenityPlatformWindow*>(window->driverdata);
 +    }
 +
++    SerenityGLContext* serenity_gl_context() { return m_serenity_gl_context; }
++    void set_serenity_gl_context(SerenityGLContext* serenity_gl_context) { m_serenity_gl_context = serenity_gl_context; }
++
 +    NonnullRefPtr<GUI::Window> window() { return m_window; }
 +    NonnullRefPtr<SerenitySDLWidget> widget() { return m_widget; }
 +
 +private:
++    SerenityGLContext* m_serenity_gl_context;
 +    NonnullRefPtr<GUI::Window> m_window;
 +    NonnullRefPtr<SerenitySDLWidget> m_widget;
-+};
-+
-+class SerenityGLContext final {
-+public:
-+    explicit SerenityGLContext(SDL_Window& sdl_window)
-+        : m_sdl_window(sdl_window)
-+    {
-+    }
-+
-+    SDL_Window& sdl_window() const { return m_sdl_window; }
-+
-+private:
-+    SDL_Window& m_sdl_window;
 +};
 +
 +#endif /* SDL_serenityvideo_h_ */

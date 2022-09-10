@@ -43,13 +43,13 @@ public:
         auto interpreter = adopt_own(*new Interpreter(vm));
         VM::InterpreterExecutionScope scope(*interpreter);
 
-        GlobalObject* global_object { nullptr };
+        Realm* realm { nullptr };
 
         interpreter->m_global_execution_context = MUST(Realm::initialize_host_defined_realm(
             vm,
-            [&](Realm& realm) -> GlobalObject* {
-                global_object = interpreter->heap().allocate_without_global_object<GlobalObjectType>(realm, forward<Args>(args)...);
-                return global_object;
+            [&](Realm& realm_) -> GlobalObject* {
+                realm = &realm_;
+                return interpreter->heap().allocate_without_realm<GlobalObjectType>(realm_, forward<Args>(args)...);
             },
             nullptr));
 
@@ -57,8 +57,7 @@ public:
         static FlyString global_execution_context_name = "(global execution context)";
         interpreter->m_global_execution_context->function_name = global_execution_context_name;
 
-        interpreter->m_global_object = make_handle(global_object);
-        interpreter->m_realm = make_handle(global_object->associated_realm());
+        interpreter->m_realm = make_handle(realm);
 
         return interpreter;
     }
@@ -69,9 +68,6 @@ public:
 
     ThrowCompletionOr<Value> run(Script&);
     ThrowCompletionOr<Value> run(SourceTextModule&);
-
-    GlobalObject& global_object();
-    GlobalObject const& global_object() const;
 
     Realm& realm();
     Realm const& realm() const;
@@ -102,8 +98,6 @@ private:
     ExecutingASTNodeChain* m_ast_node_chain { nullptr };
 
     NonnullRefPtr<VM> m_vm;
-
-    Handle<GlobalObject> m_global_object;
     Handle<Realm> m_realm;
 
     // This is here to keep the global execution context alive for the entire lifespan of the Interpreter.

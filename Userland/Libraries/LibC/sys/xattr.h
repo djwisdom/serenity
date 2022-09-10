@@ -1,11 +1,13 @@
 /*
  * Copyright (c) 2021, the SerenityOS developers.
+ * Copyright (c) 2022, Kenneth Myhra <kennethmyhra@serenityos.org>.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
+#include <sys/cdefs.h>
 #include <sys/types.h>
 
 __BEGIN_DECLS
@@ -21,5 +23,9 @@ int fsetxattr(int fd, char const* name, void const* value, size_t size, int flag
 ssize_t listxattr(char const* path, char* list, size_t size);
 ssize_t llistxattr(char const* path, char* list, size_t size);
 ssize_t flistxattr(int fd, char* list, size_t size);
+
+int removexattr(char const* path, char const* name);
+int lremovexattr(char const* path, char const* name);
+int fremovexattr(int fd, char const* name);
 
 __END_DECLS

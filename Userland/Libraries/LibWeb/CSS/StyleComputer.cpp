@@ -27,6 +27,7 @@
 #include <LibWeb/FontCache.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/Platform/FontPlugin.h>
 #include <stdio.h>
 
 namespace Web::CSS {
@@ -108,24 +109,24 @@ private:
     HashMap<float, NonnullRefPtr<Gfx::ScaledFont>> mutable m_cached_fonts;
 };
 
-static StyleSheet& default_stylesheet()
+static CSSStyleSheet& default_stylesheet()
 {
-    static StyleSheet* sheet;
-    if (!sheet) {
+    static JS::Handle<CSSStyleSheet> sheet;
+    if (!sheet.cell()) {
         extern char const default_stylesheet_source[];
         String css = default_stylesheet_source;
-        sheet = parse_css_stylesheet(CSS::Parser::ParsingContext(), css).leak_ref();
+        sheet = JS::make_handle(parse_css_stylesheet(CSS::Parser::ParsingContext(), css));
     }
     return *sheet;
 }
 
-static StyleSheet& quirks_mode_stylesheet()
+static CSSStyleSheet& quirks_mode_stylesheet()
 {
-    static StyleSheet* sheet;
-    if (!sheet) {
+    static JS::Handle<CSSStyleSheet> sheet;
+    if (!sheet.cell()) {
         extern char const quirks_mode_stylesheet_source[];
         String css = quirks_mode_stylesheet_source;
-        sheet = parse_css_stylesheet(CSS::Parser::ParsingContext(), css).leak_ref();
+        sheet = JS::make_handle(parse_css_stylesheet(CSS::Parser::ParsingContext(), css));
     }
     return *sheet;
 }
@@ -140,7 +141,7 @@ void StyleComputer::for_each_stylesheet(CascadeOrigin cascade_origin, Callback c
     }
     if (cascade_origin == CascadeOrigin::Author) {
         for (auto const& sheet : document().style_sheets().sheets()) {
-            callback(sheet);
+            callback(*sheet);
         }
     }
 }
@@ -180,11 +181,11 @@ Vector<MatchingRule> StyleComputer::collect_matching_rules(DOM::Element const& e
     size_t style_sheet_index = 0;
     for_each_stylesheet(cascade_origin, [&](auto& sheet) {
         size_t rule_index = 0;
-        static_cast<CSSStyleSheet const&>(sheet).for_each_effective_style_rule([&](auto const& rule) {
+        sheet.for_each_effective_style_rule([&](auto const& rule) {
             size_t selector_index = 0;
             for (auto& selector : rule.selectors()) {
                 if (SelectorEngine::matches(selector, element, pseudo_element)) {
-                    matching_rules.append({ rule, style_sheet_index, rule_index, selector_index, selector.specificity() });
+                    matching_rules.append({ &rule, style_sheet_index, rule_index, selector_index, selector.specificity() });
                     break;
                 }
                 ++selector_index;
@@ -517,6 +518,32 @@ static void set_property_expanding_shorthands(StyleProperties& style, CSS::Prope
         return;
     }
 
+    if (property_id == CSS::PropertyID::GridColumn) {
+        if (value.is_grid_track_placement_shorthand()) {
+            auto const& shorthand = value.as_grid_track_placement_shorthand();
+            style.set_property(CSS::PropertyID::GridColumnStart, shorthand.start());
+            style.set_property(CSS::PropertyID::GridColumnEnd, shorthand.end());
+            return;
+        }
+
+        style.set_property(CSS::PropertyID::GridColumnStart, value);
+        style.set_property(CSS::PropertyID::GridColumnEnd, value);
+        return;
+    }
+
+    if (property_id == CSS::PropertyID::GridRow) {
+        if (value.is_grid_track_placement_shorthand()) {
+            auto const& shorthand = value.as_grid_track_placement_shorthand();
+            style.set_property(CSS::PropertyID::GridRowStart, shorthand.start());
+            style.set_property(CSS::PropertyID::GridRowEnd, shorthand.end());
+            return;
+        }
+
+        style.set_property(CSS::PropertyID::GridRowStart, value);
+        style.set_property(CSS::PropertyID::GridRowEnd, value);
+        return;
+    }
+
     style.set_property(property_id, value);
 }
 
@@ -828,7 +855,7 @@ void StyleComputer::compute_defaulted_values(StyleProperties& style, DOM::Elemen
 
 float StyleComputer::root_element_font_size() const
 {
-    constexpr float default_root_element_font_size = 10;
+    constexpr float default_root_element_font_size = 16;
 
     auto const* root_element = m_document.first_child_of_type<HTML::HTMLHtmlElement>();
     if (!root_element)
@@ -894,7 +921,7 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
 
     bool bold = weight > Gfx::FontWeight::Regular;
 
-    float font_size_in_px = 10;
+    float font_size_in_px = 16;
 
     if (font_size->is_identifier()) {
         switch (static_cast<IdentifierStyleValue const&>(*font_size).id()) {
@@ -903,7 +930,7 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
         case CSS::ValueID::Small:
         case CSS::ValueID::Medium:
             // FIXME: Should be based on "user's default font size"
-            font_size_in_px = 10;
+            font_size_in_px = 16;
             break;
         case CSS::ValueID::Large:
         case CSS::ValueID::XLarge:
@@ -1003,28 +1030,39 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
         return {};
     };
 
-    // FIXME: Replace hard-coded font names with a relevant call to FontDatabase.
-    // Currently, we cannot request the default font's name, or request it at a specific size and weight.
-    // So, hard-coded font names it is.
     auto find_generic_font = [&](ValueID font_id) -> RefPtr<Gfx::Font> {
+        Platform::GenericFont generic_font {};
         switch (font_id) {
         case ValueID::Monospace:
         case ValueID::UiMonospace:
+            generic_font = Platform::GenericFont::Monospace;
             monospace = true;
-            return find_font("Csilla");
+            break;
         case ValueID::Serif:
-            return find_font("Roman");
+            generic_font = Platform::GenericFont::Serif;
+            break;
         case ValueID::Fantasy:
-            return find_font("Comic Book");
+            generic_font = Platform::GenericFont::Fantasy;
+            break;
         case ValueID::SansSerif:
+            generic_font = Platform::GenericFont::SansSerif;
+            break;
         case ValueID::Cursive:
+            generic_font = Platform::GenericFont::Cursive;
+            break;
         case ValueID::UiSerif:
+            generic_font = Platform::GenericFont::UiSerif;
+            break;
         case ValueID::UiSansSerif:
+            generic_font = Platform::GenericFont::UiSansSerif;
+            break;
         case ValueID::UiRounded:
-            return find_font("Katica");
+            generic_font = Platform::GenericFont::UiRounded;
+            break;
         default:
             return {};
         }
+        return find_font(Platform::FontPlugin::the().generic_font_name(generic_font));
     };
 
     RefPtr<Gfx::Font> found_font;
@@ -1235,10 +1273,10 @@ void StyleComputer::build_rule_cache()
     size_t style_sheet_index = 0;
     for_each_stylesheet(CascadeOrigin::Author, [&](auto& sheet) {
         size_t rule_index = 0;
-        static_cast<CSSStyleSheet const&>(sheet).for_each_effective_style_rule([&](auto const& rule) {
+        sheet.for_each_effective_style_rule([&](auto const& rule) {
             size_t selector_index = 0;
             for (CSS::Selector const& selector : rule.selectors()) {
-                MatchingRule matching_rule { rule, style_sheet_index, rule_index, selector_index, selector.specificity() };
+                MatchingRule matching_rule { &rule, style_sheet_index, rule_index, selector_index, selector.specificity() };
 
                 bool added_to_bucket = false;
                 for (auto const& simple_selector : selector.compound_selectors().last().simple_selectors) {

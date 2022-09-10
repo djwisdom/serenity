@@ -81,13 +81,13 @@ public:
     void remove_window(Window&);
 
     void notify_title_changed(Window&);
-    void notify_modal_unparented(Window&);
     void notify_rect_changed(Window&, Gfx::IntRect const& oldRect, Gfx::IntRect const& newRect);
     void notify_minimization_state_changed(Window&);
     void notify_opacity_changed(Window&);
     void notify_occlusion_state_changed(Window&);
     void notify_progress_changed(Window&);
     void notify_modified_changed(Window&);
+    void notify_input_preempted(Window&, InputPreemptor = InputPreemptor::Other);
 
     Gfx::IntRect tiled_window_rect(Window const&, WindowTileType tile_type = WindowTileType::Maximized, bool relative_to_window_screen = false) const;
 
@@ -96,6 +96,8 @@ public:
 
     void start_dnd_drag(ConnectionFromClient&, String const& text, Gfx::Bitmap const*, Core::MimeData const&);
     void end_dnd_drag();
+
+    void set_accepts_drag(bool);
 
     Window* active_window()
     {
@@ -150,6 +152,7 @@ public:
     Cursor const& disallowed_cursor() const { return *m_disallowed_cursor; }
     Cursor const& move_cursor() const { return *m_move_cursor; }
     Cursor const& drag_cursor() const { return *m_drag_cursor; }
+    Cursor const& drag_copy_cursor() const { return *m_drag_copy_cursor; }
     Cursor const& wait_cursor() const { return *m_wait_cursor; }
     Cursor const& eyedropper_cursor() const { return *m_eyedropper_cursor; }
     Cursor const& zoom_cursor() const { return *m_zoom_cursor; }
@@ -195,7 +198,7 @@ public:
     void tell_wms_super_digit_key_pressed(u8);
     void tell_wms_current_window_stack_changed();
 
-    bool is_active_window_or_accessory(Window&) const;
+    bool is_active_window_or_capturing_modal(Window&) const;
 
     void check_hide_geometry_overlay(Window&);
 
@@ -239,35 +242,31 @@ public:
     void maximize_windows(Window&, bool);
     void set_always_on_top(Window&, bool);
 
-    template<typename Function>
-    IterationDecision for_each_window_in_modal_stack(Window& window, Function f)
+    template<typename Callback>
+    Window* for_each_window_in_modal_chain(Window& window, Callback callback)
     {
-        auto* blocking_modal_window = window.blocking_modal_window();
-        if (blocking_modal_window || window.is_modal()) {
-            Vector<Window&> modal_stack;
-            auto* modal_stack_top = blocking_modal_window ? blocking_modal_window : &window;
-            for (auto* parent = modal_stack_top->parent_window(); parent; parent = parent->parent_window()) {
-                auto* blocked_by = parent->blocking_modal_window();
-                if (!blocked_by || (blocked_by != modal_stack_top && !modal_stack_top->is_descendant_of(*blocked_by)))
-                    break;
-                modal_stack.append(*parent);
-                if (!parent->is_modal())
-                    break;
+        Function<Window*(Window&)> recurse = [&](Window& w) -> Window* {
+            if (!w.is_modal()) {
+                auto decision = callback(w);
+                if (decision == IterationDecision::Break)
+                    return &w;
             }
-            if (!modal_stack.is_empty()) {
-                for (size_t i = modal_stack.size(); i > 0; i--) {
-                    IterationDecision decision = f(modal_stack[i - 1], false);
-                    if (decision != IterationDecision::Continue)
-                        return decision;
-                }
+            for (auto& child : w.child_windows()) {
+                if (!child || child->is_destroyed() || !child->is_modal())
+                    continue;
+                auto decision = callback(*child);
+                if (auto* result = recurse(*child))
+                    return result;
+                if (decision == IterationDecision::Break)
+                    return child;
             }
-            return f(*modal_stack_top, true);
-        } else {
-            // Not a modal window stack, just "iterate" over this window
-            return f(window, true);
-        }
+            return nullptr;
+        };
+        if (auto* modeless = window.modeless_ancestor())
+            return recurse(*modeless);
+        return nullptr;
     }
-    bool is_window_in_modal_stack(Window& window_in_modal_stack, Window& other_window);
+    bool is_window_in_modal_chain(Window& chain_window, Window& other_window);
 
     Gfx::IntPoint get_recommended_window_position(Gfx::IntPoint const& desired);
 
@@ -313,7 +312,6 @@ public:
     {
         switch (window_type) {
         case WindowType::Normal:
-        case WindowType::ToolWindow:
         case WindowType::Tooltip:
             return false;
         default:
@@ -376,9 +374,7 @@ private:
     void tell_wm_about_window_icon(WMConnectionFromClient& conn, Window&);
     void tell_wm_about_window_rect(WMConnectionFromClient& conn, Window&);
     void tell_wm_about_current_window_stack(WMConnectionFromClient&);
-    bool pick_new_active_window(Window*);
-
-    void do_move_to_front(Window&, bool, bool);
+    void pick_new_active_window(Window*);
 
     bool sync_config_to_disk();
 
@@ -398,6 +394,7 @@ private:
     RefPtr<Cursor> m_disallowed_cursor;
     RefPtr<Cursor> m_move_cursor;
     RefPtr<Cursor> m_drag_cursor;
+    RefPtr<Cursor> m_drag_copy_cursor;
     RefPtr<Cursor> m_wait_cursor;
     RefPtr<Cursor> m_crosshair_cursor;
     RefPtr<Cursor> m_eyedropper_cursor;
@@ -486,6 +483,7 @@ private:
     OwnPtr<DndOverlay> m_dnd_overlay;
     WeakPtr<ConnectionFromClient> m_dnd_client;
     String m_dnd_text;
+    bool m_dnd_accepts_drag { false };
 
     RefPtr<Core::MimeData> m_dnd_mime_data;
 
@@ -516,8 +514,6 @@ inline IterationDecision WindowManager::for_each_visible_window_from_back_to_fro
     if (for_each_window.template operator()<WindowType::Desktop>() == IterationDecision::Break)
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Normal>() == IterationDecision::Break)
-        return IterationDecision::Break;
-    if (for_each_window.template operator()<WindowType::ToolWindow>() == IterationDecision::Break)
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Taskbar>() == IterationDecision::Break)
         return IterationDecision::Break;
@@ -561,8 +557,6 @@ inline IterationDecision WindowManager::for_each_visible_window_from_front_to_ba
     if (for_each_window.template operator()<WindowType::AppletArea>() == IterationDecision::Break)
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Taskbar>() == IterationDecision::Break)
-        return IterationDecision::Break;
-    if (for_each_window.template operator()<WindowType::ToolWindow>() == IterationDecision::Break)
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Normal>() == IterationDecision::Break)
         return IterationDecision::Break;

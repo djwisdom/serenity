@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -49,7 +49,7 @@ ErrorOr<size_t> InodeFile::write(OpenFileDescription& description, u64 offset, U
         nwritten = TRY(m_inode->write_bytes(offset, count, data, &description));
     }
     if (nwritten > 0) {
-        auto mtime_result = m_inode->set_mtime(kgettimeofday().to_truncated_seconds());
+        auto mtime_result = m_inode->update_timestamps({}, {}, kgettimeofday().to_truncated_seconds());
         Thread::current()->did_file_write(nwritten);
         evaluate_block_conditions();
         if (mtime_result.is_error())
@@ -62,7 +62,8 @@ ErrorOr<void> InodeFile::ioctl(OpenFileDescription& description, unsigned reques
 {
     switch (request) {
     case FIBMAP: {
-        if (!Process::current().is_superuser())
+        auto current_process_credentials = Process::current().credentials();
+        if (!current_process_credentials->is_superuser())
             return EPERM;
 
         auto user_block_number = static_ptr_cast<int*>(arg);
@@ -84,16 +85,11 @@ ErrorOr<void> InodeFile::ioctl(OpenFileDescription& description, unsigned reques
     }
 }
 
-ErrorOr<Memory::Region*> InodeFile::mmap(Process& process, OpenFileDescription& description, Memory::VirtualRange const& range, u64 offset, int prot, bool shared)
+ErrorOr<NonnullLockRefPtr<Memory::VMObject>> InodeFile::vmobject_for_mmap(Process&, Memory::VirtualRange const&, u64&, bool shared)
 {
-    // FIXME: If PROT_EXEC, check that the underlying file system isn't mounted noexec.
-    LockRefPtr<Memory::InodeVMObject> vmobject;
     if (shared)
-        vmobject = TRY(Memory::SharedInodeVMObject::try_create_with_inode(inode()));
-    else
-        vmobject = TRY(Memory::PrivateInodeVMObject::try_create_with_inode(inode()));
-    auto path = TRY(description.pseudo_path());
-    return process.address_space().allocate_region_with_vmobject(range, vmobject.release_nonnull(), offset, path->view(), prot, shared);
+        return TRY(Memory::SharedInodeVMObject::try_create_with_inode(inode()));
+    return TRY(Memory::PrivateInodeVMObject::try_create_with_inode(inode()));
 }
 
 ErrorOr<NonnullOwnPtr<KString>> InodeFile::pseudo_path(OpenFileDescription const&) const
@@ -105,7 +101,7 @@ ErrorOr<NonnullOwnPtr<KString>> InodeFile::pseudo_path(OpenFileDescription const
 ErrorOr<void> InodeFile::truncate(u64 size)
 {
     TRY(m_inode->truncate(size));
-    TRY(m_inode->set_mtime(kgettimeofday().to_truncated_seconds()));
+    TRY(m_inode->update_timestamps({}, {}, kgettimeofday().to_truncated_seconds()));
     return {};
 }
 
@@ -115,18 +111,18 @@ ErrorOr<void> InodeFile::sync()
     return {};
 }
 
-ErrorOr<void> InodeFile::chown(OpenFileDescription& description, UserID uid, GroupID gid)
+ErrorOr<void> InodeFile::chown(Credentials const& credentials, OpenFileDescription& description, UserID uid, GroupID gid)
 {
     VERIFY(description.inode() == m_inode);
     VERIFY(description.custody());
-    return VirtualFileSystem::the().chown(*description.custody(), uid, gid);
+    return VirtualFileSystem::the().chown(credentials, *description.custody(), uid, gid);
 }
 
-ErrorOr<void> InodeFile::chmod(OpenFileDescription& description, mode_t mode)
+ErrorOr<void> InodeFile::chmod(Credentials const& credentials, OpenFileDescription& description, mode_t mode)
 {
     VERIFY(description.inode() == m_inode);
     VERIFY(description.custody());
-    return VirtualFileSystem::the().chmod(*description.custody(), mode);
+    return VirtualFileSystem::the().chmod(credentials, *description.custody(), mode);
 }
 
 }

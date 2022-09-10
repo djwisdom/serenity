@@ -10,7 +10,7 @@
 #include <AK/String.h>
 #include <AK/StringView.h>
 #include <LibJS/Runtime/Object.h>
-#include <LibUnicode/Locale.h>
+#include <LibLocale/Locale.h>
 
 namespace JS::Intl {
 
@@ -39,15 +39,14 @@ class DisplayNames final : public Object {
     };
 
 public:
-    DisplayNames(Object& prototype);
     virtual ~DisplayNames() override = default;
 
     String const& locale() const { return m_locale; }
     void set_locale(String locale) { m_locale = move(locale); }
 
-    Unicode::Style style() const { return m_style; }
-    void set_style(StringView style) { m_style = Unicode::style_from_string(style); }
-    StringView style_string() const { return Unicode::style_to_string(m_style); }
+    ::Locale::Style style() const { return m_style; }
+    void set_style(StringView style) { m_style = ::Locale::style_from_string(style); }
+    StringView style_string() const { return ::Locale::style_to_string(m_style); }
 
     Type type() const { return m_type; }
     void set_type(StringView type);
@@ -63,14 +62,16 @@ public:
     StringView language_display_string() const;
 
 private:
-    String m_locale;                                 // [[Locale]]
-    Unicode::Style m_style { Unicode::Style::Long }; // [[Style]]
-    Type m_type { Type::Invalid };                   // [[Type]]
-    Fallback m_fallback { Fallback::Invalid };       // [[Fallback]]
-    Optional<LanguageDisplay> m_language_display {}; // [[LanguageDisplay]]
+    DisplayNames(Object& prototype);
+
+    String m_locale;                                   // [[Locale]]
+    ::Locale::Style m_style { ::Locale::Style::Long }; // [[Style]]
+    Type m_type { Type::Invalid };                     // [[Type]]
+    Fallback m_fallback { Fallback::Invalid };         // [[Fallback]]
+    Optional<LanguageDisplay> m_language_display {};   // [[LanguageDisplay]]
 };
 
-ThrowCompletionOr<Value> canonical_code_for_display_names(GlobalObject& global_object, DisplayNames::Type type, StringView code);
+ThrowCompletionOr<Value> canonical_code_for_display_names(VM&, DisplayNames::Type, StringView code);
 bool is_valid_date_time_field_code(StringView field);
 
 }

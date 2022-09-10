@@ -19,8 +19,6 @@
 
 namespace WindowServer {
 
-static constexpr Gfx::IntSize s_default_normal_minimum_size = { 50, 50 };
-
 static String default_window_icon_path()
 {
     return "/res/icons/16x16/window.png";
@@ -88,34 +86,25 @@ Window::Window(Core::Object& parent, WindowType type)
     , m_icon(default_window_icon())
     , m_frame(*this)
 {
-    // Set default minimum size for Normal windows
-    if (m_type == WindowType::Normal)
-        m_minimum_size = s_default_normal_minimum_size;
-
     WindowManager::the().add_window(*this);
     frame().window_was_constructed({});
 }
 
-Window::Window(ConnectionFromClient& client, WindowType window_type, int window_id, bool modal, bool minimizable, bool closeable, bool frameless, bool resizable, bool fullscreen, bool accessory, Window* parent_window)
+Window::Window(ConnectionFromClient& client, WindowType window_type, WindowMode window_mode, int window_id, bool minimizable, bool closeable, bool frameless, bool resizable, bool fullscreen, Window* parent_window)
     : Core::Object(&client)
     , m_client(&client)
     , m_type(window_type)
-    , m_modal(modal)
+    , m_mode(window_mode)
     , m_minimizable(minimizable)
     , m_closeable(closeable)
     , m_frameless(frameless)
     , m_resizable(resizable)
     , m_fullscreen(fullscreen)
-    , m_accessory(accessory)
     , m_window_id(window_id)
     , m_client_id(client.client_id())
     , m_icon(default_window_icon())
     , m_frame(*this)
 {
-    // Set default minimum size for Normal windows
-    if (m_type == WindowType::Normal)
-        m_minimum_size = s_default_normal_minimum_size;
-
     if (parent_window)
         set_parent_window(*parent_window);
     WindowManager::the().add_window(*this);
@@ -169,19 +158,11 @@ void Window::set_rect(Gfx::IntRect const& rect)
 
 void Window::set_rect_without_repaint(Gfx::IntRect const& rect)
 {
-    VERIFY(!rect.is_empty());
+    VERIFY(rect.width() >= 0 && rect.height() >= 0);
     if (m_rect == rect)
         return;
     auto old_rect = m_rect;
     m_rect = rect;
-
-    if (old_rect.size() == m_rect.size()) {
-        auto delta = m_rect.location() - old_rect.location();
-        for (auto& child_window : m_child_windows) {
-            if (child_window)
-                child_window->move_by(delta);
-        }
-    }
 
     invalidate(true, old_rect.size() != rect.size());
     m_frame.window_rect_changed(old_rect, rect);
@@ -200,64 +181,11 @@ bool Window::apply_minimum_size(Gfx::IntRect& rect)
     return did_size_clamp;
 }
 
-void Window::nudge_into_desktop(Screen* target_screen, bool force_titlebar_visible)
-{
-    if (!target_screen) {
-        // If no explicit target screen was supplied,
-        // guess based on the current frame rectangle
-        target_screen = &Screen::closest_to_rect(rect());
-    }
-    Gfx::IntRect arena = WindowManager::the().arena_rect_for_type(*target_screen, type());
-    auto min_visible = 1;
-    switch (type()) {
-    case WindowType::Normal:
-        min_visible = 30;
-        break;
-    case WindowType::Desktop:
-        set_rect(arena);
-        return;
-    default:
-        break;
-    }
-
-    // Push the frame around such that at least `min_visible` pixels of the *frame* are in the desktop rect.
-    auto old_frame_rect = frame().rect();
-    Gfx::IntRect new_frame_rect = {
-        clamp(old_frame_rect.x(), arena.left() + min_visible - width(), arena.right() - min_visible),
-        clamp(old_frame_rect.y(), arena.top() + min_visible - height(), arena.bottom() - min_visible),
-        old_frame_rect.width(),
-        old_frame_rect.height(),
-    };
-
-    // Make sure that at least half of the titlebar is visible.
-    auto min_frame_y = arena.top() - (y() - old_frame_rect.y()) / 2;
-    if (force_titlebar_visible && new_frame_rect.y() < min_frame_y) {
-        new_frame_rect.set_y(min_frame_y);
-    }
-
-    // Deduce new window rect:
-    Gfx::IntRect new_window_rect = {
-        x() + new_frame_rect.x() - old_frame_rect.x(),
-        y() + new_frame_rect.y() - old_frame_rect.y(),
-        width(),
-        height(),
-    };
-
-    set_rect(new_window_rect);
-}
-
 void Window::set_minimum_size(Gfx::IntSize const& size)
 {
-    if (size.is_null())
-        return;
-
+    VERIFY(size.width() >= 0 && size.height() >= 0);
     if (m_minimum_size == size)
         return;
-
-    // Disallow setting minimum zero widths or heights.
-    if (size.width() == 0 || size.height() == 0)
-        return;
-
     m_minimum_size = size;
 }
 
@@ -292,7 +220,7 @@ void Window::update_window_menu_items()
         return;
 
     m_window_menu_minimize_item->set_text(m_minimized_state != WindowMinimizedState::None ? "&Unminimize" : "Mi&nimize");
-    m_window_menu_minimize_item->set_enabled(m_minimizable);
+    m_window_menu_minimize_item->set_enabled(m_minimizable && !is_modal());
 
     m_window_menu_maximize_item->set_text(is_maximized() ? "&Restore" : "Ma&ximize");
     m_window_menu_maximize_item->set_enabled(m_resizable);
@@ -359,8 +287,9 @@ void Window::set_closeable(bool closeable)
 
 void Window::set_taskbar_rect(Gfx::IntRect const& rect)
 {
+    if (m_taskbar_rect == rect)
+        return;
     m_taskbar_rect = rect;
-    m_have_taskbar_rect = !m_taskbar_rect.is_empty();
 }
 
 static Gfx::IntRect interpolate_rect(Gfx::IntRect const& from_rect, Gfx::IntRect const& to_rect, float progress)
@@ -384,26 +313,13 @@ void Window::start_minimize_animation()
         return;
     if (!WindowManager::the().system_effects().animate_windows())
         return;
-    if (!m_have_taskbar_rect) {
-        // If this is a modal window, it may not have its own taskbar
-        // button, so there is no rectangle. In that case, walk the
-        // modal stack until we find a window that may have one
-        WindowManager::the().for_each_window_in_modal_stack(*this, [&](Window& w, bool) {
-            if (w.has_taskbar_rect()) {
-                // We purposely do NOT set m_have_taskbar_rect to true here
-                // because we want to only copy the rectangle from the
-                // window that has it, but since this window wouldn't receive
-                // any updates down the road we want to query it again
-                // next time we want to start the animation
-                m_taskbar_rect = w.taskbar_rect();
-
-                VERIFY(!m_have_taskbar_rect); // should remain unset!
-                return IterationDecision::Break;
-            };
-            return IterationDecision::Continue;
-        });
+    if (is_modal()) {
+        if (auto modeless = modeless_ancestor(); modeless) {
+            auto rect = modeless->taskbar_rect();
+            VERIFY(!rect.is_empty());
+            m_taskbar_rect = rect;
+        }
     }
-
     m_animation = Animation::create();
     m_animation->set_duration(150);
     m_animation->on_update = [this](float progress, Gfx::Painter& painter, Screen& screen, Gfx::DisjointRectSet& flush_rects) {
@@ -478,7 +394,7 @@ void Window::set_occluded(bool occluded)
     WindowManager::the().notify_occlusion_state_changed(*this);
 }
 
-void Window::set_maximized(bool maximized, Optional<Gfx::IntPoint> fixed_point)
+void Window::set_maximized(bool maximized)
 {
     if (is_maximized() == maximized)
         return;
@@ -486,18 +402,10 @@ void Window::set_maximized(bool maximized, Optional<Gfx::IntPoint> fixed_point)
         return;
     m_tile_type = maximized ? WindowTileType::Maximized : WindowTileType::None;
     update_window_menu_items();
-    if (maximized) {
-        m_unmaximized_rect = m_floating_rect;
+    if (maximized)
         set_rect(WindowManager::the().tiled_window_rect(*this));
-    } else {
-        if (fixed_point.has_value()) {
-            auto new_rect = Gfx::IntRect(m_rect);
-            new_rect.set_size_around(m_unmaximized_rect.size(), fixed_point.value());
-            set_rect(new_rect);
-        } else {
-            set_rect(m_unmaximized_rect);
-        }
-    }
+    else
+        set_rect(m_floating_rect);
     m_frame.did_set_maximized({}, maximized);
     Core::EventLoop::current().post_event(*this, make<ResizeEvent>(m_rect));
     set_default_positioned(false);
@@ -535,9 +443,8 @@ void Window::event(Core::Event& event)
     }
 
     if (blocking_modal_window()) {
-        // We still want to handle the WindowDeactivated event below when a new modal is
-        // created to notify its parent window, despite it being "blocked by modal window".
-        if (event.type() != Event::WindowDeactivated)
+        // Allow windows to process their inactivity after being blocked
+        if (event.type() != Event::WindowDeactivated && event.type() != Event::WindowInputLeft)
             return;
     }
 
@@ -751,18 +658,14 @@ bool Window::is_active() const
 
 Window* Window::blocking_modal_window()
 {
-    // A window is blocked if any immediate child, or any child further
-    // down the chain is modal
-    for (auto& window : m_child_windows) {
-        if (window && !window->is_destroyed()) {
-            if (window->is_modal())
-                return window;
-
-            if (auto* blocking_window = window->blocking_modal_window())
-                return blocking_window;
-        }
-    }
-    return nullptr;
+    auto maybe_blocker = WindowManager::the().for_each_window_in_modal_chain(*this, [&](auto& window) {
+        if (is_descendant_of(window))
+            return IterationDecision::Continue;
+        if (window.is_blocking() && this != &window)
+            return IterationDecision::Break;
+        return IterationDecision::Continue;
+    });
+    return maybe_blocker;
 }
 
 void Window::set_default_icon()
@@ -810,7 +713,7 @@ void Window::ensure_window_menu()
 
         m_window_menu->add_item(make<MenuItem>(*m_window_menu, MenuItem::Type::Separator));
 
-        if (!m_modal) {
+        if (!is_modal()) {
             auto pin_item = make<MenuItem>(*m_window_menu, (unsigned)WindowMenuAction::ToggleAlwaysOnTop, "Always on &Top");
             m_window_menu_always_on_top_item = pin_item.ptr();
             m_window_menu_always_on_top_item->set_icon(&pin_icon());
@@ -983,21 +886,14 @@ void Window::check_untile_due_to_resize(Gfx::IntRect const& new_rect)
     m_tile_type = new_tile_type;
 }
 
-bool Window::set_untiled(Optional<Gfx::IntPoint> fixed_point)
+bool Window::set_untiled()
 {
     if (m_tile_type == WindowTileType::None)
         return false;
     VERIFY(!resize_aspect_ratio().has_value());
 
     m_tile_type = WindowTileType::None;
-
-    if (fixed_point.has_value()) {
-        auto new_rect = Gfx::IntRect(m_rect);
-        new_rect.set_size_around(m_floating_rect.size(), fixed_point.value());
-        set_rect(new_rect);
-    } else {
-        set_rect(m_floating_rect);
-    }
+    set_rect(m_floating_rect);
 
     Core::EventLoop::current().post_event(*this, make<ResizeEvent>(m_rect));
 
@@ -1052,55 +948,29 @@ void Window::add_child_window(Window& child_window)
     m_child_windows.append(child_window);
 }
 
-void Window::add_accessory_window(Window& accessory_window)
-{
-    m_accessory_windows.append(accessory_window);
-}
-
 void Window::set_parent_window(Window& parent_window)
 {
     VERIFY(!m_parent_window);
     m_parent_window = parent_window;
-    if (m_accessory)
-        parent_window.add_accessory_window(*this);
-    else
-        parent_window.add_child_window(*this);
+    parent_window.add_child_window(*this);
 }
 
-bool Window::is_accessory() const
+Window* Window::modeless_ancestor()
 {
-    if (!m_accessory)
-        return false;
-    if (parent_window() != nullptr)
-        return true;
-
-    // If accessory window was unparented, convert to a regular window
-    const_cast<Window*>(this)->set_accessory(false);
-    return false;
+    if (!is_modal())
+        return this;
+    for (auto parent = m_parent_window; parent; parent = parent->parent_window()) {
+        if (!parent->is_modal())
+            return parent;
+    }
+    return nullptr;
 }
 
-bool Window::is_accessory_of(Window& window) const
+bool Window::is_capturing_active_input_from(Window const& window) const
 {
-    if (!is_accessory())
+    if (!is_capturing_input())
         return false;
     return parent_window() == &window;
-}
-
-void Window::modal_unparented()
-{
-    m_modal = false;
-    WindowManager::the().notify_modal_unparented(*this);
-}
-
-bool Window::is_modal() const
-{
-    if (!m_modal)
-        return false;
-    if (!m_parent_window) {
-        const_cast<Window*>(this)->modal_unparented();
-        return false;
-    }
-    return true;
 }
 
 void Window::set_progress(Optional<int> progress)
@@ -1114,14 +984,9 @@ void Window::set_progress(Optional<int> progress)
 
 bool Window::is_descendant_of(Window& window) const
 {
-    for (auto* parent = parent_window(); parent; parent = parent->parent_window()) {
+    for (auto* parent = parent_window(); parent; parent = parent->parent_window())
         if (parent == &window)
             return true;
-        for (auto& accessory : parent->accessory_windows()) {
-            if (accessory == &window)
-                return true;
-        }
-    }
     return false;
 }
 

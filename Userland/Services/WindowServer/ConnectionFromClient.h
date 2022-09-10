@@ -101,9 +101,9 @@ private:
     virtual void update_menu_item(i32, i32, i32, String const&, bool, bool, bool, bool, String const&, Gfx::ShareableBitmap const&) override;
     virtual void remove_menu_item(i32 menu_id, i32 identifier) override;
     virtual void flash_menubar_menu(i32, i32) override;
-    virtual void create_window(i32, Gfx::IntRect const&, bool, bool, bool, bool, bool,
+    virtual void create_window(i32, Gfx::IntRect const&, bool, bool, bool,
         bool, bool, bool, bool, bool, float, float, Gfx::IntSize const&, Gfx::IntSize const&, Gfx::IntSize const&,
-        Optional<Gfx::IntSize> const&, i32, String const&, i32, Gfx::IntRect const&) override;
+        Optional<Gfx::IntSize> const&, i32, i32, String const&, i32, Gfx::IntRect const&) override;
     virtual Messages::WindowServer::DestroyWindowResponse destroy_window(i32) override;
     virtual void set_window_title(i32, String const&) override;
     virtual Messages::WindowServer::GetWindowTitleResponse get_window_title(i32) override;
@@ -138,10 +138,11 @@ private:
     virtual void show_screen_numbers(bool) override;
     virtual void set_window_cursor(i32, i32) override;
     virtual void set_window_custom_cursor(i32, Gfx::ShareableBitmap const&) override;
-    virtual void popup_menu(i32, Gfx::IntPoint const&) override;
+    virtual void popup_menu(i32, Gfx::IntPoint const&, Gfx::IntRect const&) override;
     virtual void dismiss_menu(i32) override;
     virtual void set_window_icon_bitmap(i32, Gfx::ShareableBitmap const&) override;
     virtual Messages::WindowServer::StartDragResponse start_drag(String const&, HashMap<String, ByteBuffer> const&, Gfx::ShareableBitmap const&) override;
+    virtual void set_accepts_drag(bool) override;
     virtual Messages::WindowServer::SetSystemThemeResponse set_system_theme(String const&, String const&, bool keep_desktop_background) override;
     virtual Messages::WindowServer::GetSystemThemeResponse get_system_theme() override;
     virtual Messages::WindowServer::SetSystemThemeOverrideResponse set_system_theme_override(Core::AnonymousBuffer const&) override;

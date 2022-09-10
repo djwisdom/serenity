@@ -4,17 +4,17 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/Bindings/HeadersWrapper.h>
+#include <LibJS/Runtime/VM.h>
 #include <LibWeb/Fetch/Headers.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::Fetch {
 
 // https://fetch.spec.whatwg.org/#dom-headers
-DOM::ExceptionOr<NonnullRefPtr<Headers>> Headers::create(Optional<HeadersInit> const& init)
+DOM::ExceptionOr<JS::NonnullGCPtr<Headers>> Headers::create_with_global_object(HTML::Window& window, Optional<HeadersInit> const& init)
 {
     // The new Headers(init) constructor steps are:
-
-    auto headers = adopt_ref(*new Headers());
+    auto* headers = window.heap().allocate<Headers>(window.realm(), window);
 
     // 1. Set this’s guard to "none".
     headers->m_guard = Guard::None;
@@ -23,16 +23,24 @@ DOM::ExceptionOr<NonnullRefPtr<Headers>> Headers::create(Optional<HeadersInit> c
     if (init.has_value())
         TRY(headers->fill(*init));
 
-    return headers;
+    return JS::NonnullGCPtr(*headers);
 }
+
+Headers::Headers(HTML::Window& window)
+    : PlatformObject(window.realm())
+{
+    set_prototype(&window.cached_web_prototype("Headers"));
+}
+
+Headers::~Headers() = default;
 
 // https://fetch.spec.whatwg.org/#dom-headers-append
 DOM::ExceptionOr<void> Headers::append(String const& name_string, String const& value_string)
 {
     // The append(name, value) method steps are to append (name, value) to this.
     auto header = Infrastructure::Header {
-        .name = TRY_OR_RETURN_OOM(ByteBuffer::copy(name_string.bytes())),
-        .value = TRY_OR_RETURN_OOM(ByteBuffer::copy(value_string.bytes())),
+        .name = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(name_string.bytes())),
+        .value = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(value_string.bytes())),
     };
     TRY(append(move(header)));
     return {};
@@ -89,7 +97,7 @@ DOM::ExceptionOr<String> Headers::get(String const& name_string)
         return DOM::SimpleException { DOM::SimpleExceptionType::TypeError, "Invalid header name" };
 
     // 2. Return the result of getting name from this’s header list.
-    auto byte_buffer = TRY_OR_RETURN_OOM(m_header_list.get(name));
+    auto byte_buffer = TRY_OR_RETURN_OOM(global_object(), m_header_list.get(name));
     // FIXME: Teach WrapperGenerator about Optional<String>
     return byte_buffer.has_value() ? String { byte_buffer->span() } : String {};
 }
@@ -116,10 +124,10 @@ DOM::ExceptionOr<void> Headers::set(String const& name_string, String const& val
     auto value = value_string.bytes();
 
     // 1. Normalize value.
-    auto normalized_value = TRY_OR_RETURN_OOM(Infrastructure::normalize_header_value(value));
+    auto normalized_value = TRY_OR_RETURN_OOM(global_object(), Infrastructure::normalize_header_value(value));
 
     auto header = Infrastructure::Header {
-        .name = TRY_OR_RETURN_OOM(ByteBuffer::copy(name)),
+        .name = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(name)),
         .value = move(normalized_value),
     };
 
@@ -146,7 +154,7 @@ DOM::ExceptionOr<void> Headers::set(String const& name_string, String const& val
         return {};
 
     // 7. Set (name, value) in this’s header list.
-    TRY_OR_RETURN_OOM(m_header_list.set(move(header)));
+    TRY_OR_RETURN_OOM(global_object(), m_header_list.set(move(header)));
 
     // 8. If this’s guard is "request-no-cors", then remove privileged no-CORS request headers from this.
     if (m_guard == Guard::RequestNoCORS)
@@ -158,14 +166,11 @@ DOM::ExceptionOr<void> Headers::set(String const& name_string, String const& val
 // https://webidl.spec.whatwg.org/#es-iterable, Step 4
 JS::ThrowCompletionOr<void> Headers::for_each(ForEachCallback callback)
 {
-    auto& global_object = wrapper()->global_object();
-    auto& vm = global_object.vm();
-
     // The value pairs to iterate over are the return value of running sort and combine with this’s header list.
     auto value_pairs_to_iterate_over = [&]() -> JS::ThrowCompletionOr<Vector<Fetch::Infrastructure::Header>> {
         auto headers_or_error = m_header_list.sort_and_combine();
         if (headers_or_error.is_error())
-            return vm.throw_completion<JS::InternalError>(global_object, JS::ErrorType::NotEnoughMemoryToAllocate);
+            return vm().throw_completion<JS::InternalError>(JS::ErrorType::NotEnoughMemoryToAllocate);
         return headers_or_error.release_value();
     };
 
@@ -202,7 +207,7 @@ DOM::ExceptionOr<void> Headers::append(Infrastructure::Header header)
     auto& [name, value] = header;
 
     // 1. Normalize value.
-    value = TRY_OR_RETURN_OOM(Infrastructure::normalize_header_value(value));
+    value = TRY_OR_RETURN_OOM(global_object(), Infrastructure::normalize_header_value(value));
 
     // 2. If name is not a header name or value is not a header value, then throw a TypeError.
     if (!Infrastructure::is_header_name(name))
@@ -221,21 +226,21 @@ DOM::ExceptionOr<void> Headers::append(Infrastructure::Header header)
     // 5. Otherwise, if headers’s guard is "request-no-cors":
     if (m_guard == Guard::RequestNoCORS) {
         // 1. Let temporaryValue be the result of getting name from headers’s header list.
-        auto temporary_value = TRY_OR_RETURN_OOM(m_header_list.get(name));
+        auto temporary_value = TRY_OR_RETURN_OOM(global_object(), m_header_list.get(name));
 
         // 2. If temporaryValue is null, then set temporaryValue to value.
         if (!temporary_value.has_value()) {
-            temporary_value = TRY_OR_RETURN_OOM(ByteBuffer::copy(value));
+            temporary_value = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(value));
         }
         // 3. Otherwise, set temporaryValue to temporaryValue, followed by 0x2C 0x20, followed by value.
         else {
-            TRY_OR_RETURN_OOM(temporary_value->try_append(0x2c));
-            TRY_OR_RETURN_OOM(temporary_value->try_append(0x20));
-            TRY_OR_RETURN_OOM(temporary_value->try_append(value));
+            TRY_OR_RETURN_OOM(global_object(), temporary_value->try_append(0x2c));
+            TRY_OR_RETURN_OOM(global_object(), temporary_value->try_append(0x20));
+            TRY_OR_RETURN_OOM(global_object(), temporary_value->try_append(value));
         }
 
         auto temporary_header = Infrastructure::Header {
-            .name = TRY_OR_RETURN_OOM(ByteBuffer::copy(name)),
+            .name = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(name)),
             .value = temporary_value.release_value(),
         };
 
@@ -249,7 +254,7 @@ DOM::ExceptionOr<void> Headers::append(Infrastructure::Header header)
         return {};
 
     // 7. Append (name, value) to headers’s header list.
-    TRY_OR_RETURN_OOM(m_header_list.append(move(header)));
+    TRY_OR_RETURN_OOM(global_object(), m_header_list.append(move(header)));
 
     // 8. If headers’s guard is "request-no-cors", then remove privileged no-CORS request headers from headers.
     if (m_guard == Guard::RequestNoCORS)
@@ -272,8 +277,8 @@ DOM::ExceptionOr<void> Headers::fill(HeadersInit const& object)
 
                 // 2. Append (header’s first item, header’s second item) to headers.
                 auto header = Fetch::Infrastructure::Header {
-                    .name = TRY_OR_RETURN_OOM(ByteBuffer::copy(entry[0].bytes())),
-                    .value = TRY_OR_RETURN_OOM(ByteBuffer::copy(entry[1].bytes())),
+                    .name = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(entry[0].bytes())),
+                    .value = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(entry[1].bytes())),
                 };
                 TRY(append(move(header)));
             }
@@ -283,8 +288,8 @@ DOM::ExceptionOr<void> Headers::fill(HeadersInit const& object)
         [this](OrderedHashMap<String, String> const& object) -> DOM::ExceptionOr<void> {
             for (auto const& entry : object) {
                 auto header = Fetch::Infrastructure::Header {
-                    .name = TRY_OR_RETURN_OOM(ByteBuffer::copy(entry.key.bytes())),
-                    .value = TRY_OR_RETURN_OOM(ByteBuffer::copy(entry.value.bytes())),
+                    .name = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(entry.key.bytes())),
+                    .value = TRY_OR_RETURN_OOM(global_object(), ByteBuffer::copy(entry.value.bytes())),
                 };
                 TRY(append(move(header)));
             }

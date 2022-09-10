@@ -14,15 +14,15 @@
 
 namespace JS {
 
-Error* Error::create(GlobalObject& global_object)
+Error* Error::create(Realm& realm)
 {
-    return global_object.heap().allocate<Error>(global_object, *global_object.error_prototype());
+    return realm.heap().allocate<Error>(realm, *realm.intrinsics().error_prototype());
 }
 
-Error* Error::create(GlobalObject& global_object, String const& message)
+Error* Error::create(Realm& realm, String const& message)
 {
-    auto& vm = global_object.vm();
-    auto* error = Error::create(global_object);
+    auto& vm = realm.vm();
+    auto* error = Error::create(realm);
     u8 attr = Attribute::Writable | Attribute::Configurable;
     error->define_direct_property(vm.names.message, js_string(vm, message), attr);
     return error;
@@ -96,24 +96,24 @@ String Error::stack_string() const
     return stack_string_builder.build();
 }
 
-#define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType)                         \
-    ClassName* ClassName::create(GlobalObject& global_object)                                                    \
-    {                                                                                                            \
-        return global_object.heap().allocate<ClassName>(global_object, *global_object.snake_name##_prototype()); \
-    }                                                                                                            \
-                                                                                                                 \
-    ClassName* ClassName::create(GlobalObject& global_object, String const& message)                             \
-    {                                                                                                            \
-        auto& vm = global_object.vm();                                                                           \
-        auto* error = ClassName::create(global_object);                                                          \
-        u8 attr = Attribute::Writable | Attribute::Configurable;                                                 \
-        error->define_direct_property(vm.names.message, js_string(vm, message), attr);                           \
-        return error;                                                                                            \
-    }                                                                                                            \
-                                                                                                                 \
-    ClassName::ClassName(Object& prototype)                                                                      \
-        : Error(prototype)                                                                                       \
-    {                                                                                                            \
+#define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType)              \
+    ClassName* ClassName::create(Realm& realm)                                                        \
+    {                                                                                                 \
+        return realm.heap().allocate<ClassName>(realm, *realm.intrinsics().snake_name##_prototype()); \
+    }                                                                                                 \
+                                                                                                      \
+    ClassName* ClassName::create(Realm& realm, String const& message)                                 \
+    {                                                                                                 \
+        auto& vm = realm.vm();                                                                        \
+        auto* error = ClassName::create(realm);                                                       \
+        u8 attr = Attribute::Writable | Attribute::Configurable;                                      \
+        error->define_direct_property(vm.names.message, js_string(vm, message), attr);                \
+        return error;                                                                                 \
+    }                                                                                                 \
+                                                                                                      \
+    ClassName::ClassName(Object& prototype)                                                           \
+        : Error(prototype)                                                                            \
+    {                                                                                                 \
     }
 
 JS_ENUMERATE_NATIVE_ERRORS

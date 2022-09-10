@@ -17,25 +17,24 @@ struct Variable {
     DeclarationKind declaration_kind;
 };
 
-#define JS_ENVIRONMENT(class_, base_class) \
-public:                                    \
-    using Base = base_class;               \
-    virtual StringView class_name() const override { return #class_##sv; }
+#define JS_ENVIRONMENT(class_, base_class) JS_CELL(class_, base_class)
 
 class Environment : public Cell {
+    JS_CELL(Environment, Cell);
+
 public:
     virtual bool has_this_binding() const { return false; }
-    virtual ThrowCompletionOr<Value> get_this_binding(GlobalObject&) const { return Value {}; }
+    virtual ThrowCompletionOr<Value> get_this_binding(VM&) const { return Value {}; }
 
     virtual Object* with_base_object() const { return nullptr; }
 
     virtual ThrowCompletionOr<bool> has_binding([[maybe_unused]] FlyString const& name, [[maybe_unused]] Optional<size_t>* out_index = nullptr) const { return false; }
-    virtual ThrowCompletionOr<void> create_mutable_binding(GlobalObject&, [[maybe_unused]] FlyString const& name, [[maybe_unused]] bool can_be_deleted) { return {}; }
-    virtual ThrowCompletionOr<void> create_immutable_binding(GlobalObject&, [[maybe_unused]] FlyString const& name, [[maybe_unused]] bool strict) { return {}; }
-    virtual ThrowCompletionOr<void> initialize_binding(GlobalObject&, [[maybe_unused]] FlyString const& name, Value) { return {}; }
-    virtual ThrowCompletionOr<void> set_mutable_binding(GlobalObject&, [[maybe_unused]] FlyString const& name, Value, [[maybe_unused]] bool strict) { return {}; }
-    virtual ThrowCompletionOr<Value> get_binding_value(GlobalObject&, [[maybe_unused]] FlyString const& name, [[maybe_unused]] bool strict) { return Value {}; }
-    virtual ThrowCompletionOr<bool> delete_binding(GlobalObject&, [[maybe_unused]] FlyString const& name) { return false; }
+    virtual ThrowCompletionOr<void> create_mutable_binding(VM&, [[maybe_unused]] FlyString const& name, [[maybe_unused]] bool can_be_deleted) { return {}; }
+    virtual ThrowCompletionOr<void> create_immutable_binding(VM&, [[maybe_unused]] FlyString const& name, [[maybe_unused]] bool strict) { return {}; }
+    virtual ThrowCompletionOr<void> initialize_binding(VM&, [[maybe_unused]] FlyString const& name, Value) { return {}; }
+    virtual ThrowCompletionOr<void> set_mutable_binding(VM&, [[maybe_unused]] FlyString const& name, Value, [[maybe_unused]] bool strict) { return {}; }
+    virtual ThrowCompletionOr<Value> get_binding_value(VM&, [[maybe_unused]] FlyString const& name, [[maybe_unused]] bool strict) { return Value {}; }
+    virtual ThrowCompletionOr<bool> delete_binding(VM&, [[maybe_unused]] FlyString const& name) { return false; }
 
     // [[OuterEnv]]
     Environment* outer_environment() { return m_outer_environment; }
@@ -47,8 +46,6 @@ public:
 
     template<typename T>
     bool fast_is() const = delete;
-
-    virtual StringView class_name() const override { return "Environment"sv; }
 
     // This flag is set on the entire variable environment chain when direct eval() is performed.
     // It is used to disable non-local variable access caching.

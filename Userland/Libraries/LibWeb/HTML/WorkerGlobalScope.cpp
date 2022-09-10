@@ -9,23 +9,37 @@
 #include <AK/Utf8View.h>
 #include <AK/Vector.h>
 #include <LibTextCodec/Decoder.h>
-#include <LibWeb/Bindings/WorkerGlobalScopeWrapper.h>
+#include <LibWeb/Bindings/WorkerGlobalScopePrototype.h>
 #include <LibWeb/DOM/DOMException.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WorkerGlobalScope.h>
 #include <LibWeb/HTML/WorkerLocation.h>
 #include <LibWeb/HTML/WorkerNavigator.h>
 
 namespace Web::HTML {
 
-WorkerGlobalScope::WorkerGlobalScope()
-    : m_navigator(make_ref_counted<WorkerNavigator>())
+WorkerGlobalScope::WorkerGlobalScope(JS::Realm& realm)
+    : DOM::EventTarget(realm)
+
 {
 }
 
 WorkerGlobalScope::~WorkerGlobalScope() = default;
+
+void WorkerGlobalScope::initialize(JS::Realm& realm)
+{
+    Base::initialize(realm);
+    m_navigator = WorkerNavigator::create(*this);
+}
+
+void WorkerGlobalScope::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_location);
+}
 
 // https://html.spec.whatwg.org/multipage/workers.html#importing-scripts-and-libraries
 DOM::ExceptionOr<void> WorkerGlobalScope::import_scripts(Vector<String> urls)
@@ -54,20 +68,15 @@ DOM::ExceptionOr<void> WorkerGlobalScope::import_scripts(Vector<String> urls)
     return {};
 }
 
-JS::Object* WorkerGlobalScope::create_wrapper(JS::GlobalObject& global_object)
-{
-    return wrap(global_object, *this);
-}
-
 // https://html.spec.whatwg.org/multipage/workers.html#dom-workerglobalscope-location
-NonnullRefPtr<WorkerLocation const> WorkerGlobalScope::location() const
+JS::NonnullGCPtr<WorkerLocation> WorkerGlobalScope::location() const
 {
     // The location attribute must return the WorkerLocation object whose associated WorkerGlobalScope object is the WorkerGlobalScope object.
     return *m_location;
 }
 
 // https://html.spec.whatwg.org/multipage/workers.html#dom-worker-navigator
-NonnullRefPtr<WorkerNavigator const> WorkerGlobalScope::navigator() const
+JS::NonnullGCPtr<WorkerNavigator> WorkerGlobalScope::navigator() const
 {
     // The navigator attribute of the WorkerGlobalScope interface must return an instance of the WorkerNavigator interface,
     // which represents the identity and state of the user agent (the client).
@@ -75,14 +84,14 @@ NonnullRefPtr<WorkerNavigator const> WorkerGlobalScope::navigator() const
 }
 
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                                          \
-    void WorkerGlobalScope::set_##attribute_name(Optional<Bindings::CallbackType> value) \
-    {                                                                                    \
-        set_event_handler_attribute(event_name, move(value));                            \
-    }                                                                                    \
-    Bindings::CallbackType* WorkerGlobalScope::attribute_name()                          \
-    {                                                                                    \
-        return event_handler_attribute(event_name);                                      \
+#define __ENUMERATE(attribute_name, event_name)                                 \
+    void WorkerGlobalScope::set_##attribute_name(Bindings::CallbackType* value) \
+    {                                                                           \
+        set_event_handler_attribute(event_name, move(value));                   \
+    }                                                                           \
+    Bindings::CallbackType* WorkerGlobalScope::attribute_name()                 \
+    {                                                                           \
+        return event_handler_attribute(event_name);                             \
     }
 ENUMERATE_WORKER_GLOBAL_SCOPE_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE
@@ -121,7 +130,7 @@ DOM::ExceptionOr<String> WorkerGlobalScope::btoa(String const& data) const
     byte_string.ensure_capacity(data.length());
     for (u32 code_point : Utf8View(data)) {
         if (code_point > 0xff)
-            return DOM::InvalidCharacterError::create("Data contains characters outside the range U+0000 and U+00FF");
+            return DOM::InvalidCharacterError::create(global_object(), "Data contains characters outside the range U+0000 and U+00FF");
         byte_string.append(code_point);
     }
 
@@ -141,7 +150,7 @@ DOM::ExceptionOr<String> WorkerGlobalScope::atob(String const& data) const
 
     // 2. If decodedData is failure, then throw an "InvalidCharacterError" DOMException.
     if (decoded_data.is_error())
-        return DOM::InvalidCharacterError::create("Input string is not valid base64 data");
+        return DOM::InvalidCharacterError::create(global_object(), "Input string is not valid base64 data");
 
     // 3. Return decodedData.
     // decode_base64() returns a byte string. LibJS uses UTF-8 for strings. Use Latin1Decoder to convert bytes 128-255 to UTF-8.

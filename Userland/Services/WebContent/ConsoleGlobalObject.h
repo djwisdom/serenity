@@ -9,10 +9,7 @@
 #include <LibJS/Forward.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/GlobalObject.h>
-
-namespace Web::Bindings {
-class WindowObject;
-}
+#include <LibWeb/HTML/Window.h>
 
 namespace WebContent {
 
@@ -20,7 +17,8 @@ class ConsoleGlobalObject final : public JS::GlobalObject {
     JS_OBJECT(ConsoleGlobalObject, JS::GlobalObject);
 
 public:
-    ConsoleGlobalObject(JS::Realm&, Web::Bindings::WindowObject&);
+    ConsoleGlobalObject(JS::Realm&, Web::HTML::Window&);
+    virtual void initialize(JS::Realm&) override;
     virtual ~ConsoleGlobalObject() override = default;
 
     virtual JS::ThrowCompletionOr<Object*> internal_get_prototype_of() const override;
@@ -35,15 +33,13 @@ public:
     virtual JS::ThrowCompletionOr<bool> internal_delete(JS::PropertyKey const& name) override;
     virtual JS::ThrowCompletionOr<JS::MarkedVector<JS::Value>> internal_own_property_keys() const override;
 
-    virtual void initialize_global_object() override;
-
 private:
     virtual void visit_edges(Visitor&) override;
 
     // Because $0 is not a nice C++ function name
     JS_DECLARE_NATIVE_FUNCTION(inspected_node_getter);
 
-    Web::Bindings::WindowObject* m_window_object;
+    Web::HTML::Window* m_window_object;
 };
 
 }

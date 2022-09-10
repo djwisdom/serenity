@@ -50,24 +50,24 @@ public:
     ErrorOr<void> remount(Custody& mount_point, int new_flags);
     ErrorOr<void> unmount(Inode& guest_inode);
 
-    ErrorOr<NonnullLockRefPtr<OpenFileDescription>> open(StringView path, int options, mode_t mode, Custody& base, Optional<UidAndGid> = {});
-    ErrorOr<NonnullLockRefPtr<OpenFileDescription>> create(StringView path, int options, mode_t mode, Custody& parent_custody, Optional<UidAndGid> = {});
-    ErrorOr<void> mkdir(StringView path, mode_t mode, Custody& base);
-    ErrorOr<void> link(StringView old_path, StringView new_path, Custody& base);
-    ErrorOr<void> unlink(StringView path, Custody& base);
-    ErrorOr<void> symlink(StringView target, StringView linkpath, Custody& base);
-    ErrorOr<void> rmdir(StringView path, Custody& base);
-    ErrorOr<void> chmod(StringView path, mode_t, Custody& base, int options = 0);
-    ErrorOr<void> chmod(Custody&, mode_t);
-    ErrorOr<void> chown(StringView path, UserID, GroupID, Custody& base, int options);
-    ErrorOr<void> chown(Custody&, UserID, GroupID);
-    ErrorOr<void> access(StringView path, int mode, Custody& base);
-    ErrorOr<InodeMetadata> lookup_metadata(StringView path, Custody& base, int options = 0);
-    ErrorOr<void> utime(StringView path, Custody& base, time_t atime, time_t mtime);
-    ErrorOr<void> utimensat(StringView path, Custody& base, timespec const& atime, timespec const& mtime, int options = 0);
-    ErrorOr<void> rename(StringView oldpath, StringView newpath, Custody& base);
-    ErrorOr<void> mknod(StringView path, mode_t, dev_t, Custody& base);
-    ErrorOr<NonnullLockRefPtr<Custody>> open_directory(StringView path, Custody& base);
+    ErrorOr<NonnullLockRefPtr<OpenFileDescription>> open(Credentials const&, StringView path, int options, mode_t mode, Custody& base, Optional<UidAndGid> = {});
+    ErrorOr<NonnullLockRefPtr<OpenFileDescription>> create(Credentials const&, StringView path, int options, mode_t mode, Custody& parent_custody, Optional<UidAndGid> = {});
+    ErrorOr<void> mkdir(Credentials const&, StringView path, mode_t mode, Custody& base);
+    ErrorOr<void> link(Credentials const&, StringView old_path, StringView new_path, Custody& base);
+    ErrorOr<void> unlink(Credentials const&, StringView path, Custody& base);
+    ErrorOr<void> symlink(Credentials const&, StringView target, StringView linkpath, Custody& base);
+    ErrorOr<void> rmdir(Credentials const&, StringView path, Custody& base);
+    ErrorOr<void> chmod(Credentials const&, StringView path, mode_t, Custody& base, int options = 0);
+    ErrorOr<void> chmod(Credentials const&, Custody&, mode_t);
+    ErrorOr<void> chown(Credentials const&, StringView path, UserID, GroupID, Custody& base, int options);
+    ErrorOr<void> chown(Credentials const&, Custody&, UserID, GroupID);
+    ErrorOr<void> access(Credentials const&, StringView path, int mode, Custody& base);
+    ErrorOr<InodeMetadata> lookup_metadata(Credentials const&, StringView path, Custody& base, int options = 0);
+    ErrorOr<void> utime(Credentials const&, StringView path, Custody& base, time_t atime, time_t mtime);
+    ErrorOr<void> utimensat(Credentials const&, StringView path, Custody& base, timespec const& atime, timespec const& mtime, int options = 0);
+    ErrorOr<void> rename(Credentials const&, StringView oldpath, StringView newpath, Custody& base);
+    ErrorOr<void> mknod(Credentials const&, StringView path, mode_t, dev_t, Custody& base);
+    ErrorOr<NonnullRefPtr<Custody>> open_directory(Credentials const&, StringView path, Custody& base);
 
     ErrorOr<void> for_each_mount(Function<ErrorOr<void>(Mount const&)>) const;
 
@@ -75,9 +75,9 @@ public:
 
     static void sync();
 
-    Custody& root_custody();
-    ErrorOr<NonnullLockRefPtr<Custody>> resolve_path(StringView path, Custody& base, LockRefPtr<Custody>* out_parent = nullptr, int options = 0, int symlink_recursion_level = 0);
-    ErrorOr<NonnullLockRefPtr<Custody>> resolve_path_without_veil(StringView path, Custody& base, LockRefPtr<Custody>* out_parent = nullptr, int options = 0, int symlink_recursion_level = 0);
+    NonnullRefPtr<Custody> root_custody();
+    ErrorOr<NonnullRefPtr<Custody>> resolve_path(Credentials const&, StringView path, NonnullRefPtr<Custody> base, RefPtr<Custody>* out_parent = nullptr, int options = 0, int symlink_recursion_level = 0);
+    ErrorOr<NonnullRefPtr<Custody>> resolve_path_without_veil(Credentials const&, StringView path, NonnullRefPtr<Custody> base, RefPtr<Custody>* out_parent = nullptr, int options = 0, int symlink_recursion_level = 0);
 
 private:
     friend class OpenFileDescription;
@@ -92,13 +92,15 @@ private:
 
     bool mount_point_exists_at_inode(InodeIdentifier inode);
 
+    // FIXME: These functions are totally unsafe as someone could unmount the returned Mount underneath us.
     Mount* find_mount_for_host(InodeIdentifier);
     Mount* find_mount_for_guest(InodeIdentifier);
 
     LockRefPtr<Inode> m_root_inode;
-    LockRefPtr<Custody> m_root_custody;
 
-    SpinlockProtected<Vector<Mount, 16>> m_mounts { LockRank::None };
+    SpinlockProtected<RefPtr<Custody>> m_root_custody;
+
+    SpinlockProtected<Vector<NonnullOwnPtr<Mount>, 16>> m_mounts { LockRank::None };
 };
 
 }

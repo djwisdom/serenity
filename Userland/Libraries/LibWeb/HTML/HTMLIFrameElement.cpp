@@ -16,6 +16,7 @@ namespace Web::HTML {
 HTMLIFrameElement::HTMLIFrameElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : BrowsingContextContainer(document, move(qualified_name))
 {
+    set_prototype(&document.window().cached_web_prototype("HTMLIFrameElement"));
 }
 
 HTMLIFrameElement::~HTMLIFrameElement() = default;
@@ -92,7 +93,7 @@ void run_iframe_load_event_steps(HTML::HTMLIFrameElement& element)
     // FIXME: 4. Set childDocument's iframe load in progress flag.
 
     // 5. Fire an event named load at element.
-    element.dispatch_event(DOM::Event::create(HTML::EventNames::load));
+    element.dispatch_event(*DOM::Event::create(element.document().window(), HTML::EventNames::load));
 
     // FIXME: 6. Unset childDocument's iframe load in progress flag.
 }

@@ -206,7 +206,8 @@ ErrorOr<void> PerformanceEventBuffer::to_json_impl(Serializer& object) const
         TRY(strings.finish());
     }
 
-    bool show_kernel_addresses = Process::current().is_superuser();
+    auto current_process_credentials = Process::current().credentials();
+    bool show_kernel_addresses = current_process_credentials->is_superuser();
     auto array = TRY(object.add_array("events"sv));
     bool seen_first_sample = false;
     for (size_t i = 0; i < m_count; ++i) {
@@ -333,8 +334,6 @@ OwnPtr<PerformanceEventBuffer> PerformanceEventBuffer::try_create_with_size(size
 
 ErrorOr<void> PerformanceEventBuffer::add_process(Process const& process, ProcessEventType event_type)
 {
-    SpinlockLocker locker(process.address_space().get_lock());
-
     OwnPtr<KString> executable;
     if (process.executable())
         executable = TRY(process.executable()->try_serialize_absolute_path());
@@ -353,12 +352,13 @@ ErrorOr<void> PerformanceEventBuffer::add_process(Process const& process, Proces
     });
     TRY(result);
 
-    for (auto const& region : process.address_space().regions()) {
-        TRY(append_with_ip_and_bp(process.pid(), 0,
-            0, 0, PERF_EVENT_MMAP, 0, region.range().base().get(), region.range().size(), region.name()));
-    }
-
-    return {};
+    return process.address_space().with([&](auto& space) -> ErrorOr<void> {
+        for (auto const& region : space->region_tree().regions()) {
+            TRY(append_with_ip_and_bp(process.pid(), 0,
+                0, 0, PERF_EVENT_MMAP, 0, region.range().base().get(), region.range().size(), region.name()));
+        }
+        return {};
+    });
 }
 
 ErrorOr<FlatPtr> PerformanceEventBuffer::register_string(NonnullOwnPtr<KString> string)

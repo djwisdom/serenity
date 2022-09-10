@@ -69,7 +69,8 @@ public:
     virtual ErrorOr<void> chmod(mode_t) = 0;
     virtual ErrorOr<void> chown(UserID, GroupID) = 0;
     virtual ErrorOr<void> truncate(u64) { return {}; }
-    virtual ErrorOr<NonnullLockRefPtr<Custody>> resolve_as_link(Custody& base, LockRefPtr<Custody>* out_parent, int options, int symlink_recursion_level) const;
+
+    ErrorOr<NonnullRefPtr<Custody>> resolve_as_link(Credentials const&, Custody& base, RefPtr<Custody>* out_parent, int options, int symlink_recursion_level) const;
 
     virtual ErrorOr<int> get_block_address(int) { return ENOTSUP; }
 
@@ -79,9 +80,7 @@ public:
 
     bool is_metadata_dirty() const { return m_metadata_dirty; }
 
-    virtual ErrorOr<void> set_atime(time_t);
-    virtual ErrorOr<void> set_ctime(time_t);
-    virtual ErrorOr<void> set_mtime(time_t);
+    virtual ErrorOr<void> update_timestamps(Optional<time_t> atime, Optional<time_t> ctime, Optional<time_t> mtime);
     virtual ErrorOr<void> increment_link_count();
     virtual ErrorOr<void> decrement_link_count();
 

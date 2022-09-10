@@ -16,9 +16,11 @@ class GeneratorFunctionPrototype final : public Object {
     JS_OBJECT(GeneratorFunctionPrototype, Object);
 
 public:
-    explicit GeneratorFunctionPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~GeneratorFunctionPrototype() override = default;
+
+private:
+    explicit GeneratorFunctionPrototype(Realm&);
 };
 
 }

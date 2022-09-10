@@ -1,47 +1,39 @@
 /*
- * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/NonnullRefPtrVector.h>
-#include <AK/RefCounted.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/LegacyPlatformObject.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
-#include <LibWeb/Forward.h>
 
 namespace Web::CSS {
 
-class StyleSheetList
-    : public RefCounted<StyleSheetList>
-    , public Weakable<StyleSheetList>
-    , public Bindings::Wrappable {
+class StyleSheetList : public Bindings::LegacyPlatformObject {
+    WEB_PLATFORM_OBJECT(StyleSheetList, Bindings::LegacyPlatformObject);
+
 public:
-    using WrapperType = Bindings::StyleSheetListWrapper;
+    static StyleSheetList* create(DOM::Document& document);
 
-    static NonnullRefPtr<StyleSheetList> create(DOM::Document& document)
-    {
-        return adopt_ref(*new StyleSheetList(document));
-    }
-
-    void add_sheet(NonnullRefPtr<CSSStyleSheet>);
+    void add_sheet(CSSStyleSheet&);
     void remove_sheet(CSSStyleSheet&);
 
-    NonnullRefPtrVector<CSSStyleSheet> const& sheets() const { return m_sheets; }
-    NonnullRefPtrVector<CSSStyleSheet>& sheets() { return m_sheets; }
+    Vector<JS::NonnullGCPtr<CSSStyleSheet>> const& sheets() const { return m_sheets; }
+    Vector<JS::NonnullGCPtr<CSSStyleSheet>>& sheets() { return m_sheets; }
 
-    RefPtr<CSSStyleSheet> item(size_t index) const
+    CSSStyleSheet* item(size_t index) const
     {
         if (index >= m_sheets.size())
             return {};
-        return m_sheets[index];
+        return const_cast<CSSStyleSheet*>(m_sheets[index].ptr());
     }
 
     size_t length() const { return m_sheets.size(); }
 
-    bool is_supported_property_index(u32) const;
+    virtual bool is_supported_property_index(u32 index) const override;
+    virtual JS::Value item_value(size_t index) const override;
 
     DOM::Document& document() { return m_document; }
     DOM::Document const& document() const { return m_document; }
@@ -49,14 +41,14 @@ public:
 private:
     explicit StyleSheetList(DOM::Document&);
 
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    void sort_sheets();
+
     DOM::Document& m_document;
-    NonnullRefPtrVector<CSSStyleSheet> m_sheets;
+    Vector<JS::NonnullGCPtr<CSSStyleSheet>> m_sheets;
 };
 
 }
 
-namespace Web::Bindings {
-
-StyleSheetListWrapper* wrap(JS::GlobalObject&, CSS::StyleSheetList&);
-
-}
+WRAPPER_HACK(StyleSheetList, Web::CSS)

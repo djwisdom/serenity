@@ -13,27 +13,23 @@
 namespace Web::UIEvents {
 
 struct UIEventInit : public DOM::EventInit {
-    RefPtr<HTML::Window> view { nullptr };
+    JS::GCPtr<HTML::Window> view;
     int detail { 0 };
 };
 
 class UIEvent : public DOM::Event {
+    WEB_PLATFORM_OBJECT(UIEvent, DOM::Event);
+
 public:
-    using WrapperType = Bindings::UIEventWrapper;
+    static UIEvent* create(HTML::Window&, FlyString const& type);
+    static UIEvent* create_with_global_object(HTML::Window&, FlyString const& event_name, UIEventInit const& event_init);
 
-    static NonnullRefPtr<UIEvent> create(FlyString const& type)
-    {
-        return adopt_ref(*new UIEvent(type));
-    }
+    UIEvent(HTML::Window&, FlyString const& event_name);
+    UIEvent(HTML::Window&, FlyString const& event_name, UIEventInit const& event_init);
 
-    static NonnullRefPtr<UIEvent> create_with_global_object(Bindings::WindowObject&, FlyString const& event_name, UIEventInit const& event_init)
-    {
-        return adopt_ref(*new UIEvent(event_name, event_init));
-    }
+    virtual ~UIEvent() override;
 
-    virtual ~UIEvent() override = default;
-
-    HTML::Window const* view() const { return m_view; }
+    HTML::Window const* view() const { return m_view.ptr(); }
     int detail() const { return m_detail; }
     virtual u32 which() const { return 0; }
 
@@ -45,19 +41,12 @@ public:
     }
 
 protected:
-    explicit UIEvent(FlyString const& event_name)
-        : Event(event_name)
-    {
-    }
-    UIEvent(FlyString const& event_name, UIEventInit const& event_init)
-        : Event(event_name, event_init)
-        , m_view(event_init.view)
-        , m_detail(event_init.detail)
-    {
-    }
+    virtual void visit_edges(Cell::Visitor&) override;
 
-    RefPtr<HTML::Window> m_view;
+    JS::GCPtr<HTML::Window> m_view;
     int m_detail { 0 };
 };
 
 }
+
+WRAPPER_HACK(UIEvent, Web::UIEvents)

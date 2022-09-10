@@ -18,7 +18,7 @@ DeclarativeEnvironment* DeclarativeEnvironment::create_for_per_iteration_binding
     auto bindings = other.m_bindings.span().slice(0, bindings_size);
     auto* parent_environment = other.outer_environment();
 
-    return parent_environment->heap().allocate_without_global_object<DeclarativeEnvironment>(parent_environment, bindings);
+    return parent_environment->heap().allocate_without_realm<DeclarativeEnvironment>(parent_environment, bindings);
 }
 
 DeclarativeEnvironment::DeclarativeEnvironment()
@@ -47,16 +47,16 @@ void DeclarativeEnvironment::visit_edges(Visitor& visitor)
 // 9.1.1.1.1 HasBinding ( N ), https://tc39.es/ecma262/#sec-declarative-environment-records-hasbinding-n
 ThrowCompletionOr<bool> DeclarativeEnvironment::has_binding(FlyString const& name, Optional<size_t>* out_index) const
 {
-    auto index = find_binding_index(name);
-    if (!index.has_value())
+    auto binding_and_index = find_binding_and_index(name);
+    if (!binding_and_index.has_value())
         return false;
-    if (!is_permanently_screwed_by_eval() && out_index)
-        *out_index = *index;
+    if (!is_permanently_screwed_by_eval() && out_index && binding_and_index->index().has_value())
+        *out_index = *(binding_and_index->index());
     return true;
 }
 
 // 9.1.1.1.2 CreateMutableBinding ( N, D ), https://tc39.es/ecma262/#sec-declarative-environment-records-createmutablebinding-n-d
-ThrowCompletionOr<void> DeclarativeEnvironment::create_mutable_binding(GlobalObject&, FlyString const& name, bool can_be_deleted)
+ThrowCompletionOr<void> DeclarativeEnvironment::create_mutable_binding(VM&, FlyString const& name, bool can_be_deleted)
 {
     // 1. Assert: envRec does not already have a binding for N.
     // NOTE: We skip this to avoid O(n) traversal of m_bindings.
@@ -76,7 +76,7 @@ ThrowCompletionOr<void> DeclarativeEnvironment::create_mutable_binding(GlobalObj
 }
 
 // 9.1.1.1.3 CreateImmutableBinding ( N, S ), https://tc39.es/ecma262/#sec-declarative-environment-records-createimmutablebinding-n-s
-ThrowCompletionOr<void> DeclarativeEnvironment::create_immutable_binding(GlobalObject&, FlyString const& name, bool strict)
+ThrowCompletionOr<void> DeclarativeEnvironment::create_immutable_binding(VM&, FlyString const& name, bool strict)
 {
     // 1. Assert: envRec does not already have a binding for N.
     // NOTE: We skip this to avoid O(n) traversal of m_bindings.
@@ -96,18 +96,16 @@ ThrowCompletionOr<void> DeclarativeEnvironment::create_immutable_binding(GlobalO
 }
 
 // 9.1.1.1.4 InitializeBinding ( N, V ), https://tc39.es/ecma262/#sec-declarative-environment-records-initializebinding-n-v
-ThrowCompletionOr<void> DeclarativeEnvironment::initialize_binding(GlobalObject& global_object, FlyString const& name, Value value)
+ThrowCompletionOr<void> DeclarativeEnvironment::initialize_binding(VM& vm, FlyString const& name, Value value)
 {
-    auto index = find_binding_index(name);
-    VERIFY(index.has_value());
+    auto binding_and_index = find_binding_and_index(name);
+    VERIFY(binding_and_index.has_value());
 
-    return initialize_binding_direct(global_object, *index, value);
+    return initialize_binding_direct(vm, binding_and_index->binding(), value);
 }
 
-ThrowCompletionOr<void> DeclarativeEnvironment::initialize_binding_direct(GlobalObject&, size_t index, Value value)
+ThrowCompletionOr<void> DeclarativeEnvironment::initialize_binding_direct(VM&, Binding& binding, Value value)
 {
-    auto& binding = m_bindings[index];
-
     // 1. Assert: envRec must have an uninitialized binding for N.
     VERIFY(binding.initialized == false);
 
@@ -122,110 +120,115 @@ ThrowCompletionOr<void> DeclarativeEnvironment::initialize_binding_direct(Global
 }
 
 // 9.1.1.1.5 SetMutableBinding ( N, V, S ), https://tc39.es/ecma262/#sec-declarative-environment-records-setmutablebinding-n-v-s
-ThrowCompletionOr<void> DeclarativeEnvironment::set_mutable_binding(GlobalObject& global_object, FlyString const& name, Value value, bool strict)
+ThrowCompletionOr<void> DeclarativeEnvironment::set_mutable_binding(VM& vm, FlyString const& name, Value value, bool strict)
 {
     // 1. If envRec does not have a binding for N, then
-    auto index = find_binding_index(name);
-    if (!index.has_value()) {
+    auto binding_and_index = find_binding_and_index(name);
+    if (!binding_and_index.has_value()) {
         // a. If S is true, throw a ReferenceError exception.
         if (strict)
-            return vm().throw_completion<ReferenceError>(global_object, ErrorType::UnknownIdentifier, name);
+            return vm.throw_completion<ReferenceError>(ErrorType::UnknownIdentifier, name);
 
         // b. Perform ! envRec.CreateMutableBinding(N, true).
-        MUST(create_mutable_binding(global_object, name, true));
+        MUST(create_mutable_binding(vm, name, true));
 
         // c. Perform ! envRec.InitializeBinding(N, V).
-        MUST(initialize_binding(global_object, name, value));
+        MUST(initialize_binding(vm, name, value));
 
         // d. Return unused.
         return {};
     }
 
     // 2-5. (extracted into a non-standard function below)
-    TRY(set_mutable_binding_direct(global_object, *index, value, strict));
+    TRY(set_mutable_binding_direct(vm, binding_and_index->binding(), value, strict));
 
     // 6. Return unused.
     return {};
 }
 
-ThrowCompletionOr<void> DeclarativeEnvironment::set_mutable_binding_direct(GlobalObject& global_object, size_t index, Value value, bool strict)
+ThrowCompletionOr<void> DeclarativeEnvironment::set_mutable_binding_direct(VM& vm, size_t index, Value value, bool strict)
 {
-    auto& binding = m_bindings[index];
+    return set_mutable_binding_direct(vm, m_bindings[index], value, strict);
+}
+
+ThrowCompletionOr<void> DeclarativeEnvironment::set_mutable_binding_direct(VM& vm, Binding& binding, Value value, bool strict)
+{
     if (binding.strict)
         strict = true;
 
     if (!binding.initialized)
-        return vm().throw_completion<ReferenceError>(global_object, ErrorType::BindingNotInitialized, binding.name);
+        return vm.throw_completion<ReferenceError>(ErrorType::BindingNotInitialized, binding.name);
 
     if (binding.mutable_) {
         binding.value = value;
     } else {
         if (strict)
-            return vm().throw_completion<TypeError>(global_object, ErrorType::InvalidAssignToConst);
+            return vm.throw_completion<TypeError>(ErrorType::InvalidAssignToConst);
     }
 
     return {};
 }
 
 // 9.1.1.1.6 GetBindingValue ( N, S ), https://tc39.es/ecma262/#sec-declarative-environment-records-getbindingvalue-n-s
-ThrowCompletionOr<Value> DeclarativeEnvironment::get_binding_value(GlobalObject& global_object, FlyString const& name, bool strict)
+ThrowCompletionOr<Value> DeclarativeEnvironment::get_binding_value(VM& vm, FlyString const& name, bool strict)
 {
     // 1. Assert: envRec has a binding for N.
-    auto index = find_binding_index(name);
-    VERIFY(index.has_value());
+    auto binding_and_index = find_binding_and_index(name);
+    VERIFY(binding_and_index.has_value());
 
     // 2-3. (extracted into a non-standard function below)
-    return get_binding_value_direct(global_object, *index, strict);
+    return get_binding_value_direct(vm, binding_and_index->binding(), strict);
 }
 
-ThrowCompletionOr<Value> DeclarativeEnvironment::get_binding_value_direct(GlobalObject& global_object, size_t index, bool)
+ThrowCompletionOr<Value> DeclarativeEnvironment::get_binding_value_direct(VM& vm, size_t index, bool strict)
 {
-    auto& binding = m_bindings[index];
+    return get_binding_value_direct(vm, m_bindings[index], strict);
+}
 
+ThrowCompletionOr<Value> DeclarativeEnvironment::get_binding_value_direct(VM&, Binding& binding, bool)
+{
     // 2. If the binding for N in envRec is an uninitialized binding, throw a ReferenceError exception.
     if (!binding.initialized)
-        return vm().throw_completion<ReferenceError>(global_object, ErrorType::BindingNotInitialized, binding.name);
+        return vm().throw_completion<ReferenceError>(ErrorType::BindingNotInitialized, binding.name);
 
     // 3. Return the value currently bound to N in envRec.
     return binding.value;
 }
 
 // 9.1.1.1.7 DeleteBinding ( N ), https://tc39.es/ecma262/#sec-declarative-environment-records-deletebinding-n
-ThrowCompletionOr<bool> DeclarativeEnvironment::delete_binding(GlobalObject&, FlyString const& name)
+ThrowCompletionOr<bool> DeclarativeEnvironment::delete_binding(VM&, FlyString const& name)
 {
     // 1. Assert: envRec has a binding for the name that is the value of N.
-    auto index = find_binding_index(name);
-    VERIFY(index.has_value());
-
-    auto& binding = m_bindings[*index];
+    auto binding_and_index = find_binding_and_index(name);
+    VERIFY(binding_and_index.has_value());
 
     // 2. If the binding for N in envRec cannot be deleted, return false.
-    if (!binding.can_be_deleted)
+    if (!binding_and_index->binding().can_be_deleted)
         return false;
 
     // 3. Remove the binding for N from envRec.
     // NOTE: We keep the entries in m_bindings to avoid disturbing indices.
-    binding = {};
+    binding_and_index->binding() = {};
 
     // 4. Return true.
     return true;
 }
 
-ThrowCompletionOr<void> DeclarativeEnvironment::initialize_or_set_mutable_binding(GlobalObject& global_object, FlyString const& name, Value value)
+ThrowCompletionOr<void> DeclarativeEnvironment::initialize_or_set_mutable_binding(VM& vm, FlyString const& name, Value value)
 {
-    auto index = find_binding_index(name);
-    VERIFY(index.has_value());
-    auto& binding = m_bindings[*index];
-    if (!binding.initialized)
-        TRY(initialize_binding(global_object, name, value));
+    auto binding_and_index = find_binding_and_index(name);
+    VERIFY(binding_and_index.has_value());
+
+    if (!binding_and_index->binding().initialized)
+        TRY(initialize_binding(vm, name, value));
     else
-        TRY(set_mutable_binding(global_object, name, value, false));
+        TRY(set_mutable_binding(vm, name, value, false));
     return {};
 }
 
-void DeclarativeEnvironment::initialize_or_set_mutable_binding(Badge<ScopeNode>, GlobalObject& global_object, FlyString const& name, Value value)
+void DeclarativeEnvironment::initialize_or_set_mutable_binding(Badge<ScopeNode>, VM& vm, FlyString const& name, Value value)
 {
-    MUST(initialize_or_set_mutable_binding(global_object, name, value));
+    MUST(initialize_or_set_mutable_binding(vm, name, value));
 }
 
 }

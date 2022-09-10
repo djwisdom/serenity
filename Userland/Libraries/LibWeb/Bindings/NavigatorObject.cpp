@@ -13,15 +13,15 @@
 namespace Web {
 namespace Bindings {
 
-NavigatorObject::NavigatorObject(JS::GlobalObject& global_object)
-    : Object(static_cast<WindowObject&>(global_object).ensure_web_prototype<NavigatorPrototype>("Navigator"))
+NavigatorObject::NavigatorObject(JS::Realm& realm)
+    : Object(verify_cast<HTML::Window>(realm.global_object()).cached_web_prototype("Navigator"))
 {
 }
 
-void NavigatorObject::initialize(JS::GlobalObject& global_object)
+void NavigatorObject::initialize(JS::Realm& realm)
 {
     auto& heap = this->heap();
-    auto* languages = MUST(JS::Array::create(global_object, 0));
+    auto* languages = MUST(JS::Array::create(realm, 0));
     languages->indexed_properties().append(js_string(heap, "en-US"));
 
     // FIXME: All of these should be in Navigator's prototype and be native accessors
@@ -34,10 +34,10 @@ void NavigatorObject::initialize(JS::GlobalObject& global_object)
     define_direct_property("platform", js_string(heap, "SerenityOS"), attr);
     define_direct_property("product", js_string(heap, "Gecko"), attr);
 
-    define_native_accessor("userAgent", user_agent_getter, {}, JS::Attribute::Configurable | JS::Attribute::Enumerable);
-    define_native_accessor("cookieEnabled", cookie_enabled_getter, {}, JS::Attribute::Configurable | JS::Attribute::Enumerable);
+    define_native_accessor(realm, "userAgent", user_agent_getter, {}, JS::Attribute::Configurable | JS::Attribute::Enumerable);
+    define_native_accessor(realm, "cookieEnabled", cookie_enabled_getter, {}, JS::Attribute::Configurable | JS::Attribute::Enumerable);
 
-    define_native_function("javaEnabled", java_enabled, 0, JS::Attribute::Configurable | JS::Attribute::Enumerable);
+    define_native_function(realm, "javaEnabled", java_enabled, 0, JS::Attribute::Configurable | JS::Attribute::Enumerable);
 
     // FIXME: Reflect actual connectivity status.
     define_direct_property("onLine", JS::Value(true), attr);

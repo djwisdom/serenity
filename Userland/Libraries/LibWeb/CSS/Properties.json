@@ -528,6 +528,7 @@
     "valid-identifiers": [
       "block",
       "flex",
+      "grid",
       "inline",
       "inline-block",
       "inline-flex",
@@ -691,6 +692,100 @@
       "bolder",
       "lighter",
       "normal"
+    ]
+  },
+  "grid-column": {
+    "inherited": false,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "string"
+    ],
+    "longhands": [
+      "grid-column-end",
+      "grid-column-start"
+    ]
+  },
+  "grid-column-end": {
+    "inherited": false,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "string"
+    ]
+  },
+  "grid-column-start": {
+    "inherited": false,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "string"
+    ]
+  },
+  "grid-row": {
+    "inherited": false,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "string"
+    ],
+    "longhands": [
+      "grid-row-end",
+      "grid-row-start"
+    ]
+  },
+  "grid-row-end": {
+    "inherited": false,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "string"
+    ]
+  },
+  "grid-row-start": {
+    "inherited": false,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "string"
+    ]
+  },
+  "grid-template-columns": {
+    "inherited": false,
+    "initial": "auto",
+    "max-values": 4,
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "length",
+      "percentage",
+      "string"
+    ]
+  },
+  "grid-template-rows": {
+    "inherited": false,
+    "initial": "auto",
+    "max-values": 4,
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "length",
+      "percentage",
+      "string"
     ]
   },
   "height": {

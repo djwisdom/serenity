@@ -92,7 +92,7 @@ void RectangleTool::on_mouseup(Layer* layer, MouseEvent& event)
         m_drawing_button = GUI::MouseButton::None;
         layer->did_modify_bitmap();
         m_editor->update();
-        m_editor->did_complete_action();
+        m_editor->did_complete_action(tool_name());
     }
 }
 
@@ -123,6 +123,7 @@ void RectangleTool::on_second_paint(Layer const* layer, GUI::PaintEvent& event)
 
     GUI::Painter painter(*m_editor);
     painter.add_clip_rect(event.rect());
+    painter.translate(editor_layer_location(*layer));
     auto start_position = editor_stroke_position(m_rectangle_start_position, m_thickness);
     auto end_position = editor_stroke_position(m_rectangle_end_position, m_thickness);
     draw_using(painter, start_position, end_position, AK::max(m_thickness * m_editor->scale(), 1), m_corner_radius * m_editor->scale());

@@ -11,7 +11,7 @@
 
 namespace JS {
 
-ThrowCompletionOr<Object*> promise_resolve(GlobalObject&, Object& constructor, Value);
+ThrowCompletionOr<Object*> promise_resolve(VM&, Object& constructor, Value);
 
 class Promise : public Object {
     JS_OBJECT(Promise, Object);
@@ -27,9 +27,8 @@ public:
         Handle,
     };
 
-    static Promise* create(GlobalObject&);
+    static Promise* create(Realm&);
 
-    explicit Promise(Object& prototype);
     virtual ~Promise() = default;
 
     State state() const { return m_state; }
@@ -48,6 +47,8 @@ public:
     bool is_handled() const { return m_is_handled; }
 
 protected:
+    explicit Promise(Object& prototype);
+
     virtual void visit_edges(Visitor&) override;
 
 private:

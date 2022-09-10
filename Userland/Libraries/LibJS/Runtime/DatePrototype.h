@@ -15,11 +15,12 @@ class DatePrototype final : public PrototypeObject<DatePrototype, Date> {
     JS_PROTOTYPE_OBJECT(DatePrototype, Date, Date);
 
 public:
-    explicit DatePrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~DatePrototype() override = default;
 
 private:
+    explicit DatePrototype(Realm&);
+
     JS_DECLARE_NATIVE_FUNCTION(get_date);
     JS_DECLARE_NATIVE_FUNCTION(get_day);
     JS_DECLARE_NATIVE_FUNCTION(get_full_year);
@@ -71,7 +72,7 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(symbol_to_primitive);
 };
 
-ThrowCompletionOr<double> this_time_value(GlobalObject& global_object, Value value);
+ThrowCompletionOr<double> this_time_value(VM&, Value value);
 String time_string(double time);
 String date_string(double time);
 String time_zone_string(double time);

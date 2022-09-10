@@ -27,6 +27,7 @@
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/AsyncGenerator.h>
 #include <LibJS/Runtime/BooleanObject.h>
+#include <LibJS/Runtime/ConsoleObject.h>
 #include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/DatePrototype.h>
@@ -96,7 +97,7 @@ public:
         : GlobalObject(realm)
     {
     }
-    virtual void initialize_global_object() override;
+    virtual void initialize(JS::Realm&) override;
     virtual ~ReplObject() override = default;
 
 private:
@@ -117,7 +118,7 @@ public:
         : JS::GlobalObject(realm)
     {
     }
-    virtual void initialize_global_object() override;
+    virtual void initialize(JS::Realm&) override;
     virtual ~ScriptObject() override = default;
 
 private:
@@ -753,7 +754,7 @@ static void print_intl_number_format(JS::Intl::NumberFormat const& number_format
         print_value(JS::Value(number_format.max_significant_digits()), seen_objects);
     }
     js_out("\n  useGrouping: ");
-    print_value(number_format.use_grouping_to_value(number_format.global_object()), seen_objects);
+    print_value(number_format.use_grouping_to_value(number_format.vm()), seen_objects);
     js_out("\n  roundingType: ");
     print_value(js_string(number_format.vm(), number_format.rounding_type_string()), seen_objects);
     js_out("\n  roundingMode: ");
@@ -798,7 +799,7 @@ static void print_intl_date_time_format(JS::Intl::DateTimeFormat& date_time_form
         print_value(js_string(date_time_format.vm(), date_time_format.time_style_string()), seen_objects);
     }
 
-    JS::Intl::for_each_calendar_field(date_time_format.global_object(), date_time_format, [&](auto& option, auto const& property, auto const&) -> JS::ThrowCompletionOr<void> {
+    JS::Intl::for_each_calendar_field(date_time_format.vm(), date_time_format, [&](auto& option, auto const& property, auto const&) -> JS::ThrowCompletionOr<void> {
         using ValueType = typename RemoveReference<decltype(option)>::ValueType;
 
         if (!option.has_value())
@@ -809,7 +810,7 @@ static void print_intl_date_time_format(JS::Intl::DateTimeFormat& date_time_form
         if constexpr (IsIntegral<ValueType>) {
             print_value(JS::Value(*option), seen_objects);
         } else {
-            auto name = Unicode::calendar_pattern_style_to_string(*option);
+            auto name = Locale::calendar_pattern_style_to_string(*option);
             print_value(js_string(date_time_format.vm(), name), seen_objects);
         }
 
@@ -1003,8 +1004,11 @@ static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects)
             return print_error(object, seen_objects);
 
         auto prototype_or_error = object.internal_get_prototype_of();
-        if (prototype_or_error.has_value() && prototype_or_error.value() == object.global_object().error_prototype())
-            return print_error(object, seen_objects);
+        if (prototype_or_error.has_value() && prototype_or_error.value() != nullptr) {
+            auto& prototype = *prototype_or_error.value();
+            if (&prototype == prototype.shape().realm().intrinsics().error_prototype())
+                return print_error(object, seen_objects);
+        }
 
         if (is<JS::RegExpObject>(object))
             return print_regexp_object(static_cast<JS::RegExpObject&>(object), seen_objects);
@@ -1154,7 +1158,7 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
         if (JS::Bytecode::g_dump_bytecode || s_run_bytecode) {
             auto executable_result = JS::Bytecode::Generator::generate(script_or_module->parse_node());
             if (executable_result.is_error()) {
-                result = g_vm->throw_completion<JS::InternalError>(interpreter.global_object(), executable_result.error().to_string());
+                result = g_vm->throw_completion<JS::InternalError>(executable_result.error().to_string());
                 return ReturnEarly::No;
             }
 
@@ -1170,7 +1174,7 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
                 executable->dump();
 
             if (s_run_bytecode) {
-                JS::Bytecode::Interpreter bytecode_interpreter(interpreter.global_object(), interpreter.realm());
+                JS::Bytecode::Interpreter bytecode_interpreter(interpreter.realm());
                 auto result_or_error = bytecode_interpreter.run_and_return_frame(*executable, nullptr);
                 if (result_or_error.value.is_error())
                     result = result_or_error.value.release_error();
@@ -1194,7 +1198,7 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             if (!hint.is_empty())
                 outln("{}", hint);
             outln("{}", error.to_string());
-            result = interpreter.vm().throw_completion<JS::SyntaxError>(interpreter.global_object(), error.to_string());
+            result = interpreter.vm().throw_completion<JS::SyntaxError>(error.to_string());
         } else {
             auto return_early = run_script_or_module(script_or_error.value());
             if (return_early == ReturnEarly::Yes)
@@ -1208,7 +1212,7 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             if (!hint.is_empty())
                 outln("{}", hint);
             outln(error.to_string());
-            result = interpreter.vm().throw_completion<JS::SyntaxError>(interpreter.global_object(), error.to_string());
+            result = interpreter.vm().throw_completion<JS::SyntaxError>(error.to_string());
         } else {
             auto return_early = run_script_or_module(module_or_error.value());
             if (return_early == ReturnEarly::Yes)
@@ -1262,17 +1266,19 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
     return true;
 }
 
-static JS::ThrowCompletionOr<JS::Value> load_ini_impl(JS::VM& vm, JS::GlobalObject& global_object)
+static JS::ThrowCompletionOr<JS::Value> load_ini_impl(JS::VM& vm)
 {
-    auto filename = TRY(vm.argument(0).to_string(global_object));
+    auto& realm = *vm.current_realm();
+
+    auto filename = TRY(vm.argument(0).to_string(vm));
     auto file = Core::File::construct(filename);
     if (!file->open(Core::OpenMode::ReadOnly))
-        return vm.throw_completion<JS::Error>(global_object, String::formatted("Failed to open '{}': {}", filename, file->error_string()));
+        return vm.throw_completion<JS::Error>(String::formatted("Failed to open '{}': {}", filename, file->error_string()));
 
     auto config_file = MUST(Core::ConfigFile::open(filename, file->fd()));
-    auto* object = JS::Object::create(global_object, global_object.object_prototype());
+    auto* object = JS::Object::create(realm, realm.intrinsics().object_prototype());
     for (auto const& group : config_file->groups()) {
-        auto* group_object = JS::Object::create(global_object, global_object.object_prototype());
+        auto* group_object = JS::Object::create(realm, realm.intrinsics().object_prototype());
         for (auto const& key : config_file->keys(group)) {
             auto entry = config_file->read_entry(group, key);
             group_object->define_direct_property(key, js_string(vm, move(entry)), JS::Attribute::Enumerable | JS::Attribute::Configurable | JS::Attribute::Writable);
@@ -1282,37 +1288,40 @@ static JS::ThrowCompletionOr<JS::Value> load_ini_impl(JS::VM& vm, JS::GlobalObje
     return object;
 }
 
-static JS::ThrowCompletionOr<JS::Value> load_json_impl(JS::VM& vm, JS::GlobalObject& global_object)
+static JS::ThrowCompletionOr<JS::Value> load_json_impl(JS::VM& vm)
 {
-    auto filename = TRY(vm.argument(0).to_string(global_object));
+    auto filename = TRY(vm.argument(0).to_string(vm));
     auto file = Core::File::construct(filename);
     if (!file->open(Core::OpenMode::ReadOnly))
-        return vm.throw_completion<JS::Error>(global_object, String::formatted("Failed to open '{}': {}", filename, file->error_string()));
+        return vm.throw_completion<JS::Error>(String::formatted("Failed to open '{}': {}", filename, file->error_string()));
     auto file_contents = file->read_all();
     auto json = JsonValue::from_string(file_contents);
     if (json.is_error())
-        return vm.throw_completion<JS::SyntaxError>(global_object, JS::ErrorType::JsonMalformed);
-    return JS::JSONObject::parse_json_value(global_object, json.value());
+        return vm.throw_completion<JS::SyntaxError>(JS::ErrorType::JsonMalformed);
+    return JS::JSONObject::parse_json_value(vm, json.value());
 }
 
-void ReplObject::initialize_global_object()
+void ReplObject::initialize(JS::Realm& realm)
 {
-    Base::initialize_global_object();
+    Base::initialize(realm);
+
     define_direct_property("global", this, JS::Attribute::Enumerable);
     u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
-    define_native_function("exit", exit_interpreter, 0, attr);
-    define_native_function("help", repl_help, 0, attr);
-    define_native_function("save", save_to_file, 1, attr);
-    define_native_function("loadINI", load_ini, 1, attr);
-    define_native_function("loadJSON", load_json, 1, attr);
-    define_native_function("print", print, 1, attr);
+    define_native_function(realm, "exit", exit_interpreter, 0, attr);
+    define_native_function(realm, "help", repl_help, 0, attr);
+    define_native_function(realm, "save", save_to_file, 1, attr);
+    define_native_function(realm, "loadINI", load_ini, 1, attr);
+    define_native_function(realm, "loadJSON", load_json, 1, attr);
+    define_native_function(realm, "print", print, 1, attr);
 
     define_native_accessor(
+        realm,
         "_",
-        [](JS::VM&, JS::GlobalObject&) {
+        [](JS::VM&) {
             return g_last_value.value();
         },
-        [](JS::VM& vm, JS::GlobalObject& global_object) -> JS::ThrowCompletionOr<JS::Value> {
+        [](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+            auto& global_object = vm.get_global_object();
             VERIFY(is<ReplObject>(global_object));
             outln("Disable writing last value to '_'");
 
@@ -1341,7 +1350,7 @@ JS_DEFINE_NATIVE_FUNCTION(ReplObject::exit_interpreter)
 {
     if (!vm.argument_count())
         exit(0);
-    exit(TRY(vm.argument(0).to_number(global_object)).as_double());
+    exit(TRY(vm.argument(0).to_number(vm)).as_double());
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ReplObject::repl_help)
@@ -1358,12 +1367,12 @@ JS_DEFINE_NATIVE_FUNCTION(ReplObject::repl_help)
 
 JS_DEFINE_NATIVE_FUNCTION(ReplObject::load_ini)
 {
-    return load_ini_impl(vm, global_object);
+    return load_ini_impl(vm);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ReplObject::load_json)
 {
-    return load_json_impl(vm, global_object);
+    return load_json_impl(vm);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ReplObject::print)
@@ -1372,24 +1381,25 @@ JS_DEFINE_NATIVE_FUNCTION(ReplObject::print)
     return JS::js_undefined();
 }
 
-void ScriptObject::initialize_global_object()
+void ScriptObject::initialize(JS::Realm& realm)
 {
-    Base::initialize_global_object();
+    Base::initialize(realm);
+
     define_direct_property("global", this, JS::Attribute::Enumerable);
     u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
-    define_native_function("loadINI", load_ini, 1, attr);
-    define_native_function("loadJSON", load_json, 1, attr);
-    define_native_function("print", print, 1, attr);
+    define_native_function(realm, "loadINI", load_ini, 1, attr);
+    define_native_function(realm, "loadJSON", load_json, 1, attr);
+    define_native_function(realm, "print", print, 1, attr);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ScriptObject::load_ini)
 {
-    return load_ini_impl(vm, global_object);
+    return load_ini_impl(vm);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ScriptObject::load_json)
 {
-    return load_json_impl(vm, global_object);
+    return load_json_impl(vm);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ScriptObject::print)
@@ -1552,8 +1562,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     if (evaluate_script.is_empty() && script_paths.is_empty()) {
         s_print_last_result = true;
         interpreter = JS::Interpreter::create<ReplObject>(*g_vm);
-        ReplConsoleClient console_client(interpreter->global_object().console());
-        interpreter->global_object().console().set_client(console_client);
+        auto& console_object = *interpreter->realm().intrinsics().console_object();
+        ReplConsoleClient console_client(console_object.console());
+        console_object.console().set_client(console_client);
         interpreter->heap().set_should_collect_on_every_allocation(gc_on_every_allocation);
 
         auto& global_environment = interpreter->realm().global_environment();
@@ -1724,7 +1735,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 auto reference_or_error = g_vm->resolve_binding(variable_name, &global_environment);
                 if (reference_or_error.is_error())
                     return {};
-                auto value_or_error = reference_or_error.value().get_value(interpreter->global_object());
+                auto value_or_error = reference_or_error.value().get_value(*g_vm);
                 if (value_or_error.is_error())
                     return {};
                 auto variable = value_or_error.value();
@@ -1733,13 +1744,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 if (!variable.is_object())
                     break;
 
-                auto const* object = MUST(variable.to_object(interpreter->global_object()));
+                auto const* object = MUST(variable.to_object(*g_vm));
                 auto const& shape = object->shape();
                 list_all_properties(shape, property_name);
                 break;
             }
             case CompleteVariable: {
-                auto const& variable = interpreter->global_object();
+                auto const& variable = interpreter->realm().global_object();
                 list_all_properties(variable.shape(), variable_name);
 
                 for (auto const& name : global_environment.declarative_record().bindings()) {
@@ -1762,8 +1773,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         s_editor->save_history(s_history_path);
     } else {
         interpreter = JS::Interpreter::create<ScriptObject>(*g_vm);
-        ReplConsoleClient console_client(interpreter->global_object().console());
-        interpreter->global_object().console().set_client(console_client);
+        auto& console_object = *interpreter->realm().intrinsics().console_object();
+        ReplConsoleClient console_client(console_object.console());
+        console_object.console().set_client(console_client);
         interpreter->heap().set_should_collect_on_every_allocation(gc_on_every_allocation);
 
         signal(SIGINT, [](int) {

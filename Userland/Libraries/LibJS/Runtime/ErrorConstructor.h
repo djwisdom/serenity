@@ -15,14 +15,15 @@ class ErrorConstructor final : public NativeFunction {
     JS_OBJECT(ErrorConstructor, NativeFunction);
 
 public:
-    explicit ErrorConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~ErrorConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
     virtual ThrowCompletionOr<Object*> construct(FunctionObject& new_target) override;
 
 private:
+    explicit ErrorConstructor(Realm&);
+
     virtual bool has_constructor() const override { return true; }
 };
 
@@ -31,14 +32,18 @@ private:
         JS_OBJECT(ConstructorName, NativeFunction);                                             \
                                                                                                 \
     public:                                                                                     \
-        explicit ConstructorName(GlobalObject&);                                                \
-        virtual void initialize(GlobalObject&) override;                                        \
+        virtual void initialize(Realm&) override;                                               \
         virtual ~ConstructorName() override;                                                    \
         virtual ThrowCompletionOr<Value> call() override;                                       \
         virtual ThrowCompletionOr<Object*> construct(FunctionObject& new_target) override;      \
                                                                                                 \
     private:                                                                                    \
-        virtual bool has_constructor() const override { return true; }                          \
+        explicit ConstructorName(Realm&);                                                       \
+                                                                                                \
+        virtual bool has_constructor() const override                                           \
+        {                                                                                       \
+            return true;                                                                        \
+        }                                                                                       \
     };
 
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \

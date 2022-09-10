@@ -11,7 +11,7 @@
 #include <LibJS/Runtime/Intl/AbstractOperations.h>
 #include <LibJS/Runtime/Intl/Locale.h>
 #include <LibJS/Runtime/Intl/LocaleConstructor.h>
-#include <LibUnicode/Locale.h>
+#include <LibLocale/Locale.h>
 
 namespace JS::Intl {
 
@@ -26,53 +26,49 @@ struct LocaleAndKeys {
 };
 
 // Note: This is not an AO in the spec. This just serves to abstract very similar steps in ApplyOptionsToTag and the Intl.Locale constructor.
-static ThrowCompletionOr<Optional<String>> get_string_option(GlobalObject& global_object, Object const& options, PropertyKey const& property, Function<bool(StringView)> validator, Span<StringView const> values = {})
+static ThrowCompletionOr<Optional<String>> get_string_option(VM& vm, Object const& options, PropertyKey const& property, Function<bool(StringView)> validator, Span<StringView const> values = {})
 {
-    auto& vm = global_object.vm();
-
-    auto option = TRY(get_option(global_object, options, property, OptionType::String, values, Empty {}));
+    auto option = TRY(get_option(vm, options, property, OptionType::String, values, Empty {}));
     if (option.is_undefined())
         return Optional<String> {};
 
     if (validator && !validator(option.as_string().string()))
-        return vm.throw_completion<RangeError>(global_object, ErrorType::OptionIsNotValidValue, option, property);
+        return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, option, property);
 
     return option.as_string().string();
 }
 
 // 14.1.2 ApplyOptionsToTag ( tag, options ), https://tc39.es/ecma402/#sec-apply-options-to-tag
-static ThrowCompletionOr<String> apply_options_to_tag(GlobalObject& global_object, StringView tag, Object const& options)
+static ThrowCompletionOr<String> apply_options_to_tag(VM& vm, StringView tag, Object const& options)
 {
-    auto& vm = global_object.vm();
-
     // 1. Assert: Type(tag) is String.
     // 2. Assert: Type(options) is Object.
 
     // 3. If ! IsStructurallyValidLanguageTag(tag) is false, throw a RangeError exception.
     auto locale_id = is_structurally_valid_language_tag(tag);
     if (!locale_id.has_value())
-        return vm.throw_completion<RangeError>(global_object, ErrorType::IntlInvalidLanguageTag, tag);
+        return vm.throw_completion<RangeError>(ErrorType::IntlInvalidLanguageTag, tag);
 
     // 4. Let language be ? GetOption(options, "language", "string", undefined, undefined).
     // 5. If language is not undefined, then
     //     a. If language does not match the unicode_language_subtag production, throw a RangeError exception.
-    auto language = TRY(get_string_option(global_object, options, vm.names.language, Unicode::is_unicode_language_subtag));
+    auto language = TRY(get_string_option(vm, options, vm.names.language, ::Locale::is_unicode_language_subtag));
 
     // 6. Let script be ? GetOption(options, "script", "string", undefined, undefined).
     // 7. If script is not undefined, then
     //     a. If script does not match the unicode_script_subtag production, throw a RangeError exception.
-    auto script = TRY(get_string_option(global_object, options, vm.names.script, Unicode::is_unicode_script_subtag));
+    auto script = TRY(get_string_option(vm, options, vm.names.script, ::Locale::is_unicode_script_subtag));
 
     // 8. Let region be ? GetOption(options, "region", "string", undefined, undefined).
     // 9. If region is not undefined, then
     //     a. If region does not match the unicode_region_subtag production, throw a RangeError exception.
-    auto region = TRY(get_string_option(global_object, options, vm.names.region, Unicode::is_unicode_region_subtag));
+    auto region = TRY(get_string_option(vm, options, vm.names.region, ::Locale::is_unicode_region_subtag));
 
     // 10. Set tag to ! CanonicalizeUnicodeLocaleId(tag).
-    auto canonicalized_tag = Intl::canonicalize_unicode_locale_id(*locale_id);
+    auto canonicalized_tag = JS::Intl::canonicalize_unicode_locale_id(*locale_id);
 
     // 11. Assert: tag matches the unicode_locale_id production.
-    locale_id = Unicode::parse_unicode_locale_id(canonicalized_tag);
+    locale_id = ::Locale::parse_unicode_locale_id(canonicalized_tag);
     VERIFY(locale_id.has_value());
 
     // 12. Let languageId be the substring of tag corresponding to the unicode_language_id production.
@@ -112,20 +108,20 @@ static LocaleAndKeys apply_unicode_extension_to_tag(StringView tag, LocaleAndKey
 {
     // 1. Assert: Type(tag) is String.
     // 2. Assert: tag matches the unicode_locale_id production.
-    auto locale_id = Unicode::parse_unicode_locale_id(tag);
+    auto locale_id = ::Locale::parse_unicode_locale_id(tag);
     VERIFY(locale_id.has_value());
 
     Vector<String> attributes;
-    Vector<Unicode::Keyword> keywords;
+    Vector<::Locale::Keyword> keywords;
 
     // 3. If tag contains a substring that is a Unicode locale extension sequence, then
     for (auto& extension : locale_id->extensions) {
-        if (!extension.has<Unicode::LocaleExtension>())
+        if (!extension.has<::Locale::LocaleExtension>())
             continue;
 
         // a. Let extension be the String value consisting of the substring of the Unicode locale extension sequence within tag.
         // b. Let components be ! UnicodeExtensionComponents(extension).
-        auto& components = extension.get<Unicode::LocaleExtension>();
+        auto& components = extension.get<::Locale::LocaleExtension>();
         // c. Let attributes be components.[[Attributes]].
         attributes = move(components.attributes);
         // d. Let keywords be components.[[Keywords]].
@@ -161,7 +157,7 @@ static LocaleAndKeys apply_unicode_extension_to_tag(StringView tag, LocaleAndKey
         // a. Let value be undefined.
         Optional<String> value {};
 
-        Unicode::Keyword* entry = nullptr;
+        ::Locale::Keyword* entry = nullptr;
         // b. If keywords contains an element whose [[Key]] is the same as key, then
         if (auto it = keywords.find_if([&](auto const& k) { return key == k.key; }); it != keywords.end()) {
             // i. Let entry be the element of keywords whose [[Key]] is the same as key.
@@ -200,11 +196,11 @@ static LocaleAndKeys apply_unicode_extension_to_tag(StringView tag, LocaleAndKey
     }
 
     // 7. Let locale be the String value that is tag with any Unicode locale extension sequences removed.
-    locale_id->remove_extension_type<Unicode::LocaleExtension>();
+    locale_id->remove_extension_type<::Locale::LocaleExtension>();
     auto locale = locale_id->to_string();
 
     // 8. Let newExtension be a Unicode BCP 47 U Extension based on attributes and keywords.
-    Unicode::LocaleExtension new_extension { move(attributes), move(keywords) };
+    ::Locale::LocaleExtension new_extension { move(attributes), move(keywords) };
 
     // 9. If newExtension is not the empty String, then
     if (!new_extension.attributes.is_empty() || !new_extension.keywords.is_empty()) {
@@ -220,19 +216,19 @@ static LocaleAndKeys apply_unicode_extension_to_tag(StringView tag, LocaleAndKey
 }
 
 // 14.1 The Intl.Locale Constructor, https://tc39.es/ecma402/#sec-intl-locale-constructor
-LocaleConstructor::LocaleConstructor(GlobalObject& global_object)
-    : NativeFunction(vm().names.Locale.as_string(), *global_object.function_prototype())
+LocaleConstructor::LocaleConstructor(Realm& realm)
+    : NativeFunction(vm().names.Locale.as_string(), *realm.intrinsics().function_prototype())
 {
 }
 
-void LocaleConstructor::initialize(GlobalObject& global_object)
+void LocaleConstructor::initialize(Realm& realm)
 {
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     auto& vm = this->vm();
 
     // 14.2.1 Intl.Locale.prototype, https://tc39.es/ecma402/#sec-Intl.Locale.prototype
-    define_direct_property(vm.names.prototype, global_object.intl_locale_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.intrinsics().intl_locale_prototype(), 0);
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
 }
 
@@ -240,14 +236,13 @@ void LocaleConstructor::initialize(GlobalObject& global_object)
 ThrowCompletionOr<Value> LocaleConstructor::call()
 {
     // 1. If NewTarget is undefined, throw a TypeError exception.
-    return vm().throw_completion<TypeError>(global_object(), ErrorType::ConstructorWithoutNew, "Intl.Locale");
+    return vm().throw_completion<TypeError>(ErrorType::ConstructorWithoutNew, "Intl.Locale");
 }
 
 // 14.1.1 Intl.Locale ( tag [ , options ] ), https://tc39.es/ecma402/#sec-Intl.Locale
 ThrowCompletionOr<Object*> LocaleConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
     auto tag_value = vm.argument(0);
     auto options_value = vm.argument(1);
@@ -262,13 +257,13 @@ ThrowCompletionOr<Object*> LocaleConstructor::construct(FunctionObject& new_targ
     //     a. Append [[Numeric]] as the last element of internalSlotsList.
 
     // 6. Let locale be ? OrdinaryCreateFromConstructor(NewTarget, "%Locale.prototype%", internalSlotsList).
-    auto* locale = TRY(ordinary_create_from_constructor<Locale>(global_object, new_target, &GlobalObject::intl_locale_prototype));
+    auto* locale = TRY(ordinary_create_from_constructor<Locale>(vm, new_target, &Intrinsics::intl_locale_prototype));
 
     String tag;
 
     // 7. If Type(tag) is not String or Object, throw a TypeError exception.
     if (!tag_value.is_string() && !tag_value.is_object())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObjectOrString, "tag"sv);
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOrString, "tag"sv);
 
     // 8. If Type(tag) is Object and tag has an [[InitializedLocale]] internal slot, then
     if (tag_value.is_object() && is<Locale>(tag_value.as_object())) {
@@ -279,14 +274,14 @@ ThrowCompletionOr<Object*> LocaleConstructor::construct(FunctionObject& new_targ
     // 9. Else,
     else {
         // a. Let tag be ? ToString(tag).
-        tag = TRY(tag_value.to_string(global_object));
+        tag = TRY(tag_value.to_string(vm));
     }
 
     // 10. Set options to ? CoerceOptionsToObject(options).
-    auto* options = TRY(coerce_options_to_object(global_object, options_value));
+    auto* options = TRY(coerce_options_to_object(vm, options_value));
 
     // 11. Set tag to ? ApplyOptionsToTag(tag, options).
-    tag = TRY(apply_options_to_tag(global_object, tag, *options));
+    tag = TRY(apply_options_to_tag(vm, tag, *options));
 
     // 12. Let opt be a new Record.
     LocaleAndKeys opt {};
@@ -295,35 +290,35 @@ ThrowCompletionOr<Object*> LocaleConstructor::construct(FunctionObject& new_targ
     // 14. If calendar is not undefined, then
     //     a. If calendar does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
     // 15. Set opt.[[ca]] to calendar.
-    opt.ca = TRY(get_string_option(global_object, *options, vm.names.calendar, Unicode::is_type_identifier));
+    opt.ca = TRY(get_string_option(vm, *options, vm.names.calendar, ::Locale::is_type_identifier));
 
     // 16. Let collation be ? GetOption(options, "collation", "string", undefined, undefined).
     // 17. If collation is not undefined, then
     //     a. If collation does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
     // 18. Set opt.[[co]] to collation.
-    opt.co = TRY(get_string_option(global_object, *options, vm.names.collation, Unicode::is_type_identifier));
+    opt.co = TRY(get_string_option(vm, *options, vm.names.collation, ::Locale::is_type_identifier));
 
     // 19. Let hc be ? GetOption(options, "hourCycle", "string", « "h11", "h12", "h23", "h24" », undefined).
     // 20. Set opt.[[hc]] to hc.
-    opt.hc = TRY(get_string_option(global_object, *options, vm.names.hourCycle, nullptr, AK::Array { "h11"sv, "h12"sv, "h23"sv, "h24"sv }));
+    opt.hc = TRY(get_string_option(vm, *options, vm.names.hourCycle, nullptr, AK::Array { "h11"sv, "h12"sv, "h23"sv, "h24"sv }));
 
     // 21. Let kf be ? GetOption(options, "caseFirst", "string", « "upper", "lower", "false" », undefined).
     // 22. Set opt.[[kf]] to kf.
-    opt.kf = TRY(get_string_option(global_object, *options, vm.names.caseFirst, nullptr, AK::Array { "upper"sv, "lower"sv, "false"sv }));
+    opt.kf = TRY(get_string_option(vm, *options, vm.names.caseFirst, nullptr, AK::Array { "upper"sv, "lower"sv, "false"sv }));
 
     // 23. Let kn be ? GetOption(options, "numeric", "boolean", undefined, undefined).
-    auto kn = TRY(get_option(global_object, *options, vm.names.numeric, OptionType::Boolean, {}, Empty {}));
+    auto kn = TRY(get_option(vm, *options, vm.names.numeric, OptionType::Boolean, {}, Empty {}));
 
     // 24. If kn is not undefined, set kn to ! ToString(kn).
     // 25. Set opt.[[kn]] to kn.
     if (!kn.is_undefined())
-        opt.kn = TRY(kn.to_string(global_object));
+        opt.kn = TRY(kn.to_string(vm));
 
     // 26. Let numberingSystem be ? GetOption(options, "numberingSystem", "string", undefined, undefined).
     // 27. If numberingSystem is not undefined, then
     //     a. If numberingSystem does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
     // 28. Set opt.[[nu]] to numberingSystem.
-    opt.nu = TRY(get_string_option(global_object, *options, vm.names.numberingSystem, Unicode::is_type_identifier));
+    opt.nu = TRY(get_string_option(vm, *options, vm.names.numberingSystem, ::Locale::is_type_identifier));
 
     // 29. Let r be ! ApplyUnicodeExtensionToTag(tag, opt, relevantExtensionKeys).
     auto result = apply_unicode_extension_to_tag(tag, move(opt), relevant_extension_keys);

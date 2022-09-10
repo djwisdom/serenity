@@ -69,8 +69,11 @@ Window::Window(Core::Object* parent)
     : Core::Object(parent)
     , m_menubar(Menubar::construct())
 {
+    if (parent)
+        set_window_mode(WindowMode::Passive);
+
     all_windows->set(this);
-    m_rect_when_windowless = { -5000, -5000, 140, 140 };
+    m_rect_when_windowless = { -5000, -5000, 0, 0 };
     m_title_when_windowless = "GUI::Window";
 
     register_property(
@@ -144,14 +147,12 @@ void Window::show()
         m_rect_when_windowless,
         !m_moved_by_client,
         m_has_alpha_channel,
-        m_modal,
         m_minimizable,
         m_closeable,
         m_resizable,
         m_fullscreen,
         m_frameless,
         m_forced_shadow,
-        m_accessory,
         m_opacity_when_windowless,
         m_alpha_hit_threshold,
         m_base_size,
@@ -159,6 +160,7 @@ void Window::show()
         m_minimum_size_when_windowless,
         m_resize_aspect_ratio,
         (i32)m_window_type,
+        (i32)m_window_mode,
         m_title_when_windowless,
         parent_window ? parent_window->window_id() : 0,
         launch_origin_rect);
@@ -207,6 +209,8 @@ void Window::hide()
     //       All our windows will be automatically garbage-collected by WindowServer anyway.
     if (GUI::Application::in_teardown())
         return;
+
+    m_rect_when_windowless = rect();
 
     auto destroyed_window_ids = ConnectionToWindowServer::the().destroy_window(m_window_id);
     server_did_destroy();
@@ -289,7 +293,8 @@ Gfx::IntSize Window::minimum_size() const
 
 void Window::set_minimum_size(Gfx::IntSize const& size)
 {
-    m_minimum_size_modified = true;
+    VERIFY(size.width() >= 0 && size.height() >= 0);
+    VERIFY(!is_obeying_widget_min_size());
     m_minimum_size_when_windowless = size;
 
     if (is_visible())
@@ -311,14 +316,12 @@ void Window::center_within(Window const& other)
 void Window::set_window_type(WindowType window_type)
 {
     m_window_type = window_type;
+}
 
-    if (!m_minimum_size_modified) {
-        // Apply minimum size defaults.
-        if (m_window_type == WindowType::Normal || m_window_type == WindowType::ToolWindow)
-            m_minimum_size_when_windowless = { 50, 50 };
-        else
-            m_minimum_size_when_windowless = { 1, 1 };
-    }
+void Window::set_window_mode(WindowMode mode)
+{
+    VERIFY(!is_visible());
+    m_window_mode = mode;
 }
 
 void Window::make_window_manager(unsigned event_mask)
@@ -475,7 +478,7 @@ void Window::handle_resize_event(ResizeEvent& event)
         m_pending_paint_event_rects.clear_with_capacity();
         m_pending_paint_event_rects.append({ {}, new_size });
     }
-    m_rect_when_windowless = { {}, new_size };
+    m_rect_when_windowless.set_size(new_size);
     if (m_main_widget)
         m_main_widget->set_relative_rect({ {}, new_size });
 }
@@ -895,12 +898,6 @@ OwnPtr<WindowBackingStore> Window::create_backing_store(Gfx::IntSize const& size
     return make<WindowBackingStore>(bitmap_or_error.release_value());
 }
 
-void Window::set_modal(bool modal)
-{
-    VERIFY(!is_visible());
-    m_modal = modal;
-}
-
 void Window::wm_event(WMEvent&)
 {
 }
@@ -1044,7 +1041,10 @@ void Window::update_min_size()
         main_widget()->do_layout();
         if (m_obey_widget_min_size) {
             auto min_size = main_widget()->effective_min_size();
-            set_minimum_size(MUST(min_size.width().shrink_value()), MUST(min_size.height().shrink_value()));
+            Gfx::IntSize size = { MUST(min_size.width().shrink_value()), MUST(min_size.height().shrink_value()) };
+            m_minimum_size_when_windowless = size;
+            if (is_visible())
+                ConnectionToWindowServer::the().async_set_window_minimum_size(m_window_id, size);
         }
     }
 }
@@ -1108,6 +1108,12 @@ void Window::notify_state_changed(Badge<ConnectionToWindowServer>, bool minimize
             update();
         }
     }
+}
+
+void Window::notify_input_preempted(Badge<ConnectionToWindowServer>, InputPreemptor preemptor)
+{
+    if (on_input_preemption)
+        on_input_preemption(preemptor);
 }
 
 Action* Window::action_for_shortcut(Shortcut const& shortcut)

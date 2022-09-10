@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -17,25 +17,21 @@
 
 namespace JS {
 
-ThrowCompletionOr<TypedArrayBase*> typed_array_from(GlobalObject& global_object, Value typed_array_value)
+ThrowCompletionOr<TypedArrayBase*> typed_array_from(VM& vm, Value typed_array_value)
 {
-    auto& vm = global_object.vm();
-
-    auto* this_object = TRY(typed_array_value.to_object(global_object));
+    auto* this_object = TRY(typed_array_value.to_object(vm));
     if (!this_object->is_typed_array())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObjectOfType, "TypedArray");
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOfType, "TypedArray");
 
     return static_cast<TypedArrayBase*>(this_object);
 }
 
 // 23.2.4.3 ValidateTypedArray ( O ), https://tc39.es/ecma262/#sec-validatetypedarray
-ThrowCompletionOr<void> validate_typed_array(GlobalObject& global_object, TypedArrayBase& typed_array)
+ThrowCompletionOr<void> validate_typed_array(VM& vm, TypedArrayBase& typed_array)
 {
-    auto& vm = global_object.vm();
-
     // 1. Perform ? RequireInternalSlot(O, [[TypedArrayName]]).
     if (!typed_array.is_typed_array())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObjectOfType, "TypedArray");
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOfType, "TypedArray");
 
     // 2. Assert: O has a [[ViewedArrayBuffer]] internal slot.
 
@@ -44,37 +40,35 @@ ThrowCompletionOr<void> validate_typed_array(GlobalObject& global_object, TypedA
 
     // 4. If IsDetachedBuffer(buffer) is true, throw a TypeError exception.
     if (buffer->is_detached())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::DetachedArrayBuffer);
+        return vm.throw_completion<TypeError>(ErrorType::DetachedArrayBuffer);
 
     return {};
 }
 
 // 22.2.5.1.3 InitializeTypedArrayFromArrayBuffer, https://tc39.es/ecma262/#sec-initializetypedarrayfromarraybuffer
-static ThrowCompletionOr<void> initialize_typed_array_from_array_buffer(GlobalObject& global_object, TypedArrayBase& typed_array, ArrayBuffer& array_buffer, Value byte_offset, Value length)
+static ThrowCompletionOr<void> initialize_typed_array_from_array_buffer(VM& vm, TypedArrayBase& typed_array, ArrayBuffer& array_buffer, Value byte_offset, Value length)
 {
-    auto& vm = global_object.vm();
-
     // 1. Let elementSize be TypedArrayElementSize(O).
     auto element_size = typed_array.element_size();
 
     // 2. Let offset be ? ToIndex(byteOffset).
-    auto offset = TRY(byte_offset.to_index(global_object));
+    auto offset = TRY(byte_offset.to_index(vm));
 
     // 3. If offset modulo elementSize ≠ 0, throw a RangeError exception.
     if (offset % element_size != 0)
-        return vm.throw_completion<RangeError>(global_object, ErrorType::TypedArrayInvalidByteOffset, typed_array.class_name(), element_size, offset);
+        return vm.throw_completion<RangeError>(ErrorType::TypedArrayInvalidByteOffset, typed_array.class_name(), element_size, offset);
 
     size_t new_length { 0 };
 
     // 4. If length is not undefined, then
     if (!length.is_undefined()) {
         // a. Let newLength be ? ToIndex(length).
-        new_length = TRY(length.to_index(global_object));
+        new_length = TRY(length.to_index(vm));
     }
 
     // 5. If IsDetachedBuffer(buffer) is true, throw a TypeError exception.
     if (array_buffer.is_detached())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::DetachedArrayBuffer);
+        return vm.throw_completion<TypeError>(ErrorType::DetachedArrayBuffer);
 
     // 6. Let bufferByteLength be buffer.[[ArrayBufferByteLength]].
     auto buffer_byte_length = array_buffer.byte_length();
@@ -85,12 +79,12 @@ static ThrowCompletionOr<void> initialize_typed_array_from_array_buffer(GlobalOb
     if (length.is_undefined()) {
         // a. If bufferByteLength modulo elementSize ≠ 0, throw a RangeError exception.
         if (buffer_byte_length % element_size != 0)
-            return vm.throw_completion<RangeError>(global_object, ErrorType::TypedArrayInvalidBufferLength, typed_array.class_name(), element_size, buffer_byte_length);
+            return vm.throw_completion<RangeError>(ErrorType::TypedArrayInvalidBufferLength, typed_array.class_name(), element_size, buffer_byte_length);
 
         // b. Let newByteLength be bufferByteLength - offset.
         // c. If newByteLength < 0, throw a RangeError exception.
         if (offset > buffer_byte_length)
-            return vm.throw_completion<RangeError>(global_object, ErrorType::TypedArrayOutOfRangeByteOffset, offset, buffer_byte_length);
+            return vm.throw_completion<RangeError>(ErrorType::TypedArrayOutOfRangeByteOffset, offset, buffer_byte_length);
         new_byte_length = buffer_byte_length;
         new_byte_length -= offset;
     }
@@ -105,14 +99,14 @@ static ThrowCompletionOr<void> initialize_typed_array_from_array_buffer(GlobalOb
         new_byte_end += offset;
 
         if (new_byte_end.has_overflow())
-            return vm.throw_completion<RangeError>(global_object, ErrorType::InvalidLength, "typed array");
+            return vm.throw_completion<RangeError>(ErrorType::InvalidLength, "typed array");
 
         if (new_byte_end.value() > buffer_byte_length)
-            return vm.throw_completion<RangeError>(global_object, ErrorType::TypedArrayOutOfRangeByteOffsetOrLength, offset, new_byte_end.value(), buffer_byte_length);
+            return vm.throw_completion<RangeError>(ErrorType::TypedArrayOutOfRangeByteOffsetOrLength, offset, new_byte_end.value(), buffer_byte_length);
     }
 
     if (new_byte_length.has_overflow())
-        return vm.throw_completion<RangeError>(global_object, ErrorType::InvalidLength, "typed array");
+        return vm.throw_completion<RangeError>(ErrorType::InvalidLength, "typed array");
 
     // 9. Set O.[[ViewedArrayBuffer]] to buffer.
     typed_array.set_viewed_array_buffer(&array_buffer);
@@ -132,9 +126,9 @@ static ThrowCompletionOr<void> initialize_typed_array_from_array_buffer(GlobalOb
 
 // 23.2.5.1.2 InitializeTypedArrayFromTypedArray ( O, srcArray ), https://tc39.es/ecma262/#sec-initializetypedarrayfromtypedarray
 template<typename T>
-static ThrowCompletionOr<void> initialize_typed_array_from_typed_array(GlobalObject& global_object, TypedArray<T>& dest_array, TypedArrayBase& src_array)
+static ThrowCompletionOr<void> initialize_typed_array_from_typed_array(VM& vm, TypedArray<T>& dest_array, TypedArrayBase& src_array)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let srcData be srcArray.[[ViewedArrayBuffer]].
     auto* src_data = src_array.viewed_array_buffer();
@@ -142,7 +136,7 @@ static ThrowCompletionOr<void> initialize_typed_array_from_typed_array(GlobalObj
 
     // 2. If IsDetachedBuffer(srcData) is true, throw a TypeError exception.
     if (src_data->is_detached())
-        return vm.template throw_completion<TypeError>(global_object, ErrorType::DetachedArrayBuffer);
+        return vm.template throw_completion<TypeError>(ErrorType::DetachedArrayBuffer);
 
     // 3. Let elementType be TypedArrayElementType(O).
     // 4. Let elementSize be TypedArrayElementSize(O).
@@ -162,27 +156,27 @@ static ThrowCompletionOr<void> initialize_typed_array_from_typed_array(GlobalObj
     Checked<size_t> byte_length = element_size;
     byte_length *= element_length;
     if (byte_length.has_overflow())
-        return vm.template throw_completion<RangeError>(global_object, ErrorType::InvalidLength, "typed array");
+        return vm.template throw_completion<RangeError>(ErrorType::InvalidLength, "typed array");
 
     ArrayBuffer* data = nullptr;
 
     // 10. If elementType is the same as srcType, then
     if (dest_array.element_name() == src_array.element_name()) {
         // a. Let data be ? CloneArrayBuffer(srcData, srcByteOffset, byteLength).
-        data = TRY(clone_array_buffer(global_object, *src_data, src_byte_offset, byte_length.value()));
+        data = TRY(clone_array_buffer(vm, *src_data, src_byte_offset, byte_length.value()));
     }
     // 11. Else,
     else {
         // a. Let data be ? AllocateArrayBuffer(bufferConstructor, byteLength).
-        data = TRY(allocate_array_buffer(global_object, *global_object.array_buffer_constructor(), byte_length.value()));
+        data = TRY(allocate_array_buffer(vm, *realm.intrinsics().array_buffer_constructor(), byte_length.value()));
 
         // b. If IsDetachedBuffer(srcData) is true, throw a TypeError exception.
         if (src_data->is_detached())
-            return vm.template throw_completion<TypeError>(global_object, ErrorType::DetachedArrayBuffer);
+            return vm.template throw_completion<TypeError>(ErrorType::DetachedArrayBuffer);
 
         // c. If srcArray.[[ContentType]] ≠ O.[[ContentType]], throw a TypeError exception.
         if (src_array.content_type() != dest_array.content_type())
-            return vm.template throw_completion<TypeError>(global_object, ErrorType::TypedArrayContentTypeMismatch, dest_array.class_name(), src_array.class_name());
+            return vm.template throw_completion<TypeError>(ErrorType::TypedArrayContentTypeMismatch, dest_array.class_name(), src_array.class_name());
 
         // d. Let srcByteIndex be srcByteOffset.
         u64 src_byte_index = src_byte_offset;
@@ -227,26 +221,26 @@ static ThrowCompletionOr<void> initialize_typed_array_from_typed_array(GlobalObj
 
 // 23.2.5.1.6 AllocateTypedArrayBuffer ( O, length ), https://tc39.es/ecma262/#sec-allocatetypedarraybuffer
 template<typename T>
-static ThrowCompletionOr<void> allocate_typed_array_buffer(GlobalObject& global_object, TypedArray<T>& typed_array, size_t length)
+static ThrowCompletionOr<void> allocate_typed_array_buffer(VM& vm, TypedArray<T>& typed_array, size_t length)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // Enforce 2GB "Excessive Length" limit
     if (length > NumericLimits<i32>::max() / sizeof(T))
-        return vm.template throw_completion<RangeError>(global_object, ErrorType::InvalidLength, "typed array");
+        return vm.template throw_completion<RangeError>(ErrorType::InvalidLength, "typed array");
 
     // 1. Assert: O.[[ViewedArrayBuffer]] is undefined.
 
     // 2. Let elementSize be TypedArrayElementSize(O).
     auto element_size = typed_array.element_size();
     if (Checked<size_t>::multiplication_would_overflow(element_size, length))
-        return vm.template throw_completion<RangeError>(global_object, ErrorType::InvalidLength, "typed array");
+        return vm.template throw_completion<RangeError>(ErrorType::InvalidLength, "typed array");
 
     // 3. Let byteLength be elementSize × length.
     auto byte_length = element_size * length;
 
     // 4. Let data be ? AllocateArrayBuffer(%ArrayBuffer%, byteLength).
-    auto* data = TRY(allocate_array_buffer(global_object, *global_object.array_buffer_constructor(), byte_length));
+    auto* data = TRY(allocate_array_buffer(vm, *realm.intrinsics().array_buffer_constructor(), byte_length));
 
     // 5. Set O.[[ViewedArrayBuffer]] to data.
     typed_array.set_viewed_array_buffer(data);
@@ -266,13 +260,13 @@ static ThrowCompletionOr<void> allocate_typed_array_buffer(GlobalObject& global_
 
 // 23.2.5.1.5 InitializeTypedArrayFromArrayLike, https://tc39.es/ecma262/#sec-initializetypedarrayfromarraylike
 template<typename T>
-static ThrowCompletionOr<void> initialize_typed_array_from_array_like(GlobalObject& global_object, TypedArray<T>& typed_array, Object const& array_like)
+static ThrowCompletionOr<void> initialize_typed_array_from_array_like(VM& vm, TypedArray<T>& typed_array, Object const& array_like)
 {
     // 1. Let len be ? LengthOfArrayLike(arrayLike).
-    auto length = TRY(length_of_array_like(global_object, array_like));
+    auto length = TRY(length_of_array_like(vm, array_like));
 
     // 2. Perform ? AllocateTypedArrayBuffer(O, len).
-    TRY(allocate_typed_array_buffer(global_object, typed_array, length));
+    TRY(allocate_typed_array_buffer(vm, typed_array, length));
 
     // 3. Let k be 0.
     // 4. Repeat, while k < len,
@@ -293,13 +287,13 @@ static ThrowCompletionOr<void> initialize_typed_array_from_array_like(GlobalObje
 
 // 23.2.5.1.4 InitializeTypedArrayFromList, https://tc39.es/ecma262/#sec-initializetypedarrayfromlist
 template<typename T>
-static ThrowCompletionOr<void> initialize_typed_array_from_list(GlobalObject& global_object, TypedArray<T>& typed_array, MarkedVector<Value> const& list)
+static ThrowCompletionOr<void> initialize_typed_array_from_list(VM& vm, TypedArray<T>& typed_array, MarkedVector<Value> const& list)
 {
     // 1. Let len be the number of elements in values.
     auto length = list.size();
 
     // 2. Perform ? AllocateTypedArrayBuffer(O, len).
-    TRY(allocate_typed_array_buffer(global_object, typed_array, length));
+    TRY(allocate_typed_array_buffer(vm, typed_array, length));
 
     // 3. Let k be 0.
     // 4. Repeat, while k < len,
@@ -320,27 +314,25 @@ static ThrowCompletionOr<void> initialize_typed_array_from_list(GlobalObject& gl
 }
 
 // 23.2.4.2 TypedArrayCreate ( constructor, argumentList ), https://tc39.es/ecma262/#typedarray-create
-ThrowCompletionOr<TypedArrayBase*> typed_array_create(GlobalObject& global_object, FunctionObject& constructor, MarkedVector<Value> arguments)
+ThrowCompletionOr<TypedArrayBase*> typed_array_create(VM& vm, FunctionObject& constructor, MarkedVector<Value> arguments)
 {
-    auto& vm = global_object.vm();
-
     Optional<Value> first_argument;
     if (!arguments.is_empty())
         first_argument = arguments[0];
     // 1. Let newTypedArray be ? Construct(constructor, argumentList).
-    auto* new_typed_array = TRY(construct(global_object, constructor, move(arguments)));
+    auto* new_typed_array = TRY(construct(vm, constructor, move(arguments)));
 
     // 2. Perform ? ValidateTypedArray(newTypedArray).
     if (!new_typed_array->is_typed_array())
-        return vm.throw_completion<TypeError>(global_object, ErrorType::NotAnObjectOfType, "TypedArray");
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOfType, "TypedArray");
     auto& typed_array = *static_cast<TypedArrayBase*>(new_typed_array);
-    TRY(validate_typed_array(global_object, typed_array));
+    TRY(validate_typed_array(vm, typed_array));
 
     // 3. If argumentList is a List of a single Number, then
     if (first_argument.has_value() && first_argument->is_number()) {
         // a. If newTypedArray.[[ArrayLength]] < ℝ(argumentList[0]), throw a TypeError exception.
         if (typed_array.array_length() < first_argument->as_double())
-            return vm.throw_completion<TypeError>(global_object, ErrorType::InvalidLength, "typed array");
+            return vm.throw_completion<TypeError>(ErrorType::InvalidLength, "typed array");
     }
 
     // 4. Return newTypedArray.
@@ -348,14 +340,16 @@ ThrowCompletionOr<TypedArrayBase*> typed_array_create(GlobalObject& global_objec
 }
 
 // 1.2.1.1 TypedArrayCreateSameType ( exemplar, argumentList ) https://tc39.es/proposal-change-array-by-copy/#typedarray-create-same-type
-ThrowCompletionOr<TypedArrayBase*> typed_array_create_same_type(GlobalObject& global_object, TypedArrayBase const& exemplar, MarkedVector<Value> arguments)
+ThrowCompletionOr<TypedArrayBase*> typed_array_create_same_type(VM& vm, TypedArrayBase const& exemplar, MarkedVector<Value> arguments)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Assert: exemplar is an Object that has [[TypedArrayName]] and [[ContentType]] internal slots.
     // 2. Let constructor be the intrinsic object listed in column one of Table 63 (points to Table 72) for exemplar.[[TypedArrayName]].
-    auto* constructor = (global_object.*exemplar.intrinsic_constructor())();
+    auto* constructor = (realm.intrinsics().*exemplar.intrinsic_constructor())();
 
     // 3. Let result be ? TypedArrayCreate(constructor, argumentList).
-    auto* result = TRY(typed_array_create(global_object, *constructor, move(arguments)));
+    auto* result = TRY(typed_array_create(vm, *constructor, move(arguments)));
 
     // 4. Assert: result has [[TypedArrayName]] and [[ContentType]] internal slots.
     // 5. Assert: result.[[ContentType]] is exemplar.[[ContentType]].
@@ -364,21 +358,20 @@ ThrowCompletionOr<TypedArrayBase*> typed_array_create_same_type(GlobalObject& gl
 }
 
 // 1.2.2.1.2 CompareTypedArrayElements ( x, y, comparefn, buffer ), https://tc39.es/proposal-change-array-by-copy/#sec-comparetypedarrayelements
-ThrowCompletionOr<double> compare_typed_array_elements(GlobalObject& global_object, Value x, Value y, FunctionObject* comparefn, ArrayBuffer& buffer)
+ThrowCompletionOr<double> compare_typed_array_elements(VM& vm, Value x, Value y, FunctionObject* comparefn, ArrayBuffer& buffer)
 {
-    auto& vm = global_object.vm();
     // 1. Assert: Both Type(x) and Type(y) are Number or both are BigInt.
     VERIFY(((x.is_number() && y.is_number()) || (x.is_bigint() && y.is_bigint())));
 
     // 2. If comparefn is not undefined, then
     if (comparefn != nullptr) {
         // a. Let v be ? ToNumber(? Call(comparefn, undefined, « x, y »)).
-        auto value = TRY(call(global_object, comparefn, js_undefined(), x, y));
-        auto value_number = TRY(value.to_number(global_object));
+        auto value = TRY(call(vm, comparefn, js_undefined(), x, y));
+        auto value_number = TRY(value.to_number(vm));
 
         // b. If IsDetachedBuffer(buffer) is true, throw a TypeError exception.
         if (buffer.is_detached())
-            return vm.throw_completion<TypeError>(global_object, ErrorType::DetachedArrayBuffer);
+            return vm.throw_completion<TypeError>(ErrorType::DetachedArrayBuffer);
 
         //  c. If v is NaN, return +0𝔽.
         if (value_number.is_nan())
@@ -430,129 +423,137 @@ void TypedArrayBase::visit_edges(Visitor& visitor)
     visitor.visit(m_viewed_array_buffer);
 }
 
-#define JS_DEFINE_TYPED_ARRAY(ClassName, snake_name, PrototypeName, ConstructorName, Type)                                             \
-    ThrowCompletionOr<ClassName*> ClassName::create(GlobalObject& global_object, u32 length, FunctionObject& new_target)               \
-    {                                                                                                                                  \
-        auto* prototype = TRY(get_prototype_from_constructor(global_object, new_target, &GlobalObject::snake_name##_prototype));       \
-        auto* array_buffer = TRY(ArrayBuffer::create(global_object, length * sizeof(UnderlyingBufferDataType)));                       \
-        return global_object.heap().allocate<ClassName>(global_object, *prototype, length, *array_buffer);                             \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    ThrowCompletionOr<ClassName*> ClassName::create(GlobalObject& global_object, u32 length)                                           \
-    {                                                                                                                                  \
-        auto* array_buffer = TRY(ArrayBuffer::create(global_object, length * sizeof(UnderlyingBufferDataType)));                       \
-        return create(global_object, length, *array_buffer);                                                                           \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    ClassName* ClassName::create(GlobalObject& global_object, u32 length, ArrayBuffer& array_buffer)                                   \
-    {                                                                                                                                  \
-        return global_object.heap().allocate<ClassName>(global_object, *global_object.snake_name##_prototype(), length, array_buffer); \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    ClassName::ClassName(Object& prototype, u32 length, ArrayBuffer& array_buffer)                                                     \
-        : TypedArray(prototype,                                                                                                        \
-            reinterpret_cast<TypedArrayBase::IntrinsicConstructor>(&GlobalObject::snake_name##_constructor), length, array_buffer)     \
-    {                                                                                                                                  \
-        if constexpr (#ClassName##sv.is_one_of("BigInt64Array", "BigUint64Array"))                                                     \
-            m_content_type = ContentType::BigInt;                                                                                      \
-        else                                                                                                                           \
-            m_content_type = ContentType::Number;                                                                                      \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    ClassName::~ClassName() { }                                                                                                        \
-                                                                                                                                       \
-    FlyString const& ClassName::element_name() const                                                                                   \
-    {                                                                                                                                  \
-        return vm().names.ClassName.as_string();                                                                                       \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    PrototypeName::PrototypeName(GlobalObject& global_object)                                                                          \
-        : Object(*global_object.typed_array_prototype())                                                                               \
-    {                                                                                                                                  \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    PrototypeName::~PrototypeName() { }                                                                                                \
-                                                                                                                                       \
-    void PrototypeName::initialize(GlobalObject& global_object)                                                                        \
-    {                                                                                                                                  \
-        auto& vm = this->vm();                                                                                                         \
-        Object::initialize(global_object);                                                                                             \
-        define_direct_property(vm.names.BYTES_PER_ELEMENT, Value((i32)sizeof(Type)), 0);                                               \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    ConstructorName::ConstructorName(GlobalObject& global_object)                                                                      \
-        : TypedArrayConstructor(vm().names.ClassName.as_string(), *global_object.typed_array_constructor())                            \
-    {                                                                                                                                  \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    ConstructorName::~ConstructorName() { }                                                                                            \
-                                                                                                                                       \
-    void ConstructorName::initialize(GlobalObject& global_object)                                                                      \
-    {                                                                                                                                  \
-        auto& vm = this->vm();                                                                                                         \
-        NativeFunction::initialize(global_object);                                                                                     \
-                                                                                                                                       \
-        /* 23.2.6.2 TypedArray.prototype, https://tc39.es/ecma262/#sec-typedarray.prototype */                                         \
-        define_direct_property(vm.names.prototype, global_object.snake_name##_prototype(), 0);                                         \
-                                                                                                                                       \
-        /* 23.2.6.1 TypedArray.BYTES_PER_ELEMENT, https://tc39.es/ecma262/#sec-typedarray.bytes_per_element */                         \
-        define_direct_property(vm.names.BYTES_PER_ELEMENT, Value((i32)sizeof(Type)), 0);                                               \
-                                                                                                                                       \
-        define_direct_property(vm.names.length, Value(3), Attribute::Configurable);                                                    \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    /* 23.2.5.1 TypedArray ( ...args ), https://tc39.es/ecma262/#sec-typedarray */                                                     \
-    ThrowCompletionOr<Value> ConstructorName::call()                                                                                   \
-    {                                                                                                                                  \
-        auto& vm = this->vm();                                                                                                         \
-        return vm.throw_completion<TypeError>(global_object(), ErrorType::ConstructorWithoutNew, vm.names.ClassName);                  \
-    }                                                                                                                                  \
-                                                                                                                                       \
-    /* 23.2.5.1 TypedArray ( ...args ), https://tc39.es/ecma262/#sec-typedarray */                                                     \
-    ThrowCompletionOr<Object*> ConstructorName::construct(FunctionObject& new_target)                                                  \
-    {                                                                                                                                  \
-        auto& vm = this->vm();                                                                                                         \
-        if (vm.argument_count() == 0)                                                                                                  \
-            return TRY(ClassName::create(global_object(), 0, new_target));                                                             \
-                                                                                                                                       \
-        auto first_argument = vm.argument(0);                                                                                          \
-        if (first_argument.is_object()) {                                                                                              \
-            auto* typed_array = TRY(ClassName::create(global_object(), 0, new_target));                                                \
-            if (first_argument.as_object().is_typed_array()) {                                                                         \
-                auto& arg_typed_array = static_cast<TypedArrayBase&>(first_argument.as_object());                                      \
-                TRY(initialize_typed_array_from_typed_array(global_object(), *typed_array, arg_typed_array));                          \
-            } else if (is<ArrayBuffer>(first_argument.as_object())) {                                                                  \
-                auto& array_buffer = static_cast<ArrayBuffer&>(first_argument.as_object());                                            \
-                TRY(initialize_typed_array_from_array_buffer(global_object(), *typed_array, array_buffer,                              \
-                    vm.argument(1), vm.argument(2)));                                                                                  \
-            } else {                                                                                                                   \
-                auto iterator = TRY(first_argument.get_method(global_object(), *vm.well_known_symbol_iterator()));                     \
-                if (iterator) {                                                                                                        \
-                    auto values = TRY(iterable_to_list(global_object(), first_argument, iterator));                                    \
-                    TRY(initialize_typed_array_from_list(global_object(), *typed_array, values));                                      \
-                } else {                                                                                                               \
-                    TRY(initialize_typed_array_from_array_like(global_object(), *typed_array, first_argument.as_object()));            \
-                }                                                                                                                      \
-            }                                                                                                                          \
-            return typed_array;                                                                                                        \
-        }                                                                                                                              \
-                                                                                                                                       \
-        auto array_length_or_error = first_argument.to_index(global_object());                                                         \
-        if (array_length_or_error.is_error()) {                                                                                        \
-            auto error = array_length_or_error.release_error();                                                                        \
-            if (error.value()->is_object() && is<RangeError>(error.value()->as_object())) {                                            \
-                /* Re-throw more specific RangeError */                                                                                \
-                return vm.throw_completion<RangeError>(global_object(), ErrorType::InvalidLength, "typed array");                      \
-            }                                                                                                                          \
-            return error;                                                                                                              \
-        }                                                                                                                              \
-        auto array_length = array_length_or_error.release_value();                                                                     \
-        if (array_length > NumericLimits<i32>::max() / sizeof(Type))                                                                   \
-            return vm.throw_completion<RangeError>(global_object(), ErrorType::InvalidLength, "typed array");                          \
-        /* FIXME: What is the best/correct behavior here? */                                                                           \
-        if (Checked<u32>::multiplication_would_overflow(array_length, sizeof(Type)))                                                   \
-            return vm.throw_completion<RangeError>(global_object(), ErrorType::InvalidLength, "typed array");                          \
-        return TRY(ClassName::create(global_object(), array_length, new_target));                                                      \
+#define JS_DEFINE_TYPED_ARRAY(ClassName, snake_name, PrototypeName, ConstructorName, Type)                                       \
+    ThrowCompletionOr<ClassName*> ClassName::create(Realm& realm, u32 length, FunctionObject& new_target)                        \
+    {                                                                                                                            \
+        auto* prototype = TRY(get_prototype_from_constructor(realm.vm(), new_target, &Intrinsics::snake_name##_prototype));      \
+        auto* array_buffer = TRY(ArrayBuffer::create(realm, length * sizeof(UnderlyingBufferDataType)));                         \
+        return realm.heap().allocate<ClassName>(realm, *prototype, length, *array_buffer);                                       \
+    }                                                                                                                            \
+                                                                                                                                 \
+    ThrowCompletionOr<ClassName*> ClassName::create(Realm& realm, u32 length)                                                    \
+    {                                                                                                                            \
+        auto* array_buffer = TRY(ArrayBuffer::create(realm, length * sizeof(UnderlyingBufferDataType)));                         \
+        return create(realm, length, *array_buffer);                                                                             \
+    }                                                                                                                            \
+                                                                                                                                 \
+    ClassName* ClassName::create(Realm& realm, u32 length, ArrayBuffer& array_buffer)                                            \
+    {                                                                                                                            \
+        return realm.heap().allocate<ClassName>(realm, *realm.intrinsics().snake_name##_prototype(), length, array_buffer);      \
+    }                                                                                                                            \
+                                                                                                                                 \
+    ClassName::ClassName(Object& prototype, u32 length, ArrayBuffer& array_buffer)                                               \
+        : TypedArray(prototype,                                                                                                  \
+            reinterpret_cast<TypedArrayBase::IntrinsicConstructor>(&Intrinsics::snake_name##_constructor), length, array_buffer) \
+    {                                                                                                                            \
+        if constexpr (#ClassName##sv.is_one_of("BigInt64Array", "BigUint64Array"))                                               \
+            m_content_type = ContentType::BigInt;                                                                                \
+        else                                                                                                                     \
+            m_content_type = ContentType::Number;                                                                                \
+    }                                                                                                                            \
+                                                                                                                                 \
+    ClassName::~ClassName()                                                                                                      \
+    {                                                                                                                            \
+    }                                                                                                                            \
+                                                                                                                                 \
+    FlyString const& ClassName::element_name() const                                                                             \
+    {                                                                                                                            \
+        return vm().names.ClassName.as_string();                                                                                 \
+    }                                                                                                                            \
+                                                                                                                                 \
+    PrototypeName::PrototypeName(Realm& realm)                                                                                   \
+        : Object(*realm.intrinsics().typed_array_prototype())                                                                    \
+    {                                                                                                                            \
+    }                                                                                                                            \
+                                                                                                                                 \
+    PrototypeName::~PrototypeName()                                                                                              \
+    {                                                                                                                            \
+    }                                                                                                                            \
+                                                                                                                                 \
+    void PrototypeName::initialize(Realm& realm)                                                                                 \
+    {                                                                                                                            \
+        auto& vm = this->vm();                                                                                                   \
+        Object::initialize(realm);                                                                                               \
+        define_direct_property(vm.names.BYTES_PER_ELEMENT, Value((i32)sizeof(Type)), 0);                                         \
+    }                                                                                                                            \
+                                                                                                                                 \
+    ConstructorName::ConstructorName(Realm& realm)                                                                               \
+        : TypedArrayConstructor(vm().names.ClassName.as_string(), *realm.intrinsics().typed_array_constructor())                 \
+    {                                                                                                                            \
+    }                                                                                                                            \
+                                                                                                                                 \
+    ConstructorName::~ConstructorName()                                                                                          \
+    {                                                                                                                            \
+    }                                                                                                                            \
+                                                                                                                                 \
+    void ConstructorName::initialize(Realm& realm)                                                                               \
+    {                                                                                                                            \
+        auto& vm = this->vm();                                                                                                   \
+        NativeFunction::initialize(realm);                                                                                       \
+                                                                                                                                 \
+        /* 23.2.6.2 TypedArray.prototype, https://tc39.es/ecma262/#sec-typedarray.prototype */                                   \
+        define_direct_property(vm.names.prototype, realm.intrinsics().snake_name##_prototype(), 0);                              \
+                                                                                                                                 \
+        /* 23.2.6.1 TypedArray.BYTES_PER_ELEMENT, https://tc39.es/ecma262/#sec-typedarray.bytes_per_element */                   \
+        define_direct_property(vm.names.BYTES_PER_ELEMENT, Value((i32)sizeof(Type)), 0);                                         \
+                                                                                                                                 \
+        define_direct_property(vm.names.length, Value(3), Attribute::Configurable);                                              \
+    }                                                                                                                            \
+                                                                                                                                 \
+    /* 23.2.5.1 TypedArray ( ...args ), https://tc39.es/ecma262/#sec-typedarray */                                               \
+    ThrowCompletionOr<Value> ConstructorName::call()                                                                             \
+    {                                                                                                                            \
+        auto& vm = this->vm();                                                                                                   \
+        return vm.throw_completion<TypeError>(ErrorType::ConstructorWithoutNew, vm.names.ClassName);                             \
+    }                                                                                                                            \
+                                                                                                                                 \
+    /* 23.2.5.1 TypedArray ( ...args ), https://tc39.es/ecma262/#sec-typedarray */                                               \
+    ThrowCompletionOr<Object*> ConstructorName::construct(FunctionObject& new_target)                                            \
+    {                                                                                                                            \
+        auto& vm = this->vm();                                                                                                   \
+        auto& realm = *vm.current_realm();                                                                                       \
+                                                                                                                                 \
+        if (vm.argument_count() == 0)                                                                                            \
+            return TRY(ClassName::create(realm, 0, new_target));                                                                 \
+                                                                                                                                 \
+        auto first_argument = vm.argument(0);                                                                                    \
+        if (first_argument.is_object()) {                                                                                        \
+            auto* typed_array = TRY(ClassName::create(realm, 0, new_target));                                                    \
+            if (first_argument.as_object().is_typed_array()) {                                                                   \
+                auto& arg_typed_array = static_cast<TypedArrayBase&>(first_argument.as_object());                                \
+                TRY(initialize_typed_array_from_typed_array(vm, *typed_array, arg_typed_array));                                 \
+            } else if (is<ArrayBuffer>(first_argument.as_object())) {                                                            \
+                auto& array_buffer = static_cast<ArrayBuffer&>(first_argument.as_object());                                      \
+                TRY(initialize_typed_array_from_array_buffer(vm, *typed_array, array_buffer,                                     \
+                    vm.argument(1), vm.argument(2)));                                                                            \
+            } else {                                                                                                             \
+                auto iterator = TRY(first_argument.get_method(vm, *vm.well_known_symbol_iterator()));                            \
+                if (iterator) {                                                                                                  \
+                    auto values = TRY(iterable_to_list(vm, first_argument, iterator));                                           \
+                    TRY(initialize_typed_array_from_list(vm, *typed_array, values));                                             \
+                } else {                                                                                                         \
+                    TRY(initialize_typed_array_from_array_like(vm, *typed_array, first_argument.as_object()));                   \
+                }                                                                                                                \
+            }                                                                                                                    \
+            return typed_array;                                                                                                  \
+        }                                                                                                                        \
+                                                                                                                                 \
+        auto array_length_or_error = first_argument.to_index(vm);                                                                \
+        if (array_length_or_error.is_error()) {                                                                                  \
+            auto error = array_length_or_error.release_error();                                                                  \
+            if (error.value()->is_object() && is<RangeError>(error.value()->as_object())) {                                      \
+                /* Re-throw more specific RangeError */                                                                          \
+                return vm.throw_completion<RangeError>(ErrorType::InvalidLength, "typed array");                                 \
+            }                                                                                                                    \
+            return error;                                                                                                        \
+        }                                                                                                                        \
+        auto array_length = array_length_or_error.release_value();                                                               \
+        if (array_length > NumericLimits<i32>::max() / sizeof(Type))                                                             \
+            return vm.throw_completion<RangeError>(ErrorType::InvalidLength, "typed array");                                     \
+        /* FIXME: What is the best/correct behavior here? */                                                                     \
+        if (Checked<u32>::multiplication_would_overflow(array_length, sizeof(Type)))                                             \
+            return vm.throw_completion<RangeError>(ErrorType::InvalidLength, "typed array");                                     \
+        return TRY(ClassName::create(realm, array_length, new_target));                                                          \
     }
 
 #undef __JS_ENUMERATE

@@ -9,8 +9,8 @@
 
 namespace Web::Bindings {
 
-WebAssemblyTableObject::WebAssemblyTableObject(JS::GlobalObject& global_object, Wasm::TableAddress address)
-    : Object(static_cast<WindowObject&>(global_object).ensure_web_prototype<WebAssemblyTablePrototype>("WebAssemblyTablePrototype"))
+WebAssemblyTableObject::WebAssemblyTableObject(JS::Realm& realm, Wasm::TableAddress address)
+    : Object(verify_cast<HTML::Window>(realm.global_object()).ensure_web_prototype<WebAssemblyTablePrototype>("WebAssemblyTablePrototype"))
     , m_address(address)
 {
 }

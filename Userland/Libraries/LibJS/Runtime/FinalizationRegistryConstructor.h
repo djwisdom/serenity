@@ -14,14 +14,15 @@ class FinalizationRegistryConstructor final : public NativeFunction {
     JS_OBJECT(FinalizationRegistryConstructor, NativeFunction);
 
 public:
-    explicit FinalizationRegistryConstructor(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~FinalizationRegistryConstructor() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
     virtual ThrowCompletionOr<Object*> construct(FunctionObject&) override;
 
 private:
+    explicit FinalizationRegistryConstructor(Realm&);
+
     virtual bool has_constructor() const override { return true; }
 };
 
