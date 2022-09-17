@@ -156,10 +156,10 @@ set(Lagom_INSTALL_CMAKEDIR "${CMAKE_INSTALL_DATADIR}/${package}"
     CACHE PATH "CMake package config location relative to the install prefix")
 mark_as_advanced(Lagom_INSTALL_CMAKEDIR)
 
-configure_file("${SERENITY_PROJECT_ROOT}/Meta/CMake/lagom-install-config.cmake.in" "${package}Config.cmake" @ONLY)
 install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/${package}Config.cmake"
+    FILES "${SERENITY_PROJECT_ROOT}/Meta/CMake/lagom-install-config.cmake"
     DESTINATION "${Lagom_INSTALL_CMAKEDIR}"
+    RENAME "${package}Config.cmake"
     COMPONENT Lagom_Development
 )
 
@@ -759,6 +759,7 @@ if (BUILD_LAGOM)
         # Extra tests from Tests/LibJS
         lagom_test(../../Tests/LibJS/test-invalid-unicode-js.cpp LIBS LibJS)
         lagom_test(../../Tests/LibJS/test-bytecode-js.cpp LIBS LibJS)
+        lagom_test(../../Tests/LibJS/test-value-js.cpp LIBS LibJS)
 
         # Spreadsheet
         add_executable(test-spreadsheet_lagom

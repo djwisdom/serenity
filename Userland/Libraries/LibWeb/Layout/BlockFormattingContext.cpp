@@ -318,10 +318,13 @@ float BlockFormattingContext::compute_theoretical_height(LayoutState const& stat
     if (is<ReplacedBox>(box)) {
         height = compute_height_for_replaced_element(state, verify_cast<ReplacedBox>(box));
     } else {
-        if (box.computed_values().height().is_auto())
+        // NOTE: We treat percentage heights as "auto" if the containing block has indefinite height.
+        if (box.computed_values().height().is_auto()
+            || (box.computed_values().height().is_percentage() && !state.get(*box.containing_block()).has_definite_height())) {
             height = compute_auto_height_for_block_level_element(state, box);
-        else
+        } else {
             height = computed_values.height().resolved(box, containing_block_height).to_px(box);
+        }
     }
 
     auto specified_max_height = computed_values.max_height().resolved(box, containing_block_height).resolved(box);
@@ -663,13 +666,13 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
             } else {
                 // We ran out of horizontal space on this "float line", and need to break.
                 float_to_edge();
-                float lowest_border_edge = 0;
+                float lowest_margin_edge = 0;
                 for (auto const& box : side_data.current_boxes) {
                     auto const& box_state = m_state.get(box.box);
-                    lowest_border_edge = max(lowest_border_edge, box_state.border_box_height());
+                    lowest_margin_edge = max(lowest_margin_edge, box_state.margin_box_height());
                 }
 
-                side_data.y_offset += lowest_border_edge;
+                side_data.y_offset += lowest_margin_edge;
 
                 // Also, forget all previous boxes floated to this side while since they're no longer relevant.
                 side_data.clear();

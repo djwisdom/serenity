@@ -164,7 +164,7 @@ static Action* action_for_shortcut(Window& window, Shortcut const& shortcut)
     }
 
     // NOTE: Application-global shortcuts are ignored while a blocking modal window is up.
-    if (!window.is_blocking()) {
+    if (!window.is_blocking() && !window.is_capturing_input()) {
         if (auto* action = Application::the()->action_for_shortcut(shortcut)) {
             dbgln_if(KEYBOARD_SHORTCUTS_DEBUG, "  > Asked application, got action: {} {} (enabled: {}, shortcut: {}, alt-shortcut: {})", action, action->text(), action->is_enabled(), action->shortcut().to_string(), action->alternate_shortcut().to_string());
             return action;
@@ -193,9 +193,8 @@ void ConnectionToWindowServer::key_down(i32 window_id, u32 code_point, u32 key, 
     }
 
     bool focused_widget_accepts_emoji_input = window->focused_widget() && window->focused_widget()->accepts_emoji_input();
-    if (focused_widget_accepts_emoji_input && (modifiers == (Mod_Ctrl | Mod_Alt)) && key == Key_Space) {
+    if (!window->blocks_emoji_input() && focused_widget_accepts_emoji_input && (modifiers == (Mod_Ctrl | Mod_Alt)) && key == Key_Space) {
         auto emoji_input_dialog = EmojiInputDialog::construct(window);
-        emoji_input_dialog->set_window_mode(GUI::WindowMode::Passive);
         if (emoji_input_dialog->exec() != EmojiInputDialog::ExecResult::OK)
             return;
         key_event->m_key = Key_Invalid;
@@ -207,14 +206,14 @@ void ConnectionToWindowServer::key_down(i32 window_id, u32 code_point, u32 key, 
         key_event->m_code_point = emoji_code_point;
     }
 
-    bool accepts_command_palette = true;
-    if (window->focused_widget())
+    bool accepts_command_palette = !window->blocks_command_palette();
+    if (accepts_command_palette && window->focused_widget())
         accepts_command_palette = window->focused_widget()->accepts_command_palette();
 
     // FIXME: This shortcut should be configurable.
     if (accepts_command_palette && !m_in_command_palette && modifiers == (Mod_Ctrl | Mod_Shift) && key == Key_A) {
         auto command_palette = CommandPalette::construct(*window);
-        command_palette->set_window_mode(GUI::WindowMode::Passive);
+        command_palette->set_window_mode(GUI::WindowMode::CaptureInput);
         TemporaryChange change { m_in_command_palette, true };
         if (command_palette->exec() != GUI::Dialog::ExecResult::OK)
             return;
