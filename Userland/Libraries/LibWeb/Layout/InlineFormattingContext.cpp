@@ -90,21 +90,21 @@ void InlineFormattingContext::dimension_box_on_line(Box const& box, LayoutMode l
     auto& box_state = m_state.get_mutable(box);
     auto const& computed_values = box.computed_values();
 
-    box_state.margin_left = computed_values.margin().left.resolved(box, width_of_containing_block).to_px(box);
+    box_state.margin_left = computed_values.margin().left().resolved(box, width_of_containing_block).to_px(box);
     box_state.border_left = computed_values.border_left().width;
-    box_state.padding_left = computed_values.padding().left.resolved(box, width_of_containing_block).to_px(box);
+    box_state.padding_left = computed_values.padding().left().resolved(box, width_of_containing_block).to_px(box);
 
-    box_state.margin_right = computed_values.margin().right.resolved(box, width_of_containing_block).to_px(box);
+    box_state.margin_right = computed_values.margin().right().resolved(box, width_of_containing_block).to_px(box);
     box_state.border_right = computed_values.border_right().width;
-    box_state.padding_right = computed_values.padding().right.resolved(box, width_of_containing_block).to_px(box);
+    box_state.padding_right = computed_values.padding().right().resolved(box, width_of_containing_block).to_px(box);
 
-    box_state.margin_top = computed_values.margin().top.resolved(box, width_of_containing_block).to_px(box);
+    box_state.margin_top = computed_values.margin().top().resolved(box, width_of_containing_block).to_px(box);
     box_state.border_top = computed_values.border_top().width;
-    box_state.padding_top = computed_values.padding().top.resolved(box, width_of_containing_block).to_px(box);
+    box_state.padding_top = computed_values.padding().top().resolved(box, width_of_containing_block).to_px(box);
 
-    box_state.padding_bottom = computed_values.padding().bottom.resolved(box, width_of_containing_block).to_px(box);
+    box_state.padding_bottom = computed_values.padding().bottom().resolved(box, width_of_containing_block).to_px(box);
     box_state.border_bottom = computed_values.border_bottom().width;
-    box_state.margin_bottom = computed_values.margin().bottom.resolved(box, width_of_containing_block).to_px(box);
+    box_state.margin_bottom = computed_values.margin().bottom().resolved(box, width_of_containing_block).to_px(box);
 
     if (is<ReplacedBox>(box)) {
         auto& replaced = verify_cast<ReplacedBox>(box);
@@ -295,6 +295,33 @@ void InlineFormattingContext::generate_line_boxes(LayoutMode layout_mode)
             apply_justification_to_fragments(text_justify, line_box, is_last_line);
         }
     }
+}
+
+bool InlineFormattingContext::any_floats_intrude_at_y(float y) const
+{
+    auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(containing_block(), parent().root(), m_state);
+    float y_in_root = box_in_root_rect.y() + y;
+    auto space = parent().space_used_by_floats(y_in_root);
+    return space.left > 0 || space.right > 0;
+}
+
+bool InlineFormattingContext::can_fit_new_line_at_y(float y) const
+{
+    auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(containing_block(), parent().root(), m_state);
+    float y_in_root = box_in_root_rect.y() + y;
+    auto space_top = parent().space_used_by_floats(y_in_root);
+    auto space_bottom = parent().space_used_by_floats(y_in_root + containing_block().line_height() - 1);
+
+    [[maybe_unused]] auto top_left_edge = space_top.left;
+    [[maybe_unused]] auto top_right_edge = m_effective_containing_block_width - space_top.right;
+    [[maybe_unused]] auto bottom_left_edge = space_bottom.left;
+    [[maybe_unused]] auto bottom_right_edge = m_effective_containing_block_width - space_bottom.right;
+
+    if (top_left_edge > bottom_right_edge)
+        return false;
+    if (bottom_left_edge > top_right_edge)
+        return false;
+    return true;
 }
 
 }

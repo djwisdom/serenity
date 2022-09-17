@@ -695,7 +695,7 @@ Parser::ParseErrorOr<Optional<Selector::SimpleSelector>> Parser::parse_simple_se
             }
             return Selector::SimpleSelector {
                 .type = Selector::SimpleSelector::Type::Class,
-                .value = FlyString { class_name_value.token().ident() }
+                .value = Selector::SimpleSelector::Name { class_name_value.token().ident() }
             };
         }
         case '>':
@@ -719,13 +719,13 @@ Parser::ParseErrorOr<Optional<Selector::SimpleSelector>> Parser::parse_simple_se
         }
         return Selector::SimpleSelector {
             .type = Selector::SimpleSelector::Type::Id,
-            .value = FlyString { first_value.token().hash_value() }
+            .value = Selector::SimpleSelector::Name { first_value.token().hash_value() }
         };
     }
     if (first_value.is(Token::Type::Ident)) {
         return Selector::SimpleSelector {
             .type = Selector::SimpleSelector::Type::TagName,
-            .value = FlyString { first_value.token().ident() }
+            .value = Selector::SimpleSelector::Name { first_value.token().ident() }
         };
     }
     if (first_value.is_block() && first_value.block().is_square())
@@ -2341,7 +2341,10 @@ Optional<AK::URL> Parser::parse_url_function(ComponentValue const& component_val
                 if (data_url.data_mime_type().starts_with("image"sv, CaseSensitivity::CaseInsensitive))
                     return data_url;
                 break;
-
+            case AllowedDataUrlType::Font:
+                if (data_url.data_mime_type().starts_with("font"sv, CaseSensitivity::CaseInsensitive))
+                    return data_url;
+                break;
             default:
                 break;
             }
@@ -2477,7 +2480,7 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
         if (side_a.has_value() && !side_b.has_value()) {
             gradient_direction = *side_a;
         } else if (side_a.has_value() && side_b.has_value()) {
-            // Covert two sides to a corner
+            // Convert two sides to a corner
             if (to_underlying(*side_b) < to_underlying(*side_a))
                 swap(side_a, side_b);
             if (side_a == SideOrCorner::Top && side_b == SideOrCorner::Left)
@@ -2605,7 +2608,7 @@ CSSRule* Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
         if (has_ignored_vendor_prefix(rule->at_rule_name())) {
             return {};
         } else if (rule->at_rule_name().equals_ignoring_case("font-face"sv)) {
-            if (rule->prelude().is_empty() || !rule->block() || !rule->block()->is_curly()) {
+            if (!rule->block() || !rule->block()->is_curly()) {
                 dbgln_if(CSS_PARSER_DEBUG, "@font-face rule is malformed.");
                 return {};
             }
@@ -4406,6 +4409,188 @@ RefPtr<StyleValue> Parser::parse_content_value(Vector<ComponentValue> const& com
     return ContentStyleValue::create(StyleValueList::create(move(content_values), StyleValueList::Separator::Space), move(alt_text));
 }
 
+RefPtr<StyleValue> Parser::parse_filter_value_list_value(Vector<ComponentValue> const& component_values)
+{
+    if (component_values.size() == 1 && component_values.first().is(Token::Type::Ident)) {
+        auto ident = parse_identifier_value(component_values.first());
+        if (ident && ident->to_identifier() == ValueID::None)
+            return ident;
+    }
+
+    TokenStream tokens { component_values };
+
+    // FIXME: <url>s are ignored for now
+    // <filter-value-list> = [ <filter-function> | <url> ]+
+
+    enum class FilterToken {
+        // Color filters:
+        Brightness,
+        Contrast,
+        Grayscale,
+        Invert,
+        Opacity,
+        Saturate,
+        Sepia,
+        // Special filters:
+        Blur,
+        DropShadow,
+        HueRotate
+    };
+
+    auto filter_token_to_operation = [&](auto filter) {
+        VERIFY(to_underlying(filter) < to_underlying(FilterToken::Blur));
+        return static_cast<Filter::Color::Operation>(filter);
+    };
+
+    auto parse_number_percentage = [&](auto& token) -> Optional<NumberPercentage> {
+        if (token.is(Token::Type::Percentage))
+            return NumberPercentage(Percentage(token.token().percentage()));
+        if (token.is(Token::Type::Number))
+            return NumberPercentage(Number(Number::Type::Number, token.token().number_value()));
+        return {};
+    };
+
+    auto parse_filter_function_name = [&](auto name) -> Optional<FilterToken> {
+        if (name.equals_ignoring_case("blur"sv))
+            return FilterToken::Blur;
+        if (name.equals_ignoring_case("brightness"sv))
+            return FilterToken::Brightness;
+        if (name.equals_ignoring_case("contrast"sv))
+            return FilterToken::Contrast;
+        if (name.equals_ignoring_case("drop-shadow"sv))
+            return FilterToken::DropShadow;
+        if (name.equals_ignoring_case("grayscale"sv))
+            return FilterToken::Grayscale;
+        if (name.equals_ignoring_case("hue-rotate"sv))
+            return FilterToken::HueRotate;
+        if (name.equals_ignoring_case("invert"sv))
+            return FilterToken::Invert;
+        if (name.equals_ignoring_case("opacity"sv))
+            return FilterToken::Opacity;
+        if (name.equals_ignoring_case("saturate"sv))
+            return FilterToken::Saturate;
+        if (name.equals_ignoring_case("sepia"sv))
+            return FilterToken::Sepia;
+        return {};
+    };
+
+    auto parse_filter_function = [&](auto filter_token, auto function_values) -> Optional<FilterFunction> {
+        TokenStream tokens { function_values };
+        tokens.skip_whitespace();
+
+        auto if_no_more_tokens_return = [&](auto filter) -> Optional<FilterFunction> {
+            tokens.skip_whitespace();
+            if (tokens.has_next_token())
+                return {};
+            return filter;
+        };
+
+        if (filter_token == FilterToken::Blur) {
+            // blur( <length>? )
+            if (!tokens.has_next_token())
+                return Filter::Blur {};
+            auto blur_radius = parse_length(tokens.next_token());
+            if (!blur_radius.has_value())
+                return {};
+            return if_no_more_tokens_return(Filter::Blur { *blur_radius });
+        } else if (filter_token == FilterToken::DropShadow) {
+            if (!tokens.has_next_token())
+                return {};
+            auto next_token = [&]() -> auto&
+            {
+                auto& token = tokens.next_token();
+                tokens.skip_whitespace();
+                return token;
+            };
+            // drop-shadow( [ <color>? && <length>{2,3} ] )
+            // Note: The following code is a little awkward to allow the color to be before or after the lengths.
+            auto& first_param = next_token();
+            Optional<Length> maybe_radius = {};
+            auto maybe_color = parse_color(first_param);
+            auto x_offset = parse_length(maybe_color.has_value() ? next_token() : first_param);
+            if (!x_offset.has_value() || !tokens.has_next_token()) {
+                return {};
+            }
+            auto y_offset = parse_length(next_token());
+            if (!y_offset.has_value()) {
+                return {};
+            }
+            if (tokens.has_next_token()) {
+                auto& token = next_token();
+                maybe_radius = parse_length(token);
+                if (!maybe_color.has_value() && (!maybe_radius.has_value() || tokens.has_next_token())) {
+                    maybe_color = parse_color(!maybe_radius.has_value() ? token : next_token());
+                    if (!maybe_color.has_value()) {
+                        return {};
+                    }
+                } else if (!maybe_radius.has_value()) {
+                    return {};
+                }
+            }
+            return if_no_more_tokens_return(Filter::DropShadow { *x_offset, *y_offset, maybe_radius, maybe_color });
+        } else if (filter_token == FilterToken::HueRotate) {
+            // hue-rotate( [ <angle> | <zero> ]? )
+            if (!tokens.has_next_token())
+                return Filter::HueRotate {};
+            auto& token = tokens.next_token();
+            if (token.is(Token::Type::Number)) {
+                // hue-rotate(0)
+                auto number = token.token().number();
+                if (number.is_integer() && number.integer_value() == 0)
+                    return if_no_more_tokens_return(Filter::HueRotate { Filter::HueRotate::Zero {} });
+                return {};
+            }
+            if (!token.is(Token::Type::Dimension))
+                return {};
+            float angle_value = token.token().dimension_value();
+            auto angle_unit_name = token.token().dimension_unit();
+            auto angle_unit = Angle::unit_from_name(angle_unit_name);
+            if (!angle_unit.has_value())
+                return {};
+            Angle angle { angle_value, angle_unit.release_value() };
+            return if_no_more_tokens_return(Filter::HueRotate { angle });
+        } else {
+            // Simple filters:
+            // brightness( <number-percentage>? )
+            // contrast( <number-percentage>? )
+            // grayscale( <number-percentage>? )
+            // invert( <number-percentage>? )
+            // opacity( <number-percentage>? )
+            // sepia( <number-percentage>? )
+            // saturate( <number-percentage>? )
+            if (!tokens.has_next_token())
+                return Filter::Color { filter_token_to_operation(filter_token) };
+            auto amount = parse_number_percentage(tokens.next_token());
+            if (!amount.has_value())
+                return {};
+            return if_no_more_tokens_return(Filter::Color { filter_token_to_operation(filter_token), *amount });
+        }
+    };
+
+    Vector<FilterFunction> filter_value_list {};
+
+    while (tokens.has_next_token()) {
+        tokens.skip_whitespace();
+        if (!tokens.has_next_token())
+            break;
+        auto& token = tokens.next_token();
+        if (!token.is_function())
+            return {};
+        auto filter_token = parse_filter_function_name(token.function().name());
+        if (!filter_token.has_value())
+            return {};
+        auto filter_function = parse_filter_function(*filter_token, token.function().values());
+        if (!filter_function.has_value())
+            return {};
+        filter_value_list.append(*filter_function);
+    }
+
+    if (filter_value_list.is_empty())
+        return {};
+
+    return FilterValueListStyleValue::create(move(filter_value_list));
+}
+
 RefPtr<StyleValue> Parser::parse_flex_value(Vector<ComponentValue> const& component_values)
 {
     if (component_values.size() == 1) {
@@ -4820,9 +5005,8 @@ Vector<FontFace::Source> Parser::parse_font_face_src(TokenStream<ComponentValue>
         auto& first = source_tokens.next_token();
 
         // <url> [ format(<font-format>)]?
-        // FIXME: Allow data urls for fonts.
         // FIXME: Implement optional tech() function from CSS-Fonts-4.
-        if (auto maybe_url = parse_url_function(first); maybe_url.has_value()) {
+        if (auto maybe_url = parse_url_function(first, AllowedDataUrlType::Font); maybe_url.has_value()) {
             auto url = maybe_url.release_value();
             Optional<FlyString> format;
 
@@ -5325,10 +5509,23 @@ RefPtr<StyleValue> Parser::parse_grid_track_sizes(Vector<ComponentValue> const& 
             params.append(Length::make_auto());
             continue;
         }
+        if (component_value.is_block()) {
+            params.append(Length::make_auto());
+            continue;
+        }
         if (component_value.is(Token::Type::Ident) && component_value.token().ident().equals_ignoring_case("auto"sv)) {
             params.append(Length::make_auto());
             continue;
         }
+        if (component_value.token().type() == Token::Type::Dimension) {
+            float numeric_value = component_value.token().dimension_value();
+            auto unit_string = component_value.token().dimension_unit();
+            if (unit_string.equals_ignoring_case("fr"sv) && numeric_value) {
+                params.append(GridTrackSize(numeric_value));
+                continue;
+            }
+        }
+
         auto dimension = parse_dimension(component_value);
         if (!dimension.has_value())
             return GridTrackSizeStyleValue::create({});
@@ -5354,13 +5551,16 @@ RefPtr<StyleValue> Parser::parse_grid_track_placement(Vector<ComponentValue> con
     }
 
     auto first_grid_track_placement = CSS::GridTrackPlacement();
+    auto has_span = false;
     if (current_token.to_string() == "span"sv) {
-        first_grid_track_placement.set_has_span(true);
+        has_span = true;
         tokens.skip_whitespace();
         current_token = tokens.next_token().token();
     }
-    if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+    if (current_token.is(Token::Type::Number) && current_token.number().is_integer()) {
         first_grid_track_placement.set_position(static_cast<int>(current_token.number_value()));
+        first_grid_track_placement.set_has_span(has_span);
+    }
 
     if (!tokens.has_next_token())
         return GridTrackPlacementStyleValue::create(first_grid_track_placement);
@@ -5382,13 +5582,16 @@ RefPtr<StyleValue> Parser::parse_grid_track_placement_shorthand_value(Vector<Com
 
     auto calculate_grid_track_placement = [](auto& current_token, auto& tokens) -> CSS::GridTrackPlacement {
         auto grid_track_placement = CSS::GridTrackPlacement();
+        auto has_span = false;
         if (current_token.to_string() == "span"sv) {
-            grid_track_placement.set_has_span(true);
+            has_span = true;
             tokens.skip_whitespace();
             current_token = tokens.next_token().token();
         }
-        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+        if (current_token.is(Token::Type::Number) && current_token.number().is_integer()) {
             grid_track_placement.set_position(static_cast<int>(current_token.number_value()));
+            grid_track_placement.set_has_span(has_span);
+        }
         return grid_track_placement;
     };
 
@@ -5471,6 +5674,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue>> Parser::parse_css_value(Property
 
     // Special-case property handling
     switch (property_id) {
+    case PropertyID::BackdropFilter:
+        if (auto parsed_value = parse_filter_value_list_value(component_values))
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
     case PropertyID::Background:
         if (auto parsed_value = parse_background_value(component_values))
             return parsed_value.release_nonnull();

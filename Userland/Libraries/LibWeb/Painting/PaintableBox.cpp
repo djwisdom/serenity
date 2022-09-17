@@ -11,6 +11,7 @@
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Painting/BackgroundPainting.h>
+#include <LibWeb/Painting/FilterPainting.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/ShadowPainting.h>
 #include <LibWeb/Painting/StackingContext.h>
@@ -122,6 +123,7 @@ void PaintableBox::paint(PaintContext& context, PaintPhase phase) const
             auto border_box = absolute_border_box_rect();
             context.painter().add_clip_rect(clip_rect.to_rect().resolved(Paintable::layout_node(), border_box).to_rounded<int>());
         }
+        paint_backdrop_filter(context);
         paint_background(context);
         paint_box_shadow(context);
     }
@@ -193,6 +195,13 @@ void PaintableBox::paint_border(PaintContext& context) const
     paint_all_borders(context, absolute_border_box_rect(), normalized_border_radii_data(), borders_data);
 }
 
+void PaintableBox::paint_backdrop_filter(PaintContext& context) const
+{
+    auto& backdrop_filter = computed_values().backdrop_filter();
+    if (!backdrop_filter.is_none())
+        Painting::apply_backdrop_filter(context, layout_node(), absolute_border_box_rect(), normalized_border_radii_data(), backdrop_filter);
+}
+
 void PaintableBox::paint_background(PaintContext& context) const
 {
     // If the body's background properties were propagated to the root element, do no re-paint the body's background.
@@ -257,9 +266,12 @@ BorderRadiiData PaintableBox::normalized_border_radii_data(ShrinkRadiiForBorders
     return border_radius_data;
 }
 
-void PaintableBox::before_children_paint(PaintContext& context, PaintPhase phase) const
+void PaintableBox::before_children_paint(PaintContext& context, PaintPhase phase, ShouldClipOverflow should_clip_overflow) const
 {
     if (!AK::first_is_one_of(phase, PaintPhase::Background, PaintPhase::Border, PaintPhase::Foreground))
+        return;
+
+    if (should_clip_overflow == ShouldClipOverflow::No)
         return;
 
     // FIXME: Support more overflow variations.
@@ -293,9 +305,12 @@ void PaintableBox::before_children_paint(PaintContext& context, PaintPhase phase
     }
 }
 
-void PaintableBox::after_children_paint(PaintContext& context, PaintPhase phase) const
+void PaintableBox::after_children_paint(PaintContext& context, PaintPhase phase, ShouldClipOverflow should_clip_overflow) const
 {
     if (!AK::first_is_one_of(phase, PaintPhase::Background, PaintPhase::Border, PaintPhase::Foreground))
+        return;
+
+    if (should_clip_overflow == ShouldClipOverflow::No)
         return;
 
     // FIXME: Support more overflow variations.

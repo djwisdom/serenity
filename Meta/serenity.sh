@@ -259,7 +259,7 @@ build_target() {
         cmake -S "$SERENITY_SOURCE_DIR/Meta/Lagom" -B "$BUILD_DIR" -DBUILD_LAGOM=ON
     fi
 
-    # Get either the environement MAKEJOBS or all processors via CMake
+    # Get either the environment MAKEJOBS or all processors via CMake
     [ -z "$MAKEJOBS" ] && MAKEJOBS=$(cmake -P "$SERENITY_SOURCE_DIR/Meta/CMake/processor-count.cmake" 2>&1)
 
     # With zero args, we are doing a standard "build"
@@ -309,6 +309,16 @@ ensure_toolchain() {
         fi
     fi
 
+}
+
+confirm_rebuild_if_toolchain_exists() {
+    [ ! -d "$TOOLCHAIN_DIR" ] && return
+
+    read -rp "You already have a toolchain, are you sure you want to delete and rebuild one [y/N]? " input
+
+    if [[ "$input" != "y" && "$input" != "Y" ]]; then
+        die "Aborted rebuild"
+    fi
 }
 
 delete_toolchain() {
@@ -482,6 +492,7 @@ elif [ "$CMD" = "delete" ]; then
 elif [ "$CMD" = "rebuild-toolchain" ]; then
     cmd_with_target
     lagom_unsupported "The lagom target uses the host toolchain"
+    confirm_rebuild_if_toolchain_exists
     delete_toolchain
     ensure_toolchain
 elif [ "$CMD" = "rebuild-world" ]; then

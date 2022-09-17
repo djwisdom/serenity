@@ -14,6 +14,8 @@ namespace GL {
 Optional<ContextParameter> GLContext::get_context_parameter(GLenum name)
 {
     switch (name) {
+    case GL_ACTIVE_TEXTURE:
+        return ContextParameter { .type = GL_INT, .value = { .integer_value = static_cast<GLint>(GL_TEXTURE0 + m_active_texture_unit_index) } };
     case GL_ALPHA_BITS:
         return ContextParameter { .type = GL_INT, .value = { .integer_value = sizeof(u8) * 8 } };
     case GL_ALPHA_TEST:
@@ -26,12 +28,26 @@ Optional<ContextParameter> GLContext::get_context_parameter(GLenum name)
         return ContextParameter { .type = GL_INT, .value = { .integer_value = static_cast<GLint>(m_blend_source_factor) } };
     case GL_BLUE_BITS:
         return ContextParameter { .type = GL_INT, .value = { .integer_value = sizeof(u8) * 8 } };
+    case GL_CLIENT_ACTIVE_TEXTURE:
+        return ContextParameter { .type = GL_INT, .value = { .integer_value = static_cast<GLint>(GL_TEXTURE0 + m_client_active_texture) } };
     case GL_COLOR_MATERIAL:
         return ContextParameter { .type = GL_BOOL, .is_capability = true, .value = { .boolean_value = m_color_material_enabled } };
     case GL_COLOR_MATERIAL_FACE:
         return ContextParameter { .type = GL_INT, .value = { .integer_value = static_cast<GLint>(m_color_material_face) } };
     case GL_COLOR_MATERIAL_MODE:
         return ContextParameter { .type = GL_INT, .value = { .integer_value = static_cast<GLint>(m_color_material_mode) } };
+    case GL_CURRENT_COLOR:
+        return ContextParameter {
+            .type = GL_DOUBLE,
+            .count = 4,
+            .value = {
+                .double_list = {
+                    static_cast<double>(m_current_vertex_color.x()),
+                    static_cast<double>(m_current_vertex_color.y()),
+                    static_cast<double>(m_current_vertex_color.z()),
+                    static_cast<double>(m_current_vertex_color.w()),
+                } }
+        };
     case GL_CULL_FACE:
         return ContextParameter { .type = GL_BOOL, .is_capability = true, .value = { .boolean_value = m_cull_faces } };
     case GL_DEPTH_BITS:
@@ -60,6 +76,8 @@ Optional<ContextParameter> GLContext::get_context_parameter(GLenum name)
         return ContextParameter { .type = GL_INT, .value = { .integer_value = MODELVIEW_MATRIX_STACK_LIMIT } };
     case GL_MAX_PROJECTION_STACK_DEPTH:
         return ContextParameter { .type = GL_INT, .value = { .integer_value = PROJECTION_MATRIX_STACK_LIMIT } };
+    case GL_MAX_TEXTURE_LOD_BIAS:
+        return ContextParameter { .type = GL_DOUBLE, .value = { .double_value = static_cast<GLdouble>(m_device_info.max_texture_lod_bias) } };
     case GL_MAX_TEXTURE_SIZE:
         return ContextParameter { .type = GL_INT, .value = { .integer_value = 4096 } };
     case GL_MAX_TEXTURE_STACK_DEPTH:
@@ -92,6 +110,10 @@ Optional<ContextParameter> GLContext::get_context_parameter(GLenum name)
         return ContextParameter { .type = GL_BOOL, .is_capability = true, .value = { .boolean_value = m_depth_offset_enabled } };
     case GL_RED_BITS:
         return ContextParameter { .type = GL_INT, .value = { .integer_value = sizeof(u8) * 8 } };
+    case GL_SAMPLE_BUFFERS:
+        return ContextParameter { .type = GL_INT, .value = { .integer_value = 0 } };
+    case GL_SAMPLES:
+        return ContextParameter { .type = GL_INT, .value = { .integer_value = 1 } };
     case GL_SCISSOR_BOX: {
         auto scissor_box = m_rasterizer->options().scissor_box;
         return ContextParameter {
@@ -262,25 +284,29 @@ void GLContext::gl_disable(GLenum capability)
     case GL_TEXTURE_1D:
         m_active_texture_unit->set_texture_1d_enabled(false);
         m_sampler_config_is_dirty = true;
+        m_texture_units_dirty = true;
         break;
     case GL_TEXTURE_2D:
         m_active_texture_unit->set_texture_2d_enabled(false);
         m_sampler_config_is_dirty = true;
+        m_texture_units_dirty = true;
         break;
     case GL_TEXTURE_3D:
         m_active_texture_unit->set_texture_3d_enabled(false);
         m_sampler_config_is_dirty = true;
+        m_texture_units_dirty = true;
         break;
     case GL_TEXTURE_CUBE_MAP:
         m_active_texture_unit->set_texture_cube_map_enabled(false);
         m_sampler_config_is_dirty = true;
+        m_texture_units_dirty = true;
         break;
     case GL_TEXTURE_GEN_Q:
     case GL_TEXTURE_GEN_R:
     case GL_TEXTURE_GEN_S:
     case GL_TEXTURE_GEN_T:
         texture_coordinate_generation(m_active_texture_unit_index, capability).enabled = false;
-        m_texcoord_generation_dirty = true;
+        m_texture_units_dirty = true;
         break;
     default:
         dbgln_if(GL_DEBUG, "gl_disable({:#x}): unknown parameter", capability);
@@ -412,25 +438,29 @@ void GLContext::gl_enable(GLenum capability)
     case GL_TEXTURE_1D:
         m_active_texture_unit->set_texture_1d_enabled(true);
         m_sampler_config_is_dirty = true;
+        m_texture_units_dirty = true;
         break;
     case GL_TEXTURE_2D:
         m_active_texture_unit->set_texture_2d_enabled(true);
         m_sampler_config_is_dirty = true;
+        m_texture_units_dirty = true;
         break;
     case GL_TEXTURE_3D:
         m_active_texture_unit->set_texture_3d_enabled(true);
         m_sampler_config_is_dirty = true;
+        m_texture_units_dirty = true;
         break;
     case GL_TEXTURE_CUBE_MAP:
         m_active_texture_unit->set_texture_cube_map_enabled(true);
         m_sampler_config_is_dirty = true;
+        m_texture_units_dirty = true;
         break;
     case GL_TEXTURE_GEN_Q:
     case GL_TEXTURE_GEN_R:
     case GL_TEXTURE_GEN_S:
     case GL_TEXTURE_GEN_T:
         texture_coordinate_generation(m_active_texture_unit_index, capability).enabled = true;
-        m_texcoord_generation_dirty = true;
+        m_texture_units_dirty = true;
         break;
     default:
         dbgln_if(GL_DEBUG, "gl_enable({:#x}): unknown parameter", capability);
@@ -508,10 +538,10 @@ void GLContext::get_floating_point(GLenum pname, T* params)
     };
     switch (pname) {
     case GL_MODELVIEW_MATRIX:
-        flatten_and_assign_matrix(m_model_view_matrix);
+        flatten_and_assign_matrix(model_view_matrix());
         return;
     case GL_PROJECTION_MATRIX:
-        flatten_and_assign_matrix(m_projection_matrix);
+        flatten_and_assign_matrix(projection_matrix());
         return;
     }
 

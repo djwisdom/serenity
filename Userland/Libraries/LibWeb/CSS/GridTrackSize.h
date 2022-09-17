@@ -24,7 +24,10 @@ public:
 
     GridTrackSize(Length);
     GridTrackSize(Percentage);
-    GridTrackSize(int);
+    GridTrackSize(float);
+    ~GridTrackSize();
+
+    static GridTrackSize make_auto();
 
     Type type() const { return m_type; }
 
@@ -32,9 +35,17 @@ public:
     bool is_percentage() const { return m_type == Type::Percentage; }
     bool is_flexible_length() const { return m_type == Type::FlexibleLength; }
 
-    Length length() const { return m_length; }
+    Length length() const;
     Percentage percentage() const { return m_percentage; }
-    int flexible_length() const { return m_flexible_length; }
+    float flexible_length() const { return m_flexible_length; }
+
+    // https://drafts.csswg.org/css-grid/#layout-algorithm
+    // Intrinsic sizing function - min-content, max-content, auto, fit-content()
+    // FIXME: Add missing properties once implemented.
+    bool is_intrinsic_track_sizing() const
+    {
+        return (m_type == Type::Length && m_length.is_auto());
+    }
 
     String to_string() const;
     bool operator==(GridTrackSize const& other) const
@@ -47,9 +58,11 @@ public:
 
 private:
     Type m_type;
-    Length m_length { Length::make_px(0) };
+    // Length includes a RefPtr<CalculatedStyleValue> member, but we can't include the header StyleValue.h as it includes
+    // this file already. To break the cyclic dependency, we must initialize m_length in the constructor.
+    Length m_length;
     Percentage m_percentage { Percentage(0) };
-    int m_flexible_length { 0 };
+    float m_flexible_length { 0 };
 };
 
 }

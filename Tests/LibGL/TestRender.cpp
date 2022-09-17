@@ -24,7 +24,7 @@
 static NonnullOwnPtr<GL::GLContext> create_testing_context(int width, int height)
 {
     auto bitmap = MUST(Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, { width, height }));
-    auto context = GL::create_context(*bitmap);
+    auto context = MUST(GL::create_context(*bitmap));
     GL::make_context_current(context);
 
     // Assume some defaults for our testing contexts
@@ -227,4 +227,28 @@ TEST_CASE(0007_test_rgba_to_rgb_texture)
 
     context->present();
     expect_bitmap_equals_reference(context->frontbuffer(), "0007_test_rgba_to_rgb_texture"sv);
+}
+
+TEST_CASE(0008_test_pop_matrix_regression)
+{
+    auto context = create_testing_context(64, 64);
+
+    // Load identity matrix after popping
+    glMatrixMode(GL_MODELVIEW);
+    glTranslatef(10.f, 10.f, 10.f);
+    glPushMatrix();
+    glPopMatrix();
+    glLoadIdentity();
+
+    glBegin(GL_TRIANGLES);
+    glColor3f(0.f, 1.f, 0.f);
+    glVertex2f(.5f, -.5f);
+    glVertex2f(.0f, .5f);
+    glVertex2f(-.5f, -.5f);
+    glEnd();
+
+    EXPECT_EQ(glGetError(), 0u);
+
+    context->present();
+    expect_bitmap_equals_reference(context->frontbuffer(), "0008_test_pop_matrix_regression"sv);
 }

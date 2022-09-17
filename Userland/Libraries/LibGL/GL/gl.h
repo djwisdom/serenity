@@ -96,6 +96,7 @@ extern "C" {
 #define GL_SHADING_LANGUAGE_VERSION 0x8B8C
 
 // Get parameters
+#define GL_CURRENT_COLOR 0x0B00
 #define GL_COLOR_MATERIAL_FACE 0x0B55
 #define GL_COLOR_MATERIAL_MODE 0x0B56
 #define GL_COLOR_MATERIAL 0x0B57
@@ -120,6 +121,8 @@ extern "C" {
 #define GL_ALPHA_BITS 0x0D55
 #define GL_DEPTH_BITS 0x0D56
 #define GL_STENCIL_BITS 0x0D57
+#define GL_ACTIVE_TEXTURE 0x84E0
+#define GL_CLIENT_ACTIVE_TEXTURE 0x84E1
 #define GL_MAX_TEXTURE_UNITS 0x84E2
 #define GL_MAX_LIGHTS 0x0D31
 #define GL_AUTO_NORMAL 0x0D80
@@ -143,6 +146,9 @@ extern "C" {
 #define GL_MAP2_VERTEX_4 0x0DB8
 #define GL_NORMAL_ARRAY 0x8075
 #define GL_NORMAL_ARRAY_TYPE 0x807E
+#define GL_SAMPLE_BUFFERS 0x80A8
+#define GL_SAMPLES 0x80A9
+#define GL_MAX_TEXTURE_LOD_BIAS 0x84FD
 
 // Blend factors
 #define GL_ZERO 0
@@ -169,7 +175,7 @@ extern "C" {
 #define GL_FRONT_AND_BACK 0x0408
 
 // Error codes
-#define GL_NO_ERROR 0x0000
+#define GL_NO_ERROR 0
 #define GL_INVALID_ENUM 0x0500
 #define GL_INVALID_VALUE 0x0501
 #define GL_INVALID_OPERATION 0x0502
@@ -484,6 +490,8 @@ extern "C" {
 #define GL_Q 0x2003
 
 // Texture Environment and Parameters
+#define GL_ADD 0x0104
+#define GL_ALPHA_SCALE 0x0D1C
 #define GL_MODULATE 0x2100
 #define GL_TEXTURE_ENV_MODE 0x2200
 #define GL_DECAL 0x2101
@@ -500,9 +508,42 @@ extern "C" {
 #define GL_TEXTURE_WRAP_T 0x2803
 #define GL_CLAMP 0x2900
 #define GL_REPEAT 0x2901
-#define GL_MIRRORED_REPEAT 0x8370
 #define GL_CLAMP_TO_BORDER 0x812D
 #define GL_CLAMP_TO_EDGE 0x812F
+#define GL_GENERATE_MIPMAP 0x8191
+#define GL_MIRRORED_REPEAT 0x8370
+#define GL_SUBTRACT 0x84E7
+#define GL_TEXTURE_FILTER_CONTROL 0x8500
+#define GL_TEXTURE_LOD_BIAS 0x8501
+#define GL_COMBINE 0x8570
+#define GL_COMBINE_RGB 0x8571
+#define GL_COMBINE_ALPHA 0x8572
+#define GL_RGB_SCALE 0x8573
+#define GL_ADD_SIGNED 0x8574
+#define GL_INTERPOLATE 0x8575
+#define GL_CONSTANT 0x8576
+#define GL_PRIMARY_COLOR 0x8577
+#define GL_PREVIOUS 0x8578
+#define GL_SRC0_RGB 0x8580
+#define GL_SOURCE0_RGB 0x8580
+#define GL_SRC1_RGB 0x8581
+#define GL_SOURCE1_RGB 0x8581
+#define GL_SRC2_RGB 0x8582
+#define GL_SOURCE2_RGB 0x8582
+#define GL_SRC0_ALPHA 0x8588
+#define GL_SOURCE0_ALPHA 0x8588
+#define GL_SRC1_ALPHA 0x8589
+#define GL_SOURCE1_ALPHA 0x8589
+#define GL_SRC2_ALPHA 0x858A
+#define GL_SOURCE2_ALPHA 0x858A
+#define GL_OPERAND0_RGB 0x8590
+#define GL_OPERAND1_RGB 0x8591
+#define GL_OPERAND2_RGB 0x8592
+#define GL_OPERAND0_ALPHA 0x8598
+#define GL_OPERAND1_ALPHA 0x8599
+#define GL_OPERAND2_ALPHA 0x859A
+#define GL_DOT3_RGB 0x86AE
+#define GL_DOT3_RGBA 0x86AF
 
 // Texture gen modes
 #define GL_EYE_LINEAR 0x2400
@@ -536,8 +577,6 @@ extern "C" {
 // OpenGL State & GLGet
 #define GL_MODELVIEW_MATRIX 0x0BA6
 #define GL_PROJECTION_MATRIX 0x0BA7
-
-#define GL_ADD 0x0104
 
 // User clipping planes
 #define GL_MAX_CLIP_PLANES 0x0D32
@@ -651,8 +690,13 @@ GLAPI void glTexCoord3f(GLfloat s, GLfloat t, GLfloat r);
 GLAPI void glTexCoord3fv(GLfloat const* v);
 GLAPI void glTexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q);
 GLAPI void glTexCoord4fv(GLfloat const* v);
+GLAPI void glMultiTexCoord1f(GLenum target, GLfloat s);
 GLAPI void glMultiTexCoord2fARB(GLenum target, GLfloat s, GLfloat t);
+GLAPI void glMultiTexCoord2fvARB(GLenum target, GLfloat const* v);
+GLAPI void glMultiTexCoord2fv(GLenum target, GLfloat const* v);
 GLAPI void glMultiTexCoord2f(GLenum target, GLfloat s, GLfloat t);
+GLAPI void glMultiTexCoord3f(GLenum target, GLfloat s, GLfloat t, GLfloat r);
+GLAPI void glMultiTexCoord4f(GLenum target, GLfloat s, GLfloat t, GLfloat r, GLfloat q);
 GLAPI void glTexParameteri(GLenum target, GLenum pname, GLint param);
 GLAPI void glTexParameterf(GLenum target, GLenum pname, GLfloat param);
 GLAPI void glTexEnvf(GLenum target, GLenum pname, GLfloat param);
@@ -704,10 +748,14 @@ GLAPI void glStencilMask(GLuint mask);
 GLAPI void glStencilMaskSeparate(GLenum face, GLuint mask);
 GLAPI void glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass);
 GLAPI void glStencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass);
+GLAPI void glNormal3d(GLdouble nx, GLdouble ny, GLdouble nz);
 GLAPI void glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz);
 GLAPI void glNormal3fv(GLfloat const* v);
 GLAPI void glNormalPointer(GLenum type, GLsizei stride, void const* pointer);
+GLAPI void glRasterPos2d(GLdouble x, GLdouble y);
+GLAPI void glRasterPos2f(GLfloat x, GLfloat y);
 GLAPI void glRasterPos2i(GLint x, GLint y);
+GLAPI void glRasterPos2s(GLshort x, GLshort y);
 GLAPI void glMaterialf(GLenum face, GLenum pname, GLfloat param);
 GLAPI void glMaterialfv(GLenum face, GLenum pname, GLfloat const* params);
 GLAPI void glMateriali(GLenum face, GLenum pname, GLint param);

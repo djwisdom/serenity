@@ -8,10 +8,7 @@
 #pragma once
 
 #include <AK/Array.h>
-#include <AK/Error.h>
 #include <AK/NonnullRefPtr.h>
-#include <AK/RefCounted.h>
-#include <AK/RefPtr.h>
 #include <AK/Vector.h>
 #include <LibGPU/DeviceInfo.h>
 #include <LibGPU/Enums.h>
@@ -24,12 +21,11 @@
 #include <LibGPU/RasterizerOptions.h>
 #include <LibGPU/SamplerConfig.h>
 #include <LibGPU/StencilConfiguration.h>
-#include <LibGPU/TexCoordGenerationConfig.h>
+#include <LibGPU/TextureUnitConfiguration.h>
 #include <LibGPU/Vertex.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Matrix3x3.h>
 #include <LibGfx/Matrix4x4.h>
-#include <LibGfx/Rect.h>
 #include <LibGfx/Size.h>
 #include <LibGfx/Vector2.h>
 #include <LibGfx/Vector4.h>
@@ -42,14 +38,16 @@ public:
 
     virtual DeviceInfo info() const = 0;
 
-    virtual void draw_primitives(PrimitiveType, FloatMatrix4x4 const& model_view_transform, FloatMatrix4x4 const& projection_transform, FloatMatrix4x4 const& texture_transform, Vector<Vertex>& vertices, Vector<size_t> const& enabled_texture_units) = 0;
+    virtual void draw_primitives(PrimitiveType, FloatMatrix4x4 const& model_view_transform, FloatMatrix4x4 const& projection_transform, Vector<Vertex>& vertices) = 0;
     virtual void resize(Gfx::IntSize const& min_size) = 0;
     virtual void clear_color(FloatVector4 const&) = 0;
     virtual void clear_depth(DepthType) = 0;
     virtual void clear_stencil(StencilType) = 0;
-    virtual void blit_color_buffer_to(Gfx::Bitmap& target) = 0;
+    virtual void blit_from_color_buffer(Gfx::Bitmap& target) = 0;
+    virtual void blit_from_color_buffer(NonnullRefPtr<Image>, u32 level, Vector2<u32> input_size, Vector2<i32> input_offset, Vector3<i32> output_offset) = 0;
     virtual void blit_from_color_buffer(void*, Vector2<i32> offset, GPU::ImageDataLayout const&) = 0;
     virtual void blit_from_depth_buffer(void*, Vector2<i32> offset, GPU::ImageDataLayout const&) = 0;
+    virtual void blit_from_depth_buffer(NonnullRefPtr<Image>, u32 level, Vector2<u32> input_size, Vector2<i32> input_offset, Vector3<i32> output_offset) = 0;
     virtual void blit_to_color_buffer_at_raster_position(void const*, GPU::ImageDataLayout const&) = 0;
     virtual void blit_to_depth_buffer_at_raster_position(void const*, GPU::ImageDataLayout const&) = 0;
     virtual void set_options(RasterizerOptions const&) = 0;
@@ -57,12 +55,13 @@ public:
     virtual RasterizerOptions options() const = 0;
     virtual LightModelParameters light_model() const = 0;
 
-    virtual NonnullRefPtr<Image> create_image(PixelFormat const&, u32 width, u32 height, u32 depth, u32 levels, u32 layers) = 0;
+    virtual NonnullRefPtr<Image> create_image(PixelFormat const&, u32 width, u32 height, u32 depth, u32 max_levels) = 0;
 
     virtual void set_sampler_config(unsigned, SamplerConfig const&) = 0;
     virtual void set_light_state(unsigned, Light const&) = 0;
     virtual void set_material_state(Face, Material const&) = 0;
     virtual void set_stencil_configuration(Face, StencilConfiguration const&) = 0;
+    virtual void set_texture_unit_configuration(TextureUnitIndex, TextureUnitConfiguration const&) = 0;
     virtual void set_clip_planes(Vector<FloatVector4> const&) = 0;
 
     virtual RasterPosition raster_position() const = 0;

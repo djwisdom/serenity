@@ -1066,7 +1066,7 @@ void Painter::blit(IntPoint const& position, Gfx::Bitmap const& source, IntRect 
         ARGB32 const* src = source.scanline(src_rect.top() + first_row) + src_rect.left() + first_column;
         size_t const src_skip = source.pitch() / sizeof(ARGB32);
         for (int row = first_row; row <= last_row; ++row) {
-            fast_u32_copy(dst, src, clipped_rect.width());
+            memcpy(dst, src, sizeof(ARGB32) * clipped_rect.width());
             dst += dst_skip;
             src += src_skip;
         }
@@ -1797,6 +1797,15 @@ Optional<Color> Painter::get_pixel(IntPoint const& p)
     if (!clip_rect().contains(point / scale()))
         return {};
     return Color::from_argb(m_target->scanline(point.y())[point.x()]);
+}
+
+ErrorOr<NonnullRefPtr<Bitmap>> Painter::get_region_bitmap(IntRect const& region, BitmapFormat format, Optional<IntRect&> actual_region)
+{
+    VERIFY(scale() == 1);
+    auto bitmap_region = region.translated(state().translation).intersected(m_target->rect());
+    if (actual_region.has_value())
+        actual_region.value() = bitmap_region.translated(-state().translation);
+    return m_target->cropped(bitmap_region, format);
 }
 
 ALWAYS_INLINE void Painter::set_physical_pixel_with_draw_op(u32& pixel, Color const& color)

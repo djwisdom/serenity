@@ -89,6 +89,15 @@ bool Node::establishes_stacking_context() const
         return true;
     if (!computed_values().transformations().is_empty())
         return true;
+
+    // Element that is a child of a flex container, with z-index value other than auto.
+    if (parent() && parent()->computed_values().display().is_flex_inside() && computed_values().z_index().has_value())
+        return true;
+
+    // Element that is a child of a grid container, with z-index value other than auto.
+    if (parent() && parent()->computed_values().display().is_grid_inside() && computed_values().z_index().has_value())
+        return true;
+
     return computed_values().opacity() < 1.0f;
 }
 
@@ -384,6 +393,7 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     computed_values.set_flex_shrink(computed_style.flex_shrink());
     computed_values.set_order(computed_style.order());
     computed_values.set_clip(computed_style.clip());
+    computed_values.set_backdrop_filter(computed_style.backdrop_filter());
 
     auto justify_content = computed_style.justify_content();
     if (justify_content.has_value())

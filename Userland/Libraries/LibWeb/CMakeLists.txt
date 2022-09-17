@@ -38,6 +38,7 @@ set(SOURCES
     CSS/GridTrackPlacement.cpp
     CSS/GridTrackSize.cpp
     CSS/Length.cpp
+    CSS/LengthBox.cpp
     CSS/MediaList.cpp
     CSS/MediaQuery.cpp
     CSS/MediaQueryList.cpp
@@ -267,7 +268,6 @@ set(SOURCES
     HTML/WorkerLocation.cpp
     HTML/WorkerNavigator.cpp
     HighResolutionTime/Performance.cpp
-    ImageDecoding.cpp
     Infra/ByteSequences.cpp
     IntersectionObserver/IntersectionObserver.cpp
     Layout/BlockContainer.cpp
@@ -334,6 +334,7 @@ set(SOURCES
     Painting/CanvasPaintable.cpp
     Painting/CheckBoxPaintable.cpp
     Painting/GradientPainting.cpp
+    Painting/FilterPainting.cpp
     Painting/ImagePaintable.cpp
     Painting/InlinePaintable.cpp
     Painting/LabelablePaintable.cpp
@@ -353,6 +354,7 @@ set(SOURCES
     Painting/TextPaintable.cpp
     Platform/EventLoopPlugin.cpp
     Platform/FontPlugin.cpp
+    Platform/ImageCodecPlugin.cpp
     Platform/Timer.cpp
     RequestIdleCallback/IdleDeadline.cpp
     ResizeObserver/ResizeObserver.cpp

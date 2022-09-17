@@ -22,8 +22,11 @@
 #include <Kernel/Arch/aarch64/RPi/UART.h>
 #include <Kernel/Arch/aarch64/Registers.h>
 #include <Kernel/Arch/aarch64/TrapFrame.h>
+#include <Kernel/CommandLine.h>
+#include <Kernel/Devices/DeviceManagement.h>
 #include <Kernel/Graphics/Console/BootFramebufferConsole.h>
 #include <Kernel/KSyms.h>
+#include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Panic.h>
 
 extern "C" void exception_common(Kernel::TrapFrame const* const trap_frame);
@@ -67,6 +70,8 @@ void __stack_chk_fail()
     Kernel::Processor::halt();
 }
 
+READONLY_AFTER_INIT bool g_in_early_boot;
+
 namespace Kernel {
 
 static void draw_logo();
@@ -85,10 +90,25 @@ Atomic<Graphics::Console*> g_boot_console;
 
 extern "C" [[noreturn]] void init()
 {
+    g_in_early_boot = true;
+
+    // FIXME: Don't hardcode this
+    multiboot_memory_map_t mmap[] = {
+        { sizeof(struct multiboot_mmap_entry) - sizeof(u32),
+            (u64)0x0,
+            (u64)0xA2F000,
+            MULTIBOOT_MEMORY_AVAILABLE }
+    };
+
+    multiboot_memory_map = mmap;
+    multiboot_memory_map_count = 1;
+
     dbgln("Welcome to Serenity OS!");
     dbgln("Imagine this being your ideal operating system.");
     dbgln("Observed deviations from that ideal are shortcomings of your imagination.");
     dbgln();
+
+    CommandLine::early_initialize("");
 
     new (&bootstrap_processor()) Processor();
     bootstrap_processor().initialize(0);
@@ -100,10 +120,9 @@ extern "C" [[noreturn]] void init()
         (*ctor)();
     kmalloc_init();
 
-    for (ctor_func_t* ctor = start_ctors; ctor < end_ctors; ctor++)
-        (*ctor)();
-
     load_kernel_symbol_table();
+
+    CommandLine::initialize();
 
     auto& framebuffer = RPi::Framebuffer::the();
     if (framebuffer.initialized()) {
@@ -112,15 +131,22 @@ extern "C" [[noreturn]] void init()
     }
     dmesgln("Starting SerenityOS...");
 
+    dmesgln("Initialize MMU");
+    init_page_tables();
+    Memory::MemoryManager::initialize(0);
+    DeviceManagement::initialize();
+
+    // Invoke all static global constructors in the kernel.
+    // Note that we want to do this as early as possible.
+    for (ctor_func_t* ctor = start_ctors; ctor < end_ctors; ctor++)
+        (*ctor)();
+
     initialize_interrupts();
     InterruptManagement::initialize();
     Processor::enable_interrupts();
 
     auto firmware_version = query_firmware_version();
     dmesgln("Firmware version: {}", firmware_version);
-
-    dmesgln("Initialize MMU");
-    init_page_tables();
 
     auto& timer = RPi::Timer::the();
     timer.set_interrupt_interval_usec(1'000'000);
@@ -132,6 +158,8 @@ extern "C" [[noreturn]] void init()
     // interrupts are working!
     for (;;)
         asm volatile("wfi");
+
+    VERIFY_NOT_REACHED();
 }
 
 class QueryFirmwareVersionMboxMessage : RPi::Mailbox::Message {

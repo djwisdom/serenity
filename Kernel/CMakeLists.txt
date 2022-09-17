@@ -468,9 +468,13 @@ else()
         Arch/aarch64/vector_table.S
 
         # Files from base Kernel
+        CommandLine.cpp
+        KString.cpp
         KSyms.cpp
         MiniStdLib.cpp
         UBSanitizer.cpp
+
+        Devices/DeviceManagement.cpp
 
         Graphics/Console/BootFramebufferConsole.cpp
         Graphics/Console/GenericFramebufferConsole.cpp

@@ -440,14 +440,10 @@ func_defined install || install() {
 func_defined post_install || post_install() {
     echo
 }
-func_defined clean || clean() {
-    if [ -z "${IN_SERENITY_PORT_DEV:-}" ]; then
-        rm -rf "$workdir" *.out
-    else
-        rm -rf "$nongit_workdir" *.out
-    fi
+clean() {
+    rm -rf "${PORT_BUILD_DIR}"
 }
-func_defined clean_dist || clean_dist() {
+clean_dist() {
     OLDIFS=$IFS
     IFS=$'\n'
     for f in $files; do
@@ -456,19 +452,9 @@ func_defined clean_dist || clean_dist() {
         rm -f "${PORT_META_DIR}/${filename}"
     done
 }
-func_defined clean_all || clean_all() {
-    if [ -z "${IN_SERENITY_PORT_DEV:-}" ]; then
-        rm -rf "$workdir" *.out
-    else
-        rm -rf "$nongit_workdir" *.out
-    fi
-    OLDIFS=$IFS
-    IFS=$'\n'
-    for f in $files; do
-        IFS=$OLDIFS
-        read url filename hash <<< $(echo "$f")
-        rm -f "${PORT_META_DIR}/${filename}"
-    done
+clean_all() {
+    clean
+    clean_dist
 }
 addtodb() {
     if [ -n "$(package_install_state $port $version)" ]; then
@@ -574,15 +560,15 @@ do_install() {
     addtodb "${1:-}"
 }
 do_clean() {
-    echo "Cleaning workdir and .out files in $port..."
+    echo "Cleaning build directory for $port..."
     clean
 }
 do_clean_dist() {
-    echo "Cleaning dist in $port..."
+    echo "Cleaning dist files for $port..."
     clean_dist
 }
 do_clean_all() {
-    echo "Cleaning all in $port..."
+    echo "Cleaning all for $port..."
     clean_all
 }
 do_uninstall() {

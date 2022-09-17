@@ -19,6 +19,11 @@ void GLContext::gl_active_texture(GLenum texture)
 
     m_active_texture_unit_index = texture - GL_TEXTURE0;
     m_active_texture_unit = &m_texture_units.at(m_active_texture_unit_index);
+
+    if (m_current_matrix_mode == GL_TEXTURE) {
+        m_current_matrix_stack = &m_active_texture_unit->texture_matrix_stack();
+        m_current_matrix = &m_current_matrix_stack->last();
+    }
 }
 
 void GLContext::gl_bind_texture(GLenum target, GLuint texture)
@@ -82,21 +87,82 @@ void GLContext::gl_copy_tex_image_2d(GLenum target, GLint level, GLenum internal
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_copy_tex_image_2d, target, level, internalformat, x, y, width, height, border);
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
 
-    // FIXME: implement
-    dbgln_if(GL_DEBUG, "GLContext FIXME: implement gl_copy_tex_image_2d({:#x}, {}, {:#x}, {}, {}, {}, {}, {})",
-        target, level, internalformat, x, y, width, height, border);
+    RETURN_WITH_ERROR_IF(internalformat == GL_NONE, GL_INVALID_ENUM);
+    auto pixel_type_or_error = get_validated_pixel_type(target, internalformat, GL_NONE, GL_NONE);
+    RETURN_WITH_ERROR_IF(pixel_type_or_error.is_error(), pixel_type_or_error.release_error().code());
+
+    RETURN_WITH_ERROR_IF(level < 0 || level > Texture2D::LOG2_MAX_TEXTURE_SIZE, GL_INVALID_VALUE);
+    RETURN_WITH_ERROR_IF(width < 0 || height < 0 || width > (2 + Texture2D::MAX_TEXTURE_SIZE) || height > (2 + Texture2D::MAX_TEXTURE_SIZE), GL_INVALID_VALUE);
+    if (!m_device_info.supports_npot_textures)
+        RETURN_WITH_ERROR_IF(!is_power_of_two(width) || !is_power_of_two(height), GL_INVALID_VALUE);
+    RETURN_WITH_ERROR_IF(border != 0, GL_INVALID_VALUE);
+
+    auto texture_2d = m_active_texture_unit->texture_2d_target_texture();
+    VERIFY(!texture_2d.is_null());
+
+    auto internal_pixel_format = pixel_format_for_internal_format(internalformat);
+    if (level == 0) {
+        texture_2d->set_device_image(m_rasterizer->create_image(internal_pixel_format, width, height, 1, Texture2D::LOG2_MAX_TEXTURE_SIZE));
+        m_sampler_config_is_dirty = true;
+    }
+
+    auto pixel_type = pixel_type_or_error.release_value();
+    if (pixel_type.format == GPU::PixelFormat::DepthComponent) {
+        m_rasterizer->blit_from_depth_buffer(
+            *texture_2d->device_image(),
+            level,
+            { static_cast<u32>(width), static_cast<u32>(height) },
+            { x, y },
+            { 0, 0, 0 });
+    } else if (pixel_type.format == GPU::PixelFormat::StencilIndex) {
+        dbgln("{}: GL_STENCIL_INDEX is not yet supported", __FUNCTION__);
+    } else {
+        m_rasterizer->blit_from_color_buffer(
+            *texture_2d->device_image(),
+            level,
+            { static_cast<u32>(width), static_cast<u32>(height) },
+            { x, y },
+            { 0, 0, 0 });
+    }
 }
 
 void GLContext::gl_copy_tex_sub_image_2d(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height)
 {
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_copy_tex_sub_image_2d, target, level, xoffset, yoffset, x, y, width, height);
-    RETURN_WITH_ERROR_IF(!(target == GL_TEXTURE_2D || target == GL_TEXTURE_1D_ARRAY), GL_INVALID_ENUM);
-    RETURN_WITH_ERROR_IF(level < 0, GL_INVALID_VALUE);
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
 
-    // FIXME: implement
-    dbgln_if(GL_DEBUG, "GLContext FIXME: implement gl_copy_tex_sub_image_2d({:#x}, {}, {}, {}, {}, {}, {}, {})",
-        target, level, xoffset, yoffset, x, y, width, height);
+    RETURN_WITH_ERROR_IF(level < 0 || level > Texture2D::LOG2_MAX_TEXTURE_SIZE, GL_INVALID_VALUE);
+    RETURN_WITH_ERROR_IF(width < 0 || height < 0 || width > (2 + Texture2D::MAX_TEXTURE_SIZE) || height > (2 + Texture2D::MAX_TEXTURE_SIZE), GL_INVALID_VALUE);
+
+    auto texture_2d = m_active_texture_unit->texture_2d_target_texture();
+    VERIFY(!texture_2d.is_null());
+    RETURN_WITH_ERROR_IF(texture_2d->device_image().is_null(), GL_INVALID_OPERATION);
+
+    m_rasterizer->blit_from_color_buffer(
+        *texture_2d->device_image(),
+        level,
+        { static_cast<u32>(width), static_cast<u32>(height) },
+        { x, y },
+        { xoffset, yoffset, 0 });
+
+    // FIXME: use GPU::PixelFormat for Texture2D's internal format
+    if (texture_2d->internal_format() == GL_DEPTH_COMPONENT) {
+        m_rasterizer->blit_from_depth_buffer(
+            *texture_2d->device_image(),
+            level,
+            { static_cast<u32>(width), static_cast<u32>(height) },
+            { x, y },
+            { 0, 0, 0 });
+    } else if (texture_2d->internal_format() == GL_STENCIL_INDEX) {
+        dbgln("{}: GL_STENCIL_INDEX is not yet supported", __FUNCTION__);
+    } else {
+        m_rasterizer->blit_from_color_buffer(
+            *texture_2d->device_image(),
+            level,
+            { static_cast<u32>(width), static_cast<u32>(height) },
+            { x, y },
+            { 0, 0, 0 });
+    }
 }
 
 void GLContext::gl_delete_textures(GLsizei n, GLuint const* textures)
@@ -146,6 +212,7 @@ void GLContext::gl_gen_textures(GLsizei n, GLuint* textures)
 void GLContext::gl_get_tex_image(GLenum target, GLint level, GLenum format, GLenum type, void* pixels)
 {
     RETURN_WITH_ERROR_IF(level < 0 || level > Texture2D::LOG2_MAX_TEXTURE_SIZE, GL_INVALID_VALUE);
+    RETURN_WITH_ERROR_IF(format == GL_NONE || type == GL_NONE, GL_INVALID_ENUM);
     auto pixel_type_or_error = get_validated_pixel_type(target, GL_NONE, format, type);
     RETURN_WITH_ERROR_IF(pixel_type_or_error.is_error(), pixel_type_or_error.release_error().code());
 
@@ -243,27 +310,152 @@ void GLContext::gl_tex_env(GLenum target, GLenum pname, GLfloat param)
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_tex_env, target, pname, param);
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
 
-    // FIXME: We currently only support a subset of possible target values. Implement the rest!
-    RETURN_WITH_ERROR_IF(target != GL_TEXTURE_ENV, GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF(target != GL_TEXTURE_ENV && target != GL_TEXTURE_FILTER_CONTROL, GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF(target == GL_TEXTURE_FILTER_CONTROL && pname != GL_TEXTURE_LOD_BIAS, GL_INVALID_ENUM);
 
-    // FIXME: We currently only support a subset of possible pname values. Implement the rest!
-    RETURN_WITH_ERROR_IF(pname != GL_TEXTURE_ENV_MODE, GL_INVALID_ENUM);
-
-    auto param_enum = static_cast<GLenum>(param);
-
-    switch (param_enum) {
-    case GL_MODULATE:
-    case GL_REPLACE:
-    case GL_DECAL:
-    case GL_ADD:
-        m_active_texture_unit->set_env_mode(param_enum);
-        m_sampler_config_is_dirty = true;
+    switch (target) {
+    case GL_TEXTURE_ENV:
+        switch (pname) {
+        case GL_ALPHA_SCALE:
+            RETURN_WITH_ERROR_IF(param != 1.f && param != 2.f && param != 4.f, GL_INVALID_VALUE);
+            m_active_texture_unit->set_alpha_scale(param);
+            break;
+        case GL_COMBINE_ALPHA: {
+            auto param_enum = static_cast<GLenum>(param);
+            switch (param_enum) {
+            case GL_ADD:
+            case GL_ADD_SIGNED:
+            case GL_INTERPOLATE:
+            case GL_MODULATE:
+            case GL_REPLACE:
+            case GL_SUBTRACT:
+                m_active_texture_unit->set_alpha_combinator(param_enum);
+                break;
+            default:
+                RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+            }
+            break;
+        }
+        case GL_COMBINE_RGB: {
+            auto param_enum = static_cast<GLenum>(param);
+            switch (param_enum) {
+            case GL_ADD:
+            case GL_ADD_SIGNED:
+            case GL_DOT3_RGB:
+            case GL_DOT3_RGBA:
+            case GL_INTERPOLATE:
+            case GL_MODULATE:
+            case GL_REPLACE:
+            case GL_SUBTRACT:
+                m_active_texture_unit->set_rgb_combinator(param_enum);
+                break;
+            default:
+                RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+            }
+            break;
+        }
+        case GL_OPERAND0_ALPHA:
+        case GL_OPERAND1_ALPHA:
+        case GL_OPERAND2_ALPHA: {
+            auto param_enum = static_cast<GLenum>(param);
+            switch (param_enum) {
+            case GL_ONE_MINUS_SRC_ALPHA:
+            case GL_SRC_ALPHA:
+                m_active_texture_unit->set_alpha_operand(pname - GL_OPERAND0_ALPHA, param_enum);
+                break;
+            default:
+                RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+            }
+            break;
+        }
+        case GL_OPERAND0_RGB:
+        case GL_OPERAND1_RGB:
+        case GL_OPERAND2_RGB: {
+            auto param_enum = static_cast<GLenum>(param);
+            switch (param_enum) {
+            case GL_ONE_MINUS_SRC_ALPHA:
+            case GL_ONE_MINUS_SRC_COLOR:
+            case GL_SRC_ALPHA:
+            case GL_SRC_COLOR:
+                m_active_texture_unit->set_rgb_operand(pname - GL_OPERAND0_RGB, param_enum);
+                break;
+            default:
+                RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+            }
+            break;
+        }
+        case GL_RGB_SCALE:
+            RETURN_WITH_ERROR_IF(param != 1.f && param != 2.f && param != 4.f, GL_INVALID_VALUE);
+            m_active_texture_unit->set_rgb_scale(param);
+            break;
+        case GL_SRC0_ALPHA:
+        case GL_SRC1_ALPHA:
+        case GL_SRC2_ALPHA: {
+            auto param_enum = static_cast<GLenum>(param);
+            switch (param_enum) {
+            case GL_CONSTANT:
+            case GL_PREVIOUS:
+            case GL_PRIMARY_COLOR:
+            case GL_TEXTURE:
+            case GL_TEXTURE0 ... GL_TEXTURE31:
+                m_active_texture_unit->set_alpha_source(pname - GL_SRC0_ALPHA, param_enum);
+                break;
+            default:
+                RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+            }
+            break;
+        }
+        case GL_SRC0_RGB:
+        case GL_SRC1_RGB:
+        case GL_SRC2_RGB: {
+            auto param_enum = static_cast<GLenum>(param);
+            switch (param_enum) {
+            case GL_CONSTANT:
+            case GL_PREVIOUS:
+            case GL_PRIMARY_COLOR:
+            case GL_TEXTURE:
+            case GL_TEXTURE0 ... GL_TEXTURE31:
+                m_active_texture_unit->set_rgb_source(pname - GL_SRC0_RGB, param_enum);
+                break;
+            default:
+                RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+            }
+            break;
+        }
+        case GL_TEXTURE_ENV_MODE: {
+            auto param_enum = static_cast<GLenum>(param);
+            switch (param_enum) {
+            case GL_ADD:
+            case GL_BLEND:
+            case GL_COMBINE:
+            case GL_DECAL:
+            case GL_MODULATE:
+            case GL_REPLACE:
+                m_active_texture_unit->set_env_mode(param_enum);
+                break;
+            default:
+                RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+            }
+            break;
+        }
+        default:
+            RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+        }
+        break;
+    case GL_TEXTURE_FILTER_CONTROL:
+        switch (pname) {
+        case GL_TEXTURE_LOD_BIAS:
+            m_active_texture_unit->set_level_of_detail_bias(param);
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
         break;
     default:
-        // FIXME: We currently only support a subset of possible param values. Implement the rest!
-        dbgln_if(GL_DEBUG, "gl_tex_env({:#x}, {:#x}, {}): param unimplemented", target, pname, param);
-        RETURN_WITH_ERROR_IF(true, GL_INVALID_ENUM);
+        VERIFY_NOT_REACHED();
     }
+
+    m_sampler_config_is_dirty = true;
 }
 
 void GLContext::gl_tex_gen(GLenum coord, GLenum pname, GLint param)
@@ -284,7 +476,7 @@ void GLContext::gl_tex_gen(GLenum coord, GLenum pname, GLint param)
 
     GLenum const capability = GL_TEXTURE_GEN_S + (coord - GL_S);
     texture_coordinate_generation(m_active_texture_unit_index, capability).generation_mode = param;
-    m_texcoord_generation_dirty = true;
+    m_texture_units_dirty = true;
 }
 
 void GLContext::gl_tex_gen_floatv(GLenum coord, GLenum pname, GLfloat const* params)
@@ -319,7 +511,7 @@ void GLContext::gl_tex_gen_floatv(GLenum coord, GLenum pname, GLfloat const* par
         texture_coordinate_generation(m_active_texture_unit_index, capability).object_plane_coefficients = { params[0], params[1], params[2], params[3] };
         break;
     case GL_EYE_PLANE: {
-        auto const& inverse_model_view = m_model_view_matrix.inverse();
+        auto const& inverse_model_view = model_view_matrix().inverse();
         auto input_coefficients = FloatVector4 { params[0], params[1], params[2], params[3] };
 
         // Note: we are allowed to store transformed coefficients here, according to the documentation on
@@ -335,23 +527,21 @@ void GLContext::gl_tex_gen_floatv(GLenum coord, GLenum pname, GLfloat const* par
         VERIFY_NOT_REACHED();
     }
 
-    m_texcoord_generation_dirty = true;
+    m_texture_units_dirty = true;
 }
 
 void GLContext::gl_tex_image_2d(GLenum target, GLint level, GLint internal_format, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, GLvoid const* data)
 {
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
 
+    RETURN_WITH_ERROR_IF(internal_format == GL_NONE || format == GL_NONE || type == GL_NONE, GL_INVALID_ENUM);
     auto pixel_type_or_error = get_validated_pixel_type(target, internal_format, format, type);
     RETURN_WITH_ERROR_IF(pixel_type_or_error.is_error(), pixel_type_or_error.release_error().code());
 
     RETURN_WITH_ERROR_IF(level < 0 || level > Texture2D::LOG2_MAX_TEXTURE_SIZE, GL_INVALID_VALUE);
     RETURN_WITH_ERROR_IF(width < 0 || height < 0 || width > (2 + Texture2D::MAX_TEXTURE_SIZE) || height > (2 + Texture2D::MAX_TEXTURE_SIZE), GL_INVALID_VALUE);
-    // Check if width and height are a power of 2
-    if (!m_device_info.supports_npot_textures) {
-        RETURN_WITH_ERROR_IF(!is_power_of_two(width), GL_INVALID_VALUE);
-        RETURN_WITH_ERROR_IF(!is_power_of_two(height), GL_INVALID_VALUE);
-    }
+    if (!m_device_info.supports_npot_textures)
+        RETURN_WITH_ERROR_IF(!is_power_of_two(width) || !is_power_of_two(height), GL_INVALID_VALUE);
     RETURN_WITH_ERROR_IF(border != 0, GL_INVALID_VALUE);
 
     auto texture_2d = m_active_texture_unit->texture_2d_target_texture();
@@ -365,7 +555,7 @@ void GLContext::gl_tex_image_2d(GLenum target, GLint level, GLint internal_forma
         // To be spec compliant we should create the device image once the texture has become complete and is used for rendering the first time.
         // All images that were attached before the device image was created need to be stored somewhere to be used to initialize the device image once complete.
         auto internal_pixel_format = pixel_format_for_internal_format(internal_format);
-        texture_2d->set_device_image(m_rasterizer->create_image(internal_pixel_format, width, height, 1, 999, 1));
+        texture_2d->set_device_image(m_rasterizer->create_image(internal_pixel_format, width, height, 1, Texture2D::LOG2_MAX_TEXTURE_SIZE));
         m_sampler_config_is_dirty = true;
     }
 
@@ -397,18 +587,26 @@ void GLContext::gl_tex_parameter(GLenum target, GLenum pname, GLfloat param)
     RETURN_WITH_ERROR_IF(target != GL_TEXTURE_2D, GL_INVALID_ENUM);
 
     // FIXME: implement the remaining parameters. (https://docs.gl/gl2/glTexParameter)
-    RETURN_WITH_ERROR_IF(!(pname == GL_TEXTURE_MIN_FILTER
-                             || pname == GL_TEXTURE_MAG_FILTER
-                             || pname == GL_TEXTURE_WRAP_S
-                             || pname == GL_TEXTURE_WRAP_T),
+    RETURN_WITH_ERROR_IF(pname != GL_GENERATE_MIPMAP
+            && pname != GL_TEXTURE_LOD_BIAS
+            && pname != GL_TEXTURE_MIN_FILTER
+            && pname != GL_TEXTURE_MAG_FILTER
+            && pname != GL_TEXTURE_WRAP_S
+            && pname != GL_TEXTURE_WRAP_T,
         GL_INVALID_ENUM);
 
     // We assume GL_TEXTURE_2D (see above)
     auto texture_2d = m_active_texture_unit->texture_2d_target_texture();
-    if (texture_2d.is_null())
-        return;
+    VERIFY(!texture_2d.is_null());
 
     switch (pname) {
+    case GL_GENERATE_MIPMAP:
+        RETURN_WITH_ERROR_IF(param != GL_TRUE && param != GL_FALSE, GL_INVALID_ENUM);
+        texture_2d->set_generate_mipmaps(param == GL_TRUE);
+        break;
+    case GL_TEXTURE_LOD_BIAS:
+        texture_2d->set_level_of_detail_bias(param);
+        break;
     case GL_TEXTURE_MIN_FILTER:
         RETURN_WITH_ERROR_IF(!(param == GL_NEAREST
                                  || param == GL_LINEAR
@@ -468,7 +666,7 @@ void GLContext::gl_tex_parameterfv(GLenum target, GLenum pname, GLfloat const* p
     RETURN_WITH_ERROR_IF(target != GL_TEXTURE_2D, GL_INVALID_ENUM);
 
     // FIXME: implement the remaining parameters. (https://docs.gl/gl2/glTexParameter)
-    RETURN_WITH_ERROR_IF(!(pname == GL_TEXTURE_BORDER_COLOR), GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF(pname != GL_TEXTURE_BORDER_COLOR, GL_INVALID_ENUM);
 
     // We assume GL_TEXTURE_2D (see above)
     auto texture_2d = m_active_texture_unit->texture_2d_target_texture();
@@ -495,8 +693,10 @@ void GLContext::gl_tex_sub_image_2d(GLenum target, GLint level, GLint xoffset, G
 
     // A 2D texture array must have been defined by a previous glTexImage2D operation
     auto texture_2d = m_active_texture_unit->texture_2d_target_texture();
-    RETURN_WITH_ERROR_IF(texture_2d.is_null(), GL_INVALID_OPERATION);
+    VERIFY(!texture_2d.is_null());
+    RETURN_WITH_ERROR_IF(texture_2d->device_image().is_null(), GL_INVALID_OPERATION);
 
+    RETURN_WITH_ERROR_IF(format == GL_NONE || type == GL_NONE, GL_INVALID_ENUM);
     auto pixel_type_or_error = get_validated_pixel_type(target, texture_2d->internal_format(), format, type);
     RETURN_WITH_ERROR_IF(pixel_type_or_error.is_error(), pixel_type_or_error.release_error().code());
 
@@ -529,20 +729,15 @@ void GLContext::sync_device_sampler_config()
 
     for (unsigned i = 0; i < m_texture_units.size(); ++i) {
         auto const& texture_unit = m_texture_units[i];
-
         if (!texture_unit.texture_2d_enabled())
             continue;
 
         GPU::SamplerConfig config;
 
         auto texture_2d = texture_unit.texture_2d_target_texture();
-        if (texture_2d.is_null()) {
-            config.bound_image = nullptr;
-            m_rasterizer->set_sampler_config(i, config);
-            continue;
-        }
-
+        VERIFY(!texture_2d.is_null());
         config.bound_image = texture_2d->device_image();
+        config.level_of_detail_bias = texture_2d->level_of_detail_bias() + texture_unit.level_of_detail_bias();
 
         auto const& sampler = texture_2d->sampler();
 
@@ -626,21 +821,96 @@ void GLContext::sync_device_sampler_config()
             VERIFY_NOT_REACHED();
         }
 
-        switch (texture_unit.env_mode()) {
-        case GL_MODULATE:
-            config.fixed_function_texture_env_mode = GPU::TextureEnvMode::Modulate;
-            break;
-        case GL_REPLACE:
-            config.fixed_function_texture_env_mode = GPU::TextureEnvMode::Replace;
-            break;
-        case GL_DECAL:
-            config.fixed_function_texture_env_mode = GPU::TextureEnvMode::Decal;
-            break;
-        case GL_ADD:
-            config.fixed_function_texture_env_mode = GPU::TextureEnvMode::Add;
-            break;
-        default:
-            VERIFY_NOT_REACHED();
+        auto& fixed_function_env = config.fixed_function_texture_environment;
+
+        auto get_env_mode = [](GLenum mode) {
+            switch (mode) {
+            case GL_ADD:
+                return GPU::TextureEnvMode::Add;
+            case GL_BLEND:
+                return GPU::TextureEnvMode::Blend;
+            case GL_COMBINE:
+                return GPU::TextureEnvMode::Combine;
+            case GL_DECAL:
+                return GPU::TextureEnvMode::Decal;
+            case GL_MODULATE:
+                return GPU::TextureEnvMode::Modulate;
+            case GL_REPLACE:
+                return GPU::TextureEnvMode::Replace;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        };
+        fixed_function_env.env_mode = get_env_mode(texture_unit.env_mode());
+
+        fixed_function_env.alpha_scale = texture_unit.alpha_scale();
+        fixed_function_env.rgb_scale = texture_unit.rgb_scale();
+
+        auto get_combinator = [](GLenum combinator) {
+            switch (combinator) {
+            case GL_ADD:
+                return GPU::TextureCombinator::Add;
+            case GL_ADD_SIGNED:
+                return GPU::TextureCombinator::AddSigned;
+            case GL_DOT3_RGB:
+                return GPU::TextureCombinator::Dot3RGB;
+            case GL_DOT3_RGBA:
+                return GPU::TextureCombinator::Dot3RGBA;
+            case GL_INTERPOLATE:
+                return GPU::TextureCombinator::Interpolate;
+            case GL_MODULATE:
+                return GPU::TextureCombinator::Modulate;
+            case GL_REPLACE:
+                return GPU::TextureCombinator::Replace;
+            case GL_SUBTRACT:
+                return GPU::TextureCombinator::Subtract;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        };
+        fixed_function_env.alpha_combinator = get_combinator(texture_unit.alpha_combinator());
+        fixed_function_env.rgb_combinator = get_combinator(texture_unit.rgb_combinator());
+
+        auto get_operand = [](GLenum operand) {
+            switch (operand) {
+            case GL_ONE_MINUS_SRC_ALPHA:
+                return GPU::TextureOperand::OneMinusSourceAlpha;
+            case GL_ONE_MINUS_SRC_COLOR:
+                return GPU::TextureOperand::OneMinusSourceColor;
+            case GL_SRC_ALPHA:
+                return GPU::TextureOperand::SourceAlpha;
+            case GL_SRC_COLOR:
+                return GPU::TextureOperand::SourceColor;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        };
+        auto get_source = [](GLenum source) {
+            switch (source) {
+            case GL_CONSTANT:
+                return GPU::TextureSource::Constant;
+            case GL_PREVIOUS:
+                return GPU::TextureSource::Previous;
+            case GL_PRIMARY_COLOR:
+                return GPU::TextureSource::PrimaryColor;
+            case GL_TEXTURE:
+                return GPU::TextureSource::Texture;
+            case GL_TEXTURE0 ... GL_TEXTURE31:
+                return GPU::TextureSource::TextureStage;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        };
+        for (size_t j = 0; j < 3; ++j) {
+            fixed_function_env.alpha_operand[j] = get_operand(texture_unit.alpha_operand(j));
+            fixed_function_env.alpha_source[j] = get_source(texture_unit.alpha_source(j));
+            if (fixed_function_env.alpha_source[j] == GPU::TextureSource::TextureStage)
+                fixed_function_env.alpha_source_texture_stage = texture_unit.alpha_source(j) - GL_TEXTURE0;
+
+            fixed_function_env.rgb_operand[j] = get_operand(texture_unit.rgb_operand(j));
+            fixed_function_env.rgb_source[j] = get_source(texture_unit.rgb_source(j));
+            if (fixed_function_env.rgb_source[j] == GPU::TextureSource::TextureStage)
+                fixed_function_env.rgb_source_texture_stage = texture_unit.rgb_source(j) - GL_TEXTURE0;
         }
 
         config.border_color = sampler.border_color();
@@ -648,39 +918,41 @@ void GLContext::sync_device_sampler_config()
     }
 }
 
-void GLContext::sync_device_texcoord_config()
+void GLContext::sync_device_texture_units()
 {
-    if (!m_texcoord_generation_dirty)
+    if (!m_texture_units_dirty)
         return;
-    m_texcoord_generation_dirty = false;
+    m_texture_units_dirty = false;
 
-    auto options = m_rasterizer->options();
+    for (GPU::TextureUnitIndex i = 0; i < m_device_info.num_texture_units; ++i) {
+        GPU::TextureUnitConfiguration texture_unit_configuration;
+        texture_unit_configuration.enabled = m_texture_units[i].texture_2d_enabled();
+        texture_unit_configuration.transformation_matrix = m_texture_units[i].texture_matrix();
 
-    for (size_t i = 0; i < m_device_info.num_texture_units; ++i) {
-
+        // Tex coord generation
         u8 enabled_coordinates = GPU::TexCoordGenerationCoordinate::None;
         for (GLenum capability = GL_TEXTURE_GEN_S; capability <= GL_TEXTURE_GEN_Q; ++capability) {
             auto const context_coordinate_config = texture_coordinate_generation(i, capability);
             if (!context_coordinate_config.enabled)
                 continue;
 
-            GPU::TexCoordGenerationConfig* texcoord_generation_config;
+            GPU::TexCoordGeneration* texcoord_generation;
             switch (capability) {
             case GL_TEXTURE_GEN_S:
                 enabled_coordinates |= GPU::TexCoordGenerationCoordinate::S;
-                texcoord_generation_config = &options.texcoord_generation_config[i][0];
+                texcoord_generation = &texture_unit_configuration.tex_coord_generation[0];
                 break;
             case GL_TEXTURE_GEN_T:
                 enabled_coordinates |= GPU::TexCoordGenerationCoordinate::T;
-                texcoord_generation_config = &options.texcoord_generation_config[i][1];
+                texcoord_generation = &texture_unit_configuration.tex_coord_generation[1];
                 break;
             case GL_TEXTURE_GEN_R:
                 enabled_coordinates |= GPU::TexCoordGenerationCoordinate::R;
-                texcoord_generation_config = &options.texcoord_generation_config[i][2];
+                texcoord_generation = &texture_unit_configuration.tex_coord_generation[2];
                 break;
             case GL_TEXTURE_GEN_Q:
                 enabled_coordinates |= GPU::TexCoordGenerationCoordinate::Q;
-                texcoord_generation_config = &options.texcoord_generation_config[i][3];
+                texcoord_generation = &texture_unit_configuration.tex_coord_generation[3];
                 break;
             default:
                 VERIFY_NOT_REACHED();
@@ -688,28 +960,30 @@ void GLContext::sync_device_texcoord_config()
 
             switch (context_coordinate_config.generation_mode) {
             case GL_OBJECT_LINEAR:
-                texcoord_generation_config->mode = GPU::TexCoordGenerationMode::ObjectLinear;
-                texcoord_generation_config->coefficients = context_coordinate_config.object_plane_coefficients;
+                texcoord_generation->mode = GPU::TexCoordGenerationMode::ObjectLinear;
+                texcoord_generation->coefficients = context_coordinate_config.object_plane_coefficients;
                 break;
             case GL_EYE_LINEAR:
-                texcoord_generation_config->mode = GPU::TexCoordGenerationMode::EyeLinear;
-                texcoord_generation_config->coefficients = context_coordinate_config.eye_plane_coefficients;
+                texcoord_generation->mode = GPU::TexCoordGenerationMode::EyeLinear;
+                texcoord_generation->coefficients = context_coordinate_config.eye_plane_coefficients;
                 break;
             case GL_SPHERE_MAP:
-                texcoord_generation_config->mode = GPU::TexCoordGenerationMode::SphereMap;
+                texcoord_generation->mode = GPU::TexCoordGenerationMode::SphereMap;
                 break;
             case GL_REFLECTION_MAP:
-                texcoord_generation_config->mode = GPU::TexCoordGenerationMode::ReflectionMap;
+                texcoord_generation->mode = GPU::TexCoordGenerationMode::ReflectionMap;
                 break;
             case GL_NORMAL_MAP:
-                texcoord_generation_config->mode = GPU::TexCoordGenerationMode::NormalMap;
+                texcoord_generation->mode = GPU::TexCoordGenerationMode::NormalMap;
                 break;
+            default:
+                VERIFY_NOT_REACHED();
             }
         }
-        options.texcoord_generation_enabled_coordinates[i] = enabled_coordinates;
-    }
+        texture_unit_configuration.tex_coord_generation_enabled = enabled_coordinates;
 
-    m_rasterizer->set_options(options);
+        m_rasterizer->set_texture_unit_configuration(i, texture_unit_configuration);
+    }
 }
 
 }

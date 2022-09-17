@@ -81,10 +81,10 @@ Optional<LengthPercentage> StyleProperties::length_percentage(CSS::PropertyID id
 LengthBox StyleProperties::length_box(CSS::PropertyID left_id, CSS::PropertyID top_id, CSS::PropertyID right_id, CSS::PropertyID bottom_id, const CSS::Length& default_value) const
 {
     LengthBox box;
-    box.left = length_percentage_or_fallback(left_id, default_value);
-    box.top = length_percentage_or_fallback(top_id, default_value);
-    box.right = length_percentage_or_fallback(right_id, default_value);
-    box.bottom = length_percentage_or_fallback(bottom_id, default_value);
+    box.left() = length_percentage_or_fallback(left_id, default_value);
+    box.top() = length_percentage_or_fallback(top_id, default_value);
+    box.right() = length_percentage_or_fallback(right_id, default_value);
+    box.bottom() = length_percentage_or_fallback(bottom_id, default_value);
     return box;
 }
 
@@ -353,6 +353,14 @@ Optional<CSS::Appearance> StyleProperties::appearance() const
         }
     }
     return appearance;
+}
+
+CSS::BackdropFilter StyleProperties::backdrop_filter() const
+{
+    auto value = property(CSS::PropertyID::BackdropFilter);
+    if (value->is_filter_value_list())
+        return BackdropFilter(value->as_filter_value_list());
+    return BackdropFilter::make_none();
 }
 
 Optional<CSS::Position> StyleProperties::position() const

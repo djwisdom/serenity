@@ -6,9 +6,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Assertions.h>
 #include <AK/Debug.h>
-#include <AK/Format.h>
 #include <AK/Vector.h>
 #include <LibGL/GLContext.h>
 #include <LibGL/Image.h>
@@ -17,7 +15,6 @@
 #include <LibGPU/ImageDataLayout.h>
 #include <LibGPU/ImageFormat.h>
 #include <LibGfx/Bitmap.h>
-#include <LibGfx/Vector3.h>
 
 __attribute__((visibility("hidden"))) GL::GLContext* g_gl_context;
 
@@ -62,14 +59,14 @@ GLContext::GLContext(RefPtr<GPU::Driver> driver, NonnullOwnPtr<GPU::Device> devi
     // coordinate generation config.
     m_texture_coordinate_generation.resize(m_device_info.num_texture_units);
     for (auto& texture_coordinate_generation : m_texture_coordinate_generation) {
-        texture_coordinate_generation[0].object_plane_coefficients = { 1.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[0].eye_plane_coefficients = { 1.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[1].object_plane_coefficients = { 0.0f, 1.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[1].eye_plane_coefficients = { 0.0f, 1.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[2].object_plane_coefficients = { 0.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[2].eye_plane_coefficients = { 0.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[3].object_plane_coefficients = { 0.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[3].eye_plane_coefficients = { 0.0f, 0.0f, 0.0f, 0.0f };
+        texture_coordinate_generation[0].object_plane_coefficients = { 1.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[0].eye_plane_coefficients = { 1.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[1].object_plane_coefficients = { 0.f, 1.f, 0.f, 0.f };
+        texture_coordinate_generation[1].eye_plane_coefficients = { 0.f, 1.f, 0.f, 0.f };
+        texture_coordinate_generation[2].object_plane_coefficients = { 0.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[2].eye_plane_coefficients = { 0.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[3].object_plane_coefficients = { 0.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[3].eye_plane_coefficients = { 0.f, 0.f, 0.f, 0.f };
     }
 
     build_extension_string();
@@ -137,12 +134,6 @@ void GLContext::gl_end()
     RETURN_WITH_ERROR_IF(!m_in_draw_state, GL_INVALID_OPERATION);
     m_in_draw_state = false;
 
-    Vector<size_t, 32> enabled_texture_units;
-    for (size_t i = 0; i < m_texture_units.size(); ++i) {
-        if (m_texture_units[i].texture_2d_enabled())
-            enabled_texture_units.append(i);
-    }
-
     sync_device_config();
 
     GPU::PrimitiveType primitive_type;
@@ -177,7 +168,7 @@ void GLContext::gl_end()
         VERIFY_NOT_REACHED();
     }
 
-    m_rasterizer->draw_primitives(primitive_type, m_model_view_matrix, m_projection_matrix, m_texture_matrix, m_vertex_list, enabled_texture_units);
+    m_rasterizer->draw_primitives(primitive_type, model_view_matrix(), projection_matrix(), m_vertex_list);
     m_vertex_list.clear_with_capacity();
 }
 
@@ -499,6 +490,7 @@ void GLContext::gl_read_pixels(GLint x, GLint y, GLsizei width, GLsizei height, 
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
     RETURN_WITH_ERROR_IF(width < 0 || height < 0, GL_INVALID_VALUE);
 
+    RETURN_WITH_ERROR_IF(format == GL_NONE || type == GL_NONE, GL_INVALID_ENUM);
     auto pixel_type_or_error = get_validated_pixel_type(GL_NONE, GL_NONE, format, type);
     RETURN_WITH_ERROR_IF(pixel_type_or_error.is_error(), pixel_type_or_error.release_error().code());
 
@@ -564,6 +556,7 @@ void GLContext::gl_draw_pixels(GLsizei width, GLsizei height, GLenum format, GLe
     //        target and data is not evenly divisible into the number of bytes needed to store in memory a datum
     //        indicated by type.
 
+    RETURN_WITH_ERROR_IF(format == GL_NONE || type == GL_NONE, GL_INVALID_ENUM);
     auto pixel_type_or_error = get_validated_pixel_type(GL_NONE, GL_NONE, format, type);
     RETURN_WITH_ERROR_IF(pixel_type_or_error.is_error(), pixel_type_or_error.release_error().code());
 
@@ -657,29 +650,10 @@ void GLContext::gl_depth_func(GLenum func)
 void GLContext::gl_color_mask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha)
 {
     auto options = m_rasterizer->options();
-    auto mask = options.color_mask;
-
-    if (!red)
-        mask &= ~0x000000ff;
-    else
-        mask |= 0x000000ff;
-
-    if (!green)
-        mask &= ~0x0000ff00;
-    else
-        mask |= 0x0000ff00;
-
-    if (!blue)
-        mask &= ~0x00ff0000;
-    else
-        mask |= 0x00ff0000;
-
-    if (!alpha)
-        mask &= ~0xff000000;
-    else
-        mask |= 0xff000000;
-
-    options.color_mask = mask;
+    options.color_mask = (red == GL_TRUE ? 0xff : 0)
+        | (green == GL_TRUE ? 0xff00 : 0)
+        | (blue == GL_TRUE ? 0xff0000 : 0)
+        | (alpha == GL_TRUE ? 0xff000000 : 0);
     m_rasterizer->set_options(options);
 }
 
@@ -833,7 +807,7 @@ void GLContext::gl_raster_pos(GLfloat x, GLfloat y, GLfloat z, GLfloat w)
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_raster_pos, x, y, z, w);
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
 
-    m_rasterizer->set_raster_position({ x, y, z, w }, m_model_view_matrix, m_projection_matrix);
+    m_rasterizer->set_raster_position({ x, y, z, w }, model_view_matrix(), projection_matrix());
 }
 
 void GLContext::gl_line_width(GLfloat width)
@@ -908,13 +882,13 @@ void GLContext::gl_point_size(GLfloat size)
 
 void GLContext::present()
 {
-    m_rasterizer->blit_color_buffer_to(*m_frontbuffer);
+    m_rasterizer->blit_from_color_buffer(*m_frontbuffer);
 }
 
 void GLContext::sync_device_config()
 {
     sync_device_sampler_config();
-    sync_device_texcoord_config();
+    sync_device_texture_units();
     sync_light_state();
     sync_stencil_configuration();
     sync_clip_planes();
@@ -933,19 +907,25 @@ void GLContext::build_extension_string()
     if (m_device_info.num_texture_units > 1)
         extensions.append("GL_ARB_multitexture"sv);
 
+    if (m_device_info.supports_texture_clamp_to_edge)
+        extensions.append("GL_EXT_texture_edge_clamp"sv);
+
     if (m_device_info.supports_texture_env_add) {
         extensions.append("GL_ARB_texture_env_add"sv);
         extensions.append("GL_EXT_texture_env_add"sv);
     }
 
+    if (m_device_info.max_texture_lod_bias > 0.f)
+        extensions.append("GL_EXT_texture_lod_bias"sv);
+
     m_extensions = String::join(' ', extensions);
 }
 
-NonnullOwnPtr<GLContext> create_context(Gfx::Bitmap& bitmap)
+ErrorOr<NonnullOwnPtr<GLContext>> create_context(Gfx::Bitmap& bitmap)
 {
     // FIXME: Make driver selectable. This is currently hardcoded to LibSoftGPU
-    auto driver = MUST(GPU::Driver::try_create("softgpu"sv));
-    auto device = MUST(driver->try_create_device(bitmap.size()));
+    auto driver = TRY(GPU::Driver::try_create("softgpu"sv));
+    auto device = TRY(driver->try_create_device(bitmap.size()));
     auto context = make<GLContext>(driver, move(device), bitmap);
     dbgln_if(GL_DEBUG, "GL::create_context({}) -> {:p}", bitmap.size(), context.ptr());
 

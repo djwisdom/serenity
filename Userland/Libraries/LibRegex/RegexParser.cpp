@@ -1582,7 +1582,7 @@ bool ECMA262Parser::parse_atom_escape(ByteCode& stack, size_t& match_length_mini
         }
 
         // If not, put the characters back.
-        back(escape_str.length());
+        back(escape_str.length() + (done() ? 0 : 1));
     }
 
     Vector<CompareTypeAndValuePair> escape_compares;
@@ -2701,10 +2701,13 @@ size_t ECMA262Parser::ensure_total_number_of_capturing_parenthesis()
             continue;
         case '[':
             while (!lexer.is_eof()) {
-                if (lexer.consume_specific('\\'))
+                if (lexer.consume_specific('\\')) {
                     lexer.consume();
-                else if (lexer.consume_specific(']'))
+                    continue;
+                }
+                if (lexer.consume_specific(']')) {
                     break;
+                }
                 lexer.consume();
             }
             break;

@@ -20,14 +20,23 @@ GridTrackSize::GridTrackSize(Length length)
 
 GridTrackSize::GridTrackSize(Percentage percentage)
     : m_type(Type::Percentage)
+    , m_length { Length::make_px(0) }
     , m_percentage(percentage)
 {
 }
 
-GridTrackSize::GridTrackSize(int flexible_length)
+GridTrackSize::GridTrackSize(float flexible_length)
     : m_type(Type::FlexibleLength)
+    , m_length { Length::make_px(0) }
     , m_flexible_length(flexible_length)
 {
+}
+
+GridTrackSize::~GridTrackSize() = default;
+
+GridTrackSize GridTrackSize::make_auto()
+{
+    return GridTrackSize(CSS::Length::make_auto());
 }
 
 String GridTrackSize::to_string() const
@@ -41,6 +50,11 @@ String GridTrackSize::to_string() const
         return String::formatted("{}fr", m_flexible_length);
     }
     VERIFY_NOT_REACHED();
+}
+
+Length GridTrackSize::length() const
+{
+    return m_length;
 }
 
 }

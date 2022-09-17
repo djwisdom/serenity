@@ -543,7 +543,7 @@ void Device::rasterize_line_antialiased(GPU::Vertex& from, GPU::Vertex& to)
             // FIXME: interpolate color, tex coords and fog depth along the distance of the line
             //        in clip space (i.e. NOT distance_from_line)
             quad.vertex_color = from_color4;
-            for (size_t i = 0; i < GPU::NUM_SAMPLERS; ++i)
+            for (size_t i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i)
                 quad.texture_coordinates[i] = expand4(from.tex_coords[i]);
             quad.fog_depth = from_fog_depth4;
         });
@@ -590,7 +590,7 @@ void Device::rasterize_point_aliased(GPU::Vertex& point)
         },
         [&point](auto& quad) {
             quad.vertex_color = expand4(point.color);
-            for (size_t i = 0; i < GPU::NUM_SAMPLERS; ++i)
+            for (size_t i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i)
                 quad.texture_coordinates[i] = expand4(point.tex_coords[i]);
             quad.fog_depth = expand4(abs(point.eye_coordinates.z()));
         });
@@ -625,7 +625,7 @@ void Device::rasterize_point_antialiased(GPU::Vertex& point)
         },
         [&point](auto& quad) {
             quad.vertex_color = expand4(point.color);
-            for (size_t i = 0; i < GPU::NUM_SAMPLERS; ++i)
+            for (size_t i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i)
                 quad.texture_coordinates[i] = expand4(point.tex_coords[i]);
             quad.fog_depth = expand4(abs(point.eye_coordinates.z()));
         });
@@ -633,18 +633,6 @@ void Device::rasterize_point_antialiased(GPU::Vertex& point)
 
 void Device::rasterize_point(GPU::Vertex& point)
 {
-    // Divide texture coordinates R, S and T by Q
-    for (size_t i = 0; i < GPU::NUM_SAMPLERS; ++i) {
-        auto& tex_coord = point.tex_coords[i];
-        auto one_over_w = 1 / tex_coord.w();
-        tex_coord = {
-            tex_coord.x() * one_over_w,
-            tex_coord.y() * one_over_w,
-            tex_coord.z() * one_over_w,
-            tex_coord.w(),
-        };
-    }
-
     if (m_options.point_smooth)
         rasterize_point_antialiased(point);
     else
@@ -790,7 +778,7 @@ void Device::rasterize_triangle(Triangle& triangle)
             else
                 quad.vertex_color = expand4(vertex0.color);
 
-            for (size_t i = 0; i < GPU::NUM_SAMPLERS; ++i)
+            for (GPU::TextureUnitIndex i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i)
                 quad.texture_coordinates[i] = interpolate(expand4(vertex0.tex_coords[i]), expand4(vertex1.tex_coords[i]), expand4(vertex2.tex_coords[i]), quad.barycentrics);
 
             if (m_options.fog_enabled)
@@ -810,27 +798,28 @@ GPU::DeviceInfo Device::info() const
     return {
         .vendor_name = "SerenityOS",
         .device_name = "SoftGPU",
-        .num_texture_units = GPU::NUM_SAMPLERS,
+        .num_texture_units = GPU::NUM_TEXTURE_UNITS,
         .num_lights = NUM_LIGHTS,
         .max_clip_planes = MAX_CLIP_PLANES,
+        .max_texture_lod_bias = MAX_TEXTURE_LOD_BIAS,
         .stencil_bits = sizeof(GPU::StencilType) * 8,
         .supports_npot_textures = true,
+        .supports_texture_clamp_to_edge = true,
         .supports_texture_env_add = true,
     };
 }
 
-static void generate_texture_coordinates(GPU::Vertex& vertex, GPU::RasterizerOptions const& options)
+static void generate_texture_coordinates(GPU::Vertex const& vertex, FloatVector4& tex_coord, GPU::TextureUnitConfiguration const& texture_unit_configuration)
 {
-    auto generate_coordinate = [&](size_t texcoord_index, size_t config_index) -> float {
-        auto mode = options.texcoord_generation_config[texcoord_index][config_index].mode;
-
-        switch (mode) {
+    auto generate_coordinate = [&](size_t config_index) -> float {
+        auto const& tex_coord_generation = texture_unit_configuration.tex_coord_generation[config_index];
+        switch (tex_coord_generation.mode) {
         case GPU::TexCoordGenerationMode::ObjectLinear: {
-            auto coefficients = options.texcoord_generation_config[texcoord_index][config_index].coefficients;
+            auto coefficients = tex_coord_generation.coefficients;
             return coefficients.dot(vertex.position);
         }
         case GPU::TexCoordGenerationMode::EyeLinear: {
-            auto coefficients = options.texcoord_generation_config[texcoord_index][config_index].coefficients;
+            auto coefficients = tex_coord_generation.coefficients;
             return coefficients.dot(vertex.eye_coordinates);
         }
         case GPU::TexCoordGenerationMode::SphereMap: {
@@ -852,21 +841,20 @@ static void generate_texture_coordinates(GPU::Vertex& vertex, GPU::RasterizerOpt
         case GPU::TexCoordGenerationMode::NormalMap: {
             return vertex.normal[config_index];
         }
-        default:
-            VERIFY_NOT_REACHED();
         }
+        VERIFY_NOT_REACHED();
     };
 
-    for (size_t i = 0; i < vertex.tex_coords.size(); ++i) {
-        auto& tex_coord = vertex.tex_coords[i];
-        auto const enabled_coords = options.texcoord_generation_enabled_coordinates[i];
-        tex_coord = {
-            ((enabled_coords & GPU::TexCoordGenerationCoordinate::S) > 0) ? generate_coordinate(i, 0) : tex_coord.x(),
-            ((enabled_coords & GPU::TexCoordGenerationCoordinate::T) > 0) ? generate_coordinate(i, 1) : tex_coord.y(),
-            ((enabled_coords & GPU::TexCoordGenerationCoordinate::R) > 0) ? generate_coordinate(i, 2) : tex_coord.z(),
-            ((enabled_coords & GPU::TexCoordGenerationCoordinate::Q) > 0) ? generate_coordinate(i, 3) : tex_coord.w(),
-        };
-    }
+    auto const enabled_coords = texture_unit_configuration.tex_coord_generation_enabled;
+    if (enabled_coords == GPU::TexCoordGenerationCoordinate::None)
+        return;
+
+    tex_coord = {
+        ((enabled_coords & GPU::TexCoordGenerationCoordinate::S) > 0) ? generate_coordinate(0) : tex_coord.x(),
+        ((enabled_coords & GPU::TexCoordGenerationCoordinate::T) > 0) ? generate_coordinate(1) : tex_coord.y(),
+        ((enabled_coords & GPU::TexCoordGenerationCoordinate::R) > 0) ? generate_coordinate(2) : tex_coord.z(),
+        ((enabled_coords & GPU::TexCoordGenerationCoordinate::Q) > 0) ? generate_coordinate(3) : tex_coord.w(),
+    };
 }
 
 void Device::calculate_vertex_lighting(GPU::Vertex& vertex) const
@@ -988,8 +976,7 @@ void Device::calculate_vertex_lighting(GPU::Vertex& vertex) const
     vertex.color.clamp(0.0f, 1.0f);
 }
 
-void Device::draw_primitives(GPU::PrimitiveType primitive_type, FloatMatrix4x4 const& model_view_transform, FloatMatrix4x4 const& projection_transform,
-    FloatMatrix4x4 const& texture_transform, Vector<GPU::Vertex>& vertices, Vector<size_t> const& enabled_texture_units)
+void Device::draw_primitives(GPU::PrimitiveType primitive_type, FloatMatrix4x4 const& model_view_transform, FloatMatrix4x4 const& projection_transform, Vector<GPU::Vertex>& vertices)
 {
     // At this point, the user has effectively specified that they are done with defining the geometry
     // of what they want to draw. We now need to do a few things (https://www.khronos.org/opengl/wiki/Rendering_Pipeline_Overview):
@@ -1004,16 +991,9 @@ void Device::draw_primitives(GPU::PrimitiveType primitive_type, FloatMatrix4x4 c
     if (vertices.is_empty())
         return;
 
-    m_enabled_texture_units = enabled_texture_units;
-
     // Set up normals transform by taking the upper left 3x3 elements from the model view matrix
     // See section 2.11.3 of the OpenGL 1.5 spec
     auto const normal_transform = model_view_transform.submatrix_from_topleft<3>().transpose().inverse();
-
-    // Generate texture coordinates if at least one coordinate is enabled
-    bool texture_coordinate_generation_enabled = any_of(
-        m_options.texcoord_generation_enabled_coordinates,
-        [](auto coordinates_enabled) { return coordinates_enabled != GPU::TexCoordGenerationCoordinate::None; });
 
     // First, transform all vertices
     for (auto& vertex : vertices) {
@@ -1027,11 +1007,13 @@ void Device::draw_primitives(GPU::PrimitiveType primitive_type, FloatMatrix4x4 c
 
         vertex.clip_coordinates = projection_transform * vertex.eye_coordinates;
 
-        if (texture_coordinate_generation_enabled)
-            generate_texture_coordinates(vertex, m_options);
-
-        for (size_t i = 0; i < GPU::NUM_SAMPLERS; ++i)
-            vertex.tex_coords[i] = texture_transform * vertex.tex_coords[i];
+        for (GPU::TextureUnitIndex i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i) {
+            auto const& texture_unit_configuration = m_texture_unit_configuration[i];
+            if (!texture_unit_configuration.enabled)
+                continue;
+            generate_texture_coordinates(vertex, vertex.tex_coords[i], texture_unit_configuration);
+            vertex.tex_coords[i] = texture_unit_configuration.transformation_matrix * vertex.tex_coords[i];
+        }
     }
 
     // Window coordinate calculation
@@ -1187,40 +1169,127 @@ void Device::draw_primitives(GPU::PrimitiveType primitive_type, FloatMatrix4x4 c
 
 ALWAYS_INLINE void Device::shade_fragments(PixelQuad& quad)
 {
-    quad.out_color = quad.vertex_color;
+    Array<Vector4<f32x4>, GPU::NUM_TEXTURE_UNITS> texture_stage_texel;
 
-    for (size_t i : m_enabled_texture_units) {
-        // FIXME: implement GL_TEXTURE_1D, GL_TEXTURE_3D and GL_TEXTURE_CUBE_MAP
+    auto current_color = quad.vertex_color;
+    for (GPU::TextureUnitIndex i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i) {
+        if (!m_texture_unit_configuration[i].enabled)
+            continue;
         auto const& sampler = m_samplers[i];
 
-        auto texel = sampler.sample_2d(quad.texture_coordinates[i].xy());
+        // OpenGL 2.0 ¶ 3.5.1 states (in a roundabout way) that texture coordinates must be divided by Q
+        auto texel = sampler.sample_2d(quad.texture_coordinates[i].xy() / quad.texture_coordinates[i].w());
+        texture_stage_texel[i] = texel;
         INCREASE_STATISTICS_COUNTER(g_num_sampler_calls, 1);
 
-        // FIXME: Implement more blend modes
-        switch (sampler.config().fixed_function_texture_env_mode) {
-        case GPU::TextureEnvMode::Modulate:
-            quad.out_color = quad.out_color * texel;
+        // FIXME: implement support for GL_ALPHA, GL_LUMINANCE, GL_LUMINANCE_ALPHA, GL_INTENSITY and GL_RGB internal formats
+        auto& fixed_function_env = sampler.config().fixed_function_texture_environment;
+        switch (fixed_function_env.env_mode) {
+        case GPU::TextureEnvMode::Add:
+            current_color.set_x(current_color.x() + texel.x());
+            current_color.set_y(current_color.y() + texel.y());
+            current_color.set_z(current_color.z() + texel.z());
+            current_color.set_w(current_color.w() * texel.w());
             break;
-        case GPU::TextureEnvMode::Replace:
-            quad.out_color = texel;
+        case GPU::TextureEnvMode::Blend: {
+            auto blend_color = expand4(fixed_function_env.color);
+            current_color.set_x(mix(current_color.x(), blend_color.x(), texel.x()));
+            current_color.set_y(mix(current_color.y(), blend_color.y(), texel.y()));
+            current_color.set_z(mix(current_color.z(), blend_color.z(), texel.z()));
+            current_color.set_w(current_color.w() * texel.w());
             break;
+        }
+        case GPU::TextureEnvMode::Combine: {
+            auto get_source_color = [&](GPU::TextureSource source, u8 texture_stage) {
+                switch (source) {
+                case GPU::TextureSource::Constant:
+                    return expand4(fixed_function_env.color);
+                case GPU::TextureSource::Previous:
+                    return current_color;
+                case GPU::TextureSource::PrimaryColor:
+                    return quad.vertex_color;
+                case GPU::TextureSource::Texture:
+                    return texel;
+                case GPU::TextureSource::TextureStage:
+                    return texture_stage_texel[texture_stage];
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto get_argument_value = [](GPU::TextureOperand operand, auto value) {
+                switch (operand) {
+                case GPU::TextureOperand::OneMinusSourceAlpha:
+                case GPU::TextureOperand::OneMinusSourceColor:
+                    return expand4(FloatVector4 { 1.f, 1.f, 1.f, 1.f }) - value;
+                case GPU::TextureOperand::SourceAlpha:
+                case GPU::TextureOperand::SourceColor:
+                    return value;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto calculate_combinator = [](GPU::TextureCombinator combinator, auto arg0, auto arg1, auto arg2) {
+                switch (combinator) {
+                case GPU::TextureCombinator::Add:
+                    return arg0 + arg1;
+                case GPU::TextureCombinator::AddSigned:
+                    return arg0 + arg1 - expand4(FloatVector4 { .5f, .5f, .5f, .5f });
+                case GPU::TextureCombinator::Dot3RGB:
+                case GPU::TextureCombinator::Dot3RGBA: {
+                    auto scalar = 4.f * ((arg0.x() - .5f) * (arg1.x() - .5f) + (arg0.y() - 0.5f) * (arg1.y() - 0.5f) + (arg0.z() - 0.5f) * (arg1.z() - 0.5f));
+                    return Vector4<f32x4> { scalar, scalar, scalar, scalar };
+                }
+                case GPU::TextureCombinator::Interpolate:
+                    return mix(arg0, arg1, arg2);
+                case GPU::TextureCombinator::Modulate:
+                    return arg0 * arg1;
+                case GPU::TextureCombinator::Replace:
+                    return arg0;
+                case GPU::TextureCombinator::Subtract:
+                    return arg0 - arg1;
+                }
+                VERIFY_NOT_REACHED();
+            };
+            auto calculate_color = [&](GPU::TextureCombinator combinator, auto& operands, auto& sources, u8 texture_stage) {
+                auto arg0 = get_argument_value(operands[0], get_source_color(sources[0], texture_stage));
+                auto arg1 = get_argument_value(operands[1], get_source_color(sources[1], texture_stage));
+                auto arg2 = get_argument_value(operands[2], get_source_color(sources[2], texture_stage));
+                return calculate_combinator(combinator, arg0, arg1, arg2);
+            };
+
+            auto rgb_color = calculate_color(
+                fixed_function_env.rgb_combinator,
+                fixed_function_env.rgb_operand,
+                fixed_function_env.rgb_source,
+                fixed_function_env.rgb_source_texture_stage);
+            auto alpha_color = calculate_color(
+                fixed_function_env.alpha_combinator,
+                fixed_function_env.alpha_operand,
+                fixed_function_env.alpha_source,
+                fixed_function_env.alpha_source_texture_stage);
+
+            current_color.set_x(rgb_color.x() * fixed_function_env.rgb_scale);
+            current_color.set_y(rgb_color.y() * fixed_function_env.rgb_scale);
+            current_color.set_z(rgb_color.z() * fixed_function_env.rgb_scale);
+            current_color.set_w(alpha_color.w() * fixed_function_env.alpha_scale);
+
+            current_color.clamp(expand4(0.f), expand4(1.f));
+            break;
+        }
         case GPU::TextureEnvMode::Decal: {
             auto dst_alpha = texel.w();
-            quad.out_color.set_x(mix(quad.out_color.x(), texel.x(), dst_alpha));
-            quad.out_color.set_y(mix(quad.out_color.y(), texel.y(), dst_alpha));
-            quad.out_color.set_z(mix(quad.out_color.z(), texel.z(), dst_alpha));
+            current_color.set_x(mix(current_color.x(), texel.x(), dst_alpha));
+            current_color.set_y(mix(current_color.y(), texel.y(), dst_alpha));
+            current_color.set_z(mix(current_color.z(), texel.z(), dst_alpha));
             break;
         }
-        case GPU::TextureEnvMode::Add:
-            quad.out_color.set_x(quad.out_color.x() + texel.x());
-            quad.out_color.set_y(quad.out_color.y() + texel.y());
-            quad.out_color.set_z(quad.out_color.z() + texel.z());
-            quad.out_color.set_w(quad.out_color.w() * texel.w()); // FIXME: If texture format is `GL_INTENSITY` alpha components must be added (https://www.khronos.org/registry/OpenGL-Refpages/gl2.1/xhtml/glTexEnv.xml)
+        case GPU::TextureEnvMode::Modulate:
+            current_color = current_color * texel;
             break;
-        default:
-            VERIFY_NOT_REACHED();
+        case GPU::TextureEnvMode::Replace:
+            current_color = texel;
+            break;
         }
     }
+    quad.out_color = current_color;
 
     // Calculate fog
     // Math from here: https://opengl-notes.readthedocs.io/en/latest/topics/texturing/aliasing.html
@@ -1373,6 +1442,29 @@ GPU::ImageDataLayout Device::depth_buffer_data_layout(Vector2<u32> size, Vector2
     };
 }
 
+void Device::blit_from_color_buffer(Gfx::Bitmap& target)
+{
+    m_frame_buffer->color_buffer()->blit_flipped_to_bitmap(target, m_frame_buffer->rect());
+
+    if constexpr (ENABLE_STATISTICS_OVERLAY)
+        draw_statistics_overlay(target);
+}
+
+void Device::blit_from_color_buffer(NonnullRefPtr<GPU::Image> image, u32 level, Vector2<u32> input_size, Vector2<i32> input_offset, Vector3<i32> output_offset)
+{
+    auto input_layout = color_buffer_data_layout(input_size, input_offset);
+    auto const* input_data = m_frame_buffer->color_buffer()->scanline(0);
+
+    auto const& softgpu_image = reinterpret_cast<Image*>(image.ptr());
+    auto output_layout = softgpu_image->image_data_layout(level, output_offset);
+    auto* output_data = softgpu_image->texel_pointer(level, 0, 0, 0);
+
+    PixelConverter converter { input_layout, output_layout };
+    auto conversion_result = converter.convert(input_data, output_data, {});
+    if (conversion_result.is_error())
+        dbgln("Pixel conversion failed: {}", conversion_result.error().string_literal());
+}
+
 void Device::blit_from_color_buffer(void* output_data, Vector2<i32> input_offset, GPU::ImageDataLayout const& output_layout)
 {
     auto const& output_selection = output_layout.selection;
@@ -1392,6 +1484,21 @@ void Device::blit_from_depth_buffer(void* output_data, Vector2<i32> input_offset
 
     PixelConverter converter { input_layout, output_layout };
     auto const* input_data = m_frame_buffer->depth_buffer()->scanline(0);
+    auto conversion_result = converter.convert(input_data, output_data, {});
+    if (conversion_result.is_error())
+        dbgln("Pixel conversion failed: {}", conversion_result.error().string_literal());
+}
+
+void Device::blit_from_depth_buffer(NonnullRefPtr<GPU::Image> image, u32 level, Vector2<u32> input_size, Vector2<i32> input_offset, Vector3<i32> output_offset)
+{
+    auto input_layout = depth_buffer_data_layout(input_size, input_offset);
+    auto const* input_data = m_frame_buffer->depth_buffer()->scanline(0);
+
+    auto const& softgpu_image = reinterpret_cast<Image*>(image.ptr());
+    auto output_layout = softgpu_image->image_data_layout(level, output_offset);
+    auto* output_data = softgpu_image->texel_pointer(level, 0, 0, 0);
+
+    PixelConverter converter { input_layout, output_layout };
     auto conversion_result = converter.convert(input_data, output_data, {});
     if (conversion_result.is_error())
         dbgln("Pixel conversion failed: {}", conversion_result.error().string_literal());
@@ -1434,14 +1541,6 @@ void Device::blit_to_depth_buffer_at_raster_position(void const* input_data, GPU
     auto conversion_result = converter.convert(input_data, output_data, {});
     if (conversion_result.is_error())
         dbgln("Pixel conversion failed: {}", conversion_result.error().string_literal());
-}
-
-void Device::blit_color_buffer_to(Gfx::Bitmap& target)
-{
-    m_frame_buffer->color_buffer()->blit_flipped_to_bitmap(target, m_frame_buffer->rect());
-
-    if constexpr (ENABLE_STATISTICS_OVERLAY)
-        draw_statistics_overlay(target);
 }
 
 void Device::draw_statistics_overlay(Gfx::Bitmap& target)
@@ -1514,15 +1613,14 @@ void Device::set_light_model_params(GPU::LightModelParameters const& lighting_mo
     m_lighting_model = lighting_model;
 }
 
-NonnullRefPtr<GPU::Image> Device::create_image(GPU::PixelFormat const& pixel_format, u32 width, u32 height, u32 depth, u32 levels, u32 layers)
+NonnullRefPtr<GPU::Image> Device::create_image(GPU::PixelFormat const& pixel_format, u32 width, u32 height, u32 depth, u32 max_levels)
 {
     VERIFY(width > 0);
     VERIFY(height > 0);
     VERIFY(depth > 0);
-    VERIFY(levels > 0);
-    VERIFY(layers > 0);
+    VERIFY(max_levels > 0);
 
-    return adopt_ref(*new Image(this, pixel_format, width, height, depth, levels, layers));
+    return adopt_ref(*new Image(this, pixel_format, width, height, depth, max_levels));
 }
 
 void Device::set_sampler_config(unsigned sampler, GPU::SamplerConfig const& config)
@@ -1545,6 +1643,11 @@ void Device::set_material_state(GPU::Face face, GPU::Material const& material)
 void Device::set_stencil_configuration(GPU::Face face, GPU::StencilConfiguration const& stencil_configuration)
 {
     m_stencil_configuration[face] = stencil_configuration;
+}
+
+void Device::set_texture_unit_configuration(GPU::TextureUnitIndex index, GPU::TextureUnitConfiguration const& configuration)
+{
+    m_texture_unit_configuration[index] = configuration;
 }
 
 void Device::set_raster_position(GPU::RasterPosition const& raster_position)

@@ -109,6 +109,9 @@ struct LayoutState {
 
         Optional<LineBoxFragmentCoordinate> containing_line_box_fragment;
 
+        void add_floating_descendant(Box const& box) { m_floating_descendants.set(&box); }
+        auto const& floating_descendants() const { return m_floating_descendants; }
+
     private:
         Layout::NodeWithStyleAndBoxModelMetrics* m_node { nullptr };
 
@@ -117,7 +120,12 @@ struct LayoutState {
 
         bool m_has_definite_width { false };
         bool m_has_definite_height { false };
+
+        HashTable<Box const*> m_floating_descendants;
     };
+
+    float resolved_definite_width(Box const&) const;
+    float resolved_definite_height(Box const&) const;
 
     void commit();
 
