@@ -3,6 +3,7 @@
  * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
  * Copyright (c) 2022, Ali Mohammad Pur <mpfard@serenityos.org>
+ * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -21,7 +22,7 @@
 namespace IDL {
 
 template<typename FunctionType>
-static size_t get_function_length(FunctionType& function)
+static size_t get_function_shortest_length(FunctionType& function)
 {
     size_t length = 0;
     for (auto& parameter : function.parameters) {
@@ -41,29 +42,104 @@ struct CppType {
     SequenceStorageType sequence_storage_type;
 };
 
-struct Type : public RefCounted<Type> {
-    Type() = default;
+class ParameterizedType;
+class UnionType;
+
+class Type : public RefCounted<Type> {
+public:
+    enum class Kind {
+        Plain, // AKA, Type.
+        Parameterized,
+        Union,
+    };
 
     Type(String name, bool nullable)
-        : name(move(name))
-        , nullable(nullable)
+        : m_kind(Kind::Plain)
+        , m_name(move(name))
+        , m_nullable(nullable)
+    {
+    }
+
+    Type(Kind kind, String name, bool nullable)
+        : m_kind(kind)
+        , m_name(move(name))
+        , m_nullable(nullable)
     {
     }
 
     virtual ~Type() = default;
 
-    String name;
-    bool nullable { false };
-    bool is_string() const { return name.is_one_of("ByteString", "CSSOMString", "DOMString", "USVString"); }
+    Kind kind() const { return m_kind; }
+
+    bool is_plain() const { return m_kind == Kind::Plain; }
+
+    bool is_parameterized() const { return m_kind == Kind::Parameterized; }
+    ParameterizedType const& as_parameterized() const;
+    ParameterizedType& as_parameterized();
+
+    bool is_union() const { return m_kind == Kind::Union; }
+    UnionType const& as_union() const;
+    UnionType& as_union();
+
+    String const& name() const { return m_name; }
+
+    bool is_nullable() const { return m_nullable; }
+    void set_nullable(bool value) { m_nullable = value; }
+
+    // https://webidl.spec.whatwg.org/#dfn-includes-a-nullable-type
+    bool includes_nullable_type() const;
+
+    // -> https://webidl.spec.whatwg.org/#dfn-includes-undefined
+    bool includes_undefined() const;
+
+    Type const& innermost_type() const
+    {
+        // From step 4 of https://webidl.spec.whatwg.org/#dfn-distinguishable
+        // "Consider the two "innermost" types derived by taking each type’s inner type if it is an annotated type, and then taking its inner type inner type if the result is a nullable type."
+        // FIXME: Annotated types.
+        VERIFY(!is_union());
+        return *this;
+    }
+
+    // https://webidl.spec.whatwg.org/#idl-any
+    bool is_any() const { return is_plain() && m_name == "any"; }
+
+    // https://webidl.spec.whatwg.org/#idl-undefined
+    bool is_undefined() const { return is_plain() && m_name == "undefined"; }
+
+    // https://webidl.spec.whatwg.org/#idl-boolean
+    bool is_boolean() const { return is_plain() && m_name == "boolean"; }
+
+    // https://webidl.spec.whatwg.org/#idl-bigint
+    bool is_bigint() const { return is_plain() && m_name == "bigint"; }
+
+    // https://webidl.spec.whatwg.org/#idl-object
+    bool is_object() const { return is_plain() && m_name == "object"; }
+
+    // https://webidl.spec.whatwg.org/#idl-symbol
+    bool is_symbol() const { return is_plain() && m_name == "symbol"; }
+
+    bool is_string() const { return is_plain() && m_name.is_one_of("ByteString", "CSSOMString", "DOMString", "USVString"); }
 
     // https://webidl.spec.whatwg.org/#dfn-integer-type
-    bool is_integer() const { return name.is_one_of("byte", "octet", "short", "unsigned short", "long", "unsigned long", "long long", "unsigned long long"); }
+    bool is_integer() const { return is_plain() && m_name.is_one_of("byte", "octet", "short", "unsigned short", "long", "unsigned long", "long long", "unsigned long long"); }
 
     // https://webidl.spec.whatwg.org/#dfn-numeric-type
-    bool is_numeric() const { return is_integer() || name.is_one_of("float", "unrestricted float", "double", "unrestricted double"); }
+    bool is_numeric() const { return is_plain() && (is_integer() || m_name.is_one_of("float", "unrestricted float", "double", "unrestricted double")); }
 
     // https://webidl.spec.whatwg.org/#dfn-primitive-type
-    bool is_primitive() const { return is_numeric() || name.is_one_of("bigint", "boolean"); }
+    bool is_primitive() const { return is_plain() && (is_numeric() || is_boolean() || m_name == "bigint"); }
+
+    // https://webidl.spec.whatwg.org/#idl-sequence
+    bool is_sequence() const { return is_parameterized() && m_name == "sequence"; }
+
+    // https://webidl.spec.whatwg.org/#dfn-distinguishable
+    bool is_distinguishable_from(Type const& other) const;
+
+private:
+    Kind m_kind;
+    String m_name;
+    bool m_nullable { false };
 };
 
 struct Parameter {
@@ -83,14 +159,14 @@ struct Function {
     size_t overload_index { 0 };
     bool is_overloaded { false };
 
-    size_t length() const { return get_function_length(*this); }
+    size_t shortest_length() const { return get_function_shortest_length(*this); }
 };
 
 struct Constructor {
     String name;
     Vector<Parameter> parameters;
 
-    size_t length() const { return get_function_length(*this); }
+    size_t shortest_length() const { return get_function_shortest_length(*this); }
 };
 
 struct Constant {
@@ -143,27 +219,30 @@ struct CallbackFunction {
 
 class Interface;
 
-struct ParameterizedType : public Type {
-    ParameterizedType() = default;
-
+class ParameterizedType : public Type {
+public:
     ParameterizedType(String name, bool nullable, NonnullRefPtrVector<Type> parameters)
-        : Type(move(name), nullable)
-        , parameters(move(parameters))
+        : Type(Kind::Parameterized, move(name), nullable)
+        , m_parameters(move(parameters))
     {
     }
 
     virtual ~ParameterizedType() override = default;
 
-    NonnullRefPtrVector<Type> parameters;
-
     void generate_sequence_from_iterable(SourceGenerator& generator, String const& cpp_name, String const& iterable_cpp_name, String const& iterator_method_cpp_name, IDL::Interface const&, size_t recursion_depth) const;
+
+    NonnullRefPtrVector<Type> const& parameters() const { return m_parameters; }
+    NonnullRefPtrVector<Type>& parameters() { return m_parameters; }
+
+private:
+    NonnullRefPtrVector<Type> m_parameters;
 };
 
 static inline size_t get_shortest_function_length(Vector<Function&> const& overload_set)
 {
     size_t shortest_length = SIZE_MAX;
     for (auto const& function : overload_set)
-        shortest_length = min(function.length(), shortest_length);
+        shortest_length = min(function.shortest_length(), shortest_length);
     return shortest_length;
 }
 
@@ -238,20 +317,18 @@ public:
     }
 };
 
-CppType idl_type_name_to_cpp_type(Type const& type, IDL::Interface const& interface);
-
-struct UnionType : public Type {
-    UnionType() = default;
-
+class UnionType : public Type {
+public:
     UnionType(String name, bool nullable, NonnullRefPtrVector<Type> member_types)
-        : Type(move(name), nullable)
-        , member_types(move(member_types))
+        : Type(Kind::Union, move(name), nullable)
+        , m_member_types(move(member_types))
     {
     }
 
     virtual ~UnionType() override = default;
 
-    NonnullRefPtrVector<Type> member_types;
+    NonnullRefPtrVector<Type> const& member_types() const { return m_member_types; }
+    NonnullRefPtrVector<Type>& member_types() { return m_member_types; }
 
     // https://webidl.spec.whatwg.org/#dfn-flattened-union-member-types
     NonnullRefPtrVector<Type> flattened_member_types() const
@@ -262,14 +339,14 @@ struct UnionType : public Type {
         NonnullRefPtrVector<Type> types;
 
         // 3. For each member type U of T:
-        for (auto& type : member_types) {
+        for (auto& type : m_member_types) {
             // FIXME: 1. If U is an annotated type, then set U to be the inner type of U.
 
             // 2. If U is a nullable type, then set U to be the inner type of U. (NOTE: Not necessary as nullable is stored with Type and not as a separate struct)
 
             // 3. If U is a union type, then add to S the flattened member types of U.
-            if (is<UnionType>(type)) {
-                auto& union_member_type = verify_cast<UnionType>(type);
+            if (type.is_union()) {
+                auto& union_member_type = type.as_union();
                 types.extend(union_member_type.flattened_member_types());
             } else {
                 // 4. Otherwise, U is not a union type. Add U to S.
@@ -290,9 +367,9 @@ struct UnionType : public Type {
         size_t num_nullable_member_types = 0;
 
         // 3. For each member type U of T:
-        for (auto& type : member_types) {
+        for (auto& type : m_member_types) {
             // 1. If U is a nullable type, then:
-            if (type.nullable) {
+            if (type.is_nullable()) {
                 // 1. Set n to n + 1.
                 ++num_nullable_member_types;
 
@@ -300,8 +377,8 @@ struct UnionType : public Type {
             }
 
             // 2. If U is a union type, then:
-            if (is<UnionType>(type)) {
-                auto& union_member_type = verify_cast<UnionType>(type);
+            if (type.is_union()) {
+                auto& union_member_type = type.as_union();
 
                 // 1. Let m be the number of nullable member types of U.
                 // 2. Set n to n + m.
@@ -313,52 +390,67 @@ struct UnionType : public Type {
         return num_nullable_member_types;
     }
 
-    // https://webidl.spec.whatwg.org/#dfn-includes-a-nullable-type
-    bool includes_nullable_type() const
+private:
+    NonnullRefPtrVector<Type> m_member_types;
+};
+
+// https://webidl.spec.whatwg.org/#dfn-optionality-value
+enum class Optionality {
+    Required,
+    Optional,
+    Variadic,
+};
+
+// https://webidl.spec.whatwg.org/#dfn-effective-overload-set
+class EffectiveOverloadSet {
+public:
+    struct Item {
+        int callable_id;
+        NonnullRefPtrVector<Type> types;
+        Vector<Optionality> optionality_values;
+    };
+
+    EffectiveOverloadSet(Vector<Item> items)
+        : m_items(move(items))
+        , m_argument_count(m_items.is_empty() ? 0 : m_items.first().types.size())
     {
-        // -> the type is a union type and its number of nullable member types is 1.
-        return number_of_nullable_member_types() == 1;
     }
 
-    // -> https://webidl.spec.whatwg.org/#dfn-includes-undefined
-    bool includes_undefined() const
-    {
-        // -> the type is a union type and one of its member types includes undefined.
-        for (auto& type : member_types) {
-            if (is<UnionType>(type)) {
-                auto& union_type = verify_cast<UnionType>(type);
-                if (union_type.includes_undefined())
-                    return true;
-            }
+    Vector<Item>& items() { return m_items; }
+    Vector<Item> const& items() const { return m_items; }
 
-            if (type.name == "undefined"sv)
+    Item const& only_item() const
+    {
+        VERIFY(m_items.size() == 1);
+        return m_items[0];
+    }
+
+    bool is_empty() const { return m_items.is_empty(); }
+    size_t size() const { return m_items.size(); }
+
+    int distinguishing_argument_index();
+
+    template<typename Matches>
+    bool has_overload_with_matching_argument_at_index(size_t index, Matches matches)
+    {
+        for (auto const& item : m_items) {
+            if (matches(item.types[index], item.optionality_values[index])) {
+                m_last_matching_item = &item;
                 return true;
+            }
         }
+        m_last_matching_item = nullptr;
         return false;
     }
 
-    String to_variant(IDL::Interface const& interface) const
-    {
-        StringBuilder builder;
-        builder.append("Variant<"sv);
+    void remove_all_other_entries();
 
-        auto flattened_types = flattened_member_types();
-        for (size_t type_index = 0; type_index < flattened_types.size(); ++type_index) {
-            auto& type = flattened_types.at(type_index);
+private:
+    // FIXME: This should be an "ordered set".
+    Vector<Item> m_items;
+    size_t m_argument_count;
 
-            if (type_index > 0)
-                builder.append(", "sv);
-
-            auto cpp_type = idl_type_name_to_cpp_type(type, interface);
-            builder.append(cpp_type.name);
-        }
-
-        if (includes_undefined())
-            builder.append(", Empty"sv);
-
-        builder.append('>');
-        return builder.to_string();
-    }
+    Item const* m_last_matching_item { nullptr };
 };
 
 }

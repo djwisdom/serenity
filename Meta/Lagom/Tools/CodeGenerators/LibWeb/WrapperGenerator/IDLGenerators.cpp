@@ -7,56 +7,57 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "IDLTypes.h"
 #include <AK/LexicalPath.h>
 #include <AK/Queue.h>
 #include <AK/QuickSort.h>
+#include <LibIDL/Types.h>
 
 Vector<StringView> s_header_search_paths;
 
 namespace IDL {
 
+// FIXME: Generate this automatically somehow.
 static bool is_wrappable_type(Type const& type)
 {
-    if (type.name == "EventTarget")
+    if (type.name() == "EventTarget")
         return true;
-    if (type.name == "Node")
+    if (type.name() == "Node")
         return true;
-    if (type.name == "Document")
+    if (type.name() == "Document")
         return true;
-    if (type.name == "Text")
+    if (type.name() == "Text")
         return true;
-    if (type.name == "DocumentType")
+    if (type.name() == "DocumentType")
         return true;
-    if (type.name.ends_with("Element"sv))
+    if (type.name().ends_with("Element"sv))
         return true;
-    if (type.name.ends_with("Event"sv))
+    if (type.name().ends_with("Event"sv))
         return true;
-    if (type.name == "ImageData")
+    if (type.name() == "ImageData")
         return true;
-    if (type.name == "Window")
+    if (type.name() == "Window")
         return true;
-    if (type.name == "Range")
+    if (type.name() == "Range")
         return true;
-    if (type.name == "Selection")
+    if (type.name() == "Selection")
         return true;
-    if (type.name == "Attribute")
+    if (type.name() == "Attr")
         return true;
-    if (type.name == "NamedNodeMap")
+    if (type.name() == "NamedNodeMap")
         return true;
-    if (type.name == "TextMetrics")
+    if (type.name() == "TextMetrics")
         return true;
-    if (type.name == "AbortSignal")
+    if (type.name() == "AbortSignal")
         return true;
-    if (type.name == "CanvasRenderingContext2D")
+    if (type.name() == "CanvasRenderingContext2D")
         return true;
-    if (type.name == "WebGLRenderingContext")
+    if (type.name() == "WebGLRenderingContext")
         return true;
-    if (type.name == "URLSearchParams")
+    if (type.name() == "URLSearchParams")
         return true;
-    if (type.name == "Blob")
+    if (type.name() == "Blob")
         return true;
-    if (type.name == "Path2D")
+    if (type.name() == "Path2D")
         return true;
     return false;
 }
@@ -75,153 +76,178 @@ static StringView sequence_storage_type_to_cpp_storage_type_name(SequenceStorage
 
 static bool impl_is_wrapper(Type const& type)
 {
-    if (type.name == "StyleSheet"sv)
+    if (type.name() == "StyleSheet"sv)
         return true;
 
-    if (type.name == "CSSStyleSheet"sv)
+    if (type.name() == "CSSStyleSheet"sv)
         return true;
 
-    if (type.name == "StyleSheetList"sv)
+    if (type.name() == "StyleSheetList"sv)
         return true;
 
-    if (type.name == "CSSRuleList"sv)
+    if (type.name() == "CSSRuleList"sv)
         return true;
 
-    if (type.name == "CSSRule"sv)
+    if (type.name() == "CSSRule"sv)
         return true;
 
-    if (type.name == "CSSStyleRule"sv)
+    if (type.name() == "CSSStyleRule"sv)
         return true;
 
-    if (type.name == "CSSFontFaceRule"sv)
+    if (type.name() == "CSSFontFaceRule"sv)
         return true;
 
-    if (type.name == "CSSConditionRule"sv)
+    if (type.name() == "CSSConditionRule"sv)
         return true;
 
-    if (type.name == "CSSGroupingRule"sv)
+    if (type.name() == "CSSGroupingRule"sv)
         return true;
 
-    if (type.name == "CSSMediaRule"sv)
+    if (type.name() == "CSSMediaRule"sv)
         return true;
 
-    if (type.name == "CSSImportRule"sv)
+    if (type.name() == "CSSImportRule"sv)
         return true;
 
-    if (type.name == "EventTarget"sv)
+    if (type.name() == "EventTarget"sv)
         return true;
 
-    if (type.name == "Node"sv)
+    if (type.name() == "Node"sv)
         return true;
-    if (type.name == "ShadowRoot"sv)
+    if (type.name() == "ShadowRoot"sv)
         return true;
-    if (type.name == "DocumentTemporary"sv)
+    if (type.name() == "DocumentTemporary"sv)
         return true;
-    if (type.name == "Text"sv)
+    if (type.name() == "Text"sv)
         return true;
-    if (type.name == "Document"sv)
+    if (type.name() == "Document"sv)
         return true;
-    if (type.name == "DocumentType"sv)
+    if (type.name() == "DocumentType"sv)
         return true;
-    if (type.name.ends_with("Element"sv))
+    if (type.name().ends_with("Element"sv))
         return true;
-    if (type.name == "XMLHttpRequest"sv)
+    if (type.name() == "XMLHttpRequest"sv)
         return true;
-    if (type.name == "XMLHttpRequestEventTarget"sv)
+    if (type.name() == "XMLHttpRequestEventTarget"sv)
         return true;
-    if (type.name == "AbortSignal"sv)
+    if (type.name() == "AbortSignal"sv)
         return true;
-    if (type.name == "WebSocket"sv)
+    if (type.name() == "WebSocket"sv)
         return true;
-    if (type.name == "Worker"sv)
+    if (type.name() == "Worker"sv)
         return true;
-    if (type.name == "NodeIterator"sv)
+    if (type.name() == "NodeIterator"sv)
         return true;
-    if (type.name == "TreeWalker"sv)
+    if (type.name() == "TreeWalker"sv)
         return true;
-    if (type.name == "MediaQueryList"sv)
+    if (type.name() == "MediaQueryList"sv)
         return true;
-    if (type.name == "MessagePort"sv)
+    if (type.name() == "MessagePort"sv)
         return true;
-    if (type.name == "NodeFilter"sv)
+    if (type.name() == "NodeFilter"sv)
         return true;
-    if (type.name == "DOMTokenList"sv)
+    if (type.name() == "DOMTokenList"sv)
         return true;
-    if (type.name == "DOMStringMap"sv)
+    if (type.name() == "DOMStringMap"sv)
         return true;
-    if (type.name == "MutationRecord"sv)
+    if (type.name() == "MutationRecord"sv)
         return true;
-    if (type.name == "CanvasRenderingContext2D"sv)
+    if (type.name() == "CanvasRenderingContext2D"sv)
         return true;
-    if (type.name == "WebGLRenderingContext"sv)
+    if (type.name() == "WebGLRenderingContext"sv)
         return true;
-    if (type.name == "Path2D"sv)
+    if (type.name() == "Path2D"sv)
         return true;
-    if (type.name == "Storage"sv)
+    if (type.name() == "Storage"sv)
         return true;
-    if (type.name == "File"sv)
+    if (type.name() == "File"sv)
         return true;
-    if (type.name == "Blob"sv)
+    if (type.name() == "Blob"sv)
         return true;
-    if (type.name == "URL"sv)
+    if (type.name() == "URL"sv)
         return true;
-    if (type.name == "URLSearchParams"sv)
+    if (type.name() == "URLSearchParams"sv)
         return true;
-    if (type.name == "DOMException"sv)
+    if (type.name() == "DOMException"sv)
         return true;
 
     return false;
+}
+
+CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface);
+
+static String union_type_to_variant(UnionType const& union_type, Interface const& interface)
+{
+    StringBuilder builder;
+    builder.append("Variant<"sv);
+
+    auto flattened_types = union_type.flattened_member_types();
+    for (size_t type_index = 0; type_index < flattened_types.size(); ++type_index) {
+        auto& type = flattened_types.at(type_index);
+
+        if (type_index > 0)
+            builder.append(", "sv);
+
+        auto cpp_type = idl_type_name_to_cpp_type(type, interface);
+        builder.append(cpp_type.name);
+    }
+
+    if (union_type.includes_undefined())
+        builder.append(", Empty"sv);
+
+    builder.append('>');
+    return builder.to_string();
 }
 
 CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface)
 {
     if (is_wrappable_type(type)) {
         if (impl_is_wrapper(type)) {
-            return { .name = String::formatted("JS::Handle<{}>", type.name), .sequence_storage_type = SequenceStorageType::MarkedVector };
+            return { .name = String::formatted("JS::Handle<{}>", type.name()), .sequence_storage_type = SequenceStorageType::MarkedVector };
         }
 
-        if (type.nullable)
-            return { .name = String::formatted("RefPtr<{}>", type.name), .sequence_storage_type = SequenceStorageType::Vector };
+        if (type.is_nullable())
+            return { .name = String::formatted("RefPtr<{}>", type.name()), .sequence_storage_type = SequenceStorageType::Vector };
 
-        return { .name = String::formatted("NonnullRefPtr<{}>", type.name), .sequence_storage_type = SequenceStorageType::Vector };
+        return { .name = String::formatted("NonnullRefPtr<{}>", type.name()), .sequence_storage_type = SequenceStorageType::Vector };
     }
 
     if (type.is_string())
         return { .name = "String", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "double" && !type.nullable)
+    if (type.name() == "double" && !type.is_nullable())
         return { .name = "double", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "float" && !type.nullable)
+    if (type.name() == "float" && !type.is_nullable())
         return { .name = "float", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "boolean" && !type.nullable)
+    if (type.name() == "boolean" && !type.is_nullable())
         return { .name = "bool", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "unsigned long" && !type.nullable)
+    if (type.name() == "unsigned long" && !type.is_nullable())
         return { .name = "u32", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "unsigned short" && !type.nullable)
+    if (type.name() == "unsigned short" && !type.is_nullable())
         return { .name = "u16", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "long long" && !type.nullable)
+    if (type.name() == "long long" && !type.is_nullable())
         return { .name = "i64", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "unsigned long long" && !type.nullable)
+    if (type.name() == "unsigned long long" && !type.is_nullable())
         return { .name = "u64", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "long" && !type.nullable)
+    if (type.name() == "long" && !type.is_nullable())
         return { .name = "i32", .sequence_storage_type = SequenceStorageType::Vector };
 
-    if (type.name == "any")
+    if (type.name() == "any")
         return { .name = "JS::Value", .sequence_storage_type = SequenceStorageType::MarkedVector };
 
-    if (type.name == "BufferSource")
+    if (type.name() == "BufferSource")
         return { .name = "JS::Handle<JS::Object>", .sequence_storage_type = SequenceStorageType::MarkedVector };
 
-    if (type.name == "sequence") {
+    if (type.name() == "sequence") {
         auto& parameterized_type = verify_cast<ParameterizedType>(type);
-        auto& sequence_type = parameterized_type.parameters.first();
+        auto& sequence_type = parameterized_type.parameters().first();
         auto sequence_cpp_type = idl_type_name_to_cpp_type(sequence_type, interface);
         auto storage_type_name = sequence_storage_type_to_cpp_storage_type_name(sequence_cpp_type.sequence_storage_type);
 
@@ -231,10 +257,10 @@ CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface)
         return { .name = String::formatted("{}<{}>", storage_type_name, sequence_cpp_type.name), .sequence_storage_type = SequenceStorageType::Vector };
     }
 
-    if (type.name == "record") {
+    if (type.name() == "record") {
         auto& parameterized_type = verify_cast<ParameterizedType>(type);
-        auto& record_key_type = parameterized_type.parameters[0];
-        auto& record_value_type = parameterized_type.parameters[1];
+        auto& record_key_type = parameterized_type.parameters()[0];
+        auto& record_value_type = parameterized_type.parameters()[1];
         auto record_key_cpp_type = idl_type_name_to_cpp_type(record_key_type, interface);
         auto record_value_cpp_type = idl_type_name_to_cpp_type(record_value_type, interface);
 
@@ -243,17 +269,17 @@ CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface)
 
     if (is<UnionType>(type)) {
         auto& union_type = verify_cast<UnionType>(type);
-        return { .name = union_type.to_variant(interface), .sequence_storage_type = SequenceStorageType::Vector };
+        return { .name = union_type_to_variant(union_type, interface), .sequence_storage_type = SequenceStorageType::Vector };
     }
 
-    if (!type.nullable) {
+    if (!type.is_nullable()) {
         for (auto& dictionary : interface.dictionaries) {
-            if (type.name == dictionary.key)
-                return { .name = type.name, .sequence_storage_type = SequenceStorageType::Vector };
+            if (type.name() == dictionary.key)
+                return { .name = type.name(), .sequence_storage_type = SequenceStorageType::Vector };
         }
     }
 
-    dbgln("Unimplemented type for idl_type_name_to_cpp_type: {}{}", type.name, type.nullable ? "?" : "");
+    dbgln("Unimplemented type for idl_type_name_to_cpp_type: {}{}", type.name(), type.is_nullable() ? "?" : "");
     TODO();
 }
 
@@ -341,11 +367,11 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     scoped_generator.set("js_name", js_name);
     scoped_generator.set("js_suffix", js_suffix);
     scoped_generator.set("legacy_null_to_empty_string", legacy_null_to_empty_string ? "true" : "false");
-    scoped_generator.set("parameter.type.name", parameter.type->name);
-    if (parameter.type->name == "Window")
+    scoped_generator.set("parameter.type.name", parameter.type->name());
+    if (parameter.type->name() == "Window")
         scoped_generator.set("wrapper_name", "HTML::Window");
     else {
-        scoped_generator.set("wrapper_name", String::formatted("{}Wrapper", parameter.type->name));
+        scoped_generator.set("wrapper_name", String::formatted("{}Wrapper", parameter.type->name()));
     }
 
     if (optional_default_value.has_value())
@@ -364,7 +390,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     }
 )~~~");
         } else if (!optional) {
-            if (!parameter.type->nullable) {
+            if (!parameter.type->is_nullable()) {
                 scoped_generator.append(R"~~~(
     String @cpp_name@;
     if (@js_name@@js_suffix@.is_null() && @legacy_null_to_empty_string@) {
@@ -389,7 +415,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         else
             @cpp_name@ = TRY(@js_name@@js_suffix@.to_string(vm));
     })~~~");
-            if (optional_default_value.has_value() && (!parameter.type->nullable || optional_default_value.value() != "null")) {
+            if (optional_default_value.has_value() && (!parameter.type->is_nullable() || optional_default_value.value() != "null")) {
                 scoped_generator.append(R"~~~( else {
         @cpp_name@ = @parameter.optional_default_value@;
     }
@@ -399,15 +425,15 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
             }
         }
-    } else if (parameter.type->name.is_one_of("EventListener", "NodeFilter")) {
+    } else if (parameter.type->name().is_one_of("EventListener", "NodeFilter")) {
         // FIXME: Replace this with support for callback interfaces. https://heycam.github.io/webidl/#idl-callback-interface
 
-        if (parameter.type->name == "EventListener")
+        if (parameter.type->name() == "EventListener")
             scoped_generator.set("cpp_type", "IDLEventListener");
         else
-            scoped_generator.set("cpp_type", parameter.type->name);
+            scoped_generator.set("cpp_type", parameter.type->name());
 
-        if (parameter.type->nullable) {
+        if (parameter.type->is_nullable()) {
             scoped_generator.append(R"~~~(
     @cpp_type@* @cpp_name@ = nullptr;
     if (!@js_name@@js_suffix@.is_nullish()) {
@@ -428,7 +454,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
         }
     } else if (IDL::is_wrappable_type(*parameter.type)) {
-        if (!parameter.type->nullable) {
+        if (!parameter.type->is_nullable()) {
             if (!optional) {
                 scoped_generator.append(R"~~~(
     if (!@js_name@@js_suffix@.is_object() || !is<@wrapper_name@>(@js_name@@js_suffix@.as_object()))
@@ -458,7 +484,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     }
 )~~~");
         }
-    } else if (parameter.type->name == "double" || parameter.type->name == "float") {
+    } else if (parameter.type->name() == "double" || parameter.type->name() == "float") {
         if (!optional) {
             scoped_generator.append(R"~~~(
     @parameter.type.name@ @cpp_name@ = TRY(@js_name@@js_suffix@.to_double(vm));
@@ -487,7 +513,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
             }
         }
-    } else if (parameter.type->name == "boolean") {
+    } else if (parameter.type->name() == "boolean") {
         if (!optional || optional_default_value.has_value()) {
             scoped_generator.append(R"~~~(
     bool @cpp_name@;
@@ -511,7 +537,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         @cpp_name@ = @parameter.optional_default_value@;
 )~~~");
         }
-    } else if (parameter.type->name == "unsigned long") {
+    } else if (parameter.type->name() == "unsigned long") {
         if (!optional || optional_default_value.has_value()) {
             scoped_generator.append(R"~~~(
     u32 @cpp_name@;
@@ -535,7 +561,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         @cpp_name@ = @parameter.optional_default_value@UL;
 )~~~");
         }
-    } else if (parameter.type->name == "unsigned short") {
+    } else if (parameter.type->name() == "unsigned short") {
         if (!optional || optional_default_value.has_value()) {
             scoped_generator.append(R"~~~(
     u16 @cpp_name@;
@@ -559,7 +585,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         @cpp_name@ = @parameter.optional_default_value@;
 )~~~");
         }
-    } else if (parameter.type->name == "long") {
+    } else if (parameter.type->name() == "long") {
         if (!optional || optional_default_value.has_value()) {
             scoped_generator.append(R"~~~(
     i32 @cpp_name@;
@@ -583,7 +609,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         @cpp_name@ = @parameter.optional_default_value@L;
 )~~~");
         }
-    } else if (parameter.type->name == "long long") {
+    } else if (parameter.type->name() == "long long") {
         if (!optional || optional_default_value.has_value()) {
             scoped_generator.append(R"~~~(
     i64 @cpp_name@;
@@ -607,7 +633,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         @cpp_name@ = @parameter.optional_default_value@L;
 )~~~");
         }
-    } else if (parameter.type->name == "Promise") {
+    } else if (parameter.type->name() == "Promise") {
         // NOTE: It's not clear to me where the implicit wrapping of non-Promise values in a resolved
         // Promise is defined in the spec; https://webidl.spec.whatwg.org/#idl-promise doesn't say
         // anything of this sort. Both Gecko and Blink do it, however, so I'm sure it's correct.
@@ -619,7 +645,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     }
     auto @cpp_name@ = JS::make_handle(&static_cast<JS::Promise&>(@js_name@@js_suffix@.as_object()));
 )~~~");
-    } else if (parameter.type->name == "BufferSource") {
+    } else if (parameter.type->name() == "BufferSource") {
         scoped_generator.append(R"~~~(
     if (!@js_name@@js_suffix@.is_object() || !(is<JS::TypedArrayBase>(@js_name@@js_suffix@.as_object()) || is<JS::ArrayBuffer>(@js_name@@js_suffix@.as_object()) || is<JS::DataView>(@js_name@@js_suffix@.as_object())))
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "@parameter.type.name@");
@@ -627,7 +653,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     // TODO: Should we make this a Variant?
     auto @cpp_name@ = JS::make_handle(&@js_name@@js_suffix@.as_object());
 )~~~");
-    } else if (parameter.type->name == "any") {
+    } else if (parameter.type->name() == "any") {
         if (!optional) {
             scoped_generator.append(R"~~~(
     auto @cpp_name@ = @js_name@@js_suffix@;
@@ -654,9 +680,9 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
                 }
             }
         }
-    } else if (interface.enumerations.contains(parameter.type->name)) {
+    } else if (interface.enumerations.contains(parameter.type->name())) {
         auto enum_generator = scoped_generator.fork();
-        auto& enumeration = interface.enumerations.find(parameter.type->name)->value;
+        auto& enumeration = interface.enumerations.find(parameter.type->name())->value;
         StringView enum_member_name;
         if (optional_default_value.has_value()) {
             VERIFY(optional_default_value->length() >= 2 && (*optional_default_value)[0] == '"' && (*optional_default_value)[optional_default_value->length() - 1] == '"');
@@ -712,7 +738,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     }
 )~~~");
         }
-    } else if (interface.dictionaries.contains(parameter.type->name)) {
+    } else if (interface.dictionaries.contains(parameter.type->name())) {
         if (optional_default_value.has_value() && optional_default_value != "{}")
             TODO();
         auto dictionary_generator = scoped_generator.fork();
@@ -722,7 +748,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
     @parameter.type.name@ @cpp_name@ {};
 )~~~");
-        auto* current_dictionary = &interface.dictionaries.find(parameter.type->name)->value;
+        auto* current_dictionary = &interface.dictionaries.find(parameter.type->name())->value;
         while (true) {
             for (auto& member : current_dictionary->members) {
                 dictionary_generator.set("member_key", member.name);
@@ -755,11 +781,11 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
             VERIFY(interface.dictionaries.contains(current_dictionary->parent_name));
             current_dictionary = &interface.dictionaries.find(current_dictionary->parent_name)->value;
         }
-    } else if (interface.callback_functions.contains(parameter.type->name)) {
+    } else if (interface.callback_functions.contains(parameter.type->name())) {
         // https://webidl.spec.whatwg.org/#es-callback-function
 
         auto callback_function_generator = scoped_generator.fork();
-        auto& callback_function = interface.callback_functions.find(parameter.type->name)->value;
+        auto& callback_function = interface.callback_functions.find(parameter.type->name())->value;
 
         // An ECMAScript value V is converted to an IDL callback function type value by running the following algorithm:
         // 1. If the result of calling IsCallable(V) is false and the conversion to an IDL value is not being performed due to V being assigned to an attribute whose type is a nullable callback function that is annotated with [LegacyTreatNonObjectAsNull], then throw a TypeError.
@@ -781,7 +807,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     auto @cpp_name@ = vm.heap().allocate_without_realm<CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
 )~~~");
         }
-    } else if (parameter.type->name == "sequence") {
+    } else if (parameter.type->name() == "sequence") {
         // https://webidl.spec.whatwg.org/#es-sequence
 
         auto sequence_generator = scoped_generator.fork();
@@ -795,7 +821,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         // 4. Return the result of creating a sequence from V and method.
 
         if (optional) {
-            auto sequence_cpp_type = idl_type_name_to_cpp_type(parameterized_type.parameters.first(), interface);
+            auto sequence_cpp_type = idl_type_name_to_cpp_type(parameterized_type.parameters().first(), interface);
             sequence_generator.set("sequence.type", sequence_cpp_type.name);
             sequence_generator.set("sequence.storage_type", sequence_storage_type_to_cpp_storage_type_name(sequence_cpp_type.sequence_storage_type));
 
@@ -846,7 +872,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     }
 )~~~");
         }
-    } else if (parameter.type->name == "record") {
+    } else if (parameter.type->name() == "record") {
         // https://webidl.spec.whatwg.org/#es-record
 
         auto record_generator = scoped_generator.fork();
@@ -854,10 +880,10 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         record_generator.set("recursion_depth", String::number(recursion_depth));
 
         // A record can only have two types: key type and value type.
-        VERIFY(parameterized_type.parameters.size() == 2);
+        VERIFY(parameterized_type.parameters().size() == 2);
 
         // A record only allows the key to be a string.
-        VERIFY(parameterized_type.parameters[0].is_string());
+        VERIFY(parameterized_type.parameters()[0].is_string());
 
         // An ECMAScript value O is converted to an IDL record<K, V> value as follows:
         // 1. If Type(O) is not Object, throw a TypeError.
@@ -900,7 +926,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
             continue;
 )~~~");
 
-        IDL::Parameter key_parameter { .type = parameterized_type.parameters[0], .name = acceptable_cpp_name, .optional_default_value = {}, .extended_attributes = {} };
+        IDL::Parameter key_parameter { .type = parameterized_type.parameters()[0], .name = acceptable_cpp_name, .optional_default_value = {}, .extended_attributes = {} };
         generate_to_cpp(record_generator, key_parameter, "key", String::number(recursion_depth), String::formatted("typed_key{}", recursion_depth), interface, false, false, {}, false, recursion_depth + 1);
 
         record_generator.append(R"~~~(
@@ -908,7 +934,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
 
         // FIXME: Record value types should be TypeWithExtendedAttributes, which would allow us to get [LegacyNullToEmptyString] here.
-        IDL::Parameter value_parameter { .type = parameterized_type.parameters[1], .name = acceptable_cpp_name, .optional_default_value = {}, .extended_attributes = {} };
+        IDL::Parameter value_parameter { .type = parameterized_type.parameters()[1], .name = acceptable_cpp_name, .optional_default_value = {}, .extended_attributes = {} };
         generate_to_cpp(record_generator, value_parameter, "value", String::number(recursion_depth), String::formatted("typed_value{}", recursion_depth), interface, false, false, {}, false, recursion_depth + 1);
 
         record_generator.append(R"~~~(
@@ -921,7 +947,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         auto union_generator = scoped_generator.fork();
 
         auto& union_type = verify_cast<IDL::UnionType>(*parameter.type);
-        union_generator.set("union_type", union_type.to_variant(interface));
+        union_generator.set("union_type", union_type_to_variant(union_type, interface));
         union_generator.set("recursion_depth", String::number(recursion_depth));
 
         // NOTE: This is handled out here as we need the dictionary conversion code for the {} optional default value.
@@ -931,7 +957,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         RefPtr<Type> dictionary_type;
         for (auto& dictionary : interface.dictionaries) {
             for (auto& type : types) {
-                if (type.name == dictionary.key) {
+                if (type.name() == dictionary.key) {
                     dictionary_type = type;
                     break;
                 }
@@ -943,7 +969,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
         if (dictionary_type) {
             auto dictionary_generator = union_generator.fork();
-            dictionary_generator.set("dictionary.type", dictionary_type->name);
+            dictionary_generator.set("dictionary.type", dictionary_type->name());
 
             // The lambda must take the JS::Value to convert as a parameter instead of capturing it in order to support union types being variadic.
             dictionary_generator.append(R"~~~(
@@ -993,7 +1019,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
         // FIXME: 2. If the union type includes a nullable type and V is null or undefined, then return the IDL value null.
         if (union_type.includes_nullable_type()) {
-            TODO();
+            dbgln("FIXME: 2. If the union type includes a nullable type and V is null or undefined, then return the IDL value null.");
         } else if (dictionary_type) {
             // 4. If V is null or undefined, then
             //    4.1 If types includes a dictionary type, then return the result of converting V to that dictionary type.
@@ -1005,7 +1031,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
         bool includes_object = false;
         for (auto& type : types) {
-            if (type.name == "object") {
+            if (type.name() == "object") {
                 includes_object = true;
                 break;
             }
@@ -1037,7 +1063,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
                     continue;
 
                 auto union_platform_object_type_generator = union_generator.fork();
-                union_platform_object_type_generator.set("platform_object_type", String::formatted("{}Wrapper", type.name));
+                union_platform_object_type_generator.set("platform_object_type", String::formatted("{}Wrapper", type.name()));
                 auto cpp_type = IDL::idl_type_name_to_cpp_type(type, interface);
                 union_platform_object_type_generator.set("refptr_type", cpp_type.name);
 
@@ -1062,7 +1088,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         // 6. If Type(V) is Object and V has an [[ArrayBufferData]] internal slot, then
         //    1. If types includes ArrayBuffer, then return the result of converting V to ArrayBuffer.
         for (auto& type : types) {
-            if (type.name == "BufferSource") {
+            if (type.name() == "BufferSource") {
                 union_generator.append(R"~~~(
             if (is<JS::ArrayBuffer>(@js_name@@js_suffix@_object))
                 return JS::make_handle(@js_name@@js_suffix@_object);
@@ -1092,7 +1118,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         //     1. If types includes a sequence type, then:
         RefPtr<IDL::ParameterizedType> sequence_type;
         for (auto& type : types) {
-            if (type.name == "sequence") {
+            if (type.name() == "sequence") {
                 sequence_type = verify_cast<IDL::ParameterizedType>(type);
                 break;
             }
@@ -1132,7 +1158,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         // 4. If types includes a record type, then return the result of converting V to that record type.
         RefPtr<IDL::ParameterizedType> record_type;
         for (auto& type : types) {
-            if (type.name == "record") {
+            if (type.name() == "record") {
                 record_type = verify_cast<IDL::ParameterizedType>(type);
                 break;
             }
@@ -1165,7 +1191,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         //     1. If types includes boolean, then return the result of converting V to boolean.
         bool includes_boolean = false;
         for (auto& type : types) {
-            if (type.name == "boolean") {
+            if (type.name() == "boolean") {
                 includes_boolean = true;
                 break;
             }
@@ -1207,7 +1233,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         //     1. If types includes bigint, then return the result of converting V to bigint
         bool includes_bigint = false;
         for (auto& type : types) {
-            if (type.name == "bigint") {
+            if (type.name() == "bigint") {
                 includes_bigint = true;
                 break;
             }
@@ -1342,7 +1368,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     )~~~");
         }
     } else {
-        dbgln("Unimplemented JS-to-C++ conversion: {}", parameter.type->name);
+        dbgln("Unimplemented JS-to-C++ conversion: {}", parameter.type->name());
         VERIFY_NOT_REACHED();
     }
 }
@@ -1402,7 +1428,7 @@ void IDL::ParameterizedType::generate_sequence_from_iterable(SourceGenerator& ge
     sequence_generator.set("iterable_cpp_name", iterable_cpp_name);
     sequence_generator.set("iterator_method_cpp_name", iterator_method_cpp_name);
     sequence_generator.set("recursion_depth", String::number(recursion_depth));
-    auto sequence_cpp_type = idl_type_name_to_cpp_type(parameters.first(), interface);
+    auto sequence_cpp_type = idl_type_name_to_cpp_type(parameters().first(), interface);
     sequence_generator.set("sequence.type", sequence_cpp_type.name);
     sequence_generator.set("sequence.storage_type", sequence_storage_type_to_cpp_storage_type_name(sequence_cpp_type.sequence_storage_type));
 
@@ -1440,7 +1466,7 @@ void IDL::ParameterizedType::generate_sequence_from_iterable(SourceGenerator& ge
 )~~~");
 
     // FIXME: Sequences types should be TypeWithExtendedAttributes, which would allow us to get [LegacyNullToEmptyString] here.
-    IDL::Parameter parameter { .type = parameters.first(), .name = iterable_cpp_name, .optional_default_value = {}, .extended_attributes = {} };
+    IDL::Parameter parameter { .type = parameters().first(), .name = iterable_cpp_name, .optional_default_value = {}, .extended_attributes = {} };
     generate_to_cpp(sequence_generator, parameter, "next_item", String::number(recursion_depth), String::formatted("sequence_item{}", recursion_depth), interface, false, false, {}, false, recursion_depth);
 
     sequence_generator.append(R"~~~(
@@ -1458,25 +1484,25 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
 {
     auto scoped_generator = generator.fork();
     scoped_generator.set("value", value);
-    scoped_generator.set("type", type.name);
+    scoped_generator.set("type", type.name());
     scoped_generator.set("result_expression", result_expression);
     scoped_generator.set("recursion_depth", String::number(recursion_depth));
 
-    if (type.name == "undefined") {
+    if (type.name() == "undefined") {
         scoped_generator.append(R"~~~(
     @result_expression@ JS::js_undefined();
 )~~~");
         return;
     }
 
-    if (type.nullable && !is<UnionType>(type)) {
+    if (type.is_nullable() && !is<UnionType>(type)) {
         if (type.is_string()) {
             scoped_generator.append(R"~~~(
     if (@value@.is_null()) {
         @result_expression@ JS::js_null();
     } else {
 )~~~");
-        } else if (type.name == "sequence") {
+        } else if (type.name() == "sequence") {
             scoped_generator.append(R"~~~(
     if (!@value@.has_value()) {
         @result_expression@ JS::js_null();
@@ -1495,7 +1521,7 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
         scoped_generator.append(R"~~~(
     @result_expression@ JS::js_string(vm, @value@);
 )~~~");
-    } else if (type.name == "sequence") {
+    } else if (type.name() == "sequence") {
         // https://webidl.spec.whatwg.org/#es-sequence
         auto& sequence_generic_type = verify_cast<IDL::ParameterizedType>(type);
 
@@ -1503,7 +1529,7 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
     auto* new_array@recursion_depth@ = MUST(JS::Array::create(realm, 0));
 )~~~");
 
-        if (!type.nullable) {
+        if (!type.is_nullable()) {
             scoped_generator.append(R"~~~(
     for (size_t i@recursion_depth@ = 0; i@recursion_depth@ < @value@.size(); ++i@recursion_depth@) {
         auto& element@recursion_depth@ = @value@.at(i@recursion_depth@);
@@ -1516,12 +1542,12 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
 )~~~");
         }
 
-        if (impl_is_wrapper(sequence_generic_type.parameters.first())) {
+        if (impl_is_wrapper(sequence_generic_type.parameters().first())) {
             scoped_generator.append(R"~~~(
             auto* wrapped_element@recursion_depth@ = &(*element@recursion_depth@);
 )~~~");
         } else {
-            generate_wrap_statement(scoped_generator, String::formatted("element{}", recursion_depth), sequence_generic_type.parameters.first(), interface, String::formatted("auto wrapped_element{} =", recursion_depth), WrappingReference::Yes, recursion_depth + 1);
+            generate_wrap_statement(scoped_generator, String::formatted("element{}", recursion_depth), sequence_generic_type.parameters().first(), interface, String::formatted("auto wrapped_element{} =", recursion_depth), WrappingReference::Yes, recursion_depth + 1);
         }
 
         scoped_generator.append(R"~~~(
@@ -1531,27 +1557,27 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
 
     @result_expression@ new_array@recursion_depth@;
 )~~~");
-    } else if (type.name == "boolean" || type.name == "double" || type.name == "float") {
+    } else if (type.name() == "boolean" || type.name() == "double" || type.name() == "float") {
         scoped_generator.append(R"~~~(
     @result_expression@ JS::Value(@value@);
 )~~~");
-    } else if (type.name == "short" || type.name == "long" || type.name == "unsigned short") {
+    } else if (type.name() == "short" || type.name() == "long" || type.name() == "unsigned short") {
         scoped_generator.append(R"~~~(
     @result_expression@ JS::Value((i32)@value@);
 )~~~");
-    } else if (type.name == "unsigned long") {
+    } else if (type.name() == "unsigned long") {
         scoped_generator.append(R"~~~(
     @result_expression@ JS::Value((u32)@value@);
 )~~~");
-    } else if (type.name == "long long") {
+    } else if (type.name() == "long long") {
         scoped_generator.append(R"~~~(
     @result_expression@ JS::Value((double)@value@);
 )~~~");
-    } else if (type.name == "unsigned long long") {
+    } else if (type.name() == "unsigned long long") {
         scoped_generator.append(R"~~~(
     @result_expression@ JS::Value((double)@value@);
 )~~~");
-    } else if (type.name == "Location" || type.name == "Promise" || type.name == "Uint8Array" || type.name == "Uint8ClampedArray" || type.name == "any") {
+    } else if (type.name() == "Location" || type.name() == "Promise" || type.name() == "Uint8Array" || type.name() == "Uint8ClampedArray" || type.name() == "any") {
         scoped_generator.append(R"~~~(
     @result_expression@ @value@;
 )~~~");
@@ -1580,7 +1606,7 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
 
             // End of current visit lambda.
             // The last lambda cannot have a trailing comma on the closing brace, unless the type is nullable, where an extra lambda will be generated for the Empty case.
-            if (current_union_type_index != union_types.size() - 1 || type.nullable) {
+            if (current_union_type_index != union_types.size() - 1 || type.is_nullable()) {
                 union_generator.append(R"~~~(
         },
 )~~~");
@@ -1591,7 +1617,7 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
             }
         }
 
-        if (type.nullable) {
+        if (type.is_nullable()) {
             union_generator.append(R"~~~(
         [](Empty) -> JS::Value {
             return JS::js_null();
@@ -1603,18 +1629,18 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
         union_generator.append(R"~~~(
     );
 )~~~");
-    } else if (interface.enumerations.contains(type.name)) {
+    } else if (interface.enumerations.contains(type.name())) {
         scoped_generator.append(R"~~~(
     @result_expression@ JS::js_string(vm, Bindings::idl_enum_to_string(@value@));
 )~~~");
-    } else if (interface.callback_functions.contains(type.name)) {
+    } else if (interface.callback_functions.contains(type.name())) {
         // https://webidl.spec.whatwg.org/#es-callback-function
 
-        auto& callback_function = interface.callback_functions.find(type.name)->value;
+        auto& callback_function = interface.callback_functions.find(type.name())->value;
 
         // The result of converting an IDL callback function type value to an ECMAScript value is a reference to the same object that the IDL callback function type value represents.
 
-        if (callback_function.is_legacy_treat_non_object_as_null && !type.nullable) {
+        if (callback_function.is_legacy_treat_non_object_as_null && !type.is_nullable()) {
             scoped_generator.append(R"~~~(
   if (!@value@) {
       @result_expression@ JS::js_null();
@@ -1627,7 +1653,7 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
   @result_expression@ &@value@->callback;
 )~~~");
         }
-    } else if (interface.dictionaries.contains(type.name)) {
+    } else if (interface.dictionaries.contains(type.name())) {
         // https://webidl.spec.whatwg.org/#es-dictionary
         auto dictionary_generator = scoped_generator.fork();
 
@@ -1635,7 +1661,7 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
     auto* dictionary_object@recursion_depth@ = JS::Object::create(realm, realm.intrinsics().object_prototype());
 )~~~");
 
-        auto* current_dictionary = &interface.dictionaries.find(type.name)->value;
+        auto* current_dictionary = &interface.dictionaries.find(type.name())->value;
         while (true) {
             for (auto& member : current_dictionary->members) {
                 dictionary_generator.set("member_key", member.name);
@@ -1662,7 +1688,7 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
         dictionary_generator.append(R"~~~(
     @result_expression@ dictionary_object@recursion_depth@;
 )~~~");
-    } else if (type.name == "object") {
+    } else if (type.name() == "object") {
         scoped_generator.append(R"~~~(
     @result_expression@ JS::Value(const_cast<JS::Object*>(@value@));
 )~~~");
@@ -1678,7 +1704,7 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
         }
     }
 
-    if (type.nullable && !is<UnionType>(type)) {
+    if (type.is_nullable() && !is<UnionType>(type)) {
         scoped_generator.append(R"~~~(
     }
 )~~~");
@@ -1735,7 +1761,7 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@function.name:snakecase@@overload_suffi
 
     // Optimization: overloaded functions' arguments count is checked by the overload arbiter
     if (!function.is_overloaded)
-        generate_argument_count_check(generator, function.name, function.length());
+        generate_argument_count_check(generator, function.name, function.shortest_length());
 
     StringBuilder arguments_builder;
     generate_arguments(generator, function.parameters, arguments_builder, interface);
@@ -1758,46 +1784,170 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@function.name:snakecase@@overload_suffi
 )~~~");
 }
 
-// FIXME: This is extremely ad-hoc, implement the WebIDL overload resolution algorithm instead
-static Optional<String> generate_arguments_match_check_for_count(Vector<IDL::Parameter> const& parameters, size_t argument_count)
+// https://webidl.spec.whatwg.org/#compute-the-effective-overload-set
+static EffectiveOverloadSet compute_the_effective_overload_set(auto const& overload_set)
 {
-    Vector<String> conditions;
-    for (auto i = 0u; i < argument_count; ++i) {
-        auto const& parameter = parameters[i];
-        if (parameter.type->is_string() || parameter.type->is_primitive())
-            continue;
-        auto argument = String::formatted("arg{}", i);
-        StringBuilder condition;
-        condition.append('(');
-        if (parameter.type->nullable)
-            condition.appendff("{}.is_nullish() || ", argument);
-        else if (parameter.optional)
-            condition.appendff("{}.is_undefined() || ", argument);
-        condition.appendff("{}.is_object()", argument);
-        condition.append(')');
-        conditions.append(condition.build());
+    // 1. Let S be an ordered set.
+    Vector<EffectiveOverloadSet::Item> overloads;
+
+    // 2. Let F be an ordered set with items as follows, according to the kind of effective overload set:
+    // Note: This is determined by the caller of generate_overload_arbiter()
+
+    // 3. Let maxarg be the maximum number of arguments the operations, legacy factory functions, or
+    //    callback functions in F are declared to take. For variadic operations and legacy factory functions,
+    //    the argument on which the ellipsis appears counts as a single argument.
+    auto overloaded_functions = overload_set.value;
+    auto maximum_arguments = 0;
+    for (auto const& function : overloaded_functions)
+        maximum_arguments = max(maximum_arguments, static_cast<int>(function.parameters.size()));
+
+    // 4. Let max be max(maxarg, N).
+    // NOTE: We don't do this step. `N` is a runtime value, so we just use `maxarg` here instead.
+    //       Later, `generate_overload_arbiter()` produces individual overload sets for each possible N.
+
+    // 5. For each operation or extended attribute X in F:
+    auto overload_id = 0;
+    for (auto const& overload : overloaded_functions) {
+        // 1. Let arguments be the list of arguments X is declared to take.
+        auto const& arguments = overload.parameters;
+
+        // 2. Let n be the size of arguments.
+        int argument_count = (int)arguments.size();
+
+        // 3. Let types be a type list.
+        NonnullRefPtrVector<Type> types;
+
+        // 4. Let optionalityValues be an optionality list.
+        Vector<Optionality> optionality_values;
+
+        bool overload_is_variadic = false;
+
+        // 5. For each argument in arguments:
+        for (auto const& argument : arguments) {
+            // 1. Append the type of argument to types.
+            types.append(argument.type);
+
+            // 2. Append "variadic" to optionalityValues if argument is a final, variadic argument, "optional" if argument is optional, and "required" otherwise.
+            if (argument.variadic) {
+                optionality_values.append(Optionality::Variadic);
+                overload_is_variadic = true;
+            } else if (argument.optional) {
+                optionality_values.append(Optionality::Optional);
+            } else {
+                optionality_values.append(Optionality::Required);
+            }
+        }
+
+        // 6. Append the tuple (X, types, optionalityValues) to S.
+        overloads.empend(overload_id, types, optionality_values);
+
+        // 7. If X is declared to be variadic, then:
+        if (overload_is_variadic) {
+            // 1. For each i in the range n to max − 1, inclusive:
+            for (auto i = argument_count; i < maximum_arguments; ++i) {
+                // 1. Let t be a type list.
+                // 2. Let o be an optionality list.
+                // NOTE: We hold both of these in an Item instead.
+                EffectiveOverloadSet::Item item;
+                item.callable_id = overload_id;
+
+                // 3. For each j in the range 0 to n − 1, inclusive:
+                for (auto j = 0; j < argument_count; ++j) {
+                    // 1. Append types[j] to t.
+                    item.types.append(types[j]);
+
+                    // 2. Append optionalityValues[j] to o.
+                    item.optionality_values.append(optionality_values[j]);
+                }
+
+                // 4. For each j in the range n to i, inclusive:
+                for (auto j = argument_count; j <= i; ++j) {
+                    // 1. Append types[n − 1] to t.
+                    item.types.append(types[argument_count - 1]);
+
+                    // 2. Append "variadic" to o.
+                    item.optionality_values.append(Optionality::Variadic);
+                }
+
+                // 5. Append the tuple (X, t, o) to S.
+                overloads.append(move(item));
+            }
+        }
+
+        // 8. Let i be n − 1.
+        auto i = argument_count - 1;
+
+        // 9. While i ≥ 0:
+        while (i >= 0) {
+            // 1. If arguments[i] is not optional (i.e., it is not marked as "optional" and is not a final, variadic argument), then break.
+            if (!arguments[i].optional && !arguments[i].variadic)
+                break;
+
+            // 2. Let t be a type list.
+            // 3. Let o be an optionality list.
+            // NOTE: We hold both of these in an Item instead.
+            EffectiveOverloadSet::Item item;
+            item.callable_id = overload_id;
+
+            // 4. For each j in the range 0 to i − 1, inclusive:
+            for (auto j = 0; j < i; ++j) {
+                // 1. Append types[j] to t.
+                item.types.append(types[j]);
+
+                // 2. Append optionalityValues[j] to o.
+                item.optionality_values.append(optionality_values[j]);
+            }
+
+            // 5. Append the tuple (X, t, o) to S.
+            overloads.append(move(item));
+
+            // 6. Set i to i − 1.
+            --i;
+        }
+
+        overload_id++;
     }
-    if (conditions.is_empty())
-        return {};
-    return String::formatted("({})", String::join(" && "sv, conditions));
+
+    return EffectiveOverloadSet { move(overloads) };
 }
 
-static String generate_arguments_match_check(Function const& function)
+static String generate_constructor_for_idl_type(Type const& type)
 {
-    Vector<String> options;
-    for (size_t i = 0; i < function.parameters.size(); ++i) {
-        if (!function.parameters[i].optional && !function.parameters[i].variadic)
-            continue;
-        auto match_check = generate_arguments_match_check_for_count(function.parameters, i);
-        if (match_check.has_value())
-            options.append(match_check.release_value());
+    auto append_type_list = [](auto& builder, auto const& type_list) {
+        bool first = true;
+        for (auto const& child_type : type_list) {
+            if (first) {
+                first = false;
+            } else {
+                builder.append(", "sv);
+            }
+
+            builder.append(generate_constructor_for_idl_type(child_type));
+        }
+    };
+
+    switch (type.kind()) {
+    case Type::Kind::Plain:
+        return String::formatted("make_ref_counted<IDL::Type>(\"{}\", {})", type.name(), type.is_nullable());
+    case Type::Kind::Parameterized: {
+        auto const& parameterized_type = type.as_parameterized();
+        StringBuilder builder;
+        builder.appendff("make_ref_counted<IDL::ParameterizedTypeType>(\"{}\", {}, NonnullRefPtrVector<IDL::Type> {{", type.name(), type.is_nullable());
+        append_type_list(builder, parameterized_type.parameters());
+        builder.append("})"sv);
+        return builder.to_string();
     }
-    if (!function.parameters.is_empty() && !function.parameters.last().variadic) {
-        auto match_check = generate_arguments_match_check_for_count(function.parameters, function.parameters.size());
-        if (match_check.has_value())
-            options.append(match_check.release_value());
+    case Type::Kind::Union: {
+        auto const& union_type = type.as_union();
+        StringBuilder builder;
+        builder.appendff("make_ref_counted<IDL::UnionType>(\"{}\", {}, NonnullRefPtrVector<IDL::Type> {{", type.name(), type.is_nullable());
+        append_type_list(builder, union_type.member_types());
+        builder.append("})"sv);
+        return builder.to_string();
     }
-    return String::join(" || "sv, options);
+    }
+
+    VERIFY_NOT_REACHED();
 }
 
 static void generate_overload_arbiter(SourceGenerator& generator, auto const& overload_set, String const& class_name)
@@ -1809,61 +1959,111 @@ static void generate_overload_arbiter(SourceGenerator& generator, auto const& ov
     function_generator.append(R"~~~(
 JS_DEFINE_NATIVE_FUNCTION(@class_name@::@function.name:snakecase@)
 {
-    [[maybe_unused]] auto& realm = *vm.current_realm();
+    Optional<IDL::EffectiveOverloadSet> effective_overload_set;
 )~~~");
 
-    auto minimum_argument_count = get_shortest_function_length(overload_set.value);
-    generate_argument_count_check(function_generator, overload_set.key, minimum_argument_count);
+    auto all_possible_effective_overloads = compute_the_effective_overload_set(overload_set);
+    auto overloads_set = all_possible_effective_overloads.items();
+    auto maximum_argument_count = 0u;
+    for (auto const& overload : overloads_set)
+        maximum_argument_count = max(maximum_argument_count, overload.types.size());
+    function_generator.set("max_argument_count", String::number(maximum_argument_count));
+    function_generator.appendln("    switch (min(@max_argument_count@, vm.argument_count())) {");
 
-    auto overloaded_functions = overload_set.value;
-    quick_sort(overloaded_functions, [](auto const& a, auto const& b) { return a.length() < b.length(); });
-    auto fetched_arguments = 0u;
-    for (auto i = 0u; i < overloaded_functions.size(); ++i) {
-        auto const& overloaded_function = overloaded_functions[i];
-        auto argument_count = overloaded_function.parameters.size();
+    // Generate the effective overload set for each argument count.
+    // This skips part of the Overload Resolution Algorithm https://webidl.spec.whatwg.org/#es-overloads
+    // Namely, since that discards any overloads that don't have the exact number of arguments that were given,
+    // we simply only provide the overloads that do have that number of arguments.
+    for (auto argument_count = 0u; argument_count <= maximum_argument_count; ++argument_count) {
+        // FIXME: Calculate the distinguishing argument index now instead of at runtime.
 
-        function_generator.set("argument_count", String::number(argument_count));
-        auto arguments_match_check = generate_arguments_match_check(overloaded_function);
-        function_generator.set("arguments_match_check", arguments_match_check);
-        function_generator.set("overload_suffix", String::number(i));
+        auto effective_overload_count = 0;
+        for (auto const& overload : overloads_set) {
+            if (overload.types.size() == argument_count)
+                effective_overload_count++;
+        }
 
-        if (argument_count > fetched_arguments) {
-            for (auto j = fetched_arguments; j < argument_count; ++j) {
-                function_generator.set("argument.index", String::number(j));
-                function_generator.append(R"~~~(
-    [[maybe_unused]] auto arg@argument.index@ = vm.argument(@argument.index@);
+        if (effective_overload_count == 0)
+            continue;
+
+        function_generator.set("current_argument_count", String::number(argument_count));
+        function_generator.set("overload_count", String::number(effective_overload_count));
+        function_generator.appendln(R"~~~(
+    case @current_argument_count@: {
+        Vector<IDL::EffectiveOverloadSet::Item> overloads;
+        overloads.ensure_capacity(@overload_count@);
 )~~~");
+
+        for (auto& overload : overloads_set) {
+            if (overload.types.size() != argument_count)
+                continue;
+
+            StringBuilder types_builder;
+            types_builder.append("NonnullRefPtrVector<IDL::Type> { "sv);
+            StringBuilder optionality_builder;
+            optionality_builder.append("Vector<IDL::Optionality> { "sv);
+
+            for (auto i = 0u; i < overload.types.size(); ++i) {
+                if (i > 0) {
+                    types_builder.append(", "sv);
+                    optionality_builder.append(", "sv);
+                }
+
+                types_builder.append(generate_constructor_for_idl_type(overload.types[i]));
+
+                optionality_builder.append("IDL::Optionality::"sv);
+                switch (overload.optionality_values[i]) {
+                case Optionality::Required:
+                    optionality_builder.append("Required"sv);
+                    break;
+                case Optionality::Optional:
+                    optionality_builder.append("Optional"sv);
+                    break;
+                case Optionality::Variadic:
+                    optionality_builder.append("Variadic"sv);
+                    break;
+                }
             }
-            fetched_arguments = argument_count;
+
+            types_builder.append("}"sv);
+            optionality_builder.append("}"sv);
+
+            function_generator.set("overload.callable_id", String::number(overload.callable_id));
+            function_generator.set("overload.types", types_builder.to_string());
+            function_generator.set("overload.optionality_values", optionality_builder.to_string());
+
+            function_generator.appendln("        overloads.empend(@overload.callable_id@, @overload.types@, @overload.optionality_values@);");
         }
 
-        auto is_last = i == overloaded_functions.size() - 1;
-        if (!is_last) {
-            function_generator.append(R"~~~(
-    if (vm.argument_count() == @argument_count@) {
-)~~~");
-        }
-
-        if (arguments_match_check.is_empty()) {
-            function_generator.append(R"~~~(
-    return @function.name:snakecase@@overload_suffix@(vm);
-)~~~");
-        } else {
-            function_generator.append(R"~~~(
-    if (@arguments_match_check@)
-        return @function.name:snakecase@@overload_suffix@(vm);
-)~~~");
-        }
-
-        if (!is_last) {
-            function_generator.append(R"~~~(
+        function_generator.append(R"~~~(
+        effective_overload_set.emplace(move(overloads));
+        break;
     }
 )~~~");
-        }
     }
 
     function_generator.append(R"~~~(
-    return vm.throw_completion<JS::TypeError>(JS::ErrorType::OverloadResolutionFailed);
+    }
+
+    if (!effective_overload_set.has_value())
+        return vm.throw_completion<JS::TypeError>(JS::ErrorType::OverloadResolutionFailed);
+
+    auto chosen_overload = TRY(resolve_overload(vm, effective_overload_set.value()));
+    switch (chosen_overload.callable_id) {
+)~~~");
+
+    for (auto i = 0u; i < overload_set.value.size(); ++i) {
+        function_generator.set("overload_id", String::number(i));
+        function_generator.append(R"~~~(
+    case @overload_id@:
+        return @function.name:snakecase@@overload_id@(vm);
+)~~~");
+    }
+
+    function_generator.append(R"~~~(
+    default:
+        VERIFY_NOT_REACHED();
+    }
 }
 )~~~");
 }
@@ -2039,7 +2239,7 @@ JS::ThrowCompletionOr<JS::Object*> @constructor_class@::construct(FunctionObject
         // Single constructor
 
         auto& constructor = interface.constructors[0];
-        generator.set("constructor.length", String::number(constructor.length()));
+        generator.set("constructor.length", String::number(constructor.shortest_length()));
 
         generator.append(R"~~~(
     auto& vm = this->vm();
@@ -2049,7 +2249,7 @@ JS::ThrowCompletionOr<JS::Object*> @constructor_class@::construct(FunctionObject
 )~~~");
 
         if (!constructor.parameters.is_empty()) {
-            generate_argument_count_check(generator, constructor.name, constructor.length());
+            generate_argument_count_check(generator, constructor.name, constructor.shortest_length());
 
             StringBuilder arguments_builder;
             generate_arguments(generator, constructor.parameters, arguments_builder, interface);
@@ -2270,6 +2470,7 @@ void generate_prototype_implementation(IDL::Interface const& interface)
 
     generator.append(R"~~~(
 #include <AK/Function.h>
+#include <LibIDL/Types.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/Error.h>
@@ -2280,6 +2481,7 @@ void generate_prototype_implementation(IDL::Interface const& interface)
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/@prototype_class@.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
+#include <LibWeb/Bindings/IDLOverloadResolution.h>
 #include <LibWeb/Bindings/LocationObject.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Event.h>
@@ -2533,7 +2735,7 @@ JS_DEFINE_NATIVE_FUNCTION(@prototype_class@::@attribute.getter_callback@)
 )~~~");
 
         if (attribute.extended_attributes.contains("Reflect")) {
-            if (attribute.type->name != "boolean") {
+            if (attribute.type->name() != "boolean") {
                 attribute_generator.append(R"~~~(
     auto retval = impl->attribute(HTML::AttributeNames::@attribute.reflect_name@);
 )~~~");
@@ -2567,7 +2769,7 @@ JS_DEFINE_NATIVE_FUNCTION(@prototype_class@::@attribute.setter_callback@)
             generate_to_cpp(generator, attribute, "value", "", "cpp_value", interface, attribute.extended_attributes.contains("LegacyNullToEmptyString"));
 
             if (attribute.extended_attributes.contains("Reflect")) {
-                if (attribute.type->name != "boolean") {
+                if (attribute.type->name() != "boolean") {
                     attribute_generator.append(R"~~~(
     impl->set_attribute(HTML::AttributeNames::@attribute.reflect_name@, cpp_value);
 )~~~");
@@ -2805,5 +3007,4 @@ JS_DEFINE_NATIVE_FUNCTION(@prototype_class@::next)
 
     outln("{}", generator.as_string_view());
 }
-
 }

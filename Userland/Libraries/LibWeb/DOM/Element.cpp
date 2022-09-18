@@ -98,7 +98,7 @@ ExceptionOr<void> Element::set_attribute(FlyString const& name, String const& va
 
     // 4. If attribute is null, create an attribute whose local name is qualifiedName, value is value, and node document is this’s node document, then append this attribute to this, and then return.
     if (!attribute) {
-        auto new_attribute = Attribute::create(document(), insert_as_lowercase ? name.to_lowercase() : name, value);
+        auto new_attribute = Attr::create(document(), insert_as_lowercase ? name.to_lowercase() : name, value);
         m_attributes->append_attribute(new_attribute);
 
         attribute = new_attribute.ptr();
@@ -208,7 +208,7 @@ DOM::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optional
     if (!attribute) {
         // 1. If force is not given or is true, create an attribute whose local name is qualifiedName, value is the empty string, and node document is this’s node document, then append this attribute to this, and then return true.
         if (!force.has_value() || force.value()) {
-            auto new_attribute = Attribute::create(document(), insert_as_lowercase ? name.to_lowercase() : name, "");
+            auto new_attribute = Attr::create(document(), insert_as_lowercase ? name.to_lowercase() : name, "");
             m_attributes->append_attribute(new_attribute);
 
             parse_attribute(new_attribute->local_name(), "");
@@ -507,10 +507,18 @@ bool Element::is_active() const
     return document().active_element() == this;
 }
 
-JS::NonnullGCPtr<HTMLCollection> Element::get_elements_by_class_name(FlyString const& class_name)
+JS::NonnullGCPtr<HTMLCollection> Element::get_elements_by_class_name(FlyString const& class_names)
 {
-    return HTMLCollection::create(*this, [class_name, quirks_mode = document().in_quirks_mode()](Element const& element) {
-        return element.has_class(class_name, quirks_mode ? CaseSensitivity::CaseInsensitive : CaseSensitivity::CaseSensitive);
+    Vector<FlyString> list_of_class_names;
+    for (auto& name : class_names.view().split_view(' ')) {
+        list_of_class_names.append(name);
+    }
+    return HTMLCollection::create(*this, [list_of_class_names = move(list_of_class_names), quirks_mode = document().in_quirks_mode()](Element const& element) {
+        for (auto& name : list_of_class_names) {
+            if (!element.has_class(name, quirks_mode ? CaseSensitivity::CaseInsensitive : CaseSensitivity::CaseSensitive))
+                return false;
+        }
+        return true;
     });
 }
 
@@ -537,7 +545,7 @@ CSS::CSSStyleDeclaration* Element::style_for_bindings()
 void Element::make_html_uppercased_qualified_name()
 {
     // This is allowed by the spec: "User agents could optimize qualified name and HTML-uppercased qualified name by storing them in internal slots."
-    if (namespace_() == Namespace::HTML /* FIXME: and its node document is an HTML document */)
+    if (namespace_() == Namespace::HTML && document().document_type() == Document::Type::HTML)
         m_html_uppercased_qualified_name = qualified_name().to_uppercase();
     else
         m_html_uppercased_qualified_name = qualified_name();

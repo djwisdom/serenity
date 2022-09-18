@@ -7,12 +7,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "IDLParser.h"
-#include "IDLTypes.h"
 #include <AK/Debug.h>
 #include <AK/LexicalPath.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
+#include <LibIDL/IDLParser.h>
+#include <LibIDL/Types.h>
 
 extern Vector<StringView> s_header_search_paths;
 
@@ -112,21 +112,21 @@ int main(int argc, char** argv)
         for (auto& attribute : interface.attributes) {
             dbgln("  {}{}{} {}",
                 attribute.readonly ? "readonly " : "",
-                attribute.type->name,
-                attribute.type->nullable ? "?" : "",
+                attribute.type->name(),
+                attribute.type->is_nullable() ? "?" : "",
                 attribute.name);
         }
 
         dbgln("Functions:");
         for (auto& function : interface.functions) {
             dbgln("  {}{} {}",
-                function.return_type->name,
-                function.return_type->nullable ? "?" : "",
+                function.return_type->name(),
+                function.return_type->is_nullable() ? "?" : "",
                 function.name);
             for (auto& parameter : function.parameters) {
                 dbgln("    {}{} {}",
-                    parameter.type->name,
-                    parameter.type->nullable ? "?" : "",
+                    parameter.type->name(),
+                    parameter.type->is_nullable() ? "?" : "",
                     parameter.name);
             }
         }
@@ -134,13 +134,13 @@ int main(int argc, char** argv)
         dbgln("Static Functions:");
         for (auto& function : interface.static_functions) {
             dbgln("  static {}{} {}",
-                function.return_type->name,
-                function.return_type->nullable ? "?" : "",
+                function.return_type->name(),
+                function.return_type->is_nullable() ? "?" : "",
                 function.name);
             for (auto& parameter : function.parameters) {
                 dbgln("    {}{} {}",
-                    parameter.type->name,
-                    parameter.type->nullable ? "?" : "",
+                    parameter.type->name(),
+                    parameter.type->is_nullable() ? "?" : "",
                     parameter.name);
             }
         }

@@ -183,6 +183,7 @@ public:
     JS::NonnullGCPtr<HTMLCollection> links();
     JS::NonnullGCPtr<HTMLCollection> forms();
     JS::NonnullGCPtr<HTMLCollection> scripts();
+    JS::NonnullGCPtr<HTMLCollection> all();
 
     String const& source() const { return m_source; }
     void set_source(String const& source) { m_source = source; }
@@ -191,7 +192,7 @@ public:
 
     JS::Value run_javascript(StringView source, StringView filename = "(unknown)"sv);
 
-    ExceptionOr<JS::NonnullGCPtr<Element>> create_element(String const& tag_name);
+    ExceptionOr<JS::NonnullGCPtr<Element>> create_element(FlyString const& local_name);
     ExceptionOr<JS::NonnullGCPtr<Element>> create_element_ns(String const& namespace_, String const& qualified_name);
     JS::NonnullGCPtr<DocumentFragment> create_document_fragment();
     JS::NonnullGCPtr<Text> create_text_node(String const& data);
@@ -210,6 +211,10 @@ public:
     void add_script_to_execute_as_soon_as_possible(Badge<HTML::HTMLScriptElement>, HTML::HTMLScriptElement&);
     Vector<JS::Handle<HTML::HTMLScriptElement>> take_scripts_to_execute_as_soon_as_possible(Badge<HTML::HTMLParser>);
     Vector<JS::Handle<HTML::HTMLScriptElement>>& scripts_to_execute_as_soon_as_possible() { return m_scripts_to_execute_as_soon_as_possible; }
+
+    void add_script_to_execute_in_order_as_soon_as_possible(Badge<HTML::HTMLScriptElement>, HTML::HTMLScriptElement&);
+    Vector<JS::Handle<HTML::HTMLScriptElement>> take_scripts_to_execute_in_order_as_soon_as_possible(Badge<HTML::HTMLParser>);
+    Vector<JS::Handle<HTML::HTMLScriptElement>>& scripts_to_execute_in_order_as_soon_as_possible() { return m_scripts_to_execute_in_order_as_soon_as_possible; }
 
     QuirksMode mode() const { return m_quirks_mode; }
     bool in_quirks_mode() const { return m_quirks_mode == QuirksMode::Yes; }
@@ -313,6 +318,7 @@ public:
     String visibility_state() const;
 
     void run_the_resize_steps();
+    void run_the_scroll_steps();
 
     void evaluate_media_queries_and_report_changes();
     void add_media_query_list(JS::NonnullGCPtr<CSS::MediaQueryList>);
@@ -356,6 +362,9 @@ public:
     String domain() const;
     void set_domain(String const& domain);
 
+    auto& pending_scroll_event_targets() { return m_pending_scroll_event_targets; }
+    auto& pending_scrollend_event_targets() { return m_pending_scrollend_event_targets; }
+
 protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
@@ -398,7 +407,13 @@ private:
     String m_source;
 
     JS::GCPtr<HTML::HTMLScriptElement> m_pending_parsing_blocking_script;
+
     Vector<JS::Handle<HTML::HTMLScriptElement>> m_scripts_to_execute_when_parsing_has_finished;
+
+    // https://html.spec.whatwg.org/multipage/scripting.html#list-of-scripts-that-will-execute-in-order-as-soon-as-possible
+    Vector<JS::Handle<HTML::HTMLScriptElement>> m_scripts_to_execute_in_order_as_soon_as_possible;
+
+    // https://html.spec.whatwg.org/multipage/scripting.html#set-of-scripts-that-will-execute-as-soon-as-possible
     Vector<JS::Handle<HTML::HTMLScriptElement>> m_scripts_to_execute_as_soon_as_possible;
 
     QuirksMode m_quirks_mode { QuirksMode::No };
@@ -446,6 +461,12 @@ private:
     // Used by run_the_resize_steps().
     Gfx::IntSize m_last_viewport_size;
 
+    // https://w3c.github.io/csswg-drafts/cssom-view-1/#document-pending-scroll-event-targets
+    Vector<JS::NonnullGCPtr<EventTarget>> m_pending_scroll_event_targets;
+
+    // https://w3c.github.io/csswg-drafts/cssom-view-1/#document-pending-scrollend-event-targets
+    Vector<JS::NonnullGCPtr<EventTarget>> m_pending_scrollend_event_targets;
+
     // Used by evaluate_media_queries_and_report_changes().
     Vector<WeakPtr<CSS::MediaQueryList>> m_media_query_lists;
 
@@ -466,6 +487,15 @@ private:
 
     // https://dom.spec.whatwg.org/#concept-document-origin
     HTML::Origin m_origin;
+
+    JS::GCPtr<HTMLCollection> m_applets;
+    JS::GCPtr<HTMLCollection> m_anchors;
+    JS::GCPtr<HTMLCollection> m_images;
+    JS::GCPtr<HTMLCollection> m_embeds;
+    JS::GCPtr<HTMLCollection> m_links;
+    JS::GCPtr<HTMLCollection> m_forms;
+    JS::GCPtr<HTMLCollection> m_scripts;
+    JS::GCPtr<HTMLCollection> m_all;
 };
 
 }
