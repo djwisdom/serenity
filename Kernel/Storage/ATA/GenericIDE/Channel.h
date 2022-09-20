@@ -36,8 +36,10 @@ namespace Kernel {
 class AsyncBlockDeviceRequest;
 
 class IDEController;
-class PCIIDEController;
+#if ARCH(I386) || ARCH(X86_64)
+class PCIIDELegacyModeController;
 class ISAIDEController;
+#endif
 class IDEChannel
     : public ATAPort
     , public IRQHandler {
@@ -110,8 +112,10 @@ public:
 
     virtual StringView purpose() const override { return "PATA Channel"sv; }
 
-    ErrorOr<void> allocate_resources_for_pci_ide_controller(Badge<PCIIDEController>, bool force_pio);
+#if ARCH(I386) || ARCH(X86_64)
+    ErrorOr<void> allocate_resources_for_pci_ide_controller(Badge<PCIIDELegacyModeController>, bool force_pio);
     ErrorOr<void> allocate_resources_for_isa_ide_controller(Badge<ISAIDEController>);
+#endif
 
 private:
     static constexpr size_t m_logical_sector_size = 512;
