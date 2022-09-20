@@ -98,7 +98,7 @@ static NonnullRefPtr<HTML::BrowsingContext> obtain_a_browsing_context_to_use_for
 
     // 3. Let newBrowsingContext be the result of creating a new top-level browsing context.
     VERIFY(browsing_context.page());
-    auto new_browsing_context = HTML::BrowsingContext::create_a_new_browsing_context(*browsing_context.page(), nullptr, nullptr);
+    auto new_browsing_context = HTML::BrowsingContext::create_a_new_top_level_browsing_context(*browsing_context.page());
 
     // FIXME: 4. If navigationCOOP's value is "same-origin-plurs-COEP", then set newBrowsingContext's group's
     //           cross-origin isolation mode to either "logical" or "concrete". The choice of which is implementation-defined.
@@ -216,16 +216,19 @@ JS::NonnullGCPtr<Document> Document::create_and_initialize(Type type, String con
     //    whose type is type,
     //    content type is contentType,
     //    origin is navigationParams's origin,
-    //    FIXME: policy container is navigationParams's policy container,
+    //    policy container is navigationParams's policy container,
     //    FIXME: permissions policy is permissionsPolicy,
-    //    FIXME: active sandboxing flag set is navigationParams's final sandboxing flag set,
+    //    active sandboxing flag set is navigationParams's final sandboxing flag set,
     //    FIXME: and cross-origin opener policy is navigationParams's cross-origin opener policy,
     //    FIXME: load timing info is loadTimingInfo,
-    //    FIXME: and navigation id is navigationParams's id.
+    //    and navigation id is navigationParams's id.
     auto document = Document::create(*window);
     document->m_type = type;
     document->m_content_type = content_type;
     document->set_origin(navigation_params.origin);
+    document->m_policy_container = navigation_params.policy_container;
+    document->m_active_sandboxing_flag_set = navigation_params.final_sandboxing_flag_set;
+    document->m_navigation_id = navigation_params.id;
 
     document->m_window = window;
     window->set_associated_document(*document);
@@ -644,6 +647,8 @@ void Document::set_title(String const& title)
 void Document::attach_to_browsing_context(Badge<HTML::BrowsingContext>, HTML::BrowsingContext& browsing_context)
 {
     m_browsing_context = browsing_context;
+
+    update_the_visibility_state(browsing_context.system_visibility_state());
 }
 
 void Document::detach_from_browsing_context(Badge<HTML::BrowsingContext>, HTML::BrowsingContext& browsing_context)
@@ -1454,24 +1459,31 @@ EventTarget* Document::get_parent(Event const& event)
     return &window();
 }
 
+// https://html.spec.whatwg.org/#completely-loaded
+bool Document::is_completely_loaded() const
+{
+    return m_completely_loaded_time.has_value();
+}
+
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#completely-finish-loading
 void Document::completely_finish_loading()
 {
     // 1. Assert: document's browsing context is non-null.
     VERIFY(browsing_context());
 
-    // FIXME: 2. Set document's completely loaded time to the current time.
+    // 2. Set document's completely loaded time to the current time.
+    m_completely_loaded_time = AK::Time::now_realtime();
 
     // 3. Let container be document's browsing context's container.
     auto container = JS::make_handle(browsing_context()->container());
 
-    // If container is an iframe element, then queue an element task on the DOM manipulation task source given container to run the iframe load event steps given container.
+    // 4. If container is an iframe element, then queue an element task on the DOM manipulation task source given container to run the iframe load event steps given container.
     if (container && is<HTML::HTMLIFrameElement>(*container)) {
         container->queue_an_element_task(HTML::Task::Source::DOMManipulation, [container]() mutable {
             run_iframe_load_event_steps(static_cast<HTML::HTMLIFrameElement&>(*container));
         });
     }
-    // Otherwise, if container is non-null, then queue an element task on the DOM manipulation task source given container to fire an event named load at container.
+    // 5. Otherwise, if container is non-null, then queue an element task on the DOM manipulation task source given container to fire an event named load at container.
     else if (container) {
         container->queue_an_element_task(HTML::Task::Source::DOMManipulation, [container]() mutable {
             container->dispatch_event(*DOM::Event::create(container->window(), HTML::EventNames::load));
@@ -1571,13 +1583,37 @@ Bindings::LocationObject* Document::location()
 // https://html.spec.whatwg.org/multipage/interaction.html#dom-document-hidden
 bool Document::hidden() const
 {
-    return false;
+    return visibility_state() == "hidden";
 }
 
 // https://html.spec.whatwg.org/multipage/interaction.html#dom-document-visibilitystate
 String Document::visibility_state() const
 {
-    return hidden() ? "hidden" : "visible";
+    switch (m_visibility_state) {
+    case HTML::VisibilityState::Hidden:
+        return "hidden"sv;
+    case HTML::VisibilityState::Visible:
+        return "visible"sv;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#update-the-visibility-state
+void Document::update_the_visibility_state(HTML::VisibilityState visibility_state)
+{
+    // 1. If document's visibility state equals visibilityState, then return.
+    if (m_visibility_state == visibility_state)
+        return;
+
+    // 2. Set document's visibility state to visibilityState.
+    m_visibility_state = visibility_state;
+
+    // FIXME: 3. Run any page visibility change steps which may be defined in other specifications, with visibility state and document.
+
+    // 4. Fire an event named visibilitychange at document, with its bubbles attribute initialized to true.
+    auto event = DOM::Event::create(window(), HTML::EventNames::visibilitychange);
+    event->set_bubbles(true);
+    dispatch_event(event);
 }
 
 // https://drafts.csswg.org/cssom-view/#run-the-resize-steps
@@ -1935,6 +1971,47 @@ String Document::domain() const
 void Document::set_domain(String const& domain)
 {
     dbgln("(STUBBED) Document::set_domain(domain='{}')", domain);
+}
+
+void Document::set_navigation_id(Optional<AK::String> navigation_id)
+{
+    m_navigation_id = move(navigation_id);
+}
+
+Optional<String> Document::navigation_id() const
+{
+    return m_navigation_id;
+}
+
+HTML::SandboxingFlagSet Document::active_sandboxing_flag_set() const
+{
+    return m_active_sandboxing_flag_set;
+}
+
+HTML::PolicyContainer Document::policy_container() const
+{
+    return m_policy_container;
+}
+
+// https://html.spec.whatwg.org/multipage/browsers.html#list-of-the-descendant-browsing-contexts
+Vector<NonnullRefPtr<HTML::BrowsingContext>> Document::list_of_descendant_browsing_contexts() const
+{
+    // 1. Let list be an empty list.
+    Vector<NonnullRefPtr<HTML::BrowsingContext>> list;
+
+    // 2. For each browsing context container container,
+    //    whose nested browsing context is non-null and whose shadow-including root is d, in shadow-including tree order:
+
+    // NOTE: We already store our browsing contexts in a tree structure, so we can simply collect all the descendants
+    //       of this document's browsing context.
+    if (browsing_context()) {
+        browsing_context()->for_each_in_subtree([&](auto& context) {
+            list.append(context);
+            return IterationDecision::Continue;
+        });
+    }
+
+    return list;
 }
 
 }

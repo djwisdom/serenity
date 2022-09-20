@@ -29,7 +29,9 @@
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/History.h>
 #include <LibWeb/HTML/Origin.h>
+#include <LibWeb/HTML/SandboxingFlagSet.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/VisibilityState.h>
 #include <LibWeb/HTML/Window.h>
 
 namespace Web::DOM {
@@ -317,6 +319,9 @@ public:
     bool hidden() const;
     String visibility_state() const;
 
+    // https://html.spec.whatwg.org/multipage/interaction.html#update-the-visibility-state
+    void update_the_visibility_state(HTML::VisibilityState);
+
     void run_the_resize_steps();
     void run_the_scroll_steps();
 
@@ -364,6 +369,22 @@ public:
 
     auto& pending_scroll_event_targets() { return m_pending_scroll_event_targets; }
     auto& pending_scrollend_event_targets() { return m_pending_scrollend_event_targets; }
+
+    // https://html.spec.whatwg.org/#completely-loaded
+    bool is_completely_loaded() const;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-navigation-id
+    Optional<String> navigation_id() const;
+    void set_navigation_id(Optional<String>);
+
+    // https://html.spec.whatwg.org/multipage/origin.html#active-sandboxing-flag-set
+    HTML::SandboxingFlagSet active_sandboxing_flag_set() const;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-policy-container
+    HTML::PolicyContainer policy_container() const;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#list-of-the-descendant-browsing-contexts
+    Vector<NonnullRefPtr<HTML::BrowsingContext>> list_of_descendant_browsing_contexts() const;
 
 protected:
     virtual void visit_edges(Cell::Visitor&) override;
@@ -496,6 +517,21 @@ private:
     JS::GCPtr<HTMLCollection> m_forms;
     JS::GCPtr<HTMLCollection> m_scripts;
     JS::GCPtr<HTMLCollection> m_all;
+
+    // https://html.spec.whatwg.org/#completely-loaded-time
+    Optional<AK::Time> m_completely_loaded_time;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-navigation-id
+    Optional<String> m_navigation_id;
+
+    // https://html.spec.whatwg.org/multipage/origin.html#active-sandboxing-flag-set
+    HTML::SandboxingFlagSet m_active_sandboxing_flag_set;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-policy-container
+    HTML::PolicyContainer m_policy_container;
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#visibility-state
+    HTML::VisibilityState m_visibility_state { HTML::VisibilityState::Hidden };
 };
 
 }
