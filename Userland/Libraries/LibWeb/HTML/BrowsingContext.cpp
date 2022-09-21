@@ -19,6 +19,7 @@
 #include <LibWeb/HTML/SandboxingFlagSet.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/HighResolutionTime/CoarsenTime.h>
 #include <LibWeb/Layout/BreakNode.h>
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/TextNode.h>
@@ -158,8 +159,12 @@ NonnullRefPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context(Pa
         top_level_creation_url,
         top_level_origin);
 
-    // FIXME: 12. Let loadTimingInfo be a new document load timing info with its navigation start time set to the result of calling
-    //            coarsen time with unsafeContextCreationTime and the new environment settings object's cross-origin isolated capability.
+    // 12. Let loadTimingInfo be a new document load timing info with its navigation start time set to the result of calling
+    //     coarsen time with unsafeContextCreationTime and the new environment settings object's cross-origin isolated capability.
+    auto load_timing_info = DOM::DocumentLoadTimingInfo();
+    load_timing_info.navigation_start_time = HighResolutionTime::coarsen_time(
+        unsafe_context_creation_time,
+        verify_cast<WindowEnvironmentSettingsObject>(window->realm().host_defined())->cross_origin_isolated_capability() == CanUseCrossOriginIsolatedAPIs::Yes);
 
     // 13. Let coop be a new cross-origin opener policy.
     auto coop = CrossOriginOpenerPolicy {};
@@ -179,7 +184,7 @@ NonnullRefPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context(Pa
     //     FIXME: active sandboxing flag set is sandboxFlags,
     //     FIXME: permissions policy is permissionsPolicy,
     //     cross-origin opener policy is coop,
-    //     FIXME: load timing info is loadTimingInfo,
+    //     load timing info is loadTimingInfo,
     //     FIXME: navigation id is null,
     //     and which is ready for post-load tasks.
     auto document = DOM::Document::create(*window);
@@ -193,6 +198,7 @@ NonnullRefPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context(Pa
     document->set_origin(origin);
     document->set_url(AK::URL("about:blank"));
     document->set_cross_origin_opener_policy(coop);
+    document->set_load_timing_info(load_timing_info);
     document->set_ready_for_post_load_tasks(true);
 
     // FIXME: 16. Assert: document's URL and document's relevant settings object's creation URL are about:blank.
@@ -947,7 +953,8 @@ DOM::ExceptionOr<void> BrowsingContext::navigate(
 
     // FIXME: 13. If unloadPromptResult is "refuse", then return a new WebDriver BiDi navigation status whose id is navigationId and status is "canceled".
 
-    // FIXME: 14. Abort the active document of browsingContext.
+    // 14. Abort the active document of browsingContext.
+    active_document()->abort();
 
     // FIXME: 15. If browsingContext is a child browsing context, then put it in the delaying load events mode.
     //            The user agent must take this child browsing context out of the delaying load events mode when this navigation algorithm later matures,
@@ -1314,6 +1321,24 @@ void BrowsingContext::discard()
     // AD-HOC:
     if (parent())
         parent()->remove_child(*this);
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#close-a-browsing-context
+void BrowsingContext::close()
+{
+    VERIFY(active_document());
+
+    // FIXME: 1. If the result of calling prompt to unload with browsingContext's active document is "refuse", then return.
+
+    // 2. Unload browsingContext's active document.
+    active_document()->unload();
+
+    // 3. Remove browsingContext from the user interface (e.g., close or hide its tab in a tabbed browser).
+    if (m_page)
+        m_page->client().page_did_close_browsing_context(*this);
+
+    // 4. Discard browsingContext.
+    discard();
 }
 
 }
