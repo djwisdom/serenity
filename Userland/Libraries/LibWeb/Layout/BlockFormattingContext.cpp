@@ -504,12 +504,25 @@ void BlockFormattingContext::place_block_level_element_in_normal_flow_vertically
 
     auto clear_floating_boxes = [&](FloatSideData& float_side) {
         if (!float_side.current_boxes.is_empty()) {
-            float clearance_y = 0;
+            // NOTE: Floating boxes are globally relevant within this BFC, *but* their offset coordinates
+            //       are relative to their containing block.
+            //       This means that we have to first convert to a root-space Y coordinate before clearing,
+            //       and then convert back to a local Y coordinate when assigning the cleared offset to
+            //       the `child_box` layout state.
+
+            // First, find the lowest margin box edge on this float side and calculate the Y offset just below it.
+            float clearance_y_in_root = 0;
             for (auto const& floating_box : float_side.current_boxes) {
-                auto const& floating_box_state = m_state.get(floating_box.box);
-                clearance_y = max(clearance_y, floating_box_state.offset.y() + floating_box_state.border_box_height());
+                auto floating_box_rect_in_root = margin_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
+                clearance_y_in_root = max(clearance_y_in_root, floating_box_rect_in_root.bottom() + 1);
             }
-            y = max(y, clearance_y);
+
+            // Then, convert the clearance Y to a coordinate relative to the containing block of `child_box`.
+            float clearance_y_in_containing_block = clearance_y_in_root;
+            for (auto* containing_block = child_box.containing_block(); containing_block && containing_block != &root(); containing_block = containing_block->containing_block())
+                clearance_y_in_containing_block -= m_state.get(*containing_block).offset.y();
+
+            y = max(y, clearance_y_in_containing_block);
             float_side.clear();
         }
     };
@@ -642,7 +655,7 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
             }
 
             if (fits_on_line) {
-                auto const previous_rect = border_box_rect_in_ancestor_coordinate_space(previous_box.box, root(), m_state);
+                auto const previous_rect = margin_box_rect_in_ancestor_coordinate_space(previous_box.box, root(), m_state);
                 if (previous_rect.contains_vertically(y_in_root + side_data.y_offset)) {
                     // This box touches another already floating box. Stack after others.
                     offset_from_edge = wanted_offset_from_edge;
@@ -759,7 +772,7 @@ BlockFormattingContext::SpaceUsedByFloats BlockFormattingContext::space_used_by_
         auto const& floating_box = *floating_box_ptr;
         auto const& floating_box_state = m_state.get(floating_box.box);
         // NOTE: The floating box is *not* in the final horizontal position yet, but the size and vertical position is valid.
-        auto rect = border_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
+        auto rect = margin_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
         if (rect.contains_vertically(y)) {
             space_used_by_floats.left = floating_box.offset_from_edge
                 + floating_box_state.content_width()
@@ -772,7 +785,7 @@ BlockFormattingContext::SpaceUsedByFloats BlockFormattingContext::space_used_by_
         auto const& floating_box = *floating_box_ptr;
         auto const& floating_box_state = m_state.get(floating_box.box);
         // NOTE: The floating box is *not* in the final horizontal position yet, but the size and vertical position is valid.
-        auto rect = border_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
+        auto rect = margin_box_rect_in_ancestor_coordinate_space(floating_box.box, root(), m_state);
         if (rect.contains_vertically(y)) {
             space_used_by_floats.right = floating_box.offset_from_edge
                 + floating_box_state.margin_box_left();
