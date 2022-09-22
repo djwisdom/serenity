@@ -17,47 +17,37 @@ Vector<StringView> s_header_search_paths;
 namespace IDL {
 
 // FIXME: Generate this automatically somehow.
-static bool is_wrappable_type(Type const& type)
+static bool is_platform_object(Type const& type)
 {
-    if (type.name() == "EventTarget")
-        return true;
-    if (type.name() == "Node")
-        return true;
-    if (type.name() == "Document")
-        return true;
-    if (type.name() == "Text")
-        return true;
-    if (type.name() == "DocumentType")
-        return true;
+    // NOTE: This is a hand-curated subset of platform object types that are actually relevant
+    // in places where this function is used. If you add IDL code and get compile errors, you
+    // might simply need to add another type here.
+    static constexpr Array types = {
+        "AbortSignal"sv,
+        "Attr"sv,
+        "Blob"sv,
+        "CanvasRenderingContext2D"sv,
+        "Document"sv,
+        "DocumentType"sv,
+        "EventTarget"sv,
+        "ImageData"sv,
+        "MutationRecord"sv,
+        "NamedNodeMap"sv,
+        "Node"sv,
+        "Path2D"sv,
+        "Range"sv,
+        "Selection"sv,
+        "Text"sv,
+        "TextMetrics"sv,
+        "URLSearchParams"sv,
+        "WebGLRenderingContext"sv,
+        "Window"sv,
+    };
     if (type.name().ends_with("Element"sv))
         return true;
     if (type.name().ends_with("Event"sv))
         return true;
-    if (type.name() == "ImageData")
-        return true;
-    if (type.name() == "Window")
-        return true;
-    if (type.name() == "Range")
-        return true;
-    if (type.name() == "Selection")
-        return true;
-    if (type.name() == "Attr")
-        return true;
-    if (type.name() == "NamedNodeMap")
-        return true;
-    if (type.name() == "TextMetrics")
-        return true;
-    if (type.name() == "AbortSignal")
-        return true;
-    if (type.name() == "CanvasRenderingContext2D")
-        return true;
-    if (type.name() == "WebGLRenderingContext")
-        return true;
-    if (type.name() == "URLSearchParams")
-        return true;
-    if (type.name() == "Blob")
-        return true;
-    if (type.name() == "Path2D")
+    if (types.span().contains_slow(type.name()))
         return true;
     return false;
 }
@@ -72,106 +62,6 @@ static StringView sequence_storage_type_to_cpp_storage_type_name(SequenceStorage
     default:
         VERIFY_NOT_REACHED();
     }
-}
-
-static bool impl_is_wrapper(Type const& type)
-{
-    if (type.name() == "StyleSheet"sv)
-        return true;
-
-    if (type.name() == "CSSStyleSheet"sv)
-        return true;
-
-    if (type.name() == "StyleSheetList"sv)
-        return true;
-
-    if (type.name() == "CSSRuleList"sv)
-        return true;
-
-    if (type.name() == "CSSRule"sv)
-        return true;
-
-    if (type.name() == "CSSStyleRule"sv)
-        return true;
-
-    if (type.name() == "CSSFontFaceRule"sv)
-        return true;
-
-    if (type.name() == "CSSConditionRule"sv)
-        return true;
-
-    if (type.name() == "CSSGroupingRule"sv)
-        return true;
-
-    if (type.name() == "CSSMediaRule"sv)
-        return true;
-
-    if (type.name() == "CSSImportRule"sv)
-        return true;
-
-    if (type.name() == "EventTarget"sv)
-        return true;
-
-    if (type.name() == "Node"sv)
-        return true;
-    if (type.name() == "ShadowRoot"sv)
-        return true;
-    if (type.name() == "DocumentTemporary"sv)
-        return true;
-    if (type.name() == "Text"sv)
-        return true;
-    if (type.name() == "Document"sv)
-        return true;
-    if (type.name() == "DocumentType"sv)
-        return true;
-    if (type.name().ends_with("Element"sv))
-        return true;
-    if (type.name() == "XMLHttpRequest"sv)
-        return true;
-    if (type.name() == "XMLHttpRequestEventTarget"sv)
-        return true;
-    if (type.name() == "AbortSignal"sv)
-        return true;
-    if (type.name() == "WebSocket"sv)
-        return true;
-    if (type.name() == "Worker"sv)
-        return true;
-    if (type.name() == "NodeIterator"sv)
-        return true;
-    if (type.name() == "TreeWalker"sv)
-        return true;
-    if (type.name() == "MediaQueryList"sv)
-        return true;
-    if (type.name() == "MessagePort"sv)
-        return true;
-    if (type.name() == "NodeFilter"sv)
-        return true;
-    if (type.name() == "DOMTokenList"sv)
-        return true;
-    if (type.name() == "DOMStringMap"sv)
-        return true;
-    if (type.name() == "MutationRecord"sv)
-        return true;
-    if (type.name() == "CanvasRenderingContext2D"sv)
-        return true;
-    if (type.name() == "WebGLRenderingContext"sv)
-        return true;
-    if (type.name() == "Path2D"sv)
-        return true;
-    if (type.name() == "Storage"sv)
-        return true;
-    if (type.name() == "File"sv)
-        return true;
-    if (type.name() == "Blob"sv)
-        return true;
-    if (type.name() == "URL"sv)
-        return true;
-    if (type.name() == "URLSearchParams"sv)
-        return true;
-    if (type.name() == "DOMException"sv)
-        return true;
-
-    return false;
 }
 
 CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface);
@@ -201,16 +91,8 @@ static String union_type_to_variant(UnionType const& union_type, Interface const
 
 CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface)
 {
-    if (is_wrappable_type(type)) {
-        if (impl_is_wrapper(type)) {
-            return { .name = String::formatted("JS::Handle<{}>", type.name()), .sequence_storage_type = SequenceStorageType::MarkedVector };
-        }
-
-        if (type.is_nullable())
-            return { .name = String::formatted("RefPtr<{}>", type.name()), .sequence_storage_type = SequenceStorageType::Vector };
-
-        return { .name = String::formatted("NonnullRefPtr<{}>", type.name()), .sequence_storage_type = SequenceStorageType::Vector };
-    }
+    if (is_platform_object(type))
+        return { .name = String::formatted("JS::Handle<{}>", type.name()), .sequence_storage_type = SequenceStorageType::MarkedVector };
 
     if (type.is_string())
         return { .name = "String", .sequence_storage_type = SequenceStorageType::Vector };
@@ -368,11 +250,6 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     scoped_generator.set("js_suffix", js_suffix);
     scoped_generator.set("legacy_null_to_empty_string", legacy_null_to_empty_string ? "true" : "false");
     scoped_generator.set("parameter.type.name", parameter.type->name());
-    if (parameter.type->name() == "Window")
-        scoped_generator.set("wrapper_name", "HTML::Window");
-    else {
-        scoped_generator.set("wrapper_name", String::formatted("{}Wrapper", parameter.type->name()));
-    }
 
     if (optional_default_value.has_value())
         scoped_generator.set("parameter.optional_default_value", *optional_default_value);
@@ -453,23 +330,23 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     auto @cpp_name@ = adopt_ref(*new @cpp_type@(move(callback_type)));
 )~~~");
         }
-    } else if (IDL::is_wrappable_type(*parameter.type)) {
+    } else if (IDL::is_platform_object(*parameter.type)) {
         if (!parameter.type->is_nullable()) {
             if (!optional) {
                 scoped_generator.append(R"~~~(
-    if (!@js_name@@js_suffix@.is_object() || !is<@wrapper_name@>(@js_name@@js_suffix@.as_object()))
+    if (!@js_name@@js_suffix@.is_object() || !is<@parameter.type.name@>(@js_name@@js_suffix@.as_object()))
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "@parameter.type.name@");
 
-    auto& @cpp_name@ = static_cast<@wrapper_name@&>(@js_name@@js_suffix@.as_object()).impl();
+    auto& @cpp_name@ = static_cast<@parameter.type.name@&>(@js_name@@js_suffix@.as_object());
 )~~~");
             } else {
                 scoped_generator.append(R"~~~(
     Optional<JS::NonnullGCPtr<@parameter.type.name@>> @cpp_name@;
     if (!@js_name@@js_suffix@.is_undefined()) {
-        if (!@js_name@@js_suffix@.is_object() || !is<@wrapper_name@>(@js_name@@js_suffix@.as_object()))
+        if (!@js_name@@js_suffix@.is_object() || !is<@parameter.type.name@>(@js_name@@js_suffix@.as_object()))
             return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "@parameter.type.name@");
 
-        @cpp_name@ = static_cast<@wrapper_name@&>(@js_name@@js_suffix@.as_object()).impl();
+        @cpp_name@ = static_cast<@parameter.type.name@&>(@js_name@@js_suffix@.as_object());
     }
 )~~~");
             }
@@ -477,10 +354,10 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
             scoped_generator.append(R"~~~(
     @parameter.type.name@* @cpp_name@ = nullptr;
     if (!@js_name@@js_suffix@.is_nullish()) {
-        if (!@js_name@@js_suffix@.is_object() || !is<@wrapper_name@>(@js_name@@js_suffix@.as_object()))
+        if (!@js_name@@js_suffix@.is_object() || !is<@parameter.type.name@>(@js_name@@js_suffix@.as_object()))
             return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "@parameter.type.name@");
 
-        @cpp_name@ = &static_cast<@wrapper_name@&>(@js_name@@js_suffix@.as_object()).impl();
+        @cpp_name@ = &static_cast<@parameter.type.name@&>(@js_name@@js_suffix@.as_object());
     }
 )~~~");
         }
@@ -1043,40 +920,40 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
             [[maybe_unused]] auto& @js_name@@js_suffix@_object = @js_name@@js_suffix@.as_object();
 )~~~");
 
-        bool includes_wrappable_type = false;
+        bool includes_platform_object = false;
         for (auto& type : types) {
-            if (IDL::is_wrappable_type(type)) {
-                includes_wrappable_type = true;
+            if (IDL::is_platform_object(type)) {
+                includes_platform_object = true;
                 break;
             }
         }
 
-        if (includes_wrappable_type) {
+        if (includes_platform_object) {
             // 5. If V is a platform object, then:
             union_generator.append(R"~~~(
             if (is<PlatformObject>(@js_name@@js_suffix@_object)) {
 )~~~");
 
+            // NOTE: This codegen assumes that all union types are cells or values we can create a handle for.
+
             //    1. If types includes an interface type that V implements, then return the IDL value that is a reference to the object V.
             for (auto& type : types) {
-                if (!IDL::is_wrappable_type(type))
+                if (!IDL::is_platform_object(type))
                     continue;
 
                 auto union_platform_object_type_generator = union_generator.fork();
-                union_platform_object_type_generator.set("platform_object_type", String::formatted("{}Wrapper", type.name()));
-                auto cpp_type = IDL::idl_type_name_to_cpp_type(type, interface);
-                union_platform_object_type_generator.set("refptr_type", cpp_type.name);
+                union_platform_object_type_generator.set("platform_object_type", type.name());
 
                 union_platform_object_type_generator.append(R"~~~(
                 if (is<@platform_object_type@>(@js_name@@js_suffix@_object))
-                    return @refptr_type@ { static_cast<@platform_object_type@&>(@js_name@@js_suffix@_object).impl() };
+                    return JS::make_handle(static_cast<@platform_object_type@&>(@js_name@@js_suffix@_object));
 )~~~");
             }
 
             //    2. If types includes object, then return the IDL value that is a reference to the object V.
             if (includes_object) {
                 union_generator.append(R"~~~(
-                return @js_name@@js_suffix@_object;
+                return JS::make_handle(@js_name@@js_suffix@_object);
 )~~~");
             }
 
@@ -1542,7 +1419,10 @@ static void generate_wrap_statement(SourceGenerator& generator, String const& va
 )~~~");
         }
 
-        if (impl_is_wrapper(sequence_generic_type.parameters().first())) {
+        // If the type is a platform object we currently return a Vector<JS::Handle<T>> from the
+        // C++ implementation, thus allowing us to unwrap the element (a handle) like below.
+        // This might need to change if we switch to a MarkedVector.
+        if (is_platform_object(sequence_generic_type.parameters().first())) {
             scoped_generator.append(R"~~~(
             auto* wrapped_element@recursion_depth@ = &(*element@recursion_depth@);
 )~~~");
@@ -2131,7 +2011,6 @@ void generate_constructor_implementation(IDL::Interface const& interface)
 
     generator.set("name", interface.name);
     generator.set("prototype_class", interface.prototype_class);
-    generator.set("wrapper_class", interface.wrapper_class);
     generator.set("constructor_class", interface.constructor_class);
     generator.set("prototype_class:snakecase", interface.prototype_class.to_snakecase());
     generator.set("fully_qualified_name", interface.fully_qualified_name);
@@ -2458,14 +2337,12 @@ void generate_prototype_implementation(IDL::Interface const& interface)
     generator.set("parent_name", interface.parent_name);
     generator.set("prototype_class", interface.prototype_class);
     generator.set("prototype_base_class", interface.prototype_base_class);
-    generator.set("wrapper_class", interface.wrapper_class);
     generator.set("constructor_class", interface.constructor_class);
     generator.set("prototype_class:snakecase", interface.prototype_class.to_snakecase());
     generator.set("fully_qualified_name", interface.fully_qualified_name);
 
     if (interface.pair_iterator_types.has_value()) {
         generator.set("iterator_name", String::formatted("{}Iterator", interface.name));
-        generator.set("iterator_wrapper_class", String::formatted("{}IteratorWrapper", interface.name));
     }
 
     generator.append(R"~~~(
@@ -2690,7 +2567,7 @@ static JS::ThrowCompletionOr<@fully_qualified_name@*> impl_from(JS::VM& vm)
         if (interface.name == "EventTarget") {
             generator.append(R"~~~(
     if (is<HTML::Window>(this_object)) {
-        return &static_cast<HTML::Window*>(this_object)->impl();
+        return static_cast<HTML::Window*>(this_object);
     }
 )~~~");
         }
@@ -2699,7 +2576,7 @@ static JS::ThrowCompletionOr<@fully_qualified_name@*> impl_from(JS::VM& vm)
     if (!is<@fully_qualified_name@>(this_object))
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "@fully_qualified_name@");
 
-    return &static_cast<@fully_qualified_name@*>(this_object)->impl();
+    return static_cast<@fully_qualified_name@*>(this_object);
 }
 )~~~");
     }
@@ -2927,7 +2804,6 @@ void generate_iterator_prototype_implementation(IDL::Interface const& interface)
 
     generator.set("name", String::formatted("{}Iterator", interface.name));
     generator.set("prototype_class", String::formatted("{}IteratorPrototype", interface.name));
-    generator.set("wrapper_class", String::formatted("{}IteratorWrapper", interface.name));
     generator.set("fully_qualified_name", String::formatted("{}Iterator", interface.fully_qualified_name));
     generator.set("possible_include_path", String::formatted("{}Iterator", interface.name.replace("::"sv, "/"sv, ReplaceMode::All)));
 
@@ -2993,7 +2869,7 @@ static JS::ThrowCompletionOr<@fully_qualified_name@*> impl_from(JS::VM& vm)
     auto* this_object = TRY(vm.this_value().to_object(vm));
     if (!is<@fully_qualified_name@>(this_object))
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "@fully_qualified_name@");
-    return &static_cast<@fully_qualified_name@*>(this_object)->impl();
+    return static_cast<@fully_qualified_name@*>(this_object);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(@prototype_class@::next)
