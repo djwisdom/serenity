@@ -84,6 +84,7 @@ set(KERNEL_SOURCES
     Graphics/VirtIOGPU/Console.cpp
     Graphics/VirtIOGPU/GPU3DDevice.cpp
     Graphics/VirtIOGPU/GraphicsAdapter.cpp
+    IOWindow.cpp
     SanCov.cpp
     Storage/ATA/AHCI/Controller.cpp
     Storage/ATA/AHCI/Port.cpp
@@ -298,11 +299,6 @@ set(KERNEL_SOURCES
     Thread.cpp
     ThreadBlockers.cpp
     ThreadTracer.cpp
-    Time/APICTimer.cpp
-    Time/HPET.cpp
-    Time/HPETComparator.cpp
-    Time/PIT.cpp
-    Time/RTC.cpp
     Time/TimeManagement.cpp
     TimerQueue.cpp
     UBSanitizer.cpp
@@ -341,9 +337,18 @@ if ("${SERENITY_ARCH}" STREQUAL "i686" OR "${SERENITY_ARCH}" STREQUAL "x86_64")
         Arch/x86/ISABus/HID/VMWareMouseDevice.cpp
         Arch/x86/ISABus/I8042Controller.cpp
         Arch/x86/ISABus/IDEController.cpp
+        Arch/x86/ISABus/SerialDevice.cpp
         Arch/x86/PCI/Controller/HostBridge.cpp
         Arch/x86/PCI/IDELegacyModeController.cpp
         Arch/x86/PCI/Initializer.cpp
+
+        Arch/x86/Time/APICTimer.cpp
+        Arch/x86/Time/HPET.cpp
+        Arch/x86/Time/HPETComparator.cpp
+        Arch/x86/Time/PIT.cpp
+        Arch/x86/Time/RTC.cpp
+
+        Arch/x86/VGA/IOArbiter.cpp
     )
 
     set(KERNEL_SOURCES
