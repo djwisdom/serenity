@@ -12,11 +12,9 @@
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/ResolvedCSSStyleDeclaration.h>
 #include <LibWeb/CSS/SelectorEngine.h>
-#include <LibWeb/DOM/DOMException.h>
 #include <LibWeb/DOM/DOMTokenList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Text.h>
@@ -39,6 +37,8 @@
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Painting/PaintableBox.h>
+#include <LibWeb/WebIDL/DOMException.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::DOM {
 
@@ -82,12 +82,12 @@ String Element::get_attribute(FlyString const& name) const
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattribute
-ExceptionOr<void> Element::set_attribute(FlyString const& name, String const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute(FlyString const& name, String const& value)
 {
     // 1. If qualifiedName does not match the Name production in XML, then throw an "InvalidCharacterError" DOMException.
     // FIXME: Proper name validation
     if (name.is_empty())
-        return InvalidCharacterError::create(global_object(), "Attribute name must not be empty");
+        return WebIDL::InvalidCharacterError::create(global_object(), "Attribute name must not be empty");
 
     // 2. If this is in the HTML namespace and its node document is an HTML document, then set qualifiedName to qualifiedName in ASCII lowercase.
     // FIXME: Handle the second condition, assume it is an HTML document for now.
@@ -98,7 +98,7 @@ ExceptionOr<void> Element::set_attribute(FlyString const& name, String const& va
 
     // 4. If attribute is null, create an attribute whose local name is qualifiedName, value is value, and node document is this’s node document, then append this attribute to this, and then return.
     if (!attribute) {
-        auto new_attribute = Attribute::create(document(), insert_as_lowercase ? name.to_lowercase() : name, value);
+        auto new_attribute = Attr::create(document(), insert_as_lowercase ? name.to_lowercase() : name, value);
         m_attributes->append_attribute(new_attribute);
 
         attribute = new_attribute.ptr();
@@ -118,7 +118,7 @@ ExceptionOr<void> Element::set_attribute(FlyString const& name, String const& va
 }
 
 // https://dom.spec.whatwg.org/#validate-and-extract
-ExceptionOr<QualifiedName> validate_and_extract(JS::Object& global_object, FlyString namespace_, FlyString qualified_name)
+WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Object& global_object, FlyString namespace_, FlyString qualified_name)
 {
     // 1. If namespace is the empty string, then set it to null.
     if (namespace_.is_empty())
@@ -142,26 +142,26 @@ ExceptionOr<QualifiedName> validate_and_extract(JS::Object& global_object, FlySt
 
     // 6. If prefix is non-null and namespace is null, then throw a "NamespaceError" DOMException.
     if (!prefix.is_null() && namespace_.is_null())
-        return NamespaceError::create(global_object, "Prefix is non-null and namespace is null.");
+        return WebIDL::NamespaceError::create(global_object, "Prefix is non-null and namespace is null.");
 
     // 7. If prefix is "xml" and namespace is not the XML namespace, then throw a "NamespaceError" DOMException.
     if (prefix == "xml"sv && namespace_ != Namespace::XML)
-        return NamespaceError::create(global_object, "Prefix is 'xml' and namespace is not the XML namespace.");
+        return WebIDL::NamespaceError::create(global_object, "Prefix is 'xml' and namespace is not the XML namespace.");
 
     // 8. If either qualifiedName or prefix is "xmlns" and namespace is not the XMLNS namespace, then throw a "NamespaceError" DOMException.
     if ((qualified_name == "xmlns"sv || prefix == "xmlns"sv) && namespace_ != Namespace::XMLNS)
-        return NamespaceError::create(global_object, "Either qualifiedName or prefix is 'xmlns' and namespace is not the XMLNS namespace.");
+        return WebIDL::NamespaceError::create(global_object, "Either qualifiedName or prefix is 'xmlns' and namespace is not the XMLNS namespace.");
 
     // 9. If namespace is the XMLNS namespace and neither qualifiedName nor prefix is "xmlns", then throw a "NamespaceError" DOMException.
     if (namespace_ == Namespace::XMLNS && !(qualified_name == "xmlns"sv || prefix == "xmlns"sv))
-        return NamespaceError::create(global_object, "Namespace is the XMLNS namespace and neither qualifiedName nor prefix is 'xmlns'.");
+        return WebIDL::NamespaceError::create(global_object, "Namespace is the XMLNS namespace and neither qualifiedName nor prefix is 'xmlns'.");
 
     // 10. Return namespace, prefix, and localName.
     return QualifiedName { local_name, prefix, namespace_ };
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattributens
-ExceptionOr<void> Element::set_attribute_ns(FlyString const& namespace_, FlyString const& qualified_name, String const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute_ns(FlyString const& namespace_, FlyString const& qualified_name, String const& value)
 {
     // 1. Let namespace, prefix, and localName be the result of passing namespace and qualifiedName to validate and extract.
     auto extracted_qualified_name = TRY(validate_and_extract(global_object(), namespace_, qualified_name));
@@ -190,12 +190,12 @@ bool Element::has_attribute(FlyString const& name) const
 }
 
 // https://dom.spec.whatwg.org/#dom-element-toggleattribute
-DOM::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optional<bool> force)
+WebIDL::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optional<bool> force)
 {
     // 1. If qualifiedName does not match the Name production in XML, then throw an "InvalidCharacterError" DOMException.
     // FIXME: Proper name validation
     if (name.is_empty())
-        return InvalidCharacterError::create(global_object(), "Attribute name must not be empty");
+        return WebIDL::InvalidCharacterError::create(global_object(), "Attribute name must not be empty");
 
     // 2. If this is in the HTML namespace and its node document is an HTML document, then set qualifiedName to qualifiedName in ASCII lowercase.
     // FIXME: Handle the second condition, assume it is an HTML document for now.
@@ -208,7 +208,7 @@ DOM::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optional
     if (!attribute) {
         // 1. If force is not given or is true, create an attribute whose local name is qualifiedName, value is the empty string, and node document is this’s node document, then append this attribute to this, and then return true.
         if (!force.has_value() || force.value()) {
-            auto new_attribute = Attribute::create(document(), insert_as_lowercase ? name.to_lowercase() : name, "");
+            auto new_attribute = Attr::create(document(), insert_as_lowercase ? name.to_lowercase() : name, "");
             m_attributes->append_attribute(new_attribute);
 
             parse_attribute(new_attribute->local_name(), "");
@@ -251,11 +251,15 @@ Vector<String> Element::get_attribute_names() const
 
 bool Element::has_class(FlyString const& class_name, CaseSensitivity case_sensitivity) const
 {
-    return any_of(m_classes, [&](auto& it) {
-        return case_sensitivity == CaseSensitivity::CaseSensitive
-            ? it == class_name
-            : it.equals_ignoring_case(class_name);
-    });
+    if (case_sensitivity == CaseSensitivity::CaseSensitive) {
+        return any_of(m_classes, [&](auto& it) {
+            return it == class_name;
+        });
+    } else {
+        return any_of(m_classes, [&](auto& it) {
+            return it.equals_ignoring_case(class_name);
+        });
+    }
 }
 
 RefPtr<Layout::Node> Element::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
@@ -435,11 +439,11 @@ DOMTokenList* Element::class_list()
 }
 
 // https://dom.spec.whatwg.org/#dom-element-matches
-DOM::ExceptionOr<bool> Element::matches(StringView selectors) const
+WebIDL::ExceptionOr<bool> Element::matches(StringView selectors) const
 {
     auto maybe_selectors = parse_selector(CSS::Parser::ParsingContext(static_cast<ParentNode&>(const_cast<Element&>(*this))), selectors);
     if (!maybe_selectors.has_value())
-        return DOM::SyntaxError::create(global_object(), "Failed to parse selector");
+        return WebIDL::SyntaxError::create(global_object(), "Failed to parse selector");
 
     auto sel = maybe_selectors.value();
     for (auto& s : sel) {
@@ -450,11 +454,11 @@ DOM::ExceptionOr<bool> Element::matches(StringView selectors) const
 }
 
 // https://dom.spec.whatwg.org/#dom-element-closest
-DOM::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) const
+WebIDL::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) const
 {
     auto maybe_selectors = parse_selector(CSS::Parser::ParsingContext(static_cast<ParentNode&>(const_cast<Element&>(*this))), selectors);
     if (!maybe_selectors.has_value())
-        return DOM::SyntaxError::create(global_object(), "Failed to parse selector");
+        return WebIDL::SyntaxError::create(global_object(), "Failed to parse selector");
 
     auto matches_selectors = [](CSS::SelectorList const& selector_list, Element const* element) {
         for (auto& selector : selector_list) {
@@ -475,7 +479,7 @@ DOM::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) con
     return nullptr;
 }
 
-ExceptionOr<void> Element::set_inner_html(String const& markup)
+WebIDL::ExceptionOr<void> Element::set_inner_html(String const& markup)
 {
     TRY(DOMParsing::inner_html_setter(*this, markup));
 
@@ -503,10 +507,18 @@ bool Element::is_active() const
     return document().active_element() == this;
 }
 
-JS::NonnullGCPtr<HTMLCollection> Element::get_elements_by_class_name(FlyString const& class_name)
+JS::NonnullGCPtr<HTMLCollection> Element::get_elements_by_class_name(FlyString const& class_names)
 {
-    return HTMLCollection::create(*this, [class_name, quirks_mode = document().in_quirks_mode()](Element const& element) {
-        return element.has_class(class_name, quirks_mode ? CaseSensitivity::CaseInsensitive : CaseSensitivity::CaseSensitive);
+    Vector<FlyString> list_of_class_names;
+    for (auto& name : class_names.view().split_view(' ')) {
+        list_of_class_names.append(name);
+    }
+    return HTMLCollection::create(*this, [list_of_class_names = move(list_of_class_names), quirks_mode = document().in_quirks_mode()](Element const& element) {
+        for (auto& name : list_of_class_names) {
+            if (!element.has_class(name, quirks_mode ? CaseSensitivity::CaseInsensitive : CaseSensitivity::CaseSensitive))
+                return false;
+        }
+        return true;
     });
 }
 
@@ -533,18 +545,16 @@ CSS::CSSStyleDeclaration* Element::style_for_bindings()
 void Element::make_html_uppercased_qualified_name()
 {
     // This is allowed by the spec: "User agents could optimize qualified name and HTML-uppercased qualified name by storing them in internal slots."
-    if (namespace_() == Namespace::HTML /* FIXME: and its node document is an HTML document */)
+    if (namespace_() == Namespace::HTML && document().document_type() == Document::Type::HTML)
         m_html_uppercased_qualified_name = qualified_name().to_uppercase();
     else
         m_html_uppercased_qualified_name = qualified_name();
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#queue-an-element-task
-void Element::queue_an_element_task(HTML::Task::Source source, Function<void()> steps)
+void Element::queue_an_element_task(HTML::Task::Source source, JS::SafeFunction<void()> steps)
 {
-    auto task = HTML::Task::create(source, &document(), [strong_this = JS::make_handle(*this), steps = move(steps)] {
-        steps();
-    });
+    auto task = HTML::Task::create(source, &document(), move(steps));
     HTML::main_thread_event_loop().task_queue().add(move(task));
 }
 
@@ -716,6 +726,79 @@ void Element::serialize_pseudo_elements_as_json(JsonArraySerializer<StringBuilde
         MUST(object.add("pseudo-element"sv, i));
         MUST(object.finish());
     }
+}
+
+// https://w3c.github.io/DOM-Parsing/#dom-element-insertadjacenthtml
+WebIDL::ExceptionOr<void> Element::insert_adjacent_html(String position, String text)
+{
+    JS::GCPtr<Node> context;
+    // 1. Use the first matching item from this list:
+    // - If position is an ASCII case-insensitive match for the string "beforebegin"
+    // - If position is an ASCII case-insensitive match for the string "afterend"
+    if (position.equals_ignoring_case("beforebegin"sv) || position.equals_ignoring_case("afterend"sv)) {
+        // Let context be the context object's parent.
+        context = this->parent();
+
+        // If context is null or a Document, throw a "NoModificationAllowedError" DOMException.
+        if (!context || context->is_document())
+            return WebIDL::NoModificationAllowedError::create(window(), "insertAdjacentHTML: context is null or a Document"sv);
+    }
+    // - If position is an ASCII case-insensitive match for the string "afterbegin"
+    // - If position is an ASCII case-insensitive match for the string "beforeend"
+    else if (position.equals_ignoring_case("afterbegin"sv) || position.equals_ignoring_case("beforeend"sv)) {
+        // Let context be the context object.
+        context = this;
+    }
+    // Otherwise
+    else {
+        // Throw a "SyntaxError" DOMException.
+        return WebIDL::SyntaxError::create(window(), "insertAdjacentHTML: invalid position argument"sv);
+    }
+
+    // 2. If context is not an Element or the following are all true:
+    //    - context's node document is an HTML document,
+    //    - context's local name is "html", and
+    //    - context's namespace is the HTML namespace;
+    if (!is<Element>(*context)
+        || (context->document().document_type() == Document::Type::HTML
+            && static_cast<Element const&>(*context).local_name() == "html"sv
+            && static_cast<Element const&>(*context).namespace_() == Namespace::HTML)) {
+        // FIXME: let context be a new Element with
+        //        - body as its local name,
+        //        - The HTML namespace as its namespace, and
+        //        - The context object's node document as its node document.
+        TODO();
+    }
+
+    // 3. Let fragment be the result of invoking the fragment parsing algorithm with text as markup, and context as the context element.
+    auto fragment = TRY(DOMParsing::parse_fragment(text, verify_cast<Element>(*context)));
+
+    // 4. Use the first matching item from this list:
+
+    // - If position is an ASCII case-insensitive match for the string "beforebegin"
+    if (position.equals_ignoring_case("beforebegin"sv)) {
+        // Insert fragment into the context object's parent before the context object.
+        parent()->insert_before(fragment, this);
+    }
+
+    // - If position is an ASCII case-insensitive match for the string "afterbegin"
+    else if (position.equals_ignoring_case("afterbegin"sv)) {
+        // Insert fragment into the context object before its first child.
+        insert_before(fragment, first_child());
+    }
+
+    // - If position is an ASCII case-insensitive match for the string "beforeend"
+    else if (position.equals_ignoring_case("beforeend"sv)) {
+        // Append fragment to the context object.
+        TRY(append_child(fragment));
+    }
+
+    // - If position is an ASCII case-insensitive match for the string "afterend"
+    else if (position.equals_ignoring_case("afterend"sv)) {
+        // Insert fragment into the context object's parent before the context object's next sibling.
+        parent()->insert_before(fragment, next_sibling());
+    }
+    return {};
 }
 
 }

@@ -50,6 +50,7 @@ class CSSStyleSheet;
 class CSSSupportsRule;
 class Display;
 class ElementInlineCSSStyleDeclaration;
+class FilterValueListStyleValue;
 class FlexFlowStyleValue;
 class FlexStyleValue;
 class FontFace;
@@ -67,6 +68,7 @@ class ImageStyleValue;
 class InheritStyleValue;
 class InitialStyleValue;
 class Length;
+class LengthBox;
 class LengthPercentage;
 class LengthStyleValue;
 class LinearGradientStyleValue;
@@ -89,6 +91,7 @@ class ResolutionStyleValue;
 class Screen;
 class Selector;
 class ShadowStyleValue;
+class Size;
 class StringStyleValue;
 class StyleComputer;
 class StyleProperties;
@@ -127,7 +130,7 @@ namespace Web::DOM {
 class AbstractRange;
 class AbortController;
 class AbortSignal;
-class Attribute;
+class Attr;
 class CDATASection;
 class CharacterData;
 class Comment;
@@ -137,7 +140,6 @@ class DocumentFragment;
 class DocumentLoadEventDelayer;
 class DocumentType;
 class DOMEventListener;
-class DOMException;
 class DOMImplementation;
 class DOMTokenList;
 class Element;
@@ -167,9 +169,6 @@ class TreeWalker;
 enum class QuirksMode;
 struct EventListenerOptions;
 struct AddEventListenerOptions;
-
-template<typename ValueType>
-class ExceptionOr;
 }
 
 namespace Web::DOMParsing {
@@ -187,6 +186,7 @@ class HeadersIterator;
 
 namespace Web::Fetch::Infrastructure {
 class Body;
+struct BodyWithType;
 struct Header;
 class HeaderList;
 class Request;
@@ -209,6 +209,7 @@ class DOMRectReadOnly;
 namespace Web::HTML {
 class BrowsingContext;
 class BrowsingContextContainer;
+class BrowsingContextGroup;
 class CanvasRenderingContext2D;
 class ClassicScript;
 class CloseEvent;
@@ -313,6 +314,7 @@ class TextMetrics;
 class Timer;
 class Window;
 class WindowEnvironmentSettingsObject;
+class WindowProxy;
 class Worker;
 class WorkerEnvironmentSettingsObject;
 class WorkerGlobalScope;
@@ -363,6 +365,14 @@ namespace Web::ResizeObserver {
 class ResizeObserver;
 }
 
+namespace Web::Selection {
+class Selection;
+}
+
+namespace Web::Streams {
+class ReadableStream;
+}
+
 namespace Web::SVG {
 class SVGAnimatedLength;
 class SVGCircleElement;
@@ -381,8 +391,12 @@ class SVGRectElement;
 class SVGSVGElement;
 }
 
-namespace Web::Selection {
-class Selection;
+namespace Web::WebIDL {
+class CallbackType;
+class DOMException;
+
+template<typename ValueType>
+class ExceptionOr;
 }
 
 namespace Web::WebSockets {
@@ -455,7 +469,6 @@ namespace Web::Bindings {
 class LocationObject;
 class OptionConstructor;
 class RangePrototype;
-class WindowProxy;
 class Wrappable;
 class Wrapper;
 class XMLHttpRequestPrototype;

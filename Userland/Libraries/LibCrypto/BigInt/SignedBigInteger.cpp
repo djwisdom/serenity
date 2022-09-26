@@ -246,7 +246,7 @@ FLATTEN SignedBigInteger SignedBigInteger::bitwise_xor(SignedBigInteger const& o
 
 bool SignedBigInteger::operator==(UnsignedBigInteger const& other) const
 {
-    if (m_sign)
+    if (m_sign && m_unsigned_data != 0)
         return false;
     return m_unsigned_data == other;
 }
@@ -290,6 +290,13 @@ FLATTEN SignedDivisionResult SignedBigInteger::divided_by(SignedBigInteger const
         { move(unsigned_division_result.quotient), result_sign },
         { move(unsigned_division_result.remainder), m_sign }
     };
+}
+
+FLATTEN SignedBigInteger SignedBigInteger::negated_value() const
+{
+    auto result { *this };
+    result.negate();
+    return result;
 }
 
 u32 SignedBigInteger::hash() const

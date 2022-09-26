@@ -240,7 +240,7 @@ private:
     Vector<FontFace::Source> parse_font_face_src(TokenStream<ComponentValue>&);
 
     CSSRule* convert_to_rule(NonnullRefPtr<Rule>);
-    PropertyOwningCSSStyleDeclaration* convert_to_style_declaration(Vector<DeclarationOrAtRule> declarations);
+    PropertyOwningCSSStyleDeclaration* convert_to_style_declaration(Vector<DeclarationOrAtRule> const& declarations);
     Optional<StyleProperty> convert_to_style_property(Declaration const&);
 
     class Dimension {
@@ -318,6 +318,7 @@ private:
     enum class AllowedDataUrlType {
         None,
         Image,
+        Font,
     };
     Optional<AK::URL> parse_url_function(ComponentValue const&, AllowedDataUrlType = AllowedDataUrlType::None);
 
@@ -339,6 +340,7 @@ private:
     RefPtr<StyleValue> parse_comma_separated_value_list(Vector<ComponentValue> const&, ParseFunction);
     RefPtr<StyleValue> parse_simple_comma_separated_value_list(Vector<ComponentValue> const&);
 
+    RefPtr<StyleValue> parse_filter_value_list_value(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_background_value(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_single_background_position_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue> parse_single_background_repeat_value(TokenStream<ComponentValue>&);

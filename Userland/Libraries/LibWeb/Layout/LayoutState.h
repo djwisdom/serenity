@@ -124,6 +124,9 @@ struct LayoutState {
         HashTable<Box const*> m_floating_descendants;
     };
 
+    float resolved_definite_width(Box const&) const;
+    float resolved_definite_height(Box const&) const;
+
     void commit();
 
     // NOTE: get_mutable() will CoW the UsedValues if it's inherited from an ancestor state;
@@ -144,8 +147,6 @@ struct LayoutState {
     };
 
     HashMap<NodeWithStyleAndBoxModelMetrics const*, NonnullOwnPtr<IntrinsicSizes>> mutable intrinsic_sizes;
-
-    HashMap<Box const*, float> mutable flex_item_size_cache;
 
     LayoutState const* m_parent { nullptr };
     LayoutState const& m_root;

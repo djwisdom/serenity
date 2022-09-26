@@ -953,7 +953,7 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
         if (parent_element && parent_element->computed_css_values())
             font_metrics = parent_element->computed_css_values()->computed_font().pixel_metrics();
         else
-            font_metrics = Gfx::FontDatabase::default_font().pixel_metrics();
+            font_metrics = Platform::FontPlugin::the().default_font().pixel_metrics();
 
         auto parent_font_size = [&]() -> float {
             if (!parent_element || !parent_element->computed_css_values())
@@ -1344,7 +1344,7 @@ Gfx::IntRect StyleComputer::viewport_rect() const
 
 void StyleComputer::did_load_font([[maybe_unused]] FlyString const& family_name)
 {
-    document().invalidate_style();
+    document().invalidate_layout();
 }
 
 void StyleComputer::load_fonts_from_sheet(CSSStyleSheet const& sheet)
@@ -1358,8 +1358,31 @@ void StyleComputer::load_fonts_from_sheet(CSSStyleSheet const& sheet)
         if (m_loaded_fonts.contains(font_face.font_family()))
             continue;
 
+        // NOTE: This is rather ad-hoc, we just look for the first valid
+        //       source URL that's either a WOFF or TTF file and try loading that.
+        // FIXME: Find out exactly which resources we need to load and how.
+        Optional<AK::URL> candidate_url;
+        for (auto& source : font_face.sources()) {
+            if (!source.url.is_valid())
+                continue;
+
+            if (source.url.protocol() != "data") {
+                auto path = source.url.path();
+                if (!path.ends_with(".woff"sv, AK::CaseSensitivity::CaseInsensitive)
+                    && !path.ends_with(".ttf"sv, AK::CaseSensitivity::CaseInsensitive)) {
+                    continue;
+                }
+            }
+
+            candidate_url = source.url;
+            break;
+        }
+
+        if (!candidate_url.has_value())
+            continue;
+
         LoadRequest request;
-        auto url = m_document.parse_url(font_face.sources().first().url.to_string());
+        auto url = m_document.parse_url(candidate_url.value().to_string());
         auto loader = make<FontLoader>(const_cast<StyleComputer&>(*this), font_face.font_family(), move(url));
         const_cast<StyleComputer&>(*this).m_loaded_fonts.set(font_face.font_family(), move(loader));
     }

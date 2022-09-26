@@ -41,6 +41,7 @@ public:
     void set_property(CSS::PropertyID, NonnullRefPtr<StyleValue> value);
     NonnullRefPtr<StyleValue> property(CSS::PropertyID) const;
 
+    CSS::Size size_value(CSS::PropertyID) const;
     Length length_or_fallback(CSS::PropertyID, Length const& fallback) const;
     LengthPercentage length_percentage_or_fallback(CSS::PropertyID, LengthPercentage const& fallback) const;
     Optional<LengthPercentage> length_percentage(CSS::PropertyID) const;
@@ -70,6 +71,7 @@ public:
     Optional<CSS::AlignItems> align_items() const;
     Optional<CSS::AlignSelf> align_self() const;
     Optional<CSS::Appearance> appearance() const;
+    CSS::BackdropFilter backdrop_filter() const;
     float opacity() const;
     Optional<CSS::Visibility> visibility() const;
     Optional<CSS::ImageRendering> image_rendering() const;

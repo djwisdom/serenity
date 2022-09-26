@@ -56,12 +56,14 @@ public:
     void draw_bitmap(IntPoint const&, GlyphBitmap const&, Color = Color());
     void draw_scaled_bitmap(IntRect const& dst_rect, Gfx::Bitmap const&, IntRect const& src_rect, float opacity = 1.0f, ScalingMode = ScalingMode::NearestNeighbor);
     void draw_scaled_bitmap(IntRect const& dst_rect, Gfx::Bitmap const&, FloatRect const& src_rect, float opacity = 1.0f, ScalingMode = ScalingMode::NearestNeighbor);
+    void draw_scaled_bitmap_with_transform(IntRect const& dst_rect, Gfx::Bitmap const&, FloatRect const& src_rect, Gfx::AffineTransform const&, float opacity = 1.0f, ScalingMode = ScalingMode::NearestNeighbor);
     void draw_triangle(IntPoint const&, IntPoint const&, IntPoint const&, Color);
     void draw_triangle(IntPoint const& offset, Span<IntPoint const>, Color);
     void draw_ellipse_intersecting(IntRect const&, Color, int thickness = 1);
     void set_pixel(IntPoint const&, Color, bool blend = false);
     void set_pixel(int x, int y, Color color, bool blend = false) { set_pixel({ x, y }, color, blend); }
     Optional<Color> get_pixel(IntPoint const&);
+    ErrorOr<NonnullRefPtr<Bitmap>> get_region_bitmap(IntRect const&, BitmapFormat format, Optional<IntRect&> actual_region = {});
     void draw_line(IntPoint const&, IntPoint const&, Color, int thickness = 1, LineStyle style = LineStyle::Solid, Color alternate_color = Color::Transparent);
     void draw_triangle_wave(IntPoint const&, IntPoint const&, Color color, int amplitude, int thickness = 1);
     void draw_quadratic_bezier_curve(IntPoint const& control_point, IntPoint const&, IntPoint const&, Color, int thickness = 1, LineStyle style = LineStyle::Solid);

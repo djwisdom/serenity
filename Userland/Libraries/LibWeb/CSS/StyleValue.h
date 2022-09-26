@@ -97,6 +97,52 @@ struct EdgeRect {
     Gfx::FloatRect resolved(Layout::Node const&, Gfx::FloatRect) const;
 };
 
+namespace Filter {
+
+struct Blur {
+    Optional<Length> radius {};
+    float resolved_radius(Layout::Node const&) const;
+};
+
+struct DropShadow {
+    Length offset_x;
+    Length offset_y;
+    Optional<Length> radius {};
+    Optional<Color> color {};
+    struct Resolved {
+        float offset_x;
+        float offset_y;
+        float radius;
+        Color color;
+    };
+    Resolved resolved(Layout::Node const&) const;
+};
+
+struct HueRotate {
+    struct Zero { };
+    using AngleOrZero = Variant<Angle, Zero>;
+    Optional<AngleOrZero> angle {};
+    float angle_degrees() const;
+};
+
+struct Color {
+    enum class Operation {
+        Brightness,
+        Contrast,
+        Grayscale,
+        Invert,
+        Opacity,
+        Saturate,
+        Sepia
+    } operation;
+    Optional<NumberPercentage> amount {};
+    float resolved_amount() const;
+};
+
+};
+
+using FilterFunction = Variant<Filter::Blur, Filter::DropShadow, Filter::HueRotate, Filter::Color>;
+
 // FIXME: Find a better place for this helper.
 inline Gfx::Painter::ScalingMode to_gfx_scaling_mode(CSS::ImageRendering css_value)
 {
@@ -128,6 +174,7 @@ public:
         Calculated,
         Color,
         Content,
+        FilterValueList,
         Flex,
         FlexFlow,
         Font,
@@ -172,6 +219,7 @@ public:
     bool is_calculated() const { return type() == Type::Calculated; }
     bool is_color() const { return type() == Type::Color; }
     bool is_content() const { return type() == Type::Content; }
+    bool is_filter_value_list() const { return type() == Type::FilterValueList; }
     bool is_flex() const { return type() == Type::Flex; }
     bool is_flex_flow() const { return type() == Type::FlexFlow; }
     bool is_font() const { return type() == Type::Font; }
@@ -214,6 +262,7 @@ public:
     CalculatedStyleValue const& as_calculated() const;
     ColorStyleValue const& as_color() const;
     ContentStyleValue const& as_content() const;
+    FilterValueListStyleValue const& as_filter_value_list() const;
     FlexFlowStyleValue const& as_flex_flow() const;
     FlexStyleValue const& as_flex() const;
     FontStyleValue const& as_font() const;
@@ -254,6 +303,7 @@ public:
     CalculatedStyleValue& as_calculated() { return const_cast<CalculatedStyleValue&>(const_cast<StyleValue const&>(*this).as_calculated()); }
     ColorStyleValue& as_color() { return const_cast<ColorStyleValue&>(const_cast<StyleValue const&>(*this).as_color()); }
     ContentStyleValue& as_content() { return const_cast<ContentStyleValue&>(const_cast<StyleValue const&>(*this).as_content()); }
+    FilterValueListStyleValue& as_filter_value_list() { return const_cast<FilterValueListStyleValue&>(const_cast<StyleValue const&>(*this).as_filter_value_list()); }
     FlexFlowStyleValue& as_flex_flow() { return const_cast<FlexFlowStyleValue&>(const_cast<StyleValue const&>(*this).as_flex_flow()); }
     FlexStyleValue& as_flex() { return const_cast<FlexStyleValue&>(const_cast<StyleValue const&>(*this).as_flex()); }
     FontStyleValue& as_font() { return const_cast<FontStyleValue&>(const_cast<StyleValue const&>(*this).as_font()); }
@@ -609,6 +659,7 @@ public:
         String to_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
+        bool contains_percentage() const;
     };
 
     // This represents that: https://www.w3.org/TR/css-values-3/#calc-syntax
@@ -623,6 +674,8 @@ public:
         String to_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
+
+        bool contains_percentage() const;
     };
 
     struct CalcNumberSum {
@@ -645,6 +698,7 @@ public:
         String to_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
+        bool contains_percentage() const;
     };
 
     struct CalcSumPartWithOperator {
@@ -658,6 +712,7 @@ public:
         String to_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
+        bool contains_percentage() const;
     };
 
     struct CalcProductPartWithOperator {
@@ -667,6 +722,8 @@ public:
         String to_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
+
+        bool contains_percentage() const;
     };
 
     struct CalcNumberProduct {
@@ -734,6 +791,8 @@ public:
     Optional<float> resolve_number();
     Optional<i64> resolve_integer();
 
+    bool contains_percentage() const;
+
 private:
     explicit CalculatedStyleValue(NonnullOwnPtr<CalcSum> calc_sum, ResolvedType resolved_type)
         : StyleValue(Type::Calculated)
@@ -792,6 +851,33 @@ private:
 
     NonnullRefPtr<StyleValueList> m_content;
     RefPtr<StyleValueList> m_alt_text;
+};
+
+class FilterValueListStyleValue final : public StyleValue {
+public:
+    static NonnullRefPtr<FilterValueListStyleValue> create(
+        Vector<FilterFunction> filter_value_list)
+    {
+        VERIFY(filter_value_list.size() >= 1);
+        return adopt_ref(*new FilterValueListStyleValue(move(filter_value_list)));
+    }
+
+    Vector<FilterFunction> const& filter_value_list() const { return m_filter_value_list; }
+
+    virtual String to_string() const override;
+    virtual bool equals(StyleValue const& other) const override;
+
+    virtual ~FilterValueListStyleValue() override = default;
+
+private:
+    FilterValueListStyleValue(Vector<FilterFunction> filter_value_list)
+        : StyleValue(Type::FilterValueList)
+        , m_filter_value_list(move(filter_value_list))
+    {
+    }
+
+    // FIXME: No support for SVG filters yet
+    Vector<FilterFunction> m_filter_value_list;
 };
 
 class FlexStyleValue final : public StyleValue {

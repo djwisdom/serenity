@@ -19,10 +19,10 @@
 #include <LibWeb/HTML/HTMLIFrameElement.h>
 #include <LibWeb/HTML/NavigationParams.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
-#include <LibWeb/ImageDecoding.h>
 #include <LibWeb/Loader/FrameLoader.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Platform/ImageCodecPlugin.h>
 #include <LibWeb/XML/XMLDocumentBuilder.h>
 
 namespace Web {
@@ -82,7 +82,7 @@ static bool build_text_document(DOM::Document& document, ByteBuffer const& data)
 
 static bool build_image_document(DOM::Document& document, ByteBuffer const& data)
 {
-    auto image = ImageDecoding::Decoder::the().decode_image(data);
+    auto image = Platform::ImageCodecPlugin::the().decode_image(data);
     if (!image.has_value() || image->frames.is_empty())
         return false;
     auto const& frame = image->frames[0];
@@ -172,8 +172,10 @@ bool FrameLoader::load(LoadRequest& request, Type type)
     auto& url = request.url();
 
     if (type == Type::Navigation || type == Type::Reload) {
-        if (auto* page = browsing_context().page())
-            page->client().page_did_start_loading(url);
+        if (auto* page = browsing_context().page()) {
+            if (&page->top_level_browsing_context() == &m_browsing_context)
+                page->client().page_did_start_loading(url);
+        }
     }
 
     // https://fetch.spec.whatwg.org/#concept-fetch
@@ -215,7 +217,7 @@ bool FrameLoader::load(LoadRequest& request, Type type)
                 if (data.is_empty())
                     return;
                 RefPtr<Gfx::Bitmap> favicon_bitmap;
-                auto decoded_image = ImageDecoding::Decoder::the().decode_image(data);
+                auto decoded_image = Platform::ImageCodecPlugin::the().decode_image(data);
                 if (!decoded_image.has_value() || decoded_image->frames.is_empty()) {
                     dbgln("Could not decode favicon {}", favicon_url);
                 } else {
@@ -275,7 +277,7 @@ void FrameLoader::load_html(StringView html, const AK::URL& url)
 
     auto parser = HTML::HTMLParser::create(document, html, "utf-8");
     parser->run(url);
-    browsing_context().set_active_document(&parser->document());
+    browsing_context().set_active_document(parser->document());
 }
 
 static String s_error_page_url = "file:///res/html/error.html";
@@ -398,6 +400,8 @@ void FrameLoader::resource_did_load()
     document->set_content_type(resource()->mime_type());
 
     browsing_context().set_active_document(document);
+    if (auto* page = browsing_context().page())
+        page->client().page_did_create_main_document();
 
     if (!parse_document(*document, resource()->encoded_data())) {
         load_error_page(url, "Failed to parse content.");

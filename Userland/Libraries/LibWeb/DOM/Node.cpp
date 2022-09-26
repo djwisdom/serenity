@@ -90,6 +90,7 @@ void Node::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_last_child.ptr());
     visitor.visit(m_next_sibling.ptr());
     visitor.visit(m_previous_sibling.ptr());
+    visitor.visit(m_child_nodes);
 
     for (auto& registered_observer : m_registered_observer_list)
         visitor.visit(registered_observer);
@@ -143,14 +144,18 @@ String Node::descendant_text_content() const
 String Node::text_content() const
 {
     // The textContent getter steps are to return the following, switching on the interface this implements:
+
     // If DocumentFragment or Element, return the descendant text content of this.
     if (is<DocumentFragment>(this) || is<Element>(this))
         return descendant_text_content();
-    else if (is<CharacterData>(this))
-        // If CharacterData, return this’s data.
-        return verify_cast<CharacterData>(this)->data();
 
-    // FIXME: If this is an Attr node, return this's value.
+    // If CharacterData, return this’s data.
+    if (is<CharacterData>(this))
+        return static_cast<CharacterData const&>(*this).data();
+
+    // If Attr node, return this's value.
+    if (is<Attr>(*this))
+        return static_cast<Attr const&>(*this).value();
 
     // Otherwise, return null
     return {};
@@ -165,16 +170,21 @@ void Node::set_text_content(String const& content)
     // If DocumentFragment or Element, string replace all with the given value within this.
     if (is<DocumentFragment>(this) || is<Element>(this)) {
         string_replace_all(content);
-    } else if (is<CharacterData>(this)) {
-        // If CharacterData, replace data with node this, offset 0, count this’s length, and data the given value.
+    }
+
+    // If CharacterData, replace data with node this, offset 0, count this’s length, and data the given value.
+    else if (is<CharacterData>(this)) {
+
         auto* character_data_node = verify_cast<CharacterData>(this);
         character_data_node->set_data(content);
 
         // FIXME: CharacterData::set_data is not spec compliant. Make this match the spec when set_data becomes spec compliant.
         //        Do note that this will make this function able to throw an exception.
-    } else {
-        // FIXME: If this is an Attr node, set an existing attribute value with this and the given value.
-        return;
+    }
+
+    // If Attr, set an existing attribute value with this and the given value.
+    if (is<Attr>(*this)) {
+        static_cast<Attr&>(*this).set_value(content);
     }
 
     // Otherwise, do nothing.
@@ -188,8 +198,8 @@ String Node::node_value() const
     // The nodeValue getter steps are to return the following, switching on the interface this implements:
 
     // If Attr, return this’s value.
-    if (is<Attribute>(this)) {
-        return verify_cast<Attribute>(this)->value();
+    if (is<Attr>(this)) {
+        return verify_cast<Attr>(this)->value();
     }
 
     // If CharacterData, return this’s data.
@@ -208,8 +218,8 @@ void Node::set_node_value(String const& value)
     // and then do as described below, switching on the interface this implements:
 
     // If Attr, set an existing attribute value with this and the given value.
-    if (is<Attribute>(this)) {
-        verify_cast<Attribute>(this)->set_value(value);
+    if (is<Attr>(this)) {
+        verify_cast<Attr>(this)->set_value(value);
     } else if (is<CharacterData>(this)) {
         // If CharacterData, replace data with node this, offset 0, count this’s length, and data the given value.
         verify_cast<CharacterData>(this)->set_data(value);
@@ -242,11 +252,6 @@ void Node::invalidate_style()
     for (auto* ancestor = parent_or_shadow_host(); ancestor; ancestor = ancestor->parent_or_shadow_host())
         ancestor->m_child_needs_style_update = true;
     document().schedule_style_update();
-}
-
-bool Node::is_link() const
-{
-    return enclosing_link_element();
 }
 
 String Node::child_text_content() const
@@ -306,28 +311,28 @@ Element const* Node::parent_element() const
 }
 
 // https://dom.spec.whatwg.org/#concept-node-ensure-pre-insertion-validity
-ExceptionOr<void> Node::ensure_pre_insertion_validity(JS::NonnullGCPtr<Node> node, JS::GCPtr<Node> child) const
+WebIDL::ExceptionOr<void> Node::ensure_pre_insertion_validity(JS::NonnullGCPtr<Node> node, JS::GCPtr<Node> child) const
 {
     // 1. If parent is not a Document, DocumentFragment, or Element node, then throw a "HierarchyRequestError" DOMException.
     if (!is<Document>(this) && !is<DocumentFragment>(this) && !is<Element>(this))
-        return DOM::HierarchyRequestError::create(global_object(), "Can only insert into a document, document fragment or element");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Can only insert into a document, document fragment or element");
 
     // 2. If node is a host-including inclusive ancestor of parent, then throw a "HierarchyRequestError" DOMException.
     if (node->is_host_including_inclusive_ancestor_of(*this))
-        return DOM::HierarchyRequestError::create(global_object(), "New node is an ancestor of this node");
+        return WebIDL::HierarchyRequestError::create(global_object(), "New node is an ancestor of this node");
 
     // 3. If child is non-null and its parent is not parent, then throw a "NotFoundError" DOMException.
     if (child && child->parent() != this)
-        return DOM::NotFoundError::create(global_object(), "This node is not the parent of the given child");
+        return WebIDL::NotFoundError::create(global_object(), "This node is not the parent of the given child");
 
     // FIXME: All the following "Invalid node type for insertion" messages could be more descriptive.
     // 4. If node is not a DocumentFragment, DocumentType, Element, or CharacterData node, then throw a "HierarchyRequestError" DOMException.
     if (!is<DocumentFragment>(*node) && !is<DocumentType>(*node) && !is<Element>(*node) && !is<Text>(*node) && !is<Comment>(*node) && !is<ProcessingInstruction>(*node))
-        return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
 
     // 5. If either node is a Text node and parent is a document, or node is a doctype and parent is not a document, then throw a "HierarchyRequestError" DOMException.
     if ((is<Text>(*node) && is<Document>(this)) || (is<DocumentType>(*node) && !is<Document>(this)))
-        return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
 
     // 6. If parent is a document, and any of the statements below, switched on the interface node implements, are true, then throw a "HierarchyRequestError" DOMException.
     if (is<Document>(this)) {
@@ -338,18 +343,18 @@ ExceptionOr<void> Node::ensure_pre_insertion_validity(JS::NonnullGCPtr<Node> nod
             auto node_element_child_count = verify_cast<DocumentFragment>(*node).child_element_count();
             if ((node_element_child_count > 1 || node->has_child_of_type<Text>())
                 || (node_element_child_count == 1 && (has_child_of_type<Element>() || is<DocumentType>(child.ptr()) || (child && child->has_following_node_of_type_in_tree_order<DocumentType>())))) {
-                return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+                return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
             }
         } else if (is<Element>(*node)) {
             // Element
             // If parent has an element child, child is a doctype, or child is non-null and a doctype is following child.
             if (has_child_of_type<Element>() || is<DocumentType>(child.ptr()) || (child && child->has_following_node_of_type_in_tree_order<DocumentType>()))
-                return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+                return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
         } else if (is<DocumentType>(*node)) {
             // DocumentType
             // parent has a doctype child, child is non-null and an element is preceding child, or child is null and parent has an element child.
             if (has_child_of_type<DocumentType>() || (child && child->has_preceding_node_of_type_in_tree_order<Element>()) || (!child && has_child_of_type<Element>()))
-                return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+                return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
         }
     }
 
@@ -451,7 +456,7 @@ void Node::insert_before(JS::NonnullGCPtr<Node> node, JS::GCPtr<Node> child, boo
 }
 
 // https://dom.spec.whatwg.org/#concept-node-pre-insert
-ExceptionOr<JS::NonnullGCPtr<Node>> Node::pre_insert(JS::NonnullGCPtr<Node> node, JS::GCPtr<Node> child)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Node>> Node::pre_insert(JS::NonnullGCPtr<Node> node, JS::GCPtr<Node> child)
 {
     // 1. Ensure pre-insertion validity of node into parent before child.
     TRY(ensure_pre_insertion_validity(node, child));
@@ -471,18 +476,18 @@ ExceptionOr<JS::NonnullGCPtr<Node>> Node::pre_insert(JS::NonnullGCPtr<Node> node
 }
 
 // https://dom.spec.whatwg.org/#dom-node-removechild
-ExceptionOr<JS::NonnullGCPtr<Node>> Node::remove_child(JS::NonnullGCPtr<Node> child)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Node>> Node::remove_child(JS::NonnullGCPtr<Node> child)
 {
     // The removeChild(child) method steps are to return the result of pre-removing child from this.
     return pre_remove(child);
 }
 
 // https://dom.spec.whatwg.org/#concept-node-pre-remove
-ExceptionOr<JS::NonnullGCPtr<Node>> Node::pre_remove(JS::NonnullGCPtr<Node> child)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Node>> Node::pre_remove(JS::NonnullGCPtr<Node> child)
 {
     // 1. If child’s parent is not parent, then throw a "NotFoundError" DOMException.
     if (child->parent() != this)
-        return DOM::NotFoundError::create(global_object(), "Child does not belong to this node");
+        return WebIDL::NotFoundError::create(global_object(), "Child does not belong to this node");
 
     // 2. Remove child.
     child->remove();
@@ -492,7 +497,7 @@ ExceptionOr<JS::NonnullGCPtr<Node>> Node::pre_remove(JS::NonnullGCPtr<Node> chil
 }
 
 // https://dom.spec.whatwg.org/#concept-node-append
-ExceptionOr<JS::NonnullGCPtr<Node>> Node::append_child(JS::NonnullGCPtr<Node> node)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Node>> Node::append_child(JS::NonnullGCPtr<Node> node)
 {
     // To append a node to a parent, pre-insert node into parent before null.
     return pre_insert(node, nullptr);
@@ -599,33 +604,33 @@ void Node::remove(bool suppress_observers)
     // 21. Run the children changed steps for parent.
     parent->children_changed();
 
-    document().invalidate_style();
+    document().invalidate_layout();
 }
 
 // https://dom.spec.whatwg.org/#concept-node-replace
-ExceptionOr<JS::NonnullGCPtr<Node>> Node::replace_child(JS::NonnullGCPtr<Node> node, JS::NonnullGCPtr<Node> child)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Node>> Node::replace_child(JS::NonnullGCPtr<Node> node, JS::NonnullGCPtr<Node> child)
 {
     // If parent is not a Document, DocumentFragment, or Element node, then throw a "HierarchyRequestError" DOMException.
     if (!is<Document>(this) && !is<DocumentFragment>(this) && !is<Element>(this))
-        return DOM::HierarchyRequestError::create(global_object(), "Can only insert into a document, document fragment or element");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Can only insert into a document, document fragment or element");
 
     // 2. If node is a host-including inclusive ancestor of parent, then throw a "HierarchyRequestError" DOMException.
     if (node->is_host_including_inclusive_ancestor_of(*this))
-        return DOM::HierarchyRequestError::create(global_object(), "New node is an ancestor of this node");
+        return WebIDL::HierarchyRequestError::create(global_object(), "New node is an ancestor of this node");
 
     // 3. If child’s parent is not parent, then throw a "NotFoundError" DOMException.
     if (child->parent() != this)
-        return DOM::NotFoundError::create(global_object(), "This node is not the parent of the given child");
+        return WebIDL::NotFoundError::create(global_object(), "This node is not the parent of the given child");
 
     // FIXME: All the following "Invalid node type for insertion" messages could be more descriptive.
 
     // 4. If node is not a DocumentFragment, DocumentType, Element, or CharacterData node, then throw a "HierarchyRequestError" DOMException.
     if (!is<DocumentFragment>(*node) && !is<DocumentType>(*node) && !is<Element>(*node) && !is<Text>(*node) && !is<Comment>(*node) && !is<ProcessingInstruction>(*node))
-        return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
 
     // 5. If either node is a Text node and parent is a document, or node is a doctype and parent is not a document, then throw a "HierarchyRequestError" DOMException.
     if ((is<Text>(*node) && is<Document>(this)) || (is<DocumentType>(*node) && !is<Document>(this)))
-        return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
 
     // If parent is a document, and any of the statements below, switched on the interface node implements, are true, then throw a "HierarchyRequestError" DOMException.
     if (is<Document>(this)) {
@@ -636,18 +641,18 @@ ExceptionOr<JS::NonnullGCPtr<Node>> Node::replace_child(JS::NonnullGCPtr<Node> n
             auto node_element_child_count = verify_cast<DocumentFragment>(*node).child_element_count();
             if ((node_element_child_count > 1 || node->has_child_of_type<Text>())
                 || (node_element_child_count == 1 && (first_child_of_type<Element>() != child || child->has_following_node_of_type_in_tree_order<DocumentType>()))) {
-                return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+                return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
             }
         } else if (is<Element>(*node)) {
             // Element
             // parent has an element child that is not child or a doctype is following child.
             if (first_child_of_type<Element>() != child || child->has_following_node_of_type_in_tree_order<DocumentType>())
-                return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+                return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
         } else if (is<DocumentType>(*node)) {
             // DocumentType
             // parent has a doctype child that is not child, or an element is preceding child.
             if (first_child_of_type<DocumentType>() != node || child->has_preceding_node_of_type_in_tree_order<Element>())
-                return DOM::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
+                return WebIDL::HierarchyRequestError::create(global_object(), "Invalid node type for insertion");
         }
     }
 
@@ -738,7 +743,7 @@ JS::NonnullGCPtr<Node> Node::clone_node(Document* document, bool clone_children)
         document_type_copy->set_public_id(document_type->public_id());
         document_type_copy->set_system_id(document_type->system_id());
         copy = move(document_type_copy);
-    } else if (is<Attribute>(this)) {
+    } else if (is<Attr>(this)) {
         // FIXME:
         // Attr
         // Set copy’s namespace, namespace prefix, local name, and value to those of node.
@@ -787,11 +792,11 @@ JS::NonnullGCPtr<Node> Node::clone_node(Document* document, bool clone_children)
 }
 
 // https://dom.spec.whatwg.org/#dom-node-clonenode
-ExceptionOr<JS::NonnullGCPtr<Node>> Node::clone_node_binding(bool deep)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Node>> Node::clone_node_binding(bool deep)
 {
     // 1. If this is a shadow root, then throw a "NotSupportedError" DOMException.
     if (is<ShadowRoot>(*this))
-        return NotSupportedError::create(global_object(), "Cannot clone shadow root");
+        return WebIDL::NotSupportedError::create(global_object(), "Cannot clone shadow root");
 
     // 2. Return a clone of this, with the clone children flag set if deep is true.
     return clone_node(nullptr, deep);
@@ -857,11 +862,12 @@ ParentNode* Node::parent_or_shadow_host()
 
 JS::NonnullGCPtr<NodeList> Node::child_nodes()
 {
-    // FIXME: This should return the same LiveNodeList object every time,
-    //        but that would cause a reference cycle since NodeList refs the root.
-    return LiveNodeList::create(window(), *this, [this](auto& node) {
-        return is_parent_of(node);
-    });
+    if (!m_child_nodes) {
+        m_child_nodes = LiveNodeList::create(window(), *this, [this](auto& node) {
+            return is_parent_of(node);
+        });
+    }
+    return *m_child_nodes;
 }
 
 Vector<JS::Handle<Node>> Node::children_as_vector() const
@@ -903,19 +909,19 @@ u16 Node::compare_document_position(JS::GCPtr<Node> other)
     Node* node2 = this;
 
     // 3. Let attr1 and attr2 be null.
-    Attribute* attr1;
-    Attribute* attr2;
+    Attr* attr1;
+    Attr* attr2;
 
     // 4. If node1 is an attribute, then set attr1 to node1 and node1 to attr1’s element.
-    if (is<Attribute>(node1)) {
-        attr1 = verify_cast<Attribute>(node1);
+    if (is<Attr>(node1)) {
+        attr1 = verify_cast<Attr>(node1);
         node1 = const_cast<Element*>(attr1->owner_element());
     }
 
     // 5. If node2 is an attribute, then:
-    if (is<Attribute>(node2)) {
+    if (is<Attr>(node2)) {
         // 1. Set attr2 to node2 and node2 to attr2’s element.
-        attr2 = verify_cast<Attribute>(node2);
+        attr2 = verify_cast<Attr>(node2);
         node2 = const_cast<Element*>(attr2->owner_element());
 
         // 2. If attr1 and node1 are non-null, and node2 is node1, then:
