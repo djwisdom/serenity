@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,9 +9,9 @@
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
 #include <AK/RefPtr.h>
-#include <LibWeb/DOM/DOMException.h>
+#include <LibWeb/WebIDL/DOMException.h>
 
-namespace Web::DOM {
+namespace Web::WebIDL {
 
 #define ENUMERATE_SIMPLE_WEBIDL_EXCEPTION_TYPES(E) \
     E(EvalError)                                   \
@@ -94,6 +94,7 @@ public:
 
 private:
     Optional<ValueType> m_result;
+
     // https://webidl.spec.whatwg.org/#idl-exceptions
     Variant<Empty, SimpleException, JS::NonnullGCPtr<DOMException>> m_exception {};
 };

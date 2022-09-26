@@ -20,7 +20,6 @@
 #include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/DOM/Comment.h>
 #include <LibWeb/DOM/CustomEvent.h>
-#include <LibWeb/DOM/DOMException.h>
 #include <LibWeb/DOM/DOMImplementation.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentFragment.h>
@@ -28,7 +27,6 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
-#include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/NodeIterator.h>
 #include <LibWeb/DOM/Range.h>
@@ -73,6 +71,8 @@
 #include <LibWeb/UIEvents/FocusEvent.h>
 #include <LibWeb/UIEvents/KeyboardEvent.h>
 #include <LibWeb/UIEvents/MouseEvent.h>
+#include <LibWeb/WebIDL/DOMException.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::DOM {
 
@@ -351,7 +351,7 @@ void Document::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-write
-ExceptionOr<void> Document::write(Vector<String> const& strings)
+WebIDL::ExceptionOr<void> Document::write(Vector<String> const& strings)
 {
     StringBuilder builder;
     builder.join(""sv, strings);
@@ -360,7 +360,7 @@ ExceptionOr<void> Document::write(Vector<String> const& strings)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-writeln
-ExceptionOr<void> Document::writeln(Vector<String> const& strings)
+WebIDL::ExceptionOr<void> Document::writeln(Vector<String> const& strings)
 {
     StringBuilder builder;
     builder.join(""sv, strings);
@@ -370,15 +370,15 @@ ExceptionOr<void> Document::writeln(Vector<String> const& strings)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#document-write-steps
-ExceptionOr<void> Document::run_the_document_write_steps(String input)
+WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(String input)
 {
     // 1. If document is an XML document, then throw an "InvalidStateError" DOMException.
     if (m_type == Type::XML)
-        return DOM::InvalidStateError::create(global_object(), "write() called on XML document.");
+        return WebIDL::InvalidStateError::create(global_object(), "write() called on XML document.");
 
     // 2. If document's throw-on-dynamic-markup-insertion counter is greater than 0, then throw an "InvalidStateError" DOMException.
     if (m_throw_on_dynamic_markup_insertion_counter > 0)
-        return DOM::InvalidStateError::create(global_object(), "throw-on-dynamic-markup-insertion-counter greater than zero.");
+        return WebIDL::InvalidStateError::create(global_object(), "throw-on-dynamic-markup-insertion-counter greater than zero.");
 
     // 3. If document's active parser was aborted is true, then return.
     if (m_active_parser_was_aborted)
@@ -405,22 +405,22 @@ ExceptionOr<void> Document::run_the_document_write_steps(String input)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-open
-ExceptionOr<Document*> Document::open(String const&, String const&)
+WebIDL::ExceptionOr<Document*> Document::open(String const&, String const&)
 {
     // 1. If document is an XML document, then throw an "InvalidStateError" DOMException exception.
     if (m_type == Type::XML)
-        return DOM::InvalidStateError::create(global_object(), "open() called on XML document.");
+        return WebIDL::InvalidStateError::create(global_object(), "open() called on XML document.");
 
     // 2. If document's throw-on-dynamic-markup-insertion counter is greater than 0, then throw an "InvalidStateError" DOMException.
     if (m_throw_on_dynamic_markup_insertion_counter > 0)
-        return DOM::InvalidStateError::create(global_object(), "throw-on-dynamic-markup-insertion-counter greater than zero.");
+        return WebIDL::InvalidStateError::create(global_object(), "throw-on-dynamic-markup-insertion-counter greater than zero.");
 
     // FIXME: 3. Let entryDocument be the entry global object's associated Document.
     auto& entry_document = *this;
 
     // 4. If document's origin is not same origin to entryDocument's origin, then throw a "SecurityError" DOMException.
     if (origin() != entry_document.origin())
-        return DOM::SecurityError::create(global_object(), "Document.origin() not the same as entryDocument's.");
+        return WebIDL::SecurityError::create(global_object(), "Document.origin() not the same as entryDocument's.");
 
     // 5. If document has an active parser whose script nesting level is greater than 0, then return document.
     if (m_parser && m_parser->script_nesting_level() > 0)
@@ -476,15 +476,15 @@ ExceptionOr<Document*> Document::open(String const&, String const&)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#closing-the-input-stream
-ExceptionOr<void> Document::close()
+WebIDL::ExceptionOr<void> Document::close()
 {
     // 1. If document is an XML document, then throw an "InvalidStateError" DOMException exception.
     if (m_type == Type::XML)
-        return DOM::InvalidStateError::create(global_object(), "close() called on XML document.");
+        return WebIDL::InvalidStateError::create(global_object(), "close() called on XML document.");
 
     // 2. If document's throw-on-dynamic-markup-insertion counter is greater than 0, then throw an "InvalidStateError" DOMException.
     if (m_throw_on_dynamic_markup_insertion_counter > 0)
-        return DOM::InvalidStateError::create(global_object(), "throw-on-dynamic-markup-insertion-counter greater than zero.");
+        return WebIDL::InvalidStateError::create(global_object(), "throw-on-dynamic-markup-insertion-counter greater than zero.");
 
     // 3. If there is no script-created parser associated with the document, then return.
     if (!m_parser)
@@ -585,10 +585,10 @@ HTML::HTMLElement* Document::body()
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#dom-document-body
-ExceptionOr<void> Document::set_body(HTML::HTMLElement* new_body)
+WebIDL::ExceptionOr<void> Document::set_body(HTML::HTMLElement* new_body)
 {
     if (!is<HTML::HTMLBodyElement>(new_body) && !is<HTML::HTMLFrameSetElement>(new_body))
-        return DOM::HierarchyRequestError::create(global_object(), "Invalid document body element, must be 'body' or 'frameset'");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Invalid document body element, must be 'body' or 'frameset'");
 
     auto* existing_body = body();
     if (existing_body) {
@@ -598,7 +598,7 @@ ExceptionOr<void> Document::set_body(HTML::HTMLElement* new_body)
 
     auto* document_element = this->document_element();
     if (!document_element)
-        return DOM::HierarchyRequestError::create(global_object(), "Missing document element");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Missing document element");
 
     (void)TRY(document_element->append_child(*new_body));
     return {};
@@ -1108,13 +1108,13 @@ JS::Value Document::run_javascript(StringView source, StringView filename)
 }
 
 // https://dom.spec.whatwg.org/#dom-document-createelement
-DOM::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element(FlyString const& a_local_name)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element(FlyString const& a_local_name)
 {
     auto local_name = a_local_name;
 
     // 1. If localName does not match the Name production, then throw an "InvalidCharacterError" DOMException.
     if (!is_valid_name(local_name))
-        return DOM::InvalidCharacterError::create(global_object(), "Invalid character in tag name.");
+        return WebIDL::InvalidCharacterError::create(global_object(), "Invalid character in tag name.");
 
     // 2. If this is an HTML document, then set localName to localName in ASCII lowercase.
     if (document_type() == Type::HTML)
@@ -1135,7 +1135,7 @@ DOM::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element(FlyString c
 // https://dom.spec.whatwg.org/#dom-document-createelementns
 // https://dom.spec.whatwg.org/#internal-createelementns-steps
 // FIXME: This only implements step 4 of the algorithm and does not take in options.
-DOM::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element_ns(String const& namespace_, String const& qualified_name)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element_ns(String const& namespace_, String const& qualified_name)
 {
     // 1. Let namespace, prefix, and localName be the result of passing namespace and qualifiedName to validate and extract.
     auto extracted_qualified_name = TRY(validate_and_extract(global_object(), namespace_, qualified_name));
@@ -1168,7 +1168,7 @@ JS::NonnullGCPtr<Range> Document::create_range()
 }
 
 // https://dom.spec.whatwg.org/#dom-document-createevent
-DOM::ExceptionOr<JS::NonnullGCPtr<Event>> Document::create_event(String const& interface)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Event>> Document::create_event(String const& interface)
 {
     auto& window_object = window();
 
@@ -1219,7 +1219,7 @@ DOM::ExceptionOr<JS::NonnullGCPtr<Event>> Document::create_event(String const& i
 
     // 3. If constructor is null, then throw a "NotSupportedError" DOMException.
     if (!event) {
-        return DOM::NotSupportedError::create(global_object(), "No constructor for interface found");
+        return WebIDL::NotSupportedError::create(global_object(), "No constructor for interface found");
     }
 
     // FIXME: 4. If the interface indicated by constructor is not exposed on the relevant global object of this, then throw a "NotSupportedError" DOMException.
@@ -1285,11 +1285,11 @@ Vector<JS::Handle<HTML::HTMLScriptElement>> Document::take_scripts_to_execute_in
 }
 
 // https://dom.spec.whatwg.org/#dom-document-importnode
-ExceptionOr<JS::NonnullGCPtr<Node>> Document::import_node(JS::NonnullGCPtr<Node> node, bool deep)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Node>> Document::import_node(JS::NonnullGCPtr<Node> node, bool deep)
 {
     // 1. If node is a document or shadow root, then throw a "NotSupportedError" DOMException.
     if (is<Document>(*node) || is<ShadowRoot>(*node))
-        return DOM::NotSupportedError::create(global_object(), "Cannot import a document or shadow root.");
+        return WebIDL::NotSupportedError::create(global_object(), "Cannot import a document or shadow root.");
 
     // 2. Return a clone of node, with this and the clone children flag set if deep is true.
     return node->clone_node(this, deep);
@@ -1333,13 +1333,13 @@ void Document::adopt_node(Node& node)
 }
 
 // https://dom.spec.whatwg.org/#dom-document-adoptnode
-ExceptionOr<JS::NonnullGCPtr<Node>> Document::adopt_node_binding(JS::NonnullGCPtr<Node> node)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Node>> Document::adopt_node_binding(JS::NonnullGCPtr<Node> node)
 {
     if (is<Document>(*node))
-        return DOM::NotSupportedError::create(global_object(), "Cannot adopt a document into a document");
+        return WebIDL::NotSupportedError::create(global_object(), "Cannot adopt a document into a document");
 
     if (is<ShadowRoot>(*node))
-        return DOM::HierarchyRequestError::create(global_object(), "Cannot adopt a shadow root into a document");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Cannot adopt a shadow root into a document");
 
     if (is<DocumentFragment>(*node) && verify_cast<DocumentFragment>(*node).host())
         return node;
@@ -1798,14 +1798,14 @@ bool Document::is_valid_name(String const& name)
 }
 
 // https://dom.spec.whatwg.org/#validate
-ExceptionOr<Document::PrefixAndTagName> Document::validate_qualified_name(JS::Object& global_object, String const& qualified_name)
+WebIDL::ExceptionOr<Document::PrefixAndTagName> Document::validate_qualified_name(JS::Object& global_object, String const& qualified_name)
 {
     if (qualified_name.is_empty())
-        return InvalidCharacterError::create(global_object, "Empty string is not a valid qualified name.");
+        return WebIDL::InvalidCharacterError::create(global_object, "Empty string is not a valid qualified name.");
 
     Utf8View utf8view { qualified_name };
     if (!utf8view.validate())
-        return InvalidCharacterError::create(global_object, "Invalid qualified name.");
+        return WebIDL::InvalidCharacterError::create(global_object, "Invalid qualified name.");
 
     Optional<size_t> colon_offset;
 
@@ -1815,19 +1815,19 @@ ExceptionOr<Document::PrefixAndTagName> Document::validate_qualified_name(JS::Ob
         auto code_point = *it;
         if (code_point == ':') {
             if (colon_offset.has_value())
-                return InvalidCharacterError::create(global_object, "More than one colon (:) in qualified name.");
+                return WebIDL::InvalidCharacterError::create(global_object, "More than one colon (:) in qualified name.");
             colon_offset = utf8view.byte_offset_of(it);
             at_start_of_name = true;
             continue;
         }
         if (at_start_of_name) {
             if (!is_valid_name_start_character(code_point))
-                return InvalidCharacterError::create(global_object, "Invalid start of qualified name.");
+                return WebIDL::InvalidCharacterError::create(global_object, "Invalid start of qualified name.");
             at_start_of_name = false;
             continue;
         }
         if (!is_valid_name_character(code_point))
-            return InvalidCharacterError::create(global_object, "Invalid character in qualified name.");
+            return WebIDL::InvalidCharacterError::create(global_object, "Invalid character in qualified name.");
     }
 
     if (!colon_offset.has_value())
@@ -1837,10 +1837,10 @@ ExceptionOr<Document::PrefixAndTagName> Document::validate_qualified_name(JS::Ob
         };
 
     if (*colon_offset == 0)
-        return InvalidCharacterError::create(global_object, "Qualified name can't start with colon (:).");
+        return WebIDL::InvalidCharacterError::create(global_object, "Qualified name can't start with colon (:).");
 
     if (*colon_offset >= (qualified_name.length() - 1))
-        return InvalidCharacterError::create(global_object, "Qualified name can't end with colon (:).");
+        return WebIDL::InvalidCharacterError::create(global_object, "Qualified name can't end with colon (:).");
 
     return Document::PrefixAndTagName {
         .prefix = qualified_name.substring_view(0, *colon_offset),

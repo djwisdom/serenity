@@ -859,7 +859,7 @@ void BrowsingContext::remove()
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
-DOM::ExceptionOr<void> BrowsingContext::navigate(
+WebIDL::ExceptionOr<void> BrowsingContext::navigate(
     Fetch::Infrastructure::Request resource,
     BrowsingContext& source_browsing_context,
     bool exceptions_enabled,
@@ -881,7 +881,7 @@ DOM::ExceptionOr<void> BrowsingContext::navigate(
         // 1. If exceptionsEnabled is given and is true, then throw a "SecurityError" DOMException.
         if (exceptions_enabled) {
             VERIFY(source_browsing_context.active_document());
-            return DOM::SecurityError::create(source_browsing_context.active_document()->global_object(), "Source browsing context not allowed to navigate"sv);
+            return WebIDL::SecurityError::create(source_browsing_context.active_document()->global_object(), "Source browsing context not allowed to navigate"sv);
         }
 
         // FIXME: 2. Otherwise, the user agent may instead offer to open resource in a new top-level browsing context
@@ -983,7 +983,7 @@ DOM::ExceptionOr<void> BrowsingContext::navigate(
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-fragid
-DOM::ExceptionOr<void> BrowsingContext::navigate_to_a_fragment(AK::URL const& url, HistoryHandlingBehavior history_handling, String navigation_id)
+WebIDL::ExceptionOr<void> BrowsingContext::navigate_to_a_fragment(AK::URL const& url, HistoryHandlingBehavior history_handling, String navigation_id)
 {
     // 1. If historyHandling is not "replace",
     if (history_handling != HistoryHandlingBehavior::Replace) {
@@ -1025,7 +1025,7 @@ DOM::ExceptionOr<void> BrowsingContext::navigate_to_a_fragment(AK::URL const& ur
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#traverse-the-history
-DOM::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_index, HistoryHandlingBehavior history_handling, bool explicit_history_navigation)
+WebIDL::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_index, HistoryHandlingBehavior history_handling, bool explicit_history_navigation)
 {
     auto* entry = &m_session_history[entry_index];
 
@@ -1105,7 +1105,7 @@ DOM::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_index,
     if (new_document->ready_state() == "complete"sv) {
         // then queue a global task on the DOM manipulation task source given newDocument's relevant global object to run the following steps:
 
-        queue_global_task(Task::Source::DOMManipulation, relevant_global_object(*new_document), [new_document = JS::make_handle(*new_document)]() mutable {
+        queue_global_task(Task::Source::DOMManipulation, relevant_global_object(*new_document), [new_document]() mutable {
             // 1. If newDocument's page showing flag is true, then abort these steps.
             if (new_document->page_showing())
                 return;
@@ -1174,7 +1174,7 @@ DOM::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_index,
     // 20. If hashChanged is true,
     if (hash_changed) {
         // then queue a global task on the DOM manipulation task source given newDocument's relevant global object
-        queue_global_task(Task::Source::DOMManipulation, relevant_global_object(*new_document), [new_document = JS::make_handle(*new_document)]() mutable {
+        queue_global_task(Task::Source::DOMManipulation, relevant_global_object(*new_document), [new_document]() mutable {
             // to fire an event named hashchange at newDocument's relevant global object,
             // using HashChangeEvent, with the oldURL attribute initialized to oldURL
             // and the newURL attribute initialized to newURL.

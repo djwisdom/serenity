@@ -397,6 +397,14 @@ if (BUILD_LAGOM)
         SOURCES ${LIBGL_SOURCES} ${LIBGL_TEX_SOURCES}
         LIBS m LibGfx LibGPU)
 
+    # GUI
+    list(APPEND LIBGUI_SOURCES "../../Userland/Libraries/LibGUI/ModelIndex.cpp")
+    list(APPEND LIBGUI_SOURCES "../../Userland/Libraries/LibGUI/Model.cpp")
+    list(APPEND LIBGUI_SOURCES "../../Userland/Libraries/LibGUI/Icon.cpp")
+    lagom_lib(GUI gui
+        SOURCES ${LIBGUI_SOURCES}
+        LIBS LibGfx)
+
     # GUI-GML
     file(GLOB LIBGUI_GML_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibGUI/GML/*.cpp")
     list(REMOVE_ITEM LIBGUI_GML_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibGUI/GML/AutocompleteProvider.cpp")
@@ -568,6 +576,12 @@ if (BUILD_LAGOM)
         SOURCES ${LIBWEBSOCKET_SOURCES} ${LIBWEBSOCKET_SUBDIR_SOURCES}
         LIBS LibCrypto LibTLS
     )
+
+    # WebView
+    list(APPEND LIBWEBVIEW_SOURCES "../../Userland/Libraries/LibWebView/DOMTreeModel.cpp")
+    lagom_lib(WebView webview
+        SOURCES ${LIBWEBVIEW_SOURCES}
+        LIBS LibGUI)
 
     # x86
     # FIXME: Excluding arm64 is a temporary hack to circumvent a build problem

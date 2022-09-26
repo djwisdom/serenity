@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/DOM/DOMException.h>
 #include <LibWeb/HTML/HTMLOptGroupElement.h>
 #include <LibWeb/HTML/HTMLOptionElement.h>
 #include <LibWeb/HTML/HTMLOptionsCollection.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/WebIDL/DOMException.h>
 
 namespace Web::HTML {
 
@@ -27,7 +27,7 @@ HTMLOptionsCollection::HTMLOptionsCollection(DOM::ParentNode& root, Function<boo
 HTMLOptionsCollection::~HTMLOptionsCollection() = default;
 
 // https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#dom-htmloptionscollection-add
-DOM::ExceptionOr<void> HTMLOptionsCollection::add(HTMLOptionOrOptGroupElement element, Optional<HTMLElementOrElementIndex> before)
+WebIDL::ExceptionOr<void> HTMLOptionsCollection::add(HTMLOptionOrOptGroupElement element, Optional<HTMLElementOrElementIndex> before)
 {
     auto resolved_element = element.visit(
         [](auto& e) -> JS::Handle<HTMLElement> {
@@ -40,11 +40,11 @@ DOM::ExceptionOr<void> HTMLOptionsCollection::add(HTMLOptionOrOptGroupElement el
 
     // 1. If element is an ancestor of the select element on which the HTMLOptionsCollection is rooted, then throw a "HierarchyRequestError" DOMException.
     if (resolved_element->is_ancestor_of(root()))
-        return DOM::HierarchyRequestError::create(global_object(), "The provided element is an ancestor of the root select element.");
+        return WebIDL::HierarchyRequestError::create(global_object(), "The provided element is an ancestor of the root select element.");
 
     // 2. If before is an element, but that element isn't a descendant of the select element on which the HTMLOptionsCollection is rooted, then throw a "NotFoundError" DOMException.
     if (before_element && !before_element->is_descendant_of(root()))
-        return DOM::NotFoundError::create(global_object(), "The 'before' element is not a descendant of the root select element.");
+        return WebIDL::NotFoundError::create(global_object(), "The 'before' element is not a descendant of the root select element.");
 
     // 3. If element and before are the same element, then return.
     if (before_element && (resolved_element.ptr() == before_element.ptr()))

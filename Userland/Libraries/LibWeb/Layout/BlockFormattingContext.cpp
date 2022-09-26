@@ -39,6 +39,11 @@ bool BlockFormattingContext::is_initial() const
     return is<InitialContainingBlock>(root());
 }
 
+float BlockFormattingContext::automatic_content_height() const
+{
+    return compute_auto_height_for_block_formatting_context_root(m_state, root());
+}
+
 void BlockFormattingContext::run(Box const&, LayoutMode layout_mode)
 {
     if (is_initial()) {
@@ -207,19 +212,19 @@ void BlockFormattingContext::compute_width(Box const& box, LayoutMode layout_mod
 
     // 2. The tentative used width is greater than 'max-width', the rules above are applied again,
     //    but this time using the computed value of 'max-width' as the computed value for 'width'.
-    auto specified_max_width = computed_values.max_width().resolved(box, width_of_containing_block_as_length).resolved(box);
-    if (!specified_max_width.is_auto()) {
-        if (used_width.to_px(box) > specified_max_width.to_px(box)) {
-            used_width = try_compute_width(specified_max_width);
+    if (!computed_values.max_width().is_none()) {
+        auto max_width = computed_values.max_width().resolved(box, width_of_containing_block_as_length).resolved(box);
+        if (used_width.to_px(box) > max_width.to_px(box)) {
+            used_width = try_compute_width(max_width);
         }
     }
 
     // 3. If the resulting width is smaller than 'min-width', the rules above are applied again,
     //    but this time using the value of 'min-width' as the computed value for 'width'.
-    auto specified_min_width = computed_values.min_width().resolved(box, width_of_containing_block_as_length).resolved(box);
-    if (!specified_min_width.is_auto()) {
-        if (used_width.to_px(box) < specified_min_width.to_px(box)) {
-            used_width = try_compute_width(specified_min_width);
+    if (!computed_values.min_width().is_auto()) {
+        auto min_width = computed_values.min_width().resolved(box, width_of_containing_block_as_length).resolved(box);
+        if (used_width.to_px(box) < min_width.to_px(box)) {
+            used_width = try_compute_width(min_width);
         }
     }
 
@@ -287,18 +292,18 @@ void BlockFormattingContext::compute_width_for_floating_box(Box const& box, Layo
 
     // 2. The tentative used width is greater than 'max-width', the rules above are applied again,
     //    but this time using the computed value of 'max-width' as the computed value for 'width'.
-    auto specified_max_width = computed_values.max_width().resolved(box, width_of_containing_block_as_length).resolved(box);
-    if (!specified_max_width.is_auto()) {
-        if (width.to_px(box) > specified_max_width.to_px(box))
-            width = compute_width(specified_max_width);
+    if (!computed_values.max_width().is_none()) {
+        auto max_width = computed_values.max_width().resolved(box, width_of_containing_block_as_length).resolved(box);
+        if (width.to_px(box) > max_width.to_px(box))
+            width = compute_width(max_width);
     }
 
     // 3. If the resulting width is smaller than 'min-width', the rules above are applied again,
     //    but this time using the value of 'min-width' as the computed value for 'width'.
-    auto specified_min_width = computed_values.min_width().resolved(box, width_of_containing_block_as_length).resolved(box);
-    if (!specified_min_width.is_auto()) {
-        if (width.to_px(box) < specified_min_width.to_px(box))
-            width = compute_width(specified_min_width);
+    if (!computed_values.min_width().is_auto()) {
+        auto min_width = computed_values.min_width().resolved(box, width_of_containing_block_as_length).resolved(box);
+        if (width.to_px(box) < min_width.to_px(box))
+            width = compute_width(min_width);
     }
 
     auto& box_state = m_state.get_mutable(box);
@@ -316,8 +321,10 @@ void BlockFormattingContext::compute_width_for_block_level_replaced_element_in_n
     m_state.get_mutable(box).set_content_width(compute_width_for_replaced_element(m_state, box));
 }
 
-float BlockFormattingContext::compute_theoretical_height(LayoutState const& state, Box const& box)
+void BlockFormattingContext::compute_height(Box const& box, LayoutState& state)
 {
+    resolve_vertical_box_model_metrics(box, *box.containing_block(), state);
+
     auto const& computed_values = box.computed_values();
     auto containing_block_height = CSS::Length::make_px(containing_block_height_for(box, state));
 
@@ -333,19 +340,16 @@ float BlockFormattingContext::compute_theoretical_height(LayoutState const& stat
         }
     }
 
-    auto specified_max_height = computed_values.max_height().resolved(box, containing_block_height).resolved(box);
-    if (!specified_max_height.is_auto())
-        height = min(height, specified_max_height.to_px(box));
+    if (!computed_values.max_height().is_none()) {
+        auto max_height = computed_values.max_height().resolved(box, containing_block_height).resolved(box);
+        if (!max_height.is_auto())
+            height = min(height, max_height.to_px(box));
+    }
     auto specified_min_height = computed_values.min_height().resolved(box, containing_block_height).resolved(box);
     if (!specified_min_height.is_auto())
         height = max(height, specified_min_height.to_px(box));
-    return height;
-}
 
-void BlockFormattingContext::compute_height(Box const& box, LayoutState& state)
-{
-    resolve_vertical_box_model_metrics(box, *box.containing_block(), state);
-    state.get_mutable(box).set_content_height(compute_theoretical_height(state, box));
+    state.get_mutable(box).set_content_height(height);
 }
 
 void BlockFormattingContext::layout_inline_children(BlockContainer const& block_container, LayoutMode layout_mode)

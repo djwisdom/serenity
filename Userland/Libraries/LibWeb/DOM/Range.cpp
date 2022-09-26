@@ -131,17 +131,17 @@ static RelativeBoundaryPointPosition position_of_boundary_point_relative_to_othe
     return RelativeBoundaryPointPosition::Before;
 }
 
-ExceptionOr<void> Range::set_start_or_end(Node& node, u32 offset, StartOrEnd start_or_end)
+WebIDL::ExceptionOr<void> Range::set_start_or_end(Node& node, u32 offset, StartOrEnd start_or_end)
 {
     // To set the start or end of a range to a boundary point (node, offset), run these steps:
 
     // 1. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(node))
-        return InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
 
     // 2. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
     if (offset > node.length())
-        return IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
+        return WebIDL::IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
 
     // 3. Let bp be the boundary point (node, offset).
 
@@ -176,76 +176,76 @@ ExceptionOr<void> Range::set_start_or_end(Node& node, u32 offset, StartOrEnd sta
 }
 
 // https://dom.spec.whatwg.org/#concept-range-bp-set
-ExceptionOr<void> Range::set_start(Node& node, u32 offset)
+WebIDL::ExceptionOr<void> Range::set_start(Node& node, u32 offset)
 {
     // The setStart(node, offset) method steps are to set the start of this to boundary point (node, offset).
     return set_start_or_end(node, offset, StartOrEnd::Start);
 }
 
-ExceptionOr<void> Range::set_end(Node& node, u32 offset)
+WebIDL::ExceptionOr<void> Range::set_end(Node& node, u32 offset)
 {
     // The setEnd(node, offset) method steps are to set the end of this to boundary point (node, offset).
     return set_start_or_end(node, offset, StartOrEnd::End);
 }
 
 // https://dom.spec.whatwg.org/#dom-range-setstartbefore
-ExceptionOr<void> Range::set_start_before(Node& node)
+WebIDL::ExceptionOr<void> Range::set_start_before(Node& node)
 {
     // 1. Let parent be node’s parent.
     auto* parent = node.parent();
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Set the start of this to boundary point (parent, node’s index).
     return set_start_or_end(*parent, node.index(), StartOrEnd::Start);
 }
 
 // https://dom.spec.whatwg.org/#dom-range-setstartafter
-ExceptionOr<void> Range::set_start_after(Node& node)
+WebIDL::ExceptionOr<void> Range::set_start_after(Node& node)
 {
     // 1. Let parent be node’s parent.
     auto* parent = node.parent();
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Set the start of this to boundary point (parent, node’s index plus 1).
     return set_start_or_end(*parent, node.index() + 1, StartOrEnd::Start);
 }
 
 // https://dom.spec.whatwg.org/#dom-range-setendbefore
-ExceptionOr<void> Range::set_end_before(Node& node)
+WebIDL::ExceptionOr<void> Range::set_end_before(Node& node)
 {
     // 1. Let parent be node’s parent.
     auto* parent = node.parent();
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Set the end of this to boundary point (parent, node’s index).
     return set_start_or_end(*parent, node.index(), StartOrEnd::End);
 }
 
 // https://dom.spec.whatwg.org/#dom-range-setendafter
-ExceptionOr<void> Range::set_end_after(Node& node)
+WebIDL::ExceptionOr<void> Range::set_end_after(Node& node)
 {
     // 1. Let parent be node’s parent.
     auto* parent = node.parent();
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Set the end of this to boundary point (parent, node’s index plus 1).
     return set_start_or_end(*parent, node.index() + 1, StartOrEnd::End);
 }
 
 // https://dom.spec.whatwg.org/#dom-range-compareboundarypoints
-ExceptionOr<i16> Range::compare_boundary_points(u16 how, Range const& source_range) const
+WebIDL::ExceptionOr<i16> Range::compare_boundary_points(u16 how, Range const& source_range) const
 {
     // 1. If how is not one of
     //      - START_TO_START,
@@ -254,11 +254,11 @@ ExceptionOr<i16> Range::compare_boundary_points(u16 how, Range const& source_ran
     //      - END_TO_START,
     //    then throw a "NotSupportedError" DOMException.
     if (how != HowToCompareBoundaryPoints::START_TO_START && how != HowToCompareBoundaryPoints::START_TO_END && how != HowToCompareBoundaryPoints::END_TO_END && how != HowToCompareBoundaryPoints::END_TO_START)
-        return NotSupportedError::create(global_object(), String::formatted("Expected 'how' to be one of START_TO_START (0), START_TO_END (1), END_TO_END (2) or END_TO_START (3), got {}", how));
+        return WebIDL::NotSupportedError::create(global_object(), String::formatted("Expected 'how' to be one of START_TO_START (0), START_TO_END (1), END_TO_END (2) or END_TO_START (3), got {}", how));
 
     // 2. If this’s root is not the same as sourceRange’s root, then throw a "WrongDocumentError" DOMException.
     if (&root() != &source_range.root())
-        return WrongDocumentError::create(global_object(), "This range is not in the same tree as the source range.");
+        return WebIDL::WrongDocumentError::create(global_object(), "This range is not in the same tree as the source range.");
 
     JS::GCPtr<Node> this_point_node;
     u32 this_point_offset = 0;
@@ -332,14 +332,14 @@ ExceptionOr<i16> Range::compare_boundary_points(u16 how, Range const& source_ran
 }
 
 // https://dom.spec.whatwg.org/#concept-range-select
-ExceptionOr<void> Range::select(Node& node)
+WebIDL::ExceptionOr<void> Range::select(Node& node)
 {
     // 1. Let parent be node’s parent.
     auto* parent = node.parent();
 
     // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
     if (!parent)
-        return InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Given node has no parent.");
 
     // 3. Let index be node’s index.
     auto index = node.index();
@@ -356,7 +356,7 @@ ExceptionOr<void> Range::select(Node& node)
 }
 
 // https://dom.spec.whatwg.org/#dom-range-selectnode
-ExceptionOr<void> Range::select_node(Node& node)
+WebIDL::ExceptionOr<void> Range::select_node(Node& node)
 {
     // The selectNode(node) method steps are to select node within this.
     return select(node);
@@ -377,11 +377,11 @@ void Range::collapse(bool to_start)
 }
 
 // https://dom.spec.whatwg.org/#dom-range-selectnodecontents
-ExceptionOr<void> Range::select_node_contents(Node const& node)
+WebIDL::ExceptionOr<void> Range::select_node_contents(Node const& node)
 {
     // 1. If node is a doctype, throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(node))
-        return InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
 
     // 2. Let length be the length of node.
     auto length = node.length();
@@ -466,7 +466,7 @@ bool Range::intersects_node(Node const& node) const
 }
 
 // https://dom.spec.whatwg.org/#dom-range-ispointinrange
-ExceptionOr<bool> Range::is_point_in_range(Node const& node, u32 offset) const
+WebIDL::ExceptionOr<bool> Range::is_point_in_range(Node const& node, u32 offset) const
 {
     // 1. If node’s root is different from this’s root, return false.
     if (&node.root() != &root())
@@ -474,11 +474,11 @@ ExceptionOr<bool> Range::is_point_in_range(Node const& node, u32 offset) const
 
     // 2. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(node))
-        return InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
 
     // 3. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
     if (offset > node.length())
-        return IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
+        return WebIDL::IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
 
     // 4. If (node, offset) is before start or after end, return false.
     auto relative_position_to_start = position_of_boundary_point_relative_to_other_boundary_point(node, offset, m_start_container, m_start_offset);
@@ -491,19 +491,19 @@ ExceptionOr<bool> Range::is_point_in_range(Node const& node, u32 offset) const
 }
 
 // https://dom.spec.whatwg.org/#dom-range-comparepoint
-ExceptionOr<i16> Range::compare_point(Node const& node, u32 offset) const
+WebIDL::ExceptionOr<i16> Range::compare_point(Node const& node, u32 offset) const
 {
     // 1. If node’s root is different from this’s root, then throw a "WrongDocumentError" DOMException.
     if (&node.root() != &root())
-        return WrongDocumentError::create(global_object(), "Given node is not in the same document as the range.");
+        return WebIDL::WrongDocumentError::create(global_object(), "Given node is not in the same document as the range.");
 
     // 2. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(node))
-        return InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Node cannot be a DocumentType.");
 
     // 3. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
     if (offset > node.length())
-        return IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
+        return WebIDL::IndexSizeError::create(global_object(), String::formatted("Node does not contain a child at offset {}", offset));
 
     // 4. If (node, offset) is before start, return −1.
     auto relative_position_to_start = position_of_boundary_point_relative_to_other_boundary_point(node, offset, m_start_container, m_start_offset);
@@ -549,13 +549,13 @@ String Range::to_string() const
 }
 
 // https://dom.spec.whatwg.org/#dom-range-extractcontents
-ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::extract_contents()
+WebIDL::ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::extract_contents()
 {
     return extract();
 }
 
 // https://dom.spec.whatwg.org/#concept-range-extract
-ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::extract()
+WebIDL::ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::extract()
 {
     // 1. Let fragment be a new DocumentFragment node whose node document is range’s start node’s node document.
     auto* fragment = heap().allocate<DOM::DocumentFragment>(realm(), const_cast<Document&>(start_container()->document()));
@@ -636,7 +636,7 @@ ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::extract()
     // 12. If any member of contained children is a doctype, then throw a "HierarchyRequestError" DOMException.
     for (auto const& child : contained_children) {
         if (is<DocumentType>(*child))
-            return DOM::HierarchyRequestError::create(global_object(), "Contained child is a DocumentType");
+            return WebIDL::HierarchyRequestError::create(global_object(), "Contained child is a DocumentType");
     }
 
     JS::GCPtr<Node> new_node;
@@ -771,19 +771,19 @@ bool Range::partially_contains_node(Node const& node) const
 }
 
 // https://dom.spec.whatwg.org/#dom-range-insertnode
-ExceptionOr<void> Range::insert_node(JS::NonnullGCPtr<Node> node)
+WebIDL::ExceptionOr<void> Range::insert_node(JS::NonnullGCPtr<Node> node)
 {
     return insert(node);
 }
 
 // https://dom.spec.whatwg.org/#concept-range-insert
-ExceptionOr<void> Range::insert(JS::NonnullGCPtr<Node> node)
+WebIDL::ExceptionOr<void> Range::insert(JS::NonnullGCPtr<Node> node)
 {
     // 1. If range’s start node is a ProcessingInstruction or Comment node, is a Text node whose parent is null, or is node, then throw a "HierarchyRequestError" DOMException.
     if ((is<ProcessingInstruction>(*m_start_container) || is<Comment>(*m_start_container))
         || (is<Text>(*m_start_container) && !m_start_container->parent_node())
         || m_start_container.ptr() == node.ptr()) {
-        return DOM::HierarchyRequestError::create(global_object(), "Range has inappropriate start node for insertion");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Range has inappropriate start node for insertion");
     }
 
     // 2. Let referenceNode be null.
@@ -844,7 +844,7 @@ ExceptionOr<void> Range::insert(JS::NonnullGCPtr<Node> node)
 }
 
 // https://dom.spec.whatwg.org/#dom-range-surroundcontents
-ExceptionOr<void> Range::surround_contents(JS::NonnullGCPtr<Node> new_parent)
+WebIDL::ExceptionOr<void> Range::surround_contents(JS::NonnullGCPtr<Node> new_parent)
 {
     // 1. If a non-Text node is partially contained in this, then throw an "InvalidStateError" DOMException.
     Node* start_non_text_node = start_container();
@@ -854,11 +854,11 @@ ExceptionOr<void> Range::surround_contents(JS::NonnullGCPtr<Node> new_parent)
     if (is<Text>(*end_non_text_node))
         end_non_text_node = end_non_text_node->parent_node();
     if (start_non_text_node != end_non_text_node)
-        return InvalidStateError::create(global_object(), "Non-Text node is partially contained in range.");
+        return WebIDL::InvalidStateError::create(global_object(), "Non-Text node is partially contained in range.");
 
     // 2. If newParent is a Document, DocumentType, or DocumentFragment node, then throw an "InvalidNodeTypeError" DOMException.
     if (is<Document>(*new_parent) || is<DocumentType>(*new_parent) || is<DocumentFragment>(*new_parent))
-        return InvalidNodeTypeError::create(global_object(), "Invalid parent node type");
+        return WebIDL::InvalidNodeTypeError::create(global_object(), "Invalid parent node type");
 
     // 3. Let fragment be the result of extracting this.
     auto fragment = TRY(extract());
@@ -878,13 +878,13 @@ ExceptionOr<void> Range::surround_contents(JS::NonnullGCPtr<Node> new_parent)
 }
 
 // https://dom.spec.whatwg.org/#dom-range-clonecontents
-ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::clone_contents()
+WebIDL::ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::clone_contents()
 {
     return clone_the_contents();
 }
 
 // https://dom.spec.whatwg.org/#concept-range-clone
-ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::clone_the_contents()
+WebIDL::ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::clone_the_contents()
 {
     // 1. Let fragment be a new DocumentFragment node whose node document is range’s start node’s node document.
     auto* fragment = heap().allocate<DOM::DocumentFragment>(realm(), const_cast<Document&>(start_container()->document()));
@@ -962,7 +962,7 @@ ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::clone_the_contents()
     // 12. If any member of contained children is a doctype, then throw a "HierarchyRequestError" DOMException.
     for (auto const& child : contained_children) {
         if (is<DocumentType>(*child))
-            return DOM::HierarchyRequestError::create(global_object(), "Contained child is a DocumentType");
+            return WebIDL::HierarchyRequestError::create(global_object(), "Contained child is a DocumentType");
     }
 
     // 13. If first partially contained child is a CharacterData node, then:
@@ -1040,7 +1040,7 @@ ExceptionOr<JS::NonnullGCPtr<DocumentFragment>> Range::clone_the_contents()
 }
 
 // https://dom.spec.whatwg.org/#dom-range-deletecontents
-ExceptionOr<void> Range::delete_contents()
+WebIDL::ExceptionOr<void> Range::delete_contents()
 {
     // 1. If this is collapsed, then return.
     if (collapsed())

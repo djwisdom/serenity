@@ -5,9 +5,9 @@
  */
 
 #include <AK/QuickSort.h>
-#include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/HTML/CanvasGradient.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::HTML {
 
@@ -49,18 +49,18 @@ CanvasGradient::CanvasGradient(HTML::Window& window, Type type)
 CanvasGradient::~CanvasGradient() = default;
 
 // https://html.spec.whatwg.org/multipage/canvas.html#dom-canvasgradient-addcolorstop
-DOM::ExceptionOr<void> CanvasGradient::add_color_stop(double offset, String const& color)
+WebIDL::ExceptionOr<void> CanvasGradient::add_color_stop(double offset, String const& color)
 {
     // 1. If the offset is less than 0 or greater than 1, then throw an "IndexSizeError" DOMException.
     if (offset < 0 || offset > 1)
-        return DOM::IndexSizeError::create(global_object(), "CanvasGradient color stop offset out of bounds");
+        return WebIDL::IndexSizeError::create(global_object(), "CanvasGradient color stop offset out of bounds");
 
     // 2. Let parsed color be the result of parsing color.
     auto parsed_color = Color::from_string(color);
 
     // 3. If parsed color is failure, throw a "SyntaxError" DOMException.
     if (!parsed_color.has_value())
-        return DOM::SyntaxError::create(global_object(), "Could not parse color for CanvasGradient");
+        return WebIDL::SyntaxError::create(global_object(), "Could not parse color for CanvasGradient");
 
     // 4. Place a new stop on the gradient, at offset offset relative to the whole gradient, and with the color parsed color.
     m_color_stops.append(ColorStop { offset, parsed_color.value() });

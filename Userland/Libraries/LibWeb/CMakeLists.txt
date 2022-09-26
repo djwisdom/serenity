@@ -3,10 +3,6 @@ include(libweb_generators)
 set(SOURCES
     Bindings/AudioConstructor.cpp
     Bindings/CSSNamespace.cpp
-    Bindings/CallbackType.cpp
-    Bindings/CrossOriginAbstractOperations.cpp
-    Bindings/IDLAbstractOperations.cpp
-    Bindings/IDLOverloadResolution.cpp
     Bindings/ImageConstructor.cpp
     Bindings/LegacyPlatformObject.cpp
     Bindings/LocationConstructor.cpp
@@ -17,7 +13,6 @@ set(SOURCES
     Bindings/OptionConstructor.cpp
     Bindings/PlatformObject.cpp
     Bindings/WindowConstructor.cpp
-    Bindings/WindowProxy.cpp
     Crypto/Crypto.cpp
     Crypto/SubtleCrypto.cpp
     CSS/Angle.cpp
@@ -62,6 +57,7 @@ set(SOURCES
     CSS/Selector.cpp
     CSS/SelectorEngine.cpp
     CSS/Serialize.cpp
+    CSS/Size.cpp
     CSS/StyleComputer.cpp
     CSS/StyleProperties.cpp
     CSS/StyleSheet.cpp
@@ -82,7 +78,6 @@ set(SOURCES
     DOM/Comment.cpp
     DOM/CustomEvent.cpp
     DOM/DOMEventListener.cpp
-    DOM/DOMException.cpp
     DOM/DOMImplementation.cpp
     DOM/DOMTokenList.cpp
     DOM/DOMTokenList.idl
@@ -152,6 +147,7 @@ set(SOURCES
     HTML/CanvasGradient.cpp
     HTML/CanvasRenderingContext2D.cpp
     HTML/CloseEvent.cpp
+    HTML/CrossOrigin/AbstractOperations.cpp
     HTML/CrossOrigin/Reporting.cpp
     HTML/DOMParser.cpp
     HTML/DOMStringMap.cpp
@@ -265,6 +261,7 @@ set(SOURCES
     HTML/Timer.cpp
     HTML/Window.cpp
     HTML/WindowEventHandlers.cpp
+    HTML/WindowProxy.cpp
     HTML/Worker.cpp
     HTML/WorkerDebugConsoleClient.cpp
     HTML/WorkerGlobalScope.cpp
@@ -413,6 +410,10 @@ set(SOURCES
     WebGL/WebGLContextEvent.cpp
     WebGL/WebGLRenderingContext.cpp
     WebGL/WebGLRenderingContextBase.cpp
+    WebIDL/AbstractOperations.cpp
+    WebIDL/CallbackType.cpp
+    WebIDL/DOMException.cpp
+    WebIDL/OverloadResolution.cpp
     WebSockets/WebSocket.cpp
     XHR/EventNames.cpp
     XHR/ProgressEvent.cpp

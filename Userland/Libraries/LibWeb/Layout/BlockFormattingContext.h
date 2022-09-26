@@ -23,13 +23,13 @@ public:
 
     virtual void run(Box const&, LayoutMode) override;
     virtual void run_intrinsic_sizing(Box const&) override;
+    virtual float automatic_content_height() const override;
 
     bool is_initial() const;
 
     auto const& left_side_floats() const { return m_left_floats; }
     auto const& right_side_floats() const { return m_right_floats; }
 
-    static float compute_theoretical_height(LayoutState const&, Box const&);
     void compute_width(Box const&, LayoutMode = LayoutMode::Normal);
 
     // https://www.w3.org/TR/css-display/#block-formatting-context-root

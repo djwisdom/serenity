@@ -303,7 +303,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
             }
         }
     } else if (parameter.type->name().is_one_of("EventListener", "NodeFilter")) {
-        // FIXME: Replace this with support for callback interfaces. https://heycam.github.io/webidl/#idl-callback-interface
+        // FIXME: Replace this with support for callback interfaces. https://webidl.spec.whatwg.org/#idl-callback-interface
 
         if (parameter.type->name() == "EventListener")
             scoped_generator.set("cpp_type", "IDLEventListener");
@@ -317,7 +317,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         if (!@js_name@@js_suffix@.is_object())
             return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObject, @js_name@@js_suffix@.to_string_without_side_effects());
 
-        auto* callback_type = vm.heap().allocate_without_realm<CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
+        auto* callback_type = vm.heap().allocate_without_realm<WebIDL::CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
         @cpp_name@ = @cpp_type@::create(realm, *callback_type).ptr();
     }
 )~~~");
@@ -326,7 +326,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     if (!@js_name@@js_suffix@.is_object())
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObject, @js_name@@js_suffix@.to_string_without_side_effects());
 
-    auto* callback_type = vm.heap().allocate_without_realm<CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
+    auto* callback_type = vm.heap().allocate_without_realm<WebIDL::CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
     auto @cpp_name@ = adopt_ref(*new @cpp_type@(move(callback_type)));
 )~~~");
         }
@@ -675,13 +675,13 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         // 2. Return the IDL callback function type value that represents a reference to the same object that V represents, with the incumbent settings object as the callback context.
         if (callback_function.is_legacy_treat_non_object_as_null) {
             callback_function_generator.append(R"~~~(
-    Bindings::CallbackType* @cpp_name@ = nullptr;
+    WebIDL::CallbackType* @cpp_name@ = nullptr;
     if (@js_name@@js_suffix@.is_object())
-        @cpp_name@ = vm.heap().allocate_without_realm<CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
+        @cpp_name@ = vm.heap().allocate_without_realm<WebIDL::CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
 )~~~");
         } else {
             callback_function_generator.append(R"~~~(
-    auto @cpp_name@ = vm.heap().allocate_without_realm<CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
+    auto @cpp_name@ = vm.heap().allocate_without_realm<WebIDL::CallbackType>(@js_name@@js_suffix@.as_object(), HTML::incumbent_settings_object());
 )~~~");
         }
     } else if (parameter.type->name() == "sequence") {
@@ -1928,7 +1928,7 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@function.name:snakecase@)
     if (!effective_overload_set.has_value())
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::OverloadResolutionFailed);
 
-    auto chosen_overload = TRY(resolve_overload(vm, effective_overload_set.value()));
+    auto chosen_overload = TRY(WebIDL::resolve_overload(vm, effective_overload_set.value()));
     switch (chosen_overload.callable_id) {
 )~~~");
 
@@ -2087,6 +2087,7 @@ using namespace Web::Selection;
 using namespace Web::UIEvents;
 using namespace Web::XHR;
 using namespace Web::WebGL;
+using namespace Web::WebIDL;
 
 namespace Web::Bindings {
 
@@ -2358,7 +2359,6 @@ void generate_prototype_implementation(IDL::Interface const& interface)
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/@prototype_class@.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
-#include <LibWeb/Bindings/IDLOverloadResolution.h>
 #include <LibWeb/Bindings/LocationObject.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Event.h>
@@ -2368,6 +2368,7 @@ void generate_prototype_implementation(IDL::Interface const& interface)
 #include <LibWeb/HTML/Origin.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/WebIDL/OverloadResolution.h>
 
 #if __has_include(<LibWeb/Bindings/@prototype_base_class@.h>)
 #    include <LibWeb/Bindings/@prototype_base_class@.h>
@@ -2402,6 +2403,7 @@ using namespace Web::URL;
 using namespace Web::WebSockets;
 using namespace Web::XHR;
 using namespace Web::WebGL;
+using namespace Web::WebIDL;
 
 namespace Web::Bindings {
 
@@ -2843,6 +2845,7 @@ using namespace Web::XHR;
 using namespace Web::UIEvents;
 using namespace Web::URL;
 using namespace Web::WebGL;
+using namespace Web::WebIDL;
 
 namespace Web::Bindings {
 

@@ -91,6 +91,7 @@ class ResolutionStyleValue;
 class Screen;
 class Selector;
 class ShadowStyleValue;
+class Size;
 class StringStyleValue;
 class StyleComputer;
 class StyleProperties;
@@ -139,7 +140,6 @@ class DocumentFragment;
 class DocumentLoadEventDelayer;
 class DocumentType;
 class DOMEventListener;
-class DOMException;
 class DOMImplementation;
 class DOMTokenList;
 class Element;
@@ -169,9 +169,6 @@ class TreeWalker;
 enum class QuirksMode;
 struct EventListenerOptions;
 struct AddEventListenerOptions;
-
-template<typename ValueType>
-class ExceptionOr;
 }
 
 namespace Web::DOMParsing {
@@ -317,6 +314,7 @@ class TextMetrics;
 class Timer;
 class Window;
 class WindowEnvironmentSettingsObject;
+class WindowProxy;
 class Worker;
 class WorkerEnvironmentSettingsObject;
 class WorkerGlobalScope;
@@ -393,6 +391,14 @@ class SVGRectElement;
 class SVGSVGElement;
 }
 
+namespace Web::WebIDL {
+class CallbackType;
+class DOMException;
+
+template<typename ValueType>
+class ExceptionOr;
+}
+
 namespace Web::WebSockets {
 class WebSocket;
 }
@@ -460,11 +466,9 @@ class URLSearchParamsIterator;
 }
 
 namespace Web::Bindings {
-class CallbackType;
 class LocationObject;
 class OptionConstructor;
 class RangePrototype;
-class WindowProxy;
 class Wrappable;
 class Wrapper;
 class XMLHttpRequestPrototype;

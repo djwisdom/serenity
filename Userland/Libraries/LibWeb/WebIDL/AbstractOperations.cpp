@@ -12,9 +12,9 @@
 #include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/PropertyKey.h>
 #include <LibJS/Runtime/TypedArray.h>
-#include <LibWeb/Bindings/IDLAbstractOperations.h>
+#include <LibWeb/WebIDL/AbstractOperations.h>
 
-namespace Web::Bindings::IDL {
+namespace Web::WebIDL {
 
 // https://webidl.spec.whatwg.org/#dfn-get-buffer-source-copy
 ErrorOr<ByteBuffer> get_buffer_source_copy(JS::Object const& buffer_source)
@@ -72,7 +72,7 @@ ErrorOr<ByteBuffer> get_buffer_source_copy(JS::Object const& buffer_source)
     auto bytes = TRY(ByteBuffer::create_zeroed(length));
 
     // 9. For i in the range offset to offset + length − 1, inclusive, set bytes[i − offset] to ! GetValueFromBuffer(esArrayBuffer, i, Uint8, true, Unordered).
-    for (u64 i = offset; i <= offset + length - 1; ++i) {
+    for (u64 i = offset; i < offset + length; ++i) {
         auto value = es_array_buffer->get_value<u8>(i, true, JS::ArrayBuffer::Unordered);
         bytes[i - offset] = static_cast<u8>(value.as_double());
     }
@@ -82,7 +82,7 @@ ErrorOr<ByteBuffer> get_buffer_source_copy(JS::Object const& buffer_source)
 }
 
 // https://webidl.spec.whatwg.org/#invoke-a-callback-function
-JS::Completion invoke_callback(Bindings::CallbackType& callback, Optional<JS::Value> this_argument, JS::MarkedVector<JS::Value> args)
+JS::Completion invoke_callback(WebIDL::CallbackType& callback, Optional<JS::Value> this_argument, JS::MarkedVector<JS::Value> args)
 {
     // 1. Let completion be an uninitialized variable.
     JS::Completion completion;
