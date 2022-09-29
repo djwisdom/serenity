@@ -35,6 +35,16 @@ public:
 
     virtual ~Headers() override;
 
+    [[nodiscard]] NonnullRefPtr<Infrastructure::HeaderList>& header_list() { return m_header_list; }
+    [[nodiscard]] NonnullRefPtr<Infrastructure::HeaderList> const& header_list() const { return m_header_list; }
+    void set_header_list(NonnullRefPtr<Infrastructure::HeaderList> header_list) { m_header_list = move(header_list); }
+
+    [[nodiscard]] Guard guard() const { return m_guard; }
+    void set_guard(Guard guard) { m_guard = guard; }
+
+    WebIDL::ExceptionOr<void> fill(HeadersInit const&);
+
+    // JS API functions
     WebIDL::ExceptionOr<void> append(Infrastructure::Header);
     WebIDL::ExceptionOr<void> append(String const& name, String const& value);
     WebIDL::ExceptionOr<void> delete_(String const& name);
@@ -50,12 +60,11 @@ private:
 
     explicit Headers(HTML::Window&);
 
-    WebIDL::ExceptionOr<void> fill(HeadersInit const&);
     void remove_privileged_no_cors_headers();
 
     // https://fetch.spec.whatwg.org/#concept-headers-header-list
     // A Headers object has an associated header list (a header list), which is initially empty.
-    Infrastructure::HeaderList m_header_list;
+    NonnullRefPtr<Infrastructure::HeaderList> m_header_list;
 
     // https://fetch.spec.whatwg.org/#concept-headers-guard
     // A Headers object also has an associated guard, which is a headers guard. A headers guard is "immutable", "request", "request-no-cors", "response" or "none".

@@ -24,6 +24,7 @@ public:
     };
 
     static Size make_auto();
+    static Size make_px(float);
     static Size make_length(Length);
     static Size make_percentage(Percentage);
     static Size make_min_content();
@@ -62,6 +63,8 @@ public:
         return m_length_percentage.length();
     }
 
+    String to_string() const;
+
 private:
     Size(Type type, LengthPercentage);
 
@@ -70,3 +73,11 @@ private:
 };
 
 }
+
+template<>
+struct AK::Formatter<Web::CSS::Size> : Formatter<StringView> {
+    ErrorOr<void> format(FormatBuilder& builder, Web::CSS::Size const& size)
+    {
+        return Formatter<StringView>::format(builder, size.to_string());
+    }
+};

@@ -215,17 +215,17 @@ MimeSniff::MimeType XMLHttpRequest::get_final_mime_type() const
 MimeSniff::MimeType XMLHttpRequest::get_response_mime_type() const
 {
     // FIXME: Use an actual HeaderList for XHR headers.
-    Fetch::Infrastructure::HeaderList header_list;
+    auto header_list = make_ref_counted<Fetch::Infrastructure::HeaderList>();
     for (auto const& entry : m_response_headers) {
         auto header = Fetch::Infrastructure::Header {
             .name = MUST(ByteBuffer::copy(entry.key.bytes())),
             .value = MUST(ByteBuffer::copy(entry.value.bytes())),
         };
-        MUST(header_list.append(move(header)));
+        MUST(header_list->append(move(header)));
     }
 
     // 1. Let mimeType be the result of extracting a MIME type from xhr’s response’s header list.
-    auto mime_type = header_list.extract_mime_type();
+    auto mime_type = header_list->extract_mime_type();
 
     // 2. If mimeType is failure, then set mimeType to text/xml.
     if (!mime_type.has_value())
@@ -416,7 +416,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<Fetch::XMLHttpRequestBod
     dbgln("XHR send from {} to {}", m_window->associated_document().url(), request_url);
 
     // TODO: Add support for preflight requests to support CORS requests
-    auto request_url_origin = HTML::Origin(request_url.protocol(), request_url.host(), request_url.port_or_default());
+    auto request_url_origin = HTML::Origin(request_url.scheme(), request_url.host(), request_url.port_or_default());
 
     bool should_enforce_same_origin_policy = true;
     if (auto* page = m_window->page())

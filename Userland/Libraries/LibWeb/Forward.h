@@ -180,8 +180,11 @@ class TextEncoder;
 }
 
 namespace Web::Fetch {
+class BodyMixin;
 class Headers;
 class HeadersIterator;
+class Request;
+class Response;
 }
 
 namespace Web::Fetch::Infrastructure {
@@ -357,6 +360,10 @@ namespace Web::Platform {
 class Timer;
 }
 
+namespace Web::ReferrerPolicy {
+enum class ReferrerPolicy;
+}
+
 namespace Web::RequestIdleCallback {
 class IdleDeadline;
 }
@@ -476,6 +483,14 @@ enum class CanPlayTypeResult;
 enum class CanvasFillRule;
 enum class EndingType;
 enum class DOMParserSupportedType;
+enum class ReferrerPolicy;
+enum class RequestDestination;
+enum class RequestMode;
+enum class RequestCredentials;
+enum class RequestCache;
+enum class RequestRedirect;
+enum class RequestDuplex;
+enum class ResponseType;
 enum class ResizeObserverBoxOptions;
 enum class XMLHttpRequestResponseType;
 }

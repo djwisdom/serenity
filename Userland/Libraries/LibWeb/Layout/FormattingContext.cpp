@@ -39,7 +39,18 @@ void FormattingContext::run_intrinsic_sizing(Box const& box)
     if (box_state.has_definite_height())
         box_state.set_content_height(box.computed_values().height().resolved(box, CSS::Length::make_px(containing_block_height_for(box))).to_px(box));
 
-    run(box, LayoutMode::IntrinsicSizing);
+    auto to_available_space = [&](SizeConstraint constraint) {
+        if (constraint == SizeConstraint::MinContent)
+            return AvailableSpace::make_min_content();
+        if (constraint == SizeConstraint::MaxContent)
+            return AvailableSpace::make_max_content();
+        return AvailableSpace::make_indefinite();
+    };
+
+    auto available_width = to_available_space(box_state.width_constraint);
+    auto available_height = to_available_space(box_state.height_constraint);
+
+    run(box, LayoutMode::IntrinsicSizing, available_width, available_height);
 }
 
 bool FormattingContext::creates_block_formatting_context(Box const& box)
@@ -54,6 +65,8 @@ bool FormattingContext::creates_block_formatting_context(Box const& box)
         return true;
     if (is<TableCellBox>(box))
         return true;
+    if (box.computed_values().display().is_flex_inside())
+        return false;
 
     CSS::Overflow overflow_x = box.computed_values().overflow_x();
     if ((overflow_x != CSS::Overflow::Visible) && (overflow_x != CSS::Overflow::Clip))
@@ -104,7 +117,7 @@ OwnPtr<FormattingContext> FormattingContext::create_independent_formatting_conte
             {
             }
             virtual float automatic_content_height() const override { return 0; };
-            virtual void run(Box const&, LayoutMode) override { }
+            virtual void run(Box const&, LayoutMode, AvailableSpace const&, AvailableSpace const&) override { }
         };
         return make<ReplacedFormattingContext>(state, child_box);
     }
@@ -146,7 +159,7 @@ OwnPtr<FormattingContext> FormattingContext::create_independent_formatting_conte
             {
             }
             virtual float automatic_content_height() const override { return 0; };
-            virtual void run(Box const&, LayoutMode) override { }
+            virtual void run(Box const&, LayoutMode, AvailableSpace const&, AvailableSpace const&) override { }
         };
         return make<DummyFormattingContext>(state, child_box);
     }
@@ -176,9 +189,9 @@ OwnPtr<FormattingContext> FormattingContext::layout_inside(Box const& child_box,
 
     auto independent_formatting_context = create_independent_formatting_context_if_needed(m_state, child_box);
     if (independent_formatting_context)
-        independent_formatting_context->run(child_box, layout_mode);
+        independent_formatting_context->run(child_box, layout_mode, AvailableSpace::make_indefinite(), AvailableSpace::make_indefinite());
     else
-        run(child_box, layout_mode);
+        run(child_box, layout_mode, AvailableSpace::make_indefinite(), AvailableSpace::make_indefinite());
 
     return independent_formatting_context;
 }
@@ -1165,6 +1178,22 @@ float FormattingContext::compute_box_y_position_with_respect_to_siblings(Box con
     } else {
         return y + box_state.margin_top;
     }
+}
+
+// https://drafts.csswg.org/css-sizing-3/#stretch-fit-size
+float FormattingContext::calculate_stretch_fit_width(Box const& box, AvailableSpace const& available_width) const
+{
+    // The size a box would take if its outer size filled the available space in the given axis;
+    // in other words, the stretch fit into the available space, if that is definite.
+    // Undefined if the available space is indefinite.
+    auto const& box_state = m_state.get(box);
+    return available_width.to_px()
+        - box_state.margin_left
+        - box_state.margin_right
+        - box_state.padding_left
+        - box_state.padding_right
+        - box_state.border_left
+        - box_state.border_right;
 }
 
 }

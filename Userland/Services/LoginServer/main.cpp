@@ -23,8 +23,8 @@ static void child_process(Core::Account const& account)
         exit(1);
     }
 
-    if (!account.login()) {
-        dbgln("failed to switch users: {}", strerror(errno));
+    if (auto const result = account.login(); result.is_error()) {
+        dbgln("failed to switch users: {}", result.error());
         exit(1);
     }
 
@@ -80,7 +80,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
         auto fail_message = "Can't log in: invalid username or password."sv;
 
-        auto account = Core::Account::from_name(username.characters());
+        auto account = Core::Account::from_name(username);
         if (account.is_error()) {
             window->set_fail_message(fail_message);
             dbgln("failed graphical login for user {}: {}", username, account.error());
@@ -99,13 +99,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         login(account.value(), *window);
     };
 
-    char const* auto_login = nullptr;
+    StringView auto_login;
 
     Core::ArgsParser args_parser;
     args_parser.add_option(auto_login, "automatically log in with no prompt", "auto-login", 'a', "username");
     args_parser.parse(arguments);
 
-    if (!auto_login) {
+    if (auto_login.is_empty()) {
         window->show();
     } else {
         auto account = Core::Account::from_name(auto_login);

@@ -52,7 +52,50 @@ static bool build_markdown_document(DOM::Document& document, ByteBuffer const& d
     if (!markdown_document)
         return false;
 
-    auto parser = HTML::HTMLParser::create(document, markdown_document->render_to_html(), "utf-8");
+    auto extra_head_contents = R"~~~(
+<style>
+    .zoomable {
+        cursor: zoom-in;
+        max-width: 100%;
+    }
+    .zoomable.zoomed-in {
+        cursor: zoom-out;
+        max-width: none;
+    }
+</style>
+<script>
+    function imageClickEventListener(event) {
+        let image = event.target;
+        if (image.classList.contains("zoomable")) {
+            image.classList.toggle("zoomed-in");
+        }
+    }
+    function processImages() {
+        let images = document.querySelectorAll("img");
+        let windowWidth = window.innerWidth;
+        images.forEach((image) => {
+            if (image.naturalWidth > windowWidth) {
+                image.classList.add("zoomable");
+            } else {
+                image.classList.remove("zoomable");
+                image.classList.remove("zoomed-in");
+            }
+
+            image.addEventListener("click", imageClickEventListener);
+        });
+    }
+
+    document.addEventListener("load", () => {
+        processImages();
+    });
+
+    window.addEventListener("resize", () => {
+        processImages();
+    });
+</script>
+)~~~"sv;
+
+    auto parser = HTML::HTMLParser::create(document, markdown_document->render_to_html(extra_head_contents), "utf-8");
     parser->run(document.url());
     return true;
 }
@@ -199,9 +242,9 @@ bool FrameLoader::load(LoadRequest& request, Type type)
     if (document && document->has_active_favicon())
         return true;
 
-    if (url.protocol() == "http" || url.protocol() == "https") {
+    if (url.scheme() == "http" || url.scheme() == "https") {
         AK::URL favicon_url;
-        favicon_url.set_protocol(url.protocol());
+        favicon_url.set_scheme(url.scheme());
         favicon_url.set_host(url.host());
         favicon_url.set_port(url.port_or_default());
         favicon_url.set_paths({ "favicon.ico" });

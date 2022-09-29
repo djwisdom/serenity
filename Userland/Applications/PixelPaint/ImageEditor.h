@@ -12,6 +12,7 @@
 #include "Image.h"
 #include "Selection.h"
 #include <AK/Variant.h>
+#include <LibCore/EventLoop.h>
 #include <LibGUI/AbstractZoomPanWidget.h>
 #include <LibGUI/Frame.h>
 #include <LibGUI/UndoStack.h>
@@ -37,6 +38,7 @@ public:
     Layer* active_layer() { return m_active_layer; }
     void set_active_layer(Layer*);
 
+    ErrorOr<void> add_new_layer_from_selection();
     Tool* active_tool() { return m_active_tool; }
     void set_active_tool(Tool*);
     void update_tool_cursor();
@@ -114,6 +116,8 @@ public:
     void draw_marching_ants(Gfx::Painter&, Gfx::IntRect const&) const;
     void draw_marching_ants(Gfx::Painter&, Mask const&) const;
 
+    Core::EventLoop& gui_event_loop() { return m_gui_event_loop; }
+
 private:
     explicit ImageEditor(NonnullRefPtr<Image>);
 
@@ -179,6 +183,8 @@ private:
     int m_marching_ants_offset { 0 };
 
     void draw_marching_ants_pixel(Gfx::Painter&, int x, int y) const;
+
+    Core::EventLoop& m_gui_event_loop;
 };
 
 }
