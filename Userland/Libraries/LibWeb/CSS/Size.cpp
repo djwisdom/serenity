@@ -26,6 +26,11 @@ Size Size::make_auto()
     return Size { Type::Auto, Length::make_auto() };
 }
 
+Size Size::make_px(float px)
+{
+    return make_length(CSS::Length::make_px(px));
+}
+
 Size Size::make_length(Length length)
 {
     return Size { Type::Length, move(length) };
@@ -67,6 +72,26 @@ bool Size::contains_percentage() const
     default:
         return m_length_percentage.contains_percentage();
     }
+}
+
+String Size::to_string() const
+{
+    switch (m_type) {
+    case Type::Auto:
+        return "auto";
+    case Type::Length:
+    case Type::Percentage:
+        return m_length_percentage.to_string();
+    case Type::MinContent:
+        return "min-content";
+    case Type::MaxContent:
+        return "max-content";
+    case Type::FitContent:
+        return String::formatted("fit-content({})", m_length_percentage.to_string());
+    case Type::None:
+        return "none";
+    }
+    VERIFY_NOT_REACHED();
 }
 
 }

@@ -67,7 +67,7 @@ float FlexFormattingContext::automatic_content_height() const
     return m_state.get(flex_container()).content_height();
 }
 
-void FlexFormattingContext::run(Box const& run_box, LayoutMode layout_mode)
+void FlexFormattingContext::run(Box const& run_box, LayoutMode layout_mode, [[maybe_unused]] AvailableSpace const& available_width, [[maybe_unused]] AvailableSpace const& available_height)
 {
     VERIFY(&run_box == &flex_container());
 
@@ -171,7 +171,7 @@ void FlexFormattingContext::run(Box const& run_box, LayoutMode layout_mode)
     distribute_any_remaining_free_space();
 
     // 13. Resolve cross-axis auto margins.
-    // FIXME: This
+    resolve_cross_axis_auto_margins();
 
     // 14. Align all flex items along the cross-axis
     align_all_flex_items_along_the_cross_axis();
@@ -291,7 +291,7 @@ void FlexFormattingContext::generate_anonymous_flex_items()
 
     flex_container().for_each_child_of_type<Box>([&](Box& child_box) {
         // Skip anonymous text runs that are only whitespace.
-        if (child_box.is_anonymous() && !child_box.first_child_of_type<BlockContainer>()) {
+        if (child_box.is_anonymous() && !child_box.is_generated() && !child_box.first_child_of_type<BlockContainer>()) {
             bool contains_only_white_space = true;
             child_box.for_each_in_subtree([&](auto const& node) {
                 if (!is<TextNode>(node) || !static_cast<TextNode const&>(node).dom_node().data().is_whitespace()) {
@@ -598,7 +598,7 @@ void FlexFormattingContext::determine_available_main_and_cross_space(bool& main_
             cross_available_space = cross_max_size;
     }
 
-    m_available_space = AvailableSpace { .main = main_available_space, .cross = cross_available_space };
+    m_available_space = AvailableSpaceForItems { .main = main_available_space, .cross = cross_available_space };
 }
 
 float FlexFormattingContext::calculate_indefinite_main_size(FlexItem const& item)
@@ -635,7 +635,7 @@ float FlexFormattingContext::calculate_indefinite_main_size(FlexItem const& item
         VERIFY(independent_formatting_context);
 
         box_state.set_content_width(fit_content_cross_size);
-        independent_formatting_context->run(item.box, LayoutMode::Normal);
+        independent_formatting_context->run(item.box, LayoutMode::Normal, AvailableSpace::make_indefinite(), AvailableSpace::make_indefinite());
 
         return independent_formatting_context->automatic_content_height();
     }
@@ -1100,7 +1100,7 @@ void FlexFormattingContext::determine_hypothetical_cross_size_of_item(FlexItem& 
     // NOTE: Flex items should always create an independent formatting context!
     VERIFY(independent_formatting_context);
 
-    independent_formatting_context->run(item.box, LayoutMode::Normal);
+    independent_formatting_context->run(item.box, LayoutMode::Normal, AvailableSpace::make_indefinite(), AvailableSpace::make_indefinite());
 
     auto automatic_cross_size = is_row_layout() ? independent_formatting_context->automatic_content_height()
                                                 : box_state.content_width();
@@ -1783,6 +1783,36 @@ CSS::Size const& FlexFormattingContext::computed_cross_min_size(Box const& box) 
 CSS::Size const& FlexFormattingContext::computed_cross_max_size(Box const& box) const
 {
     return !is_row_layout() ? box.computed_values().max_width() : box.computed_values().max_height();
+}
+
+// https://drafts.csswg.org/css-flexbox-1/#algo-cross-margins
+void FlexFormattingContext::resolve_cross_axis_auto_margins()
+{
+    for (auto& line : m_flex_lines) {
+        for (auto& item : line.items) {
+            //  If a flex item has auto cross-axis margins:
+            if (!item->margins.cross_before_is_auto && !item->margins.cross_after_is_auto)
+                continue;
+
+            // If its outer cross size (treating those auto margins as zero) is less than the cross size of its flex line,
+            // distribute the difference in those sizes equally to the auto margins.
+            auto outer_cross_size = item->cross_size + item->padding.cross_before + item->padding.cross_after + item->borders.cross_before + item->borders.cross_after;
+            if (outer_cross_size < line.cross_size) {
+                float remainder = line.cross_size - outer_cross_size;
+                if (item->margins.cross_before_is_auto && item->margins.cross_after_is_auto) {
+                    item->margins.cross_before = remainder / 2.0f;
+                    item->margins.cross_after = remainder / 2.0f;
+                } else if (item->margins.cross_before_is_auto) {
+                    item->margins.cross_before = remainder;
+                } else {
+                    item->margins.cross_after = remainder;
+                }
+            } else {
+                // FIXME: Otherwise, if the block-start or inline-start margin (whichever is in the cross axis) is auto, set it to zero.
+                //        Set the opposite margin so that the outer cross size of the item equals the cross size of its flex line.
+            }
+        }
+    }
 }
 
 }

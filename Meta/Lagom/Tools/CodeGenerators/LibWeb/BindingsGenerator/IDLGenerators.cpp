@@ -36,6 +36,8 @@ static bool is_platform_object(Type const& type)
         "Node"sv,
         "Path2D"sv,
         "Range"sv,
+        "ReadableStream"sv,
+        "Request"sv,
         "Selection"sv,
         "Text"sv,
         "TextMetrics"sv,
@@ -585,6 +587,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     auto @js_name.as_string@ = TRY(@js_name@@js_suffix@.to_string(vm));
 )~~~");
         auto first = true;
+        VERIFY(enumeration.translated_cpp_names.size() >= 1);
         for (auto& it : enumeration.translated_cpp_names) {
             enum_generator.set("enum.alt.name", it.key);
             enum_generator.set("enum.alt.value", it.value);
@@ -600,12 +603,12 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
         // NOTE: Attribute setters return undefined instead of throwing when the string doesn't match an enum value.
         if constexpr (!IsSame<Attribute, RemoveConst<ParameterType>>) {
             enum_generator.append(R"~~~(
-    @else@
+    else
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::InvalidEnumerationValue, @js_name.as_string@, "@parameter.type.name@");
 )~~~");
         } else {
             enum_generator.append(R"~~~(
-    @else@
+    else
         return JS::js_undefined();
 )~~~");
         }
@@ -630,28 +633,40 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
             for (auto& member : current_dictionary->members) {
                 dictionary_generator.set("member_key", member.name);
                 auto member_js_name = make_input_acceptable_cpp(member.name.to_snakecase());
+                auto member_value_name = String::formatted("{}_value", member_js_name);
+                auto member_property_value_name = String::formatted("{}_property_value", member_js_name);
                 dictionary_generator.set("member_name", member_js_name);
+                dictionary_generator.set("member_value_name", member_value_name);
+                dictionary_generator.set("member_property_value_name", member_property_value_name);
                 dictionary_generator.append(R"~~~(
-    JS::Value @member_name@;
-    if (@js_name@@js_suffix@.is_nullish()) {
-        @member_name@ = JS::js_undefined();
-    } else {
-        @member_name@ = TRY(@js_name@@js_suffix@.as_object().get("@member_key@"));
-    }
+    auto @member_property_value_name@ = JS::js_undefined();
+    if (@js_name@@js_suffix@.is_object())
+        @member_property_value_name@ = TRY(@js_name@@js_suffix@.as_object().get("@member_key@"));
 )~~~");
                 if (member.required) {
                     dictionary_generator.append(R"~~~(
-    if (@member_name@.is_undefined())
+    if (@member_property_value_name@.is_undefined())
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::MissingRequiredProperty, "@member_key@");
+)~~~");
+                } else if (!member.default_value.has_value()) {
+                    // Assume struct member is Optional<T> and _don't_ assign the generated default
+                    // value (e.g. first enum member) when the dictionary member is optional (i.e.
+                    // no `required` and doesn't have a default value).
+                    // This is needed so that "dictionary has member" checks work as expected.
+                    dictionary_generator.append(R"~~~(
+    if (!@member_property_value_name@.is_undefined()) {
 )~~~");
                 }
 
-                auto member_value_name = String::formatted("{}_value", member_js_name);
-                dictionary_generator.set("member_value_name", member_value_name);
-                generate_to_cpp(dictionary_generator, member, member_js_name, "", member_value_name, interface, member.extended_attributes.contains("LegacyNullToEmptyString"), !member.required, member.default_value);
+                generate_to_cpp(dictionary_generator, member, member_property_value_name, "", member_value_name, interface, member.extended_attributes.contains("LegacyNullToEmptyString"), !member.required, member.default_value);
                 dictionary_generator.append(R"~~~(
     @cpp_name@.@member_name@ = @member_value_name@;
 )~~~");
+                if (!member.required && !member.default_value.has_value()) {
+                    dictionary_generator.append(R"~~~(
+    }
+)~~~");
+                }
             }
             if (current_dictionary->parent_name.is_null())
                 break;
@@ -2084,7 +2099,9 @@ using namespace Web::IntersectionObserver;
 using namespace Web::RequestIdleCallback;
 using namespace Web::ResizeObserver;
 using namespace Web::Selection;
+using namespace Web::Streams;
 using namespace Web::UIEvents;
+using namespace Web::URL;
 using namespace Web::XHR;
 using namespace Web::WebGL;
 using namespace Web::WebIDL;
@@ -2397,6 +2414,7 @@ using namespace Web::NavigationTiming;
 using namespace Web::RequestIdleCallback;
 using namespace Web::ResizeObserver;
 using namespace Web::Selection;
+using namespace Web::Streams;
 using namespace Web::SVG;
 using namespace Web::UIEvents;
 using namespace Web::URL;

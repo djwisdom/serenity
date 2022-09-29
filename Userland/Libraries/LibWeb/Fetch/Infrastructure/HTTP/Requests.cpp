@@ -9,6 +9,11 @@
 
 namespace Web::Fetch::Infrastructure {
 
+Request::Request()
+    : m_header_list(make_ref_counted<HeaderList>())
+{
+}
+
 // https://fetch.spec.whatwg.org/#concept-request-url
 AK::URL const& Request::url() const
 {
@@ -31,7 +36,8 @@ void Request::set_url(AK::URL url)
     // Sometimes setting the URL and URL list are done as two distinct steps in the spec,
     // but since we know the URL is always the URL list's first item and doesn't change later
     // on, we can combine them.
-    VERIFY(m_url_list.is_empty());
+    if (!m_url_list.is_empty())
+        m_url_list.clear();
     m_url_list.append(move(url));
 }
 
@@ -158,17 +164,19 @@ ErrorOr<ByteBuffer> Request::byte_serialize_origin() const
 }
 
 // https://fetch.spec.whatwg.org/#concept-request-clone
-Request Request::clone() const
+WebIDL::ExceptionOr<NonnullOwnPtr<Request>> Request::clone() const
 {
     // To clone a request request, run these steps:
 
     // 1. Let newRequest be a copy of request, except for its body.
-    BodyType body;
-    swap(body, const_cast<BodyType&>(m_body));
-    auto new_request = *this;
-    swap(body, const_cast<BodyType&>(m_body));
+    BodyType tmp_body;
+    swap(tmp_body, const_cast<BodyType&>(m_body));
+    auto new_request = make<Infrastructure::Request>(*this);
+    swap(tmp_body, const_cast<BodyType&>(m_body));
 
-    // FIXME: 2. If request’s body is non-null, set newRequest’s body to the result of cloning request’s body.
+    // 2. If request’s body is non-null, set newRequest’s body to the result of cloning request’s body.
+    if (auto const* body = m_body.get_pointer<Body>())
+        new_request->set_body(TRY(body->clone()));
 
     // 3. Return newRequest.
     return new_request;
@@ -200,7 +208,7 @@ ErrorOr<void> Request::add_range_reader(u64 first, Optional<u64> const& last)
         .name = TRY(ByteBuffer::copy("Range"sv.bytes())),
         .value = move(range_value),
     };
-    TRY(m_header_list.append(move(header)));
+    TRY(m_header_list->append(move(header)));
 
     return {};
 }

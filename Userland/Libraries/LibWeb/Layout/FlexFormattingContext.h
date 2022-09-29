@@ -18,7 +18,7 @@ public:
 
     virtual bool inhibits_floating() const override { return true; }
 
-    virtual void run(Box const&, LayoutMode) override;
+    virtual void run(Box const&, LayoutMode, AvailableSpace const& available_width, AvailableSpace const& available_height) override;
     virtual float automatic_content_height() const override;
 
     Box const& flex_container() const { return context_box(); }
@@ -142,6 +142,8 @@ private:
 
     void resolve_flexible_lengths();
 
+    void resolve_cross_axis_auto_margins();
+
     void determine_hypothetical_cross_size_of_item(FlexItem&, bool resolve_percentage_min_max_sizes);
 
     void calculate_cross_size_of_each_flex_line(float cross_min_size, float cross_max_size);
@@ -190,11 +192,11 @@ private:
     Vector<FlexItem> m_flex_items;
     CSS::FlexDirection m_flex_direction {};
 
-    struct AvailableSpace {
+    struct AvailableSpaceForItems {
         Optional<float> main;
         Optional<float> cross;
     };
-    Optional<AvailableSpace> m_available_space;
+    Optional<AvailableSpaceForItems> m_available_space;
 };
 
 }
