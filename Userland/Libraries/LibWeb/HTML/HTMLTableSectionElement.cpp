@@ -36,14 +36,14 @@ JS::NonnullGCPtr<DOM::HTMLCollection> HTMLTableSectionElement::rows() const
 }
 
 // https://html.spec.whatwg.org/multipage/tables.html#dom-tbody-insertrow
-DOM::ExceptionOr<JS::NonnullGCPtr<HTMLTableRowElement>> HTMLTableSectionElement::insert_row(long index)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<HTMLTableRowElement>> HTMLTableSectionElement::insert_row(long index)
 {
     auto rows_collection = rows();
     auto rows_collection_size = static_cast<long>(rows_collection->length());
 
     // 1. If index is less than −1 or greater than the number of elements in the rows collection, throw an "IndexSizeError" DOMException.
     if (index < -1 || index > rows_collection_size)
-        return DOM::IndexSizeError::create(global_object(), "Index is negative or greater than the number of rows");
+        return WebIDL::IndexSizeError::create(global_object(), "Index is negative or greater than the number of rows");
 
     // 2. Let table row be the result of creating an element given this element's node document, tr, and the HTML namespace.
     auto& table_row = static_cast<HTMLTableRowElement&>(*DOM::create_element(document(), TagNames::tr, Namespace::HTML));
@@ -60,14 +60,14 @@ DOM::ExceptionOr<JS::NonnullGCPtr<HTMLTableRowElement>> HTMLTableSectionElement:
 }
 
 // https://html.spec.whatwg.org/multipage/tables.html#dom-tbody-deleterow
-DOM::ExceptionOr<void> HTMLTableSectionElement::delete_row(long index)
+WebIDL::ExceptionOr<void> HTMLTableSectionElement::delete_row(long index)
 {
     auto rows_collection = rows();
     auto rows_collection_size = static_cast<long>(rows_collection->length());
 
     // 1. If index is less than −1 or greater than or equal to the number of elements in the rows collection, then throw an "IndexSizeError" DOMException.
     if (index < -1 || index >= rows_collection_size)
-        return DOM::IndexSizeError::create(global_object(), "Index is negative or greater than or equal to the number of rows");
+        return WebIDL::IndexSizeError::create(global_object(), "Index is negative or greater than or equal to the number of rows");
 
     // 2. If index is −1, then remove the last element in the rows collection from this element, or do nothing if the rows collection is empty.
     if (index == -1) {

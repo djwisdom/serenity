@@ -20,7 +20,12 @@ SVGFormattingContext::SVGFormattingContext(LayoutState& state, Box const& box, F
 
 SVGFormattingContext::~SVGFormattingContext() = default;
 
-void SVGFormattingContext::run(Box const& box, LayoutMode)
+float SVGFormattingContext::automatic_content_height() const
+{
+    return 0;
+}
+
+void SVGFormattingContext::run(Box const& box, LayoutMode, [[maybe_unused]] AvailableSpace const& available_width, [[maybe_unused]] AvailableSpace const& available_height)
 {
     auto& svg_svg_element = verify_cast<SVG::SVGSVGElement>(*box.dom_node());
 

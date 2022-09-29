@@ -187,9 +187,6 @@ void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
         insert_node_into_inline_or_block_ancestor(layout_node);
     }
 
-    if (layout_node->has_style() && style)
-        static_cast<Layout::NodeWithStyle&>(*layout_node).did_insert_into_layout_tree(*style);
-
     auto* shadow_root = is<DOM::Element>(dom_node) ? verify_cast<DOM::Element>(dom_node).shadow_root() : nullptr;
 
     if ((dom_node.has_children() || shadow_root) && layout_node->can_have_children()) {
@@ -217,6 +214,7 @@ void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
                 return nullptr;
 
             if (auto pseudo_element_node = DOM::Element::create_layout_node_for_display_type(document, pseudo_element_display, move(pseudo_element_style), nullptr)) {
+                pseudo_element_node->set_generated(true);
                 // FIXME: Handle images, and multiple values
                 if (pseudo_element_content.type == CSS::ContentData::Type::String) {
                     auto* text = document.heap().allocate<DOM::Text>(document.realm(), document, pseudo_element_content.data);

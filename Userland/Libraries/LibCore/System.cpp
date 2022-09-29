@@ -12,7 +12,6 @@
 #include <AK/StdLibExtras.h>
 #include <AK/String.h>
 #include <AK/Vector.h>
-#include <LibCore/Account.h>
 #include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <limits.h>
@@ -26,6 +25,7 @@
 #include <unistd.h>
 
 #ifdef __serenity__
+#    include <LibCore/Account.h>
 #    include <LibSystem/syscall.h>
 #    include <serenity.h>
 #endif
@@ -120,13 +120,6 @@ ErrorOr<void> ptrace_peekbuf(pid_t tid, void const* tracee_addr, Bytes destinati
     };
     int rc = syscall(SC_ptrace, &params);
     HANDLE_SYSCALL_RETURN_VALUE("ptrace_peekbuf", rc, {});
-}
-
-ErrorOr<void> setgroups(Span<gid_t const> gids)
-{
-    if (::setgroups(gids.size(), gids.data()) < 0)
-        return Error::from_syscall("setgroups"sv, -errno);
-    return {};
 }
 
 ErrorOr<void> mount(int source_fd, StringView target, StringView fs_type, int flags)
@@ -1215,6 +1208,13 @@ ErrorOr<Vector<gid_t>> getgroups()
     if (::getgroups(count, groups.data()) < 0)
         return Error::from_syscall("getgroups"sv, -errno);
     return groups;
+}
+
+ErrorOr<void> setgroups(Span<gid_t const> gids)
+{
+    if (::setgroups(gids.size(), gids.data()) < 0)
+        return Error::from_syscall("setgroups"sv, -errno);
+    return {};
 }
 
 ErrorOr<void> mknod(StringView pathname, mode_t mode, dev_t dev)

@@ -5,7 +5,6 @@
  */
 
 #include <AK/Demangle.h>
-#include <LibGfx/Font/FontDatabase.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/BrowsingContext.h>
@@ -15,6 +14,7 @@
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Platform/FontPlugin.h>
 #include <typeinfo>
 
 namespace Web::Layout {
@@ -127,14 +127,17 @@ InitialContainingBlock& Node::root()
 
 void Node::set_needs_display()
 {
-    if (auto* block = containing_block()) {
-        block->paint_box()->for_each_fragment([&](auto& fragment) {
-            if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
-                browsing_context().set_needs_display(enclosing_int_rect(fragment.absolute_rect()));
-            }
-            return IterationDecision::Continue;
-        });
-    }
+    auto* containing_block = this->containing_block();
+    if (!containing_block)
+        return;
+    if (!containing_block->paint_box())
+        return;
+    containing_block->paint_box()->for_each_fragment([&](auto& fragment) {
+        if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
+            browsing_context().set_needs_display(enclosing_int_rect(fragment.absolute_rect()));
+        }
+        return IterationDecision::Continue;
+    });
 }
 
 Gfx::FloatPoint Node::box_type_agnostic_position() const
@@ -198,11 +201,7 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, CSS::Comp
     , m_computed_values(move(computed_values))
 {
     m_has_style = true;
-    m_font = Gfx::FontDatabase::default_font();
-}
-
-void NodeWithStyle::did_insert_into_layout_tree(CSS::StyleProperties const&)
-{
+    m_font = Platform::FontPlugin::the().default_font();
 }
 
 void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
@@ -491,22 +490,15 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     if (auto maybe_visibility = computed_style.visibility(); maybe_visibility.has_value())
         computed_values.set_visibility(maybe_visibility.release_value());
 
-    if (computed_values.opacity() == 0 || computed_values.visibility() != CSS::Visibility::Visible)
-        m_visible = false;
+    m_visible = computed_values.opacity() != 0 && computed_values.visibility() == CSS::Visibility::Visible;
 
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::Width); maybe_length_percentage.has_value())
-        computed_values.set_width(maybe_length_percentage.release_value());
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::MinWidth); maybe_length_percentage.has_value())
-        computed_values.set_min_width(maybe_length_percentage.release_value());
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::MaxWidth); maybe_length_percentage.has_value())
-        computed_values.set_max_width(maybe_length_percentage.release_value());
+    computed_values.set_width(computed_style.size_value(CSS::PropertyID::Width));
+    computed_values.set_min_width(computed_style.size_value(CSS::PropertyID::MinWidth));
+    computed_values.set_max_width(computed_style.size_value(CSS::PropertyID::MaxWidth));
 
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::Height); maybe_length_percentage.has_value())
-        computed_values.set_height(maybe_length_percentage.release_value());
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::MinHeight); maybe_length_percentage.has_value())
-        computed_values.set_min_height(maybe_length_percentage.release_value());
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::MaxHeight); maybe_length_percentage.has_value())
-        computed_values.set_max_height(maybe_length_percentage.release_value());
+    computed_values.set_height(computed_style.size_value(CSS::PropertyID::Height));
+    computed_values.set_min_height(computed_style.size_value(CSS::PropertyID::MinHeight));
+    computed_values.set_max_height(computed_style.size_value(CSS::PropertyID::MaxHeight));
 
     computed_values.set_inset(computed_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::Length::make_auto()));
     computed_values.set_margin(computed_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));

@@ -97,13 +97,13 @@ JS::GCPtr<HTMLTableSectionElement> HTMLTableElement::t_head()
     return nullptr;
 }
 
-DOM::ExceptionOr<void> HTMLTableElement::set_t_head(HTMLTableSectionElement* thead)
+WebIDL::ExceptionOr<void> HTMLTableElement::set_t_head(HTMLTableSectionElement* thead)
 {
     // FIXME: This is not always the case, but this function is currently written in a way that assumes non-null.
     VERIFY(thead);
 
     if (thead->local_name() != TagNames::thead)
-        return DOM::HierarchyRequestError::create(global_object(), "Element is not thead");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Element is not thead");
 
     // FIXME: The spec requires deleting the current thead if thead is null
     //        Currently the wrapper generator doesn't send us a nullable value
@@ -184,13 +184,13 @@ JS::GCPtr<HTMLTableSectionElement> HTMLTableElement::t_foot()
     return nullptr;
 }
 
-DOM::ExceptionOr<void> HTMLTableElement::set_t_foot(HTMLTableSectionElement* tfoot)
+WebIDL::ExceptionOr<void> HTMLTableElement::set_t_foot(HTMLTableSectionElement* tfoot)
 {
     // FIXME: This is not always the case, but this function is currently written in a way that assumes non-null.
     VERIFY(tfoot);
 
     if (tfoot->local_name() != TagNames::tfoot)
-        return DOM::HierarchyRequestError::create(global_object(), "Element is not tfoot");
+        return WebIDL::HierarchyRequestError::create(global_object(), "Element is not tfoot");
 
     // FIXME: The spec requires deleting the current tfoot if tfoot is null
     //        Currently the wrapper generator doesn't send us a nullable value
@@ -280,13 +280,13 @@ JS::NonnullGCPtr<DOM::HTMLCollection> HTMLTableElement::rows()
     });
 }
 
-DOM::ExceptionOr<JS::NonnullGCPtr<HTMLTableRowElement>> HTMLTableElement::insert_row(long index)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<HTMLTableRowElement>> HTMLTableElement::insert_row(long index)
 {
     auto rows = this->rows();
     auto rows_length = rows->length();
 
     if (index < -1 || index > (long)rows_length) {
-        return DOM::IndexSizeError::create(global_object(), "Index is negative or greater than the number of rows");
+        return WebIDL::IndexSizeError::create(global_object(), "Index is negative or greater than the number of rows");
     }
     auto& tr = static_cast<HTMLTableRowElement&>(*DOM::create_element(document(), TagNames::tr, Namespace::HTML));
     if (rows_length == 0 && !has_child_of_type<HTMLTableRowElement>()) {
@@ -306,14 +306,14 @@ DOM::ExceptionOr<JS::NonnullGCPtr<HTMLTableRowElement>> HTMLTableElement::insert
 }
 
 // https://html.spec.whatwg.org/multipage/tables.html#dom-table-deleterow
-DOM::ExceptionOr<void> HTMLTableElement::delete_row(long index)
+WebIDL::ExceptionOr<void> HTMLTableElement::delete_row(long index)
 {
     auto rows = this->rows();
     auto rows_length = rows->length();
 
     // 1. If index is less than −1 or greater than or equal to the number of elements in the rows collection, then throw an "IndexSizeError" DOMException.
     if (index < -1 || index >= (long)rows_length)
-        return DOM::IndexSizeError::create(global_object(), "Index is negative or greater than or equal to the number of rows");
+        return WebIDL::IndexSizeError::create(global_object(), "Index is negative or greater than or equal to the number of rows");
 
     // 2. If index is −1, then remove the last element in the rows collection from its parent, or do nothing if the rows collection is empty.
     if (index == -1) {

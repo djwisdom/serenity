@@ -40,6 +40,8 @@
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PaintableBox.h>
+#include <LibWeb/Platform/EventLoopPluginSerenity.h>
+#include <LibWeb/Platform/FontPluginSerenity.h>
 #include <LibWeb/Platform/ImageCodecPlugin.h>
 #include <LibWeb/WebSockets/WebSocket.h>
 #include <LibWebSocket/ConnectionInfo.h>
@@ -513,19 +515,19 @@ public:
     virtual RefPtr<Web::ResourceLoaderConnectorRequest> start_request(String const& method, AK::URL const& url, HashMap<String, String> const& request_headers, ReadonlyBytes request_body, Core::ProxyData const& proxy) override
     {
         RefPtr<Web::ResourceLoaderConnectorRequest> request;
-        if (url.protocol().equals_ignoring_case("http"sv)) {
+        if (url.scheme().equals_ignoring_case("http"sv)) {
             auto request_or_error = HTTPHeadlessRequest::create(method, url, request_headers, request_body, proxy);
             if (request_or_error.is_error())
                 return {};
             request = request_or_error.release_value();
         }
-        if (url.protocol().equals_ignoring_case("https"sv)) {
+        if (url.scheme().equals_ignoring_case("https"sv)) {
             auto request_or_error = HTTPSHeadlessRequest::create(method, url, request_headers, request_body, proxy);
             if (request_or_error.is_error())
                 return {};
             request = request_or_error.release_value();
         }
-        if (url.protocol().equals_ignoring_case("gemini"sv)) {
+        if (url.scheme().equals_ignoring_case("gemini"sv)) {
             auto request_or_error = GeminiHeadlessRequest::create(method, url, request_headers, request_body, proxy);
             if (request_or_error.is_error())
                 return {};
@@ -668,6 +670,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_positional_argument(url, "URL to open", "url", Core::ArgsParser::Required::Yes);
     args_parser.parse(arguments);
 
+    Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPluginSerenity);
+    Web::Platform::FontPlugin::install(*new Web::Platform::FontPluginSerenity);
     Web::Platform::ImageCodecPlugin::install(*new ImageCodecPluginHeadless);
     Web::ResourceLoader::initialize(HeadlessRequestServer::create());
     Web::WebSockets::WebSocketClientManager::initialize(HeadlessWebSocketClientManager::create());

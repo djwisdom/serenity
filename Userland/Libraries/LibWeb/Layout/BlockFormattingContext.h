@@ -21,15 +21,14 @@ public:
     explicit BlockFormattingContext(LayoutState&, BlockContainer const&, FormattingContext* parent);
     ~BlockFormattingContext();
 
-    virtual void run(Box const&, LayoutMode) override;
-    virtual void run_intrinsic_sizing(Box const&) override;
+    virtual void run(Box const&, LayoutMode, AvailableSpace const& available_width, AvailableSpace const& available_height) override;
+    virtual float automatic_content_height() const override;
 
     bool is_initial() const;
 
     auto const& left_side_floats() const { return m_left_floats; }
     auto const& right_side_floats() const { return m_right_floats; }
 
-    static float compute_theoretical_height(LayoutState const&, Box const&);
     void compute_width(Box const&, LayoutMode = LayoutMode::Normal);
 
     // https://www.w3.org/TR/css-display/#block-formatting-context-root
@@ -74,7 +73,7 @@ private:
     void layout_block_level_children(BlockContainer const&, LayoutMode);
     void layout_inline_children(BlockContainer const&, LayoutMode);
 
-    void compute_vertical_box_model_metrics(Box const& box, BlockContainer const& containing_block);
+    static void resolve_vertical_box_model_metrics(Box const& box, BlockContainer const& containing_block, LayoutState&);
     void place_block_level_element_in_normal_flow_horizontally(Box const& child_box, BlockContainer const&);
     void place_block_level_element_in_normal_flow_vertically(Box const& child_box, BlockContainer const&);
 

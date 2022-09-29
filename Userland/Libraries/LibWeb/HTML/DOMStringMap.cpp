@@ -111,7 +111,7 @@ String DOMStringMap::determine_value_of_named_property(String const& name) const
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#dom-domstringmap-setitem
-DOM::ExceptionOr<void> DOMStringMap::set_value_of_new_named_property(String const& name, String const& value)
+WebIDL::ExceptionOr<void> DOMStringMap::set_value_of_new_named_property(String const& name, String const& value)
 {
     AK::StringBuilder builder;
 
@@ -126,7 +126,7 @@ DOM::ExceptionOr<void> DOMStringMap::set_value_of_new_named_property(String cons
         if (current_character == '-' && character_index + 1 < name.length()) {
             auto next_character = name[character_index + 1];
             if (is_ascii_lower_alpha(next_character))
-                return DOM::SyntaxError::create(global_object(), "Name cannot contain a '-' followed by a lowercase character.");
+                return WebIDL::SyntaxError::create(global_object(), "Name cannot contain a '-' followed by a lowercase character.");
         }
 
         // 2. For each ASCII upper alpha in name, insert a U+002D HYPHEN-MINUS character (-) before the character and replace the character with the same character converted to ASCII lowercase.
@@ -150,7 +150,7 @@ DOM::ExceptionOr<void> DOMStringMap::set_value_of_new_named_property(String cons
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#dom-domstringmap-setitem
-DOM::ExceptionOr<void> DOMStringMap::set_value_of_existing_named_property(String const& name, String const& value)
+WebIDL::ExceptionOr<void> DOMStringMap::set_value_of_existing_named_property(String const& name, String const& value)
 {
     return set_value_of_new_named_property(name, value);
 }

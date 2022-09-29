@@ -17,7 +17,7 @@ GridFormattingContext::GridFormattingContext(LayoutState& state, BlockContainer 
 
 GridFormattingContext::~GridFormattingContext() = default;
 
-void GridFormattingContext::run(Box const& box, LayoutMode)
+void GridFormattingContext::run(Box const& box, LayoutMode, [[maybe_unused]] AvailableSpace const& available_width, [[maybe_unused]] AvailableSpace const& available_height)
 {
     auto should_skip_is_anonymous_text_run = [&](Box& child_box) -> bool {
         if (child_box.is_anonymous() && !child_box.first_child_of_type<BlockContainer>()) {
@@ -1002,7 +1002,12 @@ void GridFormattingContext::run(Box const& box, LayoutMode)
     float total_y = 0;
     for (auto& grid_row : grid_rows)
         total_y += grid_row.base_size;
-    box_state.set_content_height(total_y);
+    m_automatic_content_height = total_y;
+}
+
+float GridFormattingContext::automatic_content_height() const
+{
+    return m_automatic_content_height;
 }
 
 }

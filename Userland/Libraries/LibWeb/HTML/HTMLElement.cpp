@@ -7,9 +7,7 @@
 #include <AK/StringBuilder.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/Parser.h>
-#include <LibWeb/DOM/DOMException.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/DOM/ExceptionOr.h>
 #include <LibWeb/DOM/IDLEventListener.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/BrowsingContextContainer.h>
@@ -25,6 +23,8 @@
 #include <LibWeb/UIEvents/EventNames.h>
 #include <LibWeb/UIEvents/FocusEvent.h>
 #include <LibWeb/UIEvents/MouseEvent.h>
+#include <LibWeb/WebIDL/DOMException.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::HTML {
 
@@ -90,7 +90,7 @@ String HTMLElement::content_editable() const
 }
 
 // https://html.spec.whatwg.org/multipage/interaction.html#contenteditable
-DOM::ExceptionOr<void> HTMLElement::set_content_editable(String const& content_editable)
+WebIDL::ExceptionOr<void> HTMLElement::set_content_editable(String const& content_editable)
 {
     if (content_editable.equals_ignoring_case("inherit"sv)) {
         remove_attribute(HTML::AttributeNames::contenteditable);
@@ -104,7 +104,7 @@ DOM::ExceptionOr<void> HTMLElement::set_content_editable(String const& content_e
         set_attribute(HTML::AttributeNames::contenteditable, "false");
         return {};
     }
-    return DOM::SyntaxError::create(global_object(), "Invalid contentEditable value, must be 'true', 'false', or 'inherit'");
+    return WebIDL::SyntaxError::create(global_object(), "Invalid contentEditable value, must be 'true', 'false', or 'inherit'");
 }
 
 void HTMLElement::set_inner_text(StringView text)
@@ -141,6 +141,9 @@ String HTMLElement::inner_text()
 // // https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsettop
 int HTMLElement::offset_top() const
 {
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<DOM::Document&>(document()).update_layout();
+
     if (is<HTML::HTMLBodyElement>(this) || !layout_node() || !parent_element() || !parent_element()->layout_node())
         return 0;
     auto position = layout_node()->box_type_agnostic_position();
@@ -151,6 +154,9 @@ int HTMLElement::offset_top() const
 // https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetleft
 int HTMLElement::offset_left() const
 {
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<DOM::Document&>(document()).update_layout();
+
     if (is<HTML::HTMLBodyElement>(this) || !layout_node() || !parent_element() || !parent_element()->layout_node())
         return 0;
     auto position = layout_node()->box_type_agnostic_position();
@@ -190,9 +196,16 @@ int HTMLElement::offset_height() const
     return paint_box()->border_box_height();
 }
 
+// https://html.spec.whatwg.org/multipage/links.html#cannot-navigate
 bool HTMLElement::cannot_navigate() const
 {
-    // FIXME: Return true if element's node document is not fully active
+    // An element element cannot navigate if one of the following is true:
+
+    // - element's node document is not fully active
+    if (!document().is_fully_active())
+        return true;
+
+    // - element is not an a element and is not connected.
     return !is<HTML::HTMLAnchorElement>(this) && !is_connected();
 }
 

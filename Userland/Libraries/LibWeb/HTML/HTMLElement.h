@@ -25,7 +25,7 @@ public:
 
     virtual bool is_editable() const final;
     String content_editable() const;
-    DOM::ExceptionOr<void> set_content_editable(String const&);
+    WebIDL::ExceptionOr<void> set_content_editable(String const&);
 
     String inner_text();
     void set_inner_text(StringView);
@@ -86,5 +86,3 @@ namespace Web::DOM {
 template<>
 inline bool Node::fast_is<HTML::HTMLElement>() const { return is_html_element(); }
 }
-
-WRAPPER_HACK(HTMLElement, Web::HTML)

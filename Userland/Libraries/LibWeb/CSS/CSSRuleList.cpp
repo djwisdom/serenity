@@ -48,14 +48,14 @@ bool CSSRuleList::is_supported_property_index(u32 index) const
 }
 
 // https://www.w3.org/TR/cssom/#insert-a-css-rule
-DOM::ExceptionOr<unsigned> CSSRuleList::insert_a_css_rule(Variant<StringView, CSSRule*> rule, u32 index)
+WebIDL::ExceptionOr<unsigned> CSSRuleList::insert_a_css_rule(Variant<StringView, CSSRule*> rule, u32 index)
 {
     // 1. Set length to the number of items in list.
     auto length = m_rules.size();
 
     // 2. If index is greater than length, then throw an IndexSizeError exception.
     if (index > length)
-        return DOM::IndexSizeError::create(global_object(), "CSS rule index out of bounds.");
+        return WebIDL::IndexSizeError::create(global_object(), "CSS rule index out of bounds.");
 
     // 3. Set new rule to the results of performing parse a CSS rule on argument rule.
     // NOTE: The insert-a-css-rule spec expects `rule` to be a string, but the CSSStyleSheet.insertRule()
@@ -72,7 +72,7 @@ DOM::ExceptionOr<unsigned> CSSRuleList::insert_a_css_rule(Variant<StringView, CS
 
     // 4. If new rule is a syntax error, throw a SyntaxError exception.
     if (!new_rule)
-        return DOM::SyntaxError::create(global_object(), "Unable to parse CSS rule.");
+        return WebIDL::SyntaxError::create(global_object(), "Unable to parse CSS rule.");
 
     // FIXME: 5. If new rule cannot be inserted into list at the zero-index position index due to constraints specified by CSS, then throw a HierarchyRequestError exception. [CSS21]
 
@@ -86,14 +86,14 @@ DOM::ExceptionOr<unsigned> CSSRuleList::insert_a_css_rule(Variant<StringView, CS
 }
 
 // https://www.w3.org/TR/cssom/#remove-a-css-rule
-DOM::ExceptionOr<void> CSSRuleList::remove_a_css_rule(u32 index)
+WebIDL::ExceptionOr<void> CSSRuleList::remove_a_css_rule(u32 index)
 {
     // 1. Set length to the number of items in list.
     auto length = m_rules.size();
 
     // 2. If index is greater than or equal to length, then throw an IndexSizeError exception.
     if (index >= length)
-        return DOM::IndexSizeError::create(global_object(), "CSS rule index out of bounds.");
+        return WebIDL::IndexSizeError::create(global_object(), "CSS rule index out of bounds.");
 
     // 3. Set old rule to the indexth item in list.
     CSSRule& old_rule = m_rules[index];

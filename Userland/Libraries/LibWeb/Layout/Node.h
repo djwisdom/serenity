@@ -15,7 +15,6 @@
 #include <LibWeb/CSS/StyleProperties.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Layout/BoxModelMetrics.h>
-#include <LibWeb/Layout/LayoutPosition.h>
 #include <LibWeb/Painting/PaintContext.h>
 #include <LibWeb/TreeNode.h>
 
@@ -41,6 +40,9 @@ public:
     bool is_anonymous() const;
     DOM::Node const* dom_node() const;
     DOM::Node* dom_node();
+
+    bool is_generated() const { return m_generated; }
+    void set_generated(bool b) { m_generated = b; }
 
     Painting::Paintable* paintable() { return m_paintable; }
     Painting::Paintable const* paintable() const { return m_paintable; }
@@ -154,6 +156,7 @@ private:
     SelectionState m_selection_state { SelectionState::None };
 
     bool m_is_flex_item { false };
+    bool m_generated { false };
 };
 
 class NodeWithStyle : public Node {
@@ -170,8 +173,6 @@ public:
     const CSS::AbstractImageStyleValue* list_style_image() const { return m_list_style_image; }
 
     NonnullRefPtr<NodeWithStyle> create_anonymous_wrapper() const;
-
-    void did_insert_into_layout_tree(CSS::StyleProperties const&);
 
 protected:
     NodeWithStyle(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::StyleProperties>);

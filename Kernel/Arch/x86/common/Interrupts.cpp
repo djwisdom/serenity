@@ -9,8 +9,8 @@
 #include <AK/Types.h>
 
 #include <Kernel/Arch/Interrupts.h>
+#include <Kernel/Arch/x86/common/Interrupts/PIC.h>
 #include <Kernel/Interrupts/GenericInterruptHandler.h>
-#include <Kernel/Interrupts/PIC.h>
 #include <Kernel/Interrupts/SharedIRQHandler.h>
 #include <Kernel/Interrupts/SpuriousInterruptHandler.h>
 #include <Kernel/Interrupts/UnhandledInterruptHandler.h>
@@ -347,39 +347,37 @@ void page_fault_handler(TrapFrame* trap)
         constexpr FlatPtr kmalloc_scrub_pattern = explode_byte(KMALLOC_SCRUB_BYTE);
         constexpr FlatPtr kfree_scrub_pattern = explode_byte(KFREE_SCRUB_BYTE);
         if (response == PageFaultResponse::BusError) {
-            dbgln("Note: Address {} is an access to undefined memory range of a Inode-backed VMObject", VirtualAddress(fault_address));
-        } else {
-            if ((fault_address & 0xffff0000) == (malloc_scrub_pattern & 0xffff0000)) {
-                dbgln("Note: Address {} looks like it may be uninitialized malloc() memory", VirtualAddress(fault_address));
-            } else if ((fault_address & 0xffff0000) == (free_scrub_pattern & 0xffff0000)) {
-                dbgln("Note: Address {} looks like it may be recently free()'d memory", VirtualAddress(fault_address));
-            } else if ((fault_address & 0xffff0000) == (kmalloc_scrub_pattern & 0xffff0000)) {
-                dbgln("Note: Address {} looks like it may be uninitialized kmalloc() memory", VirtualAddress(fault_address));
-            } else if ((fault_address & 0xffff0000) == (kfree_scrub_pattern & 0xffff0000)) {
-                dbgln("Note: Address {} looks like it may be recently kfree()'d memory", VirtualAddress(fault_address));
-            } else if (fault_address < 4096) {
-                dbgln("Note: Address {} looks like a possible nullptr dereference", VirtualAddress(fault_address));
-            } else if constexpr (SANITIZE_PTRS) {
-                constexpr FlatPtr refptr_scrub_pattern = explode_byte(REFPTR_SCRUB_BYTE);
-                constexpr FlatPtr nonnullrefptr_scrub_pattern = explode_byte(NONNULLREFPTR_SCRUB_BYTE);
-                constexpr FlatPtr ownptr_scrub_pattern = explode_byte(OWNPTR_SCRUB_BYTE);
-                constexpr FlatPtr nonnullownptr_scrub_pattern = explode_byte(NONNULLOWNPTR_SCRUB_BYTE);
-                constexpr FlatPtr lockrefptr_scrub_pattern = explode_byte(LOCKREFPTR_SCRUB_BYTE);
-                constexpr FlatPtr nonnulllockrefptr_scrub_pattern = explode_byte(NONNULLLOCKREFPTR_SCRUB_BYTE);
+            dbgln("Note: Address {} is an access to an undefined memory range of an Inode-backed VMObject", VirtualAddress(fault_address));
+        } else if ((fault_address & 0xffff0000) == (malloc_scrub_pattern & 0xffff0000)) {
+            dbgln("Note: Address {} looks like it may be uninitialized malloc() memory", VirtualAddress(fault_address));
+        } else if ((fault_address & 0xffff0000) == (free_scrub_pattern & 0xffff0000)) {
+            dbgln("Note: Address {} looks like it may be recently free()'d memory", VirtualAddress(fault_address));
+        } else if ((fault_address & 0xffff0000) == (kmalloc_scrub_pattern & 0xffff0000)) {
+            dbgln("Note: Address {} looks like it may be uninitialized kmalloc() memory", VirtualAddress(fault_address));
+        } else if ((fault_address & 0xffff0000) == (kfree_scrub_pattern & 0xffff0000)) {
+            dbgln("Note: Address {} looks like it may be recently kfree()'d memory", VirtualAddress(fault_address));
+        } else if (fault_address < 4096) {
+            dbgln("Note: Address {} looks like a possible nullptr dereference", VirtualAddress(fault_address));
+        } else if constexpr (SANITIZE_PTRS) {
+            constexpr FlatPtr refptr_scrub_pattern = explode_byte(REFPTR_SCRUB_BYTE);
+            constexpr FlatPtr nonnullrefptr_scrub_pattern = explode_byte(NONNULLREFPTR_SCRUB_BYTE);
+            constexpr FlatPtr ownptr_scrub_pattern = explode_byte(OWNPTR_SCRUB_BYTE);
+            constexpr FlatPtr nonnullownptr_scrub_pattern = explode_byte(NONNULLOWNPTR_SCRUB_BYTE);
+            constexpr FlatPtr lockrefptr_scrub_pattern = explode_byte(LOCKREFPTR_SCRUB_BYTE);
+            constexpr FlatPtr nonnulllockrefptr_scrub_pattern = explode_byte(NONNULLLOCKREFPTR_SCRUB_BYTE);
 
-                if ((fault_address & 0xffff0000) == (refptr_scrub_pattern & 0xffff0000)) {
-                    dbgln("Note: Address {} looks like it may be a recently destroyed LockRefPtr", VirtualAddress(fault_address));
-                } else if ((fault_address & 0xffff0000) == (nonnullrefptr_scrub_pattern & 0xffff0000)) {
-                    dbgln("Note: Address {} looks like it may be a recently destroyed NonnullLockRefPtr", VirtualAddress(fault_address));
-                } else if ((fault_address & 0xffff0000) == (ownptr_scrub_pattern & 0xffff0000)) {
-                    dbgln("Note: Address {} looks like it may be a recently destroyed OwnPtr", VirtualAddress(fault_address));
-                } else if ((fault_address & 0xffff0000) == (nonnullownptr_scrub_pattern & 0xffff0000)) {
-                    dbgln("Note: Address {} looks like it may be a recently destroyed NonnullOwnPtr", VirtualAddress(fault_address));
-                } else if ((fault_address & 0xffff0000) == (lockrefptr_scrub_pattern & 0xffff0000)) {
-                    dbgln("Note: Address {} looks like it may be a recently destroyed LockRefPtr", VirtualAddress(fault_address));
-                } else if ((fault_address & 0xffff0000) == (nonnulllockrefptr_scrub_pattern & 0xffff0000)) {
-                    dbgln("Note: Address {} looks like it may be a recently destroyed NonnullLockRefPtr", VirtualAddress(fault_address));
-                }
+            if ((fault_address & 0xffff0000) == (refptr_scrub_pattern & 0xffff0000)) {
+                dbgln("Note: Address {} looks like it may be a recently destroyed LockRefPtr", VirtualAddress(fault_address));
+            } else if ((fault_address & 0xffff0000) == (nonnullrefptr_scrub_pattern & 0xffff0000)) {
+                dbgln("Note: Address {} looks like it may be a recently destroyed NonnullLockRefPtr", VirtualAddress(fault_address));
+            } else if ((fault_address & 0xffff0000) == (ownptr_scrub_pattern & 0xffff0000)) {
+                dbgln("Note: Address {} looks like it may be a recently destroyed OwnPtr", VirtualAddress(fault_address));
+            } else if ((fault_address & 0xffff0000) == (nonnullownptr_scrub_pattern & 0xffff0000)) {
+                dbgln("Note: Address {} looks like it may be a recently destroyed NonnullOwnPtr", VirtualAddress(fault_address));
+            } else if ((fault_address & 0xffff0000) == (lockrefptr_scrub_pattern & 0xffff0000)) {
+                dbgln("Note: Address {} looks like it may be a recently destroyed LockRefPtr", VirtualAddress(fault_address));
+            } else if ((fault_address & 0xffff0000) == (nonnulllockrefptr_scrub_pattern & 0xffff0000)) {
+                dbgln("Note: Address {} looks like it may be a recently destroyed NonnullLockRefPtr", VirtualAddress(fault_address));
             }
         }
 
