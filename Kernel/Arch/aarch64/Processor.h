@@ -13,8 +13,7 @@
 
 #include <Kernel/Arch/ProcessorSpecificDataID.h>
 #include <Kernel/Arch/aarch64/Registers.h>
-
-class VirtualAddress;
+#include <Kernel/VirtualAddress.h>
 
 namespace Kernel {
 
@@ -36,18 +35,19 @@ struct [[gnu::aligned(16)]] FPUState
 extern Processor* g_current_processor;
 
 class Processor {
+    void* m_processor_specific_data[static_cast<size_t>(ProcessorSpecificDataID::__Count)];
+
 public:
     void initialize(u32 cpu);
 
-    void set_specific(ProcessorSpecificDataID /*specific_id*/, void* /*ptr*/)
-    {
-        VERIFY_NOT_REACHED();
-    }
     template<typename T>
     T* get_specific()
     {
-        VERIFY_NOT_REACHED();
-        return 0;
+        return static_cast<T*>(m_processor_specific_data[static_cast<size_t>(T::processor_specific_data_id())]);
+    }
+    void set_specific(ProcessorSpecificDataID specific_id, void* ptr)
+    {
+        m_processor_specific_data[static_cast<size_t>(specific_id)] = ptr;
     }
 
     ALWAYS_INLINE static void pause()
@@ -76,15 +76,8 @@ public:
         return false;
     }
 
-    ALWAYS_INLINE static void flush_tlb_local(VirtualAddress&, size_t&)
-    {
-        VERIFY_NOT_REACHED();
-    }
-
-    ALWAYS_INLINE static void flush_tlb(Memory::PageDirectory const*, VirtualAddress const&, size_t)
-    {
-        VERIFY_NOT_REACHED();
-    }
+    static void flush_tlb_local(VirtualAddress vaddr, size_t page_count);
+    static void flush_tlb(Memory::PageDirectory const*, VirtualAddress, size_t);
 
     // FIXME: When aarch64 supports multiple cores, return the correct core id here.
     ALWAYS_INLINE static u32 current_id()
@@ -136,12 +129,22 @@ public:
         Aarch64::DAIF::set_I();
     }
 
-    ALWAYS_INLINE static void enter_critical() { VERIFY_NOT_REACHED(); }
-    ALWAYS_INLINE static void leave_critical() { VERIFY_NOT_REACHED(); }
+    // FIXME: Share the critical functions with x86/Processor.h
+    ALWAYS_INLINE static void enter_critical()
+    {
+        auto current_processor = current();
+        current_processor.m_in_critical = current_processor.in_critical() + 1;
+    }
+
+    ALWAYS_INLINE static void leave_critical()
+    {
+        auto current_processor = current();
+        current_processor.m_in_critical = current_processor.in_critical() - 1;
+    }
+
     ALWAYS_INLINE static u32 in_critical()
     {
-        VERIFY_NOT_REACHED();
-        return 0;
+        return current().m_in_critical;
     }
 
     // FIXME: Actually return the idle thread once aarch64 supports threading.
@@ -161,6 +164,9 @@ public:
     }
 
     [[noreturn]] static void halt();
+
+private:
+    u32 m_in_critical { 0 };
 };
 
 }

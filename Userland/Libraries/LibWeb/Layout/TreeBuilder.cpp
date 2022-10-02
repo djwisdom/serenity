@@ -187,9 +187,6 @@ void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
         insert_node_into_inline_or_block_ancestor(layout_node);
     }
 
-    if (layout_node->has_style() && style)
-        static_cast<Layout::NodeWithStyle&>(*layout_node).did_insert_into_layout_tree(*style);
-
     auto* shadow_root = is<DOM::Element>(dom_node) ? verify_cast<DOM::Element>(dom_node).shadow_root() : nullptr;
 
     if ((dom_node.has_children() || shadow_root) && layout_node->can_have_children()) {
@@ -217,17 +214,18 @@ void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
                 return nullptr;
 
             if (auto pseudo_element_node = DOM::Element::create_layout_node_for_display_type(document, pseudo_element_display, move(pseudo_element_style), nullptr)) {
+                pseudo_element_node->set_generated(true);
                 // FIXME: Handle images, and multiple values
                 if (pseudo_element_content.type == CSS::ContentData::Type::String) {
-                    auto text = adopt_ref(*new DOM::Text(document, pseudo_element_content.data));
-                    auto text_node = adopt_ref(*new TextNode(document, text));
+                    auto* text = document.heap().allocate<DOM::Text>(document.realm(), document, pseudo_element_content.data);
+                    auto text_node = adopt_ref(*new TextNode(document, *text));
                     push_parent(verify_cast<NodeWithStyle>(*pseudo_element_node));
                     insert_node_into_inline_or_block_ancestor(text_node);
                     pop_parent();
                 } else {
                     TODO();
                 }
-                return pseudo_element_node;
+                return pseudo_element_node.ptr();
             }
 
             return nullptr;
@@ -235,11 +233,11 @@ void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
 
         push_parent(verify_cast<NodeWithStyle>(*layout_node));
         if (auto before_node = create_pseudo_element_if_needed(CSS::Selector::PseudoElement::Before)) {
-            element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::Before, before_node);
+            element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::Before, before_node.ptr());
             insert_node_into_inline_or_block_ancestor(before_node, true);
         }
         if (auto after_node = create_pseudo_element_if_needed(CSS::Selector::PseudoElement::After)) {
-            element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::After, after_node);
+            element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::After, after_node.ptr());
             insert_node_into_inline_or_block_ancestor(after_node);
         }
         pop_parent();

@@ -12,6 +12,14 @@
 
 using enum TimeZone::InDST;
 
+static void test_offset(StringView time_zone, i64 time, i64 expected_offset, TimeZone::InDST expected_in_dst)
+{
+    auto actual_offset = TimeZone::get_time_zone_offset(time_zone, AK::Time::from_seconds(time));
+    VERIFY(actual_offset.has_value());
+    EXPECT_EQ(actual_offset->seconds, expected_offset);
+    EXPECT_EQ(actual_offset->in_dst, expected_in_dst);
+}
+
 #if ENABLE_TIME_ZONE_DATA
 
 #    include <LibTimeZone/TimeZoneData.h>
@@ -92,14 +100,6 @@ static i64 offset(i64 sign, i64 hours, i64 minutes, i64 seconds)
     return sign * ((hours * 3600) + (minutes * 60) + seconds);
 }
 
-static void test_offset(StringView time_zone, i64 time, i64 expected_offset, TimeZone::InDST expected_in_dst)
-{
-    auto actual_offset = TimeZone::get_time_zone_offset(time_zone, AK::Time::from_seconds(time));
-    VERIFY(actual_offset.has_value());
-    EXPECT_EQ(actual_offset->seconds, expected_offset);
-    EXPECT_EQ(actual_offset->in_dst, expected_in_dst);
-}
-
 TEST_CASE(get_time_zone_offset)
 {
     test_offset("America/Chicago"sv, -2717668237, offset(-1, 5, 50, 36), No); // Sunday, November 18, 1883 12:09:23 PM
@@ -177,13 +177,17 @@ TEST_CASE(get_named_time_zone_offsets)
     test_named_offsets("Europe/Moscow"sv, -1609459200, offset(+1, 2, 31, 19), offset(+1, 3, 31, 19), "MSK"sv, "MSD"sv);  // Wednesday, January 1, 1919 12:00:00 AM
     test_named_offsets("Europe/Moscow"sv, -1596412800, offset(+1, 2, 31, 19), offset(+1, 4, 31, 19), "MSK"sv, "MDST"sv); // Sunday, June 1, 1919 12:00:00 AM
     test_named_offsets("Europe/Moscow"sv, -1589068800, offset(+1, 3, 00, 00), offset(+1, 4, 00, 00), "MSK"sv, "MSD"sv);  // Monday, August 25, 1919 12:00:00 AM
+
+    // Shanghai's DST rules end in 1991.
+    test_named_offsets("Asia/Shanghai"sv, 694223999, offset(+1, 8, 00, 00), offset(+1, 9, 00, 00), "CST"sv, "CDT"sv); // Tuesday, December 31, 1991 11:59:59 PM
+    test_named_offsets("Asia/Shanghai"sv, 694224000, offset(+1, 8, 00, 00), offset(+1, 8, 00, 00), "CST"sv, "CST"sv); // Wednesday, January 1, 1992 12:00:00 AM
 }
 
 #else
 
 TEST_CASE(time_zone_from_string)
 {
-    EXPECT_EQ(TimeZone::time_zone_from_string("UTC"sv), TimeZone::TimeZone::UTC);
+    EXPECT(TimeZone::time_zone_from_string("UTC"sv).has_value());
 
     EXPECT(!TimeZone::time_zone_from_string("Europe/Paris"sv).has_value());
     EXPECT(!TimeZone::time_zone_from_string("Etc/UTC"sv).has_value());
@@ -192,7 +196,7 @@ TEST_CASE(time_zone_from_string)
 
 TEST_CASE(get_time_zone_offset)
 {
-    EXPECT_EQ(TimeZone::get_time_zone_offset("UTC", AK::Time::from_seconds(123456)), { 0, No });
+    test_offset("UTC"sv, 123456, 0, No);
 
     EXPECT(!TimeZone::get_time_zone_offset("Europe/Paris"sv, {}).has_value());
     EXPECT(!TimeZone::get_time_zone_offset("Etc/UTC"sv, {}).has_value());

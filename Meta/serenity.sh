@@ -46,8 +46,10 @@ Usage: $NAME COMMAND [TARGET] [TOOLCHAIN] [ARGS...]
 
 
   Examples:
-    $NAME run i686 smp=on
+    $NAME run i686 GNU smp=on
         Runs the image in QEMU passing "smp=on" to the kernel command line
+    $NAME run i686 GNU 'init=/bin/UserspaceEmulator init_args=/bin/SystemServer'
+        Runs the image in QEMU, and run the entire system through UserspaceEmulator (not fully supported yet)
     $NAME run
         Runs the image for the default TARGET i686 in QEMU
     $NAME run lagom js -A
@@ -259,7 +261,7 @@ build_target() {
         cmake -S "$SERENITY_SOURCE_DIR/Meta/Lagom" -B "$BUILD_DIR" -DBUILD_LAGOM=ON
     fi
 
-    # Get either the environement MAKEJOBS or all processors via CMake
+    # Get either the environment MAKEJOBS or all processors via CMake
     [ -z "$MAKEJOBS" ] && MAKEJOBS=$(cmake -P "$SERENITY_SOURCE_DIR/Meta/CMake/processor-count.cmake" 2>&1)
 
     # With zero args, we are doing a standard "build"
@@ -296,11 +298,10 @@ build_toolchain() {
 ensure_toolchain() {
     [ -d "$TOOLCHAIN_DIR" ] || build_toolchain
 
-    # FIXME: Remove this check when most people have already updated their toolchain
     if [ "$TOOLCHAIN_TYPE" = "GNU" ]; then
         local ld_version
         ld_version="$("$TOOLCHAIN_DIR"/bin/"$TARGET"-pc-serenity-ld -v)"
-        local expected_version="GNU ld (GNU Binutils) 2.38"
+        local expected_version="GNU ld (GNU Binutils) 2.39"
         if [ "$ld_version" != "$expected_version" ]; then
             echo "Your toolchain has an old version of binutils installed."
             echo "    installed version: \"$ld_version\""
@@ -310,6 +311,16 @@ ensure_toolchain() {
         fi
     fi
 
+}
+
+confirm_rebuild_if_toolchain_exists() {
+    [ ! -d "$TOOLCHAIN_DIR" ] && return
+
+    read -rp "You already have a toolchain, are you sure you want to delete and rebuild one [y/N]? " input
+
+    if [[ "$input" != "y" && "$input" != "Y" ]]; then
+        die "Aborted rebuild"
+    fi
 }
 
 delete_toolchain() {
@@ -483,6 +494,7 @@ elif [ "$CMD" = "delete" ]; then
 elif [ "$CMD" = "rebuild-toolchain" ]; then
     cmd_with_target
     lagom_unsupported "The lagom target uses the host toolchain"
+    confirm_rebuild_if_toolchain_exists
     delete_toolchain
     ensure_toolchain
 elif [ "$CMD" = "rebuild-world" ]; then

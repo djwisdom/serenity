@@ -23,7 +23,7 @@
 #include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
 #include <LibCore/Stream.h>
-#include <LibUnicode/Locale.h>
+#include <LibLocale/Locale.h>
 
 template<class T>
 inline constexpr bool StorageTypeIsList = false;
@@ -285,7 +285,7 @@ struct CanonicalLanguageID {
         VERIFY(!segments.is_empty());
         size_t index = 0;
 
-        if (Unicode::is_unicode_language_subtag(segments[index])) {
+        if (Locale::is_unicode_language_subtag(segments[index])) {
             language_id.language = unique_strings.ensure(segments[index]);
             if (segments.size() == ++index)
                 return language_id;
@@ -293,20 +293,20 @@ struct CanonicalLanguageID {
             return Error::from_string_literal("Expected language subtag");
         }
 
-        if (Unicode::is_unicode_script_subtag(segments[index])) {
+        if (Locale::is_unicode_script_subtag(segments[index])) {
             language_id.script = unique_strings.ensure(segments[index]);
             if (segments.size() == ++index)
                 return language_id;
         }
 
-        if (Unicode::is_unicode_region_subtag(segments[index])) {
+        if (Locale::is_unicode_region_subtag(segments[index])) {
             language_id.region = unique_strings.ensure(segments[index]);
             if (segments.size() == ++index)
                 return language_id;
         }
 
         while (index < segments.size()) {
-            if (!Unicode::is_unicode_variant_subtag(segments[index]))
+            if (!Locale::is_unicode_variant_subtag(segments[index]))
                 return Error::from_string_literal("Expected variant subtag");
             language_id.variants.append(unique_strings.ensure(segments[index++]));
         }
@@ -332,17 +332,9 @@ inline ErrorOr<NonnullOwnPtr<Core::Stream::BufferedFile>> open_file(StringView p
 inline ErrorOr<JsonValue> read_json_file(StringView path)
 {
     auto file = TRY(open_file(path, Core::Stream::OpenMode::Read));
+    auto buffer = TRY(file->read_all());
 
-    StringBuilder builder;
-    Array<u8, 4096> buffer;
-
-    // FIXME: When Core::Stream supports reading an entire file, use that.
-    while (TRY(file->can_read_line())) {
-        auto bytes_read = TRY(file->read(buffer));
-        TRY(builder.try_append(StringView { bytes_read }));
-    }
-
-    return JsonValue::from_string(builder.build());
+    return JsonValue::from_string(buffer);
 }
 
 inline ErrorOr<Core::DirIterator> path_to_dir_iterator(String path, StringView subpath = "main"sv)

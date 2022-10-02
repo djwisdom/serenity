@@ -150,7 +150,8 @@ private:
             TRY(obj.add("bytes_in"sv, socket.bytes_in()));
             TRY(obj.add("packets_out"sv, socket.packets_out()));
             TRY(obj.add("bytes_out"sv, socket.bytes_out()));
-            if (Process::current().is_superuser() || Process::current().uid() == socket.origin_uid()) {
+            auto current_process_credentials = Process::current().credentials();
+            if (current_process_credentials->is_superuser() || current_process_credentials->uid() == socket.origin_uid()) {
                 TRY(obj.add("origin_pid"sv, socket.origin_pid().value()));
                 TRY(obj.add("origin_uid"sv, socket.origin_uid().value()));
                 TRY(obj.add("origin_gid"sv, socket.origin_gid().value()));
@@ -206,7 +207,8 @@ private:
             auto peer_address = TRY(socket.peer_address().to_string());
             TRY(obj.add("peer_address"sv, peer_address->view()));
             TRY(obj.add("peer_port"sv, socket.peer_port()));
-            if (Process::current().is_superuser() || Process::current().uid() == socket.origin_uid()) {
+            auto current_process_credentials = Process::current().credentials();
+            if (current_process_credentials->is_superuser() || current_process_credentials->uid() == socket.origin_uid()) {
                 TRY(obj.add("origin_pid"sv, socket.origin_pid().value()));
                 TRY(obj.add("origin_uid"sv, socket.origin_uid().value()));
                 TRY(obj.add("origin_gid"sv, socket.origin_gid().value()));
@@ -525,8 +527,9 @@ private:
             TRY(process_object.add("pgid"sv, process.tty() ? process.tty()->pgid().value() : 0));
             TRY(process_object.add("pgp"sv, process.pgid().value()));
             TRY(process_object.add("sid"sv, process.sid().value()));
-            TRY(process_object.add("uid"sv, process.uid().value()));
-            TRY(process_object.add("gid"sv, process.gid().value()));
+            auto credentials = process.credentials();
+            TRY(process_object.add("uid"sv, credentials->uid().value()));
+            TRY(process_object.add("gid"sv, credentials->gid().value()));
             TRY(process_object.add("ppid"sv, process.ppid().value()));
             if (process.tty()) {
                 auto tty_pseudo_name = TRY(process.tty()->pseudo_name());
@@ -537,13 +540,33 @@ private:
             TRY(process_object.add("nfds"sv, process.fds().with_shared([](auto& fds) { return fds.open_count(); })));
             TRY(process_object.add("name"sv, process.name()));
             TRY(process_object.add("executable"sv, process.executable() ? TRY(process.executable()->try_serialize_absolute_path())->view() : ""sv));
-            TRY(process_object.add("amount_virtual"sv, process.address_space().amount_virtual()));
-            TRY(process_object.add("amount_resident"sv, process.address_space().amount_resident()));
-            TRY(process_object.add("amount_dirty_private"sv, process.address_space().amount_dirty_private()));
-            TRY(process_object.add("amount_clean_inode"sv, TRY(process.address_space().amount_clean_inode())));
-            TRY(process_object.add("amount_shared"sv, process.address_space().amount_shared()));
-            TRY(process_object.add("amount_purgeable_volatile"sv, process.address_space().amount_purgeable_volatile()));
-            TRY(process_object.add("amount_purgeable_nonvolatile"sv, process.address_space().amount_purgeable_nonvolatile()));
+
+            size_t amount_virtual = 0;
+            size_t amount_resident = 0;
+            size_t amount_dirty_private = 0;
+            size_t amount_clean_inode = 0;
+            size_t amount_shared = 0;
+            size_t amount_purgeable_volatile = 0;
+            size_t amount_purgeable_nonvolatile = 0;
+
+            TRY(process.address_space().with([&](auto& space) -> ErrorOr<void> {
+                amount_virtual = space->amount_virtual();
+                amount_resident = space->amount_resident();
+                amount_dirty_private = space->amount_dirty_private();
+                amount_clean_inode = TRY(space->amount_clean_inode());
+                amount_shared = space->amount_shared();
+                amount_purgeable_volatile = space->amount_purgeable_volatile();
+                amount_purgeable_nonvolatile = space->amount_purgeable_nonvolatile();
+                return {};
+            }));
+
+            TRY(process_object.add("amount_virtual"sv, amount_virtual));
+            TRY(process_object.add("amount_resident"sv, amount_resident));
+            TRY(process_object.add("amount_dirty_private"sv, amount_dirty_private));
+            TRY(process_object.add("amount_clean_inode"sv, amount_clean_inode));
+            TRY(process_object.add("amount_shared"sv, amount_shared));
+            TRY(process_object.add("amount_purgeable_volatile"sv, amount_purgeable_volatile));
+            TRY(process_object.add("amount_purgeable_nonvolatile"sv, amount_purgeable_nonvolatile));
             TRY(process_object.add("dumpable"sv, process.is_dumpable()));
             TRY(process_object.add("kernel"sv, process.is_kernel_process()));
             auto thread_array = TRY(process_object.add_array("threads"sv));
@@ -822,7 +845,8 @@ private:
 
     virtual ErrorOr<void> try_generate(KBufferBuilder& builder) override
     {
-        if (!Process::current().is_superuser())
+        auto current_process_credentials = Process::current().credentials();
+        if (!current_process_credentials->is_superuser())
             return EPERM;
         return builder.appendff("{}", kernel_load_base);
     }

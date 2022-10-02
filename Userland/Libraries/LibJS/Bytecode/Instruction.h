@@ -12,6 +12,7 @@
 
 #define ENUMERATE_BYTECODE_OPS(O)    \
     O(Add)                           \
+    O(Append)                        \
     O(BitwiseAnd)                    \
     O(BitwiseNot)                    \
     O(BitwiseOr)                     \
@@ -80,6 +81,7 @@
     O(StrictlyEquals)                \
     O(StrictlyInequals)              \
     O(Sub)                           \
+    O(SuperCall)                     \
     O(Throw)                         \
     O(Typeof)                        \
     O(TypeofVariable)                \
@@ -90,7 +92,7 @@
 
 namespace JS::Bytecode {
 
-class Instruction {
+class alignas(void*) Instruction {
 public:
     constexpr static bool IsTerminator = false;
 

@@ -5,12 +5,13 @@
  */
 
 #include "WebAssemblyTablePrototype.h"
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/WebAssembly/WebAssemblyTableObject.h>
 
 namespace Web::Bindings {
 
-WebAssemblyTableObject::WebAssemblyTableObject(JS::GlobalObject& global_object, Wasm::TableAddress address)
-    : Object(static_cast<WindowObject&>(global_object).ensure_web_prototype<WebAssemblyTablePrototype>("WebAssemblyTablePrototype"))
+WebAssemblyTableObject::WebAssemblyTableObject(JS::Realm& realm, Wasm::TableAddress address)
+    : Object(Bindings::ensure_web_prototype<WebAssemblyTablePrototype>(realm, "WebAssemblyTablePrototype"))
     , m_address(address)
 {
 }

@@ -13,33 +13,35 @@
 
 namespace JS {
 
-SetIteratorPrototype::SetIteratorPrototype(GlobalObject& global_object)
-    : PrototypeObject(*global_object.iterator_prototype())
+SetIteratorPrototype::SetIteratorPrototype(Realm& realm)
+    : PrototypeObject(*realm.intrinsics().iterator_prototype())
 {
 }
 
-void SetIteratorPrototype::initialize(GlobalObject& global_object)
+void SetIteratorPrototype::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
-    define_native_function(vm.names.next, next, 0, Attribute::Configurable | Attribute::Writable);
+    define_native_function(realm, vm.names.next, next, 0, Attribute::Configurable | Attribute::Writable);
 
     // 24.2.5.2.2 %SetIteratorPrototype% [ @@toStringTag ], https://tc39.es/ecma262/#sec-%setiteratorprototype%-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(global_object.heap(), "Set Iterator"), Attribute::Configurable);
+    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Set Iterator"), Attribute::Configurable);
 }
 
 // 24.2.5.2.1 %SetIteratorPrototype%.next ( ), https://tc39.es/ecma262/#sec-%setiteratorprototype%.next
 JS_DEFINE_NATIVE_FUNCTION(SetIteratorPrototype::next)
 {
-    auto* set_iterator = TRY(typed_this_value(global_object));
+    auto& realm = *vm.current_realm();
+
+    auto* set_iterator = TRY(typed_this_value(vm));
     if (set_iterator->done())
-        return create_iterator_result_object(global_object, js_undefined(), true);
+        return create_iterator_result_object(vm, js_undefined(), true);
 
     auto& set = set_iterator->set();
     if (set_iterator->m_iterator == set.end()) {
         set_iterator->m_done = true;
-        return create_iterator_result_object(global_object, js_undefined(), true);
+        return create_iterator_result_object(vm, js_undefined(), true);
     }
 
     auto iteration_kind = set_iterator->iteration_kind();
@@ -48,9 +50,9 @@ JS_DEFINE_NATIVE_FUNCTION(SetIteratorPrototype::next)
     auto value = (*set_iterator->m_iterator).key;
     ++set_iterator->m_iterator;
     if (iteration_kind == Object::PropertyKind::Value)
-        return create_iterator_result_object(global_object, value, false);
+        return create_iterator_result_object(vm, value, false);
 
-    return create_iterator_result_object(global_object, Array::create_from(global_object, { value, value }), false);
+    return create_iterator_result_object(vm, Array::create_from(realm, { value, value }), false);
 }
 
 }

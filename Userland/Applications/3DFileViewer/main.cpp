@@ -59,7 +59,7 @@ private:
         constexpr u16 RENDER_WIDTH = 640;
         constexpr u16 RENDER_HEIGHT = 480;
         m_bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, { RENDER_WIDTH, RENDER_HEIGHT }).release_value_but_fixme_should_propagate_errors();
-        m_context = GL::create_context(*m_bitmap);
+        m_context = MUST(GL::create_context(*m_bitmap));
 
         start_timer(20);
 
@@ -136,7 +136,7 @@ void GLContextWidget::drop_event(GUI::DropEvent& event)
         return;
 
     for (auto& url : event.mime_data().urls()) {
-        if (url.protocol() != "file")
+        if (url.scheme() != "file")
             continue;
 
         auto response = FileSystemAccessClient::Client::the().try_request_file(window(), url.path(), Core::OpenMode::ReadOnly);

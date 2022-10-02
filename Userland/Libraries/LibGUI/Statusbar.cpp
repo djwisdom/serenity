@@ -38,6 +38,19 @@ NonnullRefPtr<Statusbar::Segment> Statusbar::create_segment()
     return widget;
 }
 
+void Statusbar::child_event(Core::ChildEvent& event)
+{
+    auto& event_to_forward = event;
+    // To ensure that the ResizeCorner is always the last widget, and thus stays in the corner,
+    // we replace ChildAdded events that do not request specific placement with events that request placement before the corner
+    if (event.type() == Event::ChildAdded && is<Widget>(*event.child()) && !event.insertion_before_child()) {
+        Core::ChildEvent new_event(Event::ChildAdded, *event.child(), m_corner.ptr());
+        event_to_forward = new_event;
+    }
+
+    return Widget::child_event(event_to_forward);
+}
+
 void Statusbar::set_segment_count(size_t count)
 {
     if (count <= 1)
@@ -133,7 +146,6 @@ Statusbar::Segment::Segment()
     set_focus_policy(GUI::FocusPolicy::NoFocus);
     set_button_style(Gfx::ButtonStyle::Tray);
     set_text_alignment(Gfx::TextAlignment::CenterLeft);
-    set_menu_position(GUI::Button::MenuPosition::TopRight);
 }
 
 void Statusbar::Segment::paint_event(PaintEvent& event)

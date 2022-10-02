@@ -98,9 +98,9 @@ ErrorOr<Account> Account::self([[maybe_unused]] Read options)
     return Account(*pwd, spwd, extra_gids);
 }
 
-ErrorOr<Account> Account::from_name(char const* username, [[maybe_unused]] Read options)
+ErrorOr<Account> Account::from_name(StringView username, [[maybe_unused]] Read options)
 {
-    auto pwd = TRY(Core::System::getpwnam({ username, strlen(username) }));
+    auto pwd = TRY(Core::System::getpwnam(username));
     if (!pwd.has_value())
         return Error::from_string_literal("No such user");
 
@@ -157,18 +157,13 @@ ErrorOr<void> Account::create_user_temporary_directory_if_needed() const
     return {};
 }
 
-bool Account::login() const
+ErrorOr<void> Account::login() const
 {
-    if (setgroups(m_extra_gids.size(), m_extra_gids.data()) < 0)
-        return false;
+    TRY(Core::System::setgroups(m_extra_gids));
+    TRY(Core::System::setgid(m_gid));
+    TRY(Core::System::setuid(m_uid));
 
-    if (setgid(m_gid) < 0)
-        return false;
-
-    if (setuid(m_uid) < 0)
-        return false;
-
-    return true;
+    return {};
 }
 
 void Account::set_password(SecretString const& password)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,32 +7,17 @@
 #pragma once
 
 #include <AK/Forward.h>
-#include <AK/RefCounted.h>
-#include <AK/Weakable.h>
-#include <LibWeb/Bindings/Wrappable.h>
 #include <LibWeb/CSS/MediaQuery.h>
 #include <LibWeb/DOM/EventTarget.h>
-#include <LibWeb/Forward.h>
 
 namespace Web::CSS {
 
 // 4.2. The MediaQueryList Interface, https://drafts.csswg.org/cssom-view/#the-mediaquerylist-interface
-class MediaQueryList final
-    : public RefCounted<MediaQueryList>
-    , public Weakable<MediaQueryList>
-    , public DOM::EventTarget
-    , public Bindings::Wrappable {
+class MediaQueryList final : public DOM::EventTarget {
+    WEB_PLATFORM_OBJECT(MediaQueryList, DOM::EventTarget);
 
 public:
-    using WrapperType = Bindings::MediaQueryListWrapper;
-
-    using RefCounted::ref;
-    using RefCounted::unref;
-
-    static NonnullRefPtr<MediaQueryList> create(DOM::Document& document, NonnullRefPtrVector<MediaQuery>&& media_queries)
-    {
-        return adopt_ref(*new MediaQueryList(document, move(media_queries)));
-    }
+    static JS::NonnullGCPtr<MediaQueryList> create(DOM::Document&, NonnullRefPtrVector<MediaQuery>&&);
 
     virtual ~MediaQueryList() override = default;
 
@@ -40,28 +25,19 @@ public:
     bool matches() const;
     bool evaluate();
 
-    // ^EventTarget
-    virtual void ref_event_target() override { ref(); }
-    virtual void unref_event_target() override { unref(); }
-    virtual JS::Object* create_wrapper(JS::GlobalObject&) override;
+    void add_listener(DOM::IDLEventListener*);
+    void remove_listener(DOM::IDLEventListener*);
 
-    void add_listener(RefPtr<DOM::IDLEventListener> listener);
-    void remove_listener(RefPtr<DOM::IDLEventListener> listener);
-
-    void set_onchange(Optional<Bindings::CallbackType>);
-    Bindings::CallbackType* onchange();
+    void set_onchange(WebIDL::CallbackType*);
+    WebIDL::CallbackType* onchange();
 
 private:
     MediaQueryList(DOM::Document&, NonnullRefPtrVector<MediaQuery>&&);
 
-    WeakPtr<DOM::Document> m_document;
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    JS::NonnullGCPtr<DOM::Document> m_document;
     NonnullRefPtrVector<MediaQuery> m_media;
 };
-
-}
-
-namespace Web::Bindings {
-
-MediaQueryListWrapper* wrap(JS::GlobalObject&, CSS::MediaQueryList&);
 
 }

@@ -14,15 +14,16 @@ class CollatorCompareFunction : public NativeFunction {
     JS_OBJECT(CollatorCompareFunction, NativeFunction);
 
 public:
-    static CollatorCompareFunction* create(GlobalObject&, Collator&);
+    static CollatorCompareFunction* create(Realm&, Collator&);
 
-    explicit CollatorCompareFunction(GlobalObject&, Collator&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~CollatorCompareFunction() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
 
 private:
+    CollatorCompareFunction(Realm&, Collator&);
+
     virtual void visit_edges(Visitor&) override;
 
     Collator& m_collator; // [[Collator]]

@@ -29,7 +29,6 @@ SoundPlayerWidgetAdvancedView::SoundPlayerWidgetAdvancedView(GUI::Window& window
     , m_window(window)
 {
     window.resize(455, 350);
-    window.set_minimum_size(600, 130);
     window.set_resizable(true);
     set_fill_with_background_color(true);
 
@@ -39,7 +38,7 @@ SoundPlayerWidgetAdvancedView::SoundPlayerWidgetAdvancedView(GUI::Window& window
 
     m_playlist_widget = PlaylistWidget::construct();
     m_playlist_widget->set_data_model(playlist().model());
-    m_playlist_widget->set_fixed_width(150);
+    m_playlist_widget->set_preferred_width(150);
 
     m_player_view->set_layout<GUI::VerticalBoxLayout>();
 

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Itamar S. <itamar8910@gmail.com>
+ * Copyright (c) 2022, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,6 +11,7 @@
 #include <AK/StringBuilder.h>
 #include <AK/StringHash.h>
 #include <LibCrypto/BigInt/Algorithms/UnsignedBigIntegerAlgorithms.h>
+#include <math.h>
 
 namespace Crypto {
 
@@ -30,6 +32,81 @@ UnsignedBigInteger::UnsignedBigInteger(u8 const* ptr, size_t length)
         }
         m_words[out++] = word;
     }
+}
+
+static constexpr u64 mantissa_size = 52;
+static constexpr u64 exponent_size = 11;
+static constexpr auto exponent_bias = (1 << (exponent_size - 1)) - 1;
+
+union DoubleExtractor {
+    struct {
+        unsigned long long mantissa : mantissa_size;
+        unsigned exponent : exponent_size;
+        unsigned sign : 1;
+    };
+    double double_value = 0;
+};
+
+UnsignedBigInteger::UnsignedBigInteger(double value)
+{
+    // Because this is currently only used for LibJS we VERIFY some preconditions
+    // also these values don't have a clear BigInteger representation.
+    VERIFY(!isnan(value));
+    VERIFY(!isinf(value));
+    VERIFY(trunc(value) == value);
+    VERIFY(value >= 0.0);
+
+    if (value <= NumericLimits<u32>::max()) {
+        m_words.append(static_cast<u32>(value));
+        return;
+    }
+
+    DoubleExtractor extractor;
+    extractor.double_value = value;
+    VERIFY(!extractor.sign);
+
+    i32 real_exponent = extractor.exponent - exponent_bias;
+    VERIFY(real_exponent > 0);
+
+    // Ensure we have enough space, we will need 2^exponent bits, so round up in words
+    auto word_index = (real_exponent + BITS_IN_WORD) / BITS_IN_WORD;
+    m_words.resize_and_keep_capacity(word_index);
+
+    // Now we just need to put the mantissa with explicit 1 bit at the top at the proper location
+    u64 raw_mantissa = extractor.mantissa | (1ull << mantissa_size);
+    VERIFY((raw_mantissa & 0xfff0000000000000) == 0x0010000000000000);
+    // Shift it so the bits we need are at the top
+    raw_mantissa <<= 64 - mantissa_size - 1;
+
+    // The initial bit needs to be exactly aligned with exponent, this is 1-indexed
+    auto top_word_bit_offset = real_exponent % BITS_IN_WORD + 1;
+
+    auto top_word_bits_from_mantissa = raw_mantissa >> (64 - top_word_bit_offset);
+    VERIFY(top_word_bits_from_mantissa <= NumericLimits<Word>::max());
+    m_words[word_index - 1] = top_word_bits_from_mantissa;
+
+    --word_index;
+    // Shift used bits away
+    raw_mantissa <<= top_word_bit_offset;
+    i32 bits_in_mantissa = mantissa_size + 1 - top_word_bit_offset;
+    // Now just put everything at the top of the next words
+
+    constexpr auto to_word_shift = 64 - BITS_IN_WORD;
+
+    while (word_index > 0 && bits_in_mantissa > 0) {
+        VERIFY((raw_mantissa >> to_word_shift) <= NumericLimits<Word>::max());
+        m_words[word_index - 1] = raw_mantissa >> to_word_shift;
+        raw_mantissa <<= to_word_shift;
+
+        bits_in_mantissa -= BITS_IN_WORD;
+        --word_index;
+    }
+
+    VERIFY(m_words.size() > word_index);
+    VERIFY((m_words.size() - word_index) <= 3);
+
+    // No bits left, otherwise we would have to round
+    VERIFY(raw_mantissa == 0);
 }
 
 UnsignedBigInteger UnsignedBigInteger::create_invalid()
@@ -104,7 +181,7 @@ String UnsignedBigInteger::to_base(u16 N) const
 
 u64 UnsignedBigInteger::to_u64() const
 {
-    VERIFY(sizeof(Word) == 4);
+    static_assert(sizeof(Word) == 4);
     if (!length())
         return 0;
     u64 value = m_words[0];
@@ -113,10 +190,165 @@ u64 UnsignedBigInteger::to_u64() const
     return value;
 }
 
-double UnsignedBigInteger::to_double() const
+double UnsignedBigInteger::to_double(UnsignedBigInteger::RoundingMode rounding_mode) const
 {
-    // FIXME: I am naive
-    return static_cast<double>(to_u64());
+    VERIFY(!is_invalid());
+    auto highest_bit = one_based_index_of_highest_set_bit();
+    if (highest_bit == 0)
+        return 0;
+    --highest_bit;
+
+    // Simple case if less than 2^53 since those number are all exactly representable in doubles
+    if (highest_bit < mantissa_size + 1)
+        return static_cast<double>(to_u64());
+
+    // If it uses too many bit to represent in a double return infinity
+    if (highest_bit > exponent_bias)
+        return __builtin_huge_val();
+
+    // Otherwise we have to take the top 53 bits, use those as the mantissa,
+    // and the amount of bits as the exponent. Note that the mantissa has an implicit top bit of 1
+    // so we have to ignore the very top bit.
+
+    // Since we extract at most 53 bits it will take at most 3 words
+    static_assert(BITS_IN_WORD * 3 >= (mantissa_size + 1));
+    constexpr auto bits_in_u64 = 64;
+    static_assert(bits_in_u64 > mantissa_size + 1);
+
+    auto bits_to_read = min(mantissa_size, highest_bit);
+
+    auto last_word_index = trimmed_length();
+    VERIFY(last_word_index > 0);
+
+    // Note that highest bit is 0-indexed at this point.
+    auto highest_bit_index_in_top_word = highest_bit % BITS_IN_WORD;
+
+    // Shift initial word until highest bit is just beyond top of u64.
+    u64 mantissa = m_words[last_word_index - 1];
+    if (highest_bit_index_in_top_word != 0)
+        mantissa <<= (bits_in_u64 - highest_bit_index_in_top_word);
+    else
+        mantissa = 0;
+
+    auto bits_written = highest_bit_index_in_top_word;
+
+    --last_word_index;
+
+    Optional<Word> dropped_bits_for_rounding;
+    u8 bits_dropped_from_final_word = 0;
+
+    if (bits_written < bits_to_read && last_word_index > 0) {
+        // Second word can always just cleanly be shifted up to the final bit of the first word
+        // since the first has at most BIT_IN_WORD - 1, 31
+        u64 next_word = m_words[last_word_index - 1];
+        VERIFY((mantissa & (next_word << (bits_in_u64 - bits_written - BITS_IN_WORD))) == 0);
+        mantissa |= next_word << (bits_in_u64 - bits_written - BITS_IN_WORD);
+        bits_written += BITS_IN_WORD;
+        --last_word_index;
+
+        if (bits_written > bits_to_read) {
+            bits_dropped_from_final_word = bits_written - bits_to_read;
+            dropped_bits_for_rounding = m_words[last_word_index] & ((1 << bits_dropped_from_final_word) - 1);
+        } else if (bits_written < bits_to_read && last_word_index > 0) {
+            // The final word has to be shifted down first to discard any excess bits.
+            u64 final_word = m_words[last_word_index - 1];
+            --last_word_index;
+
+            auto bits_to_write = bits_to_read - bits_written;
+
+            bits_dropped_from_final_word = BITS_IN_WORD - bits_to_write;
+            dropped_bits_for_rounding = final_word & ((1 << bits_dropped_from_final_word) - 1u);
+            final_word >>= bits_dropped_from_final_word;
+
+            // Then move the bits right up to the lowest bits of the second word
+            VERIFY((mantissa & (final_word << (bits_in_u64 - bits_written - bits_to_write))) == 0);
+            mantissa |= final_word << (bits_in_u64 - bits_written - bits_to_write);
+        }
+    }
+
+    // Now the mantissa should be complete so shift it down
+    mantissa >>= bits_in_u64 - mantissa_size;
+
+    if (rounding_mode == RoundingMode::IEEERoundAndTiesToEvenMantissa) {
+        bool round_up = false;
+
+        if (bits_dropped_from_final_word == 0) {
+            if (last_word_index > 0) {
+                Word next_word = m_words[last_word_index - 1];
+                last_word_index--;
+                if ((next_word & 0x80000000) != 0) {
+                    // next top bit set check for any other bits
+                    if ((next_word ^ 0x80000000) != 0) {
+                        round_up = true;
+                    } else {
+                        while (last_word_index > 0) {
+                            if (m_words[last_word_index - 1] != 0) {
+                                round_up = true;
+                                break;
+                            }
+                        }
+
+                        // All other bits are 0 which is a tie thus round to even exponent
+                        // Since we are halfway, if exponent ends with 1 we round up, if 0 we round down
+                        round_up = (mantissa & 1) != 0;
+                    }
+                } else {
+                    round_up = false;
+                }
+            } else {
+                // If there are no words left the rest is implicitly 0 so just round down
+                round_up = false;
+            }
+
+        } else {
+            VERIFY(dropped_bits_for_rounding.has_value());
+            VERIFY(bits_dropped_from_final_word >= 1);
+
+            // In this case the top bit comes form the dropped bits
+            auto top_bit_extractor = 1u << (bits_dropped_from_final_word - 1u);
+            if ((*dropped_bits_for_rounding & top_bit_extractor) != 0) {
+                // Possible tie again, if any other bit is set we round up
+                if ((*dropped_bits_for_rounding ^ top_bit_extractor) != 0) {
+                    round_up = true;
+                } else {
+                    while (last_word_index > 0) {
+                        if (m_words[last_word_index - 1] != 0) {
+                            round_up = true;
+                            break;
+                        }
+                    }
+
+                    round_up = (mantissa & 1) != 0;
+                }
+            } else {
+                round_up = false;
+            }
+        }
+
+        if (round_up) {
+            ++mantissa;
+            if ((mantissa & (1ull << mantissa_size)) != 0) {
+                // we overflowed the mantissa
+                mantissa = 0;
+                highest_bit++;
+
+                // In which case it is possible we have to round to infinity
+                if (highest_bit > exponent_bias)
+                    return __builtin_huge_val();
+            }
+        }
+    } else {
+        VERIFY(rounding_mode == RoundingMode::RoundTowardZero);
+    }
+
+    DoubleExtractor extractor;
+
+    extractor.exponent = highest_bit + exponent_bias;
+
+    VERIFY((mantissa & 0xfff0000000000000) == 0);
+    extractor.mantissa = mantissa;
+
+    return extractor.double_value;
 }
 
 void UnsignedBigInteger::set_to_0()

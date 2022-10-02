@@ -7,10 +7,8 @@
 #pragma once
 
 #include "WebAssemblyMemoryConstructor.h"
-#include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/VM.h>
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::Bindings {
@@ -19,12 +17,12 @@ class WebAssemblyMemoryPrototype final : public JS::Object {
     JS_OBJECT(WebAssemblyMemoryPrototype, JS::Object);
 
 public:
-    explicit WebAssemblyMemoryPrototype(JS::GlobalObject& global_object)
-        : JS::Object(global_object)
+    explicit WebAssemblyMemoryPrototype(JS::Realm& realm)
+        : JS::Object(*realm.intrinsics().object_prototype())
     {
     }
 
-    virtual void initialize(JS::GlobalObject&) override;
+    virtual void initialize(JS::Realm&) override;
 
 private:
     JS_DECLARE_NATIVE_FUNCTION(grow);

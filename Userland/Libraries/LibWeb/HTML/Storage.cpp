@@ -5,16 +5,21 @@
  */
 
 #include <AK/String.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/Storage.h>
 
 namespace Web::HTML {
 
-NonnullRefPtr<Storage> Storage::create()
+JS::NonnullGCPtr<Storage> Storage::create(JS::Realm& realm)
 {
-    return adopt_ref(*new Storage);
+    return *realm.heap().allocate<Storage>(realm, realm);
 }
 
-Storage::Storage() = default;
+Storage::Storage(JS::Realm& realm)
+    : PlatformObject(realm)
+{
+    set_prototype(&Bindings::cached_web_prototype(realm, "Storage"));
+}
 
 Storage::~Storage() = default;
 
@@ -52,7 +57,7 @@ String Storage::get_item(String const& key) const
 }
 
 // https://html.spec.whatwg.org/multipage/webstorage.html#dom-storage-setitem
-DOM::ExceptionOr<void> Storage::set_item(String const& key, String const& value)
+WebIDL::ExceptionOr<void> Storage::set_item(String const& key, String const& value)
 {
     // 1. Let oldValue be null.
     String old_value;

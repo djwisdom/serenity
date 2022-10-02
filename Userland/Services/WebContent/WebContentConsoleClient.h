@@ -18,7 +18,7 @@ namespace WebContent {
 
 class WebContentConsoleClient final : public JS::ConsoleClient {
 public:
-    WebContentConsoleClient(JS::Console&, WeakPtr<JS::Interpreter>, ConnectionFromClient&);
+    WebContentConsoleClient(JS::Console&, JS::Realm&, ConnectionFromClient&);
 
     void handle_input(String const& js_source);
     void send_messages(i32 start_index);
@@ -27,8 +27,14 @@ private:
     virtual void clear() override;
     virtual JS::ThrowCompletionOr<JS::Value> printer(JS::Console::LogLevel log_level, PrinterArguments) override;
 
+    virtual void add_css_style_to_current_message(StringView style) override
+    {
+        m_current_message_style.append(style);
+        m_current_message_style.append(';');
+    }
+
     ConnectionFromClient& m_client;
-    WeakPtr<JS::Interpreter> m_interpreter;
+    WeakPtr<JS::Realm> m_realm;
     JS::Handle<ConsoleGlobalObject> m_console_global_object;
 
     void clear_output();
@@ -48,6 +54,8 @@ private:
         String data;
     };
     Vector<ConsoleOutput> m_message_log;
+
+    StringBuilder m_current_message_style;
 };
 
 }

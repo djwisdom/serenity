@@ -66,7 +66,6 @@ HelpWindow::HelpWindow(GUI::Window* parent)
     resize(530, 365);
     set_title("Spreadsheet Functions Help");
     set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-help.png"sv).release_value_but_fixme_should_propagate_errors());
-    set_accessory(true);
 
     auto& widget = set_main_widget<GUI::Widget>();
     widget.set_layout<GUI::VerticalBoxLayout>();
@@ -82,7 +81,7 @@ HelpWindow::HelpWindow(GUI::Window* parent)
 
     m_webview = splitter.add<WebView::OutOfProcessWebView>();
     m_webview->on_link_click = [this](auto& url, auto&, auto&&) {
-        VERIFY(url.protocol() == "spreadsheet");
+        VERIFY(url.scheme() == "spreadsheet");
         if (url.host() == "example") {
             auto entry = LexicalPath::basename(url.path());
             auto doc_option = m_docs.get(entry);

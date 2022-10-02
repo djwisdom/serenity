@@ -5,12 +5,14 @@
  */
 
 #include <LibWeb/HTML/HTMLAreaElement.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
 HTMLAreaElement::HTMLAreaElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLAreaElement"));
 }
 
 HTMLAreaElement::~HTMLAreaElement() = default;

@@ -12,18 +12,19 @@
 
 namespace JS {
 
-ThrowCompletionOr<Value> regexp_exec(GlobalObject& global_object, Object& regexp_object, Utf16String string);
+ThrowCompletionOr<Value> regexp_exec(VM&, Object& regexp_object, Utf16String string);
 size_t advance_string_index(Utf16View const& string, size_t index, bool unicode);
 
 class RegExpPrototype final : public PrototypeObject<RegExpPrototype, RegExpObject> {
     JS_PROTOTYPE_OBJECT(RegExpPrototype, RegExpObject, RegExp);
 
 public:
-    explicit RegExpPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~RegExpPrototype() override = default;
 
 private:
+    explicit RegExpPrototype(Realm&);
+
     JS_DECLARE_NATIVE_FUNCTION(exec);
     JS_DECLARE_NATIVE_FUNCTION(flags);
     JS_DECLARE_NATIVE_FUNCTION(symbol_match);

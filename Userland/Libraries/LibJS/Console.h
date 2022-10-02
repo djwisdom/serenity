@@ -53,14 +53,12 @@ public:
         Vector<String> stack;
     };
 
-    explicit Console(GlobalObject&);
+    explicit Console(Realm&);
 
     void set_client(ConsoleClient& client) { m_client = &client; }
 
-    GlobalObject& global_object() { return m_global_object; }
-    GlobalObject const& global_object() const { return m_global_object; }
+    Realm& realm() const { return m_realm; }
 
-    VM& vm();
     MarkedVector<Value> vm_arguments();
 
     HashMap<String, unsigned>& counters() { return m_counters; }
@@ -89,7 +87,7 @@ private:
     ThrowCompletionOr<String> value_vector_to_string(MarkedVector<Value> const&);
     ThrowCompletionOr<String> format_time_since(Core::ElapsedTimer timer);
 
-    GlobalObject& m_global_object;
+    Realm& m_realm;
     ConsoleClient* m_client { nullptr };
 
     HashMap<String, unsigned> m_counters;
@@ -110,16 +108,13 @@ public:
     ThrowCompletionOr<MarkedVector<Value>> formatter(MarkedVector<Value> const& args);
     virtual ThrowCompletionOr<Value> printer(Console::LogLevel log_level, PrinterArguments) = 0;
 
+    virtual void add_css_style_to_current_message(StringView) {};
+
     virtual void clear() = 0;
     virtual void end_group() = 0;
 
 protected:
     virtual ~ConsoleClient() = default;
-
-    VM& vm();
-
-    GlobalObject& global_object() { return m_console.global_object(); }
-    GlobalObject const& global_object() const { return m_console.global_object(); }
 
     Console& m_console;
 };

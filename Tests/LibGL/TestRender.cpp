@@ -24,7 +24,7 @@
 static NonnullOwnPtr<GL::GLContext> create_testing_context(int width, int height)
 {
     auto bitmap = MUST(Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, { width, height }));
-    auto context = GL::create_context(*bitmap);
+    auto context = MUST(GL::create_context(*bitmap));
     GL::make_context_current(context);
 
     // Assume some defaults for our testing contexts
@@ -168,4 +168,87 @@ TEST_CASE(0005_lines_antialiased)
 
     context->present();
     expect_bitmap_equals_reference(context->frontbuffer(), "0005_lines"sv);
+}
+
+TEST_CASE(0006_test_rgb565_texture)
+{
+    auto context = create_testing_context(64, 64);
+
+    GLuint texture_id;
+    glGenTextures(1, &texture_id);
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+    u16 texture_data[] = { 0xF800, 0xC000, 0x8000, 0x07E0, 0x0600, 0x0400, 0x001F, 0x0018, 0x0010 };
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 3, 3, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, texture_data);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glEnable(GL_TEXTURE_2D);
+    glBegin(GL_QUADS);
+    glTexCoord2i(0, 0);
+    glVertex2i(-1, 1);
+    glTexCoord2i(0, 1);
+    glVertex2i(-1, -1);
+    glTexCoord2i(1, 1);
+    glVertex2i(1, -1);
+    glTexCoord2i(1, 0);
+    glVertex2i(1, 1);
+    glEnd();
+
+    EXPECT_EQ(glGetError(), 0u);
+
+    context->present();
+    expect_bitmap_equals_reference(context->frontbuffer(), "0006_test_rgb565_texture"sv);
+}
+
+TEST_CASE(0007_test_rgba_to_rgb_texture)
+{
+    auto context = create_testing_context(64, 64);
+
+    GLuint texture_id;
+    glGenTextures(1, &texture_id);
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+
+    // Write RGBA data with A = 0 to an RGB texture
+    u32 texture_data[] = { 0x00FF0000 };
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, texture_data);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glEnable(GL_TEXTURE_2D);
+    glBegin(GL_TRIANGLES);
+    glTexCoord2i(0, 0);
+    glVertex2i(-1, 1);
+    glTexCoord2i(0, 1);
+    glVertex2i(-1, -1);
+    glTexCoord2i(1, 1);
+    glVertex2i(1, -1);
+    glEnd();
+
+    EXPECT_EQ(glGetError(), 0u);
+
+    context->present();
+    expect_bitmap_equals_reference(context->frontbuffer(), "0007_test_rgba_to_rgb_texture"sv);
+}
+
+TEST_CASE(0008_test_pop_matrix_regression)
+{
+    auto context = create_testing_context(64, 64);
+
+    // Load identity matrix after popping
+    glMatrixMode(GL_MODELVIEW);
+    glTranslatef(10.f, 10.f, 10.f);
+    glPushMatrix();
+    glPopMatrix();
+    glLoadIdentity();
+
+    glBegin(GL_TRIANGLES);
+    glColor3f(0.f, 1.f, 0.f);
+    glVertex2f(.5f, -.5f);
+    glVertex2f(.0f, .5f);
+    glVertex2f(-.5f, -.5f);
+    glEnd();
+
+    EXPECT_EQ(glGetError(), 0u);
+
+    context->present();
+    expect_bitmap_equals_reference(context->frontbuffer(), "0008_test_pop_matrix_regression"sv);
 }

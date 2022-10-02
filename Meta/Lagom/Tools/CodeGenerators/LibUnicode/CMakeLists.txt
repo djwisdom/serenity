@@ -1,6 +1,2 @@
 lagom_tool(GenerateUnicodeData SOURCES GenerateUnicodeData.cpp LIBS LibMain)
-lagom_tool(GenerateUnicodeDateTimeFormat SOURCES GenerateUnicodeDateTimeFormat.cpp LIBS LibMain LibTimeZone)
-lagom_tool(GenerateUnicodeLocale SOURCES GenerateUnicodeLocale.cpp LIBS LibMain)
-lagom_tool(GenerateUnicodeNumberFormat SOURCES GenerateUnicodeNumberFormat.cpp LIBS LibMain)
-lagom_tool(GenerateUnicodePluralRules SOURCES GenerateUnicodePluralRules.cpp LIBS LibMain)
-lagom_tool(GenerateUnicodeRelativeTimeFormat SOURCES GenerateUnicodeRelativeTimeFormat.cpp LIBS LibMain)
+lagom_tool(GenerateEmojiData SOURCES GenerateEmojiData.cpp LIBS LibMain)

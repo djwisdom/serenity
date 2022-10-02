@@ -5,8 +5,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibCore/EventLoop.h>
-#include <LibCore/Timer.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/DOM/Document.h>
@@ -15,6 +13,8 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HighResolutionTime/Performance.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
+#include <LibWeb/Platform/Timer.h>
 
 namespace Web::HTML {
 
@@ -29,7 +29,7 @@ EventLoop::~EventLoop() = default;
 void EventLoop::schedule()
 {
     if (!m_system_event_loop_timer) {
-        m_system_event_loop_timer = Core::Timer::create_single_shot(0, [this] {
+        m_system_event_loop_timer = Platform::Timer::create_single_shot(0, [this] {
             process();
         });
     }
@@ -74,13 +74,7 @@ void EventLoop::spin_until(Function<bool()> goal_condition)
     //       NOTE: This is achieved by returning from the function.
 
     //    1. Wait until the condition goal is met.
-    Core::EventLoop loop;
-    loop.spin_until([&]() -> bool {
-        if (goal_condition())
-            return true;
-
-        return goal_condition();
-    });
+    Platform::EventLoopPlugin::the().spin_until(move(goal_condition));
 
     // 7. Stop task, allowing whatever algorithm that invoked it to resume.
     // NOTE: This is achieved by returning from the function.
@@ -141,12 +135,12 @@ void EventLoop::process()
     //               - Any Document B whose browsing context's container document is A must be listed after A in the list.
     //               - If there are two documents A and B whose browsing contexts are both child browsing contexts whose container documents are another Document C, then the order of A and B in the list must match the shadow-including tree order of their respective browsing context containers in C's node tree.
     // FIXME: NOTE: The sort order specified above is missing here!
-    NonnullRefPtrVector<DOM::Document> docs = documents_in_this_event_loop();
+    Vector<JS::Handle<DOM::Document>> docs = documents_in_this_event_loop();
 
     auto for_each_fully_active_document_in_docs = [&](auto&& callback) {
         for (auto& document : docs) {
-            if (document.is_fully_active())
-                callback(document);
+            if (document->is_fully_active())
+                callback(*document);
         }
     };
 
@@ -175,7 +169,10 @@ void EventLoop::process()
         document.run_the_resize_steps();
     });
 
-    // FIXME:     8. For each fully active Document in docs, run the scroll steps for that Document, passing in now as the timestamp. [CSSOMVIEW]
+    // 8. For each fully active Document in docs, run the scroll steps for that Document, passing in now as the timestamp. [CSSOMVIEW]
+    for_each_fully_active_document_in_docs([&](DOM::Document& document) {
+        document.run_the_scroll_steps();
+    });
 
     // 9. For each fully active Document in docs, evaluate media queries and report changes for that Document, passing in now as the timestamp. [CSSOMVIEW]
     for_each_fully_active_document_in_docs([&](DOM::Document& document) {
@@ -215,7 +212,7 @@ void EventLoop::process()
         // 3. For each win of the same-loop windows for this event loop,
         //    perform the start an idle period algorithm for win with computeDeadline. [REQUESTIDLECALLBACK]
         for (auto& win : same_loop_windows())
-            win.start_an_idle_period();
+            win->start_an_idle_period();
     }
 
     // FIXME: 14. If this is a worker event loop, then:
@@ -234,13 +231,13 @@ void EventLoop::process()
 
 // FIXME: This is here to paper over an issue in the HTML parser where it'll create new interpreters (and thus ESOs) on temporary documents created for innerHTML if it uses Document::realm() to get the global object.
 //        Use queue_global_task instead.
-void old_queue_global_task_with_document(HTML::Task::Source source, DOM::Document& document, Function<void()> steps)
+void old_queue_global_task_with_document(HTML::Task::Source source, DOM::Document& document, JS::SafeFunction<void()> steps)
 {
     main_thread_event_loop().task_queue().add(HTML::Task::create(source, &document, move(steps)));
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#queue-a-global-task
-void queue_global_task(HTML::Task::Source source, JS::GlobalObject& global_object, Function<void()> steps)
+void queue_global_task(HTML::Task::Source source, JS::Object& global_object, JS::SafeFunction<void()> steps)
 {
     // 1. Let event loop be global's relevant agent's event loop.
     auto& global_custom_data = verify_cast<Bindings::WebEngineCustomData>(*global_object.vm().custom_data());
@@ -248,9 +245,9 @@ void queue_global_task(HTML::Task::Source source, JS::GlobalObject& global_objec
 
     // 2. Let document be global's associated Document, if global is a Window object; otherwise null.
     DOM::Document* document { nullptr };
-    if (is<Bindings::WindowObject>(global_object)) {
-        auto& window_object = verify_cast<Bindings::WindowObject>(global_object);
-        document = &window_object.impl().associated_document();
+    if (is<HTML::Window>(global_object)) {
+        auto& window_object = verify_cast<HTML::Window>(global_object);
+        document = &window_object.associated_document();
     }
 
     // 3. Queue a task given source, event loop, document, and steps.
@@ -258,7 +255,7 @@ void queue_global_task(HTML::Task::Source source, JS::GlobalObject& global_objec
 }
 
 // https://html.spec.whatwg.org/#queue-a-microtask
-void queue_a_microtask(DOM::Document* document, Function<void()> steps)
+void queue_a_microtask(DOM::Document* document, JS::SafeFunction<void()> steps)
 {
     // 1. If event loop was not given, set event loop to the implied event loop.
     auto& event_loop = HTML::main_thread_event_loop();
@@ -320,12 +317,12 @@ void EventLoop::perform_a_microtask_checkpoint()
     m_performing_a_microtask_checkpoint = false;
 }
 
-NonnullRefPtrVector<DOM::Document> EventLoop::documents_in_this_event_loop() const
+Vector<JS::Handle<DOM::Document>> EventLoop::documents_in_this_event_loop() const
 {
-    NonnullRefPtrVector<DOM::Document> documents;
+    Vector<JS::Handle<DOM::Document>> documents;
     for (auto& document : m_documents) {
         VERIFY(document);
-        documents.append(*document);
+        documents.append(JS::make_handle(*document.ptr()));
     }
     return documents;
 }
@@ -368,11 +365,13 @@ void EventLoop::unregister_environment_settings_object(Badge<EnvironmentSettings
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#same-loop-windows
-NonnullRefPtrVector<Window> EventLoop::same_loop_windows() const
+Vector<JS::Handle<HTML::Window>> EventLoop::same_loop_windows() const
 {
-    NonnullRefPtrVector<Window> windows;
-    for (auto& document : documents_in_this_event_loop())
-        windows.append(document.window());
+    Vector<JS::Handle<HTML::Window>> windows;
+    for (auto& document : documents_in_this_event_loop()) {
+        if (document->is_fully_active())
+            windows.append(JS::make_handle(document->window()));
+    }
     return windows;
 }
 
@@ -394,7 +393,7 @@ double EventLoop::compute_deadline() const
         // 1. If windowInSameLoop's map of animation frame callbacks is not empty,
         //    or if the user agent believes that the windowInSameLoop might have pending rendering updates,
         //    set hasPendingRenders to true.
-        if (window.has_animation_frame_callbacks())
+        if (window->has_animation_frame_callbacks())
             has_pending_renders = true;
         // FIXME: 2. Let timerCallbackEstimates be the result of getting the values of windowInSameLoop's map of active timers.
         // FIXME: 3. For each timeoutDeadline of timerCallbackEstimates, if timeoutDeadline is less than deadline, set deadline to timeoutDeadline.

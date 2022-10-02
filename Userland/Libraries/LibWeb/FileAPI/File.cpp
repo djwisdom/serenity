@@ -4,22 +4,27 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Time.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/FileAPI/File.h>
 
 namespace Web::FileAPI {
 
-File::File(ByteBuffer byte_buffer, String file_name, String type, i64 last_modified)
-    : Blob(move(byte_buffer), move(type))
+File::File(JS::Realm& realm, ByteBuffer byte_buffer, String file_name, String type, i64 last_modified)
+    : Blob(realm, move(byte_buffer), move(type))
     , m_name(move(file_name))
     , m_last_modified(last_modified)
 {
+    set_prototype(&Bindings::cached_web_prototype(realm, "File"));
 }
 
+File::~File() = default;
+
 // https://w3c.github.io/FileAPI/#ref-for-dom-file-file
-DOM::ExceptionOr<NonnullRefPtr<File>> File::create(Vector<BlobPart> const& file_bits, String const& file_name, Optional<FilePropertyBag> const& options)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<File>> File::create(JS::Realm& realm, Vector<BlobPart> const& file_bits, String const& file_name, Optional<FilePropertyBag> const& options)
 {
     // 1. Let bytes be the result of processing blob parts given fileBits and options.
-    auto bytes = TRY_OR_RETURN_OOM(process_blob_parts(file_bits, static_cast<Optional<BlobPropertyBag> const&>(*options)));
+    auto bytes = TRY_OR_RETURN_OOM(realm, process_blob_parts(file_bits, static_cast<Optional<BlobPropertyBag> const&>(*options)));
 
     // 2. Let n be the fileName argument to the constructor.
     //    NOTE: Underlying OS filesystems use differing conventions for file name; with constructed files, mandating UTF-16 lessens ambiquity when file names are converted to byte sequences.
@@ -53,12 +58,12 @@ DOM::ExceptionOr<NonnullRefPtr<File>> File::create(Vector<BlobPart> const& file_
     //    4. F.name is set to n.
     //    5. F.type is set to t.
     //    6. F.lastModified is set to d.
-    return adopt_ref(*new File(move(bytes), move(name), move(type), last_modified));
+    return JS::NonnullGCPtr(*realm.heap().allocate<File>(realm, realm, move(bytes), move(name), move(type), last_modified));
 }
 
-DOM::ExceptionOr<NonnullRefPtr<File>> File::create_with_global_object(Bindings::WindowObject&, Vector<BlobPart> const& file_bits, String const& file_name, Optional<FilePropertyBag> const& options)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<File>> File::construct_impl(JS::Realm& realm, Vector<BlobPart> const& file_bits, String const& file_name, Optional<FilePropertyBag> const& options)
 {
-    return create(file_bits, file_name, options);
+    return create(realm, file_bits, file_name, options);
 }
 
 }

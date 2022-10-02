@@ -32,19 +32,13 @@ DisplayConnector::DisplayConnector(size_t framebuffer_resource_size, bool enable
 {
 }
 
-ErrorOr<Memory::Region*> DisplayConnector::mmap(Process& process, OpenFileDescription&, Memory::VirtualRange const& range, u64 offset, int prot, bool shared)
+ErrorOr<NonnullLockRefPtr<Memory::VMObject>> DisplayConnector::vmobject_for_mmap(Process&, Memory::VirtualRange const&, u64& offset, bool)
 {
     VERIFY(m_shared_framebuffer_vmobject);
     if (offset != 0)
         return Error::from_errno(ENOTSUP);
 
-    return process.address_space().allocate_region_with_vmobject(
-        range,
-        *m_shared_framebuffer_vmobject,
-        0,
-        "Mapped Framebuffer"sv,
-        prot,
-        shared);
+    return *m_shared_framebuffer_vmobject;
 }
 
 ErrorOr<size_t> DisplayConnector::read(OpenFileDescription&, u64, UserOrKernelBuffer&, size_t)
@@ -307,12 +301,14 @@ ErrorOr<void> DisplayConnector::ioctl(OpenFileDescription&, unsigned request, Us
         return {};
     }
     case GRAPHICS_IOCTL_GET_PROPERTIES: {
+        VERIFY(m_shared_framebuffer_vmobject);
         auto user_properties = static_ptr_cast<GraphicsConnectorProperties*>(arg);
         GraphicsConnectorProperties properties {};
         properties.flushing_support = flush_support();
         properties.doublebuffer_support = double_framebuffering_capable();
         properties.partial_flushing_support = partial_flush_support();
         properties.refresh_rate_support = refresh_rate_support();
+        properties.max_buffer_bytes = m_shared_framebuffer_vmobject->size();
 
         return copy_to_user(user_properties, &properties);
     }

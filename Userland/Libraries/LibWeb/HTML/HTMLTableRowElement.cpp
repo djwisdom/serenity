@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/HTML/HTMLTableCellElement.h>
 #include <LibWeb/HTML/HTMLTableElement.h>
@@ -15,12 +16,13 @@ namespace Web::HTML {
 HTMLTableRowElement::HTMLTableRowElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLTableRowElement"));
 }
 
 HTMLTableRowElement::~HTMLTableRowElement() = default;
 
 // https://html.spec.whatwg.org/multipage/tables.html#dom-tr-cells
-NonnullRefPtr<DOM::HTMLCollection> HTMLTableRowElement::cells() const
+JS::NonnullGCPtr<DOM::HTMLCollection> HTMLTableRowElement::cells() const
 {
     // The cells attribute must return an HTMLCollection rooted at this tr element,
     // whose filter matches only td and th elements that are children of the tr element.
@@ -39,7 +41,7 @@ int HTMLTableRowElement::row_index() const
     // or a parent tbody, thead, or tfoot element and a grandparent table element,
     // return the index of this tr element in that table element's rows collection.
     // If there is no such table element, then the attribute must return −1.
-    auto rows_collection = [&]() -> RefPtr<DOM::HTMLCollection> {
+    auto rows_collection = [&]() -> JS::GCPtr<DOM::HTMLCollection> {
         if (!parent())
             return nullptr;
         if (is<HTMLTableElement>(*parent()))
@@ -52,7 +54,7 @@ int HTMLTableRowElement::row_index() const
         return -1;
     auto rows = rows_collection->collect_matching_elements();
     for (size_t i = 0; i < rows.size(); ++i) {
-        if (rows[i].ptr() == this)
+        if (rows[i] == this)
             return i;
     }
     return -1;
@@ -64,7 +66,7 @@ int HTMLTableRowElement::section_row_index() const
     // return the index of the tr element in the parent element's rows collection
     // (for tables, that's HTMLTableElement's rows collection; for table sections, that's HTMLTableSectionElement's rows collection).
     // If there is no such parent element, then the attribute must return −1.
-    auto rows_collection = [&]() -> RefPtr<DOM::HTMLCollection> {
+    auto rows_collection = [&]() -> JS::GCPtr<DOM::HTMLCollection> {
         if (!parent())
             return nullptr;
         if (is<HTMLTableElement>(*parent()))
@@ -77,7 +79,7 @@ int HTMLTableRowElement::section_row_index() const
         return -1;
     auto rows = rows_collection->collect_matching_elements();
     for (size_t i = 0; i < rows.size(); ++i) {
-        if (rows[i].ptr() == this)
+        if (rows[i] == this)
             return i;
     }
     return -1;

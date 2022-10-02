@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/RefPtr.h>
+#include <LibJS/Heap/Handle.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/Forward.h>
 
@@ -18,10 +19,10 @@ public:
     Position() = default;
     Position(Node&, unsigned offset);
 
-    bool is_valid() const { return m_node; }
+    bool is_valid() const { return m_node.ptr(); }
 
-    Node* node() { return m_node; }
-    Node const* node() const { return m_node; }
+    Node* node() { return m_node.cell(); }
+    Node const* node() const { return m_node.cell(); }
 
     unsigned offset() const { return m_offset; }
     bool offset_is_at_end_of_node() const;
@@ -31,7 +32,7 @@ public:
 
     bool operator==(Position const& other) const
     {
-        return m_node == other.m_node && m_offset == other.m_offset;
+        return m_node.ptr() == other.m_node.ptr() && m_offset == other.m_offset;
     }
 
     bool operator!=(Position const& other) const
@@ -42,7 +43,7 @@ public:
     String to_string() const;
 
 private:
-    RefPtr<Node> m_node;
+    JS::Handle<Node> m_node;
     unsigned m_offset { 0 };
 };
 

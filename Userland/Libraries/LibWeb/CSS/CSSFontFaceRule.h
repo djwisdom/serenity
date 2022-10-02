@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,27 +13,20 @@
 namespace Web::CSS {
 
 class CSSFontFaceRule final : public CSSRule {
-    AK_MAKE_NONCOPYABLE(CSSFontFaceRule);
-    AK_MAKE_NONMOVABLE(CSSFontFaceRule);
+    WEB_PLATFORM_OBJECT(CSSFontFaceRule, CSSRule);
 
 public:
-    using WrapperType = Bindings::CSSFontFaceRuleWrapper;
-
-    static NonnullRefPtr<CSSFontFaceRule> create(FontFace&& font_face)
-    {
-        return adopt_ref(*new CSSFontFaceRule(move(font_face)));
-    }
+    static CSSFontFaceRule* create(JS::Realm&, FontFace&&);
 
     virtual ~CSSFontFaceRule() override = default;
 
-    virtual StringView class_name() const override { return "CSSFontFaceRule"sv; }
     virtual Type type() const override { return Type::FontFace; }
 
     FontFace const& font_face() const { return m_font_face; }
     CSSStyleDeclaration* style();
 
 private:
-    explicit CSSFontFaceRule(FontFace&&);
+    CSSFontFaceRule(JS::Realm&, FontFace&&);
 
     virtual String serialized() const override;
 

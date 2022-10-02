@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/HTMLSpanElement.h>
 
 namespace Web::HTML {
@@ -11,6 +12,7 @@ namespace Web::HTML {
 HTMLSpanElement::HTMLSpanElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLSpanElement"));
 }
 
 HTMLSpanElement::~HTMLSpanElement() = default;

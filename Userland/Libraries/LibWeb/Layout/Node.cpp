@@ -5,7 +5,6 @@
  */
 
 #include <AK/Demangle.h>
-#include <LibGfx/Font/FontDatabase.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/BrowsingContext.h>
@@ -15,6 +14,7 @@
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Platform/FontPlugin.h>
 #include <typeinfo>
 
 namespace Web::Layout {
@@ -89,6 +89,15 @@ bool Node::establishes_stacking_context() const
         return true;
     if (!computed_values().transformations().is_empty())
         return true;
+
+    // Element that is a child of a flex container, with z-index value other than auto.
+    if (parent() && parent()->computed_values().display().is_flex_inside() && computed_values().z_index().has_value())
+        return true;
+
+    // Element that is a child of a grid container, with z-index value other than auto.
+    if (parent() && parent()->computed_values().display().is_grid_inside() && computed_values().z_index().has_value())
+        return true;
+
     return computed_values().opacity() < 1.0f;
 }
 
@@ -118,14 +127,17 @@ InitialContainingBlock& Node::root()
 
 void Node::set_needs_display()
 {
-    if (auto* block = containing_block()) {
-        block->paint_box()->for_each_fragment([&](auto& fragment) {
-            if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
-                browsing_context().set_needs_display(enclosing_int_rect(fragment.absolute_rect()));
-            }
-            return IterationDecision::Continue;
-        });
-    }
+    auto* containing_block = this->containing_block();
+    if (!containing_block)
+        return;
+    if (!containing_block->paint_box())
+        return;
+    containing_block->paint_box()->for_each_fragment([&](auto& fragment) {
+        if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
+            browsing_context().set_needs_display(enclosing_int_rect(fragment.absolute_rect()));
+        }
+        return IterationDecision::Continue;
+    });
 }
 
 Gfx::FloatPoint Node::box_type_agnostic_position() const
@@ -189,11 +201,7 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, CSS::Comp
     , m_computed_values(move(computed_values))
 {
     m_has_style = true;
-    m_font = Gfx::FontDatabase::default_font();
-}
-
-void NodeWithStyle::did_insert_into_layout_tree(CSS::StyleProperties const&)
-{
+    m_font = Platform::FontPlugin::the().default_font();
 }
 
 void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
@@ -384,6 +392,7 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     computed_values.set_flex_shrink(computed_style.flex_shrink());
     computed_values.set_order(computed_style.order());
     computed_values.set_clip(computed_style.clip());
+    computed_values.set_backdrop_filter(computed_style.backdrop_filter());
 
     auto justify_content = computed_style.justify_content();
     if (justify_content.has_value())
@@ -481,22 +490,15 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     if (auto maybe_visibility = computed_style.visibility(); maybe_visibility.has_value())
         computed_values.set_visibility(maybe_visibility.release_value());
 
-    if (computed_values.opacity() == 0 || computed_values.visibility() != CSS::Visibility::Visible)
-        m_visible = false;
+    m_visible = computed_values.opacity() != 0 && computed_values.visibility() == CSS::Visibility::Visible;
 
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::Width); maybe_length_percentage.has_value())
-        computed_values.set_width(maybe_length_percentage.release_value());
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::MinWidth); maybe_length_percentage.has_value())
-        computed_values.set_min_width(maybe_length_percentage.release_value());
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::MaxWidth); maybe_length_percentage.has_value())
-        computed_values.set_max_width(maybe_length_percentage.release_value());
+    computed_values.set_width(computed_style.size_value(CSS::PropertyID::Width));
+    computed_values.set_min_width(computed_style.size_value(CSS::PropertyID::MinWidth));
+    computed_values.set_max_width(computed_style.size_value(CSS::PropertyID::MaxWidth));
 
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::Height); maybe_length_percentage.has_value())
-        computed_values.set_height(maybe_length_percentage.release_value());
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::MinHeight); maybe_length_percentage.has_value())
-        computed_values.set_min_height(maybe_length_percentage.release_value());
-    if (auto maybe_length_percentage = computed_style.length_percentage(CSS::PropertyID::MaxHeight); maybe_length_percentage.has_value())
-        computed_values.set_max_height(maybe_length_percentage.release_value());
+    computed_values.set_height(computed_style.size_value(CSS::PropertyID::Height));
+    computed_values.set_min_height(computed_style.size_value(CSS::PropertyID::MinHeight));
+    computed_values.set_max_height(computed_style.size_value(CSS::PropertyID::MaxHeight));
 
     computed_values.set_inset(computed_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::Length::make_auto()));
     computed_values.set_margin(computed_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));
@@ -525,6 +527,12 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     do_border_style(computed_values.border_bottom(), CSS::PropertyID::BorderBottomWidth, CSS::PropertyID::BorderBottomColor, CSS::PropertyID::BorderBottomStyle);
 
     computed_values.set_content(computed_style.content());
+    computed_values.set_grid_template_columns(computed_style.grid_template_columns());
+    computed_values.set_grid_template_rows(computed_style.grid_template_rows());
+    computed_values.set_grid_column_end(computed_style.grid_column_end());
+    computed_values.set_grid_column_start(computed_style.grid_column_start());
+    computed_values.set_grid_row_end(computed_style.grid_row_end());
+    computed_values.set_grid_row_start(computed_style.grid_row_start());
 
     if (auto fill = computed_style.property(CSS::PropertyID::Fill); fill->has_color())
         computed_values.set_fill(fill->to_color(*this));
@@ -579,6 +587,7 @@ bool Node::is_inline_block() const
 NonnullRefPtr<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const
 {
     auto wrapper = adopt_ref(*new BlockContainer(const_cast<DOM::Document&>(document()), nullptr, m_computed_values.clone_inherited_values()));
+    static_cast<CSS::MutableComputedValues&>(wrapper->m_computed_values).set_display(CSS::Display(CSS::Display::Outside::Block, CSS::Display::Inside::Flow));
     wrapper->m_font = m_font;
     wrapper->m_line_height = m_line_height;
     return wrapper;
@@ -592,6 +601,31 @@ void Node::set_paintable(RefPtr<Painting::Paintable> paintable)
 RefPtr<Painting::Paintable> Node::create_paintable() const
 {
     return nullptr;
+}
+
+bool Node::is_anonymous() const
+{
+    return !m_dom_node.ptr();
+}
+
+DOM::Node const* Node::dom_node() const
+{
+    return m_dom_node.ptr();
+}
+
+DOM::Node* Node::dom_node()
+{
+    return m_dom_node.ptr();
+}
+
+DOM::Document& Node::document()
+{
+    return *m_document;
+}
+
+DOM::Document const& Node::document() const
+{
+    return *m_document;
 }
 
 }

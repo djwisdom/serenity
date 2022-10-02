@@ -12,7 +12,7 @@
 #include <AK/StringBuilder.h>
 #include <AK/Types.h>
 
-#include <Kernel/Interrupts/APIC.h>
+#include <Kernel/Arch/x86/common/Interrupts/APIC.h>
 #include <Kernel/Process.h>
 #include <Kernel/Scheduler.h>
 #include <Kernel/Sections.h>
@@ -1561,8 +1561,7 @@ extern "C" void context_first_init([[maybe_unused]] Thread* from_thread, [[maybe
     // the scheduler lock. We don't want to enable interrupts at this point
     // as we're still in the middle of a context switch. Doing so could
     // trigger a context switch within a context switch, leading to a crash.
-    FlatPtr flags = trap->regs->flags();
-    Scheduler::leave_on_first_switch(flags & ~0x200);
+    Scheduler::leave_on_first_switch(InterruptsState::Disabled);
 }
 
 extern "C" void enter_thread_context(Thread* from_thread, Thread* to_thread)

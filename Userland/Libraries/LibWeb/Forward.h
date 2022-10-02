@@ -50,6 +50,7 @@ class CSSStyleSheet;
 class CSSSupportsRule;
 class Display;
 class ElementInlineCSSStyleDeclaration;
+class FilterValueListStyleValue;
 class FlexFlowStyleValue;
 class FlexStyleValue;
 class FontFace;
@@ -57,15 +58,22 @@ class FontStyleValue;
 class Frequency;
 class FrequencyPercentage;
 class FrequencyStyleValue;
+class GridTrackPlacement;
+class GridTrackPlacementShorthandStyleValue;
+class GridTrackPlacementStyleValue;
+class GridTrackSize;
+class GridTrackSizeStyleValue;
 class IdentifierStyleValue;
 class ImageStyleValue;
 class InheritStyleValue;
 class InitialStyleValue;
 class Length;
+class LengthBox;
 class LengthPercentage;
 class LengthStyleValue;
 class LinearGradientStyleValue;
 class ListStyleStyleValue;
+class MediaFeatureValue;
 class MediaList;
 class MediaQuery;
 class MediaQueryList;
@@ -83,6 +91,7 @@ class ResolutionStyleValue;
 class Screen;
 class Selector;
 class ShadowStyleValue;
+class Size;
 class StringStyleValue;
 class StyleComputer;
 class StyleProperties;
@@ -121,7 +130,7 @@ namespace Web::DOM {
 class AbstractRange;
 class AbortController;
 class AbortSignal;
-class Attribute;
+class Attr;
 class CDATASection;
 class CharacterData;
 class Comment;
@@ -131,7 +140,6 @@ class DocumentFragment;
 class DocumentLoadEventDelayer;
 class DocumentType;
 class DOMEventListener;
-class DOMException;
 class DOMImplementation;
 class DOMTokenList;
 class Element;
@@ -152,6 +160,7 @@ class ParentNode;
 class Position;
 class ProcessingInstruction;
 class Range;
+class RegisteredObserver;
 class ShadowRoot;
 class StaticNodeList;
 class StaticRange;
@@ -160,9 +169,6 @@ class TreeWalker;
 enum class QuirksMode;
 struct EventListenerOptions;
 struct AddEventListenerOptions;
-
-template<typename ValueType>
-class ExceptionOr;
 }
 
 namespace Web::DOMParsing {
@@ -174,12 +180,16 @@ class TextEncoder;
 }
 
 namespace Web::Fetch {
+class BodyMixin;
 class Headers;
 class HeadersIterator;
+class Request;
+class Response;
 }
 
 namespace Web::Fetch::Infrastructure {
 class Body;
+struct BodyWithType;
 struct Header;
 class HeaderList;
 class Request;
@@ -202,6 +212,7 @@ class DOMRectReadOnly;
 namespace Web::HTML {
 class BrowsingContext;
 class BrowsingContextContainer;
+class BrowsingContextGroup;
 class CanvasRenderingContext2D;
 class ClassicScript;
 class CloseEvent;
@@ -212,7 +223,7 @@ class DOMStringMap;
 struct Environment;
 struct EnvironmentSettingsObject;
 class ErrorEvent;
-struct EventHandler;
+class EventHandler;
 class EventLoop;
 class HTMLAnchorElement;
 class HTMLAreaElement;
@@ -306,6 +317,7 @@ class TextMetrics;
 class Timer;
 class Window;
 class WindowEnvironmentSettingsObject;
+class WindowProxy;
 class Worker;
 class WorkerEnvironmentSettingsObject;
 class WorkerGlobalScope;
@@ -344,12 +356,28 @@ struct BorderRadiiData;
 struct LinearGradientData;
 }
 
+namespace Web::Platform {
+class Timer;
+}
+
+namespace Web::ReferrerPolicy {
+enum class ReferrerPolicy;
+}
+
 namespace Web::RequestIdleCallback {
 class IdleDeadline;
 }
 
 namespace Web::ResizeObserver {
 class ResizeObserver;
+}
+
+namespace Web::Selection {
+class Selection;
+}
+
+namespace Web::Streams {
+class ReadableStream;
 }
 
 namespace Web::SVG {
@@ -370,8 +398,12 @@ class SVGRectElement;
 class SVGSVGElement;
 }
 
-namespace Web::Selection {
-class Selection;
+namespace Web::WebIDL {
+class CallbackType;
+class DOMException;
+
+template<typename ValueType>
+class ExceptionOr;
 }
 
 namespace Web::WebSockets {
@@ -441,216 +473,25 @@ class URLSearchParamsIterator;
 }
 
 namespace Web::Bindings {
-class AbstractRangeWrapper;
-class AbortControllerWrapper;
-class AbortSignalWrapper;
-class AttributeWrapper;
-class BlobWrapper;
-struct CallbackType;
-class CanvasGradientWrapper;
-class CanvasRenderingContext2DWrapper;
-class CDATASectionWrapper;
-class CharacterDataWrapper;
-class CloseEventWrapper;
-class CommentWrapper;
-class CryptoWrapper;
-class CSSConditionRuleWrapper;
-class CSSFontFaceRuleWrapper;
-class CSSGroupingRuleWrapper;
-class CSSImportRuleWrapper;
-class CSSMediaRuleWrapper;
-class CSSRuleListWrapper;
-class CSSRuleWrapper;
-class CSSStyleDeclarationWrapper;
-class CSSStyleRuleWrapper;
-class CSSStyleSheetWrapper;
-class CSSSupportsRuleWrapper;
-class CustomEventWrapper;
-class DocumentFragmentWrapper;
-class DocumentTypeWrapper;
-class DocumentWrapper;
-class DOMExceptionWrapper;
-class DOMImplementationWrapper;
-class DOMParserWrapper;
-class DOMPointWrapper;
-class DOMPointReadOnlyWrapper;
-class DOMRectListWrapper;
-class DOMRectReadOnlyWrapper;
-class DOMRectWrapper;
-class DOMStringMapWrapper;
-class DOMTokenListWrapper;
-class ElementWrapper;
-class ErrorEventWrapper;
-class EventListenerWrapper;
-class EventTargetWrapper;
-class EventWrapper;
-class FileWrapper;
-class FocusEventWrapper;
-class HeadersWrapper;
-class HeadersIteratorWrapper;
-class HistoryWrapper;
-class HTMLAnchorElementWrapper;
-class HTMLAreaElementWrapper;
-class HTMLAudioElementWrapper;
-class HTMLBaseElementWrapper;
-class HTMLBodyElementWrapper;
-class HTMLBRElementWrapper;
-class HTMLButtonElementWrapper;
-class HTMLCanvasElementWrapper;
-class HTMLCollectionWrapper;
-class HTMLDataElementWrapper;
-class HTMLDataListElementWrapper;
-class HTMLDetailsElementWrapper;
-class HTMLDialogElementWrapper;
-class HTMLDirectoryElementWrapper;
-class HTMLDivElementWrapper;
-class HTMLDListElementWrapper;
-class HTMLElementWrapper;
-class HTMLEmbedElementWrapper;
-class HTMLFieldSetElementWrapper;
-class HTMLFontElementWrapper;
-class HTMLFormElementWrapper;
-class HTMLFrameElementWrapper;
-class HTMLFrameSetElementWrapper;
-class HTMLHeadElementWrapper;
-class HTMLHeadingElementWrapper;
-class HTMLHRElementWrapper;
-class HTMLHtmlElementWrapper;
-class HTMLIFrameElementWrapper;
-class HTMLImageElementWrapper;
-class HTMLInputElementWrapper;
-class HTMLLabelElementWrapper;
-class HTMLLegendElementWrapper;
-class HTMLLIElementWrapper;
-class HTMLLinkElementWrapper;
-class HTMLMapElementWrapper;
-class HTMLMarqueeElementWrapper;
-class HTMLMediaElementWrapper;
-class HTMLMenuElementWrapper;
-class HTMLMetaElementWrapper;
-class HTMLMeterElementWrapper;
-class HTMLModElementWrapper;
-class HTMLObjectElementWrapper;
-class HTMLOListElementWrapper;
-class HTMLOptGroupElementWrapper;
-class HTMLOptionElementWrapper;
-class HTMLOptionsCollectionWrapper;
-class HTMLOutputElementWrapper;
-class HTMLParagraphElementWrapper;
-class HTMLParamElementWrapper;
-class HTMLPictureElementWrapper;
-class HTMLPreElementWrapper;
-class HTMLProgressElementWrapper;
-class HTMLQuoteElementWrapper;
-class HTMLScriptElementWrapper;
-class HTMLSelectElementWrapper;
-class HTMLSlotElementWrapper;
-class HTMLSourceElementWrapper;
-class HTMLSpanElementWrapper;
-class HTMLStyleElementWrapper;
-class HTMLTableCaptionElementWrapper;
-class HTMLTableCellElementWrapper;
-class HTMLTableColElementWrapper;
-class HTMLTableElementWrapper;
-class HTMLTableRowElementWrapper;
-class HTMLTableSectionElementWrapper;
-class HTMLTemplateElementWrapper;
-class HTMLTextAreaElementWrapper;
-class HTMLTimeElementWrapper;
-class HTMLTitleElementWrapper;
-class HTMLTrackElementWrapper;
-class HTMLUListElementWrapper;
-class HTMLUnknownElementWrapper;
-class HTMLVideoElementWrapper;
-class IdleDeadlineWrapper;
-class ImageDataWrapper;
-class IntersectionObserverWrapper;
-class KeyboardEventWrapper;
+class Intrinsics;
 class LocationObject;
-class MediaListWrapper;
-class MediaQueryListEventWrapper;
-class MediaQueryListWrapper;
-class MessageChannelWrapper;
-class MessageEventWrapper;
-class MessagePortWrapper;
-class MouseEventWrapper;
-class MutationObserverWrapper;
-class MutationRecordWrapper;
-class NamedNodeMapWrapper;
-class NodeFilterWrapper;
-class NodeIteratorWrapper;
-class NodeListWrapper;
-class NodeWrapper;
 class OptionConstructor;
-class PageTransitionEventWrapper;
-class Path2DWrapper;
-class PerformanceTimingWrapper;
-class PerformanceWrapper;
-class ProcessingInstructionWrapper;
-class ProgressEventWrapper;
-class PromiseRejectionEventWrapper;
-class RangeConstructor;
 class RangePrototype;
-class RangeWrapper;
-class ResizeObserverWrapper;
-class ScreenWrapper;
-class SelectionWrapper;
-class StaticRangeWrapper;
-class StorageWrapper;
-class StyleSheetListWrapper;
-class StyleSheetWrapper;
-class SubmitEventWrapper;
-class SubtleCryptoWrapper;
-class SVGAnimatedLengthWrapper;
-class SVGCircleElementWrapper;
-class SVGDefsElementWrapper;
-class SVGClipPathElementWrapper;
-class SVGElementWrapper;
-class SVGEllipseElementWrapper;
-class SVGGeometryElementWrapper;
-class SVGGraphicsElementWrapper;
-class SVGLengthWrapper;
-class SVGLineElementWrapper;
-class SVGPathElementWrapper;
-class SVGPolygonElementWrapper;
-class SVGPolylineElementWrapper;
-class SVGRectElementWrapper;
-class SVGSVGElementWrapper;
-class SVGTextContentElementWrapper;
-class TextDecoderWrapper;
-class TextEncoderWrapper;
-class TextMetricsWrapper;
-class TextWrapper;
-class TreeWalkerWrapper;
-class UIEventWrapper;
-class URLConstructor;
-class URLPrototype;
-class URLSearchParamsConstructor;
-class URLSearchParamsIteratorPrototype;
-class URLSearchParamsIteratorWrapper;
-class URLSearchParamsPrototype;
-class URLSearchParamsWrapper;
-class URLWrapper;
-class WebGLContextEventWrapper;
-class WebGLRenderingContextWrapper;
-class WebSocketWrapper;
-class WindowObject;
-class WindowProxy;
-class WorkerWrapper;
-class WorkerGlobalScopeWrapper;
-class WorkerLocationWrapper;
-class WorkerNavigatorWrapper;
 class Wrappable;
 class Wrapper;
-class XMLHttpRequestConstructor;
-class XMLHttpRequestEventTargetWrapper;
 class XMLHttpRequestPrototype;
-class XMLHttpRequestWrapper;
-class XMLSerializerWrapper;
 enum class CanPlayTypeResult;
 enum class CanvasFillRule;
 enum class EndingType;
 enum class DOMParserSupportedType;
+enum class ReferrerPolicy;
+enum class RequestDestination;
+enum class RequestMode;
+enum class RequestCredentials;
+enum class RequestCache;
+enum class RequestRedirect;
+enum class RequestDuplex;
+enum class ResponseType;
 enum class ResizeObserverBoxOptions;
 enum class XMLHttpRequestResponseType;
 }

@@ -83,6 +83,11 @@ enum Face {
     Back = 1,
 };
 
+enum class PackingType {
+    Pack,
+    Unpack,
+};
+
 class GLContext final {
 public:
     GLContext(RefPtr<GPU::Driver> driver, NonnullOwnPtr<GPU::Device>, Gfx::Bitmap&);
@@ -108,7 +113,7 @@ public:
     void gl_frustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble near_val, GLdouble far_val);
     void gl_gen_textures(GLsizei n, GLuint* textures);
     GLenum gl_get_error();
-    GLubyte* gl_get_string(GLenum name);
+    GLubyte const* gl_get_string(GLenum name);
     void gl_load_identity();
     void gl_load_matrix(FloatMatrix4x4 const& matrix);
     void gl_matrix_mode(GLenum mode);
@@ -172,7 +177,7 @@ public:
     void gl_depth_func(GLenum func);
     void gl_polygon_mode(GLenum face, GLenum mode);
     void gl_polygon_offset(GLfloat factor, GLfloat units);
-    void gl_fogfv(GLenum pname, GLfloat* params);
+    void gl_fogfv(GLenum pname, GLfloat const* params);
     void gl_fogf(GLenum pname, GLfloat param);
     void gl_fogi(GLenum pname, GLint param);
     void gl_pixel_storei(GLenum pname, GLint param);
@@ -189,6 +194,7 @@ public:
     void gl_light_model(GLenum pname, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
     void gl_bitmap(GLsizei width, GLsizei height, GLfloat xorig, GLfloat yorig, GLfloat xmove, GLfloat ymove, GLubyte const* bitmap);
     void gl_copy_tex_image_2d(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
+    void gl_get_tex_image(GLenum target, GLint level, GLenum format, GLenum type, void* pixels);
     void gl_get_tex_parameter_integerv(GLenum target, GLint level, GLenum pname, GLint* params);
     void gl_rect(GLdouble x1, GLdouble y1, GLdouble x2, GLdouble y2);
     void gl_tex_gen(GLenum coord, GLenum pname, GLint param);
@@ -211,7 +217,7 @@ public:
 private:
     void sync_device_config();
     void sync_device_sampler_config();
-    void sync_device_texcoord_config();
+    void sync_device_texture_units();
     void sync_light_state();
     void sync_stencil_configuration();
     void sync_clip_planes();
@@ -235,6 +241,7 @@ private:
     }
 
     Optional<ContextParameter> get_context_parameter(GLenum pname);
+    GPU::PackingSpecification get_packing_specification(PackingType);
 
     template<typename T>
     void get_floating_point(GLenum pname, T* params);
@@ -247,18 +254,31 @@ private:
     [[nodiscard]] bool should_append_to_listing() const { return m_current_listing_index.has_value(); }
     [[nodiscard]] bool should_execute_after_appending_to_listing() const { return m_current_listing_index.has_value() && m_current_listing_index->mode == GL_COMPILE_AND_EXECUTE; }
 
+    // FIXME: we store GPU::Texture objects that do not point back to either the driver or device, so we need
+    //        to destruct the latter two at the very end. Fix this by making all GPU objects point back to
+    //        the device that created them, and the device back to the driver.
+    RefPtr<GPU::Driver> m_driver;
+    NonnullOwnPtr<GPU::Device> m_rasterizer;
+    GPU::DeviceInfo const m_device_info;
+
     GLenum m_current_draw_mode;
     GLenum m_current_matrix_mode { GL_MODELVIEW };
-    FloatMatrix4x4 m_projection_matrix { FloatMatrix4x4::identity() };
-    FloatMatrix4x4 m_model_view_matrix { FloatMatrix4x4::identity() };
-    FloatMatrix4x4 m_texture_matrix { FloatMatrix4x4::identity() };
-    FloatMatrix4x4* m_current_matrix { &m_model_view_matrix };
 
-    Vector<FloatMatrix4x4> m_projection_matrix_stack;
-    Vector<FloatMatrix4x4> m_model_view_matrix_stack;
-    // FIXME: implement multi-texturing: the texture matrix stack should live inside a texture unit
-    Vector<FloatMatrix4x4> m_texture_matrix_stack;
+    FloatMatrix4x4& projection_matrix() { return m_projection_matrix_stack.last(); }
+    FloatMatrix4x4& model_view_matrix() { return m_model_view_matrix_stack.last(); }
+
+    Vector<FloatMatrix4x4> m_projection_matrix_stack { FloatMatrix4x4::identity() };
+    Vector<FloatMatrix4x4> m_model_view_matrix_stack { FloatMatrix4x4::identity() };
     Vector<FloatMatrix4x4>* m_current_matrix_stack { &m_model_view_matrix_stack };
+    FloatMatrix4x4* m_current_matrix { &m_current_matrix_stack->last() };
+
+    ALWAYS_INLINE void update_current_matrix(FloatMatrix4x4 const& new_matrix)
+    {
+        *m_current_matrix = new_matrix;
+
+        if (m_current_matrix_mode == GL_TEXTURE)
+            m_texture_units_dirty = true;
+    }
 
     Gfx::IntRect m_viewport;
 
@@ -326,7 +346,7 @@ private:
     bool m_client_side_vertex_array_enabled { false };
     bool m_client_side_color_array_enabled { false };
     Vector<bool> m_client_side_texture_coord_array_enabled;
-    size_t m_client_active_texture = 0;
+    size_t m_client_active_texture { 0 };
     bool m_client_side_normal_array_enabled { false };
 
     NonnullRefPtr<Gfx::Bitmap> m_frontbuffer;
@@ -346,6 +366,7 @@ private:
     Vector<TextureUnit> m_texture_units;
     TextureUnit* m_active_texture_unit;
     size_t m_active_texture_unit_index { 0 };
+    bool m_texture_units_dirty { true };
 
     // Texture coordinate generation state
     struct TextureCoordinateGeneration {
@@ -355,16 +376,11 @@ private:
         FloatVector4 eye_plane_coefficients { 0.0f, 0.0f, 0.0f, 0.0f };
     };
     Vector<Array<TextureCoordinateGeneration, 4>> m_texture_coordinate_generation;
-    bool m_texcoord_generation_dirty { true };
-
     ALWAYS_INLINE TextureCoordinateGeneration& texture_coordinate_generation(size_t texture_unit, GLenum capability)
     {
         return m_texture_coordinate_generation[texture_unit][capability - GL_TEXTURE_GEN_S];
     }
 
-    RefPtr<GPU::Driver> m_driver;
-    NonnullOwnPtr<GPU::Device> m_rasterizer;
-    GPU::DeviceInfo const m_device_info;
     bool m_sampler_config_is_dirty { true };
     bool m_light_state_is_dirty { true };
 
@@ -520,8 +536,7 @@ private:
     String m_extensions;
 };
 
-NonnullOwnPtr<GLContext> create_context(Gfx::Bitmap&);
+ErrorOr<NonnullOwnPtr<GLContext>> create_context(Gfx::Bitmap&);
 void make_context_current(GLContext*);
-void present_context(GLContext*);
 
 }

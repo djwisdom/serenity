@@ -96,6 +96,12 @@ ContentStyleValue const& StyleValue::as_content() const
     return static_cast<ContentStyleValue const&>(*this);
 }
 
+FilterValueListStyleValue const& StyleValue::as_filter_value_list() const
+{
+    VERIFY(is_filter_value_list());
+    return static_cast<FilterValueListStyleValue const&>(*this);
+}
+
 FlexStyleValue const& StyleValue::as_flex() const
 {
     VERIFY(is_flex());
@@ -118,6 +124,18 @@ FrequencyStyleValue const& StyleValue::as_frequency() const
 {
     VERIFY(is_frequency());
     return static_cast<FrequencyStyleValue const&>(*this);
+}
+
+GridTrackPlacementShorthandStyleValue const& StyleValue::as_grid_track_placement_shorthand() const
+{
+    VERIFY(is_grid_track_placement_shorthand());
+    return static_cast<GridTrackPlacementShorthandStyleValue const&>(*this);
+}
+
+GridTrackPlacementStyleValue const& StyleValue::as_grid_track_placement() const
+{
+    VERIFY(is_grid_track_placement());
+    return static_cast<GridTrackPlacementStyleValue const&>(*this);
 }
 
 IdentifierStyleValue const& StyleValue::as_identifier() const
@@ -148,6 +166,12 @@ LengthStyleValue const& StyleValue::as_length() const
 {
     VERIFY(is_length());
     return static_cast<LengthStyleValue const&>(*this);
+}
+
+GridTrackSizeStyleValue const& StyleValue::as_grid_track_size() const
+{
+    VERIFY(is_grid_track_size());
+    return static_cast<GridTrackSizeStyleValue const&>(*this);
 }
 
 LinearGradientStyleValue const& StyleValue::as_linear_gradient() const
@@ -1145,6 +1169,171 @@ bool ContentStyleValue::equals(StyleValue const& other) const
     return true;
 }
 
+float Filter::Blur::resolved_radius(Layout::Node const& node) const
+{
+    // Default value when omitted is 0px.
+    auto sigma = 0;
+    if (radius.has_value())
+        sigma = radius->resolved(node).to_px(node);
+    // Note: The radius/sigma of the blur needs to be doubled for LibGfx's blur functions.
+    return sigma * 2;
+}
+
+Filter::DropShadow::Resolved Filter::DropShadow::resolved(Layout::Node const& node) const
+{
+    // The default value for omitted values is missing length values set to 0
+    // and the missing used color is taken from the color property.
+    return Resolved {
+        offset_x.resolved(node).to_px(node),
+        offset_y.resolved(node).to_px(node),
+        radius.has_value() ? radius->resolved(node).to_px(node) : 0.0f,
+        color.has_value() ? *color : node.computed_values().color()
+    };
+}
+
+float Filter::HueRotate::angle_degrees() const
+{
+    // Default value when omitted is 0deg.
+    if (!angle.has_value())
+        return 0.0f;
+    return angle->visit([&](Angle const& angle) { return angle.to_degrees(); }, [&](auto) { return 0.0f; });
+}
+
+float Filter::Color::resolved_amount() const
+{
+    if (amount.has_value()) {
+        if (amount->is_percentage())
+            return amount->percentage().as_fraction();
+        return amount->number().value();
+    }
+    // All color filters (brightness, sepia, etc) have a default amount of 1.
+    return 1.0f;
+}
+
+String FilterValueListStyleValue::to_string() const
+{
+    StringBuilder builder {};
+    bool first = true;
+    for (auto& filter_function : filter_value_list()) {
+        if (!first)
+            builder.append(' ');
+        filter_function.visit(
+            [&](Filter::Blur const& blur) {
+                builder.append("blur("sv);
+                if (blur.radius.has_value())
+                    builder.append(blur.radius->to_string());
+            },
+            [&](Filter::DropShadow const& drop_shadow) {
+                builder.appendff("drop-shadow({} {}"sv,
+                    drop_shadow.offset_x, drop_shadow.offset_y);
+                if (drop_shadow.radius.has_value())
+                    builder.appendff(" {}", drop_shadow.radius->to_string());
+                if (drop_shadow.color.has_value()) {
+                    builder.append(' ');
+                    serialize_a_srgb_value(builder, *drop_shadow.color);
+                }
+            },
+            [&](Filter::HueRotate const& hue_rotate) {
+                builder.append("hue-rotate("sv);
+                if (hue_rotate.angle.has_value()) {
+                    hue_rotate.angle->visit(
+                        [&](Angle const& angle) {
+                            builder.append(angle.to_string());
+                        },
+                        [&](auto&) {
+                            builder.append('0');
+                        });
+                }
+            },
+            [&](Filter::Color const& color) {
+                builder.appendff("{}(",
+                    [&] {
+                        switch (color.operation) {
+                        case Filter::Color::Operation::Brightness:
+                            return "brightness"sv;
+                        case Filter::Color::Operation::Contrast:
+                            return "contrast"sv;
+                        case Filter::Color::Operation::Grayscale:
+                            return "grayscale"sv;
+                        case Filter::Color::Operation::Invert:
+                            return "invert"sv;
+                        case Filter::Color::Operation::Opacity:
+                            return "opacity"sv;
+                        case Filter::Color::Operation::Saturate:
+                            return "saturate"sv;
+                        case Filter::Color::Operation::Sepia:
+                            return "sepia"sv;
+                        default:
+                            VERIFY_NOT_REACHED();
+                        }
+                    }());
+                if (color.amount.has_value())
+                    builder.append(color.amount->to_string());
+            });
+        builder.append(')');
+        first = false;
+    }
+    return builder.to_string();
+}
+
+static bool operator==(Filter::Blur const& a, Filter::Blur const& b)
+{
+    return a.radius == b.radius;
+}
+
+static bool operator==(Filter::DropShadow const& a, Filter::DropShadow const& b)
+{
+    return a.offset_x == b.offset_x && a.offset_y == b.offset_y && a.radius == b.radius && a.color == b.color;
+}
+
+static bool operator==(Filter::HueRotate::Zero const&, Filter::HueRotate::Zero const&)
+{
+    return true;
+}
+
+static bool operator==(Filter::Color const& a, Filter::Color const& b)
+{
+    return a.operation == b.operation && a.amount == b.amount;
+}
+
+static bool operator==(Filter::HueRotate const& a, Filter::HueRotate const& b)
+{
+    return a.angle == b.angle;
+}
+
+static bool variant_equals(auto const& a, auto const& b)
+{
+    return a.visit([&](auto const& held_value) {
+        using HeldType = AK::Detail::Decay<decltype(held_value)>;
+        bool other_holds_same_type = b.template has<HeldType>();
+        return other_holds_same_type && held_value == b.template get<HeldType>();
+    });
+}
+
+static bool operator==(Filter::HueRotate::AngleOrZero const& a, Filter::HueRotate::AngleOrZero const& b)
+{
+    return variant_equals(a, b);
+}
+
+static bool operator==(FilterFunction const& a, FilterFunction const& b)
+{
+    return variant_equals(a, b);
+}
+
+bool FilterValueListStyleValue::equals(StyleValue const& other) const
+{
+    if (type() != other.type())
+        return false;
+    auto const& typed_other = other.as_filter_value_list();
+    if (m_filter_value_list.size() != typed_other.m_filter_value_list.size())
+        return false;
+    for (size_t i = 0; i < m_filter_value_list.size(); i++) {
+        if (m_filter_value_list[i] != typed_other.m_filter_value_list[i])
+            return false;
+    }
+    return true;
+}
+
 String FlexStyleValue::to_string() const
 {
     return String::formatted("{} {} {}", m_grow->to_string(), m_shrink->to_string(), m_basis->to_string());
@@ -1196,6 +1385,54 @@ bool FrequencyStyleValue::equals(StyleValue const& other) const
     if (type() != other.type())
         return false;
     return m_frequency == other.as_frequency().m_frequency;
+}
+
+String GridTrackPlacementShorthandStyleValue::to_string() const
+{
+    if (m_end->grid_track_placement().position() == 0)
+        return String::formatted("{}", m_start->grid_track_placement().to_string());
+    return String::formatted("{} / {}", m_start->grid_track_placement().to_string(), m_end->grid_track_placement().to_string());
+}
+
+bool GridTrackPlacementShorthandStyleValue::equals(StyleValue const& other) const
+{
+    if (type() != other.type())
+        return false;
+    auto const& typed_other = other.as_grid_track_placement_shorthand();
+    return m_start->equals(typed_other.m_start)
+        && m_end->equals(typed_other.m_end);
+}
+
+String GridTrackPlacementStyleValue::to_string() const
+{
+    return m_grid_track_placement.to_string();
+}
+
+bool GridTrackPlacementStyleValue::equals(StyleValue const& other) const
+{
+    if (type() != other.type())
+        return false;
+    auto const& typed_other = other.as_grid_track_placement();
+    return m_grid_track_placement == typed_other.grid_track_placement();
+}
+
+String GridTrackSizeStyleValue::to_string() const
+{
+    StringBuilder builder;
+    for (size_t i = 0; i < m_grid_track.size(); i++) {
+        builder.append(m_grid_track[i].to_string());
+        if (i != m_grid_track.size() - 1)
+            builder.append(" "sv);
+    }
+    return builder.to_string();
+}
+
+bool GridTrackSizeStyleValue::equals(StyleValue const& other) const
+{
+    if (type() != other.type())
+        return false;
+    auto const& typed_other = other.as_grid_track_size();
+    return m_grid_track == typed_other.grid_track_size();
 }
 
 String IdentifierStyleValue::to_string() const
@@ -1416,6 +1653,9 @@ void ImageStyleValue::load_any_resources(DOM::Document& document)
     if (m_bitmap)
         return;
 
+    if (resource())
+        return;
+
     m_document = &document;
     auto request = LoadRequest::create_for_url_on_page(m_url, document.page());
     set_resource(ResourceLoader::the().load_resource(Resource::Type::Image, request));
@@ -1512,8 +1752,9 @@ String LinearGradientStyleValue::to_string() const
         }
 
         serialize_a_srgb_value(builder, element.color_stop.color);
-        if (element.color_stop.length.has_value()) {
-            builder.appendff(" {}"sv, element.color_stop.length->to_string());
+        for (auto position : Array { &element.color_stop.position, &element.color_stop.second_position }) {
+            if (position->has_value())
+                builder.appendff(" {}"sv, (*position)->to_string());
         }
         first = false;
     }
@@ -1521,7 +1762,7 @@ String LinearGradientStyleValue::to_string() const
     return builder.to_string();
 }
 
-static bool operator==(LinearGradientStyleValue::GradientDirection a, LinearGradientStyleValue::GradientDirection b)
+static bool operator==(LinearGradientStyleValue::GradientDirection const& a, LinearGradientStyleValue::GradientDirection const& b)
 {
     if (a.has<SideOrCorner>() && b.has<SideOrCorner>())
         return a.get<SideOrCorner>() == b.get<SideOrCorner>();
@@ -1530,22 +1771,22 @@ static bool operator==(LinearGradientStyleValue::GradientDirection a, LinearGrad
     return false;
 }
 
-static bool operator==(GradientColorHint a, GradientColorHint b)
+static bool operator==(GradientColorHint const& a, GradientColorHint const& b)
 {
     return a.value == b.value;
 }
 
-static bool operator==(GradientColorStop a, GradientColorStop b)
+static bool operator==(GradientColorStop const& a, GradientColorStop const& b)
 {
-    return a.color == b.color && a.length == b.length;
+    return a.color == b.color && a.position == b.position && a.second_position == b.second_position;
 }
 
-static bool operator==(ColorStopListElement a, ColorStopListElement b)
+static bool operator==(ColorStopListElement const& a, ColorStopListElement const& b)
 {
     return a.transition_hint == b.transition_hint && a.color_stop == b.color_stop;
 }
 
-static bool operator==(EdgeRect a, EdgeRect b)
+static bool operator==(EdgeRect const& a, EdgeRect const& b)
 {
     return a.top_edge == b.top_edge && a.right_edge == b.right_edge && a.bottom_edge == b.bottom_edge && a.left_edge == b.left_edge;
 }
@@ -1556,8 +1797,12 @@ bool LinearGradientStyleValue::equals(StyleValue const& other_) const
         return false;
     auto& other = other_.as_linear_gradient();
 
-    if (m_direction != other.m_direction || m_color_stop_list.size() != other.m_color_stop_list.size())
+    if (m_gradient_type != other.m_gradient_type
+        || m_repeating != other.m_repeating
+        || m_direction != other.m_direction
+        || m_color_stop_list.size() != other.m_color_stop_list.size()) {
         return false;
+    }
 
     for (size_t i = 0; i < m_color_stop_list.size(); i++) {
         if (m_color_stop_list[i] != other.m_color_stop_list[i])
@@ -1607,13 +1852,15 @@ float LinearGradientStyleValue::angle_degrees(Gfx::FloatSize const& gradient_siz
 
 void LinearGradientStyleValue::resolve_for_size(Layout::Node const& node, Gfx::FloatSize const& size) const
 {
-    m_resolved_data = Painting::resolve_linear_gradient_data(node, size, *this);
+    if (m_resolved.has_value() && m_resolved->size == size)
+        return;
+    m_resolved = ResolvedData { Painting::resolve_linear_gradient_data(node, size, *this), size };
 }
 
 void LinearGradientStyleValue::paint(PaintContext& context, Gfx::IntRect const& dest_rect, CSS::ImageRendering) const
 {
-    VERIFY(m_resolved_data.has_value());
-    Painting::paint_linear_gradient(context, dest_rect, *m_resolved_data);
+    VERIFY(m_resolved.has_value());
+    Painting::paint_linear_gradient(context, dest_rect, m_resolved->data);
 }
 
 bool InheritStyleValue::equals(StyleValue const& other) const
@@ -1899,6 +2146,16 @@ NonnullRefPtr<ColorStyleValue> ColorStyleValue::create(Color color)
     return adopt_ref(*new ColorStyleValue(color));
 }
 
+NonnullRefPtr<GridTrackPlacementStyleValue> GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement grid_track_placement)
+{
+    return adopt_ref(*new GridTrackPlacementStyleValue(grid_track_placement));
+}
+
+NonnullRefPtr<GridTrackSizeStyleValue> GridTrackSizeStyleValue::create(Vector<CSS::GridTrackSize> grid_track_size)
+{
+    return adopt_ref(*new GridTrackSizeStyleValue(grid_track_size));
+}
+
 NonnullRefPtr<RectStyleValue> RectStyleValue::create(EdgeRect rect)
 {
     return adopt_ref(*new RectStyleValue(rect));
@@ -1966,6 +2223,58 @@ NonnullRefPtr<StyleValue> BorderRadiusStyleValue::absolutized(Gfx::IntRect const
     if (!m_vertical_radius.is_percentage())
         absolutized_vertical_radius = absolutized_length(m_vertical_radius.length(), viewport_rect, font_metrics, font_size, root_font_size).value_or(m_vertical_radius.length());
     return BorderRadiusStyleValue::create(absolutized_horizontal_radius, absolutized_vertical_radius);
+}
+
+bool CalculatedStyleValue::contains_percentage() const
+{
+    return m_expression->contains_percentage();
+}
+
+bool CalculatedStyleValue::CalcSum::contains_percentage() const
+{
+    if (first_calc_product->contains_percentage())
+        return true;
+    for (auto& part : zero_or_more_additional_calc_products) {
+        if (part.contains_percentage())
+            return true;
+    }
+    return false;
+}
+
+bool CalculatedStyleValue::CalcSumPartWithOperator::contains_percentage() const
+{
+    return value->contains_percentage();
+}
+
+bool CalculatedStyleValue::CalcProduct::contains_percentage() const
+{
+    if (first_calc_value.contains_percentage())
+        return true;
+    for (auto& part : zero_or_more_additional_calc_values) {
+        if (part.contains_percentage())
+            return true;
+    }
+    return false;
+}
+
+bool CalculatedStyleValue::CalcProductPartWithOperator::contains_percentage() const
+{
+    return value.visit(
+        [](CalcValue const& value) { return value.contains_percentage(); },
+        [](CalcNumberValue const&) { return false; });
+}
+
+bool CalculatedStyleValue::CalcValue::contains_percentage() const
+{
+    return value.visit(
+        [](Percentage const&) { return true; },
+        [](NonnullOwnPtr<CalcSum> const& sum) { return sum->contains_percentage(); },
+        [](auto const&) { return false; });
+}
+
+bool calculated_style_value_contains_percentage(CalculatedStyleValue const& value)
+{
+    return value.contains_percentage();
 }
 
 }

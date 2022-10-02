@@ -12,12 +12,13 @@ namespace Web::SVG {
 
 // https://svgwg.org/svg2-draft/text.html#InterfaceSVGTextContentElement
 class SVGTextContentElement : public SVGGraphicsElement {
+    WEB_PLATFORM_OBJECT(SVGTextContentElement, SVGGraphicsElement);
+
 public:
-    using WrapperType = Bindings::SVGTextContentElementWrapper;
-
-    SVGTextContentElement(DOM::Document&, DOM::QualifiedName);
-
     int get_number_of_chars() const;
+
+protected:
+    SVGTextContentElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

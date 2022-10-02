@@ -18,7 +18,8 @@ public:
 
     virtual bool inhibits_floating() const override { return true; }
 
-    virtual void run(Box const&, LayoutMode) override;
+    virtual void run(Box const&, LayoutMode, AvailableSpace const& available_width, AvailableSpace const& available_height) override;
+    virtual float automatic_content_height() const override;
 
     Box const& flex_container() const { return context_box(); }
 
@@ -62,6 +63,8 @@ private:
         DirectionAgnosticMargins padding {};
         bool is_min_violation { false };
         bool is_max_violation { false };
+        bool has_assigned_definite_main_size { false };
+        bool has_assigned_definite_cross_size { false };
 
         float add_main_margin_box_sizes(float content_size) const
         {
@@ -85,8 +88,8 @@ private:
     bool has_definite_cross_size(Box const&) const;
     float specified_main_size(Box const&) const;
     float specified_cross_size(Box const&) const;
-    float resolved_definite_main_size(Box const&) const;
-    float resolved_definite_cross_size(Box const&) const;
+    float resolved_definite_main_size(FlexItem const&) const;
+    float resolved_definite_cross_size(FlexItem const&) const;
     bool has_main_min_size(Box const&) const;
     bool has_cross_min_size(Box const&) const;
     float specified_main_max_size(Box const&) const;
@@ -104,15 +107,15 @@ private:
     Optional<float> specified_size_suggestion(FlexItem const&) const;
     Optional<float> transferred_size_suggestion(FlexItem const&) const;
     float content_size_suggestion(FlexItem const&) const;
-    CSS::LengthPercentage const& computed_main_size(Box const&) const;
-    CSS::LengthPercentage const& computed_main_min_size(Box const&) const;
-    CSS::LengthPercentage const& computed_main_max_size(Box const&) const;
-    CSS::LengthPercentage const& computed_cross_size(Box const&) const;
-    CSS::LengthPercentage const& computed_cross_min_size(Box const&) const;
-    CSS::LengthPercentage const& computed_cross_max_size(Box const&) const;
+    CSS::Size const& computed_main_size(Box const&) const;
+    CSS::Size const& computed_main_min_size(Box const&) const;
+    CSS::Size const& computed_main_max_size(Box const&) const;
+    CSS::Size const& computed_cross_size(Box const&) const;
+    CSS::Size const& computed_cross_min_size(Box const&) const;
+    CSS::Size const& computed_cross_max_size(Box const&) const;
 
-    float get_pixel_width(Box const& box, Optional<CSS::LengthPercentage> const& length_percentage) const;
-    float get_pixel_height(Box const& box, Optional<CSS::LengthPercentage> const& length_percentage) const;
+    float get_pixel_width(Box const& box, Optional<CSS::Size> const& length_percentage) const;
+    float get_pixel_height(Box const& box, Optional<CSS::Size> const& length_percentage) const;
 
     bool flex_item_is_stretched(FlexItem const&) const;
 
@@ -138,6 +141,8 @@ private:
     void collect_flex_items_into_flex_lines();
 
     void resolve_flexible_lengths();
+
+    void resolve_cross_axis_auto_margins();
 
     void determine_hypothetical_cross_size_of_item(FlexItem&, bool resolve_percentage_min_max_sizes);
 
@@ -187,11 +192,11 @@ private:
     Vector<FlexItem> m_flex_items;
     CSS::FlexDirection m_flex_direction {};
 
-    struct AvailableSpace {
+    struct AvailableSpaceForItems {
         Optional<float> main;
         Optional<float> cross;
     };
-    Optional<AvailableSpace> m_available_space;
+    Optional<AvailableSpaceForItems> m_available_space;
 };
 
 }

@@ -22,6 +22,7 @@
 #include <LibWeb/CSS/Parser/DeclarationOrAtRule.h>
 #include <LibWeb/CSS/Parser/Function.h>
 #include <LibWeb/CSS/Parser/Rule.h>
+#include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/CSS/Parser/Tokenizer.h>
 #include <LibWeb/CSS/Ratio.h>
 #include <LibWeb/CSS/Selector.h>
@@ -34,7 +35,8 @@ namespace Web::CSS::Parser {
 
 class ParsingContext {
 public:
-    ParsingContext() = default;
+    ParsingContext();
+    explicit ParsingContext(JS::Realm&);
     explicit ParsingContext(DOM::Document const&);
     explicit ParsingContext(DOM::Document const&, AK::URL);
     explicit ParsingContext(DOM::ParentNode&);
@@ -46,75 +48,13 @@ public:
     PropertyID current_property_id() const { return m_current_property_id; }
     void set_current_property_id(PropertyID property_id) { m_current_property_id = property_id; }
 
+    JS::Realm& realm() const { return m_realm; }
+
 private:
+    JS::Realm& m_realm;
     DOM::Document const* m_document { nullptr };
     PropertyID m_current_property_id { PropertyID::Invalid };
     AK::URL m_url;
-};
-
-template<typename T>
-class TokenStream {
-public:
-    class StateTransaction {
-    public:
-        explicit StateTransaction(TokenStream<T>& token_stream)
-            : m_token_stream(token_stream)
-            , m_saved_iterator_offset(token_stream.m_iterator_offset)
-        {
-        }
-
-        ~StateTransaction()
-        {
-            if (!m_commit)
-                m_token_stream.m_iterator_offset = m_saved_iterator_offset;
-        }
-
-        StateTransaction create_child() { return StateTransaction(*this); }
-
-        void commit()
-        {
-            m_commit = true;
-            if (m_parent)
-                m_parent->commit();
-        }
-
-    private:
-        explicit StateTransaction(StateTransaction& parent)
-            : m_parent(&parent)
-            , m_token_stream(parent.m_token_stream)
-            , m_saved_iterator_offset(parent.m_token_stream.m_iterator_offset)
-        {
-        }
-
-        StateTransaction* m_parent { nullptr };
-        TokenStream<T>& m_token_stream;
-        int m_saved_iterator_offset { 0 };
-        bool m_commit { false };
-    };
-
-    explicit TokenStream(Vector<T> const&);
-    ~TokenStream() = default;
-
-    TokenStream(TokenStream<T> const&) = delete;
-
-    bool has_next_token();
-    T const& next_token();
-    T const& peek_token(int offset = 0);
-    T const& current_token();
-    void reconsume_current_input_token();
-
-    StateTransaction begin_transaction() { return StateTransaction(*this); }
-
-    void skip_whitespace();
-
-    void dump_all_tokens();
-
-private:
-    Vector<T> const& m_tokens;
-    int m_iterator_offset { -1 };
-
-    T make_eof();
-    T m_eof;
 };
 
 class Parser {
@@ -122,9 +62,9 @@ public:
     Parser(ParsingContext const&, StringView input, String const& encoding = "utf-8");
     ~Parser() = default;
 
-    NonnullRefPtr<CSSStyleSheet> parse_as_css_stylesheet(Optional<AK::URL> location);
-    RefPtr<ElementInlineCSSStyleDeclaration> parse_as_style_attribute(DOM::Element&);
-    RefPtr<CSSRule> parse_as_css_rule();
+    CSSStyleSheet* parse_as_css_stylesheet(Optional<AK::URL> location);
+    ElementInlineCSSStyleDeclaration* parse_as_style_attribute(DOM::Element&);
+    CSSRule* parse_as_css_rule();
     Optional<StyleProperty> parse_as_supports_condition();
 
     enum class SelectorParsingMode {
@@ -232,11 +172,11 @@ private:
 
     Optional<GeneralEnclosed> parse_general_enclosed(TokenStream<ComponentValue>&);
 
-    RefPtr<CSSRule> parse_font_face_rule(TokenStream<ComponentValue>&);
+    CSSRule* parse_font_face_rule(TokenStream<ComponentValue>&);
     Vector<FontFace::Source> parse_font_face_src(TokenStream<ComponentValue>&);
 
-    RefPtr<CSSRule> convert_to_rule(NonnullRefPtr<Rule>);
-    RefPtr<PropertyOwningCSSStyleDeclaration> convert_to_style_declaration(Vector<DeclarationOrAtRule> declarations);
+    CSSRule* convert_to_rule(NonnullRefPtr<Rule>);
+    PropertyOwningCSSStyleDeclaration* convert_to_style_declaration(Vector<DeclarationOrAtRule> const& declarations);
     Optional<StyleProperty> convert_to_style_property(Declaration const&);
 
     class Dimension {
@@ -314,6 +254,7 @@ private:
     enum class AllowedDataUrlType {
         None,
         Image,
+        Font,
     };
     Optional<AK::URL> parse_url_function(ComponentValue const&, AllowedDataUrlType = AllowedDataUrlType::None);
 
@@ -335,6 +276,7 @@ private:
     RefPtr<StyleValue> parse_comma_separated_value_list(Vector<ComponentValue> const&, ParseFunction);
     RefPtr<StyleValue> parse_simple_comma_separated_value_list(Vector<ComponentValue> const&);
 
+    RefPtr<StyleValue> parse_filter_value_list_value(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_background_value(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_single_background_position_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue> parse_single_background_repeat_value(TokenStream<ComponentValue>&);
@@ -359,6 +301,9 @@ private:
     RefPtr<StyleValue> parse_text_decoration_line_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue> parse_transform_value(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_transform_origin_value(Vector<ComponentValue> const&);
+    RefPtr<StyleValue> parse_grid_track_sizes(Vector<ComponentValue> const&);
+    RefPtr<StyleValue> parse_grid_track_placement(Vector<ComponentValue> const&);
+    RefPtr<StyleValue> parse_grid_track_placement_shorthand_value(Vector<ComponentValue> const&);
 
     // calc() parsing, according to https://www.w3.org/TR/css-values-3/#calc-syntax
     OwnPtr<CalculatedStyleValue::CalcSum> parse_calc_sum(TokenStream<ComponentValue>&);
@@ -413,11 +358,11 @@ private:
 
 namespace Web {
 
-RefPtr<CSS::CSSStyleSheet> parse_css_stylesheet(CSS::Parser::ParsingContext const&, StringView, Optional<AK::URL> location = {});
-RefPtr<CSS::ElementInlineCSSStyleDeclaration> parse_css_style_attribute(CSS::Parser::ParsingContext const&, StringView, DOM::Element&);
+CSS::CSSStyleSheet* parse_css_stylesheet(CSS::Parser::ParsingContext const&, StringView, Optional<AK::URL> location = {});
+CSS::ElementInlineCSSStyleDeclaration* parse_css_style_attribute(CSS::Parser::ParsingContext const&, StringView, DOM::Element&);
 RefPtr<CSS::StyleValue> parse_css_value(CSS::Parser::ParsingContext const&, StringView, CSS::PropertyID property_id = CSS::PropertyID::Invalid);
 Optional<CSS::SelectorList> parse_selector(CSS::Parser::ParsingContext const&, StringView);
-RefPtr<CSS::CSSRule> parse_css_rule(CSS::Parser::ParsingContext const&, StringView);
+CSS::CSSRule* parse_css_rule(CSS::Parser::ParsingContext const&, StringView);
 RefPtr<CSS::MediaQuery> parse_media_query(CSS::Parser::ParsingContext const&, StringView);
 NonnullRefPtrVector<CSS::MediaQuery> parse_media_query_list(CSS::Parser::ParsingContext const&, StringView);
 RefPtr<CSS::Supports> parse_css_supports(CSS::Parser::ParsingContext const&, StringView);

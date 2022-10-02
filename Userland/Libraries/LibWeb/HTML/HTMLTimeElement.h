@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLTimeElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLTimeElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLTimeElement, HTMLElement);
 
-    HTMLTimeElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLTimeElement() override;
+
+private:
+    HTMLTimeElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

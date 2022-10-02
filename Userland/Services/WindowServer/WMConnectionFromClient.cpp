@@ -63,7 +63,6 @@ void WMConnectionFromClient::set_active_window(i32 client_id, i32 window_id)
         return;
     }
     auto& window = *(*it).value;
-    WindowManager::the().minimize_windows(window, false);
     WindowManager::the().move_to_front_and_make_active(window);
 }
 

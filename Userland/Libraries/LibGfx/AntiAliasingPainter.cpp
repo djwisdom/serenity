@@ -238,11 +238,58 @@ void AntiAliasingPainter::draw_cubic_bezier_curve(FloatPoint const& control_poin
     });
 }
 
+void AntiAliasingPainter::fill_rect(FloatRect const& float_rect, Color color)
+{
+    // Draw the integer part of the rectangle:
+    float right_x = float_rect.x() + float_rect.width();
+    float bottom_y = float_rect.y() + float_rect.height();
+    int x1 = ceilf(float_rect.x());
+    int y1 = ceilf(float_rect.y());
+    int x2 = floorf(right_x);
+    int y2 = floorf(bottom_y);
+    auto solid_rect = Gfx::IntRect::from_two_points({ x1, y1 }, { x2, y2 });
+    m_underlying_painter.fill_rect(solid_rect, color);
+
+    if (float_rect == solid_rect)
+        return;
+
+    // Draw the rest:
+    float left_subpixel = x1 - float_rect.x();
+    float top_subpixel = y1 - float_rect.y();
+    float right_subpixel = right_x - x2;
+    float bottom_subpixel = bottom_y - y2;
+    float top_left_subpixel = top_subpixel * left_subpixel;
+    float top_right_subpixel = top_subpixel * right_subpixel;
+    float bottom_left_subpixel = bottom_subpixel * left_subpixel;
+    float bottom_right_subpixel = bottom_subpixel * right_subpixel;
+
+    auto subpixel = [&](float alpha) {
+        return color.with_alpha(color.alpha() * alpha);
+    };
+
+    auto set_pixel = [&](int x, int y, float alpha) {
+        m_underlying_painter.set_pixel(x, y, subpixel(alpha), true);
+    };
+
+    auto line_to_rect = [&](int x1, int y1, int x2, int y2) {
+        return IntRect::from_two_points({ x1, y1 }, { x2 + 1, y2 + 1 });
+    };
+
+    set_pixel(x1 - 1, y1 - 1, top_left_subpixel);
+    set_pixel(x2, y1 - 1, top_right_subpixel);
+    set_pixel(x2, y2, bottom_right_subpixel);
+    set_pixel(x1 - 1, y2, bottom_left_subpixel);
+    m_underlying_painter.fill_rect(line_to_rect(x1, y1 - 1, x2 - 1, y1 - 1), subpixel(top_subpixel));
+    m_underlying_painter.fill_rect(line_to_rect(x1, y2, x2 - 1, y2), subpixel(bottom_subpixel));
+    m_underlying_painter.fill_rect(line_to_rect(x1 - 1, y1, x1 - 1, y2 - 1), subpixel(left_subpixel));
+    m_underlying_painter.fill_rect(line_to_rect(x2, y1, x2, y2 - 1), subpixel(right_subpixel));
+}
+
 void AntiAliasingPainter::draw_ellipse(IntRect const& a_rect, Color color, int thickness)
 {
     // FIXME: Come up with an allocation-free version of this!
     // Using draw_line() for segments of an ellipse was attempted but gave really poor results :^(
-    // There probably is a way to adjust the fill of draw_ellipse_part() to do this, but gettting it rendering correctly is tricky.
+    // There probably is a way to adjust the fill of draw_ellipse_part() to do this, but getting it rendering correctly is tricky.
     // The outline of the steps required to paint it efficiently is:
     //     - Paint the outer ellipse without the fill (from the fill() lambda in draw_ellipse_part())
     //     - Paint the inner ellipse, but in the set_pixel() invert the alpha values

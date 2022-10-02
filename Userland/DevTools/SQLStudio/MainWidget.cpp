@@ -183,6 +183,7 @@ MainWidget::MainWidget()
         if (close_attempt.release_value()) {
             m_tab_widget->remove_tab(widget);
             update_title();
+            on_editor_change();
         }
     };
 
@@ -264,7 +265,7 @@ void MainWidget::initialize_menu(GUI::Window* window)
 
     auto& help_menu = window->add_menu("&Help");
     help_menu.add_action(GUI::CommonActions::make_help_action([](auto&) {
-        Desktop::Launcher::open(URL::create_with_file_protocol("/usr/share/man/man1/SQLStudio.md"), "/bin/Help");
+        Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/SQLStudio.md"), "/bin/Help");
     }));
     help_menu.add_action(GUI::CommonActions::make_about_action("SQL Studio", GUI::Icon::default_icon("app-sql-studio"sv), window));
 }
@@ -351,14 +352,18 @@ void MainWidget::update_title()
 void MainWidget::on_editor_change()
 {
     auto editor = dynamic_cast<ScriptEditor*>(m_tab_widget->active_widget());
-    if (editor) {
-        update_statusbar(editor);
-        update_editor_actions(editor);
-    }
+    update_statusbar(editor);
+    update_editor_actions(editor);
 }
 
 void MainWidget::update_statusbar(ScriptEditor* editor)
 {
+    if (!editor) {
+        m_statusbar->set_text(1, "");
+        m_statusbar->set_text(2, "");
+        return;
+    }
+
     if (editor->has_selection()) {
         auto character_count = editor->selected_text().length();
         auto word_count = editor->number_of_selected_words();
@@ -374,6 +379,15 @@ void MainWidget::update_statusbar(ScriptEditor* editor)
 
 void MainWidget::update_editor_actions(ScriptEditor* editor)
 {
+    if (!editor) {
+        m_copy_action->set_enabled(false);
+        m_cut_action->set_enabled(false);
+        m_paste_action->set_enabled(false);
+        m_undo_action->set_enabled(false);
+        m_redo_action->set_enabled(false);
+        return;
+    }
+
     m_copy_action->set_enabled(editor->copy_action().is_enabled());
     m_cut_action->set_enabled(editor->cut_action().is_enabled());
     m_paste_action->set_enabled(editor->paste_action().is_enabled());

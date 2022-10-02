@@ -5,12 +5,15 @@
  */
 
 #include <LibWeb/HTML/HTMLAnchorElement.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
 HTMLAnchorElement::HTMLAnchorElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLAnchorElement"));
+
     activation_behavior = [this](auto const& event) {
         run_activation_behavior(event);
     };

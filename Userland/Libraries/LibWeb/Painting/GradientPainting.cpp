@@ -39,44 +39,51 @@ LinearGradientData resolve_linear_gradient_data(Layout::Node const& node, Gfx::F
 
     VERIFY(color_stop_list.size() >= 2);
     ColorStopList resolved_color_stops;
-    resolved_color_stops.ensure_capacity(color_stop_list.size());
+
+    auto color_stop_length = [&](auto& stop) {
+        return stop.color_stop.second_position.has_value() ? 2 : 1;
+    };
+
+    size_t expanded_size = 0;
     for (auto& stop : color_stop_list)
-        resolved_color_stops.append(ColorStop { .color = stop.color_stop.color });
+        expanded_size += color_stop_length(stop);
+
+    resolved_color_stops.ensure_capacity(expanded_size);
+    for (auto& stop : color_stop_list) {
+        auto resolved_stop = ColorStop { .color = stop.color_stop.color };
+        for (int i = 0; i < color_stop_length(stop); i++)
+            resolved_color_stops.append(resolved_stop);
+    }
 
     auto gradient_angle = linear_gradient.angle_degrees(gradient_size);
     auto gradient_length_px = calulate_gradient_length(gradient_size.to_rounded<int>(), gradient_angle);
     auto gradient_length = CSS::Length::make_px(gradient_length_px);
 
     // 1. If the first color stop does not have a position, set its position to 0%.
-    auto& first_stop = color_stop_list.first().color_stop;
-    resolved_color_stops.first().position = first_stop.length.has_value()
-        ? first_stop.length->resolved(node, gradient_length).to_px(node)
-        : 0;
+    resolved_color_stops.first().position = 0;
     //    If the last color stop does not have a position, set its position to 100%
-    auto& last_stop = color_stop_list.last().color_stop;
-    resolved_color_stops.last().position = last_stop.length.has_value()
-        ? last_stop.length->resolved(node, gradient_length).to_px(node)
-        : gradient_length_px;
+    resolved_color_stops.last().position = gradient_length_px;
 
     // 2. If a color stop or transition hint has a position that is less than the
     //    specified position of any color stop or transition hint before it in the list,
     //    set its position to be equal to the largest specified position of any color stop
     //    or transition hint before it.
     auto max_previous_color_stop_or_hint = resolved_color_stops[0].position;
-    for (size_t i = 1; i < color_stop_list.size(); i++) {
-        auto& stop = color_stop_list[i];
-        if (stop.transition_hint.has_value()) {
-            float value = stop.transition_hint->value.resolved(node, gradient_length).to_px(node);
-            value = max(value, max_previous_color_stop_or_hint);
-            resolved_color_stops[i].transition_hint = value;
-            max_previous_color_stop_or_hint = value;
-        }
-        if (stop.color_stop.length.has_value()) {
-            float value = stop.color_stop.length->resolved(node, gradient_length).to_px(node);
-            value = max(value, max_previous_color_stop_or_hint);
-            resolved_color_stops[i].position = value;
-            max_previous_color_stop_or_hint = value;
-        }
+    auto resolve_stop_position = [&](auto& length_percentage) {
+        float value = length_percentage.resolved(node, gradient_length).to_px(node);
+        value = max(value, max_previous_color_stop_or_hint);
+        max_previous_color_stop_or_hint = value;
+        return value;
+    };
+    size_t resolved_index = 0;
+    for (auto& stop : color_stop_list) {
+        if (stop.transition_hint.has_value())
+            resolved_color_stops[resolved_index].transition_hint = resolve_stop_position(stop.transition_hint->value);
+        if (stop.color_stop.position.has_value())
+            resolved_color_stops[resolved_index].position = resolve_stop_position(*stop.color_stop.position);
+        if (stop.color_stop.second_position.has_value())
+            resolved_color_stops[++resolved_index].position = resolve_stop_position(*stop.color_stop.second_position);
+        ++resolved_index;
     }
 
     // 3. If any color stop still does not have a position, then, for each run of adjacent color stops
@@ -86,16 +93,16 @@ LinearGradientData resolve_linear_gradient_data(Layout::Node const& node, Gfx::F
     size_t i = 1;
     auto find_run_end = [&] {
         auto color_stop_has_position = [](auto& color_stop) {
-            return color_stop.transition_hint.has_value() || color_stop.color_stop.length.has_value();
+            return color_stop.transition_hint.has_value() || isfinite(color_stop.position);
         };
-        while (i < color_stop_list.size() - 1 && !color_stop_has_position(color_stop_list[i])) {
+        while (i < color_stop_list.size() - 1 && !color_stop_has_position(resolved_color_stops[i])) {
             i++;
         }
         return i;
     };
-    while (i < color_stop_list.size() - 1) {
-        auto& stop = color_stop_list[i];
-        if (!stop.color_stop.length.has_value()) {
+    while (i < resolved_color_stops.size() - 1) {
+        auto& stop = resolved_color_stops[i];
+        if (!isfinite(stop.position)) {
             auto run_start = i - 1;
             auto start_position = resolved_color_stops[i++].transition_hint.value_or(resolved_color_stops[run_start].position);
             auto run_end = find_run_end();
@@ -125,36 +132,6 @@ LinearGradientData resolve_linear_gradient_data(Layout::Node const& node, Gfx::F
         repeat_length = resolved_color_stops.last().position - resolved_color_stops.first().position;
 
     return { gradient_angle, resolved_color_stops, repeat_length };
-}
-
-static float mix(float x, float y, float a)
-{
-    return x * (1 - a) + y * a;
-}
-
-// Note: Gfx::gamma_accurate_blend() is NOT correct for linear gradients!
-static Gfx::Color color_mix(Gfx::Color x, Gfx::Color y, float a)
-{
-    if (x.alpha() == y.alpha() || x.with_alpha(0) == y.with_alpha(0)) {
-        return Gfx::Color {
-            round_to<u8>(mix(x.red(), y.red(), a)),
-            round_to<u8>(mix(x.green(), y.green(), a)),
-            round_to<u8>(mix(x.blue(), y.blue(), a)),
-            round_to<u8>(mix(x.alpha(), y.alpha(), a)),
-        };
-    }
-    // Use slower but more visually pleasing premultiplied alpha mixing if both the color and alpha differ.
-    // https://drafts.csswg.org/css-images/#coloring-gradient-line
-    auto mixed_alpha = mix(x.alpha(), y.alpha(), a);
-    auto premultiplied_mix_channel = [&](float channel_x, float channel_y, float a) {
-        return round_to<u8>(mix(channel_x * (x.alpha() / 255.0f), channel_y * (y.alpha() / 255.0f), a) / (mixed_alpha / 255.0f));
-    };
-    return Gfx::Color {
-        premultiplied_mix_channel(x.red(), y.red(), a),
-        premultiplied_mix_channel(x.green(), y.green(), a),
-        premultiplied_mix_channel(x.blue(), y.blue(), a),
-        round_to<u8>(mixed_alpha),
-    };
 }
 
 void paint_linear_gradient(PaintContext& context, Gfx::IntRect const& gradient_rect, LinearGradientData const& data)
@@ -206,17 +183,19 @@ void paint_linear_gradient(PaintContext& context, Gfx::IntRect const& gradient_r
     auto& color_stops = data.color_stops;
     auto start_offset = data.repeat_length.has_value() ? color_stops.first().position : 0.0f;
     auto start_offset_int = round_to<int>(start_offset);
+
+    // Note: color.mixed_with() performs premultiplied alpha mixing when necessary as defined in:
+    // https://drafts.csswg.org/css-images/#coloring-gradient-line
+
     for (int loc = 0; loc < gradient_color_count; loc++) {
-        Gfx::Color gradient_color = color_mix(
-            color_stops[0].color,
+        Gfx::Color gradient_color = color_stops[0].color.mixed_with(
             color_stops[1].color,
             color_stop_step(
                 color_stops[0],
                 color_stops[1],
                 loc + start_offset_int));
         for (size_t i = 1; i < color_stops.size() - 1; i++) {
-            gradient_color = color_mix(
-                gradient_color,
+            gradient_color = gradient_color.mixed_with(
                 color_stops[i + 1].color,
                 color_stop_step(
                     color_stops[i],
@@ -240,7 +219,7 @@ void paint_linear_gradient(PaintContext& context, Gfx::IntRect const& gradient_r
             }
             // Blend between the two neighbouring colors (this fixes some nasty aliasing issues at small angles)
             auto blend = loc - static_cast<int>(loc);
-            auto gradient_color = color_mix(lookup_color(loc - 1), lookup_color(loc), blend);
+            auto gradient_color = lookup_color(loc - 1).mixed_with(lookup_color(loc), blend);
             context.painter().set_pixel(gradient_rect.x() + x, gradient_rect.y() + y, gradient_color, gradient_color.alpha() < 255);
         }
     }

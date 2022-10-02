@@ -23,10 +23,9 @@ class Error : public Object {
     JS_OBJECT(Error, Object);
 
 public:
-    static Error* create(GlobalObject&);
-    static Error* create(GlobalObject&, String const& message);
+    static Error* create(Realm&);
+    static Error* create(Realm&, String const& message);
 
-    explicit Error(Object& prototype);
     virtual ~Error() override = default;
 
     [[nodiscard]] String stack_string() const;
@@ -34,6 +33,9 @@ public:
     ThrowCompletionOr<void> install_error_cause(Value options);
 
     Vector<TracebackFrame, 32> const& traceback() const { return m_traceback; }
+
+protected:
+    explicit Error(Object& prototype);
 
 private:
     void populate_stack();
@@ -48,8 +50,8 @@ private:
         JS_OBJECT(ClassName, Error);                                                \
                                                                                     \
     public:                                                                         \
-        static ClassName* create(GlobalObject&);                                    \
-        static ClassName* create(GlobalObject&, String const& message);             \
+        static ClassName* create(Realm&);                                           \
+        static ClassName* create(Realm&, String const& message);                    \
                                                                                     \
         explicit ClassName(Object& prototype);                                      \
         virtual ~ClassName() override = default;                                    \

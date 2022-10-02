@@ -71,22 +71,22 @@ echo SYSROOT is "$SYSROOT"
 
 mkdir -p "$DIR/Tarballs"
 
-BINUTILS_VERSION="2.38"
-BINUTILS_MD5SUM="f430dff91bdc8772fcef06ffdc0656ab"
+BINUTILS_VERSION="2.39"
+BINUTILS_MD5SUM="ab6825df57514ec172331e988f55fc10"
 BINUTILS_NAME="binutils-$BINUTILS_VERSION"
 BINUTILS_PKG="${BINUTILS_NAME}.tar.gz"
 BINUTILS_BASE_URL="https://ftp.gnu.org/gnu/binutils"
 
-GDB_VERSION="11.2"
-GDB_MD5SUM="b5674bef1fbd6beead889f80afa6f269"
+GDB_VERSION="12.1"
+GDB_MD5SUM="0c7339e33fa347ce4d7df222d8ce86af"
 GDB_NAME="gdb-$GDB_VERSION"
 GDB_PKG="${GDB_NAME}.tar.gz"
 GDB_BASE_URL="https://ftp.gnu.org/gnu/gdb"
 
 # Note: If you bump the gcc version, you also have to update the matching
 #       GCC_VERSION variable in the project's root CMakeLists.txt
-GCC_VERSION="12.1.0"
-GCC_MD5SUM="7854cdccc3a7988aa37fb0d0038b8096"
+GCC_VERSION="12.2.0"
+GCC_MD5SUM="d7644b494246450468464ffc2c2b19c3"
 GCC_NAME="gcc-$GCC_VERSION"
 GCC_PKG="${GCC_NAME}.tar.gz"
 GCC_BASE_URL="https://ftp.gnu.org/gnu/gcc"
@@ -184,7 +184,7 @@ pushd "$DIR/Tarballs"
         md5=""
         if [ -e "$GDB_PKG" ]; then
             md5="$($MD5SUM $GDB_PKG | cut -f1 -d' ')"
-            echo "bu md5='$md5'"
+            echo "gdb md5='$md5'"
         fi
         if [ "$md5" != ${GDB_MD5SUM} ] ; then
             rm -f $GDB_PKG
@@ -197,7 +197,7 @@ pushd "$DIR/Tarballs"
     md5=""
     if [ -e "$BINUTILS_PKG" ]; then
         md5="$($MD5SUM $BINUTILS_PKG | cut -f1 -d' ')"
-        echo "bu md5='$md5'"
+        echo "binutils md5='$md5'"
     fi
     if [ "$md5" != ${BINUTILS_MD5SUM} ] ; then
         rm -f $BINUTILS_PKG
@@ -209,7 +209,7 @@ pushd "$DIR/Tarballs"
     md5=""
     if [ -e "$GCC_PKG" ]; then
         md5="$($MD5SUM ${GCC_PKG} | cut -f1 -d' ')"
-        echo "gc md5='$md5'"
+        echo "gcc md5='$md5'"
     fi
     if [ "$md5" != ${GCC_MD5SUM} ] ; then
         rm -f $GCC_PKG
@@ -239,51 +239,63 @@ pushd "$DIR/Tarballs"
         popd
     fi
 
-    if [ -d ${BINUTILS_NAME} ]; then
-        rm -rf "${BINUTILS_NAME}"
-        rm -rf "$DIR/Build/$ARCH/$BINUTILS_NAME"
-    fi
-    echo "Extracting binutils..."
-    tar -xzf ${BINUTILS_PKG}
+    patch_md5="$(${MD5SUM} "${DIR}"/Patches/binutils/*.patch)"
 
-    pushd ${BINUTILS_NAME}
-        if [ "$git_patch" = "1" ]; then
-            git init > /dev/null
-            git add . > /dev/null
-            git commit -am "BASE" > /dev/null
-            git am "$DIR"/Patches/binutils.patch > /dev/null
-        else
-            patch -p1 < "$DIR"/Patches/binutils.patch > /dev/null
+    if [ ! -d "${BINUTILS_NAME}" ] || [ "$(cat ${BINUTILS_NAME}/.patch.applied)" != "${patch_md5}" ]; then
+        if [ -d ${BINUTILS_NAME} ]; then
+            rm -rf "${BINUTILS_NAME}"
+            rm -rf "${DIR}/Build/${ARCH}/${BINUTILS_NAME}"
         fi
-        $MD5SUM "$DIR"/Patches/binutils.patch > .patch.applied
-    popd
+        echo "Extracting binutils..."
+        tar -xzf ${BINUTILS_PKG}
 
-    if [ -d ${GCC_NAME} ]; then
-        # Drop the previously patched extracted dir
-        rm -rf "${GCC_NAME}"
-        # Also drop the build dir
-        rm -rf "$DIR/Build/$ARCH/$GCC_NAME"
-    fi
-    echo "Extracting gcc..."
-    tar -xzf $GCC_PKG
-    pushd $GCC_NAME
-        if [ "$git_patch" = "1" ]; then
-            git init > /dev/null
-            git add . > /dev/null
-            git commit -am "BASE" > /dev/null
-            git am --keep-non-patch "$DIR"/Patches/gcc/*.patch > /dev/null
-        else
-            for patch in "$DIR"/Patches/gcc/*.patch; do
-                patch -p1 < "$patch" > /dev/null
-            done
-        fi
-        $MD5SUM "$DIR"/Patches/gcc/*.patch > .patch.applied
-    popd
-
-    if [ "$SYSTEM_NAME" = "Darwin" ]; then
-        pushd "gcc-${GCC_VERSION}"
-        ./contrib/download_prerequisites
+        pushd ${BINUTILS_NAME}
+            if [ "${git_patch}" = "1" ]; then
+                git init > /dev/null
+                git add . > /dev/null
+                git commit -am "BASE" > /dev/null
+                git am "${DIR}"/Patches/binutils/*.patch > /dev/null
+            else
+                for patch in "${DIR}"/Patches/binutils/*.patch; do
+                    patch -p1 < "${patch}" > /dev/null
+                done
+            fi
+            ${MD5SUM} "${DIR}"/Patches/binutils/*.patch > .patch.applied
         popd
+    else
+        echo "Using existing binutils source directory"
+    fi
+
+
+    patch_md5="$(${MD5SUM} "${DIR}"/Patches/gcc/*.patch)"
+
+    if [ ! -d "${GCC_NAME}" ] || [ "$(cat ${GCC_NAME}/.patch.applied)" != "${patch_md5}" ]; then
+        if [ -d ${GCC_NAME} ]; then
+            rm -rf "${GCC_NAME}"
+            rm -rf "${DIR}/Build/${ARCH}/${GCC_NAME}"
+        fi
+        echo "Extracting gcc..."
+        tar -xzf ${GCC_PKG}
+
+        pushd ${GCC_NAME}
+            if [ "${git_patch}" = "1" ]; then
+                git init > /dev/null
+                git add . > /dev/null
+                git commit -am "BASE" > /dev/null
+                git am --keep-non-patch "${DIR}"/Patches/gcc/*.patch > /dev/null
+            else
+                for patch in "${DIR}"/Patches/gcc/*.patch; do
+                    patch -p1 < "${patch}" > /dev/null
+                done
+            fi
+            ${MD5SUM} "${DIR}"/Patches/gcc/*.patch > .patch.applied
+
+            if [ "${SYSTEM_NAME}" = "Darwin" ]; then
+                ./contrib/download_prerequisites
+            fi
+        popd
+    else
+        echo "Using existing GCC source directory"
     fi
 popd
 
@@ -363,7 +375,7 @@ pushd "$DIR/Build/$ARCH"
         buildstep "binutils/install" "$MAKE" install || exit 1
     popd
 
-    echo "XXX serenity libc, libdl and libm headers"
+    echo "XXX serenity libc headers"
     mkdir -p "$BUILD"
     pushd "$BUILD"
         mkdir -p Root/usr/include/
@@ -373,15 +385,11 @@ pushd "$DIR/Build/$ARCH"
             "$SRC_ROOT"/Kernel/API \
             "$SRC_ROOT"/Kernel/Arch \
             "$SRC_ROOT"/Userland/Libraries/LibC \
-            "$SRC_ROOT"/Userland/Libraries/LibDl \
-            "$SRC_ROOT"/Userland/Libraries/LibM \
             -name '*.h' -print)
         for header in $FILES; do
             target=$(echo "$header" | sed \
                 -e "s@$SRC_ROOT/AK/@AK/@" \
                 -e "s@$SRC_ROOT/Userland/Libraries/LibC@@" \
-                -e "s@$SRC_ROOT/Userland/Libraries/LibDl@@" \
-                -e "s@$SRC_ROOT/Userland/Libraries/LibM@@" \
                 -e "s@$SRC_ROOT/Kernel/@Kernel/@")
             buildstep "system_headers" $INSTALL -D "$header" "Root/usr/include/$target"
         done

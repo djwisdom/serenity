@@ -6,8 +6,10 @@
 
 #include <AK/FlyString.h>
 #include <AK/NonnullRefPtrVector.h>
+#include <AK/Queue.h>
 #include <AK/QuickSort.h>
 #include <LibCore/DirIterator.h>
+#include <LibCore/File.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Font/TrueType/Font.h>
@@ -117,41 +119,58 @@ Font& FontDatabase::default_fixed_width_font()
 
 struct FontDatabase::Private {
     HashMap<String, NonnullRefPtr<Gfx::Font>> full_name_to_font_map;
-    Vector<RefPtr<Typeface>> typefaces;
+    HashMap<FlyString, Vector<NonnullRefPtr<Typeface>>> typefaces;
 };
+
+void FontDatabase::load_all_fonts_from_path(String const& root)
+{
+    Queue<String> path_queue;
+    path_queue.enqueue(root);
+
+    while (!path_queue.is_empty()) {
+        auto current_directory = path_queue.dequeue();
+        Core::DirIterator dir_iterator(current_directory, Core::DirIterator::SkipParentAndBaseDir);
+        if (dir_iterator.has_error()) {
+            dbgln("FontDatabase::load_fonts: {}", dir_iterator.error_string());
+            continue;
+        }
+        while (dir_iterator.has_next()) {
+            auto path = dir_iterator.next_full_path();
+
+            if (Core::File::is_directory(path)) {
+                path_queue.enqueue(path);
+                continue;
+            }
+
+            if (path.ends_with(".font"sv)) {
+                if (auto font_or_error = Gfx::BitmapFont::try_load_from_file(path); !font_or_error.is_error()) {
+                    auto font = font_or_error.release_value();
+                    m_private->full_name_to_font_map.set(font->qualified_name(), *font);
+                    auto typeface = get_or_create_typeface(font->family(), font->variant());
+                    typeface->add_bitmap_font(font);
+                }
+            } else if (path.ends_with(".ttf"sv)) {
+                // FIXME: What about .otf
+                if (auto font_or_error = TTF::Font::try_load_from_file(path); !font_or_error.is_error()) {
+                    auto font = font_or_error.release_value();
+                    auto typeface = get_or_create_typeface(font->family(), font->variant());
+                    typeface->set_vector_font(move(font));
+                }
+            } else if (path.ends_with(".woff"sv)) {
+                if (auto font_or_error = WOFF::Font::try_load_from_file(path); !font_or_error.is_error()) {
+                    auto font = font_or_error.release_value();
+                    auto typeface = get_or_create_typeface(font->family(), font->variant());
+                    typeface->set_vector_font(move(font));
+                }
+            }
+        }
+    }
+}
 
 FontDatabase::FontDatabase()
     : m_private(make<Private>())
 {
-    Core::DirIterator dir_iterator(s_default_fonts_lookup_path, Core::DirIterator::SkipDots);
-    if (dir_iterator.has_error()) {
-        warnln("DirIterator: {}", dir_iterator.error_string());
-        exit(1);
-    }
-    while (dir_iterator.has_next()) {
-        auto path = dir_iterator.next_full_path();
-
-        if (path.ends_with(".font"sv)) {
-            if (auto font = Gfx::BitmapFont::load_from_file(path)) {
-                m_private->full_name_to_font_map.set(font->qualified_name(), *font);
-                auto typeface = get_or_create_typeface(font->family(), font->variant());
-                typeface->add_bitmap_font(font);
-            }
-        } else if (path.ends_with(".ttf"sv)) {
-            // FIXME: What about .otf
-            if (auto font_or_error = TTF::Font::try_load_from_file(path); !font_or_error.is_error()) {
-                auto font = font_or_error.release_value();
-                auto typeface = get_or_create_typeface(font->family(), font->variant());
-                typeface->set_vector_font(move(font));
-            }
-        } else if (path.ends_with(".woff"sv)) {
-            if (auto font_or_error = WOFF::Font::try_load_from_file(path); !font_or_error.is_error()) {
-                auto font = font_or_error.release_value();
-                auto typeface = get_or_create_typeface(font->family(), font->variant());
-                typeface->set_vector_font(move(font));
-            }
-        }
-    }
+    load_all_fonts_from_path(s_default_fonts_lookup_path);
 }
 
 void FontDatabase::for_each_font(Function<void(Gfx::Font const&)> callback)
@@ -198,8 +217,11 @@ RefPtr<Gfx::Font> FontDatabase::get_by_name(StringView name)
 
 RefPtr<Gfx::Font> FontDatabase::get(FlyString const& family, float point_size, unsigned weight, unsigned slope, Font::AllowInexactSizeMatch allow_inexact_size_match)
 {
-    for (auto typeface : m_private->typefaces) {
-        if (typeface->family() == family && typeface->weight() == weight && typeface->slope() == slope)
+    auto it = m_private->typefaces.find(family);
+    if (it == m_private->typefaces.end())
+        return nullptr;
+    for (auto const& typeface : it->value) {
+        if (typeface->weight() == weight && typeface->slope() == slope)
             return typeface->get_font(point_size, allow_inexact_size_match);
     }
     return nullptr;
@@ -207,8 +229,11 @@ RefPtr<Gfx::Font> FontDatabase::get(FlyString const& family, float point_size, u
 
 RefPtr<Gfx::Font> FontDatabase::get(FlyString const& family, FlyString const& variant, float point_size, Font::AllowInexactSizeMatch allow_inexact_size_match)
 {
-    for (auto typeface : m_private->typefaces) {
-        if (typeface->family() == family && typeface->variant() == variant)
+    auto it = m_private->typefaces.find(family);
+    if (it == m_private->typefaces.end())
+        return nullptr;
+    for (auto const& typeface : it->value) {
+        if (typeface->variant() == variant)
             return typeface->get_font(point_size, allow_inexact_size_match);
     }
     return nullptr;
@@ -216,19 +241,24 @@ RefPtr<Gfx::Font> FontDatabase::get(FlyString const& family, FlyString const& va
 
 RefPtr<Typeface> FontDatabase::get_or_create_typeface(String const& family, String const& variant)
 {
-    for (auto typeface : m_private->typefaces) {
-        if (typeface->family() == family && typeface->variant() == variant)
-            return typeface;
+    auto it = m_private->typefaces.find(family);
+    if (it != m_private->typefaces.end()) {
+        for (auto const& typeface : it->value) {
+            if (typeface->variant() == variant)
+                return typeface;
+        }
     }
     auto typeface = adopt_ref(*new Typeface(family, variant));
-    m_private->typefaces.append(typeface);
+    m_private->typefaces.ensure(family).append(typeface);
     return typeface;
 }
 
 void FontDatabase::for_each_typeface(Function<void(Typeface const&)> callback)
 {
-    for (auto typeface : m_private->typefaces) {
-        callback(*typeface);
+    for (auto const& it : m_private->typefaces) {
+        for (auto const& jt : it.value) {
+            callback(*jt);
+        }
     }
 }
 

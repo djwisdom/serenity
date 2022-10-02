@@ -6,26 +6,23 @@
 
 #include "ConsoleGlobalObject.h"
 #include <LibJS/Runtime/Completion.h>
-#include <LibWeb/Bindings/NodeWrapper.h>
-#include <LibWeb/Bindings/NodeWrapperFactory.h>
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/Window.h>
 
 namespace WebContent {
 
-ConsoleGlobalObject::ConsoleGlobalObject(JS::Realm& realm, Web::Bindings::WindowObject& parent_object)
+ConsoleGlobalObject::ConsoleGlobalObject(JS::Realm& realm, Web::HTML::Window& parent_object)
     : GlobalObject(realm)
     , m_window_object(&parent_object)
 {
 }
 
-void ConsoleGlobalObject::initialize_global_object()
+void ConsoleGlobalObject::initialize(JS::Realm& realm)
 {
-    Base::initialize_global_object();
+    Base::initialize(realm);
 
     // $0 magic variable
-    define_native_accessor("$0", inspected_node_getter, nullptr, 0);
+    define_native_accessor(realm, "$0", inspected_node_getter, nullptr, 0);
 }
 
 void ConsoleGlobalObject::visit_edges(Visitor& visitor)
@@ -97,18 +94,18 @@ JS::ThrowCompletionOr<JS::MarkedVector<JS::Value>> ConsoleGlobalObject::internal
 
 JS_DEFINE_NATIVE_FUNCTION(ConsoleGlobalObject::inspected_node_getter)
 {
-    auto* this_object = TRY(vm.this_value(global_object).to_object(global_object));
+    auto* this_object = TRY(vm.this_value().to_object(vm));
 
     if (!is<ConsoleGlobalObject>(this_object))
-        return vm.throw_completion<JS::TypeError>(global_object, JS::ErrorType::NotAnObjectOfType, "ConsoleGlobalObject");
+        return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "ConsoleGlobalObject");
 
     auto console_global_object = static_cast<ConsoleGlobalObject*>(this_object);
-    auto& window = console_global_object->m_window_object->impl();
+    auto& window = *console_global_object->m_window_object;
     auto* inspected_node = window.associated_document().inspected_node();
     if (!inspected_node)
         return JS::js_undefined();
 
-    return Web::Bindings::wrap(global_object, *inspected_node);
+    return inspected_node;
 }
 
 }

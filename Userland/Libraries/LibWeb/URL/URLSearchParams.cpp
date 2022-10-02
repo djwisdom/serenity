@@ -7,10 +7,26 @@
 #include <AK/QuickSort.h>
 #include <AK/StringBuilder.h>
 #include <AK/Utf8View.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/URL/URL.h>
 #include <LibWeb/URL/URLSearchParams.h>
 
 namespace Web::URL {
+
+URLSearchParams::URLSearchParams(JS::Realm& realm, Vector<QueryParam> list)
+    : PlatformObject(realm)
+    , m_list(move(list))
+{
+    set_prototype(&Bindings::cached_web_prototype(realm, "URLSearchParams"));
+}
+
+URLSearchParams::~URLSearchParams() = default;
+
+void URLSearchParams::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_url);
+}
 
 String url_encode(Vector<QueryParam> const& pairs, AK::URL::PercentEncodeSet percent_encode_set)
 {
@@ -66,9 +82,14 @@ Vector<QueryParam> url_decode(StringView input)
     return output;
 }
 
+JS::NonnullGCPtr<URLSearchParams> URLSearchParams::create(JS::Realm& realm, Vector<QueryParam> list)
+{
+    return *realm.heap().allocate<URLSearchParams>(realm, realm, move(list));
+}
+
 // https://url.spec.whatwg.org/#dom-urlsearchparams-urlsearchparams
 // https://url.spec.whatwg.org/#urlsearchparams-initialize
-DOM::ExceptionOr<NonnullRefPtr<URLSearchParams>> URLSearchParams::create_with_global_object(Bindings::WindowObject&, Variant<Vector<Vector<String>>, OrderedHashMap<String, String>, String> const& init)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<URLSearchParams>> URLSearchParams::construct_impl(JS::Realm& realm, Variant<Vector<Vector<String>>, OrderedHashMap<String, String>, String> const& init)
 {
     // 1. If init is a string and starts with U+003F (?), then remove the first code point from init.
     // NOTE: We do this when we know that it's a string on step 3 of initialization.
@@ -87,13 +108,13 @@ DOM::ExceptionOr<NonnullRefPtr<URLSearchParams>> URLSearchParams::create_with_gl
         for (auto const& pair : init_sequence) {
             // a. If pair does not contain exactly two items, then throw a TypeError.
             if (pair.size() != 2)
-                return DOM::SimpleException { DOM::SimpleExceptionType::TypeError, String::formatted("Expected only 2 items in pair, got {}", pair.size()) };
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, String::formatted("Expected only 2 items in pair, got {}", pair.size()) };
 
             // b. Append a new name-value pair whose name is pair’s first item, and value is pair’s second item, to query’s list.
             list.append(QueryParam { .name = pair[0], .value = pair[1] });
         }
 
-        return URLSearchParams::create(move(list));
+        return URLSearchParams::create(realm, move(list));
     }
 
     // 2. Otherwise, if init is a record, then for each name → value of init, append a new name-value pair whose name is name and value is value, to query’s list.
@@ -106,7 +127,7 @@ DOM::ExceptionOr<NonnullRefPtr<URLSearchParams>> URLSearchParams::create_with_gl
         for (auto const& pair : init_record)
             list.append(QueryParam { .name = pair.key, .value = pair.value });
 
-        return URLSearchParams::create(move(list));
+        return URLSearchParams::create(realm, move(list));
     }
 
     // 3. Otherwise:
@@ -118,7 +139,7 @@ DOM::ExceptionOr<NonnullRefPtr<URLSearchParams>> URLSearchParams::create_with_gl
     StringView stripped_init = init_string.substring_view(init_string.starts_with('?'));
 
     // b. Set query’s list to the result of parsing init.
-    return URLSearchParams::create(url_decode(stripped_init));
+    return URLSearchParams::create(realm, url_decode(stripped_init));
 }
 
 void URLSearchParams::append(String const& name, String const& value)
@@ -132,7 +153,7 @@ void URLSearchParams::append(String const& name, String const& value)
 void URLSearchParams::update()
 {
     // 1. If query’s URL object is null, then return.
-    if (m_url.is_null())
+    if (!m_url)
         return;
     // 2. Let serializedQuery be the serialization of query’s list.
     auto serialized_query = to_string();

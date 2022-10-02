@@ -89,7 +89,13 @@ public:
     void set_stack(bool stack) { m_stack = stack; }
 
     [[nodiscard]] bool is_mmap() const { return m_mmap; }
-    void set_mmap(bool mmap) { m_mmap = mmap; }
+
+    void set_mmap(bool mmap, bool description_was_readable, bool description_was_writable)
+    {
+        m_mmap = mmap;
+        m_mmapped_from_readable = description_was_readable;
+        m_mmapped_from_writable = description_was_writable;
+    }
 
     [[nodiscard]] bool is_write_combine() const { return m_write_combine; }
     ErrorOr<void> set_write_combine(bool);
@@ -152,8 +158,8 @@ public:
         return size() / PAGE_SIZE;
     }
 
-    LockRefPtr<PhysicalPage> physical_page(size_t index) const;
-    LockRefPtr<PhysicalPage>& physical_page_slot(size_t index);
+    RefPtr<PhysicalPage> physical_page(size_t index) const;
+    RefPtr<PhysicalPage>& physical_page_slot(size_t index);
 
     [[nodiscard]] size_t offset_in_vmobject() const
     {
@@ -183,7 +189,7 @@ public:
     void set_page_directory(PageDirectory&);
     ErrorOr<void> map(PageDirectory&, ShouldFlushTLB = ShouldFlushTLB::Yes);
     void unmap(ShouldFlushTLB = ShouldFlushTLB::Yes);
-    void unmap_with_locks_held(ShouldFlushTLB, SpinlockLocker<RecursiveSpinlock>& pd_locker, SpinlockLocker<RecursiveSpinlock>& mm_locker);
+    void unmap_with_locks_held(ShouldFlushTLB, SpinlockLocker<RecursiveSpinlock>& pd_locker);
 
     void remap();
 
@@ -194,12 +200,15 @@ public:
     [[nodiscard]] bool is_syscall_region() const { return m_syscall_region; }
     void set_syscall_region(bool b) { m_syscall_region = b; }
 
+    [[nodiscard]] bool mmapped_from_readable() const { return m_mmapped_from_readable; }
+    [[nodiscard]] bool mmapped_from_writable() const { return m_mmapped_from_writable; }
+
 private:
     Region();
     Region(NonnullLockRefPtr<VMObject>, size_t offset_in_vmobject, OwnPtr<KString>, Region::Access access, Cacheable, bool shared);
     Region(VirtualRange const&, NonnullLockRefPtr<VMObject>, size_t offset_in_vmobject, OwnPtr<KString>, Region::Access access, Cacheable, bool shared);
 
-    [[nodiscard]] bool remap_vmobject_page(size_t page_index, NonnullLockRefPtr<PhysicalPage>);
+    [[nodiscard]] bool remap_vmobject_page(size_t page_index, NonnullRefPtr<PhysicalPage>);
 
     void set_access_bit(Access access, bool b)
     {
@@ -214,7 +223,7 @@ private:
     [[nodiscard]] PageFaultResponse handle_zero_fault(size_t page_index, PhysicalPage& page_in_slot_at_time_of_fault);
 
     [[nodiscard]] bool map_individual_page_impl(size_t page_index);
-    [[nodiscard]] bool map_individual_page_impl(size_t page_index, LockRefPtr<PhysicalPage>);
+    [[nodiscard]] bool map_individual_page_impl(size_t page_index, RefPtr<PhysicalPage>);
 
     LockRefPtr<PageDirectory> m_page_directory;
     VirtualRange m_range;
@@ -228,6 +237,8 @@ private:
     bool m_mmap : 1 { false };
     bool m_syscall_region : 1 { false };
     bool m_write_combine : 1 { false };
+    bool m_mmapped_from_readable : 1 { false };
+    bool m_mmapped_from_writable : 1 { false };
 
     IntrusiveRedBlackTreeNode<FlatPtr, Region, RawPtr<Region>> m_tree_node;
     IntrusiveListNode<Region> m_vmobject_list_node;

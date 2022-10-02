@@ -1338,27 +1338,6 @@ String Shell::unescape_token(StringView token)
     return builder.build();
 }
 
-String Shell::find_in_path(StringView program_name)
-{
-    String path = getenv("PATH");
-    if (!path.is_empty()) {
-        auto directories = path.split(':');
-        for (auto const& directory : directories) {
-            Core::DirIterator programs(directory.characters(), Core::DirIterator::SkipDots);
-            while (programs.has_next()) {
-                auto program = programs.next_path();
-                auto program_path = String::formatted("{}/{}", directory, program);
-                if (access(program_path.characters(), X_OK) != 0)
-                    continue;
-                if (program == program_name)
-                    return program_path;
-            }
-        }
-    }
-
-    return {};
-}
-
 void Shell::cache_path()
 {
     if (!m_is_interactive)
@@ -1387,6 +1366,7 @@ void Shell::cache_path()
         cached_path.append({ RunnablePath::Kind::Alias, name });
     }
 
+    // TODO: Can we make this rely on Core::File::resolve_executable_from_environment()?
     String path = getenv("PATH");
     if (!path.is_empty()) {
         auto directories = path.split(':');
@@ -1538,6 +1518,10 @@ Vector<Line::CompletionSuggestion> Shell::complete_path(StringView base, StringV
             }
         }
     }
+
+    // The results of DirIterator are in the order they appear on-disk.
+    // Instead, return suggestions in lexicographical order.
+    quick_sort(suggestions, [](auto& a, auto& b) { return a.text_string < b.text_string; });
 
     return suggestions;
 }
@@ -2189,7 +2173,7 @@ Shell::Shell()
             path.append({ path_env_ptr, strlen(path_env_ptr) });
         if (path.length())
             path.append(":"sv);
-        path.append("/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"sv);
+        path.append(DEFAULT_PATH_SV);
         setenv("PATH", path.to_string().characters(), true);
     }
 

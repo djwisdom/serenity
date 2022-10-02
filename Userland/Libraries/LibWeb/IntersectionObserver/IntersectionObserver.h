@@ -6,30 +6,32 @@
 
 #pragma once
 
-#include <AK/NonnullRefPtr.h>
-#include <AK/RefCounted.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibJS/Heap/Handle.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 
 namespace Web::IntersectionObserver {
 
 struct IntersectionObserverInit {
-    Optional<Variant<NonnullRefPtr<DOM::Element>, NonnullRefPtr<DOM::Document>>> root;
+    Optional<Variant<JS::Handle<DOM::Element>, JS::Handle<DOM::Document>>> root;
     String root_margin { "0px"sv };
     Variant<double, Vector<double>> threshold { 0 };
 };
 
 // https://w3c.github.io/IntersectionObserver/#intersection-observer-interface
-class IntersectionObserver
-    : public RefCounted<IntersectionObserver>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::IntersectionObserverWrapper;
+class IntersectionObserver : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(IntersectionObserver, Bindings::PlatformObject);
 
-    static NonnullRefPtr<IntersectionObserver> create_with_global_object(JS::GlobalObject&, Bindings::CallbackType const& callback, IntersectionObserverInit const& options = {});
+public:
+    static JS::NonnullGCPtr<IntersectionObserver> construct_impl(JS::Realm&, WebIDL::CallbackType* callback, IntersectionObserverInit const& options = {});
+
+    virtual ~IntersectionObserver() override;
 
     void observe(DOM::Element& target);
     void unobserve(DOM::Element& target);
     void disconnect();
+
+private:
+    explicit IntersectionObserver(JS::Realm&);
 };
 
 }

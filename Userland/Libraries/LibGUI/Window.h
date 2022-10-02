@@ -14,6 +14,7 @@
 #include <LibCore/Object.h>
 #include <LibGUI/FocusSource.h>
 #include <LibGUI/Forward.h>
+#include <LibGUI/WindowMode.h>
 #include <LibGUI/WindowType.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/Rect.h>
@@ -33,8 +34,9 @@ public:
     bool is_modified() const;
     void set_modified(bool);
 
-    bool is_modal() const { return m_modal; }
-    void set_modal(bool);
+    bool is_modal() const { return m_window_mode != WindowMode::Modeless; }
+    bool is_blocking() const { return m_window_mode == WindowMode::Blocking; }
+    bool is_capturing_input() const { return m_window_mode == WindowMode::CaptureInput; }
 
     bool is_fullscreen() const { return m_fullscreen; }
     void set_fullscreen(bool);
@@ -71,6 +73,9 @@ public:
     WindowType window_type() const { return m_window_type; }
     void set_window_type(WindowType);
 
+    WindowMode window_mode() const { return m_window_mode; }
+    void set_window_mode(WindowMode);
+
     int window_id() const { return m_window_id; }
 
     void make_window_manager(unsigned event_mask);
@@ -87,6 +92,7 @@ public:
     Function<CloseRequestDecision()> on_close_request;
     Function<void(bool is_active_input)> on_active_input_change;
     Function<void(bool is_active_window)> on_active_window_change;
+    Function<void(InputPreemptor)> on_input_preemption;
 
     int x() const { return rect().x(); }
     int y() const { return rect().y(); }
@@ -119,9 +125,6 @@ public:
     bool is_visible() const;
     bool is_active() const;
     bool is_active_input() const { return m_is_active_input; }
-
-    bool is_accessory() const { return m_accessory; }
-    void set_accessory(bool accessory) { m_accessory = accessory; }
 
     void show();
     void hide();
@@ -196,6 +199,7 @@ public:
     static void for_each_window(Badge<ConnectionToWindowServer>, Function<void(Window&)>);
     static void update_all_windows(Badge<ConnectionToWindowServer>);
     void notify_state_changed(Badge<ConnectionToWindowServer>, bool minimized, bool maximized, bool occluded);
+    void notify_input_preempted(Badge<ConnectionToWindowServer>, InputPreemptor);
 
     virtual bool is_visible_for_timer_purposes() const override { return m_visible_for_timer_purposes; }
 
@@ -220,6 +224,12 @@ public:
 
     Menubar& menubar() { return *m_menubar; }
     Menubar const& menubar() const { return *m_menubar; }
+
+    void set_blocks_command_palette(bool b) { m_blocks_command_palette = b; }
+    bool blocks_command_palette() const { return m_blocks_command_palette; }
+
+    void set_blocks_emoji_input(bool b) { m_blocks_emoji_input = b; }
+    bool blocks_emoji_input() const { return m_blocks_emoji_input; }
 
 protected:
     Window(Core::Object* parent = nullptr);
@@ -278,19 +288,18 @@ private:
     WeakPtr<Widget> m_automatic_cursor_tracking_widget;
     WeakPtr<Widget> m_hovered_widget;
     Gfx::IntRect m_rect_when_windowless;
-    Gfx::IntSize m_minimum_size_when_windowless { 50, 50 };
-    bool m_minimum_size_modified { false };
+    Gfx::IntSize m_minimum_size_when_windowless { 0, 0 };
     String m_title_when_windowless;
     Vector<Gfx::IntRect, 32> m_pending_paint_event_rects;
     Gfx::IntSize m_size_increment;
     Gfx::IntSize m_base_size;
     WindowType m_window_type { WindowType::Normal };
+    WindowMode m_window_mode { WindowMode::Modeless };
     AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_cursor { Gfx::StandardCursor::None };
     AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_effective_cursor { Gfx::StandardCursor::None };
     bool m_is_active_input { false };
     bool m_has_alpha_channel { false };
     bool m_double_buffering_enabled { true };
-    bool m_modal { false };
     bool m_resizable { true };
     bool m_obey_widget_min_size { true };
     Optional<Gfx::IntSize> m_resize_aspect_ratio {};
@@ -303,8 +312,9 @@ private:
     bool m_layout_pending { false };
     bool m_visible_for_timer_purposes { true };
     bool m_visible { false };
-    bool m_accessory { false };
     bool m_moved_by_client { false };
+    bool m_blocks_command_palette { false };
+    bool m_blocks_emoji_input { false };
 };
 
 }

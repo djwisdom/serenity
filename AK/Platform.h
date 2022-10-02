@@ -18,6 +18,12 @@
 #    define AK_ARCH_AARCH64 1
 #endif
 
+#if (defined(__SIZEOF_POINTER__) && __SIZEOF_POINTER__ == 8) || defined(_WIN64)
+#    define AK_ARCH_64_BIT
+#else
+#    define AK_ARCH_32_BIT
+#endif
+
 #if defined(__APPLE__) && defined(__MACH__)
 #    define AK_OS_MACOS
 #    define AK_OS_BSD_GENERIC
@@ -25,6 +31,10 @@
 
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
 #    define AK_OS_BSD_GENERIC
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
+#    define AK_OS_WINDOWS
 #endif
 
 // FIXME: Remove clang-format suppression after https://github.com/llvm/llvm-project/issues/56602 resolved
@@ -121,7 +131,11 @@ extern "C" {
 #    endif
 #endif
 
-#ifdef AK_OS_BSD_GENERIC
+#if defined(AK_OS_WINDOWS)
+#    define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC
+#endif
+
+#if defined(AK_OS_BSD_GENERIC)
 #    define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC
 #    define CLOCK_REALTIME_COARSE CLOCK_REALTIME
 #endif

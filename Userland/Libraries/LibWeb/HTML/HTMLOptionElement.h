@@ -12,10 +12,9 @@
 namespace Web::HTML {
 
 class HTMLOptionElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLOptionElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLOptionElement, HTMLElement);
 
-    HTMLOptionElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLOptionElement() override;
 
     bool selected() const { return m_selected; }
@@ -29,9 +28,13 @@ public:
 
     int index() const;
 
+    bool disabled() const;
+
 private:
     friend class Bindings::OptionConstructor;
     friend class HTMLSelectElement;
+
+    HTMLOptionElement(DOM::Document&, DOM::QualifiedName);
 
     void parse_attribute(FlyString const& name, String const& value) override;
     void did_remove_attribute(FlyString const& name) override;

@@ -35,10 +35,6 @@ namespace Kernel {
 
 class Timer;
 
-namespace Memory {
-extern RecursiveSpinlock s_mm_lock;
-}
-
 enum class DispatchSignalResult {
     Deferred = 0,
     Yield,
@@ -561,7 +557,7 @@ public:
         void begin_requeue()
         {
             // We need to hold the lock until we moved it over
-            m_relock_flags = m_lock.lock();
+            m_previous_interrupts_state = m_lock.lock();
         }
         void finish_requeue(FutexQueue&);
 
@@ -571,7 +567,7 @@ public:
     protected:
         FutexQueue& m_futex_queue;
         u32 m_bitset { 0 };
-        u32 m_relock_flags { 0 };
+        InterruptsState m_previous_interrupts_state { InterruptsState::Disabled };
         bool m_did_unblock { false };
     };
 
@@ -1158,6 +1154,22 @@ public:
 
     ErrorOr<NonnullOwnPtr<KString>> backtrace();
 
+    Blocker const* blocker() const { return m_blocker; };
+    Kernel::Mutex const* blocking_mutex() const { return m_blocking_mutex; }
+
+#if LOCK_DEBUG
+    struct HoldingLockInfo {
+        Mutex* lock;
+        LockLocation lock_location;
+        unsigned count;
+    };
+
+    template<IteratorFunction<HoldingLockInfo const&> Callback>
+    void for_each_held_lock(Callback);
+    template<VoidFunction<HoldingLockInfo const&> Callback>
+    void for_each_held_lock(Callback);
+#endif
+
 private:
     Thread(NonnullLockRefPtr<Process>, NonnullOwnPtr<Memory::Region>, NonnullLockRefPtr<Timer>, NonnullOwnPtr<KString>);
 
@@ -1270,11 +1282,6 @@ private:
     IntrusiveListNode<Thread> m_big_lock_blocked_threads_list_node;
 
 #if LOCK_DEBUG
-    struct HoldingLockInfo {
-        Mutex* lock;
-        LockLocation lock_location;
-        unsigned count;
-    };
     Atomic<u32> m_holding_locks { 0 };
     Spinlock m_holding_locks_lock { LockRank::None };
     Vector<HoldingLockInfo> m_holding_locks_list;
@@ -1389,6 +1396,28 @@ inline IterationDecision Thread::for_each_in_state(State state, Callback callbac
         return IterationDecision::Continue;
     });
 }
+
+#if LOCK_DEBUG
+template<IteratorFunction<Thread::HoldingLockInfo const&> Callback>
+inline void Thread::for_each_held_lock(Callback callback)
+{
+    SpinlockLocker list_lock(m_holding_locks_lock);
+
+    for (auto const& lock_info : m_holding_locks_list) {
+        if (callback(lock_info) == IterationDecision::Break)
+            break;
+    }
+}
+
+template<VoidFunction<Thread::HoldingLockInfo const&> Callback>
+inline void Thread::for_each_held_lock(Callback callback)
+{
+    for_each_held_lock([&](auto const& lock_info) {
+        callback(lock_info);
+        return IterationDecision::Continue;
+    });
+}
+#endif
 
 }
 

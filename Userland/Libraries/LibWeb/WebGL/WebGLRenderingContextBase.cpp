@@ -11,8 +11,9 @@
 
 namespace Web::WebGL {
 
-WebGLRenderingContextBase::WebGLRenderingContextBase(HTML::HTMLCanvasElement& canvas_element, NonnullOwnPtr<GL::GLContext> context, WebGLContextAttributes context_creation_parameters, WebGLContextAttributes actual_context_parameters)
-    : RefCountForwarder(canvas_element)
+WebGLRenderingContextBase::WebGLRenderingContextBase(JS::Realm& realm, HTML::HTMLCanvasElement& canvas_element, NonnullOwnPtr<GL::GLContext> context, WebGLContextAttributes context_creation_parameters, WebGLContextAttributes actual_context_parameters)
+    : PlatformObject(realm)
+    , m_canvas_element(canvas_element)
     , m_context(move(context))
     , m_context_creation_parameters(move(context_creation_parameters))
     , m_actual_context_parameters(move(actual_context_parameters))
@@ -20,6 +21,12 @@ WebGLRenderingContextBase::WebGLRenderingContextBase(HTML::HTMLCanvasElement& ca
 }
 
 WebGLRenderingContextBase::~WebGLRenderingContextBase() = default;
+
+void WebGLRenderingContextBase::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_canvas_element.ptr());
+}
 
 #define RETURN_WITH_WEBGL_ERROR_IF(condition, error)                         \
     if (condition) {                                                         \
@@ -69,17 +76,17 @@ void WebGLRenderingContextBase::present()
 
 HTML::HTMLCanvasElement& WebGLRenderingContextBase::canvas_element()
 {
-    return ref_count_target();
+    return *m_canvas_element;
 }
 
 HTML::HTMLCanvasElement const& WebGLRenderingContextBase::canvas_element() const
 {
-    return ref_count_target();
+    return *m_canvas_element;
 }
 
-NonnullRefPtr<HTML::HTMLCanvasElement> WebGLRenderingContextBase::canvas_for_binding() const
+JS::NonnullGCPtr<HTML::HTMLCanvasElement> WebGLRenderingContextBase::canvas_for_binding() const
 {
-    return canvas_element();
+    return *m_canvas_element;
 }
 
 void WebGLRenderingContextBase::needs_to_present()

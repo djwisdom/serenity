@@ -19,6 +19,7 @@ namespace Web::HTML {
 HTMLObjectElement::HTMLObjectElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : BrowsingContextContainer(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLObjectElement"));
 }
 
 HTMLObjectElement::~HTMLObjectElement() = default;
@@ -96,7 +97,7 @@ void HTMLObjectElement::queue_element_task_to_run_object_representation_steps()
 
             // 3. If that failed, fire an event named error at the element, then jump to the step below labeled fallback.
             if (!url.is_valid()) {
-                dispatch_event(DOM::Event::create(HTML::EventNames::error));
+                dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
                 return run_object_representation_fallback_steps();
             }
 
@@ -123,7 +124,7 @@ void HTMLObjectElement::queue_element_task_to_run_object_representation_steps()
 void HTMLObjectElement::resource_did_fail()
 {
     // 4.7. If the load failed (e.g. there was an HTTP 404 error, there was a DNS error), fire an event named error at the element, then jump to the step below labeled fallback.
-    dispatch_event(DOM::Event::create(HTML::EventNames::error));
+    dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
     run_object_representation_fallback_steps();
 }
 
@@ -234,7 +235,7 @@ void HTMLObjectElement::run_object_representation_handler_steps(Optional<String>
     else if (resource_type.has_value() && resource_type->starts_with("image/"sv)) {
         // If the object element's nested browsing context is non-null, then it must be discarded and then set to null.
         if (m_nested_browsing_context) {
-            discard_nested_browsing_context();
+            m_nested_browsing_context->discard();
             m_nested_browsing_context = nullptr;
         }
 
@@ -261,7 +262,7 @@ void HTMLObjectElement::run_object_representation_completed_steps(Representation
     // 4.11. If the object element does not represent its nested browsing context, then once the resource is completely loaded, queue an element task on the DOM manipulation task source given the object element to fire an event named load at the element.
     if (representation != Representation::NestedBrowsingContext) {
         queue_an_element_task(HTML::Task::Source::DOMManipulation, [&]() {
-            dispatch_event(DOM::Event::create(HTML::EventNames::load));
+            dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::load));
         });
     }
 
@@ -275,7 +276,7 @@ void HTMLObjectElement::run_object_representation_fallback_steps()
 {
     // 6. Fallback: The object element represents the element's children, ignoring any leading param element children. This is the element's fallback content. If the element has an instantiated plugin, then unload it. If the element's nested browsing context is non-null, then it must be discarded and then set to null.
     if (m_nested_browsing_context) {
-        discard_nested_browsing_context();
+        m_nested_browsing_context->discard();
         m_nested_browsing_context = nullptr;
     }
 

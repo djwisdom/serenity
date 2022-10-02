@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLQuoteElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLQuoteElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLQuoteElement, HTMLElement);
 
-    HTMLQuoteElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLQuoteElement() override;
+
+private:
+    HTMLQuoteElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

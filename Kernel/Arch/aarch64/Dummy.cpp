@@ -13,6 +13,7 @@
 #include <Kernel/Memory/SharedInodeVMObject.h>
 #include <Kernel/Panic.h>
 #include <Kernel/PhysicalAddress.h>
+#include <Kernel/Process.h>
 #include <Kernel/Random.h>
 #include <Kernel/Sections.h>
 #include <Kernel/UserOrKernelBuffer.h>
@@ -21,6 +22,7 @@
 namespace Kernel {
 
 READONLY_AFTER_INIT Thread* g_finalizer;
+RecursiveSpinlock g_scheduler_lock { LockRank::None };
 
 }
 
@@ -31,6 +33,39 @@ void get_fast_random_bytes(Bytes)
 {
     VERIFY_NOT_REACHED();
 }
+
+}
+
+// Mutex
+namespace Kernel {
+
+void Mutex::lock(Mode, [[maybe_unused]] LockLocation const& location)
+{
+    VERIFY_NOT_REACHED();
+}
+
+void Mutex::unlock()
+{
+    VERIFY_NOT_REACHED();
+}
+
+}
+
+// Process
+namespace Kernel {
+
+SpinlockProtected<Process::List>& Process::all_instances()
+{
+    VERIFY_NOT_REACHED();
+}
+
+}
+
+// LockRank
+namespace Kernel {
+
+void track_lock_acquire(LockRank) { }
+void track_lock_release(LockRank) { }
 
 }
 
@@ -60,6 +95,18 @@ ErrorOr<void> Inode::set_shared_vmobject(Memory::SharedInodeVMObject&)
 {
     VERIFY_NOT_REACHED();
     return {};
+}
+
+ErrorOr<size_t> Inode::read_bytes(off_t, size_t, UserOrKernelBuffer&, OpenFileDescription*) const
+{
+    VERIFY_NOT_REACHED();
+    return 0;
+}
+
+ErrorOr<size_t> Inode::write_bytes(off_t, size_t, UserOrKernelBuffer const&, OpenFileDescription*)
+{
+    VERIFY_NOT_REACHED();
+    return 0;
 }
 
 }
@@ -111,26 +158,6 @@ READONLY_AFTER_INIT u32 multiboot_framebuffer_width;
 READONLY_AFTER_INIT u32 multiboot_framebuffer_height;
 READONLY_AFTER_INIT u8 multiboot_framebuffer_bpp;
 READONLY_AFTER_INIT u8 multiboot_framebuffer_type;
-}
-
-namespace Kernel {
-
-// KString.cpp
-ErrorOr<NonnullOwnPtr<KString>> KString::try_create_uninitialized(size_t, char*&)
-{
-    VERIFY_NOT_REACHED();
-    return ENOMEM;
-}
-ErrorOr<NonnullOwnPtr<KString>> KString::try_create(StringView)
-{
-    VERIFY_NOT_REACHED();
-    return ENOMEM;
-}
-void KString::operator delete(void*)
-{
-    VERIFY_NOT_REACHED();
-}
-
 }
 
 extern "C" {

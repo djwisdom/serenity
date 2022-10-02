@@ -12,22 +12,23 @@
 namespace Web::SVG {
 
 class SVGEllipseElement final : public SVGGeometryElement {
-public:
-    using WrapperType = Bindings::SVGEllipseElementWrapper;
+    WEB_PLATFORM_OBJECT(SVGEllipseElement, SVGGraphicsElement);
 
-    SVGEllipseElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~SVGEllipseElement() override = default;
 
     virtual void parse_attribute(FlyString const& name, String const& value) override;
 
     virtual Gfx::Path& get_path() override;
 
-    NonnullRefPtr<SVGAnimatedLength> cx() const;
-    NonnullRefPtr<SVGAnimatedLength> cy() const;
-    NonnullRefPtr<SVGAnimatedLength> rx() const;
-    NonnullRefPtr<SVGAnimatedLength> ry() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> cx() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> cy() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> rx() const;
+    JS::NonnullGCPtr<SVGAnimatedLength> ry() const;
 
 private:
+    SVGEllipseElement(DOM::Document&, DOM::QualifiedName);
+
     Optional<Gfx::Path> m_path;
 
     Optional<float> m_center_x;

@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibGfx/Font/FontDatabase.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/Layout/ImageBox.h>
 #include <LibWeb/Painting/ImagePaintable.h>
+#include <LibWeb/Platform/FontPlugin.h>
 
 namespace Web::Layout {
 
@@ -55,17 +55,28 @@ void ImageBox::prepare_for_replaced_layout()
 
     if (renders_as_alt_text()) {
         auto& image_element = verify_cast<HTML::HTMLImageElement>(dom_node());
-        auto& font = Gfx::FontDatabase::default_font();
+        auto& font = Platform::FontPlugin::the().default_font();
         auto alt = image_element.alt();
         if (alt.is_empty())
             alt = image_element.src();
-        set_intrinsic_width(font.width(alt) + 16);
+
+        float alt_text_width = 0;
+        if (!m_cached_alt_text_width.has_value())
+            m_cached_alt_text_width = font.width(alt);
+        alt_text_width = m_cached_alt_text_width.value();
+
+        set_intrinsic_width(alt_text_width + 16);
         set_intrinsic_height(font.pixel_size() + 16);
     }
 
     if (!has_intrinsic_width() && !has_intrinsic_height()) {
         // FIXME: Do something.
     }
+}
+
+void ImageBox::dom_node_did_update_alt_text(Badge<HTML::HTMLImageElement>)
+{
+    m_cached_alt_text_width = {};
 }
 
 bool ImageBox::renders_as_alt_text() const

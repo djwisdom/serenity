@@ -8,6 +8,7 @@
 // please look at Documentation/Kernel/AHCILocking.md
 
 #include <AK/Atomic.h>
+#include <Kernel/Arch/Delay.h>
 #include <Kernel/Locking/Spinlock.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/ScatterGatherList.h>
@@ -54,7 +55,7 @@ ErrorOr<void> AHCIPort::allocate_resources_and_initialize_ports()
     return {};
 }
 
-UNMAP_AFTER_INIT AHCIPort::AHCIPort(AHCIController const& controller, NonnullLockRefPtr<Memory::PhysicalPage> identify_buffer_page, AHCI::HBADefinedCapabilities hba_capabilities, volatile AHCI::PortRegisters& registers, u32 port_index)
+UNMAP_AFTER_INIT AHCIPort::AHCIPort(AHCIController const& controller, NonnullRefPtr<Memory::PhysicalPage> identify_buffer_page, AHCI::HBADefinedCapabilities hba_capabilities, volatile AHCI::PortRegisters& registers, u32 port_index)
     : m_port_index(port_index)
     , m_hba_capabilities(hba_capabilities)
     , m_identify_buffer_page(move(identify_buffer_page))
@@ -496,7 +497,7 @@ Optional<AsyncDeviceRequest::RequestResult> AHCIPort::prepare_and_set_scatter_li
     VERIFY(m_lock.is_locked());
     VERIFY(request.block_count() > 0);
 
-    NonnullLockRefPtrVector<Memory::PhysicalPage> allocated_dma_regions;
+    NonnullRefPtrVector<Memory::PhysicalPage> allocated_dma_regions;
     for (size_t index = 0; index < calculate_descriptors_count(request.block_count()); index++) {
         allocated_dma_regions.append(m_dma_buffers.at(index));
     }
@@ -552,7 +553,7 @@ bool AHCIPort::spin_until_ready() const
     size_t spin = 0;
     dbgln_if(AHCI_DEBUG, "AHCI Port {}: Spinning until ready.", representative_port_index());
     while ((m_port_registers.tfd & (ATA_SR_BSY | ATA_SR_DRQ)) && spin <= 100) {
-        IO::delay(1000);
+        microseconds_delay(1000);
         spin++;
     }
     if (spin == 100) {
@@ -719,7 +720,7 @@ bool AHCIPort::identify_device()
             success = true;
             break;
         }
-        IO::delay(1000); // delay with 1 milliseconds
+        microseconds_delay(1000); // delay with 1 milliseconds
         time_elapsed++;
     }
 
@@ -739,7 +740,7 @@ void AHCIPort::wait_until_condition_met_or_timeout(size_t delay_in_microseconds,
     while (retry < retries) {
         if (condition_being_met())
             break;
-        IO::delay(delay_in_microseconds);
+        microseconds_delay(delay_in_microseconds);
         retry++;
     }
 }
@@ -852,7 +853,7 @@ bool AHCIPort::initiate_sata_reset()
     full_memory_barrier();
     set_interface_state(AHCI::DeviceDetectionInitialization::PerformInterfaceInitializationSequence);
     // The AHCI specification says to wait now a 1 millisecond
-    IO::delay(1000);
+    microseconds_delay(1000);
     full_memory_barrier();
     set_interface_state(AHCI::DeviceDetectionInitialization::NoActionRequested);
     full_memory_barrier();

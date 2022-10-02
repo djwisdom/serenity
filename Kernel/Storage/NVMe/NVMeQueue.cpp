@@ -4,19 +4,18 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "NVMeQueue.h"
-#include "Kernel/StdLib.h"
-#include "NVMeQueue.h"
-#include <Kernel/Arch/x86/IO.h>
+#include <Kernel/Arch/Delay.h>
+#include <Kernel/StdLib.h>
 #include <Kernel/Storage/NVMe/NVMeController.h>
 #include <Kernel/Storage/NVMe/NVMeInterruptQueue.h>
 #include <Kernel/Storage/NVMe/NVMePollQueue.h>
+#include <Kernel/Storage/NVMe/NVMeQueue.h>
 
 namespace Kernel {
-ErrorOr<NonnullLockRefPtr<NVMeQueue>> NVMeQueue::try_create(u16 qid, Optional<u8> irq, u32 q_depth, OwnPtr<Memory::Region> cq_dma_region, NonnullLockRefPtrVector<Memory::PhysicalPage> cq_dma_page, OwnPtr<Memory::Region> sq_dma_region, NonnullLockRefPtrVector<Memory::PhysicalPage> sq_dma_page, Memory::TypedMapping<volatile DoorbellRegister> db_regs)
+ErrorOr<NonnullLockRefPtr<NVMeQueue>> NVMeQueue::try_create(u16 qid, Optional<u8> irq, u32 q_depth, OwnPtr<Memory::Region> cq_dma_region, NonnullRefPtrVector<Memory::PhysicalPage> cq_dma_page, OwnPtr<Memory::Region> sq_dma_region, NonnullRefPtrVector<Memory::PhysicalPage> sq_dma_page, Memory::TypedMapping<volatile DoorbellRegister> db_regs)
 {
     // Note: Allocate DMA region for RW operation. For now the requests don't exceed more than 4096 bytes (Storage device takes care of it)
-    LockRefPtr<Memory::PhysicalPage> rw_dma_page;
+    RefPtr<Memory::PhysicalPage> rw_dma_page;
     auto rw_dma_region = TRY(MM.allocate_dma_buffer_page("NVMe Queue Read/Write DMA"sv, Memory::Region::Access::ReadWrite, rw_dma_page));
     if (!irq.has_value()) {
         auto queue = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) NVMePollQueue(move(rw_dma_region), *rw_dma_page, qid, q_depth, move(cq_dma_region), cq_dma_page, move(sq_dma_region), sq_dma_page, move(db_regs))));
@@ -26,7 +25,7 @@ ErrorOr<NonnullLockRefPtr<NVMeQueue>> NVMeQueue::try_create(u16 qid, Optional<u8
     return queue;
 }
 
-UNMAP_AFTER_INIT NVMeQueue::NVMeQueue(NonnullOwnPtr<Memory::Region> rw_dma_region, Memory::PhysicalPage const& rw_dma_page, u16 qid, u32 q_depth, OwnPtr<Memory::Region> cq_dma_region, NonnullLockRefPtrVector<Memory::PhysicalPage> cq_dma_page, OwnPtr<Memory::Region> sq_dma_region, NonnullLockRefPtrVector<Memory::PhysicalPage> sq_dma_page, Memory::TypedMapping<volatile DoorbellRegister> db_regs)
+UNMAP_AFTER_INIT NVMeQueue::NVMeQueue(NonnullOwnPtr<Memory::Region> rw_dma_region, Memory::PhysicalPage const& rw_dma_page, u16 qid, u32 q_depth, OwnPtr<Memory::Region> cq_dma_region, NonnullRefPtrVector<Memory::PhysicalPage> cq_dma_page, OwnPtr<Memory::Region> sq_dma_region, NonnullRefPtrVector<Memory::PhysicalPage> sq_dma_page, Memory::TypedMapping<volatile DoorbellRegister> db_regs)
     : m_current_request(nullptr)
     , m_rw_dma_region(move(rw_dma_region))
     , m_qid(qid)
@@ -127,7 +126,7 @@ u16 NVMeQueue::submit_sync_sqe(NVMeSubmission& sub)
                 index = m_qdepth - 1;
         }
         cqe_cid = m_cqe_array[index].command_id;
-        IO::delay(1);
+        microseconds_delay(1);
     } while (cid != cqe_cid);
 
     auto status = CQ_STATUS_FIELD(m_cqe_array[m_cq_head].status);

@@ -31,6 +31,7 @@
 #include <LibGfx/FillPathImplementation.h>
 #include <LibGfx/Palette.h>
 #include <LibGfx/Path.h>
+#include <LibGfx/Quad.h>
 #include <LibGfx/TextDirection.h>
 #include <LibGfx/TextLayout.h>
 #include <stdio.h>
@@ -1066,7 +1067,7 @@ void Painter::blit(IntPoint const& position, Gfx::Bitmap const& source, IntRect 
         ARGB32 const* src = source.scanline(src_rect.top() + first_row) + src_rect.left() + first_column;
         size_t const src_skip = source.pitch() / sizeof(ARGB32);
         for (int row = first_row; row <= last_row; ++row) {
-            fast_u32_copy(dst, src, clipped_rect.width());
+            memcpy(dst, src, sizeof(ARGB32) * clipped_rect.width());
             dst += dst_skip;
             src += src_skip;
         }
@@ -1154,7 +1155,8 @@ ALWAYS_INLINE static void do_draw_scaled_bitmap(Gfx::Bitmap& target, IntRect con
     bool has_opacity = opacity != 1.0f;
     i64 shift = (i64)1 << 32;
     i64 fractional_mask = (shift - (u64)1);
-    i64 half_pixel = (i64)1 << 31;
+    i64 bilinear_offset_x = (1ll << 31) * (src_rect.width() / dst_rect.width() - 1);
+    i64 bilinear_offset_y = (1ll << 31) * (src_rect.height() / dst_rect.height() - 1);
     i64 hscale = (src_rect.width() * shift) / dst_rect.width();
     i64 vscale = (src_rect.height() * shift) / dst_rect.height();
     i64 src_left = src_rect.left() * shift;
@@ -1175,13 +1177,16 @@ ALWAYS_INLINE static void do_draw_scaled_bitmap(Gfx::Bitmap& target, IntRect con
 
             Color src_pixel;
             if constexpr (scaling_mode == Painter::ScalingMode::BilinearBlend) {
-                auto scaled_x0 = clamp((desired_x - half_pixel) >> 32, clipped_src_rect.left(), clipped_src_rect.right());
-                auto scaled_x1 = clamp((desired_x + half_pixel) >> 32, clipped_src_rect.left(), clipped_src_rect.right());
-                auto scaled_y0 = clamp((desired_y - half_pixel) >> 32, clipped_src_rect.top(), clipped_src_rect.bottom());
-                auto scaled_y1 = clamp((desired_y + half_pixel) >> 32, clipped_src_rect.top(), clipped_src_rect.bottom());
+                auto shifted_x = desired_x + bilinear_offset_x;
+                auto shifted_y = desired_y + bilinear_offset_y;
 
-                float x_ratio = (((desired_x + half_pixel) & fractional_mask) / (float)shift);
-                float y_ratio = (((desired_y + half_pixel) & fractional_mask) / (float)shift);
+                auto scaled_x0 = clamp(shifted_x >> 32, clipped_src_rect.left(), clipped_src_rect.right());
+                auto scaled_x1 = clamp((shifted_x >> 32) + 1, clipped_src_rect.left(), clipped_src_rect.right());
+                auto scaled_y0 = clamp(shifted_y >> 32, clipped_src_rect.top(), clipped_src_rect.bottom());
+                auto scaled_y1 = clamp((shifted_y >> 32) + 1, clipped_src_rect.top(), clipped_src_rect.bottom());
+
+                float x_ratio = (shifted_x & fractional_mask) / static_cast<float>(shift);
+                float y_ratio = (shifted_y & fractional_mask) / static_cast<float>(shift);
 
                 auto top_left = get_pixel(source, scaled_x0, scaled_y0);
                 auto top_right = get_pixel(source, scaled_x1, scaled_y0);
@@ -1793,6 +1798,15 @@ Optional<Color> Painter::get_pixel(IntPoint const& p)
     if (!clip_rect().contains(point / scale()))
         return {};
     return Color::from_argb(m_target->scanline(point.y())[point.x()]);
+}
+
+ErrorOr<NonnullRefPtr<Bitmap>> Painter::get_region_bitmap(IntRect const& region, BitmapFormat format, Optional<IntRect&> actual_region)
+{
+    VERIFY(scale() == 1);
+    auto bitmap_region = region.translated(state().translation).intersected(m_target->rect());
+    if (actual_region.has_value())
+        actual_region.value() = bitmap_region.translated(-state().translation);
+    return m_target->cropped(bitmap_region, format);
 }
 
 ALWAYS_INLINE void Painter::set_physical_pixel_with_draw_op(u32& pixel, Color const& color)
@@ -2407,6 +2421,62 @@ void Painter::draw_text_run(FloatPoint const& baseline_start, Utf8View const& st
         draw_glyph_or_emoji({ static_cast<int>(x), y }, code_point_iterator, font, color);
         x += font.glyph_or_emoji_width(code_point) + font.glyph_spacing();
         last_code_point = code_point;
+    }
+}
+
+void Painter::draw_scaled_bitmap_with_transform(Gfx::IntRect const& dst_rect, Gfx::Bitmap const& bitmap, Gfx::FloatRect const& src_rect, Gfx::AffineTransform const& transform, float opacity, Gfx::Painter::ScalingMode scaling_mode)
+{
+    if (transform.is_identity_or_translation()) {
+        translate(transform.e(), transform.f());
+        draw_scaled_bitmap(dst_rect, bitmap, src_rect, opacity, scaling_mode);
+        translate(-transform.e(), -transform.f());
+    } else {
+        // The painter has an affine transform, we have to draw through it!
+
+        // FIXME: This is *super* inefficient.
+        // What we currently do, roughly:
+        // - Map the destination rect through the context's transform.
+        // - Compute the bounding rect of the destination quad.
+        // - For each point in the computed bounding rect, reverse-map it to a point in the source image.
+        //   - Sample the source image at the computed point.
+        //   - Set or blend (depending on alpha values) one pixel in the canvas.
+        //   - Loop.
+
+        // FIXME: Painter should have an affine transform as part of its state and handle all of this instead.
+
+        auto inverse_transform = transform.inverse();
+        if (!inverse_transform.has_value())
+            return;
+
+        auto destination_quad = transform.map_to_quad(dst_rect.to_type<float>());
+        auto destination_bounding_rect = destination_quad.bounding_rect().to_rounded<int>();
+
+        Gfx::AffineTransform source_transform;
+        source_transform.translate(src_rect.x(), src_rect.y());
+        source_transform.scale(src_rect.width() / dst_rect.width(), src_rect.height() / dst_rect.height());
+        source_transform.translate(-dst_rect.x(), -dst_rect.y());
+
+        for (int y = destination_bounding_rect.y(); y <= destination_bounding_rect.bottom(); ++y) {
+            for (int x = destination_bounding_rect.x(); x <= destination_bounding_rect.right(); ++x) {
+                auto destination_point = Gfx::IntPoint { x, y };
+                if (!clip_rect().contains(destination_point))
+                    continue;
+                if (!destination_quad.contains(destination_point.to_type<float>()))
+                    continue;
+                auto source_point = source_transform.map(inverse_transform->map(destination_point)).to_rounded<int>();
+                if (!bitmap.rect().contains(source_point))
+                    continue;
+                auto source_color = bitmap.get_pixel(source_point);
+                if (source_color.alpha() == 0)
+                    continue;
+                if (source_color.alpha() == 255) {
+                    set_pixel(destination_point, source_color);
+                    continue;
+                }
+                auto dst_color = target()->get_pixel(destination_point);
+                set_pixel(destination_point, dst_color.blend(source_color));
+            }
+        }
     }
 }
 

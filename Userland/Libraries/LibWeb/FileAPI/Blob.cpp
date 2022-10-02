@@ -7,11 +7,17 @@
 #include <AK/GenericLexer.h>
 #include <AK/StdLibExtras.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
-#include <LibWeb/Bindings/DOMExceptionWrapper.h>
-#include <LibWeb/Bindings/IDLAbstractOperations.h>
+#include <LibWeb/Bindings/BlobPrototype.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/FileAPI/Blob.h>
+#include <LibWeb/WebIDL/AbstractOperations.h>
 
 namespace Web::FileAPI {
+
+JS::NonnullGCPtr<Blob> Blob::create(JS::Realm& realm, ByteBuffer byte_buffer, String type)
+{
+    return JS::NonnullGCPtr(*realm.heap().allocate<Blob>(realm, realm, move(byte_buffer), move(type)));
+}
 
 // https://w3c.github.io/FileAPI/#convert-line-endings-to-native
 ErrorOr<String> convert_line_endings_to_native(String const& string)
@@ -84,11 +90,11 @@ ErrorOr<ByteBuffer> process_blob_parts(Vector<BlobPart> const& blob_parts, Optio
             },
             // 2. If element is a BufferSource, get a copy of the bytes held by the buffer source, and append those bytes to bytes.
             [&](JS::Handle<JS::Object> const& buffer_source) -> ErrorOr<void> {
-                auto data_buffer = TRY(Bindings::IDL::get_buffer_source_copy(*buffer_source.cell()));
+                auto data_buffer = TRY(WebIDL::get_buffer_source_copy(*buffer_source.cell()));
                 return bytes.try_append(data_buffer.bytes());
             },
             // 3. If element is a Blob, append the bytes it represents to bytes.
-            [&](NonnullRefPtr<Blob> const& blob) -> ErrorOr<void> {
+            [&](JS::Handle<Blob> const& blob) -> ErrorOr<void> {
                 return bytes.try_append(blob->bytes());
             }));
     }
@@ -105,28 +111,40 @@ bool is_basic_latin(StringView view)
     return true;
 }
 
-Blob::Blob(ByteBuffer byte_buffer, String type)
-    : m_byte_buffer(move(byte_buffer))
+Blob::Blob(JS::Realm& realm)
+    : PlatformObject(realm)
+{
+    set_prototype(&Bindings::cached_web_prototype(realm, "Blob"));
+}
+
+Blob::Blob(JS::Realm& realm, ByteBuffer byte_buffer, String type)
+    : PlatformObject(realm)
+    , m_byte_buffer(move(byte_buffer))
     , m_type(move(type))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm, "Blob"));
 }
 
-Blob::Blob(ByteBuffer byte_buffer)
-    : m_byte_buffer(move(byte_buffer))
+Blob::Blob(JS::Realm& realm, ByteBuffer byte_buffer)
+    : PlatformObject(realm)
+    , m_byte_buffer(move(byte_buffer))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm, "Blob"));
 }
+
+Blob::~Blob() = default;
 
 // https://w3c.github.io/FileAPI/#ref-for-dom-blob-blob
-DOM::ExceptionOr<NonnullRefPtr<Blob>> Blob::create(Optional<Vector<BlobPart>> const& blob_parts, Optional<BlobPropertyBag> const& options)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Blob>> Blob::create(JS::Realm& realm, Optional<Vector<BlobPart>> const& blob_parts, Optional<BlobPropertyBag> const& options)
 {
     // 1. If invoked with zero parameters, return a new Blob object consisting of 0 bytes, with size set to 0, and with type set to the empty string.
     if (!blob_parts.has_value() && !options.has_value())
-        return adopt_ref(*new Blob());
+        return JS::NonnullGCPtr(*realm.heap().allocate<Blob>(realm, realm));
 
     ByteBuffer byte_buffer {};
     // 2. Let bytes be the result of processing blob parts given blobParts and options.
     if (blob_parts.has_value()) {
-        byte_buffer = TRY_OR_RETURN_OOM(process_blob_parts(blob_parts.value(), options));
+        byte_buffer = TRY_OR_RETURN_OOM(realm, process_blob_parts(blob_parts.value(), options));
     }
 
     auto type = String::empty();
@@ -146,16 +164,16 @@ DOM::ExceptionOr<NonnullRefPtr<Blob>> Blob::create(Optional<Vector<BlobPart>> co
     }
 
     // 4. Return a Blob object referring to bytes as its associated byte sequence, with its size set to the length of bytes, and its type set to the value of t from the substeps above.
-    return adopt_ref(*new Blob(move(byte_buffer), move(type)));
+    return JS::NonnullGCPtr(*realm.heap().allocate<Blob>(realm, realm, move(byte_buffer), move(type)));
 }
 
-DOM::ExceptionOr<NonnullRefPtr<Blob>> Blob::create_with_global_object(Bindings::WindowObject&, Optional<Vector<BlobPart>> const& blob_parts, Optional<BlobPropertyBag> const& options)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Blob>> Blob::construct_impl(JS::Realm& realm, Optional<Vector<BlobPart>> const& blob_parts, Optional<BlobPropertyBag> const& options)
 {
-    return Blob::create(blob_parts, options);
+    return Blob::create(realm, blob_parts, options);
 }
 
 // https://w3c.github.io/FileAPI/#dfn-slice
-DOM::ExceptionOr<NonnullRefPtr<Blob>> Blob::slice(Optional<i64> start, Optional<i64> end, Optional<String> const& content_type)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Blob>> Blob::slice(Optional<i64> start, Optional<i64> end, Optional<String> const& content_type)
 {
     // 1. The optional start parameter is a value for the start point of a slice() call, and must be treated as a byte-order position, with the zeroth position representing the first byte.
     //    User agents must process slice() with start normalized according to the following:
@@ -214,22 +232,20 @@ DOM::ExceptionOr<NonnullRefPtr<Blob>> Blob::slice(Optional<i64> start, Optional<
     // a. S refers to span consecutive bytes from this, beginning with the byte at byte-order position relativeStart.
     // b. S.size = span.
     // c. S.type = relativeContentType.
-    auto byte_buffer = TRY_OR_RETURN_OOM(m_byte_buffer.slice(relative_start, span));
-    return adopt_ref(*new Blob(move(byte_buffer), move(relative_content_type)));
+    auto byte_buffer = TRY_OR_RETURN_OOM(realm(), m_byte_buffer.slice(relative_start, span));
+    return JS::NonnullGCPtr(*heap().allocate<Blob>(realm(), realm(), move(byte_buffer), move(relative_content_type)));
 }
 
 // https://w3c.github.io/FileAPI/#dom-blob-text
 JS::Promise* Blob::text()
 {
-    auto& global_object = wrapper()->global_object();
-
     // FIXME: 1. Let stream be the result of calling get stream on this.
     // FIXME: 2. Let reader be the result of getting a reader from stream. If that threw an exception, return a new promise rejected with that exception.
 
     // FIXME: We still need to implement ReadableStream for this step to be fully valid.
     // 3. Let promise be the result of reading all bytes from stream with reader
-    auto* promise = JS::Promise::create(global_object);
-    auto* result = JS::js_string(global_object.heap(), String { m_byte_buffer.bytes() });
+    auto* promise = JS::Promise::create(realm());
+    auto* result = JS::js_string(vm(), String { m_byte_buffer.bytes() });
 
     // 4. Return the result of transforming promise by a fulfillment handler that returns the result of running UTF-8 decode on its first argument.
     promise->fulfill(result);
@@ -239,15 +255,13 @@ JS::Promise* Blob::text()
 // https://w3c.github.io/FileAPI/#dom-blob-arraybuffer
 JS::Promise* Blob::array_buffer()
 {
-    auto& global_object = wrapper()->global_object();
-
     // FIXME: 1. Let stream be the result of calling get stream on this.
     // FIXME: 2. Let reader be the result of getting a reader from stream. If that threw an exception, return a new promise rejected with that exception.
 
     // FIXME: We still need to implement ReadableStream for this step to be fully valid.
     // 3. Let promise be the result of reading all bytes from stream with reader.
-    auto* promise = JS::Promise::create(global_object);
-    auto buffer_result = JS::ArrayBuffer::create(global_object, m_byte_buffer.size());
+    auto* promise = JS::Promise::create(realm());
+    auto buffer_result = JS::ArrayBuffer::create(realm(), m_byte_buffer.size());
     if (buffer_result.is_error()) {
         promise->reject(buffer_result.release_error().value().release_value());
         return promise;
@@ -258,11 +272,6 @@ JS::Promise* Blob::array_buffer()
     // 4. Return the result of transforming promise by a fulfillment handler that returns a new ArrayBuffer whose contents are its first argument.
     promise->fulfill(buffer);
     return promise;
-}
-
-JS::Object* Blob::create_wrapper(JS::GlobalObject& global_object)
-{
-    return wrap(global_object, *this);
 }
 
 }

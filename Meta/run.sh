@@ -121,13 +121,6 @@ if [ "$installed_major_version" -lt "$SERENITY_QEMU_MIN_REQ_MAJOR_VERSION" ] ||
     die
 fi
 
-# FIXME: Remove this once #14856 is resolved.
-if [ "$SERENITY_ARCH" = "aarch64" ] && [ "$installed_major_version" -ge "7" ]; then
-    echo "The aarch64 Kernel currently does not support QEMU >= 7.0."
-    echo "Please install QEMU 6.2 or use the QEMU build script: 'QEMU_VERSION=\"qemu-6.2.0\" QEMU_MD5SUM=\"a077669ce58b6ee07ec355e54aad25be\" ./Toolchain/BuildQemu.sh'."
-    die
-fi
-
 NATIVE_WINDOWS_QEMU="0"
 
 if command -v wslpath >/dev/null; then
@@ -330,6 +323,7 @@ $SERENITY_EXTRA_QEMU_ARGS
 -cpu pentium3
 -machine isapc
 -d guest_errors
+-device isa-vga
 -chardev stdio,id=stdout,mux=on
 -device isa-debugcon,chardev=stdout
 $SERENITY_BOOT_DRIVE
@@ -343,7 +337,7 @@ $SERENITY_EXTRA_QEMU_ARGS
 -d guest_errors
 -chardev stdio,id=stdout,mux=on
 -device isa-debugcon,chardev=stdout
--device isa-cirrus-vga
+-device isa-vga
 -device isa-ide
 $SERENITY_BOOT_DRIVE
 -device i8042 
@@ -381,7 +375,6 @@ $SERENITY_EXTRA_QEMU_ARGS
 -device pci-bridge,chassis_nr=1,id=bridge1,bus=pcie.4,addr=0x3.0x0
 -device sdhci-pci,bus=bridge1,addr=0x1.0x0
 -display $SERENITY_QEMU_DISPLAY_BACKEND
--device ahci,id=ahci
 -device virtio-serial
 -chardev stdio,id=stdout,mux=on
 -device virtconsole,chardev=stdout

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Matthew Olsson <mattco@serenityos.org>
- * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021, Ali Mohammad Pur <mpfard@serenityos.org>
  * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
  *
@@ -130,7 +130,7 @@ extern bool g_collect_on_every_allocation;
 extern bool g_run_bytecode;
 extern String g_currently_running_test;
 struct FunctionWithLength {
-    JS::ThrowCompletionOr<JS::Value> (*function)(JS::VM&, JS::GlobalObject&);
+    JS::ThrowCompletionOr<JS::Value> (*function)(JS::VM&);
     size_t length { 0 };
 };
 extern HashMap<String, FunctionWithLength> s_exposed_global_functions;
@@ -194,20 +194,20 @@ public:
         : JS::GlobalObject(realm)
     {
     }
-
+    virtual void initialize(JS::Realm&) override;
     virtual ~TestRunnerGlobalObject() override = default;
-
-    virtual void initialize_global_object() override;
 };
 
-inline void TestRunnerGlobalObject::initialize_global_object()
+inline void TestRunnerGlobalObject::initialize(JS::Realm& realm)
 {
-    Base::initialize_global_object();
+    Base::initialize(realm);
+
     define_direct_property("global", this, JS::Attribute::Enumerable);
     for (auto& entry : s_exposed_global_functions) {
         define_native_function(
-            entry.key, [fn = entry.value.function](auto& vm, auto& global_object) {
-                return fn(vm, global_object);
+            realm,
+            entry.key, [fn = entry.value.function](auto& vm) {
+                return fn(vm);
             },
             entry.value.length, JS::default_attributes);
     }
@@ -231,7 +231,7 @@ inline ByteBuffer load_entire_file(StringView path)
     return buffer_or_error.release_value();
 }
 
-inline AK::Result<NonnullRefPtr<JS::Script>, ParserError> parse_script(StringView path, JS::Realm& realm)
+inline AK::Result<JS::NonnullGCPtr<JS::Script>, ParserError> parse_script(StringView path, JS::Realm& realm)
 {
     auto contents = load_entire_file(path);
     auto script_or_errors = JS::Script::parse(contents, realm, path);
@@ -244,7 +244,7 @@ inline AK::Result<NonnullRefPtr<JS::Script>, ParserError> parse_script(StringVie
     return script_or_errors.release_value();
 }
 
-inline AK::Result<NonnullRefPtr<JS::SourceTextModule>, ParserError> parse_module(StringView path, JS::Realm& realm)
+inline AK::Result<JS::NonnullGCPtr<JS::SourceTextModule>, ParserError> parse_module(StringView path, JS::Realm& realm)
 {
     auto contents = load_entire_file(path);
     auto script_or_errors = JS::SourceTextModule::parse(contents, realm, path);
@@ -259,8 +259,8 @@ inline AK::Result<NonnullRefPtr<JS::SourceTextModule>, ParserError> parse_module
 
 inline ErrorOr<JsonValue> get_test_results(JS::Interpreter& interpreter)
 {
-    auto results = MUST(interpreter.global_object().get("__TestResults__"));
-    auto json_string = MUST(JS::JSONObject::stringify_impl(interpreter.global_object(), results, JS::js_undefined(), JS::js_undefined()));
+    auto results = MUST(interpreter.realm().global_object().get("__TestResults__"));
+    auto json_string = MUST(JS::JSONObject::stringify_impl(*g_vm, results, JS::js_undefined(), JS::js_undefined()));
 
     return JsonValue::from_string(json_string);
 }
@@ -364,7 +364,7 @@ inline JSFileResult TestRunner::run_file_test(String const& test_path)
         executable->name = test_path;
         if (JS::Bytecode::g_dump_bytecode)
             executable->dump();
-        JS::Bytecode::Interpreter bytecode_interpreter(interpreter->global_object(), interpreter->realm());
+        JS::Bytecode::Interpreter bytecode_interpreter(interpreter->realm());
         MUST(bytecode_interpreter.run(*executable));
     } else {
         g_vm->push_execution_context(global_execution_context);
@@ -382,7 +382,7 @@ inline JSFileResult TestRunner::run_file_test(String const& test_path)
             executable->name = test_path;
             if (JS::Bytecode::g_dump_bytecode)
                 executable->dump();
-            JS::Bytecode::Interpreter bytecode_interpreter(interpreter->global_object(), interpreter->realm());
+            JS::Bytecode::Interpreter bytecode_interpreter(interpreter->realm());
             (void)bytecode_interpreter.run(*executable);
         }
     } else {
@@ -391,7 +391,9 @@ inline JSFileResult TestRunner::run_file_test(String const& test_path)
         g_vm->pop_execution_context();
     }
 
+    g_vm->push_execution_context(global_execution_context);
     auto test_json = get_test_results(*interpreter);
+    g_vm->pop_execution_context();
     if (test_json.is_error()) {
         warnln("Received malformed JSON from test \"{}\"", test_path);
         cleanup_and_exit();
@@ -400,7 +402,7 @@ inline JSFileResult TestRunner::run_file_test(String const& test_path)
     JSFileResult file_result { test_path.substring(m_test_root.length() + 1, test_path.length() - m_test_root.length() - 1) };
 
     // Collect logged messages
-    auto user_output = MUST(interpreter->global_object().get("__UserOutput__"));
+    auto user_output = MUST(interpreter->realm().global_object().get("__UserOutput__"));
 
     auto& arr = user_output.as_array();
     for (auto& entry : arr.indexed_properties()) {

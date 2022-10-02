@@ -17,9 +17,8 @@ class Set : public Object {
     JS_OBJECT(Set, Object);
 
 public:
-    static Set* create(GlobalObject&);
+    static Set* create(Realm&);
 
-    explicit Set(Object& prototype);
     virtual ~Set() override = default;
 
     // NOTE: Unlike what the spec says, we implement Sets using an underlying map,
@@ -37,6 +36,8 @@ public:
     auto end() const { return m_values.end(); }
 
 private:
+    explicit Set(Object& prototype);
+
     virtual void visit_edges(Visitor& visitor) override;
 
     Map m_values;

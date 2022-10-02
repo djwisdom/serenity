@@ -17,9 +17,9 @@
 #include <LibGUI/Painter.h>
 #include <LibGUI/Process.h>
 #include <LibGfx/Palette.h>
+#include <LibLocale/DateTimeFormat.h>
+#include <LibLocale/Locale.h>
 #include <LibTimeZone/TimeZone.h>
-#include <LibUnicode/DateTimeFormat.h>
-#include <LibUnicode/Locale.h>
 #include <math.h>
 #include <spawn.h>
 #include <unistd.h>
@@ -125,11 +125,11 @@ void TimeZoneSettingsWidget::set_time_zone_location()
 {
     m_time_zone_location = compute_time_zone_location();
 
-    auto locale = Unicode::default_locale();
+    auto locale = Locale::default_locale();
     auto now = AK::Time::now_realtime();
 
-    auto name = Unicode::format_time_zone(locale, m_time_zone, Unicode::CalendarPatternStyle::Long, now);
-    auto offset = Unicode::format_time_zone(locale, m_time_zone, Unicode::CalendarPatternStyle::LongOffset, now);
+    auto name = Locale::format_time_zone(locale, m_time_zone, Locale::CalendarPatternStyle::Long, now);
+    auto offset = Locale::format_time_zone(locale, m_time_zone, Locale::CalendarPatternStyle::LongOffset, now);
 
     m_time_zone_text = String::formatted("{}\n({})", name, offset);
 }

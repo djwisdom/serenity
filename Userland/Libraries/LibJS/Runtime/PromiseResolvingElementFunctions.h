@@ -13,29 +13,29 @@
 namespace JS {
 
 struct RemainingElements final : public Cell {
+    JS_CELL(RemainingElements, Cell);
+
+    u64 value { 0 };
+
+private:
     RemainingElements() = default;
 
     explicit RemainingElements(u64 initial_value)
         : value(initial_value)
     {
     }
-
-    virtual StringView class_name() const override { return "RemainingElements"sv; }
-
-    u64 value { 0 };
 };
 
 class PromiseValueList final : public Cell {
-public:
-    PromiseValueList()
-    {
-    }
+    JS_CELL(PromiseValueList, Cell);
 
+public:
     Vector<Value>& values() { return m_values; }
     Vector<Value> const& values() const { return m_values; }
 
 private:
-    virtual StringView class_name() const override { return "PromiseValueList"sv; }
+    PromiseValueList() = default;
+
     virtual void visit_edges(Visitor&) override;
 
     Vector<Value> m_values;
@@ -45,7 +45,7 @@ class PromiseResolvingElementFunction : public NativeFunction {
     JS_OBJECT(PromiseResolvingFunction, NativeFunction);
 
 public:
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~PromiseResolvingElementFunction() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
@@ -71,12 +71,13 @@ class PromiseAllResolveElementFunction final : public PromiseResolvingElementFun
     JS_OBJECT(PromiseResolvingFunction, NativeFunction);
 
 public:
-    static PromiseAllResolveElementFunction* create(GlobalObject&, size_t, PromiseValueList&, PromiseCapability, RemainingElements&);
+    static PromiseAllResolveElementFunction* create(Realm&, size_t, PromiseValueList&, PromiseCapability, RemainingElements&);
 
-    explicit PromiseAllResolveElementFunction(size_t, PromiseValueList&, PromiseCapability, RemainingElements&, Object& prototype);
     virtual ~PromiseAllResolveElementFunction() override = default;
 
 private:
+    explicit PromiseAllResolveElementFunction(size_t, PromiseValueList&, PromiseCapability, RemainingElements&, Object& prototype);
+
     virtual ThrowCompletionOr<Value> resolve_element() override;
 };
 
@@ -85,12 +86,13 @@ class PromiseAllSettledResolveElementFunction final : public PromiseResolvingEle
     JS_OBJECT(PromiseResolvingFunction, NativeFunction);
 
 public:
-    static PromiseAllSettledResolveElementFunction* create(GlobalObject&, size_t, PromiseValueList&, PromiseCapability, RemainingElements&);
+    static PromiseAllSettledResolveElementFunction* create(Realm&, size_t, PromiseValueList&, PromiseCapability, RemainingElements&);
 
-    explicit PromiseAllSettledResolveElementFunction(size_t, PromiseValueList&, PromiseCapability, RemainingElements&, Object& prototype);
     virtual ~PromiseAllSettledResolveElementFunction() override = default;
 
 private:
+    explicit PromiseAllSettledResolveElementFunction(size_t, PromiseValueList&, PromiseCapability, RemainingElements&, Object& prototype);
+
     virtual ThrowCompletionOr<Value> resolve_element() override;
 };
 
@@ -99,12 +101,13 @@ class PromiseAllSettledRejectElementFunction final : public PromiseResolvingElem
     JS_OBJECT(PromiseResolvingFunction, PromiseResolvingElementFunction);
 
 public:
-    static PromiseAllSettledRejectElementFunction* create(GlobalObject&, size_t, PromiseValueList&, PromiseCapability, RemainingElements&);
+    static PromiseAllSettledRejectElementFunction* create(Realm&, size_t, PromiseValueList&, PromiseCapability, RemainingElements&);
 
-    explicit PromiseAllSettledRejectElementFunction(size_t, PromiseValueList&, PromiseCapability, RemainingElements&, Object& prototype);
     virtual ~PromiseAllSettledRejectElementFunction() override = default;
 
 private:
+    explicit PromiseAllSettledRejectElementFunction(size_t, PromiseValueList&, PromiseCapability, RemainingElements&, Object& prototype);
+
     virtual ThrowCompletionOr<Value> resolve_element() override;
 };
 
@@ -113,12 +116,13 @@ class PromiseAnyRejectElementFunction final : public PromiseResolvingElementFunc
     JS_OBJECT(PromiseResolvingFunction, PromiseResolvingElementFunction);
 
 public:
-    static PromiseAnyRejectElementFunction* create(GlobalObject&, size_t, PromiseValueList&, PromiseCapability, RemainingElements&);
+    static PromiseAnyRejectElementFunction* create(Realm&, size_t, PromiseValueList&, PromiseCapability, RemainingElements&);
 
-    explicit PromiseAnyRejectElementFunction(size_t, PromiseValueList&, PromiseCapability, RemainingElements&, Object& prototype);
     virtual ~PromiseAnyRejectElementFunction() override = default;
 
 private:
+    explicit PromiseAnyRejectElementFunction(size_t, PromiseValueList&, PromiseCapability, RemainingElements&, Object& prototype);
+
     virtual ThrowCompletionOr<Value> resolve_element() override;
 };
 

@@ -13,6 +13,8 @@ namespace Web::HTML {
 HTMLButtonElement::HTMLButtonElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLButtonElement"));
+
     // https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element:activation-behaviour
     activation_behavior = [this](auto&) {
         // 1. If element is disabled, then return.

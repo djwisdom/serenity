@@ -20,22 +20,21 @@
 #include <LibJS/Runtime/Intl/RelativeTimeFormatConstructor.h>
 #include <LibJS/Runtime/Intl/SegmenterConstructor.h>
 #include <LibJS/Runtime/Temporal/TimeZone.h>
-#include <LibUnicode/CurrencyCode.h>
-#include <LibUnicode/DateTimeFormat.h>
-#include <LibUnicode/Locale.h>
-#include <LibUnicode/NumberFormat.h>
+#include <LibLocale/DateTimeFormat.h>
+#include <LibLocale/Locale.h>
+#include <LibLocale/NumberFormat.h>
 
 namespace JS::Intl {
 
 // 8 The Intl Object, https://tc39.es/ecma402/#intl-object
-Intl::Intl(GlobalObject& global_object)
-    : Object(*global_object.object_prototype())
+Intl::Intl(Realm& realm)
+    : Object(*realm.intrinsics().object_prototype())
 {
 }
 
-void Intl::initialize(GlobalObject& global_object)
+void Intl::initialize(Realm& realm)
 {
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
     auto& vm = this->vm();
 
@@ -43,28 +42,30 @@ void Intl::initialize(GlobalObject& global_object)
     define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Intl"), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_direct_property(vm.names.Collator, global_object.intl_collator_constructor(), attr);
-    define_direct_property(vm.names.DateTimeFormat, global_object.intl_date_time_format_constructor(), attr);
-    define_direct_property(vm.names.DisplayNames, global_object.intl_display_names_constructor(), attr);
-    define_direct_property(vm.names.DurationFormat, global_object.intl_duration_format_constructor(), attr);
-    define_direct_property(vm.names.ListFormat, global_object.intl_list_format_constructor(), attr);
-    define_direct_property(vm.names.Locale, global_object.intl_locale_constructor(), attr);
-    define_direct_property(vm.names.NumberFormat, global_object.intl_number_format_constructor(), attr);
-    define_direct_property(vm.names.PluralRules, global_object.intl_plural_rules_constructor(), attr);
-    define_direct_property(vm.names.RelativeTimeFormat, global_object.intl_relative_time_format_constructor(), attr);
-    define_direct_property(vm.names.Segmenter, global_object.intl_segmenter_constructor(), attr);
+    define_direct_property(vm.names.Collator, realm.intrinsics().intl_collator_constructor(), attr);
+    define_direct_property(vm.names.DateTimeFormat, realm.intrinsics().intl_date_time_format_constructor(), attr);
+    define_direct_property(vm.names.DisplayNames, realm.intrinsics().intl_display_names_constructor(), attr);
+    define_direct_property(vm.names.DurationFormat, realm.intrinsics().intl_duration_format_constructor(), attr);
+    define_direct_property(vm.names.ListFormat, realm.intrinsics().intl_list_format_constructor(), attr);
+    define_direct_property(vm.names.Locale, realm.intrinsics().intl_locale_constructor(), attr);
+    define_direct_property(vm.names.NumberFormat, realm.intrinsics().intl_number_format_constructor(), attr);
+    define_direct_property(vm.names.PluralRules, realm.intrinsics().intl_plural_rules_constructor(), attr);
+    define_direct_property(vm.names.RelativeTimeFormat, realm.intrinsics().intl_relative_time_format_constructor(), attr);
+    define_direct_property(vm.names.Segmenter, realm.intrinsics().intl_segmenter_constructor(), attr);
 
-    define_native_function(vm.names.getCanonicalLocales, get_canonical_locales, 1, attr);
-    define_native_function(vm.names.supportedValuesOf, supported_values_of, 1, attr);
+    define_native_function(realm, vm.names.getCanonicalLocales, get_canonical_locales, 1, attr);
+    define_native_function(realm, vm.names.supportedValuesOf, supported_values_of, 1, attr);
 }
 
 // 8.3.1 Intl.getCanonicalLocales ( locales ), https://tc39.es/ecma402/#sec-intl.getcanonicallocales
 JS_DEFINE_NATIVE_FUNCTION(Intl::get_canonical_locales)
 {
+    auto& realm = *vm.current_realm();
+
     auto locales = vm.argument(0);
 
     // 1. Let ll be ? CanonicalizeLocaleList(locales).
-    auto locale_list = TRY(canonicalize_locale_list(global_object, locales));
+    auto locale_list = TRY(canonicalize_locale_list(vm, locales));
 
     MarkedVector<Value> marked_locale_list { vm.heap() };
     marked_locale_list.ensure_capacity(locale_list.size());
@@ -72,7 +73,7 @@ JS_DEFINE_NATIVE_FUNCTION(Intl::get_canonical_locales)
         marked_locale_list.append(js_string(vm, move(locale)));
 
     // 2. Return CreateArrayFromList(ll).
-    return Array::create_from(global_object, marked_locale_list);
+    return Array::create_from(realm, marked_locale_list);
 }
 
 // 1.4.4 AvailableTimeZones (), https://tc39.es/proposal-intl-enumeration/#sec-availablecurrencies
@@ -107,30 +108,32 @@ static Vector<StringView> available_time_zones()
 // 2.2.2 Intl.supportedValuesOf ( key ), https://tc39.es/proposal-intl-enumeration/#sec-intl.supportedvaluesof
 JS_DEFINE_NATIVE_FUNCTION(Intl::supported_values_of)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let key be ? ToString(key).
-    auto key = TRY(vm.argument(0).to_string(global_object));
+    auto key = TRY(vm.argument(0).to_string(vm));
 
     Span<StringView const> list;
 
     // 2. If key is "calendar", then
     if (key == "calendar"sv) {
         // a. Let list be ! AvailableCalendars( ).
-        list = Unicode::get_available_calendars();
+        list = ::Locale::get_available_calendars();
     }
     // 3. Else if key is "collation", then
     else if (key == "collation"sv) {
         // a. Let list be ! AvailableCollations( ).
-        list = Unicode::get_available_collation_types();
+        list = ::Locale::get_available_collation_types();
     }
     // 4. Else if key is "currency", then
     else if (key == "currency"sv) {
         // a. Let list be ! AvailableCurrencies( ).
-        list = Unicode::get_available_currencies();
+        list = ::Locale::get_available_currencies();
     }
     // 5. Else if key is "numberingSystem", then
     else if (key == "numberingSystem"sv) {
         // a. Let list be ! AvailableNumberingSystems( ).
-        list = Unicode::get_available_number_systems();
+        list = ::Locale::get_available_number_systems();
     }
     // 6. Else if key is "timeZone", then
     else if (key == "timeZone"sv) {
@@ -147,11 +150,11 @@ JS_DEFINE_NATIVE_FUNCTION(Intl::supported_values_of)
     // 8. Else,
     else {
         // a. Throw a RangeError exception.
-        return vm.throw_completion<RangeError>(global_object, ErrorType::IntlInvalidKey, key);
+        return vm.throw_completion<RangeError>(ErrorType::IntlInvalidKey, key);
     }
 
     // 9. Return CreateArrayFromList( list ).
-    return Array::create_from<StringView>(global_object, list, [&](auto value) { return js_string(vm, value); });
+    return Array::create_from<StringView>(realm, list, [&](auto value) { return js_string(vm, value); });
 }
 
 }

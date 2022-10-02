@@ -6,9 +6,9 @@
 
 #pragma once
 
-#include "AK/kmalloc.h"
 #include <AK/OwnPtr.h>
 #include <AK/Types.h>
+#include <AK/kmalloc.h>
 #include <Kernel/Library/LockRefPtr.h>
 #include <Kernel/Library/NonnullLockRefPtr.h>
 #include <Kernel/Library/NonnullLockRefPtrVector.h>
@@ -24,13 +24,13 @@ class NVMeNameSpace : public StorageDevice {
     friend class DeviceManagement;
 
 public:
-    static ErrorOr<NonnullLockRefPtr<NVMeNameSpace>> try_create(NVMeController const&, NonnullLockRefPtrVector<NVMeQueue> queues, u8 controller_id, u16 nsid, size_t storage_size, size_t lba_size);
+    static ErrorOr<NonnullLockRefPtr<NVMeNameSpace>> try_create(NVMeController const&, NonnullLockRefPtrVector<NVMeQueue> queues, u16 nsid, size_t storage_size, size_t lba_size);
 
     CommandSet command_set() const override { return CommandSet::NVMe; };
     void start_request(AsyncBlockDeviceRequest& request) override;
 
 private:
-    NVMeNameSpace(LUNAddress, NonnullLockRefPtrVector<NVMeQueue> queues, size_t storage_size, size_t lba_size, size_t major_number, size_t minor_number, u16 nsid, NonnullOwnPtr<KString> early_device_name);
+    NVMeNameSpace(LUNAddress, u32 hardware_relative_controller_id, NonnullLockRefPtrVector<NVMeQueue> queues, size_t storage_size, size_t lba_size, u16 nsid);
 
     u16 m_nsid;
     NonnullLockRefPtrVector<NVMeQueue> m_queues;

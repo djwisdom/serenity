@@ -4,15 +4,23 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/CSSSupportsRulePrototype.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/CSSSupportsRule.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 
 namespace Web::CSS {
 
-CSSSupportsRule::CSSSupportsRule(NonnullRefPtr<Supports>&& supports, NonnullRefPtrVector<CSSRule>&& rules)
-    : CSSConditionRule(move(rules))
+CSSSupportsRule* CSSSupportsRule::create(JS::Realm& realm, NonnullRefPtr<Supports>&& supports, CSSRuleList& rules)
+{
+    return realm.heap().allocate<CSSSupportsRule>(realm, realm, move(supports), rules);
+}
+
+CSSSupportsRule::CSSSupportsRule(JS::Realm& realm, NonnullRefPtr<Supports>&& supports, CSSRuleList& rules)
+    : CSSConditionRule(realm, rules)
     , m_supports(move(supports))
 {
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::CSSSupportsRulePrototype>(realm, "CSSSupportsRule"));
 }
 
 String CSSSupportsRule::condition_text() const

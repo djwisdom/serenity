@@ -94,7 +94,7 @@ HackStudioWidget::HackStudioWidget(String path_to_project)
 
     auto& left_hand_splitter = outer_splitter.add<GUI::VerticalSplitter>();
     left_hand_splitter.layout()->set_spacing(6);
-    left_hand_splitter.set_fixed_width(150);
+    left_hand_splitter.set_preferred_width(150);
     create_project_tab(left_hand_splitter);
     m_project_tree_view_context_menu = create_project_tree_view_context_menu();
 
@@ -606,7 +606,7 @@ NonnullRefPtr<GUI::Action> HackStudioWidget::create_show_in_file_manager_action(
     auto show_in_file_manager_action = GUI::Action::create("Show in File &Manager", [this](const GUI::Action&) {
         auto files = selected_file_paths();
         for (auto& file : files)
-            Desktop::Launcher::open(URL::create_with_file_protocol(m_project->root_path(), file));
+            Desktop::Launcher::open(URL::create_with_file_scheme(m_project->root_path(), file));
     });
     show_in_file_manager_action->set_enabled(true);
     show_in_file_manager_action->set_icon(GUI::Icon::default_icon("app-file-manager"sv).bitmap_for_size(16));
@@ -703,6 +703,12 @@ NonnullRefPtr<GUI::Action> HackStudioWidget::create_delete_action()
 NonnullRefPtr<GUI::Action> HackStudioWidget::create_new_project_action()
 {
     return GUI::Action::create("&Project...", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/hackstudio-project.png"sv).release_value_but_fixme_should_propagate_errors(), [this](const GUI::Action&) {
+        if (warn_unsaved_changes("There are unsaved changes. Would you like to save before creating a new project?") == ContinueDecision::No)
+            return;
+        // If the user wishes to save the changes, this occurs in warn_unsaved_changes. If they do not,
+        // we need to mark the documents as clean so open_project works properly without asking again.
+        for (auto& editor_wrapper : m_all_editor_wrappers)
+            editor_wrapper.editor().document().set_unmodified();
         auto dialog = NewProjectDialog::construct(window());
         dialog->set_icon(window()->icon());
         auto result = dialog->exec();
@@ -980,7 +986,7 @@ NonnullRefPtr<GUI::Action> HackStudioWidget::create_add_terminal_action()
 void HackStudioWidget::reveal_action_tab(GUI::Widget& widget)
 {
     if (m_action_tab_widget->effective_min_size().height().as_int() < 200)
-        m_action_tab_widget->set_fixed_height(200);
+        m_action_tab_widget->set_preferred_height(200);
     m_action_tab_widget->set_active_widget(&widget);
 }
 
@@ -1000,7 +1006,7 @@ NonnullRefPtr<GUI::Action> HackStudioWidget::create_debug_action()
 
         m_terminal_wrapper->clear_including_history();
 
-        // The debugger calls wait() on the debugee, so the TerminalWrapper can't do that.
+        // The debugger calls wait() on the debuggee, so the TerminalWrapper can't do that.
         auto ptm_res = m_terminal_wrapper->setup_master_pseudoterminal(TerminalWrapper::WaitForChildOnExit::No);
         if (ptm_res.is_error()) {
             perror("setup_master_pseudoterminal");
@@ -1149,7 +1155,7 @@ void HackStudioWidget::run()
 
 void HackStudioWidget::hide_action_tabs()
 {
-    m_action_tab_widget->set_fixed_height(24);
+    m_action_tab_widget->set_preferred_height(24);
 };
 
 Project& HackStudioWidget::project()
@@ -1300,13 +1306,13 @@ void HackStudioWidget::create_action_tab(GUI::Widget& parent)
 {
     m_action_tab_widget = parent.add<GUI::TabWidget>();
 
-    m_action_tab_widget->set_fixed_height(24);
+    m_action_tab_widget->set_preferred_height(24);
     m_action_tab_widget->on_change = [this](auto&) {
         on_action_tab_change();
 
         static bool first_time = true;
         if (!first_time)
-            m_action_tab_widget->set_fixed_height(200);
+            m_action_tab_widget->set_preferred_height(200);
         first_time = false;
     };
 

@@ -14,14 +14,16 @@ class StringObject : public Object {
     JS_OBJECT(StringObject, Object);
 
 public:
-    static StringObject* create(GlobalObject&, PrimitiveString&, Object& prototype);
+    static StringObject* create(Realm&, PrimitiveString&, Object& prototype);
 
-    StringObject(PrimitiveString&, Object& prototype);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~StringObject() override = default;
 
     PrimitiveString const& primitive_string() const { return m_string; }
     PrimitiveString& primitive_string() { return m_string; }
+
+protected:
+    StringObject(PrimitiveString&, Object& prototype);
 
 private:
     virtual ThrowCompletionOr<Optional<PropertyDescriptor>> internal_get_own_property(PropertyKey const&) const override;

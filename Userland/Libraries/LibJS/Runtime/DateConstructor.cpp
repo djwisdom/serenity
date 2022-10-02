@@ -147,6 +147,11 @@ static double parse_simplified_iso8601(String const& iso_8601)
     return time_clip(time_ms);
 }
 
+static constexpr AK::Array<StringView, 2> extra_formats = {
+    "%a %b %e %T %z %Y"sv,
+    "%m/%e/%Y"sv
+};
+
 static double parse_date_string(String const& date_string)
 {
     auto value = parse_simplified_iso8601(date_string);
@@ -155,30 +160,36 @@ static double parse_date_string(String const& date_string)
 
     // Date.parse() is allowed to accept an arbitrary number of implementation-defined formats.
     // Parse formats of this type: "Wed Apr 17 23:08:53 +0000 2019"
-    auto maybe_datetime = Core::DateTime::parse("%a %b %e %T %z %Y"sv, date_string);
-    if (maybe_datetime.has_value())
-        return 1000.0 * maybe_datetime->timestamp();
+    // And: "4/17/2019"
+    // FIXME: Exactly what timezone and which additional formats we should support is unclear.
+    //        Both Chrome and Firefox seem to support "4/17/2019 11:08 PM +0000" with most parts
+    //        being optional, however this is not clearly documented anywhere.
+    for (auto const& format : extra_formats) {
+        auto maybe_datetime = Core::DateTime::parse(format, date_string);
+        if (maybe_datetime.has_value())
+            return 1000.0 * maybe_datetime->timestamp();
+    }
 
     return NAN;
 }
 
-DateConstructor::DateConstructor(GlobalObject& global_object)
-    : NativeFunction(vm().names.Date.as_string(), *global_object.function_prototype())
+DateConstructor::DateConstructor(Realm& realm)
+    : NativeFunction(realm.vm().names.Date.as_string(), *realm.intrinsics().function_prototype())
 {
 }
 
-void DateConstructor::initialize(GlobalObject& global_object)
+void DateConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(global_object);
+    NativeFunction::initialize(realm);
 
     // 21.4.3.3 Date.prototype, https://tc39.es/ecma262/#sec-date.prototype
-    define_direct_property(vm.names.prototype, global_object.date_prototype(), 0);
+    define_direct_property(vm.names.prototype, realm.intrinsics().date_prototype(), 0);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.now, now, 0, attr);
-    define_native_function(vm.names.parse, parse, 1, attr);
-    define_native_function(vm.names.UTC, utc, 7, attr);
+    define_native_function(realm, vm.names.now, now, 0, attr);
+    define_native_function(realm, vm.names.parse, parse, 1, attr);
+    define_native_function(realm, vm.names.UTC, utc, 7, attr);
 
     define_direct_property(vm.names.length, Value(7), Attribute::Configurable);
 }
@@ -198,7 +209,6 @@ ThrowCompletionOr<Value> DateConstructor::call()
 ThrowCompletionOr<Object*> DateConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
-    auto& global_object = this->global_object();
 
     double date_value;
 
@@ -218,12 +228,12 @@ ThrowCompletionOr<Object*> DateConstructor::construct(FunctionObject& new_target
         // b. If Type(value) is Object and value has a [[DateValue]] internal slot, then
         if (value.is_object() && is<Date>(value.as_object())) {
             // i. Let tv be ! thisTimeValue(value).
-            time_value = MUST(this_time_value(global_object, value));
+            time_value = MUST(this_time_value(vm, value));
         }
         // c. Else,
         else {
             // i. Let v be ? ToPrimitive(value).
-            auto primitive = TRY(value.to_primitive(global_object));
+            auto primitive = TRY(value.to_primitive(vm));
 
             // ii. If Type(v) is String, then
             if (primitive.is_string()) {
@@ -234,7 +244,7 @@ ThrowCompletionOr<Object*> DateConstructor::construct(FunctionObject& new_target
             // iii. Else,
             else {
                 // 1. Let tv be ? ToNumber(v).
-                time_value = TRY(primitive.to_number(global_object)).as_double();
+                time_value = TRY(primitive.to_number(vm)).as_double();
             }
         }
 
@@ -245,12 +255,12 @@ ThrowCompletionOr<Object*> DateConstructor::construct(FunctionObject& new_target
     else {
         // a. Assert: numberOfArgs ≥ 2.
         // b. Let y be ? ToNumber(values[0]).
-        auto year = TRY(vm.argument(0).to_number(global_object)).as_double();
+        auto year = TRY(vm.argument(0).to_number(vm)).as_double();
         // c. Let m be ? ToNumber(values[1]).
-        auto month = TRY(vm.argument(1).to_number(global_object)).as_double();
+        auto month = TRY(vm.argument(1).to_number(vm)).as_double();
 
-        auto arg_or = [&vm, &global_object](size_t i, double fallback) -> ThrowCompletionOr<double> {
-            return vm.argument_count() > i ? TRY(vm.argument(i).to_number(global_object)).as_double() : fallback;
+        auto arg_or = [&vm](size_t i, double fallback) -> ThrowCompletionOr<double> {
+            return vm.argument_count() > i ? TRY(vm.argument(i).to_number(vm)).as_double() : fallback;
         };
 
         // d. If numberOfArgs > 2, let dt be ? ToNumber(values[2]); else let dt be 1𝔽.
@@ -287,7 +297,7 @@ ThrowCompletionOr<Object*> DateConstructor::construct(FunctionObject& new_target
     // 6. Let O be ? OrdinaryCreateFromConstructor(NewTarget, "%Date.prototype%", « [[DateValue]] »).
     // 7. Set O.[[DateValue]] to dv.
     // 8. Return O.
-    return TRY(ordinary_create_from_constructor<Date>(global_object, new_target, &GlobalObject::date_prototype, date_value));
+    return TRY(ordinary_create_from_constructor<Date>(vm, new_target, &Intrinsics::date_prototype, date_value));
 }
 
 // 21.4.3.1 Date.now ( ), https://tc39.es/ecma262/#sec-date.now
@@ -304,7 +314,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateConstructor::parse)
     if (!vm.argument_count())
         return js_nan();
 
-    auto date_string = TRY(vm.argument(0).to_string(global_object));
+    auto date_string = TRY(vm.argument(0).to_string(vm));
 
     return Value(parse_date_string(date_string));
 }
@@ -312,12 +322,12 @@ JS_DEFINE_NATIVE_FUNCTION(DateConstructor::parse)
 // 21.4.3.4 Date.UTC ( year [ , month [ , date [ , hours [ , minutes [ , seconds [ , ms ] ] ] ] ] ] ), https://tc39.es/ecma262/#sec-date.utc
 JS_DEFINE_NATIVE_FUNCTION(DateConstructor::utc)
 {
-    auto arg_or = [&vm, &global_object](size_t i, double fallback) -> ThrowCompletionOr<double> {
-        return vm.argument_count() > i ? TRY(vm.argument(i).to_number(global_object)).as_double() : fallback;
+    auto arg_or = [&vm](size_t i, double fallback) -> ThrowCompletionOr<double> {
+        return vm.argument_count() > i ? TRY(vm.argument(i).to_number(vm)).as_double() : fallback;
     };
 
     // 1. Let y be ? ToNumber(year).
-    auto year = TRY(vm.argument(0).to_number(global_object)).as_double();
+    auto year = TRY(vm.argument(0).to_number(vm)).as_double();
     // 2. If month is present, let m be ? ToNumber(month); else let m be +0𝔽.
     auto month = TRY(arg_or(1, 0));
     // 3. If date is present, let dt be ? ToNumber(date); else let dt be 1𝔽.

@@ -84,8 +84,12 @@ TerminalWidget::TerminalWidget(int ptm_fd, bool automatic_size_policy)
 
     set_override_cursor(Gfx::StandardCursor::IBeam);
     set_focus_policy(GUI::FocusPolicy::StrongFocus);
-    set_accepts_emoji_input(true);
     set_pty_master_fd(ptm_fd);
+
+    on_emoji_input = [this](auto emoji) {
+        inject_string(emoji);
+    };
+
     m_cursor_blink_timer = add<Core::Timer>();
     m_visual_beep_timer = add<Core::Timer>();
     m_auto_scroll_timer = add<Core::Timer>();
@@ -831,13 +835,22 @@ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
 
             auto handlers = Desktop::Launcher::get_handlers_for_url(attribute.href);
             if (!handlers.is_empty()) {
-                auto path = URL(attribute.href).path();
-                auto name = LexicalPath::basename(path);
-                if (path == handlers[0]) {
-                    set_tooltip(String::formatted("Execute {}", name));
+                auto url = URL(attribute.href);
+                auto path = url.path();
+
+                auto app_file = Desktop::AppFile::get_for_app(LexicalPath::basename(handlers[0]));
+                auto app_name = app_file->is_valid() ? app_file->name() : LexicalPath::basename(handlers[0]);
+
+                if (url.scheme() == "file") {
+                    auto file_name = LexicalPath::basename(path);
+
+                    if (path == handlers[0]) {
+                        set_tooltip(String::formatted("Execute {}", app_name));
+                    } else {
+                        set_tooltip(String::formatted("Open {} with {}", file_name, app_name));
+                    }
                 } else {
-                    auto af = Desktop::AppFile::get_for_app(LexicalPath::basename(handlers[0]));
-                    set_tooltip(String::formatted("Open {} with {}", name, af->is_valid() ? af->name() : LexicalPath::basename(handlers[0])));
+                    set_tooltip(String::formatted("Open {} with {}", attribute.href, app_name));
                 }
             }
         } else {
@@ -1115,6 +1128,13 @@ void TerminalWidget::context_menu_event(GUI::ContextMenuEvent& event)
     }
 }
 
+void TerminalWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/plain") || mime_types.contains_slow("text/uri-list"))
+        event.accept();
+}
+
 void TerminalWidget::drop_event(GUI::DropEvent& event)
 {
     if (event.mime_data().has_urls()) {
@@ -1125,7 +1145,7 @@ void TerminalWidget::drop_event(GUI::DropEvent& event)
             if (!first)
                 send_non_user_input(" "sv.bytes());
 
-            if (url.protocol() == "file")
+            if (url.scheme() == "file")
                 send_non_user_input(url.path().bytes());
             else
                 send_non_user_input(url.to_string().bytes());

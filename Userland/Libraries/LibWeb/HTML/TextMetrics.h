@@ -6,18 +6,17 @@
 
 #pragma once
 
-#include <LibJS/Heap/Handle.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 
 namespace Web::HTML {
 
-class TextMetrics
-    : public RefCounted<TextMetrics>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::TextMetricsWrapper;
+class TextMetrics : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(TextMetrics, Bindings::PlatformObject);
 
-    static RefPtr<TextMetrics> create();
+public:
+    static JS::NonnullGCPtr<TextMetrics> create(JS::Realm&);
+
+    virtual ~TextMetrics() override;
 
     double width() const { return m_width; }
     double actual_bounding_box_left() const { return m_actual_bounding_box_left; }
@@ -46,7 +45,7 @@ public:
     void set_ideographic_baseline(double baseline) { m_ideographic_baseline = baseline; }
 
 private:
-    explicit TextMetrics() = default;
+    explicit TextMetrics(JS::Realm&);
 
     double m_width { 0 };
     double m_actual_bounding_box_left { 0 };

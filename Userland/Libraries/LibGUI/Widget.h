@@ -337,8 +337,7 @@ public:
 
     Gfx::IntRect relative_non_grabbable_rect() const;
 
-    void set_accepts_emoji_input(bool b) { m_accepts_emoji_input = b; }
-    bool accepts_emoji_input() const { return m_accepts_emoji_input; }
+    Function<void(StringView)> on_emoji_input;
 
     void set_accepts_command_palette(bool b) { m_accepts_command_palette = b; }
     bool accepts_command_palette() const { return m_accepts_command_palette; }
@@ -405,6 +404,8 @@ protected:
     void show_or_hide_tooltip();
 
 private:
+    virtual bool is_widget() const final { return true; }
+
     void handle_paint_event(PaintEvent&);
     void handle_resize_event(ResizeEvent&);
     void handle_mousedown_event(MouseEvent&);
@@ -441,7 +442,6 @@ private:
     bool m_auto_focusable { true };
     bool m_enabled { true };
     bool m_updates_enabled { true };
-    bool m_accepts_emoji_input { false };
     bool m_accepts_command_palette { true };
     bool m_default_font { true };
 
@@ -467,6 +467,9 @@ inline Widget const* Widget::parent_widget() const
     return nullptr;
 }
 }
+
+template<>
+inline bool Core::Object::fast_is<GUI::Widget>() const { return is_widget(); }
 
 template<>
 struct AK::Formatter<GUI::Widget> : AK::Formatter<Core::Object> {

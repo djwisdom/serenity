@@ -6,27 +6,20 @@
 
 #pragma once
 
-#include <AK/RefCounted.h>
-#include <LibJS/Heap/Handle.h>
-#include <LibWeb/Bindings/CallbackType.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/PlatformObject.h>
+#include <LibWeb/WebIDL/CallbackType.h>
 
 namespace Web::DOM {
 
-class NodeFilter
-    : public RefCounted<NodeFilter>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::NodeFilterWrapper;
+class NodeFilter final : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(NodeFilter, Bindings::PlatformObject);
 
-    explicit NodeFilter(Bindings::CallbackType callback)
-        : m_callback(move(callback))
-    {
-    }
+public:
+    static JS::NonnullGCPtr<NodeFilter> create(JS::Realm&, WebIDL::CallbackType&);
 
     virtual ~NodeFilter() = default;
 
-    Bindings::CallbackType& callback() { return m_callback; }
+    WebIDL::CallbackType& callback() { return m_callback; }
 
     enum Result {
         FILTER_ACCEPT = 1,
@@ -35,12 +28,11 @@ public:
     };
 
 private:
-    Bindings::CallbackType m_callback;
-};
+    NodeFilter(JS::Realm&, WebIDL::CallbackType&);
 
-inline JS::Object* wrap(JS::GlobalObject&, Web::DOM::NodeFilter& filter)
-{
-    return filter.callback().callback.cell();
-}
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    WebIDL::CallbackType& m_callback;
+};
 
 }

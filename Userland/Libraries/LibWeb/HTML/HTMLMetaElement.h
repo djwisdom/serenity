@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLMetaElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLMetaElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLMetaElement, HTMLElement);
 
-    HTMLMetaElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLMetaElement() override;
+
+private:
+    HTMLMetaElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

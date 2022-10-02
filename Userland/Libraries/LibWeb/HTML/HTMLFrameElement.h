@@ -12,11 +12,13 @@ namespace Web::HTML {
 
 // NOTE: This element is marked as obsolete, but is still listed as required by the specification.
 class HTMLFrameElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLFrameElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLFrameElement, HTMLElement);
 
-    HTMLFrameElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLFrameElement() override;
+
+private:
+    HTMLFrameElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

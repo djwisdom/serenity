@@ -11,7 +11,6 @@
 #include <AK/Utf16View.h>
 #include <AK/Utf8View.h>
 #include <LibUnicode/CharacterTypes.h>
-#include <LibUnicode/Locale.h>
 
 #if ENABLE_UNICODE_DATA
 #    include <LibUnicode/UnicodeData.h>

@@ -94,6 +94,7 @@ CharacterMapWidget::CharacterMapWidget()
             m_find_window->set_icon(GUI::Icon::try_create_default_icon("find"sv).value().bitmap_for_size(16));
             m_find_window->set_title("Find a character");
             m_find_window->resize(300, 400);
+            m_find_window->set_window_mode(GUI::WindowMode::Modeless);
         }
         m_find_window->show();
         m_find_window->move_to_front();
@@ -157,7 +158,7 @@ void CharacterMapWidget::initialize_menubar(GUI::Window& window)
 
     auto& help_menu = window.add_menu("&Help");
     help_menu.add_action(GUI::CommonActions::make_help_action([&](auto&) {
-        Desktop::Launcher::open(URL::create_with_file_protocol("/usr/share/man/man1/CharacterMap.md"), "/bin/Help");
+        Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/CharacterMap.md"), "/bin/Help");
     }));
     help_menu.add_action(GUI::CommonActions::make_about_action("Character Map", GUI::Icon::default_icon("app-character-map"sv), &window));
 }

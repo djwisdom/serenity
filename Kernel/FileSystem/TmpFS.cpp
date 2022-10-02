@@ -87,9 +87,9 @@ ErrorOr<void> TmpFSInode::traverse_as_directory(Function<ErrorOr<void>(FileSyste
     return {};
 }
 
-ErrorOr<size_t> TmpFSInode::read_bytes(off_t offset, size_t size, UserOrKernelBuffer& buffer, OpenFileDescription*) const
+ErrorOr<size_t> TmpFSInode::read_bytes_locked(off_t offset, size_t size, UserOrKernelBuffer& buffer, OpenFileDescription*) const
 {
-    MutexLocker locker(m_inode_lock, Mutex::Mode::Shared);
+    VERIFY(m_inode_lock.is_locked());
     VERIFY(!is_directory());
     VERIFY(offset >= 0);
 
@@ -106,7 +106,7 @@ ErrorOr<size_t> TmpFSInode::read_bytes(off_t offset, size_t size, UserOrKernelBu
     return size;
 }
 
-ErrorOr<size_t> TmpFSInode::write_bytes(off_t offset, size_t size, UserOrKernelBuffer const& buffer, OpenFileDescription*)
+ErrorOr<size_t> TmpFSInode::write_bytes_locked(off_t offset, size_t size, UserOrKernelBuffer const& buffer, OpenFileDescription*)
 {
     VERIFY(m_inode_lock.is_locked());
     VERIFY(!is_directory());
@@ -301,29 +301,16 @@ ErrorOr<void> TmpFSInode::truncate(u64 size)
     return {};
 }
 
-ErrorOr<void> TmpFSInode::set_atime(time_t time)
+ErrorOr<void> TmpFSInode::update_timestamps(Optional<time_t> atime, Optional<time_t> ctime, Optional<time_t> mtime)
 {
     MutexLocker locker(m_inode_lock);
 
-    m_metadata.atime = time;
-    set_metadata_dirty(true);
-    return {};
-}
-
-ErrorOr<void> TmpFSInode::set_ctime(time_t time)
-{
-    MutexLocker locker(m_inode_lock);
-
-    m_metadata.ctime = time;
-    set_metadata_dirty(true);
-    return {};
-}
-
-ErrorOr<void> TmpFSInode::set_mtime(time_t t)
-{
-    MutexLocker locker(m_inode_lock);
-
-    m_metadata.mtime = t;
+    if (atime.has_value())
+        m_metadata.atime = atime.value();
+    if (ctime.has_value())
+        m_metadata.ctime = ctime.value();
+    if (mtime.has_value())
+        m_metadata.ctime = mtime.value();
     set_metadata_dirty(true);
     return {};
 }

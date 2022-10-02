@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLOptGroupElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLOptGroupElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLOptGroupElement, HTMLElement);
 
-    HTMLOptGroupElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLOptGroupElement() override;
+
+private:
+    HTMLOptGroupElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

@@ -11,15 +11,17 @@
 namespace Web::HTML {
 
 class HTMLLabelElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLLabelElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLLabelElement, HTMLElement);
 
-    HTMLLabelElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLLabelElement() override;
 
     virtual RefPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>) override;
 
     String for_() const { return attribute(HTML::AttributeNames::for_); }
+
+private:
+    HTMLLabelElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

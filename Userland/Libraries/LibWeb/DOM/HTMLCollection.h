@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,8 +8,8 @@
 
 #include <AK/FlyString.h>
 #include <AK/Function.h>
-#include <AK/Noncopyable.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibJS/Heap/GCPtr.h>
+#include <LibWeb/Bindings/LegacyPlatformObject.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::DOM {
@@ -25,45 +25,35 @@ namespace Web::DOM {
 //        We should teach it how to cache results. The main challenge is invalidating
 //        these caches, since this needs to happen on various kinds of DOM mutation.
 
-class HTMLCollection
-    : public RefCounted<HTMLCollection>
-    , public Bindings::Wrappable {
-    AK_MAKE_NONCOPYABLE(HTMLCollection);
-    AK_MAKE_NONMOVABLE(HTMLCollection);
+class HTMLCollection : public Bindings::LegacyPlatformObject {
+    WEB_PLATFORM_OBJECT(HTMLCollection, Bindings::LegacyPlatformObject);
 
 public:
-    using WrapperType = Bindings::HTMLCollectionWrapper;
+    static JS::NonnullGCPtr<HTMLCollection> create(ParentNode& root, Function<bool(Element const&)> filter);
 
-    static NonnullRefPtr<HTMLCollection> create(ParentNode& root, Function<bool(Element const&)> filter)
-    {
-        return adopt_ref(*new HTMLCollection(root, move(filter)));
-    }
-
-    ~HTMLCollection();
+    virtual ~HTMLCollection() override;
 
     size_t length();
     Element* item(size_t index) const;
     Element* named_item(FlyString const& name) const;
 
-    Vector<NonnullRefPtr<Element>> collect_matching_elements() const;
+    JS::MarkedVector<Element*> collect_matching_elements() const;
 
-    Vector<String> supported_property_names() const;
-    bool is_supported_property_index(u32) const;
+    virtual JS::Value item_value(size_t index) const override;
+    virtual JS::Value named_item_value(FlyString const& name) const override;
+    virtual Vector<String> supported_property_names() const override;
+    virtual bool is_supported_property_index(u32) const override;
 
 protected:
     HTMLCollection(ParentNode& root, Function<bool(Element const&)> filter);
 
-    NonnullRefPtr<ParentNode> root() { return m_root; }
+    JS::NonnullGCPtr<ParentNode> root() { return *m_root; }
 
 private:
-    NonnullRefPtr<ParentNode> m_root;
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    JS::NonnullGCPtr<ParentNode> m_root;
     Function<bool(Element const&)> m_filter;
 };
-
-}
-
-namespace Web::Bindings {
-
-HTMLCollectionWrapper* wrap(JS::GlobalObject&, DOM::HTMLCollection&);
 
 }

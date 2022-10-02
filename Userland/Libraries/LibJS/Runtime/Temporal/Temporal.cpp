@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -21,14 +21,14 @@
 namespace JS::Temporal {
 
 // 1 The Temporal Object, https://tc39.es/proposal-temporal/#sec-temporal-objects
-Temporal::Temporal(GlobalObject& global_object)
-    : Object(*global_object.object_prototype())
+Temporal::Temporal(Realm& realm)
+    : Object(*realm.intrinsics().object_prototype())
 {
 }
 
-void Temporal::initialize(GlobalObject& global_object)
+void Temporal::initialize(Realm& realm)
 {
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
     auto& vm = this->vm();
 
@@ -36,17 +36,17 @@ void Temporal::initialize(GlobalObject& global_object)
     define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Temporal"), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_direct_property(vm.names.Now, heap().allocate<Now>(global_object, global_object), attr);
-    define_direct_property(vm.names.Calendar, global_object.temporal_calendar_constructor(), attr);
-    define_direct_property(vm.names.Duration, global_object.temporal_duration_constructor(), attr);
-    define_direct_property(vm.names.Instant, global_object.temporal_instant_constructor(), attr);
-    define_direct_property(vm.names.PlainDate, global_object.temporal_plain_date_constructor(), attr);
-    define_direct_property(vm.names.PlainDateTime, global_object.temporal_plain_date_time_constructor(), attr);
-    define_direct_property(vm.names.PlainMonthDay, global_object.temporal_plain_month_day_constructor(), attr);
-    define_direct_property(vm.names.PlainTime, global_object.temporal_plain_time_constructor(), attr);
-    define_direct_property(vm.names.PlainYearMonth, global_object.temporal_plain_year_month_constructor(), attr);
-    define_direct_property(vm.names.TimeZone, global_object.temporal_time_zone_constructor(), attr);
-    define_direct_property(vm.names.ZonedDateTime, global_object.temporal_zoned_date_time_constructor(), attr);
+    define_direct_property(vm.names.Now, heap().allocate<Now>(realm, realm), attr);
+    define_direct_property(vm.names.Calendar, realm.intrinsics().temporal_calendar_constructor(), attr);
+    define_direct_property(vm.names.Duration, realm.intrinsics().temporal_duration_constructor(), attr);
+    define_direct_property(vm.names.Instant, realm.intrinsics().temporal_instant_constructor(), attr);
+    define_direct_property(vm.names.PlainDate, realm.intrinsics().temporal_plain_date_constructor(), attr);
+    define_direct_property(vm.names.PlainDateTime, realm.intrinsics().temporal_plain_date_time_constructor(), attr);
+    define_direct_property(vm.names.PlainMonthDay, realm.intrinsics().temporal_plain_month_day_constructor(), attr);
+    define_direct_property(vm.names.PlainTime, realm.intrinsics().temporal_plain_time_constructor(), attr);
+    define_direct_property(vm.names.PlainYearMonth, realm.intrinsics().temporal_plain_year_month_constructor(), attr);
+    define_direct_property(vm.names.TimeZone, realm.intrinsics().temporal_time_zone_constructor(), attr);
+    define_direct_property(vm.names.ZonedDateTime, realm.intrinsics().temporal_zoned_date_time_constructor(), attr);
 }
 
 }

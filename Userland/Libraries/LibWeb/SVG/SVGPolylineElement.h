@@ -11,10 +11,9 @@
 namespace Web::SVG {
 
 class SVGPolylineElement final : public SVGGeometryElement {
-public:
-    using WrapperType = Bindings::SVGPolylineElementWrapper;
+    WEB_PLATFORM_OBJECT(SVGPolylineElement, SVGGeometryElement);
 
-    SVGPolylineElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~SVGPolylineElement() override = default;
 
     virtual void parse_attribute(FlyString const& name, String const& value) override;
@@ -22,6 +21,8 @@ public:
     virtual Gfx::Path& get_path() override;
 
 private:
+    SVGPolylineElement(DOM::Document&, DOM::QualifiedName);
+
     Optional<Gfx::Path> m_path;
 
     Vector<Gfx::FloatPoint> m_points;

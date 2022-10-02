@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLUnknownElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLUnknownElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLUnknownElement, HTMLElement);
 
-    HTMLUnknownElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLUnknownElement() override;
+
+private:
+    HTMLUnknownElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

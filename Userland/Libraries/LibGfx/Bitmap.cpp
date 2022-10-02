@@ -105,20 +105,32 @@ ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_wrapper(BitmapFormat format, I
 ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_load_from_file(StringView path, int scale_factor)
 {
     if (scale_factor > 1 && path.starts_with("/res/"sv)) {
-        LexicalPath lexical_path { path };
-        StringBuilder highdpi_icon_path;
-        TRY(highdpi_icon_path.try_appendff("{}/{}-{}x.{}", lexical_path.dirname(), lexical_path.title(), scale_factor, lexical_path.extension()));
+        auto load_scaled_bitmap = [](StringView path, int scale_factor) -> ErrorOr<NonnullRefPtr<Bitmap>> {
+            LexicalPath lexical_path { path };
+            StringBuilder highdpi_icon_path;
+            TRY(highdpi_icon_path.try_appendff("{}/{}-{}x.{}", lexical_path.dirname(), lexical_path.title(), scale_factor, lexical_path.extension()));
 
-        auto highdpi_icon_string = highdpi_icon_path.string_view();
-        auto fd = TRY(Core::System::open(highdpi_icon_string, O_RDONLY));
+            auto highdpi_icon_string = highdpi_icon_path.string_view();
+            auto fd = TRY(Core::System::open(highdpi_icon_string, O_RDONLY));
 
-        auto bitmap = TRY(try_load_from_fd_and_close(fd, highdpi_icon_string));
-        if (bitmap->width() % scale_factor != 0 || bitmap->height() % scale_factor != 0)
-            return Error::from_string_literal("Bitmap::try_load_from_file: HighDPI image size should be divisible by scale factor");
-        bitmap->m_size.set_width(bitmap->width() / scale_factor);
-        bitmap->m_size.set_height(bitmap->height() / scale_factor);
-        bitmap->m_scale = scale_factor;
-        return bitmap;
+            auto bitmap = TRY(try_load_from_fd_and_close(fd, highdpi_icon_string));
+            if (bitmap->width() % scale_factor != 0 || bitmap->height() % scale_factor != 0)
+                return Error::from_string_literal("Bitmap::try_load_from_file: HighDPI image size should be divisible by scale factor");
+            bitmap->m_size.set_width(bitmap->width() / scale_factor);
+            bitmap->m_size.set_height(bitmap->height() / scale_factor);
+            bitmap->m_scale = scale_factor;
+            return bitmap;
+        };
+
+        auto scaled_bitmap_or_error = load_scaled_bitmap(path, scale_factor);
+        if (!scaled_bitmap_or_error.is_error())
+            return scaled_bitmap_or_error.release_value();
+
+        auto error = scaled_bitmap_or_error.release_error();
+        if (!(error.is_syscall() && error.code() == ENOENT)) {
+            dbgln("Couldn't load scaled bitmap: {}", error);
+            dbgln("Trying base scale instead.");
+        }
     }
 
     auto fd = TRY(Core::System::open(path, O_RDONLY));
@@ -437,9 +449,9 @@ ErrorOr<NonnullRefPtr<Gfx::Bitmap>> Bitmap::scaled(float sx, float sy) const
     return new_bitmap;
 }
 
-ErrorOr<NonnullRefPtr<Gfx::Bitmap>> Bitmap::cropped(Gfx::IntRect crop) const
+ErrorOr<NonnullRefPtr<Gfx::Bitmap>> Bitmap::cropped(Gfx::IntRect crop, Optional<BitmapFormat> new_bitmap_format) const
 {
-    auto new_bitmap = TRY(Gfx::Bitmap::try_create(format(), { crop.width(), crop.height() }, 1));
+    auto new_bitmap = TRY(Gfx::Bitmap::try_create(new_bitmap_format.value_or(format()), { crop.width(), crop.height() }, 1));
 
     for (int y = 0; y < crop.height(); ++y) {
         for (int x = 0; x < crop.width(); ++x) {

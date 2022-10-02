@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2022, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,9 +16,11 @@ struct SignedDivisionResult;
 
 class SignedBigInteger {
 public:
-    SignedBigInteger(i32 x)
-        : m_sign(x < 0)
-        , m_unsigned_data(abs(x))
+    template<typename T>
+    requires(IsSigned<T> && sizeof(T) <= sizeof(i32))
+        SignedBigInteger(T value)
+        : m_sign(value < 0)
+        , m_unsigned_data(abs(static_cast<i32>(value)))
     {
     }
 
@@ -40,6 +43,14 @@ public:
     {
     }
 
+    explicit SignedBigInteger(double value);
+
+    explicit SignedBigInteger(i64 value)
+        : m_sign(value < 0)
+        , m_unsigned_data(value < 0 ? static_cast<u64>(-(value + 1)) + 1 : static_cast<u64>(value))
+    {
+    }
+
     [[nodiscard]] static SignedBigInteger create_invalid()
     {
         return { UnsignedBigInteger::create_invalid(), false };
@@ -48,26 +59,13 @@ public:
     [[nodiscard]] static SignedBigInteger import_data(StringView data) { return import_data((u8 const*)data.characters_without_null_termination(), data.length()); }
     [[nodiscard]] static SignedBigInteger import_data(u8 const* ptr, size_t length);
 
-    [[nodiscard]] static SignedBigInteger create_from(i64 value)
-    {
-        auto sign = false;
-        u64 unsigned_value;
-        if (value < 0) {
-            unsigned_value = static_cast<u64>(-(value + 1)) + 1;
-            sign = true;
-        } else {
-            unsigned_value = value;
-        }
-        return SignedBigInteger { UnsignedBigInteger::create_from(unsigned_value), sign };
-    }
-
     size_t export_data(Bytes, bool remove_leading_zeros = false) const;
 
     [[nodiscard]] static SignedBigInteger from_base(u16 N, StringView str);
     [[nodiscard]] String to_base(u16 N) const;
 
     [[nodiscard]] u64 to_u64() const;
-    [[nodiscard]] double to_double() const;
+    [[nodiscard]] double to_double(UnsignedBigInteger::RoundingMode rounding_mode = UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa) const;
 
     [[nodiscard]] UnsignedBigInteger const& unsigned_value() const { return m_unsigned_data; }
     [[nodiscard]] Vector<u32, STARTING_WORD_SIZE> const words() const { return m_unsigned_data.words(); }
@@ -123,6 +121,8 @@ public:
     [[nodiscard]] SignedBigInteger multiplied_by(UnsignedBigInteger const& other) const;
     [[nodiscard]] SignedDivisionResult divided_by(UnsignedBigInteger const& divisor) const;
 
+    [[nodiscard]] SignedBigInteger negated_value() const;
+
     [[nodiscard]] u32 hash() const;
 
     void set_bit_inplace(size_t bit_index);
@@ -138,6 +138,14 @@ public:
     [[nodiscard]] bool operator!=(UnsignedBigInteger const& other) const;
     [[nodiscard]] bool operator<(UnsignedBigInteger const& other) const;
     [[nodiscard]] bool operator>(UnsignedBigInteger const& other) const;
+
+    enum class CompareResult {
+        DoubleEqualsBigInt,
+        DoubleLessThanBigInt,
+        DoubleGreaterThanBigInt
+    };
+
+    [[nodiscard]] CompareResult compare_to_double(double) const;
 
 private:
     void ensure_sign_is_valid()

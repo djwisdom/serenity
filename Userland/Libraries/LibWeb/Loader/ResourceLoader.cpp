@@ -9,14 +9,14 @@
 #include <AK/Debug.h>
 #include <AK/JsonObject.h>
 #include <LibCore/ElapsedTimer.h>
-#include <LibCore/EventLoop.h>
 #include <LibCore/File.h>
-#include <LibCore/Timer.h>
 #include <LibWeb/Loader/ContentFilter.h>
 #include <LibWeb/Loader/LoadRequest.h>
 #include <LibWeb/Loader/ProxyMappings.h>
 #include <LibWeb/Loader/Resource.h>
 #include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
+#include <LibWeb/Platform/Timer.h>
 
 #ifdef __serenity__
 #    include <serenity.h>
@@ -87,7 +87,7 @@ RefPtr<Resource> ResourceLoader::load_resource(Resource::Type type, LoadRequest&
     if (!request.is_valid())
         return nullptr;
 
-    bool use_cache = request.url().protocol() != "file";
+    bool use_cache = request.url().scheme() != "file";
 
     if (use_cache) {
         auto it = s_resource_cache.find(request);
@@ -120,7 +120,7 @@ RefPtr<Resource> ResourceLoader::load_resource(Resource::Type type, LoadRequest&
 
 static String sanitized_url_for_logging(AK::URL const& url)
 {
-    if (url.protocol() == "data"sv)
+    if (url.scheme() == "data"sv)
         return String::formatted("[data URL, mime-type={}, size={}]", url.data_mime_type(), url.data_payload().length());
     return url.to_string();
 }
@@ -172,20 +172,20 @@ void ResourceLoader::load(LoadRequest& request, Function<void(ReadonlyBytes, Has
         return;
     }
 
-    if (url.protocol() == "about") {
+    if (url.scheme() == "about") {
         dbgln_if(SPAM_DEBUG, "Loading about: URL {}", url);
         log_success(request);
 
         HashMap<String, String, CaseInsensitiveStringTraits> response_headers;
         response_headers.set("Content-Type", "text/html; charset=UTF-8");
 
-        deferred_invoke([success_callback = move(success_callback), response_headers = move(response_headers)] {
+        Platform::EventLoopPlugin::the().deferred_invoke([success_callback = move(success_callback), response_headers = move(response_headers)] {
             success_callback(String::empty().to_byte_buffer(), response_headers, {});
         });
         return;
     }
 
-    if (url.protocol() == "data") {
+    if (url.scheme() == "data") {
         dbgln_if(SPAM_DEBUG, "ResourceLoader loading a data URL with mime-type: '{}', base64={}, payload='{}'",
             url.data_mime_type(),
             url.data_payload_is_base64(),
@@ -206,13 +206,13 @@ void ResourceLoader::load(LoadRequest& request, Function<void(ReadonlyBytes, Has
         }
 
         log_success(request);
-        deferred_invoke([data = move(data), success_callback = move(success_callback)] {
+        Platform::EventLoopPlugin::the().deferred_invoke([data = move(data), success_callback = move(success_callback)] {
             success_callback(data, {}, {});
         });
         return;
     }
 
-    if (url.protocol() == "file") {
+    if (url.scheme() == "file") {
         if (request.page().has_value())
             m_page = request.page().value();
 
@@ -263,7 +263,7 @@ void ResourceLoader::load(LoadRequest& request, Function<void(ReadonlyBytes, Has
         return;
     }
 
-    if (url.protocol() == "http" || url.protocol() == "https" || url.protocol() == "gemini") {
+    if (url.scheme() == "http" || url.scheme() == "https" || url.scheme() == "gemini") {
         auto proxy = ProxyMappings::the().proxy_for_url(url);
 
         HashMap<String, String> headers;
@@ -284,7 +284,7 @@ void ResourceLoader::load(LoadRequest& request, Function<void(ReadonlyBytes, Has
         }
 
         if (timeout.has_value() && timeout.value() > 0) {
-            auto timer = Core::Timer::create_single_shot(timeout.value(), nullptr);
+            auto timer = Platform::Timer::create_single_shot(timeout.value(), nullptr);
             timer->on_timeout = [timer, protocol_request, timeout_callback = move(timeout_callback)]() mutable {
                 protocol_request->stop();
                 if (timeout_callback)
@@ -312,7 +312,7 @@ void ResourceLoader::load(LoadRequest& request, Function<void(ReadonlyBytes, Has
             }
             log_success(request);
             success_callback(payload, response_headers, status_code);
-            deferred_invoke([this, &protocol_request] {
+            Platform::EventLoopPlugin::the().deferred_invoke([this, &protocol_request] {
                 m_active_requests.remove(protocol_request);
             });
         };
@@ -326,7 +326,7 @@ void ResourceLoader::load(LoadRequest& request, Function<void(ReadonlyBytes, Has
         return;
     }
 
-    auto not_implemented_error = String::formatted("Protocol not implemented: {}", url.protocol());
+    auto not_implemented_error = String::formatted("Protocol not implemented: {}", url.scheme());
     log_failure(request, not_implemented_error);
     if (error_callback)
         error_callback(not_implemented_error, {});

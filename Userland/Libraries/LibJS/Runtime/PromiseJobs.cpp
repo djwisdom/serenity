@@ -16,10 +16,8 @@
 namespace JS {
 
 // 27.2.2.1 NewPromiseReactionJob ( reaction, argument ), https://tc39.es/ecma262/#sec-newpromisereactionjob
-static ThrowCompletionOr<Value> run_reaction_job(GlobalObject& global_object, PromiseReaction& reaction, Value argument)
+static ThrowCompletionOr<Value> run_reaction_job(VM& vm, PromiseReaction& reaction, Value argument)
 {
-    auto& vm = global_object.vm();
-
     // a. Let promiseCapability be reaction.[[Capability]].
     auto& promise_capability = reaction.capability();
 
@@ -55,7 +53,7 @@ static ThrowCompletionOr<Value> run_reaction_job(GlobalObject& global_object, Pr
         dbgln_if(PROMISE_DEBUG, "run_reaction_job: Calling handler callback {} @ {} with argument {}", handler.value().callback.cell()->class_name(), handler.value().callback.cell(), argument);
         MarkedVector<Value> arguments(vm.heap());
         arguments.append(argument);
-        handler_result = vm.host_call_job_callback(global_object, handler.value(), js_undefined(), move(arguments));
+        handler_result = vm.host_call_job_callback(handler.value(), js_undefined(), move(arguments));
     }
 
     // f. If promiseCapability is undefined, then
@@ -77,24 +75,24 @@ static ThrowCompletionOr<Value> run_reaction_job(GlobalObject& global_object, Pr
         // i. Return ? Call(promiseCapability.[[Reject]], undefined, « handlerResult.[[Value]] »).
         auto* reject_function = promise_capability.value().reject;
         dbgln_if(PROMISE_DEBUG, "run_reaction_job: Calling PromiseCapability's reject function @ {}", reject_function);
-        return call(global_object, *reject_function, js_undefined(), *handler_result.value());
+        return call(vm, *reject_function, js_undefined(), *handler_result.value());
     }
     // i. Else,
     else {
         // i. Return ? Call(promiseCapability.[[Resolve]], undefined, « handlerResult.[[Value]] »).
         auto* resolve_function = promise_capability.value().resolve;
         dbgln_if(PROMISE_DEBUG, "[PromiseReactionJob]: Calling PromiseCapability's resolve function @ {}", resolve_function);
-        return call(global_object, *resolve_function, js_undefined(), *handler_result.value());
+        return call(vm, *resolve_function, js_undefined(), *handler_result.value());
     }
 }
 
 // 27.2.2.1 NewPromiseReactionJob ( reaction, argument ), https://tc39.es/ecma262/#sec-newpromisereactionjob
-PromiseJob create_promise_reaction_job(GlobalObject& global_object, PromiseReaction& reaction, Value argument)
+PromiseJob create_promise_reaction_job(VM& vm, PromiseReaction& reaction, Value argument)
 {
     // 1. Let job be a new Job Abstract Closure with no parameters that captures reaction and argument and performs the following steps when called:
     //    See run_reaction_job for "the following steps".
-    auto job = [global_object = make_handle(&global_object), reaction = make_handle(&reaction), argument = make_handle(argument)]() mutable {
-        return run_reaction_job(*global_object.cell(), *reaction.cell(), argument.value());
+    auto job = [&vm, reaction = make_handle(&reaction), argument = make_handle(argument)]() mutable {
+        return run_reaction_job(vm, *reaction.cell(), argument.value());
     };
 
     // 2. Let handlerRealm be null.
@@ -104,14 +102,14 @@ PromiseJob create_promise_reaction_job(GlobalObject& global_object, PromiseReact
     auto& handler = reaction.handler();
     if (handler.has_value()) {
         // a. Let getHandlerRealmResult be Completion(GetFunctionRealm(reaction.[[Handler]].[[Callback]])).
-        auto get_handler_realm_result = get_function_realm(global_object, *handler->callback.cell());
+        auto get_handler_realm_result = get_function_realm(vm, *handler->callback.cell());
 
         // b. If getHandlerRealmResult is a normal completion, set handlerRealm to getHandlerRealmResult.[[Value]].
         if (!get_handler_realm_result.is_throw_completion()) {
             handler_realm = get_handler_realm_result.release_value();
         } else {
             // c. Else, set handlerRealm to the current Realm Record.
-            handler_realm = global_object.vm().current_realm();
+            handler_realm = vm.current_realm();
         }
 
         // d. NOTE: handlerRealm is never null unless the handler is undefined. When the handler is a revoked Proxy and no ECMAScript code runs, handlerRealm is used to create error objects.
@@ -122,10 +120,8 @@ PromiseJob create_promise_reaction_job(GlobalObject& global_object, PromiseReact
 }
 
 // 27.2.2.2 NewPromiseResolveThenableJob ( promiseToResolve, thenable, then ), https://tc39.es/ecma262/#sec-newpromiseresolvethenablejob
-static ThrowCompletionOr<Value> run_resolve_thenable_job(GlobalObject& global_object, Promise& promise_to_resolve, Value thenable, JobCallback& then)
+static ThrowCompletionOr<Value> run_resolve_thenable_job(VM& vm, Promise& promise_to_resolve, Value thenable, JobCallback& then)
 {
-    auto& vm = global_object.vm();
-
     // a. Let resolvingFunctions be CreateResolvingFunctions(promiseToResolve).
     auto [resolve_function, reject_function] = promise_to_resolve.create_resolving_functions();
 
@@ -134,13 +130,13 @@ static ThrowCompletionOr<Value> run_resolve_thenable_job(GlobalObject& global_ob
     MarkedVector<Value> arguments(vm.heap());
     arguments.append(Value(&resolve_function));
     arguments.append(Value(&reject_function));
-    auto then_call_result = vm.host_call_job_callback(global_object, then, thenable, move(arguments));
+    auto then_call_result = vm.host_call_job_callback(then, thenable, move(arguments));
 
     // c. If thenCallResult is an abrupt completion, then
     if (then_call_result.is_error()) {
         // i. Return ? Call(resolvingFunctions.[[Reject]], undefined, « thenCallResult.[[Value]] »).
         dbgln_if(PROMISE_DEBUG, "run_resolve_thenable_job: then_call_result is an abrupt completion, calling reject function with value {}", *then_call_result.throw_completion().value());
-        return call(global_object, &reject_function, js_undefined(), *then_call_result.throw_completion().value());
+        return call(vm, &reject_function, js_undefined(), *then_call_result.throw_completion().value());
     }
 
     // d. Return ? thenCallResult.
@@ -149,10 +145,10 @@ static ThrowCompletionOr<Value> run_resolve_thenable_job(GlobalObject& global_ob
 }
 
 // 27.2.2.2 NewPromiseResolveThenableJob ( promiseToResolve, thenable, then ), https://tc39.es/ecma262/#sec-newpromiseresolvethenablejob
-PromiseJob create_promise_resolve_thenable_job(GlobalObject& global_object, Promise& promise_to_resolve, Value thenable, JobCallback then)
+PromiseJob create_promise_resolve_thenable_job(VM& vm, Promise& promise_to_resolve, Value thenable, JobCallback then)
 {
     // 2. Let getThenRealmResult be Completion(GetFunctionRealm(then.[[Callback]])).
-    auto get_then_realm_result = get_function_realm(global_object, *then.callback.cell());
+    auto get_then_realm_result = get_function_realm(vm, *then.callback.cell());
 
     Realm* then_realm;
 
@@ -161,7 +157,7 @@ PromiseJob create_promise_resolve_thenable_job(GlobalObject& global_object, Prom
         then_realm = get_then_realm_result.release_value();
     } else {
         // 4. Else, let thenRealm be the current Realm Record.
-        then_realm = global_object.vm().current_realm();
+        then_realm = vm.current_realm();
     }
 
     // 5. NOTE: thenRealm is never null. When then.[[Callback]] is a revoked Proxy and no code runs, thenRealm is used to create error objects.
@@ -170,8 +166,8 @@ PromiseJob create_promise_resolve_thenable_job(GlobalObject& global_object, Prom
     // 1. Let job be a new Job Abstract Closure with no parameters that captures promiseToResolve, thenable, and then and performs the following steps when called:
     //    See PromiseResolveThenableJob::call() for "the following steps".
     //    NOTE: This is done out of order, since `then` is moved into the lambda and `then` would be invalid if it was done at the start.
-    auto job = [global_object = make_handle(&global_object), promise_to_resolve = make_handle(&promise_to_resolve), thenable = make_handle(thenable), then = move(then)]() mutable {
-        return run_resolve_thenable_job(*global_object.cell(), *promise_to_resolve.cell(), thenable.value(), then);
+    auto job = [&vm, promise_to_resolve = make_handle(&promise_to_resolve), thenable = make_handle(thenable), then = move(then)]() mutable {
+        return run_resolve_thenable_job(vm, *promise_to_resolve.cell(), thenable.value(), then);
     };
 
     // 6. Return the Record { [[Job]]: job, [[Realm]]: thenRealm }.

@@ -11,13 +11,15 @@
 namespace Web::SVG {
 
 class SVGClipPathElement final : public SVGElement {
-public:
-    using WrapperType = Bindings::SVGClipPathElementWrapper;
+    WEB_PLATFORM_OBJECT(SVGClipPathElement, SVGElement);
 
-    SVGClipPathElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~SVGClipPathElement();
 
     virtual RefPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>) override;
+
+private:
+    SVGClipPathElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

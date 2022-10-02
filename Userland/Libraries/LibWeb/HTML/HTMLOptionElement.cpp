@@ -6,8 +6,10 @@
  */
 
 #include <AK/StringBuilder.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/Text.h>
+#include <LibWeb/HTML/HTMLOptGroupElement.h>
 #include <LibWeb/HTML/HTMLOptionElement.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
@@ -18,6 +20,7 @@ namespace Web::HTML {
 HTMLOptionElement::HTMLOptionElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLOptionElement"));
 }
 
 HTMLOptionElement::~HTMLOptionElement() = default;
@@ -138,7 +141,7 @@ int HTMLOptionElement::index() const
     if (auto select_element = first_ancestor_of_type<HTMLSelectElement>()) {
         int index = 0;
         for (auto const& option_element : select_element->list_of_options()) {
-            if (&option_element == this)
+            if (option_element.ptr() == this)
                 return index;
             ++index;
         }
@@ -152,6 +155,14 @@ int HTMLOptionElement::index() const
 void HTMLOptionElement::ask_for_a_reset()
 {
     // FIXME: Implement this operation.
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#concept-option-disabled
+bool HTMLOptionElement::disabled() const
+{
+    // An option element is disabled if its disabled attribute is present or if it is a child of an optgroup element whose disabled attribute is present.
+    return has_attribute(AttributeNames::disabled)
+        || (parent() && is<HTMLOptGroupElement>(parent()) && static_cast<HTMLOptGroupElement const&>(*parent()).has_attribute(AttributeNames::disabled));
 }
 
 }

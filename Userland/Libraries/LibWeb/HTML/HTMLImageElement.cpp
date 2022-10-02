@@ -22,11 +22,13 @@ HTMLImageElement::HTMLImageElement(DOM::Document& document, DOM::QualifiedName q
     : HTMLElement(document, move(qualified_name))
     , m_image_loader(*this)
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLImageElement"));
+
     m_image_loader.on_load = [this] {
         set_needs_style_update(true);
         this->document().set_needs_layout();
         queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
-            dispatch_event(DOM::Event::create(EventNames::load));
+            dispatch_event(*DOM::Event::create(this->realm(), EventNames::load));
         });
     };
 
@@ -35,7 +37,7 @@ HTMLImageElement::HTMLImageElement(DOM::Document& document, DOM::QualifiedName q
         set_needs_style_update(true);
         this->document().set_needs_layout();
         queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
-            dispatch_event(DOM::Event::create(EventNames::error));
+            dispatch_event(*DOM::Event::create(this->realm(), EventNames::error));
         });
     };
 
@@ -76,6 +78,11 @@ void HTMLImageElement::parse_attribute(FlyString const& name, String const& valu
 
     if (name == HTML::AttributeNames::src && !value.is_empty())
         m_image_loader.load(document().parse_url(value));
+
+    if (name == HTML::AttributeNames::alt) {
+        if (layout_node())
+            verify_cast<Layout::ImageBox>(*layout_node()).dom_node_did_update_alt_text({});
+    }
 }
 
 RefPtr<Layout::Node> HTMLImageElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)

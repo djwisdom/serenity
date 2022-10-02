@@ -12,7 +12,6 @@
 #include <AK/StdLibExtras.h>
 #include <AK/String.h>
 #include <AK/Vector.h>
-#include <LibCore/Account.h>
 #include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <limits.h>
@@ -26,6 +25,7 @@
 #include <unistd.h>
 
 #ifdef __serenity__
+#    include <LibCore/Account.h>
 #    include <LibSystem/syscall.h>
 #    include <serenity.h>
 #endif
@@ -120,13 +120,6 @@ ErrorOr<void> ptrace_peekbuf(pid_t tid, void const* tracee_addr, Bytes destinati
     };
     int rc = syscall(SC_ptrace, &params);
     HANDLE_SYSCALL_RETURN_VALUE("ptrace_peekbuf", rc, {});
-}
-
-ErrorOr<void> setgroups(Span<gid_t const> gids)
-{
-    if (::setgroups(gids.size(), gids.data()) < 0)
-        return Error::from_syscall("setgroups"sv, -errno);
-    return {};
 }
 
 ErrorOr<void> mount(int source_fd, StringView target, StringView fs_type, int flags)
@@ -953,22 +946,6 @@ ErrorOr<void> adjtime(const struct timeval* delta, struct timeval* old_delta)
 }
 #endif
 
-ErrorOr<String> find_file_in_path(StringView filename)
-{
-    auto const* path_ptr = getenv("PATH");
-    StringView path { path_ptr, strlen(path_ptr) };
-    if (path.is_empty())
-        path = "/bin:/usr/bin"sv;
-    auto parts = path.split_view(':');
-    for (auto& part : parts) {
-        auto candidate = String::formatted("{}/{}", part, filename);
-        if (Core::File::exists(candidate)) {
-            return candidate;
-        }
-    }
-    return Error::from_errno(ENOENT);
-}
-
 ErrorOr<void> exec(StringView filename, Span<StringView> arguments, SearchInPath search_in_path, Optional<Span<StringView>> environment)
 {
 #ifdef __serenity__
@@ -1009,8 +986,18 @@ ErrorOr<void> exec(StringView filename, Span<StringView> arguments, SearchInPath
         return {};
     };
 
-    bool should_search_in_path = search_in_path == SearchInPath::Yes && !filename.contains('/');
-    String exec_filename = should_search_in_path ? TRY(find_file_in_path(filename)) : filename.to_string();
+    String exec_filename;
+
+    if (search_in_path == SearchInPath::Yes) {
+        auto maybe_executable = Core::File::resolve_executable_from_environment(filename);
+
+        if (!maybe_executable.has_value())
+            return ENOENT;
+
+        exec_filename = maybe_executable.release_value();
+    } else {
+        exec_filename = filename.to_string();
+    }
 
     params.path = { exec_filename.characters(), exec_filename.length() };
     TRY(run_exec(params));
@@ -1039,21 +1026,16 @@ ErrorOr<void> exec(StringView filename, Span<StringView> arguments, SearchInPath
         if (search_in_path == SearchInPath::Yes && !filename.contains('/')) {
 #    if defined(__APPLE__) || defined(__FreeBSD__)
             // These BSDs don't support execvpe(), so we'll have to manually search the PATH.
-            // This is copy-pasted from LibC's execvpe() with minor changes.
             ScopedValueRollback errno_rollback(errno);
-            String path = getenv("PATH");
-            if (path.is_empty())
-                path = "/bin:/usr/bin";
-            auto parts = path.split(':');
-            for (auto& part : parts) {
-                auto candidate = String::formatted("{}/{}", part, filename);
-                rc = ::execve(candidate.characters(), argv.data(), envp.data());
-                if (rc < 0 && errno != ENOENT) {
-                    errno_rollback.set_override_rollback_value(errno);
-                    return Error::from_syscall("exec"sv, rc);
-                }
+
+            auto maybe_executable = Core::File::resolve_executable_from_environment(filename_string);
+
+            if (!maybe_executable.has_value()) {
+                errno_rollback.set_override_rollback_value(ENOENT);
+                return Error::from_errno(ENOENT);
             }
-            errno_rollback.set_override_rollback_value(ENOENT);
+
+            rc = ::execve(maybe_executable.release_value().characters(), argv.data(), envp.data());
 #    else
             rc = ::execvpe(filename_string.characters(), argv.data(), envp.data());
 #    endif
@@ -1226,6 +1208,13 @@ ErrorOr<Vector<gid_t>> getgroups()
     if (::getgroups(count, groups.data()) < 0)
         return Error::from_syscall("getgroups"sv, -errno);
     return groups;
+}
+
+ErrorOr<void> setgroups(Span<gid_t const> gids)
+{
+    if (::setgroups(gids.size(), gids.data()) < 0)
+        return Error::from_syscall("setgroups"sv, -errno);
+    return {};
 }
 
 ErrorOr<void> mknod(StringView pathname, mode_t mode, dev_t dev)

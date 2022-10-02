@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLTableCaptionElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLTableCaptionElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLTableCaptionElement, HTMLElement);
 
-    HTMLTableCaptionElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLTableCaptionElement() override;
+
+private:
+    HTMLTableCaptionElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

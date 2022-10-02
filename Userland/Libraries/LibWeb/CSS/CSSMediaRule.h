@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,36 +15,30 @@ namespace Web::CSS {
 
 // https://www.w3.org/TR/css-conditional-3/#the-cssmediarule-interface
 class CSSMediaRule final : public CSSConditionRule {
-    AK_MAKE_NONCOPYABLE(CSSMediaRule);
-    AK_MAKE_NONMOVABLE(CSSMediaRule);
+    WEB_PLATFORM_OBJECT(CSSMediaRule, CSSConditionRule);
 
 public:
-    using WrapperType = Bindings::CSSMediaRuleWrapper;
-
-    static NonnullRefPtr<CSSMediaRule> create(NonnullRefPtr<MediaList>&& media_queries, NonnullRefPtrVector<CSSRule>&& rules)
-    {
-        return adopt_ref(*new CSSMediaRule(move(media_queries), move(rules)));
-    }
+    static CSSMediaRule* create(JS::Realm&, MediaList& media_queries, CSSRuleList&);
 
     virtual ~CSSMediaRule() = default;
 
-    virtual StringView class_name() const override { return "CSSMediaRule"sv; };
     virtual Type type() const override { return Type::Media; };
 
     virtual String condition_text() const override;
     virtual void set_condition_text(String) override;
-    virtual bool condition_matches() const override { return m_media->matches(); }
+    virtual bool condition_matches() const override { return m_media.matches(); }
 
-    NonnullRefPtr<MediaList> const& media() const { return m_media; }
+    MediaList* media() const { return &m_media; }
 
-    bool evaluate(HTML::Window const& window) { return m_media->evaluate(window); }
+    bool evaluate(HTML::Window const& window) { return m_media.evaluate(window); }
 
 private:
-    explicit CSSMediaRule(NonnullRefPtr<MediaList>&&, NonnullRefPtrVector<CSSRule>&&);
+    CSSMediaRule(JS::Realm&, MediaList&, CSSRuleList&);
 
+    virtual void visit_edges(Cell::Visitor&) override;
     virtual String serialized() const override;
 
-    NonnullRefPtr<MediaList> m_media;
+    MediaList& m_media;
 };
 
 template<>

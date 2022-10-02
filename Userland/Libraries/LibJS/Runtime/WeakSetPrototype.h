@@ -15,11 +15,12 @@ class WeakSetPrototype final : public PrototypeObject<WeakSetPrototype, WeakSet>
     JS_PROTOTYPE_OBJECT(WeakSetPrototype, WeakSet, WeakSet);
 
 public:
-    WeakSetPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~WeakSetPrototype() override = default;
 
 private:
+    explicit WeakSetPrototype(Realm&);
+
     JS_DECLARE_NATIVE_FUNCTION(add);
     JS_DECLARE_NATIVE_FUNCTION(delete_);
     JS_DECLARE_NATIVE_FUNCTION(has);

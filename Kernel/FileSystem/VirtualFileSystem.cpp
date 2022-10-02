@@ -213,8 +213,7 @@ ErrorOr<void> VirtualFileSystem::utime(Credentials const& credentials, StringVie
     if (custody->is_readonly())
         return EROFS;
 
-    TRY(inode.set_atime(atime));
-    TRY(inode.set_mtime(mtime));
+    TRY(inode.update_timestamps(atime, {}, mtime));
     return {};
 }
 
@@ -228,10 +227,10 @@ ErrorOr<void> VirtualFileSystem::utimensat(Credentials const& credentials, Strin
         return EROFS;
 
     // NOTE: A standard ext2 inode cannot store nanosecond timestamps.
-    if (atime.tv_nsec != UTIME_OMIT)
-        TRY(inode.set_atime(atime.tv_sec));
-    if (mtime.tv_nsec != UTIME_OMIT)
-        TRY(inode.set_mtime(mtime.tv_sec));
+    TRY(inode.update_timestamps(
+        (atime.tv_nsec != UTIME_OMIT) ? atime.tv_sec : Optional<time_t> {},
+        {},
+        (mtime.tv_nsec != UTIME_OMIT) ? mtime.tv_sec : Optional<time_t> {}));
 
     return {};
 }
@@ -321,7 +320,7 @@ ErrorOr<NonnullLockRefPtr<OpenFileDescription>> VirtualFileSystem::open(Credenti
 
     if (should_truncate_file) {
         TRY(inode.truncate(0));
-        TRY(inode.set_mtime(kgettimeofday().to_truncated_seconds()));
+        TRY(inode.update_timestamps({}, {}, kgettimeofday().to_truncated_seconds()));
     }
     auto description = TRY(OpenFileDescription::try_create(custody));
     description->set_rw_mode(options);
@@ -704,8 +703,6 @@ ErrorOr<void> VirtualFileSystem::symlink(Credentials const& credentials, StringV
     auto inode = TRY(parent_inode.create_child(basename, S_IFLNK | 0644, 0, credentials.euid(), credentials.egid()));
 
     auto target_buffer = UserOrKernelBuffer::for_kernel_buffer(const_cast<u8*>((u8 const*)target.characters_without_null_termination()));
-    MutexLocker locker(inode->m_inode_lock);
-    TRY(inode->prepare_to_write_data());
     TRY(inode->write_bytes(0, target.length(), target_buffer, nullptr));
     return {};
 }

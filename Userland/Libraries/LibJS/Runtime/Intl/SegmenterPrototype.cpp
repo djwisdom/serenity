@@ -12,14 +12,14 @@
 namespace JS::Intl {
 
 // 18.3 Properties of the Intl.Segmenter Prototype Object, https://tc39.es/ecma402/#sec-properties-of-intl-segmenter-prototype-object
-SegmenterPrototype::SegmenterPrototype(GlobalObject& global_object)
-    : PrototypeObject(*global_object.object_prototype())
+SegmenterPrototype::SegmenterPrototype(Realm& realm)
+    : PrototypeObject(*realm.intrinsics().object_prototype())
 {
 }
 
-void SegmenterPrototype::initialize(GlobalObject& global_object)
+void SegmenterPrototype::initialize(Realm& realm)
 {
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
     auto& vm = this->vm();
 
@@ -27,19 +27,21 @@ void SegmenterPrototype::initialize(GlobalObject& global_object)
     define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Intl.Segmenter"), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.resolvedOptions, resolved_options, 0, attr);
-    define_native_function(vm.names.segment, segment, 1, attr);
+    define_native_function(realm, vm.names.resolvedOptions, resolved_options, 0, attr);
+    define_native_function(realm, vm.names.segment, segment, 1, attr);
 }
 
 // 18.3.4 Intl.Segmenter.prototype.resolvedOptions ( ), https://tc39.es/ecma402/#sec-intl.segmenter.prototype.resolvedoptions
 JS_DEFINE_NATIVE_FUNCTION(SegmenterPrototype::resolved_options)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let segmenter be the this value.
     // 2. Perform ? RequireInternalSlot(segmenter, [[InitializedSegmenter]]).
-    auto* segmenter = TRY(typed_this_object(global_object));
+    auto* segmenter = TRY(typed_this_object(vm));
 
     // 3. Let options be OrdinaryObjectCreate(%Object.prototype%).
-    auto* options = Object::create(global_object, global_object.object_prototype());
+    auto* options = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 4. For each row of Table 16, except the header row, in table order, do
     //     a. Let p be the Property value of the current row.
@@ -56,15 +58,17 @@ JS_DEFINE_NATIVE_FUNCTION(SegmenterPrototype::resolved_options)
 // 18.3.3 Intl.Segmenter.prototype.segment ( string ), https://tc39.es/ecma402/#sec-intl.segmenter.prototype.segment
 JS_DEFINE_NATIVE_FUNCTION(SegmenterPrototype::segment)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let segmenter be the this value.
     // 2. Perform ? RequireInternalSlot(segmenter, [[InitializedSegmenter]]).
-    auto* segmenter = TRY(typed_this_object(global_object));
+    auto* segmenter = TRY(typed_this_object(vm));
 
     // 3. Let string be ? ToString(string).
-    auto string = TRY(vm.argument(0).to_utf16_string(global_object));
+    auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
     // 4. Return ! CreateSegmentsObject(segmenter, string).
-    return Segments::create(global_object, *segmenter, move(string));
+    return Segments::create(realm, *segmenter, move(string));
 }
 
 }

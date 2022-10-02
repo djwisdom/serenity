@@ -11,8 +11,16 @@
 #include <LibCore/IODevice.h>
 #include <sys/stat.h>
 
+// FIXME: Make this a bit prettier.
+#define DEFAULT_PATH "/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"
+#define DEFAULT_PATH_SV "/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"sv
+
 namespace Core {
 
+///
+/// Use of Core::File for reading/writing data is deprecated.
+/// Please use Core::Stream::File and Core::Stream::BufferedFile instead.
+///
 class File final : public IODevice {
     C_OBJECT(File)
 public:
@@ -105,6 +113,8 @@ public:
     static NonnullRefPtr<File> standard_input();
     static NonnullRefPtr<File> standard_output();
     static NonnullRefPtr<File> standard_error();
+
+    static Optional<String> resolve_executable_from_environment(StringView filename);
 
 private:
     File(Object* parent = nullptr)

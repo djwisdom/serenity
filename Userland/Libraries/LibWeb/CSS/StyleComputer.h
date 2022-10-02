@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,6 +14,7 @@
 #include <LibWeb/CSS/CSSFontFaceRule.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/Parser/ComponentValue.h>
+#include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleProperties.h>
 #include <LibWeb/Forward.h>
@@ -21,7 +22,7 @@
 namespace Web::CSS {
 
 struct MatchingRule {
-    RefPtr<CSSStyleRule> rule;
+    CSSStyleRule const* rule { nullptr };
     size_t style_sheet_index { 0 };
     size_t rule_index { 0 };
     size_t selector_index { 0 };
@@ -86,7 +87,7 @@ private:
     void compute_defaulted_property_value(StyleProperties&, DOM::Element const*, CSS::PropertyID, Optional<CSS::Selector::PseudoElement>) const;
 
     RefPtr<StyleValue> resolve_unresolved_style_value(DOM::Element&, PropertyID, UnresolvedStyleValue const&) const;
-    bool expand_unresolved_values(DOM::Element&, StringView property_name, HashMap<FlyString, NonnullRefPtr<PropertyDependencyNode>>& dependencies, Vector<Parser::ComponentValue> const& source, Vector<Parser::ComponentValue>& dest, size_t source_start_index) const;
+    bool expand_unresolved_values(DOM::Element&, StringView property_name, HashMap<FlyString, NonnullRefPtr<PropertyDependencyNode>>& dependencies, Parser::TokenStream<Parser::ComponentValue>& source, Vector<Parser::ComponentValue>& dest) const;
 
     template<typename Callback>
     void for_each_stylesheet(CascadeOrigin, Callback) const;

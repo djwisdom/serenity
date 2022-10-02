@@ -6,32 +6,26 @@
 
 #pragma once
 
-#include <AK/RefCounted.h>
-#include <AK/Types.h>
-#include <AK/Weakable.h>
-#include <LibWeb/Bindings/Wrappable.h>
-#include <LibWeb/DOM/ExceptionOr.h>
+#include <LibWeb/Bindings/PlatformObject.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::SVG {
 
 // https://www.w3.org/TR/SVG11/types.html#InterfaceSVGLength
-class SVGLength
-    : public RefCounted<SVGLength>
-    , public Bindings::Wrappable
-    , public Weakable<SVGLength> {
-public:
-    using WrapperType = Bindings::SVGLengthWrapper;
+class SVGLength : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(SVGLength, Bindings::PlatformObject);
 
-    static NonnullRefPtr<SVGLength> create(u8 unit_type, float value);
-    virtual ~SVGLength() = default;
+public:
+    static JS::NonnullGCPtr<SVGLength> create(JS::Realm&, u8 unit_type, float value);
+    virtual ~SVGLength() override;
 
     u8 unit_type() const { return m_unit_type; }
 
     float value() const { return m_value; }
-    DOM::ExceptionOr<void> set_value(float value);
+    WebIDL::ExceptionOr<void> set_value(float value);
 
 private:
-    SVGLength(u8 unit_type, float value);
+    SVGLength(JS::Realm&, u8 unit_type, float value);
 
     u8 m_unit_type { 0 };
     float m_value { 0 };

@@ -16,24 +16,28 @@ namespace Web::DOM {
 class DocumentFragment
     : public ParentNode
     , public NonElementParentNode<DocumentFragment> {
+    WEB_PLATFORM_OBJECT(DocumentFragment, ParentNode);
+
 public:
-    using WrapperType = Bindings::DocumentFragmentWrapper;
+    static JS::NonnullGCPtr<DocumentFragment> construct_impl(JS::Realm& realm);
 
-    static NonnullRefPtr<DocumentFragment> create_with_global_object(Bindings::WindowObject& window);
-
-    explicit DocumentFragment(Document& document);
     virtual ~DocumentFragment() override = default;
 
     virtual FlyString node_name() const override { return "#document-fragment"; }
 
-    Element* host() { return m_host; }
-    Element const* host() const { return m_host; }
+    Element* host() { return m_host.ptr(); }
+    Element const* host() const { return m_host.ptr(); }
 
-    void set_host(Element* host) { m_host = host; }
+    void set_host(Element*);
+
+protected:
+    explicit DocumentFragment(Document& document);
+
+    virtual void visit_edges(Cell::Visitor&) override;
 
 private:
     // https://dom.spec.whatwg.org/#concept-documentfragment-host
-    WeakPtr<Element> m_host;
+    JS::GCPtr<Element> m_host;
 };
 
 template<>

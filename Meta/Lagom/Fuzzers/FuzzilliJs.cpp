@@ -120,9 +120,8 @@ class TestRunnerGlobalObject final : public JS::GlobalObject {
 
 public:
     TestRunnerGlobalObject(JS::Realm&);
+    virtual void initialize(JS::Realm&) override;
     virtual ~TestRunnerGlobalObject() override;
-
-    virtual void initialize_global_object() override;
 
 private:
     JS_DECLARE_NATIVE_FUNCTION(fuzzilli);
@@ -142,9 +141,9 @@ JS_DEFINE_NATIVE_FUNCTION(TestRunnerGlobalObject::fuzzilli)
     if (!vm.argument_count())
         return JS::js_undefined();
 
-    auto operation = TRY(vm.argument(0).to_string(global_object));
+    auto operation = TRY(vm.argument(0).to_string(vm));
     if (operation == "FUZZILLI_CRASH") {
-        auto type = TRY(vm.argument(1).to_i32(global_object));
+        auto type = TRY(vm.argument(1).to_i32(vm));
         switch (type) {
         case 0:
             *((int*)0x41414141) = 0x1337;
@@ -160,7 +159,7 @@ JS_DEFINE_NATIVE_FUNCTION(TestRunnerGlobalObject::fuzzilli)
             fzliout = stdout;
         }
 
-        auto string = TRY(vm.argument(1).to_string(global_object));
+        auto string = TRY(vm.argument(1).to_string(vm));
         fprintf(fzliout, "%s\n", string.characters());
         fflush(fzliout);
     }
@@ -168,11 +167,11 @@ JS_DEFINE_NATIVE_FUNCTION(TestRunnerGlobalObject::fuzzilli)
     return JS::js_undefined();
 }
 
-void TestRunnerGlobalObject::initialize_global_object()
+void TestRunnerGlobalObject::initialize(JS::Realm& realm)
 {
-    Base::initialize_global_object();
+    Base::initialize(realm);
     define_direct_property("global", this, JS::Attribute::Enumerable);
-    define_native_function("fuzzilli", fuzzilli, 2, JS::default_attributes);
+    define_native_function(realm, "fuzzilli", fuzzilli, 2, JS::default_attributes);
 }
 
 int main(int, char**)

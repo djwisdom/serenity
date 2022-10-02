@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,8 +7,7 @@
 #pragma once
 
 #include <AK/FlyString.h>
-#include <LibWeb/Bindings/WindowObject.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/DOM/EventTarget.h>
 
 namespace Web::DOM {
@@ -19,12 +18,10 @@ struct EventInit {
     bool composed { false };
 };
 
-class Event
-    : public RefCounted<Event>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::EventWrapper;
+class Event : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(Event, Bindings::PlatformObject);
 
+public:
     enum Phase : u16 {
         None = 0,
         CapturingPhase = 1,
@@ -32,13 +29,14 @@ public:
         BubblingPhase = 3,
     };
 
-    using TouchTargetList = Vector<RefPtr<EventTarget>>;
+    // FIXME: These need explicit marking somehow.
+    using TouchTargetList = Vector<JS::GCPtr<EventTarget>>;
 
     struct PathEntry {
-        RefPtr<EventTarget> invocation_target;
+        JS::GCPtr<EventTarget> invocation_target;
         bool invocation_target_in_shadow_tree { false };
-        RefPtr<EventTarget> shadow_adjusted_target;
-        RefPtr<EventTarget> related_target;
+        JS::GCPtr<EventTarget> shadow_adjusted_target;
+        JS::GCPtr<EventTarget> related_target;
         TouchTargetList touch_target_list;
         bool root_of_closed_tree { false };
         bool slot_in_closed_tree { false };
@@ -47,14 +45,11 @@ public:
 
     using Path = Vector<PathEntry>;
 
-    static NonnullRefPtr<Event> create(FlyString const& event_name, EventInit const& event_init = {})
-    {
-        return adopt_ref(*new Event(event_name, event_init));
-    }
-    static NonnullRefPtr<Event> create_with_global_object(Bindings::WindowObject&, FlyString const& event_name, EventInit const& event_init)
-    {
-        return Event::create(event_name, event_init);
-    }
+    static JS::NonnullGCPtr<Event> create(JS::Realm&, FlyString const& event_name, EventInit const& event_init = {});
+    static JS::NonnullGCPtr<Event> construct_impl(JS::Realm&, FlyString const& event_name, EventInit const& event_init);
+
+    Event(JS::Realm&, FlyString const& type);
+    Event(JS::Realm&, FlyString const& type, EventInit const& event_init);
 
     virtual ~Event() = default;
 
@@ -63,13 +58,13 @@ public:
     FlyString const& type() const { return m_type; }
     void set_type(StringView type) { m_type = type; }
 
-    RefPtr<EventTarget> target() const { return m_target; }
+    JS::GCPtr<EventTarget> target() const { return m_target; }
     void set_target(EventTarget* target) { m_target = target; }
 
     // NOTE: This is intended for the JS bindings.
-    RefPtr<EventTarget> src_element() const { return target(); }
+    JS::GCPtr<EventTarget> src_element() const { return target(); }
 
-    RefPtr<EventTarget> related_target() const { return m_related_target; }
+    JS::GCPtr<EventTarget> related_target() const { return m_related_target; }
     void set_related_target(EventTarget* related_target) { m_related_target = related_target; }
 
     bool should_stop_propagation() const { return m_stop_propagation; }
@@ -99,7 +94,7 @@ public:
     u16 event_phase() const { return m_phase; }
     void set_phase(Phase phase) { m_phase = phase; }
 
-    RefPtr<EventTarget> current_target() const { return m_current_target; }
+    JS::GCPtr<EventTarget> current_target() const { return m_current_target; }
     void set_current_target(EventTarget* current_target) { m_current_target = current_target; }
 
     bool return_value() const { return !m_cancelled; }
@@ -109,7 +104,7 @@ public:
             set_cancelled_flag();
     }
 
-    void append_to_path(EventTarget&, RefPtr<EventTarget>, RefPtr<EventTarget>, TouchTargetList&, bool);
+    void append_to_path(EventTarget&, JS::GCPtr<EventTarget>, JS::GCPtr<EventTarget>, TouchTargetList&, bool);
     Path& path() { return m_path; }
     Path const& path() const { return m_path; }
     void clear_path() { m_path.clear(); }
@@ -146,30 +141,17 @@ public:
 
     void set_time_stamp(double time_stamp) { m_time_stamp = time_stamp; }
 
-    NonnullRefPtrVector<EventTarget> composed_path() const;
+    Vector<JS::Handle<EventTarget>> composed_path() const;
 
 protected:
-    explicit Event(FlyString const& type)
-        : m_type(type)
-        , m_initialized(true)
-    {
-    }
-    Event(FlyString const& type, EventInit const& event_init)
-        : m_type(type)
-        , m_bubbles(event_init.bubbles)
-        , m_cancelable(event_init.cancelable)
-        , m_composed(event_init.composed)
-        , m_initialized(true)
-    {
-    }
-
-    void initialize(String const&, bool, bool);
+    void initialize_event(String const&, bool, bool);
+    virtual void visit_edges(Visitor&) override;
 
 private:
     FlyString m_type;
-    RefPtr<EventTarget> m_target;
-    RefPtr<EventTarget> m_related_target;
-    RefPtr<EventTarget> m_current_target;
+    JS::GCPtr<EventTarget> m_target;
+    JS::GCPtr<EventTarget> m_related_target;
+    JS::GCPtr<EventTarget> m_current_target;
 
     Phase m_phase { None };
 

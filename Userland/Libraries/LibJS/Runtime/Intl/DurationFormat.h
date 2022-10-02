@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, Idan Horowitz <idan.horowitz@serenityos.org>
+ * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -32,9 +33,9 @@ public:
         Numeric,
         TwoDigit
     };
-    static_assert(to_underlying(ValueStyle::Long) == to_underlying(Unicode::Style::Long));
-    static_assert(to_underlying(ValueStyle::Short) == to_underlying(Unicode::Style::Short));
-    static_assert(to_underlying(ValueStyle::Narrow) == to_underlying(Unicode::Style::Narrow));
+    static_assert(to_underlying(ValueStyle::Long) == to_underlying(::Locale::Style::Long));
+    static_assert(to_underlying(ValueStyle::Short) == to_underlying(::Locale::Style::Short));
+    static_assert(to_underlying(ValueStyle::Narrow) == to_underlying(::Locale::Style::Narrow));
 
     enum class Display {
         Auto,
@@ -48,7 +49,6 @@ public:
         return AK::Array { "nu"sv };
     }
 
-    explicit DurationFormat(Object& prototype);
     virtual ~DurationFormat() override = default;
 
     void set_locale(String locale) { m_locale = move(locale); }
@@ -61,6 +61,7 @@ public:
     String const& numbering_system() const { return m_numbering_system; }
 
     void set_style(StringView style) { m_style = style_from_string(style); }
+    Style style() const { return m_style; }
     String style_string() const { return style_to_string(m_style); }
 
     void set_years_style(StringView years_style) { m_years_style = date_style_from_string(years_style); }
@@ -148,6 +149,8 @@ public:
     u8 fractional_digits() const { return m_fractional_digits.value(); }
 
 private:
+    explicit DurationFormat(Object& prototype);
+
     static Style style_from_string(StringView style);
     static StringView style_to_string(Style);
     static ValueStyle date_style_from_string(StringView date_style);
@@ -201,10 +204,10 @@ static constexpr AK::Array<StringView, 3> date_values = { "long"sv, "short"sv, "
 static constexpr AK::Array<StringView, 5> time_values = { "long"sv, "short"sv, "narrow"sv, "numeric"sv, "2-digit"sv };
 static constexpr AK::Array<StringView, 4> sub_second_values = { "long"sv, "short"sv, "narrow"sv, "numeric"sv };
 static constexpr AK::Array<DurationInstanceComponent, 10> duration_instances_components {
-    DurationInstanceComponent { &Temporal::DurationRecord::years, &DurationFormat::years_style, &DurationFormat::set_years_style, &DurationFormat::years_display, &DurationFormat::set_years_display, "years"sv, "year"sv, date_values, "narrow"sv },
-    DurationInstanceComponent { &Temporal::DurationRecord::months, &DurationFormat::months_style, &DurationFormat::set_months_style, &DurationFormat::months_display, &DurationFormat::set_months_display, "months"sv, "month"sv, date_values, "narrow"sv },
-    DurationInstanceComponent { &Temporal::DurationRecord::weeks, &DurationFormat::weeks_style, &DurationFormat::set_weeks_style, &DurationFormat::weeks_display, &DurationFormat::set_weeks_display, "weeks"sv, "week"sv, date_values, "narrow"sv },
-    DurationInstanceComponent { &Temporal::DurationRecord::days, &DurationFormat::days_style, &DurationFormat::set_days_style, &DurationFormat::days_display, &DurationFormat::set_days_display, "days"sv, "day"sv, date_values, "narrow"sv },
+    DurationInstanceComponent { &Temporal::DurationRecord::years, &DurationFormat::years_style, &DurationFormat::set_years_style, &DurationFormat::years_display, &DurationFormat::set_years_display, "years"sv, "year"sv, date_values, "short"sv },
+    DurationInstanceComponent { &Temporal::DurationRecord::months, &DurationFormat::months_style, &DurationFormat::set_months_style, &DurationFormat::months_display, &DurationFormat::set_months_display, "months"sv, "month"sv, date_values, "short"sv },
+    DurationInstanceComponent { &Temporal::DurationRecord::weeks, &DurationFormat::weeks_style, &DurationFormat::set_weeks_style, &DurationFormat::weeks_display, &DurationFormat::set_weeks_display, "weeks"sv, "week"sv, date_values, "short"sv },
+    DurationInstanceComponent { &Temporal::DurationRecord::days, &DurationFormat::days_style, &DurationFormat::set_days_style, &DurationFormat::days_display, &DurationFormat::set_days_display, "days"sv, "day"sv, date_values, "short"sv },
     DurationInstanceComponent { &Temporal::DurationRecord::hours, &DurationFormat::hours_style, &DurationFormat::set_hours_style, &DurationFormat::hours_display, &DurationFormat::set_hours_display, "hours"sv, "hour"sv, time_values, "numeric"sv },
     DurationInstanceComponent { &Temporal::DurationRecord::minutes, &DurationFormat::minutes_style, &DurationFormat::set_minutes_style, &DurationFormat::minutes_display, &DurationFormat::set_minutes_display, "minutes"sv, "minute"sv, time_values, "numeric"sv },
     DurationInstanceComponent { &Temporal::DurationRecord::seconds, &DurationFormat::seconds_style, &DurationFormat::set_seconds_style, &DurationFormat::seconds_display, &DurationFormat::set_seconds_display, "seconds"sv, "second"sv, time_values, "numeric"sv },
@@ -218,10 +221,10 @@ struct DurationUnitOptions {
     String display;
 };
 
-ThrowCompletionOr<Temporal::DurationRecord> to_duration_record(GlobalObject& global_object, Value input);
-i8 duration_sign(Temporal::DurationRecord const&);
+ThrowCompletionOr<Temporal::DurationRecord> to_duration_record(VM&, Value input);
+i8 duration_record_sign(Temporal::DurationRecord const&);
 bool is_valid_duration_record(Temporal::DurationRecord const&);
-ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(GlobalObject& global_object, String const& unit, Object const& options, StringView base_style, Span<StringView const> styles_list, StringView digital_base, Optional<String> const& previous_style);
-ThrowCompletionOr<Vector<PatternPartition>> partition_duration_format_pattern(GlobalObject& global_object, DurationFormat const& duration_format, Temporal::DurationRecord const& duration);
+ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(VM&, String const& unit, Object const& options, StringView base_style, Span<StringView const> styles_list, StringView digital_base, StringView previous_style);
+Vector<PatternPartition> partition_duration_format_pattern(VM&, DurationFormat const&, Temporal::DurationRecord const& duration);
 
 }

@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLLIElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLLIElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLLIElement, HTMLElement);
 
-    HTMLLIElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLLIElement() override;
+
+private:
+    HTMLLIElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

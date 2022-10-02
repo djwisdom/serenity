@@ -11,9 +11,9 @@
 namespace Web::DOM {
 
 class ShadowRoot final : public DocumentFragment {
-public:
-    ShadowRoot(Document&, Element&);
+    WEB_PLATFORM_OBJECT(ShadowRoot, DocumentFragment);
 
+public:
     bool closed() const { return m_closed; }
 
     bool delegates_focus() const { return m_delegates_focus; }
@@ -29,9 +29,11 @@ public:
     String mode() const { return m_closed ? "closed" : "open"; }
 
     String inner_html() const;
-    ExceptionOr<void> set_inner_html(String const&);
+    WebIDL::ExceptionOr<void> set_inner_html(String const&);
 
 private:
+    ShadowRoot(Document&, Element&);
+
     // ^Node
     virtual FlyString node_name() const override { return "#shadow-root"; }
     virtual bool is_shadow_root() const final { return true; }
@@ -52,7 +54,7 @@ inline IterationDecision Node::for_each_shadow_including_descendant(Callback cal
         return IterationDecision::Break;
     for (auto* child = first_child(); child; child = child->next_sibling()) {
         if (child->is_element()) {
-            if (RefPtr<ShadowRoot> shadow_root = static_cast<Element*>(child)->shadow_root()) {
+            if (JS::GCPtr<ShadowRoot> shadow_root = static_cast<Element*>(child)->shadow_root()) {
                 if (shadow_root->for_each_shadow_including_descendant(callback) == IterationDecision::Break)
                     return IterationDecision::Break;
             }

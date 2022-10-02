@@ -4,13 +4,30 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/Heap/Heap.h>
 #include <LibWeb/DOM/StaticNodeList.h>
 
 namespace Web::DOM {
 
-StaticNodeList::StaticNodeList(NonnullRefPtrVector<Node>&& static_nodes)
-    : m_static_nodes(move(static_nodes))
+JS::NonnullGCPtr<NodeList> StaticNodeList::create(JS::Realm& realm, Vector<JS::Handle<Node>> static_nodes)
 {
+    return *realm.heap().allocate<StaticNodeList>(realm, realm, move(static_nodes));
+}
+
+StaticNodeList::StaticNodeList(JS::Realm& realm, Vector<JS::Handle<Node>> static_nodes)
+    : NodeList(realm)
+{
+    for (auto& node : static_nodes)
+        m_static_nodes.append(*node);
+}
+
+StaticNodeList::~StaticNodeList() = default;
+
+void StaticNodeList::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    for (auto& node : m_static_nodes)
+        visitor.visit(node);
 }
 
 // https://dom.spec.whatwg.org/#dom-nodelist-length

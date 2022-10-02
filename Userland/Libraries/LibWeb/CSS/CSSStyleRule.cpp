@@ -4,21 +4,36 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/CSSStyleRulePrototype.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 
 namespace Web::CSS {
 
-CSSStyleRule::CSSStyleRule(NonnullRefPtrVector<Selector>&& selectors, NonnullRefPtr<CSSStyleDeclaration>&& declaration)
-    : m_selectors(move(selectors))
-    , m_declaration(move(declaration))
+CSSStyleRule* CSSStyleRule::create(JS::Realm& realm, NonnullRefPtrVector<Web::CSS::Selector>&& selectors, CSSStyleDeclaration& declaration)
 {
+    return realm.heap().allocate<CSSStyleRule>(realm, realm, move(selectors), declaration);
+}
+
+CSSStyleRule::CSSStyleRule(JS::Realm& realm, NonnullRefPtrVector<Selector>&& selectors, CSSStyleDeclaration& declaration)
+    : CSSRule(realm)
+    , m_selectors(move(selectors))
+    , m_declaration(declaration)
+{
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::CSSStyleRulePrototype>(realm, "CSSStyleRule"));
+}
+
+void CSSStyleRule::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(&m_declaration);
 }
 
 // https://www.w3.org/TR/cssom/#dom-cssstylerule-style
 CSSStyleDeclaration* CSSStyleRule::style()
 {
-    return m_declaration;
+    return &m_declaration;
 }
 
 // https://www.w3.org/TR/cssom/#serialize-a-css-rule

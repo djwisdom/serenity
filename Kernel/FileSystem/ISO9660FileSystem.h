@@ -347,27 +347,27 @@ public:
     ISO9660FS const& fs() const { return static_cast<ISO9660FS const&>(Inode::fs()); }
 
     // ^Inode
-    virtual ErrorOr<size_t> read_bytes(off_t, size_t, UserOrKernelBuffer& buffer, OpenFileDescription*) const override;
     virtual InodeMetadata metadata() const override;
     virtual ErrorOr<void> traverse_as_directory(Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)>) const override;
     virtual ErrorOr<NonnullLockRefPtr<Inode>> lookup(StringView name) override;
     virtual ErrorOr<void> flush_metadata() override;
-    virtual ErrorOr<size_t> write_bytes(off_t, size_t, UserOrKernelBuffer const& buffer, OpenFileDescription*) override;
     virtual ErrorOr<NonnullLockRefPtr<Inode>> create_child(StringView name, mode_t, dev_t, UserID, GroupID) override;
     virtual ErrorOr<void> add_child(Inode&, StringView name, mode_t) override;
     virtual ErrorOr<void> remove_child(StringView name) override;
     virtual ErrorOr<void> chmod(mode_t) override;
     virtual ErrorOr<void> chown(UserID, GroupID) override;
     virtual ErrorOr<void> truncate(u64) override;
-    virtual ErrorOr<void> set_atime(time_t) override;
-    virtual ErrorOr<void> set_ctime(time_t) override;
-    virtual ErrorOr<void> set_mtime(time_t) override;
+    virtual ErrorOr<void> update_timestamps(Optional<time_t> atime, Optional<time_t> ctime, Optional<time_t> mtime) override;
 
 private:
     // HACK: The base ISO 9660 standard says the maximum filename length is 37
     // bytes large; however, we can read filenames longer than that right now
     // without any problems, so let's allow it anyway.
     static constexpr size_t max_file_identifier_length = 256 - sizeof(ISO::DirectoryRecordHeader);
+
+    // ^Inode
+    virtual ErrorOr<size_t> read_bytes_locked(off_t, size_t, UserOrKernelBuffer& buffer, OpenFileDescription*) const override;
+    virtual ErrorOr<size_t> write_bytes_locked(off_t, size_t, UserOrKernelBuffer const& buffer, OpenFileDescription*) override;
 
     ISO9660Inode(ISO9660FS&, ISO::DirectoryRecordHeader const& record, StringView name);
     static ErrorOr<NonnullLockRefPtr<ISO9660Inode>> try_create_from_directory_record(ISO9660FS&, ISO::DirectoryRecordHeader const& record, StringView name);

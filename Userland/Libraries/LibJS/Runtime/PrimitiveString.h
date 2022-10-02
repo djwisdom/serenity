@@ -16,10 +16,9 @@
 namespace JS {
 
 class PrimitiveString final : public Cell {
+    JS_CELL(PrimitiveString, Cell);
+
 public:
-    explicit PrimitiveString(PrimitiveString&, PrimitiveString&);
-    explicit PrimitiveString(String);
-    explicit PrimitiveString(Utf16String);
     virtual ~PrimitiveString();
 
     PrimitiveString(PrimitiveString const&) = delete;
@@ -34,10 +33,13 @@ public:
     Utf16View utf16_string_view() const;
     bool has_utf16_string() const { return m_has_utf16_string; }
 
-    Optional<Value> get(GlobalObject&, PropertyKey const&) const;
+    Optional<Value> get(VM&, PropertyKey const&) const;
 
 private:
-    virtual StringView class_name() const override { return "PrimitiveString"sv; }
+    explicit PrimitiveString(PrimitiveString&, PrimitiveString&);
+    explicit PrimitiveString(String);
+    explicit PrimitiveString(Utf16String);
+
     virtual void visit_edges(Cell::Visitor&) override;
 
     void resolve_rope_if_needed() const;

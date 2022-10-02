@@ -11,7 +11,7 @@
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/Intl/NumberFormat.h>
 #include <LibJS/Runtime/Object.h>
-#include <LibUnicode/PluralRules.h>
+#include <LibLocale/PluralRules.h>
 
 namespace JS::Intl {
 
@@ -19,22 +19,23 @@ class PluralRules final : public NumberFormatBase {
     JS_OBJECT(PluralRules, NumberFormatBase);
 
 public:
-    PluralRules(Object& prototype);
     virtual ~PluralRules() override = default;
 
-    Unicode::PluralForm type() const { return m_type; }
-    StringView type_string() const { return Unicode::plural_form_to_string(m_type); }
-    void set_type(StringView type) { m_type = Unicode::plural_form_from_string(type); }
+    ::Locale::PluralForm type() const { return m_type; }
+    StringView type_string() const { return ::Locale::plural_form_to_string(m_type); }
+    void set_type(StringView type) { m_type = ::Locale::plural_form_from_string(type); }
 
 private:
-    Unicode::PluralForm m_type { Unicode::PluralForm::Cardinal }; // [[Type]]
+    explicit PluralRules(Object& prototype);
+
+    ::Locale::PluralForm m_type { ::Locale::PluralForm::Cardinal }; // [[Type]]
 };
 
-Unicode::PluralOperands get_operands(String const& string);
-Unicode::PluralCategory plural_rule_select(StringView locale, Unicode::PluralForm type, Value number, Unicode::PluralOperands operands);
-Unicode::PluralCategory resolve_plural(PluralRules const& plural_rules, Value number);
-Unicode::PluralCategory resolve_plural(NumberFormatBase const& number_format, Unicode::PluralForm type, Value number);
-Unicode::PluralCategory plural_rule_select_range(StringView locale, Unicode::PluralForm, Unicode::PluralCategory start, Unicode::PluralCategory end);
-ThrowCompletionOr<Unicode::PluralCategory> resolve_plural_range(GlobalObject& global_object, PluralRules const& plural_rules, Value start, Value end);
+::Locale::PluralOperands get_operands(String const& string);
+::Locale::PluralCategory plural_rule_select(StringView locale, ::Locale::PluralForm type, Value number, ::Locale::PluralOperands operands);
+::Locale::PluralCategory resolve_plural(PluralRules const&, Value number);
+::Locale::PluralCategory resolve_plural(NumberFormatBase const& number_format, ::Locale::PluralForm type, Value number);
+::Locale::PluralCategory plural_rule_select_range(StringView locale, ::Locale::PluralForm, ::Locale::PluralCategory start, ::Locale::PluralCategory end);
+ThrowCompletionOr<::Locale::PluralCategory> resolve_plural_range(VM&, PluralRules const&, Value start, Value end);
 
 }

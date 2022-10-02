@@ -10,20 +10,22 @@
 #include <AK/WeakPtr.h>
 #include <AK/Weakable.h>
 #include <LibGL/GLContext.h>
+#include <LibJS/Heap/GCPtr.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/WebGL/WebGLContextAttributes.h>
 
 namespace Web::WebGL {
 
-class WebGLRenderingContextBase
-    : public RefCountForwarder<HTML::HTMLCanvasElement>
-    , public Weakable<WebGLRenderingContextBase> {
+class WebGLRenderingContextBase : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(WebGLRenderingContextBase, Bindings::PlatformObject);
+
 public:
     virtual ~WebGLRenderingContextBase();
 
     void present();
 
-    NonnullRefPtr<HTML::HTMLCanvasElement> canvas_for_binding() const;
+    JS::NonnullGCPtr<HTML::HTMLCanvasElement> canvas_for_binding() const;
 
     bool is_context_lost() const;
 
@@ -62,9 +64,13 @@ public:
     void viewport(GLint x, GLint y, GLsizei width, GLsizei height);
 
 protected:
-    WebGLRenderingContextBase(HTML::HTMLCanvasElement& canvas_element, NonnullOwnPtr<GL::GLContext> context, WebGLContextAttributes context_creation_parameters, WebGLContextAttributes actual_context_parameters);
+    WebGLRenderingContextBase(JS::Realm&, HTML::HTMLCanvasElement& canvas_element, NonnullOwnPtr<GL::GLContext> context, WebGLContextAttributes context_creation_parameters, WebGLContextAttributes actual_context_parameters);
 
 private:
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    JS::NonnullGCPtr<HTML::HTMLCanvasElement> m_canvas_element;
+
     NonnullOwnPtr<GL::GLContext> m_context;
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#context-creation-parameters

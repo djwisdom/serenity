@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Emanuel Sprung <emanuel.sprung@gmail.com>
- * Copyright (c) 2022, Jakob-Niklas See <git@nwex.de>
+ * Copyright (c) 2022, networkException <networkexception@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -112,7 +112,6 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
     m_additional = GUI::Button::construct();
     m_additional->set_tooltip("Show hidden bookmarks");
     m_additional->set_menu(m_additional_menu);
-    m_additional->set_menu_position(GUI::Button::MenuPosition::BottomLeft);
     auto bitmap_or_error = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/overflow-menu.png"sv);
     if (!bitmap_or_error.is_error())
         m_additional->set_icon(bitmap_or_error.release_value());
@@ -124,7 +123,7 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
 
     m_context_menu = GUI::Menu::construct();
     auto default_action = GUI::Action::create(
-        "&Open", [this](auto&) {
+        "&Open", g_icon_bag.go_to, [this](auto&) {
             if (on_bookmark_click)
                 on_bookmark_click(m_context_menu_url, OpenInNewTab::No);
         },
@@ -132,14 +131,14 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
     m_context_menu_default_action = default_action;
     m_context_menu->add_action(default_action);
     m_context_menu->add_action(GUI::Action::create(
-        "Open in New &Tab", [this](auto&) {
+        "Open in New &Tab", g_icon_bag.new_tab, [this](auto&) {
             if (on_bookmark_click)
                 on_bookmark_click(m_context_menu_url, OpenInNewTab::Yes);
         },
         this));
     m_context_menu->add_separator();
     m_context_menu->add_action(GUI::Action::create(
-        "&Edit...", [this](auto&) {
+        "&Edit...", g_icon_bag.rename, [this](auto&) {
             edit_bookmark(m_context_menu_url);
         },
         this));

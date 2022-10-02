@@ -154,17 +154,17 @@ public:
     using ReservedClientType = Variant<Empty, HTML::Environment*, HTML::EnvironmentSettingsObject*>;
     using WindowType = Variant<Window, HTML::EnvironmentSettingsObject*>;
 
-    Request() = default;
+    Request();
 
-    [[nodiscard]] ReadonlyBytes method() { return m_method; }
+    [[nodiscard]] ReadonlyBytes method() const { return m_method; }
     void set_method(ByteBuffer method) { m_method = move(method); }
 
     [[nodiscard]] bool local_urls_only() const { return m_local_urls_only; }
     void set_local_urls_only(bool local_urls_only) { m_local_urls_only = local_urls_only; }
 
-    [[nodiscard]] HeaderList const& header_list() const { return m_header_list; }
-    [[nodiscard]] HeaderList& header_list() { return m_header_list; }
-    void set_header_list(HeaderList header_list) { m_header_list = move(header_list); }
+    [[nodiscard]] NonnullRefPtr<HeaderList> const& header_list() const { return m_header_list; }
+    [[nodiscard]] NonnullRefPtr<HeaderList>& header_list() { return m_header_list; }
+    void set_header_list(NonnullRefPtr<HeaderList> header_list) { m_header_list = move(header_list); }
 
     [[nodiscard]] bool unsafe_request() const { return m_unsafe_request; }
     void set_unsafe_request(bool unsafe_request) { m_unsafe_request = unsafe_request; }
@@ -193,7 +193,7 @@ public:
     [[nodiscard]] Optional<InitiatorType> const& initiator_type() const { return m_initiator_type; }
     void set_initiator_type(Optional<InitiatorType> initiator_type) { m_initiator_type = move(initiator_type); }
 
-    [[nodiscard]] ServiceWorkersMode service_workers_mode() { return m_service_workers_mode; }
+    [[nodiscard]] ServiceWorkersMode service_workers_mode() const { return m_service_workers_mode; }
     void set_service_workers_mode(ServiceWorkersMode service_workers_mode) { m_service_workers_mode = service_workers_mode; }
 
     [[nodiscard]] Optional<Initiator> const& initiator() const { return m_initiator; }
@@ -254,6 +254,12 @@ public:
     [[nodiscard]] u8 redirect_count() const { return m_redirect_count; }
     void set_redirect_count(u8 redirect_count) { m_redirect_count = redirect_count; }
 
+    [[nodiscard]] ReferrerType const& referrer() const { return m_referrer; }
+    void set_referrer(ReferrerType referrer) { m_referrer = move(referrer); }
+
+    [[nodiscard]] Optional<ReferrerPolicy::ReferrerPolicy> const& referrer_policy() const { return m_referrer_policy; }
+    void set_referrer_policy(Optional<ReferrerPolicy::ReferrerPolicy> referrer_policy) { m_referrer_policy = move(referrer_policy); }
+
     [[nodiscard]] ResponseTainting response_tainting() const { return m_response_tainting; }
     void set_response_tainting(ResponseTainting response_tainting) { m_response_tainting = response_tainting; }
 
@@ -281,7 +287,7 @@ public:
     [[nodiscard]] String serialize_origin() const;
     [[nodiscard]] ErrorOr<ByteBuffer> byte_serialize_origin() const;
 
-    [[nodiscard]] Request clone() const;
+    [[nodiscard]] WebIDL::ExceptionOr<NonnullOwnPtr<Request>> clone() const;
 
     [[nodiscard]] ErrorOr<void> add_range_reader(u64 first, Optional<u64> const& last);
 
@@ -290,7 +296,7 @@ public:
 private:
     // https://fetch.spec.whatwg.org/#concept-request-method
     // A request has an associated method (a method). Unless stated otherwise it is `GET`.
-    ByteBuffer m_method;
+    ByteBuffer m_method { ByteBuffer::copy("GET"sv.bytes()).release_value() };
 
     // https://fetch.spec.whatwg.org/#local-urls-only-flag
     // A request has an associated local-URLs-only flag. Unless stated otherwise it is unset.
@@ -298,7 +304,7 @@ private:
 
     // https://fetch.spec.whatwg.org/#concept-request-header-list
     // A request has an associated header list (a header list). Unless stated otherwise it is empty.
-    HeaderList m_header_list;
+    NonnullRefPtr<HeaderList> m_header_list;
 
     // https://fetch.spec.whatwg.org/#unsafe-request-flag
     // A request has an associated unsafe-request flag. Unless stated otherwise it is unset.
@@ -361,7 +367,8 @@ private:
     ReferrerType m_referrer { Referrer::Client };
 
     // https://fetch.spec.whatwg.org/#concept-request-referrer-policy
-    // FIXME: A request has an associated referrer policy, which is a referrer policy. Unless stated otherwise it is the empty string.
+    // A request has an associated referrer policy, which is a referrer policy. Unless stated otherwise it is the empty string.
+    Optional<ReferrerPolicy::ReferrerPolicy> m_referrer_policy;
 
     // https://fetch.spec.whatwg.org/#concept-request-mode
     // A request has an associated mode, which is "same-origin", "cors", "no-cors", "navigate", or "websocket". Unless stated otherwise, it is "no-cors".

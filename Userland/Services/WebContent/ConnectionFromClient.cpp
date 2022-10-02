@@ -13,8 +13,8 @@
 #include <LibGfx/SystemTheme.h>
 #include <LibJS/Console.h>
 #include <LibJS/Heap/Heap.h>
-#include <LibJS/Interpreter.h>
 #include <LibJS/Parser.h>
+#include <LibJS/Runtime/ConsoleObject.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/DOM/Document.h>
@@ -385,13 +385,14 @@ Messages::WebContentServer::GetHoveredNodeIdResponse ConnectionFromClient::get_h
 void ConnectionFromClient::initialize_js_console(Badge<PageHost>)
 {
     auto* document = page().top_level_browsing_context().active_document();
-    auto interpreter = document->interpreter().make_weak_ptr();
-    if (m_interpreter.ptr() == interpreter.ptr())
+    auto realm = document->realm().make_weak_ptr();
+    if (m_realm.ptr() == realm.ptr())
         return;
 
-    m_interpreter = interpreter;
-    m_console_client = make<WebContentConsoleClient>(interpreter->global_object().console(), interpreter, *this);
-    interpreter->global_object().console().set_client(*m_console_client.ptr());
+    auto& console_object = *realm->intrinsics().console_object();
+    m_realm = realm;
+    m_console_client = make<WebContentConsoleClient>(console_object.console(), *m_realm, *this);
+    console_object.console().set_client(*m_console_client.ptr());
 }
 
 void ConnectionFromClient::js_console_input(String const& js_source)
@@ -525,4 +526,13 @@ void ConnectionFromClient::request_file(NonnullRefPtr<Web::FileRequest>& file_re
 
     async_did_request_file(file_request->path(), id);
 }
+
+void ConnectionFromClient::set_system_visibility_state(bool visible)
+{
+    m_page_host->page().top_level_browsing_context().set_system_visibility_state(
+        visible
+            ? Web::HTML::VisibilityState::Visible
+            : Web::HTML::VisibilityState::Hidden);
+}
+
 }

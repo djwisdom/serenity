@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLDataListElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLDataListElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLDataListElement, HTMLElement);
 
-    HTMLDataListElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLDataListElement() override;
+
+private:
+    HTMLDataListElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

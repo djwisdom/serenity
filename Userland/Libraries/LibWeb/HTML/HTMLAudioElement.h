@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLAudioElement final : public HTMLMediaElement {
-public:
-    using WrapperType = Bindings::HTMLAudioElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLAudioElement, HTMLMediaElement);
 
-    HTMLAudioElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLAudioElement() override;
+
+private:
+    HTMLAudioElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

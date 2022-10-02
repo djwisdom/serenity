@@ -14,6 +14,8 @@
 #include <LibWeb/Bindings/AbortSignalPrototype.h>
 #include <LibWeb/Bindings/AbstractRangeConstructor.h>
 #include <LibWeb/Bindings/AbstractRangePrototype.h>
+#include <LibWeb/Bindings/AttrConstructor.h>
+#include <LibWeb/Bindings/AttrPrototype.h>
 #include <LibWeb/Bindings/AudioConstructor.h>
 #include <LibWeb/Bindings/BlobConstructor.h>
 #include <LibWeb/Bindings/BlobPrototype.h>
@@ -73,6 +75,8 @@
 #include <LibWeb/Bindings/DOMRectReadOnlyPrototype.h>
 #include <LibWeb/Bindings/DOMStringMapConstructor.h>
 #include <LibWeb/Bindings/DOMStringMapPrototype.h>
+#include <LibWeb/Bindings/DOMTokenListConstructor.h>
+#include <LibWeb/Bindings/DOMTokenListPrototype.h>
 #include <LibWeb/Bindings/DocumentConstructor.h>
 #include <LibWeb/Bindings/DocumentFragmentConstructor.h>
 #include <LibWeb/Bindings/DocumentFragmentPrototype.h>
@@ -262,12 +266,16 @@
 #include <LibWeb/Bindings/MessageChannelPrototype.h>
 #include <LibWeb/Bindings/MessageEventConstructor.h>
 #include <LibWeb/Bindings/MessageEventPrototype.h>
+#include <LibWeb/Bindings/MessagePortConstructor.h>
+#include <LibWeb/Bindings/MessagePortPrototype.h>
 #include <LibWeb/Bindings/MouseEventConstructor.h>
 #include <LibWeb/Bindings/MouseEventPrototype.h>
 #include <LibWeb/Bindings/MutationObserverConstructor.h>
 #include <LibWeb/Bindings/MutationObserverPrototype.h>
 #include <LibWeb/Bindings/MutationRecordConstructor.h>
 #include <LibWeb/Bindings/MutationRecordPrototype.h>
+#include <LibWeb/Bindings/NamedNodeMapConstructor.h>
+#include <LibWeb/Bindings/NamedNodeMapPrototype.h>
 #include <LibWeb/Bindings/NavigatorConstructor.h>
 #include <LibWeb/Bindings/NavigatorPrototype.h>
 #include <LibWeb/Bindings/NodeConstructor.h>
@@ -293,8 +301,16 @@
 #include <LibWeb/Bindings/PromiseRejectionEventPrototype.h>
 #include <LibWeb/Bindings/RangeConstructor.h>
 #include <LibWeb/Bindings/RangePrototype.h>
+#include <LibWeb/Bindings/ReadableStreamConstructor.h>
+#include <LibWeb/Bindings/ReadableStreamPrototype.h>
+#include <LibWeb/Bindings/RequestConstructor.h>
+#include <LibWeb/Bindings/RequestPrototype.h>
 #include <LibWeb/Bindings/ResizeObserverConstructor.h>
 #include <LibWeb/Bindings/ResizeObserverPrototype.h>
+#include <LibWeb/Bindings/ResponseConstructor.h>
+#include <LibWeb/Bindings/ResponsePrototype.h>
+#include <LibWeb/Bindings/SVGAnimatedLengthConstructor.h>
+#include <LibWeb/Bindings/SVGAnimatedLengthPrototype.h>
 #include <LibWeb/Bindings/SVGCircleElementConstructor.h>
 #include <LibWeb/Bindings/SVGCircleElementPrototype.h>
 #include <LibWeb/Bindings/SVGClipPathElementConstructor.h>
@@ -309,6 +325,8 @@
 #include <LibWeb/Bindings/SVGGeometryElementPrototype.h>
 #include <LibWeb/Bindings/SVGGraphicsElementConstructor.h>
 #include <LibWeb/Bindings/SVGGraphicsElementPrototype.h>
+#include <LibWeb/Bindings/SVGLengthConstructor.h>
+#include <LibWeb/Bindings/SVGLengthPrototype.h>
 #include <LibWeb/Bindings/SVGLineElementConstructor.h>
 #include <LibWeb/Bindings/SVGLineElementPrototype.h>
 #include <LibWeb/Bindings/SVGPathElementConstructor.h>
@@ -376,10 +394,11 @@
 
 #define ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(interface_name, constructor_name, prototype_name)                                \
     {                                                                                                                                \
-        auto& constructor = ensure_web_constructor<constructor_name>(#interface_name);                                               \
-        constructor.define_direct_property(vm.names.name, js_string(vm, #interface_name), JS::Attribute::Configurable);              \
-        auto& prototype = ensure_web_prototype<prototype_name>(#interface_name);                                                     \
+        auto& prototype = Bindings::ensure_web_prototype<Bindings::prototype_name>(realm, #interface_name);                          \
+        auto& constructor = Bindings::ensure_web_constructor<Bindings::constructor_name>(realm, #interface_name);                    \
+        define_direct_property(#interface_name, &constructor, JS::Attribute::Writable | JS::Attribute::Configurable);                \
         prototype.define_direct_property(vm.names.constructor, &constructor, JS::Attribute::Writable | JS::Attribute::Configurable); \
+        constructor.define_direct_property(vm.names.name, js_string(vm, #interface_name), JS::Attribute::Configurable);              \
     }
 
 #define ADD_WINDOW_OBJECT_INTERFACE(interface_name) \
@@ -387,9 +406,11 @@
 
 #define ADD_WINDOW_OBJECT_INTERFACES                                                                \
     auto& vm = this->vm();                                                                          \
+    auto& realm = this->realm();                                                                    \
     ADD_WINDOW_OBJECT_INTERFACE(AbortController)                                                    \
     ADD_WINDOW_OBJECT_INTERFACE(AbortSignal)                                                        \
     ADD_WINDOW_OBJECT_INTERFACE(AbstractRange)                                                      \
+    ADD_WINDOW_OBJECT_INTERFACE(Attr)                                                               \
     ADD_WINDOW_OBJECT_INTERFACE(Blob)                                                               \
     ADD_WINDOW_OBJECT_INTERFACE(CDATASection)                                                       \
     ADD_WINDOW_OBJECT_INTERFACE(CSSConditionRule)                                                   \
@@ -422,6 +443,7 @@
     ADD_WINDOW_OBJECT_INTERFACE(DOMRectList)                                                        \
     ADD_WINDOW_OBJECT_INTERFACE(DOMRectReadOnly)                                                    \
     ADD_WINDOW_OBJECT_INTERFACE(DOMStringMap)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMTokenList)                                                       \
     ADD_WINDOW_OBJECT_INTERFACE(Element)                                                            \
     ADD_WINDOW_OBJECT_INTERFACE(ErrorEvent)                                                         \
     ADD_WINDOW_OBJECT_INTERFACE(Event)                                                              \
@@ -512,9 +534,11 @@
     ADD_WINDOW_OBJECT_INTERFACE(MediaList)                                                          \
     ADD_WINDOW_OBJECT_INTERFACE(MessageChannel)                                                     \
     ADD_WINDOW_OBJECT_INTERFACE(MessageEvent)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(MessagePort)                                                        \
     ADD_WINDOW_OBJECT_INTERFACE(MouseEvent)                                                         \
     ADD_WINDOW_OBJECT_INTERFACE(MutationObserver)                                                   \
     ADD_WINDOW_OBJECT_INTERFACE(MutationRecord)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(NamedNodeMap)                                                       \
     ADD_WINDOW_OBJECT_INTERFACE(Navigator)                                                          \
     ADD_WINDOW_OBJECT_INTERFACE(Node)                                                               \
     ADD_WINDOW_OBJECT_INTERFACE(NodeIterator)                                                       \
@@ -527,7 +551,10 @@
     ADD_WINDOW_OBJECT_INTERFACE(ProgressEvent)                                                      \
     ADD_WINDOW_OBJECT_INTERFACE(PromiseRejectionEvent)                                              \
     ADD_WINDOW_OBJECT_INTERFACE(Range)                                                              \
+    ADD_WINDOW_OBJECT_INTERFACE(ReadableStream)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(Request)                                                            \
     ADD_WINDOW_OBJECT_INTERFACE(ResizeObserver)                                                     \
+    ADD_WINDOW_OBJECT_INTERFACE(Response)                                                           \
     ADD_WINDOW_OBJECT_INTERFACE(Screen)                                                             \
     ADD_WINDOW_OBJECT_INTERFACE(Selection)                                                          \
     ADD_WINDOW_OBJECT_INTERFACE(ShadowRoot)                                                         \
@@ -537,6 +564,7 @@
     ADD_WINDOW_OBJECT_INTERFACE(StyleSheetList)                                                     \
     ADD_WINDOW_OBJECT_INTERFACE(SubmitEvent)                                                        \
     ADD_WINDOW_OBJECT_INTERFACE(SubtleCrypto)                                                       \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGAnimatedLength)                                                  \
     ADD_WINDOW_OBJECT_INTERFACE(SVGElement)                                                         \
     ADD_WINDOW_OBJECT_INTERFACE(SVGCircleElement)                                                   \
     ADD_WINDOW_OBJECT_INTERFACE(SVGClipPathElement)                                                 \
@@ -544,6 +572,7 @@
     ADD_WINDOW_OBJECT_INTERFACE(SVGEllipseElement)                                                  \
     ADD_WINDOW_OBJECT_INTERFACE(SVGGeometryElement)                                                 \
     ADD_WINDOW_OBJECT_INTERFACE(SVGGraphicsElement)                                                 \
+    ADD_WINDOW_OBJECT_INTERFACE(SVGLength)                                                          \
     ADD_WINDOW_OBJECT_INTERFACE(SVGLineElement)                                                     \
     ADD_WINDOW_OBJECT_INTERFACE(SVGPathElement)                                                     \
     ADD_WINDOW_OBJECT_INTERFACE(SVGPolygonElement)                                                  \

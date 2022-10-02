@@ -68,6 +68,7 @@ private:
     virtual void set_has_focus(bool) override;
     virtual void set_is_scripting_enabled(bool) override;
     virtual void handle_file_return(i32 error, Optional<IPC::File> const& file, i32 request_id) override;
+    virtual void set_system_visibility_state(bool visible) override;
 
     virtual void js_console_input(String const&) override;
     virtual void run_javascript(String const&) override;
@@ -92,7 +93,7 @@ private:
 
     HashMap<i32, NonnullRefPtr<Gfx::Bitmap>> m_backing_stores;
 
-    WeakPtr<JS::Interpreter> m_interpreter;
+    WeakPtr<JS::Realm> m_realm;
     OwnPtr<WebContentConsoleClient> m_console_client;
     JS::Handle<JS::GlobalObject> m_console_global_object;
 

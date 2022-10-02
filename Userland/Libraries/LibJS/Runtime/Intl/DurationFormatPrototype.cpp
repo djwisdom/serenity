@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, Idan Horowitz <idan.horowitz@serenityos.org>
+ * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,14 +12,14 @@
 namespace JS::Intl {
 
 // 1.4 Properties of the Intl.DurationFormat Prototype Object, https://tc39.es/proposal-intl-duration-format/#sec-properties-of-intl-durationformat-prototype-object
-DurationFormatPrototype::DurationFormatPrototype(GlobalObject& global_object)
-    : PrototypeObject(*global_object.object_prototype())
+DurationFormatPrototype::DurationFormatPrototype(Realm& realm)
+    : PrototypeObject(*realm.intrinsics().object_prototype())
 {
 }
 
-void DurationFormatPrototype::initialize(GlobalObject& global_object)
+void DurationFormatPrototype::initialize(Realm& realm)
 {
-    Object::initialize(global_object);
+    Object::initialize(realm);
 
     auto& vm = this->vm();
 
@@ -26,9 +27,9 @@ void DurationFormatPrototype::initialize(GlobalObject& global_object)
     define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Intl.DurationFormat"), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_native_function(vm.names.format, format, 1, attr);
-    define_native_function(vm.names.formatToParts, format_to_parts, 1, attr);
-    define_native_function(vm.names.resolvedOptions, resolved_options, 0, attr);
+    define_native_function(realm, vm.names.format, format, 1, attr);
+    define_native_function(realm, vm.names.formatToParts, format_to_parts, 1, attr);
+    define_native_function(realm, vm.names.resolvedOptions, resolved_options, 0, attr);
 }
 
 // 1.4.3 Intl.DurationFormat.prototype.format ( duration ), https://tc39.es/proposal-intl-duration-format/#sec-Intl.DurationFormat.prototype.format
@@ -36,23 +37,23 @@ JS_DEFINE_NATIVE_FUNCTION(DurationFormatPrototype::format)
 {
     // 1. Let df be this value.
     // 2. Perform ? RequireInternalSlot(df, [[InitializedDurationFormat]]).
-    auto* duration_format = TRY(typed_this_object(global_object));
+    auto* duration_format = TRY(typed_this_object(vm));
 
     // 3. Let record be ? ToDurationRecord(duration).
-    auto record = TRY(to_duration_record(global_object, vm.argument(0)));
+    auto record = TRY(to_duration_record(vm, vm.argument(0)));
 
     // 4. If IsValidDurationRecord(record) is false, throw a RangeError exception.
     if (!is_valid_duration_record(record))
-        return vm.throw_completion<RangeError>(global_object, ErrorType::TemporalInvalidDurationLikeObject);
+        return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidDurationLikeObject);
 
-    // 5. Let formatted be ? PartitionDurationFormatPattern(df, record).
-    auto formatted = TRY(partition_duration_format_pattern(global_object, *duration_format, record));
+    // 5. Let parts be ! PartitionDurationFormatPattern(df, record).
+    auto parts = partition_duration_format_pattern(vm, *duration_format, record);
 
     // 6. Let result be a new empty String.
     StringBuilder result;
 
-    // 7. For each element part in formatted, in List order, do
-    for (auto const& part : formatted) {
+    // 7. For each Record { [[Type]], [[Value]] } part in parts, do
+    for (auto const& part : parts) {
         // a. Set result to the string-concatenation of result and part.[[Value]].
         result.append(part.value);
     }
@@ -64,30 +65,32 @@ JS_DEFINE_NATIVE_FUNCTION(DurationFormatPrototype::format)
 // 1.4.4 Intl.DurationFormat.prototype.formatToParts ( duration ), https://tc39.es/proposal-intl-duration-format/#sec-Intl.DurationFormat.prototype.formatToParts
 JS_DEFINE_NATIVE_FUNCTION(DurationFormatPrototype::format_to_parts)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let df be this value.
     // 2. Perform ? RequireInternalSlot(df, [[InitializedDurationFormat]]).
-    auto* duration_format = TRY(typed_this_object(global_object));
+    auto* duration_format = TRY(typed_this_object(vm));
 
     // 3. Let record be ? ToDurationRecord(duration).
-    auto record = TRY(to_duration_record(global_object, vm.argument(0)));
+    auto record = TRY(to_duration_record(vm, vm.argument(0)));
 
     // 4. If IsValidDurationRecord(record) is false, throw a RangeError exception.
     if (!is_valid_duration_record(record))
-        return vm.throw_completion<RangeError>(global_object, ErrorType::TemporalInvalidDurationLikeObject);
+        return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidDurationLikeObject);
 
-    // 5. Let formatted be ? PartitionDurationFormatPattern(df, record).
-    auto formatted = TRY(partition_duration_format_pattern(global_object, *duration_format, record));
+    // 5. Let parts be ! PartitionDurationFormatPattern(df, record).
+    auto parts = partition_duration_format_pattern(vm, *duration_format, record);
 
     // 6. Let result be ! ArrayCreate(0).
-    auto* result = MUST(Array::create(global_object, 0));
+    auto* result = MUST(Array::create(realm, 0));
 
     // 7. Let n be 0.
-    // 8. For each element part in formatted, in List order, do
-    for (size_t n = 0; n < formatted.size(); ++n) {
-        auto const& part = formatted[n];
+    // 8. For each { [[Type]], [[Value]] } part in parts, do
+    for (size_t n = 0; n < parts.size(); ++n) {
+        auto const& part = parts[n];
 
         // a. Let obj be ! OrdinaryObjectCreate(%ObjectPrototype%).
-        auto* object = Object::create(global_object, global_object.object_prototype());
+        auto* object = Object::create(realm, realm.intrinsics().object_prototype());
 
         // b. Perform ! CreateDataPropertyOrThrow(obj, "type", part.[[Type]]).
         MUST(object->create_data_property_or_throw(vm.names.type, js_string(vm, part.type)));
@@ -108,12 +111,14 @@ JS_DEFINE_NATIVE_FUNCTION(DurationFormatPrototype::format_to_parts)
 // 1.4.5 Intl.DurationFormat.prototype.resolvedOptions ( ), https://tc39.es/proposal-intl-duration-format/#sec-Intl.DurationFormat.prototype.resolvedOptions
 JS_DEFINE_NATIVE_FUNCTION(DurationFormatPrototype::resolved_options)
 {
+    auto& realm = *vm.current_realm();
+
     // 1. Let df be the this value.
     // 2. Perform ? RequireInternalSlot(df, [[InitializedDurationFormat]]).
-    auto* duration_format = TRY(typed_this_object(global_object));
+    auto* duration_format = TRY(typed_this_object(vm));
 
     // 3. Let options be ! OrdinaryObjectCreate(%Object.prototype%).
-    auto* options = Object::create(global_object, global_object.object_prototype());
+    auto* options = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 4. For each row of Table 2, except the header row, in table order, do
     //     a. Let p be the Property value of the current row.

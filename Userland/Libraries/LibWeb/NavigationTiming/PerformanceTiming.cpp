@@ -9,10 +9,18 @@
 namespace Web::NavigationTiming {
 
 PerformanceTiming::PerformanceTiming(HTML::Window& window)
-    : RefCountForwarder(window)
+    : PlatformObject(window.realm())
+    , m_window(window)
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "PerformanceTiming"));
 }
 
 PerformanceTiming::~PerformanceTiming() = default;
+
+void PerformanceTiming::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_window.ptr());
+}
 
 }

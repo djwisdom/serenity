@@ -44,14 +44,12 @@ endpoint WindowServer
         Gfx::IntRect rect,
         bool auto_position,
         bool has_alpha_channel,
-        bool modal,
         bool minimizable,
         bool closeable,
         bool resizable,
         bool fullscreen,
         bool frameless,
         bool forced_shadow,
-        bool accessory,
         float opacity,
         float alpha_hit_threshold,
         Gfx::IntSize base_size,
@@ -59,6 +57,7 @@ endpoint WindowServer
         Gfx::IntSize minimum_size,
         Optional<Gfx::IntSize> resize_aspect_ratio,
         i32 type,
+        i32 mode,
         [UTF8] String title,
         i32 parent_window_id,
         Gfx::IntRect launch_origin_rect) =|
@@ -101,7 +100,7 @@ endpoint WindowServer
     set_fullscreen(i32 window_id, bool fullscreen) =|
     set_frameless(i32 window_id, bool frameless) =|
     set_forced_shadow(i32 window_id, bool shadow) =|
-    popup_menu(i32 menu_id, Gfx::IntPoint screen_position) =|
+    popup_menu(i32 menu_id, Gfx::IntPoint screen_position, Gfx::IntRect button_rect) =|
     dismiss_menu(i32 menu_id) =|
 
     set_wallpaper(Gfx::ShareableBitmap wallpaper_bitmap) => (bool success)
@@ -124,6 +123,7 @@ endpoint WindowServer
     set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap cursor) =|
 
     start_drag([UTF8] String text, HashMap<String,ByteBuffer> mime_data, Gfx::ShareableBitmap drag_bitmap) => (bool started)
+    set_accepts_drag(bool accepts) =|
 
     set_system_theme(String theme_path, [UTF8] String theme_name, bool keep_desktop_background) => (bool success)
     get_system_theme() => ([UTF8] String theme_name)

@@ -8,51 +8,32 @@
 
 #include <AK/Forward.h>
 #include <AK/NonnullRefPtr.h>
-#include <AK/RefCounted.h>
 #include <LibJS/Forward.h>
 #include <LibTextCodec/Decoder.h>
-#include <LibWeb/Bindings/Wrappable.h>
-#include <LibWeb/DOM/ExceptionOr.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::Encoding {
 
 // https://encoding.spec.whatwg.org/#textdecoder
-class TextDecoder
-    : public RefCounted<TextDecoder>
-    , public Bindings::Wrappable {
+class TextDecoder : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(TextDecoder, Bindings::PlatformObject);
+
 public:
-    using WrapperType = Bindings::TextDecoderWrapper;
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<TextDecoder>> construct_impl(JS::Realm&, FlyString encoding);
 
-    static DOM::ExceptionOr<NonnullRefPtr<TextDecoder>> create(FlyString encoding)
-    {
-        auto decoder = TextCodec::decoder_for(encoding);
-        if (!decoder)
-            return DOM::SimpleException { DOM::SimpleExceptionType::TypeError, String::formatted("Invalid encoding {}", encoding) };
+    virtual ~TextDecoder() override;
 
-        return adopt_ref(*new TextDecoder(*decoder, move(encoding), false, false));
-    }
-
-    static DOM::ExceptionOr<NonnullRefPtr<TextDecoder>> create_with_global_object(Bindings::WindowObject&, FlyString label)
-    {
-        return TextDecoder::create(move(label));
-    }
-
-    DOM::ExceptionOr<String> decode(JS::Handle<JS::Object> const&) const;
+    WebIDL::ExceptionOr<String> decode(JS::Handle<JS::Object> const&) const;
 
     FlyString const& encoding() const { return m_encoding; }
     bool fatal() const { return m_fatal; }
     bool ignore_bom() const { return m_ignore_bom; };
 
-protected:
+private:
     // https://encoding.spec.whatwg.org/#dom-textdecoder
-    TextDecoder(TextCodec::Decoder& decoder, FlyString encoding, bool fatal, bool ignore_bom)
-        : m_decoder(decoder)
-        , m_encoding(move(encoding))
-        , m_fatal(fatal)
-        , m_ignore_bom(ignore_bom)
-    {
-    }
+    TextDecoder(JS::Realm&, TextCodec::Decoder&, FlyString encoding, bool fatal, bool ignore_bom);
 
     TextCodec::Decoder& m_decoder;
     FlyString m_encoding;

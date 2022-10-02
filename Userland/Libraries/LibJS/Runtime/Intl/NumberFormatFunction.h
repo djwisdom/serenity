@@ -16,15 +16,16 @@ class NumberFormatFunction final : public NativeFunction {
     JS_OBJECT(NumberFormatFunction, NativeFunction);
 
 public:
-    static NumberFormatFunction* create(GlobalObject&, NumberFormat&);
+    static NumberFormatFunction* create(Realm&, NumberFormat&);
 
-    explicit NumberFormatFunction(NumberFormat&, Object& prototype);
     virtual ~NumberFormatFunction() override = default;
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
 
     virtual ThrowCompletionOr<Value> call() override;
 
 private:
+    explicit NumberFormatFunction(NumberFormat&, Object& prototype);
+
     virtual void visit_edges(Visitor&) override;
 
     NumberFormat& m_number_format; // [[NumberFormat]]

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021, Jakob-Niklas See <git@nwex.de>
+ * Copyright (c) 2021, networkException <networkexception@serenityos.org>
  * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -232,6 +232,12 @@ bool ConfigFile::has_key(String const& group, String const& key) const
 bool ConfigFile::has_group(String const& group) const
 {
     return m_groups.contains(group);
+}
+
+void ConfigFile::add_group(String const& group)
+{
+    m_groups.ensure(group);
+    m_dirty = true;
 }
 
 void ConfigFile::remove_group(String const& group)

@@ -418,6 +418,13 @@ void FileSystemModel::handle_file_event(Core::FileWatcherEvent const& event)
             break;
         }
 
+        if (&child.value() == m_root) {
+            // Root directory of the filesystem model has been removed. All items became invalid.
+            invalidate();
+            on_root_path_removed();
+            break;
+        }
+
         auto index = child->index(0);
         begin_delete_rows(index.parent(), index.row(), index.row());
 
@@ -607,6 +614,11 @@ Icon FileSystemModel::icon_for(Node const& node) const
             if (node.is_selected())
                 return FileIconProvider::home_directory_open_icon();
             return FileIconProvider::home_directory_icon();
+        }
+        if (node.full_path().ends_with(".git"sv)) {
+            if (node.is_selected())
+                return FileIconProvider::git_directory_open_icon();
+            return FileIconProvider::git_directory_icon();
         }
         if (node.full_path() == Core::StandardPaths::desktop_directory())
             return FileIconProvider::desktop_directory_icon();

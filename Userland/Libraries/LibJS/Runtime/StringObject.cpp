@@ -15,9 +15,9 @@
 namespace JS {
 
 // 10.4.3.4 StringCreate ( value, prototype ), https://tc39.es/ecma262/#sec-stringcreate
-StringObject* StringObject::create(GlobalObject& global_object, PrimitiveString& primitive_string, Object& prototype)
+StringObject* StringObject::create(Realm& realm, PrimitiveString& primitive_string, Object& prototype)
 {
-    return global_object.heap().allocate<StringObject>(global_object, primitive_string, prototype);
+    return realm.heap().allocate<StringObject>(realm, primitive_string, prototype);
 }
 
 StringObject::StringObject(PrimitiveString& string, Object& prototype)
@@ -26,10 +26,10 @@ StringObject::StringObject(PrimitiveString& string, Object& prototype)
 {
 }
 
-void StringObject::initialize(GlobalObject& global_object)
+void StringObject::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(global_object);
+    Object::initialize(realm);
     define_direct_property(vm.names.length, Value(m_string.utf16_string_view().length_in_code_units()), 0);
 }
 

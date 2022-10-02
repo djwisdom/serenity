@@ -37,6 +37,9 @@ public:
     /// Tries to fill the entire buffer through reading. Returns whether the
     /// buffer was filled without an error.
     virtual bool read_or_error(Bytes);
+    /// Reads the stream until EOF, storing the contents into a ByteBuffer which
+    /// is returned once EOF is encountered. The block size determines the size
+    /// of newly allocated chunks while reading.
     virtual ErrorOr<ByteBuffer> read_all(size_t block_size = 4096);
 
     virtual bool is_writable() const { return false; }
@@ -64,7 +67,12 @@ public:
     }
 
 protected:
-    ErrorOr<ByteBuffer> read_all_impl(size_t block_size, size_t file_size = 0);
+    /// Provides a default implementation of read_all that works for streams
+    /// that behave like POSIX file descriptors. expected_file_size can be
+    /// passed as a heuristic for what the Stream subclass expects the file
+    /// content size to be in order to reduce allocations (does not affect
+    /// actual reading).
+    ErrorOr<ByteBuffer> read_all_impl(size_t block_size, size_t expected_file_size = 0);
 };
 
 enum class SeekMode {
@@ -184,6 +192,8 @@ public:
     static ErrorOr<NonnullOwnPtr<File>> open(StringView filename, OpenMode, mode_t = 0644);
     static ErrorOr<NonnullOwnPtr<File>> adopt_fd(int fd, OpenMode);
     static bool exists(StringView filename);
+
+    static ErrorOr<NonnullOwnPtr<File>> open_file_or_standard_stream(StringView filename, OpenMode mode);
 
     File(File&& other) { operator=(move(other)); }
 

@@ -6,39 +6,50 @@
 
 #pragma once
 
-#include <AK/NonnullRefPtrVector.h>
 #include <LibWeb/DOM/Node.h>
 
 namespace Web::DOM {
 
 class ParentNode : public Node {
+    WEB_PLATFORM_OBJECT(ParentNode, Node);
+
 public:
     template<typename F>
     void for_each_child(F) const;
     template<typename F>
     void for_each_child(F);
 
-    RefPtr<Element> first_element_child();
-    RefPtr<Element> last_element_child();
+    JS::GCPtr<Element> first_element_child();
+    JS::GCPtr<Element> last_element_child();
     u32 child_element_count() const;
 
-    ExceptionOr<RefPtr<Element>> query_selector(StringView);
-    ExceptionOr<NonnullRefPtr<NodeList>> query_selector_all(StringView);
+    WebIDL::ExceptionOr<JS::GCPtr<Element>> query_selector(StringView);
+    WebIDL::ExceptionOr<JS::NonnullGCPtr<NodeList>> query_selector_all(StringView);
 
-    NonnullRefPtr<HTMLCollection> children();
+    JS::NonnullGCPtr<HTMLCollection> children();
 
-    NonnullRefPtr<HTMLCollection> get_elements_by_tag_name(FlyString const&);
-    NonnullRefPtr<HTMLCollection> get_elements_by_tag_name_ns(FlyString const&, FlyString const&);
+    JS::NonnullGCPtr<HTMLCollection> get_elements_by_tag_name(FlyString const&);
+    JS::NonnullGCPtr<HTMLCollection> get_elements_by_tag_name_ns(FlyString const&, FlyString const&);
 
-    ExceptionOr<void> prepend(Vector<Variant<NonnullRefPtr<Node>, String>> const& nodes);
-    ExceptionOr<void> append(Vector<Variant<NonnullRefPtr<Node>, String>> const& nodes);
-    ExceptionOr<void> replace_children(Vector<Variant<NonnullRefPtr<Node>, String>> const& nodes);
+    WebIDL::ExceptionOr<void> prepend(Vector<Variant<JS::Handle<Node>, String>> const& nodes);
+    WebIDL::ExceptionOr<void> append(Vector<Variant<JS::Handle<Node>, String>> const& nodes);
+    WebIDL::ExceptionOr<void> replace_children(Vector<Variant<JS::Handle<Node>, String>> const& nodes);
 
 protected:
+    ParentNode(JS::Realm& realm, Document& document, NodeType type)
+        : Node(realm, document, type)
+    {
+    }
+
     ParentNode(Document& document, NodeType type)
         : Node(document, type)
     {
     }
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+private:
+    JS::GCPtr<HTMLCollection> m_children;
 };
 
 template<>

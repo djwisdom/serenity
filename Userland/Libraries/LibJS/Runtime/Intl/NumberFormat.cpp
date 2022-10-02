@@ -94,13 +94,13 @@ StringView NumberFormat::resolve_currency_display()
         m_resolved_currency_display = currency();
         break;
     case NumberFormat::CurrencyDisplay::Symbol:
-        m_resolved_currency_display = Unicode::get_locale_short_currency_mapping(data_locale(), currency());
+        m_resolved_currency_display = ::Locale::get_locale_short_currency_mapping(data_locale(), currency());
         break;
     case NumberFormat::CurrencyDisplay::NarrowSymbol:
-        m_resolved_currency_display = Unicode::get_locale_narrow_currency_mapping(data_locale(), currency());
+        m_resolved_currency_display = ::Locale::get_locale_narrow_currency_mapping(data_locale(), currency());
         break;
     case NumberFormat::CurrencyDisplay::Name:
-        m_resolved_currency_display = Unicode::get_locale_numeric_currency_mapping(data_locale(), currency());
+        m_resolved_currency_display = ::Locale::get_locale_numeric_currency_mapping(data_locale(), currency());
         break;
     default:
         VERIFY_NOT_REACHED();
@@ -242,10 +242,8 @@ void NumberFormatBase::set_trailing_zero_display(StringView trailing_zero_displa
         VERIFY_NOT_REACHED();
 }
 
-Value NumberFormat::use_grouping_to_value(GlobalObject& global_object) const
+Value NumberFormat::use_grouping_to_value(VM& vm) const
 {
-    auto& vm = global_object.vm();
-
     switch (m_use_grouping) {
     case UseGrouping::Always:
         return js_string(vm, "always"sv);
@@ -519,7 +517,7 @@ FormatResult format_numeric_to_string(NumberFormatBase const& intl_object, Mathe
 
 // 15.5.4 PartitionNumberPattern ( numberFormat, x ), https://tc39.es/ecma402/#sec-partitionnumberpattern
 // 1.1.6 PartitionNumberPattern ( numberFormat, x ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-partitionnumberpattern
-Vector<PatternPartition> partition_number_pattern(GlobalObject& global_object, NumberFormat& number_format, MathematicalValue number)
+Vector<PatternPartition> partition_number_pattern(VM& vm, NumberFormat& number_format, MathematicalValue number)
 {
     // 1. Let exponent be 0.
     int exponent = 0;
@@ -529,19 +527,19 @@ Vector<PatternPartition> partition_number_pattern(GlobalObject& global_object, N
     // 2. If x is not-a-number, then
     if (number.is_nan()) {
         // a. Let n be an implementation- and locale-dependent (ILD) String value indicating the NaN value.
-        formatted_string = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::NaN).value_or("NaN"sv);
+        formatted_string = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::NaN).value_or("NaN"sv);
     }
     // 3. Else if x is positive-infinity, then
     else if (number.is_positive_infinity()) {
         // a. Let n be an ILD String value indicating positive infinity.
-        formatted_string = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::Infinity).value_or("infinity"sv);
+        formatted_string = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::Infinity).value_or("infinity"sv);
     }
     // 4. Else if x is negative-infinity, then
     else if (number.is_negative_infinity()) {
         // a. Let n be an ILD String value indicating negative infinity.
         // NOTE: The CLDR does not contain unique strings for negative infinity. The negative sign will
         //       be inserted by the pattern returned from GetNumberFormatPattern.
-        formatted_string = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::Infinity).value_or("infinity"sv);
+        formatted_string = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::Infinity).value_or("infinity"sv);
     }
     // 5. Else,
     else {
@@ -571,10 +569,10 @@ Vector<PatternPartition> partition_number_pattern(GlobalObject& global_object, N
         number = move(format_number_result.rounded_number);
     }
 
-    Unicode::NumberFormat found_pattern {};
+    ::Locale::NumberFormat found_pattern {};
 
     // 6. Let pattern be GetNumberFormatPattern(numberFormat, x).
-    auto pattern = get_number_format_pattern(global_object, number_format, number, found_pattern);
+    auto pattern = get_number_format_pattern(vm, number_format, number, found_pattern);
     if (!pattern.has_value())
         return {};
 
@@ -606,7 +604,7 @@ Vector<PatternPartition> partition_number_pattern(GlobalObject& global_object, N
         // d. Else if p is equal to "plusSign", then
         else if (part == "plusSign"sv) {
             // i. Let plusSignSymbol be the ILND String representing the plus sign.
-            auto plus_sign_symbol = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::PlusSign).value_or("+"sv);
+            auto plus_sign_symbol = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::PlusSign).value_or("+"sv);
             // ii. Append a new Record { [[Type]]: "plusSign", [[Value]]: plusSignSymbol } as the last element of result.
             result.append({ "plusSign"sv, plus_sign_symbol });
         }
@@ -614,7 +612,7 @@ Vector<PatternPartition> partition_number_pattern(GlobalObject& global_object, N
         // e. Else if p is equal to "minusSign", then
         else if (part == "minusSign"sv) {
             // i. Let minusSignSymbol be the ILND String representing the minus sign.
-            auto minus_sign_symbol = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::MinusSign).value_or("-"sv);
+            auto minus_sign_symbol = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::MinusSign).value_or("-"sv);
             // ii. Append a new Record { [[Type]]: "minusSign", [[Value]]: minusSignSymbol } as the last element of result.
             result.append({ "minusSign"sv, minus_sign_symbol });
         }
@@ -622,7 +620,7 @@ Vector<PatternPartition> partition_number_pattern(GlobalObject& global_object, N
         // f. Else if p is equal to "percentSign" and numberFormat.[[Style]] is "percent", then
         else if ((part == "percentSign"sv) && (number_format.style() == NumberFormat::Style::Percent)) {
             // i. Let percentSignSymbol be the ILND String representing the percent sign.
-            auto percent_sign_symbol = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::PercentSign).value_or("%"sv);
+            auto percent_sign_symbol = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::PercentSign).value_or("%"sv);
             // ii. Append a new Record { [[Type]]: "percentSign", [[Value]]: percentSignSymbol } as the last element of result.
             result.append({ "percentSign"sv, percent_sign_symbol });
         }
@@ -669,7 +667,7 @@ Vector<PatternPartition> partition_number_pattern(GlobalObject& global_object, N
     return result;
 }
 
-static Vector<StringView> separate_integer_into_groups(Unicode::NumberGroupings const& grouping_sizes, StringView integer, NumberFormat::UseGrouping use_grouping)
+static Vector<StringView> separate_integer_into_groups(::Locale::NumberGroupings const& grouping_sizes, StringView integer, NumberFormat::UseGrouping use_grouping)
 {
     Utf8View utf8_integer { integer };
     if (utf8_integer.length() <= grouping_sizes.primary_grouping_size)
@@ -721,7 +719,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
     // 1. Let result be a new empty List.
     Vector<PatternPartition> result;
 
-    auto grouping_sizes = Unicode::get_number_system_groupings(number_format.data_locale(), number_format.numbering_system());
+    auto grouping_sizes = ::Locale::get_number_system_groupings(number_format.data_locale(), number_format.numbering_system());
     if (!grouping_sizes.has_value())
         return {};
 
@@ -761,7 +759,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
                 //     a. Let digits be a List whose 10 String valued elements are the UTF-16 string representations of the 10 digits specified in the "Digits" column of the matching row in Table 12.
                 //     b. Replace each digit in n with the value of digits[digit].
                 // 2. Else use an implementation dependent algorithm to map n to the appropriate representation of n in the given numbering system.
-                formatted_string = Unicode::replace_digits_for_number_system(number_format.numbering_system(), formatted_string);
+                formatted_string = ::Locale::replace_digits_for_number_system(number_format.numbering_system(), formatted_string);
 
                 // 3. Let decimalSepIndex be StringIndexOf(n, ".", 0).
                 auto decimal_sep_index = formatted_string.find('.');
@@ -791,7 +789,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
                 // 7. Else,
                 else {
                     // a. Let groupSepSymbol be the implementation-, locale-, and numbering system-dependent (ILND) String representing the grouping separator.
-                    auto group_sep_symbol = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::Group).value_or(","sv);
+                    auto group_sep_symbol = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::Group).value_or(","sv);
 
                     // b. Let groups be a List whose elements are, in left to right order, the substrings defined by ILND set of locations within the integer, which may depend on the value of numberFormat.[[UseGrouping]].
                     auto groups = separate_integer_into_groups(*grouping_sizes, integer, number_format.use_grouping());
@@ -818,7 +816,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
                 // 8. If fraction is not undefined, then
                 if (fraction.has_value()) {
                     // a. Let decimalSepSymbol be the ILND String representing the decimal separator.
-                    auto decimal_sep_symbol = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::Decimal).value_or("."sv);
+                    auto decimal_sep_symbol = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::Decimal).value_or("."sv);
                     // b. Append a new Record { [[Type]]: "decimal", [[Value]]: decimalSepSymbol } as the last element of result.
                     result.append({ "decimal"sv, decimal_sep_symbol });
                     // c. Append a new Record { [[Type]]: "fraction", [[Value]]: fraction } as the last element of result.
@@ -842,7 +840,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
             // vi. Else if p is equal to "scientificSeparator", then
             else if (part == "scientificSeparator"sv) {
                 // 1. Let scientificSeparator be the ILND String representing the exponent separator.
-                auto scientific_separator = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::Exponential).value_or("E"sv);
+                auto scientific_separator = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::Exponential).value_or("E"sv);
                 // 2. Append a new Record { [[Type]]: "exponentSeparator", [[Value]]: scientificSeparator } as the last element of result.
                 result.append({ "exponentSeparator"sv, scientific_separator });
             }
@@ -851,7 +849,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
                 // 1. If exponent < 0, then
                 if (exponent < 0) {
                     // a. Let minusSignSymbol be the ILND String representing the minus sign.
-                    auto minus_sign_symbol = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::MinusSign).value_or("-"sv);
+                    auto minus_sign_symbol = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::MinusSign).value_or("-"sv);
 
                     // b. Append a new Record { [[Type]]: "exponentMinusSign", [[Value]]: minusSignSymbol } as the last element of result.
                     result.append({ "exponentMinusSign"sv, minus_sign_symbol });
@@ -866,7 +864,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
 
                 // FIXME: The spec does not say to do this, but all of major engines perform this replacement.
                 //        Without this, formatting with non-Latin numbering systems will produce non-localized results.
-                exponent_result.formatted_string = Unicode::replace_digits_for_number_system(number_format.numbering_system(), exponent_result.formatted_string);
+                exponent_result.formatted_string = ::Locale::replace_digits_for_number_system(number_format.numbering_system(), exponent_result.formatted_string);
 
                 // 3. Append a new Record { [[Type]]: "exponentInteger", [[Value]]: exponentResult.[[FormattedString]] } as the last element of result.
                 result.append({ "exponentInteger"sv, move(exponent_result.formatted_string) });
@@ -887,11 +885,11 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
 }
 
 // 15.5.6 FormatNumeric ( numberFormat, x ), https://tc39.es/ecma402/#sec-formatnumber
-String format_numeric(GlobalObject& global_object, NumberFormat& number_format, MathematicalValue number)
+String format_numeric(VM& vm, NumberFormat& number_format, MathematicalValue number)
 {
     // 1. Let parts be ? PartitionNumberPattern(numberFormat, x).
     // Note: Our implementation of PartitionNumberPattern does not throw.
-    auto parts = partition_number_pattern(global_object, number_format, move(number));
+    auto parts = partition_number_pattern(vm, number_format, move(number));
 
     // 2. Let result be the empty String.
     StringBuilder result;
@@ -907,16 +905,16 @@ String format_numeric(GlobalObject& global_object, NumberFormat& number_format, 
 }
 
 // 15.5.7 FormatNumericToParts ( numberFormat, x ), https://tc39.es/ecma402/#sec-formatnumbertoparts
-Array* format_numeric_to_parts(GlobalObject& global_object, NumberFormat& number_format, MathematicalValue number)
+Array* format_numeric_to_parts(VM& vm, NumberFormat& number_format, MathematicalValue number)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let parts be ? PartitionNumberPattern(numberFormat, x).
     // Note: Our implementation of PartitionNumberPattern does not throw.
-    auto parts = partition_number_pattern(global_object, number_format, move(number));
+    auto parts = partition_number_pattern(vm, number_format, move(number));
 
     // 2. Let result be ! ArrayCreate(0).
-    auto* result = MUST(Array::create(global_object, 0));
+    auto* result = MUST(Array::create(realm, 0));
 
     // 3. Let n be 0.
     size_t n = 0;
@@ -924,7 +922,7 @@ Array* format_numeric_to_parts(GlobalObject& global_object, NumberFormat& number
     // 4. For each Record { [[Type]], [[Value]] } part in parts, do
     for (auto& part : parts) {
         // a. Let O be OrdinaryObjectCreate(%Object.prototype%).
-        auto* object = Object::create(global_object, global_object.object_prototype());
+        auto* object = Object::create(realm, realm.intrinsics().object_prototype());
 
         // b. Perform ! CreateDataPropertyOrThrow(O, "type", part.[[Type]]).
         MUST(object->create_data_property_or_throw(vm.names.type, js_string(vm, part.type)));
@@ -1260,21 +1258,21 @@ RawFormatResult to_raw_fixed(MathematicalValue const& number, int min_fraction, 
 
 // 15.5.11 GetNumberFormatPattern ( numberFormat, x ), https://tc39.es/ecma402/#sec-getnumberformatpattern
 // 1.1.14 GetNumberFormatPattern ( numberFormat, x ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-getnumberformatpattern
-Optional<Variant<StringView, String>> get_number_format_pattern(GlobalObject& global_object, NumberFormat& number_format, MathematicalValue const& number, Unicode::NumberFormat& found_pattern)
+Optional<Variant<StringView, String>> get_number_format_pattern(VM& vm, NumberFormat& number_format, MathematicalValue const& number, ::Locale::NumberFormat& found_pattern)
 {
     // 1. Let localeData be %NumberFormat%.[[LocaleData]].
     // 2. Let dataLocale be numberFormat.[[DataLocale]].
     // 3. Let dataLocaleData be localeData.[[<dataLocale>]].
     // 4. Let patterns be dataLocaleData.[[patterns]].
     // 5. Assert: patterns is a Record (see 15.3.3).
-    Optional<Unicode::NumberFormat> patterns;
+    Optional<::Locale::NumberFormat> patterns;
 
     // 6. Let style be numberFormat.[[Style]].
     switch (number_format.style()) {
     // 7. If style is "percent", then
     case NumberFormat::Style::Percent:
         // a. Let patterns be patterns.[[percent]].
-        patterns = Unicode::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), Unicode::StandardNumberFormatType::Percent);
+        patterns = ::Locale::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), ::Locale::StandardNumberFormatType::Percent);
         break;
 
     // 8. Else if style is "unit", then
@@ -1286,8 +1284,8 @@ Optional<Variant<StringView, String>> get_number_format_pattern(GlobalObject& gl
         //     i. Let unit be "fallback".
         // e. Let patterns be patterns.[[<unit>]].
         // f. Let patterns be patterns.[[<unitDisplay>]].
-        auto formats = Unicode::get_unit_formats(number_format.data_locale(), number_format.unit(), number_format.unit_display());
-        auto plurality = resolve_plural(number_format, Unicode::PluralForm::Cardinal, number.to_value(global_object));
+        auto formats = ::Locale::get_unit_formats(number_format.data_locale(), number_format.unit(), number_format.unit_display());
+        auto plurality = resolve_plural(number_format, ::Locale::PluralForm::Cardinal, number.to_value(vm));
 
         if (auto it = formats.find_if([&](auto& p) { return p.plurality == plurality; }); it != formats.end())
             patterns = move(*it);
@@ -1309,8 +1307,8 @@ Optional<Variant<StringView, String>> get_number_format_pattern(GlobalObject& gl
 
         // Handling of other [[CurrencyDisplay]] options will occur after [[SignDisplay]].
         if (number_format.currency_display() == NumberFormat::CurrencyDisplay::Name) {
-            auto formats = Unicode::get_compact_number_system_formats(number_format.data_locale(), number_format.numbering_system(), Unicode::CompactNumberFormatType::CurrencyUnit);
-            auto plurality = resolve_plural(number_format, Unicode::PluralForm::Cardinal, number.to_value(global_object));
+            auto formats = ::Locale::get_compact_number_system_formats(number_format.data_locale(), number_format.numbering_system(), ::Locale::CompactNumberFormatType::CurrencyUnit);
+            auto plurality = resolve_plural(number_format, ::Locale::PluralForm::Cardinal, number.to_value(vm));
 
             if (auto it = formats.find_if([&](auto& p) { return p.plurality == plurality; }); it != formats.end()) {
                 patterns = move(*it);
@@ -1320,10 +1318,10 @@ Optional<Variant<StringView, String>> get_number_format_pattern(GlobalObject& gl
 
         switch (number_format.currency_sign()) {
         case NumberFormat::CurrencySign::Standard:
-            patterns = Unicode::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), Unicode::StandardNumberFormatType::Currency);
+            patterns = ::Locale::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), ::Locale::StandardNumberFormatType::Currency);
             break;
         case NumberFormat::CurrencySign::Accounting:
-            patterns = Unicode::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), Unicode::StandardNumberFormatType::Accounting);
+            patterns = ::Locale::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), ::Locale::StandardNumberFormatType::Accounting);
             break;
         }
 
@@ -1333,7 +1331,7 @@ Optional<Variant<StringView, String>> get_number_format_pattern(GlobalObject& gl
     case NumberFormat::Style::Decimal:
         // a. Assert: style is "decimal".
         // b. Let patterns be patterns.[[decimal]].
-        patterns = Unicode::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), Unicode::StandardNumberFormatType::Decimal);
+        patterns = ::Locale::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), ::Locale::StandardNumberFormatType::Decimal);
         break;
 
     default:
@@ -1425,7 +1423,7 @@ Optional<Variant<StringView, String>> get_number_format_pattern(GlobalObject& gl
     // we might need to mutate the format pattern to inject a space between the currency display and
     // the currency number.
     if (number_format.style() == NumberFormat::Style::Currency) {
-        auto modified_pattern = Unicode::augment_currency_format_pattern(number_format.resolve_currency_display(), pattern);
+        auto modified_pattern = ::Locale::augment_currency_format_pattern(number_format.resolve_currency_display(), pattern);
         if (modified_pattern.has_value())
             return modified_pattern.release_value();
     }
@@ -1449,7 +1447,7 @@ Optional<StringView> get_notation_sub_pattern(NumberFormat& number_format, int e
     // 7. If notation is "scientific" or notation is "engineering", then
     if ((notation == NumberFormat::Notation::Scientific) || (notation == NumberFormat::Notation::Engineering)) {
         // a. Return notationSubPatterns.[[scientific]].
-        auto notation_sub_patterns = Unicode::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), Unicode::StandardNumberFormatType::Scientific);
+        auto notation_sub_patterns = ::Locale::get_standard_number_system_format(number_format.data_locale(), number_format.numbering_system(), ::Locale::StandardNumberFormatType::Scientific);
         if (!notation_sub_patterns.has_value())
             return {};
 
@@ -1549,16 +1547,16 @@ int compute_exponent_for_magnitude(NumberFormat& number_format, int magnitude)
 
         // b. Let exponent be an implementation- and locale-dependent (ILD) integer by which to scale a number of the given magnitude in compact notation for the current locale.
         // c. Return exponent.
-        Vector<Unicode::NumberFormat> format_rules;
+        Vector<::Locale::NumberFormat> format_rules;
 
         if (number_format.style() == NumberFormat::Style::Currency)
-            format_rules = Unicode::get_compact_number_system_formats(number_format.data_locale(), number_format.numbering_system(), Unicode::CompactNumberFormatType::CurrencyShort);
+            format_rules = ::Locale::get_compact_number_system_formats(number_format.data_locale(), number_format.numbering_system(), ::Locale::CompactNumberFormatType::CurrencyShort);
         else if (number_format.compact_display() == NumberFormat::CompactDisplay::Long)
-            format_rules = Unicode::get_compact_number_system_formats(number_format.data_locale(), number_format.numbering_system(), Unicode::CompactNumberFormatType::DecimalLong);
+            format_rules = ::Locale::get_compact_number_system_formats(number_format.data_locale(), number_format.numbering_system(), ::Locale::CompactNumberFormatType::DecimalLong);
         else
-            format_rules = Unicode::get_compact_number_system_formats(number_format.data_locale(), number_format.numbering_system(), Unicode::CompactNumberFormatType::DecimalShort);
+            format_rules = ::Locale::get_compact_number_system_formats(number_format.data_locale(), number_format.numbering_system(), ::Locale::CompactNumberFormatType::DecimalShort);
 
-        Unicode::NumberFormat const* best_number_format = nullptr;
+        ::Locale::NumberFormat const* best_number_format = nullptr;
 
         for (auto const& format_rule : format_rules) {
             if (format_rule.magnitude > magnitude)
@@ -1579,10 +1577,11 @@ int compute_exponent_for_magnitude(NumberFormat& number_format, int magnitude)
 }
 
 // 1.1.18 ToIntlMathematicalValue ( value ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-tointlmathematicalvalue
-ThrowCompletionOr<MathematicalValue> to_intl_mathematical_value(GlobalObject& global_object, Value value)
+ThrowCompletionOr<MathematicalValue> to_intl_mathematical_value(VM& vm, Value value)
 {
+
     // 1. Let primValue be ? ToPrimitive(value, number).
-    auto primitive_value = TRY(value.to_primitive(global_object, Value::PreferredType::Number));
+    auto primitive_value = TRY(value.to_primitive(vm, Value::PreferredType::Number));
 
     // 2. If Type(primValue) is BigInt, return the mathematical value of primValue.
     if (primitive_value.is_bigint())
@@ -1592,7 +1591,7 @@ ThrowCompletionOr<MathematicalValue> to_intl_mathematical_value(GlobalObject& gl
     //        We short-circuit some of these steps to avoid known pitfalls.
     //        See: https://github.com/tc39/proposal-intl-numberformat-v3/pull/82
     if (!primitive_value.is_string()) {
-        auto number = TRY(primitive_value.to_number(global_object));
+        auto number = TRY(primitive_value.to_number(vm));
         return number.as_double();
     }
 
@@ -1604,7 +1603,7 @@ ThrowCompletionOr<MathematicalValue> to_intl_mathematical_value(GlobalObject& gl
 
     // 5. If the grammar cannot interpret str as an expansion of StringNumericLiteral, return not-a-number.
     // 6. Let mv be the MV, a mathematical value, of ? ToNumber(str), as described in 7.1.4.1.1.
-    auto mathematical_value = TRY(primitive_value.to_number(global_object)).as_double();
+    auto mathematical_value = TRY(primitive_value.to_number(vm)).as_double();
 
     // 7. If mv is 0 and the first non white space code point in str is -, return negative-zero.
     if (mathematical_value == 0.0 && string.view().trim_whitespace(TrimMode::Left).starts_with('-'))
@@ -1719,25 +1718,23 @@ RoundingDecision apply_unsigned_rounding_mode(MathematicalValue const& x, Mathem
 }
 
 // 1.1.21 PartitionNumberRangePattern ( numberFormat, x, y ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-partitionnumberrangepattern
-ThrowCompletionOr<Vector<PatternPartitionWithSource>> partition_number_range_pattern(GlobalObject& global_object, NumberFormat& number_format, MathematicalValue start, MathematicalValue end)
+ThrowCompletionOr<Vector<PatternPartitionWithSource>> partition_number_range_pattern(VM& vm, NumberFormat& number_format, MathematicalValue start, MathematicalValue end)
 {
-    auto& vm = global_object.vm();
-
     // 1. If x is NaN or y is NaN, throw a RangeError exception.
     if (start.is_nan())
-        return vm.throw_completion<RangeError>(global_object, ErrorType::IntlNumberIsNaN, "start"sv);
+        return vm.throw_completion<RangeError>(ErrorType::IntlNumberIsNaN, "start"sv);
     if (end.is_nan())
-        return vm.throw_completion<RangeError>(global_object, ErrorType::IntlNumberIsNaN, "end"sv);
+        return vm.throw_completion<RangeError>(ErrorType::IntlNumberIsNaN, "end"sv);
 
     // 2. Let result be a new empty List.
     Vector<PatternPartitionWithSource> result;
 
     // 3. Let xResult be ? PartitionNumberPattern(numberFormat, x).
-    auto raw_start_result = partition_number_pattern(global_object, number_format, move(start));
+    auto raw_start_result = partition_number_pattern(vm, number_format, move(start));
     auto start_result = PatternPartitionWithSource::create_from_parent_list(move(raw_start_result));
 
     // 4. Let yResult be ? PartitionNumberPattern(numberFormat, y).
-    auto raw_end_result = partition_number_pattern(global_object, number_format, move(end));
+    auto raw_end_result = partition_number_pattern(vm, number_format, move(end));
     auto end_result = PatternPartitionWithSource::create_from_parent_list(move(raw_end_result));
 
     // 5. If xResult is equal to yResult, return FormatApproximately(numberFormat, xResult).
@@ -1754,8 +1751,8 @@ ThrowCompletionOr<Vector<PatternPartitionWithSource>> partition_number_range_pat
     result = move(start_result);
 
     // 8. Let rangeSeparator be an ILND String value used to separate two numbers.
-    auto range_separator_symbol = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::RangeSeparator).value_or("-"sv);
-    auto range_separator = Unicode::augment_range_pattern(range_separator_symbol, result.last().value, end_result[0].value);
+    auto range_separator_symbol = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::RangeSeparator).value_or("-"sv);
+    auto range_separator = ::Locale::augment_range_pattern(range_separator_symbol, result.last().value, end_result[0].value);
 
     // 9. Append a new Record { [[Type]]: "literal", [[Value]]: rangeSeparator, [[Source]]: "shared" } element to result.
     PatternPartitionWithSource part;
@@ -1782,7 +1779,7 @@ Vector<PatternPartitionWithSource> format_approximately(NumberFormat& number_for
 {
     // 1. Let i be an index into result, determined by an implementation-defined algorithm based on numberFormat and result.
     // 2. Let approximatelySign be an ILND String value used to signify that a number is approximate.
-    auto approximately_sign = Unicode::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), Unicode::NumericSymbol::ApproximatelySign).value_or("~"sv);
+    auto approximately_sign = ::Locale::get_number_system_symbol(number_format.data_locale(), number_format.numbering_system(), ::Locale::NumericSymbol::ApproximatelySign).value_or("~"sv);
 
     // 3. Insert a new Record { [[Type]]: "approximatelySign", [[Value]]: approximatelySign } at index i in result.
     PatternPartitionWithSource partition;
@@ -1805,10 +1802,10 @@ Vector<PatternPartitionWithSource> collapse_number_range(Vector<PatternPartition
 }
 
 // 1.1.24 FormatNumericRange( numberFormat, x, y ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-formatnumericrange
-ThrowCompletionOr<String> format_numeric_range(GlobalObject& global_object, NumberFormat& number_format, MathematicalValue start, MathematicalValue end)
+ThrowCompletionOr<String> format_numeric_range(VM& vm, NumberFormat& number_format, MathematicalValue start, MathematicalValue end)
 {
     // 1. Let parts be ? PartitionNumberRangePattern(numberFormat, x, y).
-    auto parts = TRY(partition_number_range_pattern(global_object, number_format, move(start), move(end)));
+    auto parts = TRY(partition_number_range_pattern(vm, number_format, move(start), move(end)));
 
     // 2. Let result be the empty String.
     StringBuilder result;
@@ -1824,15 +1821,15 @@ ThrowCompletionOr<String> format_numeric_range(GlobalObject& global_object, Numb
 }
 
 // 1.1.25 FormatNumericRangeToParts( numberFormat, x, y ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-formatnumericrangetoparts
-ThrowCompletionOr<Array*> format_numeric_range_to_parts(GlobalObject& global_object, NumberFormat& number_format, MathematicalValue start, MathematicalValue end)
+ThrowCompletionOr<Array*> format_numeric_range_to_parts(VM& vm, NumberFormat& number_format, MathematicalValue start, MathematicalValue end)
 {
-    auto& vm = global_object.vm();
+    auto& realm = *vm.current_realm();
 
     // 1. Let parts be ? PartitionNumberRangePattern(numberFormat, x, y).
-    auto parts = TRY(partition_number_range_pattern(global_object, number_format, move(start), move(end)));
+    auto parts = TRY(partition_number_range_pattern(vm, number_format, move(start), move(end)));
 
     // 2. Let result be ! ArrayCreate(0).
-    auto* result = MUST(Array::create(global_object, 0));
+    auto* result = MUST(Array::create(realm, 0));
 
     // 3. Let n be 0.
     size_t n = 0;
@@ -1840,7 +1837,7 @@ ThrowCompletionOr<Array*> format_numeric_range_to_parts(GlobalObject& global_obj
     // 4. For each Record { [[Type]], [[Value]] } part in parts, do
     for (auto& part : parts) {
         // a. Let O be OrdinaryObjectCreate(%Object.prototype%).
-        auto* object = Object::create(global_object, global_object.object_prototype());
+        auto* object = Object::create(realm, realm.intrinsics().object_prototype());
 
         // b. Perform ! CreateDataPropertyOrThrow(O, "type", part.[[Type]]).
         MUST(object->create_data_property_or_throw(vm.names.type, js_string(vm, part.type)));

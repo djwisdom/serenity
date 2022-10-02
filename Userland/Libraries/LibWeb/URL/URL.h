@@ -9,27 +9,23 @@
 
 #include <AK/String.h>
 #include <AK/URL.h>
-#include <LibWeb/Bindings/Wrappable.h>
-#include <LibWeb/DOM/ExceptionOr.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/URL/URLSearchParams.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::URL {
 
-class URL : public Bindings::Wrappable
-    , public RefCounted<URL>
-    , public Weakable<URL> {
+class URL : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(URL, Bindings::PlatformObject);
+
 public:
-    using WrapperType = Bindings::URLWrapper;
+    static JS::NonnullGCPtr<URL> create(JS::Realm&, AK::URL url, JS::NonnullGCPtr<URLSearchParams> query);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<URL>> construct_impl(JS::Realm&, String const& url, String const& base);
 
-    static NonnullRefPtr<URL> create(AK::URL url, NonnullRefPtr<URLSearchParams> query)
-    {
-        return adopt_ref(*new URL(move(url), move(query)));
-    }
-
-    static DOM::ExceptionOr<NonnullRefPtr<URL>> create_with_global_object(Bindings::WindowObject&, String const& url, String const& base);
+    virtual ~URL() override;
 
     String href() const;
-    DOM::ExceptionOr<void> set_href(String const&);
+    WebIDL::ExceptionOr<void> set_href(String const&);
 
     String origin() const;
 
@@ -67,12 +63,12 @@ public:
     void set_query(Badge<URLSearchParams>, String query) { m_url.set_query(move(query)); }
 
 private:
-    explicit URL(AK::URL url, NonnullRefPtr<URLSearchParams> query)
-        : m_url(move(url))
-        , m_query(move(query)) {};
+    URL(JS::Realm&, AK::URL, JS::NonnullGCPtr<URLSearchParams> query);
+
+    virtual void visit_edges(Cell::Visitor&) override;
 
     AK::URL m_url;
-    NonnullRefPtr<URLSearchParams> m_query;
+    JS::NonnullGCPtr<URLSearchParams> m_query;
 };
 
 }

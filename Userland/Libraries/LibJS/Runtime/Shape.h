@@ -37,6 +37,8 @@ struct TransitionKey {
 class Shape final
     : public Cell
     , public Weakable<Shape> {
+    JS_CELL(Shape, Cell);
+
 public:
     virtual ~Shape() override = default;
 
@@ -46,10 +48,6 @@ public:
         Configure,
         Prototype,
     };
-
-    explicit Shape(Realm&);
-    Shape(Shape& previous_shape, StringOrSymbol const& property_key, PropertyAttributes attributes, TransitionType);
-    Shape(Shape& previous_shape, Object* new_prototype);
 
     Shape* create_put_transition(StringOrSymbol const&, PropertyAttributes attributes);
     Shape* create_configure_transition(StringOrSymbol const&, PropertyAttributes attributes);
@@ -62,7 +60,6 @@ public:
     Shape* create_unique_clone() const;
 
     Realm& realm() const { return m_realm; }
-    GlobalObject* global_object() const;
 
     Object* prototype() { return m_prototype; }
     Object const* prototype() const { return m_prototype; }
@@ -85,7 +82,10 @@ public:
     void reconfigure_property_in_unique_shape(StringOrSymbol const& property_key, PropertyAttributes attributes);
 
 private:
-    virtual StringView class_name() const override { return "Shape"sv; }
+    explicit Shape(Realm&);
+    Shape(Shape& previous_shape, StringOrSymbol const& property_key, PropertyAttributes attributes, TransitionType);
+    Shape(Shape& previous_shape, Object* new_prototype);
+
     virtual void visit_edges(Visitor&) override;
 
     Shape* get_or_prune_cached_forward_transition(TransitionKey const&);

@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLParamElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLParamElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLParamElement, HTMLElement);
 
-    HTMLParamElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLParamElement() override;
+
+private:
+    HTMLParamElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

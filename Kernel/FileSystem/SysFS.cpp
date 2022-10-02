@@ -58,7 +58,7 @@ ErrorOr<void> SysFSInode::attach(OpenFileDescription& description)
     return m_associated_component->refresh_data(description);
 }
 
-ErrorOr<size_t> SysFSInode::read_bytes(off_t offset, size_t count, UserOrKernelBuffer& buffer, OpenFileDescription* fd) const
+ErrorOr<size_t> SysFSInode::read_bytes_locked(off_t offset, size_t count, UserOrKernelBuffer& buffer, OpenFileDescription* fd) const
 {
     return m_associated_component->read_bytes(offset, count, buffer, fd);
 }
@@ -91,7 +91,7 @@ ErrorOr<void> SysFSInode::flush_metadata()
     return {};
 }
 
-ErrorOr<size_t> SysFSInode::write_bytes(off_t offset, size_t count, UserOrKernelBuffer const& buffer, OpenFileDescription* fd)
+ErrorOr<size_t> SysFSInode::write_bytes_locked(off_t offset, size_t count, UserOrKernelBuffer const& buffer, OpenFileDescription* fd)
 {
     return m_associated_component->write_bytes(offset, count, buffer, fd);
 }
@@ -121,14 +121,14 @@ ErrorOr<void> SysFSInode::chown(UserID, GroupID)
     return EPERM;
 }
 
-ErrorOr<void> SysFSInode::set_mtime(time_t time)
-{
-    return m_associated_component->set_mtime(time);
-}
-
 ErrorOr<void> SysFSInode::truncate(u64 size)
 {
     return m_associated_component->truncate(size);
+}
+
+ErrorOr<void> SysFSInode::update_timestamps(Optional<time_t>, Optional<time_t>, Optional<time_t>)
+{
+    return {};
 }
 
 ErrorOr<NonnullLockRefPtr<SysFSLinkInode>> SysFSLinkInode::try_create(SysFS const& sysfs, SysFSComponent const& component)

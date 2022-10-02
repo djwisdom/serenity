@@ -17,7 +17,6 @@
 #include <Kernel/Locking/Spinlock.h>
 #include <Kernel/Memory/ScopedAddressSpaceSwitcher.h>
 #include <Kernel/Process.h>
-#include <Kernel/RTC.h>
 #include <LibC/elf.h>
 #include <LibELF/Core.h>
 
@@ -25,9 +24,23 @@
 
 namespace Kernel {
 
-[[maybe_unused]] static bool looks_like_userspace_heap_region(Memory::Region const& region)
+bool Coredump::FlatRegionData::looks_like_userspace_heap_region() const
 {
-    return region.name().starts_with("LibJS:"sv) || region.name().starts_with("malloc:"sv);
+    return name().starts_with("LibJS:"sv) || name().starts_with("malloc:"sv);
+}
+
+bool Coredump::FlatRegionData::is_consistent_with_region(Memory::Region const& region) const
+{
+    if (m_access != region.access())
+        return false;
+
+    if (m_page_count != region.page_count() || m_size != region.size())
+        return false;
+
+    if (m_vaddr != region.vaddr())
+        return false;
+
+    return true;
 }
 
 ErrorOr<NonnullOwnPtr<Coredump>> Coredump::try_create(NonnullLockRefPtr<Process> process, StringView output_path)
@@ -37,18 +50,30 @@ ErrorOr<NonnullOwnPtr<Coredump>> Coredump::try_create(NonnullLockRefPtr<Process>
         return EPERM;
     }
 
+    Vector<FlatRegionData> regions;
+    size_t number_of_regions = process->address_space().with([](auto& space) {
+        return space->region_tree().regions().size();
+    });
+    TRY(regions.try_ensure_capacity(number_of_regions));
+    TRY(process->address_space().with([&](auto& space) -> ErrorOr<void> {
+        for (auto& region : space->region_tree().regions())
+            TRY(regions.try_empend(region, TRY(KString::try_create(region.name()))));
+        return {};
+    }));
+
     auto description = TRY(try_create_target_file(process, output_path));
-    return adopt_nonnull_own_or_enomem(new (nothrow) Coredump(move(process), move(description)));
+    return adopt_nonnull_own_or_enomem(new (nothrow) Coredump(move(process), move(description), move(regions)));
 }
 
-Coredump::Coredump(NonnullLockRefPtr<Process> process, NonnullLockRefPtr<OpenFileDescription> description)
+Coredump::Coredump(NonnullLockRefPtr<Process> process, NonnullLockRefPtr<OpenFileDescription> description, Vector<FlatRegionData> regions)
     : m_process(move(process))
     , m_description(move(description))
+    , m_regions(move(regions))
 {
     m_num_program_headers = 0;
-    for ([[maybe_unused]] auto& region : m_process->address_space().regions()) {
+    for (auto& region : m_regions) {
 #if !INCLUDE_USERSPACE_HEAP_MEMORY_IN_COREDUMPS
-        if (looks_like_userspace_heap_region(region))
+        if (region.looks_like_userspace_heap_region())
             continue;
 #endif
 
@@ -133,10 +158,9 @@ ErrorOr<void> Coredump::write_elf_header()
 ErrorOr<void> Coredump::write_program_headers(size_t notes_size)
 {
     size_t offset = sizeof(ElfW(Ehdr)) + m_num_program_headers * sizeof(ElfW(Phdr));
-    for (auto& region : m_process->address_space().regions()) {
-
+    for (auto& region : m_regions) {
 #if !INCLUDE_USERSPACE_HEAP_MEMORY_IN_COREDUMPS
-        if (looks_like_userspace_heap_region(region))
+        if (region.looks_like_userspace_heap_region())
             continue;
 #endif
 
@@ -184,35 +208,52 @@ ErrorOr<void> Coredump::write_regions()
 {
     u8 zero_buffer[PAGE_SIZE] = {};
 
-    for (auto& region : m_process->address_space().regions()) {
+    for (auto& region : m_regions) {
         VERIFY(!region.is_kernel());
 
 #if !INCLUDE_USERSPACE_HEAP_MEMORY_IN_COREDUMPS
-        if (looks_like_userspace_heap_region(region))
+        if (region.looks_like_userspace_heap_region())
             continue;
 #endif
 
         if (region.access() == Memory::Region::Access::None)
             continue;
 
-        // If we crashed in the middle of mapping in Regions, they do not have a page directory yet, and will crash on a remap() call
-        if (!region.is_mapped())
-            continue;
+        auto buffer = TRY(KBuffer::try_create_with_size("Coredump Region Copy Buffer"sv, region.page_count() * PAGE_SIZE));
 
-        region.set_readable(true);
-        region.remap();
+        TRY(m_process->address_space().with([&](auto& space) -> ErrorOr<void> {
+            auto* real_region = space->region_tree().regions().find(region.vaddr().get());
 
-        for (size_t i = 0; i < region.page_count(); i++) {
-            auto page = region.physical_page(i);
-            auto src_buffer = [&]() -> ErrorOr<UserOrKernelBuffer> {
-                if (page)
-                    return UserOrKernelBuffer::for_user_buffer(reinterpret_cast<uint8_t*>((region.vaddr().as_ptr() + (i * PAGE_SIZE))), PAGE_SIZE);
-                // If the current page is not backed by a physical page, we zero it in the coredump file.
-                return UserOrKernelBuffer::for_kernel_buffer(zero_buffer);
-            }();
-            TRY(m_description->write(src_buffer.value(), PAGE_SIZE));
-        }
+            if (!real_region)
+                return Error::from_string_view("Failed to find matching region in the process"sv);
+
+            if (!region.is_consistent_with_region(*real_region))
+                return Error::from_string_view("Found region does not match stored metadata"sv);
+
+            // If we crashed in the middle of mapping in Regions, they do not have a page directory yet, and will crash on a remap() call
+            if (!real_region->is_mapped())
+                return {};
+
+            real_region->set_readable(true);
+            real_region->remap();
+
+            for (size_t i = 0; i < region.page_count(); i++) {
+                auto page = real_region->physical_page(i);
+                auto src_buffer = [&]() -> ErrorOr<UserOrKernelBuffer> {
+                    if (page)
+                        return UserOrKernelBuffer::for_user_buffer(reinterpret_cast<uint8_t*>((region.vaddr().as_ptr() + (i * PAGE_SIZE))), PAGE_SIZE);
+                    // If the current page is not backed by a physical page, we zero it in the coredump file.
+                    return UserOrKernelBuffer::for_kernel_buffer(zero_buffer);
+                }();
+                TRY(src_buffer.value().read(buffer->bytes().slice(i * PAGE_SIZE, PAGE_SIZE)));
+            }
+
+            return {};
+        }));
+
+        TRY(m_description->write(UserOrKernelBuffer::for_kernel_buffer(buffer->data()), buffer->size()));
     }
+
     return {};
 }
 
@@ -273,10 +314,9 @@ ErrorOr<void> Coredump::create_notes_threads_data(auto& builder) const
 ErrorOr<void> Coredump::create_notes_regions_data(auto& builder) const
 {
     size_t region_index = 0;
-    for (auto const& region : m_process->address_space().regions()) {
-
+    for (auto const& region : m_regions) {
 #if !INCLUDE_USERSPACE_HEAP_MEMORY_IN_COREDUMPS
-        if (looks_like_userspace_heap_region(region))
+        if (region.looks_like_userspace_heap_region())
             continue;
 #endif
 
@@ -299,6 +339,7 @@ ErrorOr<void> Coredump::create_notes_regions_data(auto& builder) const
         else
             TRY(builder.append(name.characters_without_null_termination(), name.length() + 1));
     }
+
     return {};
 }
 
@@ -336,7 +377,6 @@ ErrorOr<void> Coredump::create_notes_segment_data(auto& builder) const
 
 ErrorOr<void> Coredump::write()
 {
-    SpinlockLocker lock(m_process->address_space().get_lock());
     ScopedAddressSpaceSwitcher switcher(m_process);
 
     auto builder = TRY(KBufferBuilder::try_create());

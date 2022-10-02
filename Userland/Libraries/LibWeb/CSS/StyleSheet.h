@@ -7,18 +7,15 @@
 
 #pragma once
 
-#include <AK/RefCounted.h>
-#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::CSS {
 
-class StyleSheet
-    : public RefCounted<StyleSheet>
-    , public Bindings::Wrappable {
-public:
-    using WrapperType = Bindings::StyleSheetWrapper;
+class StyleSheet : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(StyleSheet, Bindings::PlatformObject);
 
+public:
     virtual ~StyleSheet() = default;
 
     virtual String type() const = 0;
@@ -49,12 +46,12 @@ public:
     void set_parent_css_style_sheet(CSSStyleSheet*);
 
 protected:
-    StyleSheet() = default;
+    explicit StyleSheet(JS::Realm&);
+    virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    WeakPtr<DOM::Element> m_owner_node;
-
-    WeakPtr<CSSStyleSheet> m_parent_style_sheet;
+    JS::GCPtr<DOM::Element> m_owner_node;
+    JS::GCPtr<CSSStyleSheet> m_parent_style_sheet;
 
     String m_location;
     String m_title;

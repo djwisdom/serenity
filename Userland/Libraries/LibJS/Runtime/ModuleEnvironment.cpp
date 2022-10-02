@@ -18,7 +18,7 @@ ModuleEnvironment::ModuleEnvironment(Environment* outer_environment)
 }
 
 // 9.1.1.5.1 GetBindingValue ( N, S ), https://tc39.es/ecma262/#sec-module-environment-records-getbindingvalue-n-s
-ThrowCompletionOr<Value> ModuleEnvironment::get_binding_value(GlobalObject& global_object, FlyString const& name, bool strict)
+ThrowCompletionOr<Value> ModuleEnvironment::get_binding_value(VM& vm, FlyString const& name, bool strict)
 {
     // 1. Assert: S is true.
     VERIFY(strict);
@@ -36,38 +36,27 @@ ThrowCompletionOr<Value> ModuleEnvironment::get_binding_value(GlobalObject& glob
 
         // c. If targetEnv is empty, throw a ReferenceError exception.
         if (!target_env)
-            return vm().throw_completion<ReferenceError>(global_object, ErrorType::ModuleNoEnvironment);
+            return vm.throw_completion<ReferenceError>(ErrorType::ModuleNoEnvironment);
 
         // d. Return ? targetEnv.GetBindingValue(N2, true).
-        return target_env->get_binding_value(global_object, indirect_binding->binding_name, true);
+        return target_env->get_binding_value(vm, indirect_binding->binding_name, true);
     }
 
     // 4. If the binding for N in envRec is an uninitialized binding, throw a ReferenceError exception.
     // 5. Return the value currently bound to N in envRec.
     // Note: Step 4 & 5 are the steps performed by declarative environment GetBindingValue
-    return DeclarativeEnvironment::get_binding_value(global_object, name, strict);
-}
-
-// Not defined in the spec, see comment in the header.
-ThrowCompletionOr<bool> ModuleEnvironment::has_binding(FlyString const& name, Optional<size_t>* out_index) const
-{
-    // 1. If envRec has a binding for the name that is the value of N, return true.
-    if (get_indirect_binding(name))
-        return true;
-    return DeclarativeEnvironment::has_binding(name, out_index);
-
-    // 2. Return false.
+    return DeclarativeEnvironment::get_binding_value(vm, name, strict);
 }
 
 // 9.1.1.5.2 DeleteBinding ( N ), https://tc39.es/ecma262/#sec-module-environment-records-deletebinding-n
-ThrowCompletionOr<bool> ModuleEnvironment::delete_binding(GlobalObject&, FlyString const&)
+ThrowCompletionOr<bool> ModuleEnvironment::delete_binding(VM&, FlyString const&)
 {
     // The DeleteBinding concrete method of a module Environment Record is never used within this specification.
     VERIFY_NOT_REACHED();
 }
 
 // 9.1.1.5.4 GetThisBinding ( ), https://tc39.es/ecma262/#sec-module-environment-records-getthisbinding
-ThrowCompletionOr<Value> ModuleEnvironment::get_this_binding(GlobalObject&) const
+ThrowCompletionOr<Value> ModuleEnvironment::get_this_binding(VM&) const
 {
     // 1. Return undefined.
     return js_undefined();
@@ -100,6 +89,41 @@ ModuleEnvironment::IndirectBinding const* ModuleEnvironment::get_indirect_bindin
         return nullptr;
 
     return &(*binding_or_end);
+}
+
+Optional<ModuleEnvironment::BindingAndIndex> ModuleEnvironment::find_binding_and_index(FlyString const& name) const
+{
+    auto* indirect_binding = get_indirect_binding(name);
+    if (indirect_binding != nullptr) {
+        auto* target_env = indirect_binding->module->environment();
+        if (!target_env)
+            return {};
+
+        VERIFY(is<ModuleEnvironment>(target_env));
+        auto& target_module_environment = static_cast<ModuleEnvironment&>(*target_env);
+        auto result = target_module_environment.find_binding_and_index(indirect_binding->binding_name);
+        if (!result.has_value())
+            return {};
+
+        // NOTE: We must pretend this binding is actually from this environment
+        //       so as specified by
+        //       9.1.1.5.5 CreateImportBinding ( N, M, N2 ), https://tc39.es/ecma262/#sec-createimportbinding
+        //       It creates a new initialized immutable indirect binding for the
+        //       name N. A binding must not already exist in this Environment
+        //       Record for N. N2 is the name of a binding that exists in M's
+        //       Module Environment Record. Accesses to the value of the new
+        //       binding will indirectly access the bound value of the target
+        //       binding.
+        //       We don't alter the name of the binding as the name is only used
+        //       for lookup.
+        Binding copy_binding = result->binding();
+        copy_binding.mutable_ = false;
+        copy_binding.can_be_deleted = false;
+        copy_binding.initialized = true;
+        return BindingAndIndex { copy_binding };
+    }
+
+    return DeclarativeEnvironment::find_binding_and_index(name);
 }
 
 }

@@ -50,10 +50,8 @@ ThrowCompletionOr<void> SyntheticModule::link(VM& vm)
     // 2. Assert: realm is not undefined.
     // Note: This must be true because we use a reference.
 
-    auto& global_object = realm().global_object();
-
     // 3. Let env be NewModuleEnvironment(realm.[[GlobalEnv]]).
-    auto* environment = vm.heap().allocate_without_global_object<ModuleEnvironment>(&realm().global_environment());
+    auto* environment = vm.heap().allocate_without_realm<ModuleEnvironment>(&realm().global_environment());
 
     // 4. Set module.[[Environment]] to env.
     set_environment(environment);
@@ -61,10 +59,10 @@ ThrowCompletionOr<void> SyntheticModule::link(VM& vm)
     // 5. For each exportName in module.[[ExportNames]],
     for (auto& export_name : m_export_names) {
         // a. Perform ! envRec.CreateMutableBinding(exportName, false).
-        MUST(environment->create_mutable_binding(global_object, export_name, false));
+        MUST(environment->create_mutable_binding(vm, export_name, false));
 
         // b. Perform ! envRec.InitializeBinding(exportName, undefined).
-        MUST(environment->initialize_binding(global_object, export_name, js_undefined()));
+        MUST(environment->initialize_binding(vm, export_name, js_undefined()));
     }
 
     // 6. Return unused.
@@ -88,7 +86,7 @@ ThrowCompletionOr<Promise*> SyntheticModule::evaluate(VM& vm)
     module_context.realm = &realm();
 
     // 5. Set the ScriptOrModule of moduleContext to module.
-    module_context.script_or_module = this->make_weak_ptr();
+    module_context.script_or_module = NonnullGCPtr<Module>(*this);
 
     // 6. Set the VariableEnvironment of moduleContext to module.[[Environment]].
     module_context.variable_environment = environment();
@@ -97,7 +95,7 @@ ThrowCompletionOr<Promise*> SyntheticModule::evaluate(VM& vm)
     module_context.lexical_environment = environment();
 
     // 8. Push moduleContext on to the execution context stack; moduleContext is now the running execution context.
-    TRY(vm.push_execution_context(module_context, realm().global_object()));
+    TRY(vm.push_execution_context(module_context, {}));
 
     // 9. Let result be the result of performing module.[[EvaluationSteps]](module).
     auto result = m_evaluation_steps(*this);
@@ -109,7 +107,7 @@ ThrowCompletionOr<Promise*> SyntheticModule::evaluate(VM& vm)
 
     // 12. Return Completion(result).
     // Note: Because we expect it to return a promise we convert this here.
-    auto* promise = Promise::create(realm().global_object());
+    auto* promise = Promise::create(realm());
     if (result.is_error()) {
         VERIFY(result.throw_completion().value().has_value());
         promise->reject(*result.throw_completion().value());
@@ -123,13 +121,15 @@ ThrowCompletionOr<Promise*> SyntheticModule::evaluate(VM& vm)
 // 1.2.2 SetSyntheticModuleExport ( module, exportName, exportValue ), https://tc39.es/proposal-json-modules/#sec-setsyntheticmoduleexport
 ThrowCompletionOr<void> SyntheticModule::set_synthetic_module_export(FlyString const& export_name, Value export_value)
 {
+    auto& vm = this->realm().vm();
+
     // Note: Has some changes from PR: https://github.com/tc39/proposal-json-modules/pull/13.
     // 1. Return ? module.[[Environment]].SetMutableBinding(name, value, true).
-    return environment()->set_mutable_binding(realm().global_object(), export_name, export_value, true);
+    return environment()->set_mutable_binding(vm, export_name, export_value, true);
 }
 
 // 1.3 CreateDefaultExportSyntheticModule ( defaultExport ), https://tc39.es/proposal-json-modules/#sec-create-default-export-synthetic-module
-NonnullRefPtr<SyntheticModule> SyntheticModule::create_default_export_synthetic_module(Value default_export, Realm& realm, StringView filename)
+NonnullGCPtr<SyntheticModule> SyntheticModule::create_default_export_synthetic_module(Value default_export, Realm& realm, StringView filename)
 {
     // Note: Has some changes from PR: https://github.com/tc39/proposal-json-modules/pull/13.
     // 1. Let closure be the a Abstract Closure with parameters (module) that captures defaultExport and performs the following steps when called:
@@ -139,17 +139,19 @@ NonnullRefPtr<SyntheticModule> SyntheticModule::create_default_export_synthetic_
     };
 
     // 2. Return CreateSyntheticModule("default", closure, realm)
-    return adopt_ref(*new SyntheticModule({ "default" }, move(closure), realm, filename));
+    return *realm.heap().allocate_without_realm<SyntheticModule>(Vector<FlyString> { "default" }, move(closure), realm, filename);
 }
 
 // 1.4 ParseJSONModule ( source ), https://tc39.es/proposal-json-modules/#sec-parse-json-module
-ThrowCompletionOr<NonnullRefPtr<Module>> parse_json_module(StringView source_text, Realm& realm, StringView filename)
+ThrowCompletionOr<NonnullGCPtr<Module>> parse_json_module(StringView source_text, Realm& realm, StringView filename)
 {
+    auto& vm = realm.vm();
+
     // 1. Let jsonParse be realm's intrinsic object named "%JSON.parse%".
-    auto* json_parse = realm.global_object().json_parse_function();
+    auto* json_parse = realm.intrinsics().json_parse_function();
 
     // 2. Let json be ? Call(jsonParse, undefined, « sourceText »).
-    auto json = TRY(call(realm.global_object(), *json_parse, js_undefined(), js_string(realm.vm(), source_text)));
+    auto json = TRY(call(vm, *json_parse, js_undefined(), js_string(realm.vm(), source_text)));
 
     // 3. Return CreateDefaultExportSyntheticModule(json, realm, hostDefined).
     return SyntheticModule::create_default_export_synthetic_module(json, realm, filename);

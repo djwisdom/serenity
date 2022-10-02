@@ -22,8 +22,11 @@
 #include <Kernel/Arch/aarch64/RPi/UART.h>
 #include <Kernel/Arch/aarch64/Registers.h>
 #include <Kernel/Arch/aarch64/TrapFrame.h>
+#include <Kernel/CommandLine.h>
+#include <Kernel/Devices/DeviceManagement.h>
 #include <Kernel/Graphics/Console/BootFramebufferConsole.h>
 #include <Kernel/KSyms.h>
+#include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Panic.h>
 
 extern "C" void exception_common(Kernel::TrapFrame const* const trap_frame);
@@ -46,6 +49,8 @@ extern "C" void exception_common(Kernel::TrapFrame const* const trap_frame)
 
         auto esr_el1 = Kernel::Aarch64::ESR_EL1::read();
         dbgln("esr_el1: EC({:#b}) IL({:#b}) ISS({:#b}) ISS2({:#b})", esr_el1.EC, esr_el1.IL, esr_el1.ISS, esr_el1.ISS2);
+
+        dump_backtrace_from_base_pointer(trap_frame->x[29]);
     }
 
     Kernel::Processor::halt();
@@ -67,9 +72,11 @@ void __stack_chk_fail()
     Kernel::Processor::halt();
 }
 
+READONLY_AFTER_INIT bool g_in_early_boot;
+
 namespace Kernel {
 
-static void draw_logo();
+static void draw_logo(u8* framebuffer_data);
 static u32 query_firmware_version();
 
 extern "C" [[noreturn]] void halt();
@@ -85,13 +92,31 @@ Atomic<Graphics::Console*> g_boot_console;
 
 extern "C" [[noreturn]] void init()
 {
+    g_in_early_boot = true;
+
+    // FIXME: Don't hardcode this
+    multiboot_memory_map_t mmap[] = {
+        { sizeof(struct multiboot_mmap_entry) - sizeof(u32),
+            (u64)0x0,
+            (u64)0x3F000000,
+            MULTIBOOT_MEMORY_AVAILABLE }
+    };
+
+    multiboot_memory_map = mmap;
+    multiboot_memory_map_count = 1;
+
     dbgln("Welcome to Serenity OS!");
     dbgln("Imagine this being your ideal operating system.");
     dbgln("Observed deviations from that ideal are shortcomings of your imagination.");
     dbgln();
 
+    CommandLine::early_initialize("");
+
     new (&bootstrap_processor()) Processor();
     bootstrap_processor().initialize(0);
+
+    // We want to enable the MMU as fast as possible to make the boot faster.
+    init_page_tables();
 
     // We call the constructors of kmalloc.cpp separately, because other constructors in the Kernel
     // might rely on being able to call new/kmalloc in the constructor. We do have to run the
@@ -100,17 +125,26 @@ extern "C" [[noreturn]] void init()
         (*ctor)();
     kmalloc_init();
 
+    load_kernel_symbol_table();
+
+    CommandLine::initialize();
+
+    dmesgln("Starting SerenityOS...");
+
+    dmesgln("Initialize MMU");
+    Memory::MemoryManager::initialize(0);
+    DeviceManagement::initialize();
+
+    // Invoke all static global constructors in the kernel.
+    // Note that we want to do this as early as possible.
     for (ctor_func_t* ctor = start_ctors; ctor < end_ctors; ctor++)
         (*ctor)();
 
-    load_kernel_symbol_table();
-
     auto& framebuffer = RPi::Framebuffer::the();
     if (framebuffer.initialized()) {
-        g_boot_console = &try_make_lock_ref_counted<Graphics::BootFramebufferConsole>(framebuffer.gpu_buffer(), framebuffer.width(), framebuffer.width(), framebuffer.pitch()).value().leak_ref();
-        draw_logo();
+        g_boot_console = &try_make_lock_ref_counted<Graphics::BootFramebufferConsole>(PhysicalAddress((PhysicalPtr)framebuffer.gpu_buffer()), framebuffer.width(), framebuffer.height(), framebuffer.pitch()).value().leak_ref();
+        draw_logo(static_cast<Graphics::BootFramebufferConsole*>(g_boot_console.load())->unsafe_framebuffer_data());
     }
-    dmesgln("Starting SerenityOS...");
 
     initialize_interrupts();
     InterruptManagement::initialize();
@@ -118,9 +152,6 @@ extern "C" [[noreturn]] void init()
 
     auto firmware_version = query_firmware_version();
     dmesgln("Firmware version: {}", firmware_version);
-
-    dmesgln("Initialize MMU");
-    init_page_tables();
 
     auto& timer = RPi::Timer::the();
     timer.set_interrupt_interval_usec(1'000'000);
@@ -132,6 +163,8 @@ extern "C" [[noreturn]] void init()
     // interrupts are working!
     for (;;)
         asm volatile("wfi");
+
+    VERIFY_NOT_REACHED();
 }
 
 class QueryFirmwareVersionMboxMessage : RPi::Mailbox::Message {
@@ -163,7 +196,7 @@ static u32 query_firmware_version()
 extern "C" const u32 serenity_boot_logo_start;
 extern "C" const u32 serenity_boot_logo_size;
 
-static void draw_logo()
+static void draw_logo(u8* framebuffer_data)
 {
     BootPPMParser logo_parser(reinterpret_cast<u8 const*>(&serenity_boot_logo_start), serenity_boot_logo_size);
     if (!logo_parser.parse()) {
@@ -174,7 +207,7 @@ static void draw_logo()
     dbgln("Boot logo size: {} ({} x {})", serenity_boot_logo_size, logo_parser.image.width, logo_parser.image.height);
 
     auto& framebuffer = RPi::Framebuffer::the();
-    auto fb_ptr = framebuffer.gpu_buffer();
+    auto fb_ptr = framebuffer_data;
     auto image_left = (framebuffer.width() - logo_parser.image.width) / 2;
     auto image_right = image_left + logo_parser.image.width;
     auto image_top = (framebuffer.height() - logo_parser.image.height) / 2;

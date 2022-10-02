@@ -9,31 +9,29 @@
 #include "WebContentConsoleClient.h"
 #include <LibJS/Interpreter.h>
 #include <LibJS/MarkupGenerator.h>
-#include <LibWeb/Bindings/WindowObject.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
 #include <WebContent/ConsoleGlobalObject.h>
 
 namespace WebContent {
 
-WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, WeakPtr<JS::Interpreter> interpreter, ConnectionFromClient& client)
+WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, JS::Realm& realm, ConnectionFromClient& client)
     : ConsoleClient(console)
     , m_client(client)
-    , m_interpreter(interpreter)
+    , m_realm(realm)
 {
-    JS::DeferGC defer_gc(m_interpreter->heap());
+    JS::DeferGC defer_gc(realm.heap());
 
-    auto& vm = m_interpreter->vm();
-    auto& global_object = m_interpreter->global_object();
+    auto& vm = realm.vm();
+    auto& window = static_cast<Web::HTML::Window&>(realm.global_object());
 
-    auto console_global_object = m_interpreter->heap().allocate_without_global_object<ConsoleGlobalObject>(m_interpreter->realm(), static_cast<Web::Bindings::WindowObject&>(global_object));
+    auto console_global_object = realm.heap().allocate_without_realm<ConsoleGlobalObject>(realm, window);
 
     // NOTE: We need to push an execution context here for NativeFunction::create() to succeed during global object initialization.
-    // It gets removed immediately after creating the interpreter in Document::interpreter().
-    auto& eso = verify_cast<Web::HTML::EnvironmentSettingsObject>(*m_interpreter->realm().host_defined());
+    auto& eso = Web::Bindings::host_defined_environment_settings_object(realm);
     vm.push_execution_context(eso.realm_execution_context());
-    console_global_object->set_associated_realm(m_interpreter->realm());
-    console_global_object->initialize_global_object();
+    console_global_object->initialize(realm);
     vm.pop_execution_context();
 
     m_console_global_object = JS::make_handle(console_global_object);
@@ -41,7 +39,10 @@ WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, WeakPtr<J
 
 void WebContentConsoleClient::handle_input(String const& js_source)
 {
-    auto& settings = verify_cast<Web::HTML::EnvironmentSettingsObject>(*m_interpreter->realm().host_defined());
+    if (!m_realm)
+        return;
+
+    auto& settings = Web::Bindings::host_defined_environment_settings_object(*m_realm);
     auto script = Web::HTML::ClassicScript::create("(console)", js_source, settings, settings.api_base_url());
 
     // FIXME: Add parse error printouts back once ClassicScript can report parse errors.
@@ -142,11 +143,14 @@ void WebContentConsoleClient::clear()
 // 2.3. Printer(logLevel, args[, options]), https://console.spec.whatwg.org/#printer
 JS::ThrowCompletionOr<JS::Value> WebContentConsoleClient::printer(JS::Console::LogLevel log_level, PrinterArguments arguments)
 {
+    auto styling = escape_html_entities(m_current_message_style.string_view());
+    m_current_message_style.clear();
+
     if (log_level == JS::Console::LogLevel::Trace) {
         auto trace = arguments.get<JS::Console::Trace>();
         StringBuilder html;
         if (!trace.label.is_empty())
-            html.appendff("<span class='title'>{}</span><br>", escape_html_entities(trace.label));
+            html.appendff("<span class='title' style='{}'>{}</span><br>", styling, escape_html_entities(trace.label));
 
         html.append("<span class='trace'>"sv);
         for (auto& function_name : trace.stack)
@@ -159,7 +163,7 @@ JS::ThrowCompletionOr<JS::Value> WebContentConsoleClient::printer(JS::Console::L
 
     if (log_level == JS::Console::LogLevel::Group || log_level == JS::Console::LogLevel::GroupCollapsed) {
         auto group = arguments.get<JS::Console::Group>();
-        begin_group(group.label, log_level == JS::Console::LogLevel::Group);
+        begin_group(String::formatted("<span style='{}'>{}</span>", styling, escape_html_entities(group.label)), log_level == JS::Console::LogLevel::Group);
         return JS::js_undefined();
     }
 
@@ -169,23 +173,23 @@ JS::ThrowCompletionOr<JS::Value> WebContentConsoleClient::printer(JS::Console::L
     StringBuilder html;
     switch (log_level) {
     case JS::Console::LogLevel::Debug:
-        html.append("<span class=\"debug\">(d) "sv);
+        html.appendff("<span class=\"debug\" style=\"{}\">(d) "sv, styling);
         break;
     case JS::Console::LogLevel::Error:
-        html.append("<span class=\"error\">(e) "sv);
+        html.appendff("<span class=\"error\" style=\"{}\">(e) "sv, styling);
         break;
     case JS::Console::LogLevel::Info:
-        html.append("<span class=\"info\">(i) "sv);
+        html.appendff("<span class=\"info\" style=\"{}\">(i) "sv, styling);
         break;
     case JS::Console::LogLevel::Log:
-        html.append("<span class=\"log\"> "sv);
+        html.appendff("<span class=\"log\" style=\"{}\"> "sv, styling);
         break;
     case JS::Console::LogLevel::Warn:
     case JS::Console::LogLevel::CountReset:
-        html.append("<span class=\"warn\">(w) "sv);
+        html.appendff("<span class=\"warn\" style=\"{}\">(w) "sv, styling);
         break;
     default:
-        html.append("<span>"sv);
+        html.appendff("<span style=\"{}\">"sv, styling);
         break;
     }
 

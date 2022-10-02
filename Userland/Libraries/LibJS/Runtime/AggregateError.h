@@ -15,10 +15,11 @@ class AggregateError : public Error {
     JS_OBJECT(AggregateError, Error);
 
 public:
-    static AggregateError* create(GlobalObject&);
-
-    explicit AggregateError(Object& prototype);
+    static AggregateError* create(Realm&);
     virtual ~AggregateError() override = default;
+
+private:
+    explicit AggregateError(Object& prototype);
 };
 
 }

@@ -58,7 +58,13 @@ public:
     constexpr void set_z(T value) requires(N >= 3) { m_data[2] = value; }
     constexpr void set_w(T value) requires(N >= 4) { m_data[3] = value; }
 
-    [[nodiscard]] constexpr T operator[](size_t index) const
+    [[nodiscard]] constexpr T const& operator[](size_t index) const
+    {
+        VERIFY(index < N);
+        return m_data[index];
+    }
+
+    [[nodiscard]] constexpr T& operator[](size_t index)
     {
         VERIFY(index < N);
         return m_data[index];
@@ -199,9 +205,10 @@ public:
         operator*=(inv_length);
     }
 
-    [[nodiscard]] constexpr T length() const
+    template<typename O = T>
+    [[nodiscard]] constexpr O length() const
     {
-        return AK::sqrt(dot(*this));
+        return AK::sqrt<O>(dot(*this));
     }
 
     [[nodiscard]] constexpr VectorN<2, T> xy() const requires(N >= 3)

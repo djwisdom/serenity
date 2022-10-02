@@ -163,8 +163,8 @@ static Action* action_for_shortcut(Window& window, Shortcut const& shortcut)
         return action;
     }
 
-    // NOTE: Application-global shortcuts are ignored while a modal window is up.
-    if (!window.is_modal()) {
+    // NOTE: Application-global shortcuts are ignored while a blocking modal window is up.
+    if (!window.is_blocking() && !window.is_capturing_input()) {
         if (auto* action = Application::the()->action_for_shortcut(shortcut)) {
             dbgln_if(KEYBOARD_SHORTCUTS_DEBUG, "  > Asked application, got action: {} {} (enabled: {}, shortcut: {}, alt-shortcut: {})", action, action->text(), action->is_enabled(), action->shortcut().to_string(), action->alternate_shortcut().to_string());
             return action;
@@ -192,27 +192,24 @@ void ConnectionToWindowServer::key_down(i32 window_id, u32 code_point, u32 key, 
             return;
     }
 
-    bool focused_widget_accepts_emoji_input = window->focused_widget() && window->focused_widget()->accepts_emoji_input();
-    if (focused_widget_accepts_emoji_input && (modifiers == (Mod_Ctrl | Mod_Alt)) && key == Key_Space) {
+    bool focused_widget_accepts_emoji_input = window->focused_widget() && window->focused_widget()->on_emoji_input;
+    if (!window->blocks_emoji_input() && focused_widget_accepts_emoji_input && (modifiers == (Mod_Ctrl | Mod_Alt)) && key == Key_Space) {
         auto emoji_input_dialog = EmojiInputDialog::construct(window);
         if (emoji_input_dialog->exec() != EmojiInputDialog::ExecResult::OK)
             return;
-        key_event->m_key = Key_Invalid;
-        key_event->m_modifiers = 0;
 
-        Utf8View m_utf8_view(emoji_input_dialog->selected_emoji_text());
-        u32 emoji_code_point = *m_utf8_view.begin();
-
-        key_event->m_code_point = emoji_code_point;
+        window->focused_widget()->on_emoji_input(emoji_input_dialog->selected_emoji_text());
+        return;
     }
 
-    bool accepts_command_palette = true;
-    if (window->focused_widget())
+    bool accepts_command_palette = !window->blocks_command_palette();
+    if (accepts_command_palette && window->focused_widget())
         accepts_command_palette = window->focused_widget()->accepts_command_palette();
 
     // FIXME: This shortcut should be configurable.
     if (accepts_command_palette && !m_in_command_palette && modifiers == (Mod_Ctrl | Mod_Shift) && key == Key_A) {
         auto command_palette = CommandPalette::construct(*window);
+        command_palette->set_window_mode(GUI::WindowMode::CaptureInput);
         TemporaryChange change { m_in_command_palette, true };
         if (command_palette->exec() != GUI::Dialog::ExecResult::OK)
             return;
@@ -397,6 +394,12 @@ void ConnectionToWindowServer::window_state_changed(i32 window_id, bool minimize
 {
     if (auto* window = Window::from_window_id(window_id))
         window->notify_state_changed({}, minimized, maximized, occluded);
+}
+
+void ConnectionToWindowServer::window_input_preempted(i32 window_id, i32 preemptor)
+{
+    if (auto* window = Window::from_window_id(window_id))
+        window->notify_input_preempted({}, static_cast<InputPreemptor>(preemptor));
 }
 
 void ConnectionToWindowServer::display_link_notification()

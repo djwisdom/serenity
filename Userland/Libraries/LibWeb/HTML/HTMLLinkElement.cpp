@@ -12,15 +12,16 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
-#include <LibWeb/ImageDecoding.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Platform/ImageCodecPlugin.h>
 
 namespace Web::HTML {
 
 HTMLLinkElement::HTMLLinkElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLLinkElement"));
 }
 
 HTMLLinkElement::~HTMLLinkElement() = default;
@@ -126,14 +127,14 @@ void HTMLLinkElement::resource_did_load_stylesheet()
         }
     }
 
-    auto sheet = parse_css_stylesheet(CSS::Parser::ParsingContext(document(), resource()->url()), resource()->encoded_data());
+    auto* sheet = parse_css_stylesheet(CSS::Parser::ParsingContext(document(), resource()->url()), resource()->encoded_data());
     if (!sheet) {
         dbgln_if(CSS_LOADER_DEBUG, "HTMLLinkElement: Failed to parse stylesheet: {}", resource()->url());
         return;
     }
 
     sheet->set_owner_node(this);
-    document().style_sheets().add_sheet(sheet.release_nonnull());
+    document().style_sheets().add_sheet(*sheet);
 }
 
 void HTMLLinkElement::resource_did_load_favicon()
@@ -155,7 +156,7 @@ bool HTMLLinkElement::load_favicon_and_use_if_window_is_active()
         return false;
 
     RefPtr<Gfx::Bitmap> favicon_bitmap;
-    auto decoded_image = Web::ImageDecoding::Decoder::the().decode_image(resource()->encoded_data());
+    auto decoded_image = Platform::ImageCodecPlugin::the().decode_image(resource()->encoded_data());
     if (!decoded_image.has_value() || decoded_image->frames.is_empty()) {
         dbgln("Could not decode favicon {}", resource()->url());
         return false;

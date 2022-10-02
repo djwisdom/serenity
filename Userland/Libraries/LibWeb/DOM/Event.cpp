@@ -1,19 +1,65 @@
 /*
  * Copyright (c) 2020, the SerenityOS developers.
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/TypeCasts.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 
 namespace Web::DOM {
 
+JS::NonnullGCPtr<Event> Event::create(JS::Realm& realm, FlyString const& event_name, EventInit const& event_init)
+{
+    return *realm.heap().allocate<Event>(realm, realm, event_name, event_init);
+}
+
+JS::NonnullGCPtr<Event> Event::construct_impl(JS::Realm& realm, FlyString const& event_name, EventInit const& event_init)
+{
+    return create(realm, event_name, event_init);
+}
+
+Event::Event(JS::Realm& realm, FlyString const& type)
+    : PlatformObject(Bindings::cached_web_prototype(realm, "Event"))
+    , m_type(type)
+    , m_initialized(true)
+{
+}
+
+Event::Event(JS::Realm& realm, FlyString const& type, EventInit const& event_init)
+    : PlatformObject(Bindings::cached_web_prototype(realm, "Event"))
+    , m_type(type)
+    , m_bubbles(event_init.bubbles)
+    , m_cancelable(event_init.cancelable)
+    , m_composed(event_init.composed)
+    , m_initialized(true)
+{
+}
+
+void Event::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_target.ptr());
+    visitor.visit(m_related_target.ptr());
+    visitor.visit(m_current_target.ptr());
+    for (auto& it : m_path) {
+        visitor.visit(it.invocation_target.ptr());
+        visitor.visit(it.shadow_adjusted_target.ptr());
+        visitor.visit(it.related_target.ptr());
+        for (auto& itit : it.touch_target_list)
+            visitor.visit(itit.ptr());
+    }
+    for (auto& it : m_touch_target_list)
+        visitor.visit(it.ptr());
+}
+
 // https://dom.spec.whatwg.org/#concept-event-path-append
-void Event::append_to_path(EventTarget& invocation_target, RefPtr<EventTarget> shadow_adjusted_target, RefPtr<EventTarget> related_target, TouchTargetList& touch_targets, bool slot_in_closed_tree)
+void Event::append_to_path(EventTarget& invocation_target, JS::GCPtr<EventTarget> shadow_adjusted_target, JS::GCPtr<EventTarget> related_target, TouchTargetList& touch_targets, bool slot_in_closed_tree)
 {
     // 1. Let invocationTargetInShadowTree be false.
     bool invocation_target_in_shadow_tree = false;
@@ -46,7 +92,7 @@ void Event::set_cancelled_flag()
 }
 
 // https://dom.spec.whatwg.org/#concept-event-initialize
-void Event::initialize(String const& type, bool bubbles, bool cancelable)
+void Event::initialize_event(String const& type, bool bubbles, bool cancelable)
 {
     // 1. Set event’s initialized flag.
     m_initialized = true;
@@ -80,7 +126,7 @@ void Event::init_event(String const& type, bool bubbles, bool cancelable)
         return;
 
     // 2. Initialize this with type, bubbles, and cancelable.
-    initialize(type, bubbles, cancelable);
+    initialize_event(type, bubbles, cancelable);
 }
 
 // https://dom.spec.whatwg.org/#dom-event-timestamp
@@ -90,10 +136,10 @@ double Event::time_stamp() const
 }
 
 // https://dom.spec.whatwg.org/#dom-event-composedpath
-NonnullRefPtrVector<EventTarget> Event::composed_path() const
+Vector<JS::Handle<EventTarget>> Event::composed_path() const
 {
     // 1. Let composedPath be an empty list.
-    NonnullRefPtrVector<EventTarget> composed_path;
+    Vector<JS::Handle<EventTarget>> composed_path;
 
     // 2. Let path be this’s path. (NOTE: Not necessary)
 
@@ -106,7 +152,7 @@ NonnullRefPtrVector<EventTarget> Event::composed_path() const
     // 5. Append currentTarget to composedPath.
     // NOTE: If path is not empty, then the event is being dispatched and will have a currentTarget.
     VERIFY(m_current_target);
-    composed_path.append(*m_current_target);
+    composed_path.append(const_cast<EventTarget*>(m_current_target.ptr()));
 
     // 6. Let currentTargetIndex be 0.
     size_t current_target_index = 0;
@@ -152,7 +198,7 @@ NonnullRefPtrVector<EventTarget> Event::composed_path() const
         // 2. If currentHiddenLevel is less than or equal to maxHiddenLevel, then prepend path[index]'s invocation target to composedPath.
         if (current_hidden_level <= max_hidden_level) {
             VERIFY(path_entry.invocation_target);
-            composed_path.prepend(*path_entry.invocation_target);
+            composed_path.prepend(const_cast<EventTarget*>(path_entry.invocation_target.ptr()));
         }
 
         // 3. If path[index]'s slot-in-closed-tree is true, then:
@@ -184,7 +230,7 @@ NonnullRefPtrVector<EventTarget> Event::composed_path() const
         // 2. If currentHiddenLevel is less than or equal to maxHiddenLevel, then append path[index]'s invocation target to composedPath.
         if (current_hidden_level <= max_hidden_level) {
             VERIFY(path_entry.invocation_target);
-            composed_path.append(*path_entry.invocation_target);
+            composed_path.append(const_cast<EventTarget*>(path_entry.invocation_target.ptr()));
         }
 
         // 3. If path[index]'s root-of-closed-tree is true, then:

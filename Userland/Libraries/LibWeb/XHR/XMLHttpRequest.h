@@ -11,25 +11,21 @@
 #include <AK/RefCounted.h>
 #include <AK/URL.h>
 #include <AK/Weakable.h>
-#include <LibWeb/Bindings/WindowObject.h>
-#include <LibWeb/Bindings/Wrappable.h>
 #include <LibWeb/DOM/EventTarget.h>
-#include <LibWeb/DOM/ExceptionOr.h>
+#include <LibWeb/Fetch/BodyInit.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Headers.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Statuses.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/MimeSniff/MimeType.h>
 #include <LibWeb/URL/URLSearchParams.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/XHR/XMLHttpRequestEventTarget.h>
 
 namespace Web::XHR {
 
-// https://fetch.spec.whatwg.org/#typedefdef-xmlhttprequestbodyinit
-using XMLHttpRequestBodyInit = Variant<NonnullRefPtr<FileAPI::Blob>, JS::Handle<JS::Object>, NonnullRefPtr<URL::URLSearchParams>, String>;
+class XMLHttpRequest final : public XMLHttpRequestEventTarget {
+    WEB_PLATFORM_OBJECT(XMLHttpRequest, XMLHttpRequestEventTarget);
 
-class XMLHttpRequest final
-    : public RefCounted<XMLHttpRequest>
-    , public Weakable<XMLHttpRequest>
-    , public XMLHttpRequestEventTarget {
 public:
     enum class ReadyState : u16 {
         Unsent = 0,
@@ -39,50 +35,36 @@ public:
         Done = 4,
     };
 
-    using WrapperType = Bindings::XMLHttpRequestWrapper;
-
-    static NonnullRefPtr<XMLHttpRequest> create(HTML::Window& window)
-    {
-        return adopt_ref(*new XMLHttpRequest(window));
-    }
-    static NonnullRefPtr<XMLHttpRequest> create_with_global_object(Bindings::WindowObject& window)
-    {
-        return XMLHttpRequest::create(window.impl());
-    }
+    static JS::NonnullGCPtr<XMLHttpRequest> construct_impl(JS::Realm&);
 
     virtual ~XMLHttpRequest() override;
 
-    using RefCounted::ref;
-    using RefCounted::unref;
-
     ReadyState ready_state() const { return m_ready_state; };
     Fetch::Infrastructure::Status status() const { return m_status; };
-    DOM::ExceptionOr<String> response_text() const;
-    DOM::ExceptionOr<JS::Value> response();
+    WebIDL::ExceptionOr<String> response_text() const;
+    WebIDL::ExceptionOr<JS::Value> response();
     Bindings::XMLHttpRequestResponseType response_type() const { return m_response_type; }
 
-    DOM::ExceptionOr<void> open(String const& method, String const& url);
-    DOM::ExceptionOr<void> open(String const& method, String const& url, bool async, String const& username = {}, String const& password = {});
-    DOM::ExceptionOr<void> send(Optional<XMLHttpRequestBodyInit> body);
+    WebIDL::ExceptionOr<void> open(String const& method, String const& url);
+    WebIDL::ExceptionOr<void> open(String const& method, String const& url, bool async, String const& username = {}, String const& password = {});
+    WebIDL::ExceptionOr<void> send(Optional<Fetch::XMLHttpRequestBodyInit> body);
 
-    DOM::ExceptionOr<void> set_request_header(String const& header, String const& value);
+    WebIDL::ExceptionOr<void> set_request_header(String const& header, String const& value);
     void set_response_type(Bindings::XMLHttpRequestResponseType type) { m_response_type = type; }
 
     String get_response_header(String const& name) { return m_response_headers.get(name).value_or({}); }
     String get_all_response_headers() const;
 
-    Bindings::CallbackType* onreadystatechange();
-    void set_onreadystatechange(Optional<Bindings::CallbackType>);
+    WebIDL::CallbackType* onreadystatechange();
+    void set_onreadystatechange(WebIDL::CallbackType*);
 
-    DOM::ExceptionOr<void> override_mime_type(String const& mime);
+    WebIDL::ExceptionOr<void> override_mime_type(String const& mime);
 
-    DOM::ExceptionOr<void> set_timeout(u32 timeout);
+    WebIDL::ExceptionOr<void> set_timeout(u32 timeout);
     u32 timeout() const;
 
 private:
-    virtual void ref_event_target() override { ref(); }
-    virtual void unref_event_target() override { unref(); }
-    virtual JS::Object* create_wrapper(JS::GlobalObject&) override;
+    virtual void visit_edges(Cell::Visitor&) override;
 
     void set_ready_state(ReadyState);
     void set_status(Fetch::Infrastructure::Status status) { m_status = status; }
@@ -96,7 +78,7 @@ private:
 
     explicit XMLHttpRequest(HTML::Window&);
 
-    NonnullRefPtr<HTML::Window> m_window;
+    JS::NonnullGCPtr<HTML::Window> m_window;
 
     ReadyState m_ready_state { ReadyState::Unsent };
     Fetch::Infrastructure::Status m_status { 0 };
@@ -121,7 +103,7 @@ private:
     enum class Failure {
         /// ????
     };
-    Variant<JS::Handle<JS::Value>, Failure, Empty> m_response_object;
+    Variant<JS::Value, Failure, Empty> m_response_object;
 
     // https://xhr.spec.whatwg.org/#override-mime-type
     Optional<MimeSniff::MimeType> m_override_mime_type;

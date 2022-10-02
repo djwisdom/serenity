@@ -219,6 +219,11 @@ void Widget::child_event(Core::ChildEvent& event)
         }
         if (window() && event.child() && is<Widget>(*event.child()))
             window()->did_add_widget({}, verify_cast<Widget>(*event.child()));
+
+        if (event.child() && is<Widget>(*event.child()) && static_cast<Widget const&>(*event.child()).is_visible()) {
+            ShowEvent show_event;
+            event.child()->dispatch_event(show_event);
+        }
     }
     if (event.type() == Event::ChildRemoved) {
         if (layout()) {
@@ -228,6 +233,10 @@ void Widget::child_event(Core::ChildEvent& event)
         }
         if (window() && event.child() && is<Widget>(*event.child()))
             window()->did_remove_widget({}, verify_cast<Widget>(*event.child()));
+        if (event.child() && is<Widget>(*event.child())) {
+            HideEvent hide_event;
+            event.child()->dispatch_event(hide_event);
+        }
         update();
     }
     return Core::Object::child_event(event);
@@ -731,7 +740,7 @@ bool Widget::is_focused() const
     auto* win = window();
     if (!win)
         return false;
-    // Accessory windows are not active despite being the active
+    // Capturing modals are not active despite being the active
     // input window. So we can have focus if either we're the active
     // input window or we're the active window
     if (win->is_active_input() || win->is_active())

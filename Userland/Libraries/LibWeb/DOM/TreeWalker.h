@@ -6,67 +6,66 @@
 
 #pragma once
 
-#include <AK/RefCounted.h>
-#include <LibWeb/Bindings/Wrappable.h>
 #include <LibWeb/DOM/NodeFilter.h>
 
 namespace Web::DOM {
 
 // https://dom.spec.whatwg.org/#treewalker
-class TreeWalker
-    : public RefCounted<TreeWalker>
-    , public Bindings::Wrappable {
+class TreeWalker final : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(TreeWalker, JS::Object);
+
 public:
-    using WrapperType = Bindings::TreeWalkerWrapper;
+    static JS::NonnullGCPtr<TreeWalker> create(Node& root, unsigned what_to_show, JS::GCPtr<NodeFilter>);
 
-    static NonnullRefPtr<TreeWalker> create(Node& root, unsigned what_to_show, RefPtr<NodeFilter>);
-    virtual ~TreeWalker() override = default;
+    virtual ~TreeWalker() override;
 
-    NonnullRefPtr<Node> current_node() const;
+    JS::NonnullGCPtr<Node> current_node() const;
     void set_current_node(Node&);
 
-    JS::ThrowCompletionOr<RefPtr<Node>> parent_node();
-    JS::ThrowCompletionOr<RefPtr<Node>> first_child();
-    JS::ThrowCompletionOr<RefPtr<Node>> last_child();
-    JS::ThrowCompletionOr<RefPtr<Node>> previous_sibling();
-    JS::ThrowCompletionOr<RefPtr<Node>> next_sibling();
-    JS::ThrowCompletionOr<RefPtr<Node>> previous_node();
-    JS::ThrowCompletionOr<RefPtr<Node>> next_node();
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> parent_node();
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> first_child();
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> last_child();
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> previous_sibling();
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> next_sibling();
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> previous_node();
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> next_node();
 
-    NonnullRefPtr<Node> root() { return m_root; }
+    JS::NonnullGCPtr<Node> root() { return m_root; }
 
-    NodeFilter* filter() { return m_filter; }
+    NodeFilter* filter() { return m_filter.ptr(); }
 
     unsigned what_to_show() const { return m_what_to_show; }
 
 private:
-    TreeWalker(Node& root);
+    explicit TreeWalker(Node& root);
+
+    virtual void visit_edges(Cell::Visitor&) override;
 
     enum class ChildTraversalType {
         First,
         Last,
     };
-    JS::ThrowCompletionOr<RefPtr<Node>> traverse_children(ChildTraversalType);
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> traverse_children(ChildTraversalType);
 
     enum class SiblingTraversalType {
         Next,
         Previous,
     };
-    JS::ThrowCompletionOr<RefPtr<Node>> traverse_siblings(SiblingTraversalType);
+    JS::ThrowCompletionOr<JS::GCPtr<Node>> traverse_siblings(SiblingTraversalType);
 
     JS::ThrowCompletionOr<NodeFilter::Result> filter(Node&);
 
     // https://dom.spec.whatwg.org/#concept-traversal-root
-    NonnullRefPtr<DOM::Node> m_root;
+    JS::NonnullGCPtr<Node> m_root;
 
     // https://dom.spec.whatwg.org/#treewalker-current
-    NonnullRefPtr<DOM::Node> m_current;
+    JS::NonnullGCPtr<Node> m_current;
 
     // https://dom.spec.whatwg.org/#concept-traversal-whattoshow
     unsigned m_what_to_show { 0 };
 
     // https://dom.spec.whatwg.org/#concept-traversal-filter
-    RefPtr<DOM::NodeFilter> m_filter;
+    JS::GCPtr<NodeFilter> m_filter;
 
     // https://dom.spec.whatwg.org/#concept-traversal-active
     bool m_active { false };

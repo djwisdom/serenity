@@ -7,6 +7,7 @@
 #include <AK/Debug.h>
 #include <AK/StringBuilder.h>
 #include <LibTextCodec/Decoder.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/ShadowRoot.h>
@@ -14,7 +15,6 @@
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
-#include <LibWeb/HTML/Window.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 
 namespace Web::HTML {
@@ -22,9 +22,18 @@ namespace Web::HTML {
 HTMLScriptElement::HTMLScriptElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLScriptElement"));
 }
 
 HTMLScriptElement::~HTMLScriptElement() = default;
+
+void HTMLScriptElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_script);
+    visitor.visit(m_parser_document.ptr());
+    visitor.visit(m_preparation_time_document.ptr());
+}
 
 void HTMLScriptElement::begin_delaying_document_load_event(DOM::Document& document)
 {
@@ -37,7 +46,7 @@ void HTMLScriptElement::begin_delaying_document_load_event(DOM::Document& docume
 void HTMLScriptElement::execute_script()
 {
     // 1. Let document be scriptElement's node document.
-    NonnullRefPtr<DOM::Document> node_document = document();
+    JS::NonnullGCPtr<DOM::Document> node_document = document();
 
     // 2. If scriptElement's preparation-time document is not equal to document, then return.
     if (m_preparation_time_document.ptr() != node_document.ptr()) {
@@ -48,7 +57,7 @@ void HTMLScriptElement::execute_script()
     // 3. If the script's script is null for scriptElement, then fire an event named error at scriptElement, and return.
     if (!m_script) {
         dbgln("HTMLScriptElement: Refusing to run script because the script's script is null.");
-        dispatch_event(DOM::Event::create(HTML::EventNames::error));
+        dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
         return;
     }
 
@@ -95,7 +104,7 @@ void HTMLScriptElement::execute_script()
 
     // 7. If scriptElement is from an external file, then fire an event named load at scriptElement.
     if (m_from_an_external_file)
-        dispatch_event(DOM::Event::create(HTML::EventNames::load));
+        dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::load));
 }
 
 // https://mimesniff.spec.whatwg.org/#javascript-mime-type-essence-match
@@ -115,7 +124,7 @@ void HTMLScriptElement::prepare_script()
     }
 
     // 2. Let parser document be the element's parser document.
-    RefPtr<DOM::Document> parser_document = m_parser_document.ptr();
+    JS::GCPtr<DOM::Document> parser_document = m_parser_document.ptr();
 
     // 3. Set the element's parser document to null.
     m_parser_document = nullptr;
@@ -173,7 +182,7 @@ void HTMLScriptElement::prepare_script()
 
     // 9. If parser document is non-null, then set the element's parser document back to parser document and set the element's "non-blocking" flag to false.
     if (parser_document) {
-        m_parser_document = *parser_document;
+        m_parser_document = parser_document;
         m_non_blocking = false;
     }
 
@@ -181,7 +190,7 @@ void HTMLScriptElement::prepare_script()
     m_already_started = true;
 
     // 11. Set the element's preparation-time document to its node document.
-    m_preparation_time_document = document();
+    m_preparation_time_document = &document();
 
     // 12. If parser document is non-null, and parser document is not equal to the element's preparation-time document, then return.
     if (parser_document && parser_document.ptr() != m_preparation_time_document.ptr()) {
@@ -259,7 +268,7 @@ void HTMLScriptElement::prepare_script()
         if (src.is_empty()) {
             dbgln("HTMLScriptElement: Refusing to run script because the src attribute is empty.");
             queue_an_element_task(HTML::Task::Source::Unspecified, [this] {
-                dispatch_event(DOM::Event::create(HTML::EventNames::error));
+                dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
             });
             return;
         }
@@ -272,7 +281,7 @@ void HTMLScriptElement::prepare_script()
         if (!url.is_valid()) {
             dbgln("HTMLScriptElement: Refusing to run script because the src URL '{}' is invalid.", url);
             queue_an_element_task(HTML::Task::Source::Unspecified, [this] {
-                dispatch_event(DOM::Event::create(HTML::EventNames::error));
+                dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
             });
             return;
         }
@@ -286,26 +295,8 @@ void HTMLScriptElement::prepare_script()
             if (parser_document)
                 begin_delaying_document_load_event(*parser_document);
 
-            ResourceLoader::the().load(
-                request,
-                [this, url](auto data, auto&, auto) {
-                    if (data.is_null()) {
-                        dbgln("HTMLScriptElement: Failed to load {}", url);
-                        return;
-                    }
-
-                    // FIXME: This is all ad-hoc and needs work.
-                    auto script = ClassicScript::create(url.to_string(), data, document().relevant_settings_object(), AK::URL());
-
-                    // When the chosen algorithm asynchronously completes, set the script's script to the result. At that time, the script is ready.
-                    m_script = script;
-                    script_became_ready();
-                },
-                [this](auto&, auto) {
-                    m_failed_to_load = true;
-                    dbgln("HONK! Failed to load script, but ready nonetheless.");
-                    script_became_ready();
-                });
+            auto resource = ResourceLoader::the().load_resource(Resource::Type::Generic, request);
+            set_resource(resource);
         } else if (m_script_type == ScriptType::Module) {
             // FIXME: -> "module"
             //        Fetch an external module script graph given url, settings object, and options.
@@ -367,29 +358,29 @@ void HTMLScriptElement::prepare_script()
     else if ((m_script_type == ScriptType::Classic && has_attribute(HTML::AttributeNames::src) && !has_attribute(HTML::AttributeNames::async) && !m_non_blocking)
         || (m_script_type == ScriptType::Module && !has_attribute(HTML::AttributeNames::async) && !m_non_blocking)) {
         // Add the element to the end of the list of scripts that will execute in order as soon as possible associated with the element's preparation-time document.
-        m_preparation_time_document->add_script_to_execute_as_soon_as_possible({}, *this);
+        m_preparation_time_document->add_script_to_execute_in_order_as_soon_as_possible({}, *this);
 
         // When the script is ready, run the following steps:
         when_the_script_is_ready([this] {
             // 1. If the element is not now the first element in the list of scripts
             //    that will execute in order as soon as possible to which it was added above,
             //    then mark the element as ready but return without executing the script yet.
-            if (this != &m_preparation_time_document->scripts_to_execute_as_soon_as_possible().first())
+            if (this != m_preparation_time_document->scripts_to_execute_in_order_as_soon_as_possible().first().ptr())
                 return;
 
             for (;;) {
                 // 2. Execution: Execute the script block corresponding to the first script element
                 //    in this list of scripts that will execute in order as soon as possible.
-                m_preparation_time_document->scripts_to_execute_as_soon_as_possible().first().execute_script();
+                m_preparation_time_document->scripts_to_execute_in_order_as_soon_as_possible().first()->execute_script();
 
                 // 3. Remove the first element from this list of scripts that will execute in order
                 //    as soon as possible.
-                (void)m_preparation_time_document->scripts_to_execute_as_soon_as_possible().take_first();
+                (void)m_preparation_time_document->scripts_to_execute_in_order_as_soon_as_possible().take_first();
 
                 // 4. If this list of scripts that will execute in order as soon as possible is still
                 //    not empty and the first entry has already been marked as ready, then jump back
                 //    to the step labeled execution.
-                if (!m_preparation_time_document->scripts_to_execute_as_soon_as_possible().is_empty() && m_preparation_time_document->scripts_to_execute_as_soon_as_possible().first().m_script_ready)
+                if (!m_preparation_time_document->scripts_to_execute_in_order_as_soon_as_possible().is_empty() && m_preparation_time_document->scripts_to_execute_in_order_as_soon_as_possible().first()->m_script_ready)
                     continue;
 
                 break;
@@ -409,7 +400,7 @@ void HTMLScriptElement::prepare_script()
         when_the_script_is_ready([this] {
             execute_script();
             m_preparation_time_document->scripts_to_execute_as_soon_as_possible().remove_first_matching([&](auto& entry) {
-                return entry == this;
+                return entry.ptr() == this;
             });
         });
     }
@@ -428,6 +419,34 @@ void HTMLScriptElement::prepare_script()
         // Immediately execute the script block, even if other scripts are already executing.
         execute_script();
     }
+}
+
+void HTMLScriptElement::resource_did_load()
+{
+    // FIXME: This is all ad-hoc and needs work.
+
+    auto data = resource()->encoded_data();
+
+    // If the resource has an explicit encoding (i.e from a HTTP Content-Type header)
+    // we have to re-encode it to UTF-8.
+    if (resource()->has_encoding()) {
+        if (auto* codec = TextCodec::decoder_for(resource()->encoding().value())) {
+            data = codec->to_utf8(data).to_byte_buffer();
+        }
+    }
+
+    auto script = ClassicScript::create(resource()->url().to_string(), data, document().relevant_settings_object(), AK::URL());
+
+    // When the chosen algorithm asynchronously completes, set the script's script to the result. At that time, the script is ready.
+    m_script = script;
+    script_became_ready();
+}
+
+void HTMLScriptElement::resource_did_fail()
+{
+    m_failed_to_load = true;
+    dbgln("HONK! Failed to load script, but ready nonetheless.");
+    script_became_ready();
 }
 
 void HTMLScriptElement::script_became_ready()

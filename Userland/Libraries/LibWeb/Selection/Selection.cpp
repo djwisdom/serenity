@@ -4,14 +4,23 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Selection/Selection.h>
 
 namespace Web::Selection {
 
-NonnullRefPtr<Selection> Selection::create()
+JS::NonnullGCPtr<Selection> Selection::create(JS::Realm& realm)
 {
-    return adopt_ref(*new Selection);
+    return *realm.heap().allocate<Selection>(realm, realm);
 }
+
+Selection::Selection(JS::Realm& realm)
+    : PlatformObject(realm)
+{
+    set_prototype(&Bindings::cached_web_prototype(realm, "Selection"));
+}
+
+Selection::~Selection() = default;
 
 DOM::Node* Selection::anchor_node()
 {
@@ -48,7 +57,7 @@ String Selection::type() const
     TODO();
 }
 
-NonnullRefPtr<DOM::Range> Selection::get_range_at(unsigned index)
+DOM::Range* Selection::get_range_at(unsigned index)
 {
     (void)index;
     TODO();

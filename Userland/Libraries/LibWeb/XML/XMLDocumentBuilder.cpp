@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/DOM/Event.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/XML/XMLDocumentBuilder.h>
@@ -160,26 +161,28 @@ void XMLDocumentBuilder::document_end()
         // Spin the event loop until the first script in the list of scripts that will execute when the document has finished parsing has its "ready to be parser-executed" flag set
         // and the parser's Document has no style sheet that is blocking scripts.
         HTML::main_thread_event_loop().spin_until([&] {
-            return m_document.scripts_to_execute_when_parsing_has_finished().first().is_ready_to_be_parser_executed()
+            return m_document.scripts_to_execute_when_parsing_has_finished().first()->is_ready_to_be_parser_executed()
                 && !m_document.has_a_style_sheet_that_is_blocking_scripts();
         });
 
         // Execute the first script in the list of scripts that will execute when the document has finished parsing.
-        m_document.scripts_to_execute_when_parsing_has_finished().first().execute_script();
+        m_document.scripts_to_execute_when_parsing_has_finished().first()->execute_script();
 
         // Remove the first script element from the list of scripts that will execute when the document has finished parsing (i.e. shift out the first entry in the list).
         (void)m_document.scripts_to_execute_when_parsing_has_finished().take_first();
     }
     // Queue a global task on the DOM manipulation task source given the Document's relevant global object to run the following substeps:
-    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = NonnullRefPtr(m_document)]() mutable {
-        // FIXME: Set the Document's load timing info's DOM content loaded event start time to the current high resolution time given the Document's relevant global object.
+    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = &m_document]() mutable {
+        // Set the Document's load timing info's DOM content loaded event start time to the current high resolution time given the Document's relevant global object.
+        document->load_timing_info().dom_content_loaded_event_start_time = HTML::main_thread_event_loop().unsafe_shared_current_time();
 
         // Fire an event named DOMContentLoaded at the Document object, with its bubbles attribute initialized to true.
-        auto content_loaded_event = DOM::Event::create(HTML::EventNames::DOMContentLoaded);
+        auto content_loaded_event = DOM::Event::create(document->realm(), HTML::EventNames::DOMContentLoaded);
         content_loaded_event->set_bubbles(true);
-        document->dispatch_event(content_loaded_event);
+        document->dispatch_event(*content_loaded_event);
 
-        // FIXME: Set the Document's load timing info's DOM content loaded event end time to the current high resolution time given the Document's relevant global object.
+        // Set the Document's load timing info's DOM content loaded event end time to the current high resolution time given the Document's relevant global object.
+        document->load_timing_info().dom_content_loaded_event_end_time = HTML::main_thread_event_loop().unsafe_shared_current_time();
 
         // FIXME: Enable the client message queue of the ServiceWorkerContainer object whose associated service worker client is the Document object's relevant settings object.
 
@@ -197,7 +200,7 @@ void XMLDocumentBuilder::document_end()
     });
 
     // Queue a global task on the DOM manipulation task source given the Document's relevant global object to run the following steps:
-    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = NonnullRefPtr(m_document)]() mutable {
+    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = &m_document]() mutable {
         // Update the current document readiness to "complete".
         document->update_readiness(HTML::DocumentReadyState::Complete);
 
@@ -206,20 +209,22 @@ void XMLDocumentBuilder::document_end()
             return;
 
         // Let window be the Document's relevant global object.
-        NonnullRefPtr<HTML::Window> window = document->window();
+        JS::NonnullGCPtr<HTML::Window> window = verify_cast<HTML::Window>(relevant_global_object(*document));
 
-        // FIXME: Set the Document's load timing info's load event start time to the current high resolution time given window.
+        // Set the Document's load timing info's load event start time to the current high resolution time given window.
+        document->load_timing_info().load_event_start_time = HTML::main_thread_event_loop().unsafe_shared_current_time();
 
         // Fire an event named load at window, with legacy target override flag set.
         // FIXME: The legacy target override flag is currently set by a virtual override of dispatch_event()
         // We should reorganize this so that the flag appears explicitly here instead.
-        window->dispatch_event(DOM::Event::create(HTML::EventNames::load));
+        window->dispatch_event(*DOM::Event::create(document->realm(), HTML::EventNames::load));
 
         // FIXME: Invoke WebDriver BiDi load complete with the Document's browsing context, and a new WebDriver BiDi navigation status whose id is the Document object's navigation id, status is "complete", and url is the Document object's URL.
 
         // FIXME: Set the Document object's navigation id to null.
 
-        // FIXME: Set the Document's load timing info's load event end time to the current high resolution time given window.
+        // Set the Document's load timing info's load event end time to the current high resolution time given window.
+        document->load_timing_info().dom_content_loaded_event_end_time = HTML::main_thread_event_loop().unsafe_shared_current_time();
 
         // Assert: Document's page showing is false.
         VERIFY(!document->page_showing());

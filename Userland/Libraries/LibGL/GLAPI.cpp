@@ -354,7 +354,7 @@ void glFinish()
     g_gl_context->gl_finish();
 }
 
-void glFogfv(GLenum pname, GLfloat* params)
+void glFogfv(GLenum pname, GLfloat const* params)
 {
     g_gl_context->gl_fogfv(pname, params);
 }
@@ -444,9 +444,14 @@ void glGetMaterialiv(GLenum face, GLenum pname, GLint* params)
     g_gl_context->gl_get_material(face, pname, params, GL_INT);
 }
 
-GLubyte* glGetString(GLenum name)
+GLubyte const* glGetString(GLenum name)
 {
     return g_gl_context->gl_get_string(name);
+}
+
+void glGetTexImage(GLenum target, GLint level, GLenum format, GLenum type, void* pixels)
+{
+    g_gl_context->gl_get_tex_image(target, level, format, type, pixels);
 }
 
 void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint* params)
@@ -626,14 +631,39 @@ void glMatrixMode(GLenum mode)
     g_gl_context->gl_matrix_mode(mode);
 }
 
-void glMultiTexCoord2f(GLenum target, GLfloat s, GLfloat t)
+void glMultiTexCoord1f(GLenum target, GLfloat s)
 {
-    g_gl_context->gl_multi_tex_coord(target, s, t, 0.0f, 1.0f);
+    g_gl_context->gl_multi_tex_coord(target, s, 0.f, 0.f, 1.f);
 }
 
 void glMultiTexCoord2fARB(GLenum target, GLfloat s, GLfloat t)
 {
     glMultiTexCoord2f(target, s, t);
+}
+
+void glMultiTexCoord2fvARB(GLenum target, GLfloat const* v)
+{
+    glMultiTexCoord2fv(target, v);
+}
+
+void glMultiTexCoord2fv(GLenum target, GLfloat const* v)
+{
+    g_gl_context->gl_multi_tex_coord(target, v[0], v[1], 0.f, 1.f);
+}
+
+void glMultiTexCoord2f(GLenum target, GLfloat s, GLfloat t)
+{
+    g_gl_context->gl_multi_tex_coord(target, s, t, 0.f, 1.f);
+}
+
+void glMultiTexCoord3f(GLenum target, GLfloat s, GLfloat t, GLfloat r)
+{
+    g_gl_context->gl_multi_tex_coord(target, s, t, r, 1.f);
+}
+
+void glMultiTexCoord4f(GLenum target, GLfloat s, GLfloat t, GLfloat r, GLfloat q)
+{
+    g_gl_context->gl_multi_tex_coord(target, s, t, r, q);
 }
 
 void glMultMatrixd(GLdouble const* matrix)
@@ -649,6 +679,11 @@ void glMultMatrixf(GLfloat const* matrix)
 void glNewList(GLuint list, GLenum mode)
 {
     return g_gl_context->gl_new_list(list, mode);
+}
+
+void glNormal3d(GLdouble nx, GLdouble ny, GLdouble nz)
+{
+    g_gl_context->gl_normal(nx, ny, nz);
 }
 
 void glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz)
@@ -711,9 +746,24 @@ void glPushMatrix()
     g_gl_context->gl_push_matrix();
 }
 
+void glRasterPos2d(GLdouble x, GLdouble y)
+{
+    g_gl_context->gl_raster_pos(static_cast<float>(x), static_cast<float>(y), 0.f, 1.f);
+}
+
+void glRasterPos2f(GLfloat x, GLfloat y)
+{
+    g_gl_context->gl_raster_pos(x, y, 0.f, 1.f);
+}
+
 void glRasterPos2i(GLint x, GLint y)
 {
-    g_gl_context->gl_raster_pos(static_cast<float>(x), static_cast<float>(y), 0.0f, 1.0f);
+    g_gl_context->gl_raster_pos(static_cast<float>(x), static_cast<float>(y), 0.f, 1.f);
+}
+
+void glRasterPos2s(GLshort x, GLshort y)
+{
+    g_gl_context->gl_raster_pos(static_cast<float>(x), static_cast<float>(y), 0.f, 1.f);
 }
 
 void glReadBuffer(GLenum mode)

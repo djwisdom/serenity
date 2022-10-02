@@ -20,8 +20,8 @@ namespace JS {
 
 class TypedArrayBase;
 
-ThrowCompletionOr<TypedArrayBase*> typed_array_from(GlobalObject&, Value);
-ThrowCompletionOr<void> validate_typed_array(GlobalObject&, TypedArrayBase&);
+ThrowCompletionOr<TypedArrayBase*> typed_array_from(VM&, Value);
+ThrowCompletionOr<void> validate_typed_array(VM&, TypedArrayBase&);
 
 class TypedArrayBase : public Object {
     JS_OBJECT(TypedArrayBase, Object);
@@ -32,7 +32,7 @@ public:
         Number,
     };
 
-    using IntrinsicConstructor = TypedArrayConstructor* (GlobalObject::*)();
+    using IntrinsicConstructor = TypedArrayConstructor* (Intrinsics::*)();
 
     u32 array_length() const { return m_array_length; }
     u32 byte_length() const { return m_byte_length; }
@@ -132,16 +132,16 @@ template<typename T>
 inline ThrowCompletionOr<void> integer_indexed_element_set(TypedArrayBase& typed_array, CanonicalIndex property_index, Value value)
 {
     VERIFY(!value.is_empty());
-    auto& global_object = typed_array.global_object();
+    auto& vm = typed_array.vm();
 
     Value num_value;
 
     // 1. If O.[[ContentType]] is BigInt, let numValue be ? ToBigInt(value).
     if (typed_array.content_type() == TypedArrayBase::ContentType::BigInt)
-        num_value = TRY(value.to_bigint(global_object));
+        num_value = TRY(value.to_bigint(vm));
     // 2. Otherwise, let numValue be ? ToNumber(value).
     else
-        num_value = TRY(value.to_number(global_object));
+        num_value = TRY(value.to_number(vm));
 
     // 3. If IsValidIntegerIndex(O, index) is true, then
     // NOTE: Inverted for flattened logic.
@@ -331,11 +331,18 @@ public:
             auto numeric_index = canonical_numeric_index_string(property_key, CanonicalIndexMode::DetectNumericRoundtrip);
             // b. If numericIndex is not undefined, then
             if (!numeric_index.is_undefined()) {
-                // i. Perform ? IntegerIndexedElementSet(O, numericIndex, V).
-                TRY(integer_indexed_element_set<T>(*this, numeric_index, value));
+                // i. If SameValue(O, Receiver) is true, then
+                if (same_value(this, receiver)) {
+                    // 1. Perform ? IntegerIndexedElementSet(O, numericIndex, V).
+                    TRY(integer_indexed_element_set<T>(*this, numeric_index, value));
 
-                // ii. Return true.
-                return true;
+                    // 2. Return true.
+                    return true;
+                }
+
+                // ii. If IsValidIntegerIndex(O, numericIndex) is false, return true.
+                if (!is_valid_integer_index(*this, numeric_index))
+                    return true;
             }
         }
 
@@ -407,7 +414,7 @@ public:
         return { move(keys) };
     }
 
-    Span<const UnderlyingBufferDataType> data() const
+    Span<UnderlyingBufferDataType const> data() const
     {
         return { reinterpret_cast<UnderlyingBufferDataType const*>(m_viewed_array_buffer->buffer().data() + m_byte_offset), m_array_length };
     }
@@ -450,9 +457,9 @@ private:
     virtual bool is_typed_array() const final { return true; }
 };
 
-ThrowCompletionOr<TypedArrayBase*> typed_array_create(GlobalObject& global_object, FunctionObject& constructor, MarkedVector<Value> arguments);
-ThrowCompletionOr<TypedArrayBase*> typed_array_create_same_type(GlobalObject& global_object, TypedArrayBase const& exemplar, MarkedVector<Value> arguments);
-ThrowCompletionOr<double> compare_typed_array_elements(GlobalObject& global_object, Value x, Value y, FunctionObject* comparefn, ArrayBuffer&);
+ThrowCompletionOr<TypedArrayBase*> typed_array_create(VM&, FunctionObject& constructor, MarkedVector<Value> arguments);
+ThrowCompletionOr<TypedArrayBase*> typed_array_create_same_type(VM&, TypedArrayBase const& exemplar, MarkedVector<Value> arguments);
+ThrowCompletionOr<double> compare_typed_array_elements(VM&, Value x, Value y, FunctionObject* comparefn, ArrayBuffer&);
 
 #define JS_DECLARE_TYPED_ARRAY(ClassName, snake_name, PrototypeName, ConstructorName, Type) \
     class ClassName : public TypedArray<Type> {                                             \
@@ -461,33 +468,40 @@ ThrowCompletionOr<double> compare_typed_array_elements(GlobalObject& global_obje
     public:                                                                                 \
         virtual ~ClassName();                                                               \
         static ThrowCompletionOr<ClassName*> create(                                        \
-            GlobalObject&, u32 length, FunctionObject& new_target);                         \
-        static ThrowCompletionOr<ClassName*> create(GlobalObject&, u32 length);             \
-        static ClassName* create(GlobalObject&, u32 length, ArrayBuffer& buffer);           \
-        ClassName(Object& prototype, u32 length, ArrayBuffer& array_buffer);                \
+            Realm&, u32 length, FunctionObject& new_target);                                \
+        static ThrowCompletionOr<ClassName*> create(Realm&, u32 length);                    \
+        static ClassName* create(Realm&, u32 length, ArrayBuffer& buffer);                  \
         virtual FlyString const& element_name() const override;                             \
+                                                                                            \
+    protected:                                                                              \
+        ClassName(Object& prototype, u32 length, ArrayBuffer& array_buffer);                \
     };                                                                                      \
     class PrototypeName final : public Object {                                             \
         JS_OBJECT(PrototypeName, Object);                                                   \
                                                                                             \
     public:                                                                                 \
-        PrototypeName(GlobalObject&);                                                       \
-        virtual void initialize(GlobalObject&) override;                                    \
+        virtual void initialize(Realm&) override;                                           \
         virtual ~PrototypeName() override;                                                  \
+                                                                                            \
+    private:                                                                                \
+        PrototypeName(Realm&);                                                              \
     };                                                                                      \
     class ConstructorName final : public TypedArrayConstructor {                            \
         JS_OBJECT(ConstructorName, TypedArrayConstructor);                                  \
                                                                                             \
     public:                                                                                 \
-        explicit ConstructorName(GlobalObject&);                                            \
-        virtual void initialize(GlobalObject&) override;                                    \
+        virtual void initialize(Realm&) override;                                           \
         virtual ~ConstructorName() override;                                                \
                                                                                             \
         virtual ThrowCompletionOr<Value> call() override;                                   \
         virtual ThrowCompletionOr<Object*> construct(FunctionObject& new_target) override;  \
                                                                                             \
     private:                                                                                \
-        virtual bool has_constructor() const override { return true; }                      \
+        explicit ConstructorName(Realm&);                                                   \
+        virtual bool has_constructor() const override                                       \
+        {                                                                                   \
+            return true;                                                                    \
+        }                                                                                   \
     };
 
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, Type) \

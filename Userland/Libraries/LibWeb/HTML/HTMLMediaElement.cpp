@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/Bindings/HTMLMediaElementWrapper.h>
+#include <LibWeb/Bindings/HTMLMediaElementPrototype.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/HTMLMediaElement.h>
 
 namespace Web::HTML {
@@ -12,6 +13,7 @@ namespace Web::HTML {
 HTMLMediaElement::HTMLMediaElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLMediaElement"));
 }
 
 HTMLMediaElement::~HTMLMediaElement() = default;

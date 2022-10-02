@@ -6,27 +6,26 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Assertions.h>
 #include <AK/Debug.h>
-#include <AK/Format.h>
 #include <AK/Vector.h>
 #include <LibGL/GLContext.h>
+#include <LibGL/Image.h>
 #include <LibGPU/Device.h>
 #include <LibGPU/Enums.h>
+#include <LibGPU/ImageDataLayout.h>
 #include <LibGPU/ImageFormat.h>
 #include <LibGfx/Bitmap.h>
-#include <LibGfx/Vector3.h>
 
 __attribute__((visibility("hidden"))) GL::GLContext* g_gl_context;
 
 namespace GL {
 
 GLContext::GLContext(RefPtr<GPU::Driver> driver, NonnullOwnPtr<GPU::Device> device, Gfx::Bitmap& frontbuffer)
-    : m_viewport { frontbuffer.rect() }
-    , m_frontbuffer { frontbuffer }
-    , m_driver { driver }
+    : m_driver { driver }
     , m_rasterizer { move(device) }
     , m_device_info { m_rasterizer->info() }
+    , m_viewport { frontbuffer.rect() }
+    , m_frontbuffer { frontbuffer }
 {
     m_texture_units.resize(m_device_info.num_texture_units);
     m_active_texture_unit = &m_texture_units[0];
@@ -60,14 +59,14 @@ GLContext::GLContext(RefPtr<GPU::Driver> driver, NonnullOwnPtr<GPU::Device> devi
     // coordinate generation config.
     m_texture_coordinate_generation.resize(m_device_info.num_texture_units);
     for (auto& texture_coordinate_generation : m_texture_coordinate_generation) {
-        texture_coordinate_generation[0].object_plane_coefficients = { 1.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[0].eye_plane_coefficients = { 1.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[1].object_plane_coefficients = { 0.0f, 1.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[1].eye_plane_coefficients = { 0.0f, 1.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[2].object_plane_coefficients = { 0.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[2].eye_plane_coefficients = { 0.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[3].object_plane_coefficients = { 0.0f, 0.0f, 0.0f, 0.0f };
-        texture_coordinate_generation[3].eye_plane_coefficients = { 0.0f, 0.0f, 0.0f, 0.0f };
+        texture_coordinate_generation[0].object_plane_coefficients = { 1.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[0].eye_plane_coefficients = { 1.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[1].object_plane_coefficients = { 0.f, 1.f, 0.f, 0.f };
+        texture_coordinate_generation[1].eye_plane_coefficients = { 0.f, 1.f, 0.f, 0.f };
+        texture_coordinate_generation[2].object_plane_coefficients = { 0.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[2].eye_plane_coefficients = { 0.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[3].object_plane_coefficients = { 0.f, 0.f, 0.f, 0.f };
+        texture_coordinate_generation[3].eye_plane_coefficients = { 0.f, 0.f, 0.f, 0.f };
     }
 
     build_extension_string();
@@ -135,12 +134,6 @@ void GLContext::gl_end()
     RETURN_WITH_ERROR_IF(!m_in_draw_state, GL_INVALID_OPERATION);
     m_in_draw_state = false;
 
-    Vector<size_t, 32> enabled_texture_units;
-    for (size_t i = 0; i < m_texture_units.size(); ++i) {
-        if (m_texture_units[i].texture_2d_enabled())
-            enabled_texture_units.append(i);
-    }
-
     sync_device_config();
 
     GPU::PrimitiveType primitive_type;
@@ -175,7 +168,7 @@ void GLContext::gl_end()
         VERIFY_NOT_REACHED();
     }
 
-    m_rasterizer->draw_primitives(primitive_type, m_model_view_matrix, m_projection_matrix, m_texture_matrix, m_vertex_list, enabled_texture_units);
+    m_rasterizer->draw_primitives(primitive_type, model_view_matrix(), projection_matrix(), m_vertex_list);
     m_vertex_list.clear_with_capacity();
 }
 
@@ -189,21 +182,21 @@ GLenum GLContext::gl_get_error()
     return last_error;
 }
 
-GLubyte* GLContext::gl_get_string(GLenum name)
+GLubyte const* GLContext::gl_get_string(GLenum name)
 {
     RETURN_VALUE_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION, nullptr);
 
     switch (name) {
     case GL_VENDOR:
-        return reinterpret_cast<GLubyte*>(const_cast<char*>(m_device_info.vendor_name.characters()));
+        return reinterpret_cast<GLubyte const*>(m_device_info.vendor_name.characters());
     case GL_RENDERER:
-        return reinterpret_cast<GLubyte*>(const_cast<char*>(m_device_info.device_name.characters()));
+        return reinterpret_cast<GLubyte const*>(m_device_info.device_name.characters());
     case GL_VERSION:
-        return reinterpret_cast<GLubyte*>(const_cast<char*>("1.5"));
+        return reinterpret_cast<GLubyte const*>("1.5");
     case GL_EXTENSIONS:
-        return reinterpret_cast<GLubyte*>(const_cast<char*>(m_extensions.characters()));
+        return reinterpret_cast<GLubyte const*>(m_extensions.characters());
     case GL_SHADING_LANGUAGE_VERSION:
-        return reinterpret_cast<GLubyte*>(const_cast<char*>("0.0"));
+        return reinterpret_cast<GLubyte const*>("0.0");
     default:
         dbgln_if(GL_DEBUG, "gl_get_string({:#x}): unknown name", name);
         break;
@@ -497,289 +490,41 @@ void GLContext::gl_read_pixels(GLint x, GLint y, GLsizei width, GLsizei height, 
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
     RETURN_WITH_ERROR_IF(width < 0 || height < 0, GL_INVALID_VALUE);
 
-    RETURN_WITH_ERROR_IF(format != GL_COLOR_INDEX
-            && format != GL_STENCIL_INDEX
-            && format != GL_DEPTH_COMPONENT
-            && format != GL_RED
-            && format != GL_GREEN
-            && format != GL_BLUE
-            && format != GL_ALPHA
-            && format != GL_RGB
-            && format != GL_RGBA
-            && format != GL_LUMINANCE
-            && format != GL_LUMINANCE_ALPHA,
-        GL_INVALID_ENUM);
+    RETURN_WITH_ERROR_IF(format == GL_NONE || type == GL_NONE, GL_INVALID_ENUM);
+    auto pixel_type_or_error = get_validated_pixel_type(GL_NONE, GL_NONE, format, type);
+    RETURN_WITH_ERROR_IF(pixel_type_or_error.is_error(), pixel_type_or_error.release_error().code());
 
-    RETURN_WITH_ERROR_IF(type != GL_UNSIGNED_BYTE
-            && type != GL_BYTE
-            && type != GL_BITMAP
-            && type != GL_UNSIGNED_SHORT
-            && type != GL_SHORT
-            && type != GL_BLUE
-            && type != GL_UNSIGNED_INT
-            && type != GL_INT
-            && type != GL_FLOAT,
-        GL_INVALID_ENUM);
+    auto pixel_type = pixel_type_or_error.release_value();
+    GPU::ImageDataLayout output_layout = {
+        .pixel_type = pixel_type,
+        .packing = get_packing_specification(PackingType::Pack),
+        .dimensions = {
+            .width = static_cast<u32>(width),
+            .height = static_cast<u32>(height),
+            .depth = 1,
+        },
+        .selection = {
+            .width = static_cast<u32>(width),
+            .height = static_cast<u32>(height),
+            .depth = 1,
+        },
+    };
 
-    // FIXME: We only support RGBA buffers for now.
-    // Once we add support for indexed color modes do the correct check here
-    RETURN_WITH_ERROR_IF(format == GL_COLOR_INDEX, GL_INVALID_OPERATION);
-
-    // FIXME: We do not have stencil buffers yet
-    // Once we add support for stencil buffers do the correct check here
-    RETURN_WITH_ERROR_IF(format == GL_STENCIL_INDEX, GL_INVALID_OPERATION);
-
-    if (format == GL_DEPTH_COMPONENT) {
-        // FIXME: This check needs to be a bit more sophisticated. Currently the buffers
-        // are hardcoded. Once we add proper structures for them we need to correct this check
+    if (pixel_type.format == GPU::PixelFormat::DepthComponent) {
+        // FIXME: This check needs to be a bit more sophisticated. Currently the buffers are
+        //        hardcoded. Once we add proper structures for them we need to correct this check
 
         // Error because only back buffer has a depth buffer
         RETURN_WITH_ERROR_IF(m_current_read_buffer == GL_FRONT
                 || m_current_read_buffer == GL_FRONT_LEFT
                 || m_current_read_buffer == GL_FRONT_RIGHT,
             GL_INVALID_OPERATION);
-    }
 
-    // Some helper functions for converting float values to integer types
-    auto float_to_i8 = [](float f) -> GLchar {
-        return static_cast<GLchar>((0x7f * min(max(f, 0.0f), 1.0f) - 1) / 2);
-    };
-
-    auto float_to_i16 = [](float f) -> GLshort {
-        return static_cast<GLshort>((0x7fff * min(max(f, 0.0f), 1.0f) - 1) / 2);
-    };
-
-    auto float_to_i32 = [](float f) -> GLint {
-        return static_cast<GLint>((0x7fffffff * min(max(f, 0.0f), 1.0f) - 1) / 2);
-    };
-
-    auto float_to_u8 = [](float f) -> GLubyte {
-        return static_cast<GLubyte>(0xff * min(max(f, 0.0f), 1.0f));
-    };
-
-    auto float_to_u16 = [](float f) -> GLushort {
-        return static_cast<GLushort>(0xffff * min(max(f, 0.0f), 1.0f));
-    };
-
-    auto float_to_u32 = [](float f) -> GLuint {
-        return static_cast<GLuint>(0xffffffff * min(max(f, 0.0f), 1.0f));
-    };
-
-    u8 component_size = 0;
-    switch (type) {
-    case GL_BYTE:
-    case GL_UNSIGNED_BYTE:
-        component_size = 1;
-        break;
-    case GL_SHORT:
-    case GL_UNSIGNED_SHORT:
-        component_size = 2;
-        break;
-    case GL_INT:
-    case GL_UNSIGNED_INT:
-    case GL_FLOAT:
-        component_size = 4;
-        break;
-    }
-
-    if (format == GL_DEPTH_COMPONENT) {
-        auto const row_stride = (width * component_size + m_pack_alignment - 1) / m_pack_alignment * m_pack_alignment;
-
-        // Read from depth buffer
-        for (GLsizei i = 0; i < height; ++i) {
-            for (GLsizei j = 0; j < width; ++j) {
-                float depth = m_rasterizer->get_depthbuffer_value(x + j, y + i);
-                auto char_ptr = reinterpret_cast<char*>(pixels) + i * row_stride + j * component_size;
-
-                switch (type) {
-                case GL_BYTE:
-                    *reinterpret_cast<GLchar*>(char_ptr) = float_to_i8(depth);
-                    break;
-                case GL_SHORT:
-                    *reinterpret_cast<GLshort*>(char_ptr) = float_to_i16(depth);
-                    break;
-                case GL_INT:
-                    *reinterpret_cast<GLint*>(char_ptr) = float_to_i32(depth);
-                    break;
-                case GL_UNSIGNED_BYTE:
-                    *reinterpret_cast<GLubyte*>(char_ptr) = float_to_u8(depth);
-                    break;
-                case GL_UNSIGNED_SHORT:
-                    *reinterpret_cast<GLushort*>(char_ptr) = float_to_u16(depth);
-                    break;
-                case GL_UNSIGNED_INT:
-                    *reinterpret_cast<GLuint*>(char_ptr) = float_to_u32(depth);
-                    break;
-                case GL_FLOAT:
-                    *reinterpret_cast<GLfloat*>(char_ptr) = min(max(depth, 0.0f), 1.0f);
-                    break;
-                }
-            }
-        }
-        return;
-    }
-
-    bool write_red = false;
-    bool write_green = false;
-    bool write_blue = false;
-    bool write_alpha = false;
-    size_t component_count = 0;
-    size_t red_offset = 0;
-    size_t green_offset = 0;
-    size_t blue_offset = 0;
-    size_t alpha_offset = 0;
-    char* red_ptr = nullptr;
-    char* green_ptr = nullptr;
-    char* blue_ptr = nullptr;
-    char* alpha_ptr = nullptr;
-
-    switch (format) {
-    case GL_RGB:
-        write_red = true;
-        write_green = true;
-        write_blue = true;
-        component_count = 3;
-        red_offset = 2;
-        green_offset = 1;
-        blue_offset = 0;
-        break;
-    case GL_RGBA:
-        write_red = true;
-        write_green = true;
-        write_blue = true;
-        write_alpha = true;
-        component_count = 4;
-        red_offset = 3;
-        green_offset = 2;
-        blue_offset = 1;
-        alpha_offset = 0;
-        break;
-    case GL_RED:
-        write_red = true;
-        component_count = 1;
-        red_offset = 0;
-        break;
-    case GL_GREEN:
-        write_green = true;
-        component_count = 1;
-        green_offset = 0;
-        break;
-    case GL_BLUE:
-        write_blue = true;
-        component_count = 1;
-        blue_offset = 0;
-        break;
-    case GL_ALPHA:
-        write_alpha = true;
-        component_count = 1;
-        alpha_offset = 0;
-        break;
-    }
-
-    auto const pixel_bytes = component_size * component_count;
-    auto const row_alignment_bytes = (m_pack_alignment - ((width * pixel_bytes) % m_pack_alignment)) % m_pack_alignment;
-
-    char* out_ptr = reinterpret_cast<char*>(pixels);
-    for (int i = 0; i < (int)height; ++i) {
-        for (int j = 0; j < (int)width; ++j) {
-            Gfx::ARGB32 color {};
-            if (m_current_read_buffer == GL_FRONT || m_current_read_buffer == GL_LEFT || m_current_read_buffer == GL_FRONT_LEFT) {
-                if (y + i >= m_frontbuffer->width() || x + j >= m_frontbuffer->height())
-                    color = 0;
-                else
-                    color = m_frontbuffer->scanline(y + i)[x + j];
-            } else {
-                color = m_rasterizer->get_color_buffer_pixel(x + j, y + i);
-            }
-
-            float red = ((color >> 24) & 0xff) / 255.0f;
-            float green = ((color >> 16) & 0xff) / 255.0f;
-            float blue = ((color >> 8) & 0xff) / 255.0f;
-            float alpha = (color & 0xff) / 255.0f;
-
-            // FIXME: Set up write pointers based on selected endianness (glPixelStore)
-            red_ptr = out_ptr + (component_size * red_offset);
-            green_ptr = out_ptr + (component_size * green_offset);
-            blue_ptr = out_ptr + (component_size * blue_offset);
-            alpha_ptr = out_ptr + (component_size * alpha_offset);
-
-            switch (type) {
-            case GL_BYTE:
-                if (write_red)
-                    *reinterpret_cast<GLchar*>(red_ptr) = float_to_i8(red);
-                if (write_green)
-                    *reinterpret_cast<GLchar*>(green_ptr) = float_to_i8(green);
-                if (write_blue)
-                    *reinterpret_cast<GLchar*>(blue_ptr) = float_to_i8(blue);
-                if (write_alpha)
-                    *reinterpret_cast<GLchar*>(alpha_ptr) = float_to_i8(alpha);
-                break;
-            case GL_UNSIGNED_BYTE:
-                if (write_red)
-                    *reinterpret_cast<GLubyte*>(red_ptr) = float_to_u8(red);
-                if (write_green)
-                    *reinterpret_cast<GLubyte*>(green_ptr) = float_to_u8(green);
-                if (write_blue)
-                    *reinterpret_cast<GLubyte*>(blue_ptr) = float_to_u8(blue);
-                if (write_alpha)
-                    *reinterpret_cast<GLubyte*>(alpha_ptr) = float_to_u8(alpha);
-                break;
-            case GL_SHORT:
-                if (write_red)
-                    *reinterpret_cast<GLshort*>(red_ptr) = float_to_i16(red);
-                if (write_green)
-                    *reinterpret_cast<GLshort*>(green_ptr) = float_to_i16(green);
-                if (write_blue)
-                    *reinterpret_cast<GLshort*>(blue_ptr) = float_to_i16(blue);
-                if (write_alpha)
-                    *reinterpret_cast<GLshort*>(alpha_ptr) = float_to_i16(alpha);
-                break;
-            case GL_UNSIGNED_SHORT:
-                if (write_red)
-                    *reinterpret_cast<GLushort*>(red_ptr) = float_to_u16(red);
-                if (write_green)
-                    *reinterpret_cast<GLushort*>(green_ptr) = float_to_u16(green);
-                if (write_blue)
-                    *reinterpret_cast<GLushort*>(blue_ptr) = float_to_u16(blue);
-                if (write_alpha)
-                    *reinterpret_cast<GLushort*>(alpha_ptr) = float_to_u16(alpha);
-                break;
-            case GL_INT:
-                if (write_red)
-                    *reinterpret_cast<GLint*>(red_ptr) = float_to_i32(red);
-                if (write_green)
-                    *reinterpret_cast<GLint*>(green_ptr) = float_to_i32(green);
-                if (write_blue)
-                    *reinterpret_cast<GLint*>(blue_ptr) = float_to_i32(blue);
-                if (write_alpha)
-                    *reinterpret_cast<GLint*>(alpha_ptr) = float_to_i32(alpha);
-                break;
-            case GL_UNSIGNED_INT:
-                if (write_red)
-                    *reinterpret_cast<GLuint*>(red_ptr) = float_to_u32(red);
-                if (write_green)
-                    *reinterpret_cast<GLuint*>(green_ptr) = float_to_u32(green);
-                if (write_blue)
-                    *reinterpret_cast<GLuint*>(blue_ptr) = float_to_u32(blue);
-                if (write_alpha)
-                    *reinterpret_cast<GLuint*>(alpha_ptr) = float_to_u32(alpha);
-                break;
-            case GL_FLOAT:
-                if (write_red)
-                    *reinterpret_cast<GLfloat*>(red_ptr) = min(max(red, 0.0f), 1.0f);
-                if (write_green)
-                    *reinterpret_cast<GLfloat*>(green_ptr) = min(max(green, 0.0f), 1.0f);
-                if (write_blue)
-                    *reinterpret_cast<GLfloat*>(blue_ptr) = min(max(blue, 0.0f), 1.0f);
-                if (write_alpha)
-                    *reinterpret_cast<GLfloat*>(alpha_ptr) = min(max(alpha, 0.0f), 1.0f);
-                break;
-            }
-
-            out_ptr += pixel_bytes;
-        }
-
-        out_ptr += row_alignment_bytes;
+        m_rasterizer->blit_from_depth_buffer(pixels, { x, y }, output_layout);
+    } else if (pixel_type.format == GPU::PixelFormat::StencilIndex) {
+        dbgln("gl_read_pixels(): GL_STENCIL_INDEX is not yet supported");
+    } else {
+        m_rasterizer->blit_from_color_buffer(pixels, { x, y }, output_layout);
     }
 }
 
@@ -798,39 +543,10 @@ void GLContext::gl_draw_pixels(GLsizei width, GLsizei height, GLenum format, GLe
 {
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_draw_pixels, width, height, format, type, data);
 
-    RETURN_WITH_ERROR_IF(format < GL_COLOR_INDEX || format > GL_BGRA, GL_INVALID_ENUM);
-
-    RETURN_WITH_ERROR_IF((type < GL_BYTE || type > GL_FLOAT)
-            && (type < GL_UNSIGNED_BYTE_3_3_2 || type > GL_UNSIGNED_INT_10_10_10_2)
-            && (type < GL_UNSIGNED_BYTE_2_3_3_REV || type > GL_UNSIGNED_INT_2_10_10_10_REV),
-        GL_INVALID_ENUM);
-
-    RETURN_WITH_ERROR_IF(type == GL_BITMAP && !(format == GL_COLOR_INDEX || format == GL_STENCIL_INDEX), GL_INVALID_ENUM);
-
+    RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
     RETURN_WITH_ERROR_IF(width < 0 || height < 0, GL_INVALID_VALUE);
 
     // FIXME: GL_INVALID_OPERATION is generated if format is GL_STENCIL_INDEX and there is no stencil buffer
-    // FIXME: GL_INVALID_OPERATION is generated if format is GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA, GL_RGB, GL_RGBA,
-    //        GL_BGR, GL_BGRA, GL_LUMINANCE, or GL_LUMINANCE_ALPHA, and the GL is in color index mode
-
-    RETURN_WITH_ERROR_IF(format != GL_RGB
-            && (type == GL_UNSIGNED_BYTE_3_3_2
-                || type == GL_UNSIGNED_BYTE_2_3_3_REV
-                || type == GL_UNSIGNED_SHORT_5_6_5
-                || type == GL_UNSIGNED_SHORT_5_6_5_REV),
-        GL_INVALID_OPERATION);
-
-    RETURN_WITH_ERROR_IF(!(format == GL_RGBA || format == GL_BGRA)
-            && (type == GL_UNSIGNED_SHORT_4_4_4_4
-                || type == GL_UNSIGNED_SHORT_4_4_4_4_REV
-                || type == GL_UNSIGNED_SHORT_5_5_5_1
-                || type == GL_UNSIGNED_SHORT_1_5_5_5_REV
-                || type == GL_UNSIGNED_INT_8_8_8_8
-                || type == GL_UNSIGNED_INT_8_8_8_8_REV
-                || type == GL_UNSIGNED_INT_10_10_10_2
-                || type == GL_UNSIGNED_INT_2_10_10_10_REV),
-        GL_INVALID_OPERATION);
-
     // FIXME: GL_INVALID_OPERATION is generated if a non-zero buffer object name is bound to the GL_PIXEL_UNPACK_BUFFER
     //        target and the buffer object's data store is currently mapped.
     // FIXME: GL_INVALID_OPERATION is generated if a non-zero buffer object name is bound to the GL_PIXEL_UNPACK_BUFFER
@@ -840,43 +556,32 @@ void GLContext::gl_draw_pixels(GLsizei width, GLsizei height, GLenum format, GLe
     //        target and data is not evenly divisible into the number of bytes needed to store in memory a datum
     //        indicated by type.
 
-    RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
+    RETURN_WITH_ERROR_IF(format == GL_NONE || type == GL_NONE, GL_INVALID_ENUM);
+    auto pixel_type_or_error = get_validated_pixel_type(GL_NONE, GL_NONE, format, type);
+    RETURN_WITH_ERROR_IF(pixel_type_or_error.is_error(), pixel_type_or_error.release_error().code());
 
-    // FIXME: we only support RGBA + UNSIGNED_BYTE and DEPTH_COMPONENT + UNSIGNED_SHORT, implement all combinations!
-    if (!((format == GL_RGBA && type == GL_UNSIGNED_BYTE) || (format == GL_DEPTH_COMPONENT && type == GL_UNSIGNED_SHORT))) {
-        dbgln_if(GL_DEBUG, "gl_draw_pixels(): support for format {:#x} and/or type {:#x} not implemented", format, type);
-        return;
-    }
+    auto pixel_type = pixel_type_or_error.release_value();
+    GPU::ImageDataLayout input_layout = {
+        .pixel_type = pixel_type,
+        .packing = get_packing_specification(PackingType::Unpack),
+        .dimensions = {
+            .width = static_cast<u32>(width),
+            .height = static_cast<u32>(height),
+            .depth = 1,
+        },
+        .selection = {
+            .width = static_cast<u32>(width),
+            .height = static_cast<u32>(height),
+            .depth = 1,
+        },
+    };
 
-    // FIXME: implement support for pixel parameters such as GL_UNPACK_ALIGNMENT
-
-    if (format == GL_RGBA) {
-        auto bitmap_or_error = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, { width, height });
-        RETURN_WITH_ERROR_IF(bitmap_or_error.is_error(), GL_OUT_OF_MEMORY);
-        auto bitmap = bitmap_or_error.release_value();
-
-        auto pixel_data = static_cast<u32 const*>(data);
-        for (int y = 0; y < height; ++y)
-            for (int x = 0; x < width; ++x)
-                bitmap->set_pixel(x, y, Color::from_argb(*(pixel_data++)));
-
-        m_rasterizer->blit_to_color_buffer_at_raster_position(bitmap);
-    } else if (format == GL_DEPTH_COMPONENT) {
-        Vector<float> depth_values;
-        depth_values.ensure_capacity(width * height);
-
-        auto depth_data = static_cast<u16 const*>(data);
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                auto u16_value = *(depth_data++);
-                auto float_value = static_cast<float>(u16_value) / NumericLimits<u16>::max();
-                depth_values.append(float_value);
-            }
-        }
-
-        m_rasterizer->blit_to_depth_buffer_at_raster_position(depth_values, width, height);
+    if (pixel_type.format == GPU::PixelFormat::DepthComponent) {
+        m_rasterizer->blit_to_depth_buffer_at_raster_position(data, input_layout);
+    } else if (pixel_type.format == GPU::PixelFormat::StencilIndex) {
+        dbgln("gl_draw_pixels(): GL_STENCIL_INDEX is not yet supported");
     } else {
-        VERIFY_NOT_REACHED();
+        m_rasterizer->blit_to_color_buffer_at_raster_position(data, input_layout);
     }
 }
 
@@ -945,29 +650,10 @@ void GLContext::gl_depth_func(GLenum func)
 void GLContext::gl_color_mask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha)
 {
     auto options = m_rasterizer->options();
-    auto mask = options.color_mask;
-
-    if (!red)
-        mask &= ~0x000000ff;
-    else
-        mask |= 0x000000ff;
-
-    if (!green)
-        mask &= ~0x0000ff00;
-    else
-        mask |= 0x0000ff00;
-
-    if (!blue)
-        mask &= ~0x00ff0000;
-    else
-        mask |= 0x00ff0000;
-
-    if (!alpha)
-        mask &= ~0xff000000;
-    else
-        mask |= 0xff000000;
-
-    options.color_mask = mask;
+    options.color_mask = (red == GL_TRUE ? 0xff : 0)
+        | (green == GL_TRUE ? 0xff00 : 0)
+        | (blue == GL_TRUE ? 0xff0000 : 0)
+        | (alpha == GL_TRUE ? 0xff000000 : 0);
     m_rasterizer->set_options(options);
 }
 
@@ -1013,7 +699,7 @@ void GLContext::gl_polygon_offset(GLfloat factor, GLfloat units)
     m_rasterizer->set_options(rasterizer_options);
 }
 
-void GLContext::gl_fogfv(GLenum pname, GLfloat* params)
+void GLContext::gl_fogfv(GLenum pname, GLfloat const* params)
 {
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_fogfv, pname, params);
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
@@ -1121,7 +807,7 @@ void GLContext::gl_raster_pos(GLfloat x, GLfloat y, GLfloat z, GLfloat w)
     APPEND_TO_CALL_LIST_AND_RETURN_IF_NEEDED(gl_raster_pos, x, y, z, w);
     RETURN_WITH_ERROR_IF(m_in_draw_state, GL_INVALID_OPERATION);
 
-    m_rasterizer->set_raster_position({ x, y, z, w }, m_model_view_matrix, m_projection_matrix);
+    m_rasterizer->set_raster_position({ x, y, z, w }, model_view_matrix(), projection_matrix());
 }
 
 void GLContext::gl_line_width(GLfloat width)
@@ -1196,13 +882,13 @@ void GLContext::gl_point_size(GLfloat size)
 
 void GLContext::present()
 {
-    m_rasterizer->blit_color_buffer_to(*m_frontbuffer);
+    m_rasterizer->blit_from_color_buffer(*m_frontbuffer);
 }
 
 void GLContext::sync_device_config()
 {
     sync_device_sampler_config();
-    sync_device_texcoord_config();
+    sync_device_texture_units();
     sync_light_state();
     sync_stencil_configuration();
     sync_clip_planes();
@@ -1221,14 +907,25 @@ void GLContext::build_extension_string()
     if (m_device_info.num_texture_units > 1)
         extensions.append("GL_ARB_multitexture"sv);
 
+    if (m_device_info.supports_texture_clamp_to_edge)
+        extensions.append("GL_EXT_texture_edge_clamp"sv);
+
+    if (m_device_info.supports_texture_env_add) {
+        extensions.append("GL_ARB_texture_env_add"sv);
+        extensions.append("GL_EXT_texture_env_add"sv);
+    }
+
+    if (m_device_info.max_texture_lod_bias > 0.f)
+        extensions.append("GL_EXT_texture_lod_bias"sv);
+
     m_extensions = String::join(' ', extensions);
 }
 
-NonnullOwnPtr<GLContext> create_context(Gfx::Bitmap& bitmap)
+ErrorOr<NonnullOwnPtr<GLContext>> create_context(Gfx::Bitmap& bitmap)
 {
     // FIXME: Make driver selectable. This is currently hardcoded to LibSoftGPU
-    auto driver = MUST(GPU::Driver::try_create("softgpu"sv));
-    auto device = MUST(driver->try_create_device(bitmap.size()));
+    auto driver = TRY(GPU::Driver::try_create("softgpu"sv));
+    auto device = TRY(driver->try_create_device(bitmap.size()));
     auto context = make<GLContext>(driver, move(device), bitmap);
     dbgln_if(GL_DEBUG, "GL::create_context({}) -> {:p}", bitmap.size(), context.ptr());
 
@@ -1245,11 +942,6 @@ void make_context_current(GLContext* context)
 
     dbgln_if(GL_DEBUG, "GL::make_context_current({:p})", context);
     g_gl_context = context;
-}
-
-void present_context(GLContext* context)
-{
-    context->present();
 }
 
 }

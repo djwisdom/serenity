@@ -11,13 +11,15 @@
 namespace Web::HTML {
 
 class HTMLBRElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLBRElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLBRElement, HTMLElement);
 
-    HTMLBRElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLBRElement() override;
 
     virtual RefPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>) override;
+
+private:
+    HTMLBRElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

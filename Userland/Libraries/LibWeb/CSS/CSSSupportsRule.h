@@ -17,20 +17,13 @@ namespace Web::CSS {
 
 // https://www.w3.org/TR/css-conditional-3/#the-csssupportsrule-interface
 class CSSSupportsRule final : public CSSConditionRule {
-    AK_MAKE_NONCOPYABLE(CSSSupportsRule);
-    AK_MAKE_NONMOVABLE(CSSSupportsRule);
+    WEB_PLATFORM_OBJECT(CSSSupportsRule, CSSConditionRule);
 
 public:
-    using WrapperType = Bindings::CSSSupportsRuleWrapper;
-
-    static NonnullRefPtr<CSSSupportsRule> create(NonnullRefPtr<Supports>&& supports, NonnullRefPtrVector<CSSRule>&& rules)
-    {
-        return adopt_ref(*new CSSSupportsRule(move(supports), move(rules)));
-    }
+    static CSSSupportsRule* create(JS::Realm&, NonnullRefPtr<Supports>&&, CSSRuleList&);
 
     virtual ~CSSSupportsRule() = default;
 
-    virtual StringView class_name() const override { return "CSSSupportsRule"sv; };
     virtual Type type() const override { return Type::Supports; };
 
     String condition_text() const override;
@@ -38,7 +31,7 @@ public:
     virtual bool condition_matches() const override { return m_supports->matches(); }
 
 private:
-    explicit CSSSupportsRule(NonnullRefPtr<Supports>&&, NonnullRefPtrVector<CSSRule>&&);
+    CSSSupportsRule(JS::Realm&, NonnullRefPtr<Supports>&&, CSSRuleList&);
 
     virtual String serialized() const override;
 

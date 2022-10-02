@@ -16,9 +16,10 @@ Comment::Comment(Document& document, String const& data)
 }
 
 // https://dom.spec.whatwg.org/#dom-comment-comment
-NonnullRefPtr<Comment> Comment::create_with_global_object(Bindings::WindowObject& window, String const& data)
+JS::NonnullGCPtr<Comment> Comment::construct_impl(JS::Realm& realm, String const& data)
 {
-    return make_ref_counted<Comment>(window.impl().associated_document(), data);
+    auto& window = verify_cast<HTML::Window>(realm.global_object());
+    return *realm.heap().allocate<Comment>(realm, window.associated_document(), data);
 }
 
 }

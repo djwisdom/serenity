@@ -1,5 +1,6 @@
 #import <DOM/Event.idl>
 
+[]
 interface MessageEvent : Event {
     constructor(DOMString type, optional MessageEventInit eventInitDict = {});
 

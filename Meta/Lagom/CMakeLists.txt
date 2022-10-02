@@ -61,6 +61,7 @@ if (ENABLE_FUZZERS_LIBFUZZER OR ENABLE_FUZZERS_OSSFUZZ)
 endif()
 
 include(wasm_spec_tests)
+include(flac_spec_tests)
 include(lagom_compile_options)
 
 include(GNUInstallDirs) # make sure to include before we mess w/RPATH
@@ -92,8 +93,8 @@ if (ENABLE_MEMORY_SANITIZER)
 endif()
 
 if (ENABLE_UNDEFINED_SANITIZER)
-    add_compile_options(-fsanitize=undefined -fno-sanitize=vptr -fno-omit-frame-pointer)
-    set(LINKER_FLAGS "${LINKER_FLAGS} -fsanitize=undefined -fno-sanitize=vptr")
+    add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
+    set(LINKER_FLAGS "${LINKER_FLAGS} -fsanitize=undefined")
 endif()
 
 if (ENABLE_FUZZERS)
@@ -155,10 +156,10 @@ set(Lagom_INSTALL_CMAKEDIR "${CMAKE_INSTALL_DATADIR}/${package}"
     CACHE PATH "CMake package config location relative to the install prefix")
 mark_as_advanced(Lagom_INSTALL_CMAKEDIR)
 
-configure_file("${SERENITY_PROJECT_ROOT}/Meta/CMake/lagom-install-config.cmake.in" "${package}Config.cmake" @ONLY)
 install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/${package}Config.cmake"
+    FILES "${SERENITY_PROJECT_ROOT}/Meta/CMake/lagom-install-config.cmake"
     DESTINATION "${Lagom_INSTALL_CMAKEDIR}"
+    RENAME "${package}Config.cmake"
     COMPONENT Lagom_Development
 )
 
@@ -170,9 +171,13 @@ install(
 )
 
 function(lagom_lib library fs_name)
-    cmake_parse_arguments(LAGOM_LIBRARY "" "" "SOURCES;LIBS" ${ARGN})
+    cmake_parse_arguments(LAGOM_LIBRARY "STATIC" "" "SOURCES;LIBS" ${ARGN})
     set(target_name "Lib${library}")
-    add_library(${target_name} ${LAGOM_LIBRARY_SOURCES})
+    if (LAGOM_LIBRARY_STATIC)
+        add_library(${target_name} STATIC ${LAGOM_LIBRARY_SOURCES})
+    else()
+        add_library(${target_name} ${LAGOM_LIBRARY_SOURCES})
+    endif()
 
     # Don't make alias when we're going to import a previous build for Tools
     # FIXME: Is there a better way to write this?
@@ -262,6 +267,13 @@ file(GLOB AK_SOURCES CONFIGURE_DEPENDS "../../AK/*.cpp")
 file(GLOB LIBCORE_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibCore/*.cpp")
 if (ANDROID)
     list(REMOVE_ITEM LIBCORE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/../../Userland/Libraries/LibCore/Account.cpp")
+    list(REMOVE_ITEM LIBCORE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/../../Userland/Libraries/LibCore/LocalServer.cpp")
+endif()
+if (WIN32)
+    list(REMOVE_ITEM LIBCORE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/../../Userland/Libraries/LibCore/Account.cpp")
+    list(REMOVE_ITEM LIBCORE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/../../Userland/Libraries/LibCore/FilePermissionsMask.cpp")
+    list(REMOVE_ITEM LIBCORE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/../../Userland/Libraries/LibCore/Group.cpp")
+    list(REMOVE_ITEM LIBCORE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/../../Userland/Libraries/LibCore/GetPassword.cpp")
 endif()
 lagom_lib(Core core
     SOURCES ${AK_SOURCES} ${LIBCORE_SOURCES}
@@ -275,11 +287,8 @@ endif()
 file(GLOB LIBMAIN_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibMain/*.cpp")
 lagom_lib(Main main
     SOURCES ${LIBMAIN_SOURCES}
+    STATIC
 )
-# The macOS linker is not happy about LibMain's main() calling an undefined symbol (serenity_main()).
-if (APPLE)
-    target_link_options(LibMain PRIVATE -undefined dynamic_lookup)
-endif()
 
 # LibTimeZone
 # This is needed even if Lagom is not enabled because it is depended upon by code generators.
@@ -289,6 +298,13 @@ lagom_lib(TimeZone timezone
     SOURCES ${LIBTIMEZONE_SOURCES} ${TIME_ZONE_DATA_SOURCES}
 )
 target_compile_definitions(LibTimeZone PRIVATE ENABLE_TIME_ZONE_DATA=$<BOOL:${ENABLE_TIME_ZONE_DATABASE_DOWNLOAD}>)
+
+# LibIDL
+# This is used by the BindingsGenerator so needs to always be built.
+file(GLOB LIBIDL_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibIDL/*.cpp")
+lagom_lib(IDL idl
+    SOURCES ${LIBIDL_SOURCES}
+)
 
 # Manually install AK headers
 install(
@@ -388,6 +404,14 @@ if (BUILD_LAGOM)
         SOURCES ${LIBGL_SOURCES} ${LIBGL_TEX_SOURCES}
         LIBS m LibGfx LibGPU)
 
+    # GUI
+    list(APPEND LIBGUI_SOURCES "../../Userland/Libraries/LibGUI/ModelIndex.cpp")
+    list(APPEND LIBGUI_SOURCES "../../Userland/Libraries/LibGUI/Model.cpp")
+    list(APPEND LIBGUI_SOURCES "../../Userland/Libraries/LibGUI/Icon.cpp")
+    lagom_lib(GUI gui
+        SOURCES ${LIBGUI_SOURCES}
+        LIBS LibGfx)
+
     # GUI-GML
     file(GLOB LIBGUI_GML_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibGUI/GML/*.cpp")
     list(REMOVE_ITEM LIBGUI_GML_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibGUI/GML/AutocompleteProvider.cpp")
@@ -423,7 +447,7 @@ if (BUILD_LAGOM)
     list(REMOVE_ITEM LIBJS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibJS/SyntaxHighlighter.cpp")
     lagom_lib(JS js
         SOURCES ${LIBJS_SOURCES} ${LIBJS_SUBDIR_SOURCES} ${LIBJS_SUBSUBDIR_SOURCES}
-        LIBS m LibCrypto LibRegex LibUnicode LibTextCodec
+        LIBS m LibCrypto LibRegex LibLocale LibUnicode LibTextCodec
     )
 
     # Line
@@ -431,6 +455,16 @@ if (BUILD_LAGOM)
     lagom_lib(Line line
         SOURCES ${LIBLINE_SOURCES}
     )
+
+    # Locale
+    include(locale_data)
+    file(GLOB LIBLOCALE_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibLocale/*.cpp")
+    lagom_lib(Locale locale
+        SOURCES ${LIBLOCALE_SOURCES} ${LOCALE_DATA_SOURCES}
+    )
+    target_compile_definitions(LibLocale PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
+    target_compile_options(LibLocale PRIVATE -Wno-parentheses-equality)
+    target_link_libraries(LibLocale LibTimeZone LibUnicode)
 
     # Markdown
     file(GLOB LIBMARKDOWN_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibMarkdown/*.cpp")
@@ -506,8 +540,6 @@ if (BUILD_LAGOM)
         SOURCES ${LIBUNICODE_SOURCES} ${UNICODE_DATA_SOURCES}
     )
     target_compile_definitions(LibUnicode PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
-    target_compile_options(LibUnicode PRIVATE -Wno-parentheses-equality)
-    target_link_libraries(LibUnicode LibTimeZone)
 
     # WASM
     file(GLOB LIBWASM_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWasm/*/*.cpp")
@@ -516,31 +548,33 @@ if (BUILD_LAGOM)
     )
 
     # Web
-    include(libweb_generators)
-    file(GLOB LIBWEB_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWeb/*.cpp")
-    file(GLOB LIBWEB_SUBDIR_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWeb/*/*.cpp")
-    file(GLOB LIBWEB_SUBSUBDIR_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWeb/*/*/*.cpp")
-    file(GLOB LIBWEB_SUBSUBSUBDIR_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWeb/*/*/*/*.cpp")
-    list(REMOVE_ITEM LIBWEB_SUBSUBDIR_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibWeb/CSS/SyntaxHighlighter/SyntaxHighlighter.cpp")
-    list(REMOVE_ITEM LIBWEB_SUBSUBDIR_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibWeb/HTML/SyntaxHighlighter/SyntaxHighlighter.cpp")
+    if (ENABLE_LAGOM_LIBWEB)
+        include(libweb_generators)
+        file(GLOB LIBWEB_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWeb/*.cpp")
+        file(GLOB LIBWEB_SUBDIR_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWeb/*/*.cpp")
+        file(GLOB LIBWEB_SUBSUBDIR_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWeb/*/*/*.cpp")
+        file(GLOB LIBWEB_SUBSUBSUBDIR_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWeb/*/*/*/*.cpp")
+        list(REMOVE_ITEM LIBWEB_SUBSUBDIR_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibWeb/CSS/SyntaxHighlighter/SyntaxHighlighter.cpp")
+        list(REMOVE_ITEM LIBWEB_SUBSUBDIR_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibWeb/HTML/SyntaxHighlighter/SyntaxHighlighter.cpp")
 
-    generate_css_implementation()
+        generate_css_implementation()
 
-    set(LIBWEB_GENERATED_SOURCES
-        LibWeb/CSS/DefaultStyleSheetSource.cpp
-        LibWeb/CSS/Enums.cpp
-        LibWeb/CSS/MediaFeatureID.cpp
-        LibWeb/CSS/PropertyID.cpp
-        LibWeb/CSS/QuirksModeStyleSheetSource.cpp
-        LibWeb/CSS/TransformFunctions.cpp
-        LibWeb/CSS/ValueID.cpp
-    )
+        set(LIBWEB_GENERATED_SOURCES
+            LibWeb/CSS/DefaultStyleSheetSource.cpp
+            LibWeb/CSS/Enums.cpp
+            LibWeb/CSS/MediaFeatureID.cpp
+            LibWeb/CSS/PropertyID.cpp
+            LibWeb/CSS/QuirksModeStyleSheetSource.cpp
+            LibWeb/CSS/TransformFunctions.cpp
+            LibWeb/CSS/ValueID.cpp
+        )
 
-    lagom_lib(Web web
-        SOURCES ${LIBWEB_SOURCES} ${LIBWEB_SUBDIR_SOURCES} ${LIBWEB_SUBSUBDIR_SOURCES} ${LIBWEB_SUBSUBSUBDIR_SOURCES} ${LIBWEB_GENERATED_SOURCES}
-        LIBS LibMarkdown LibGemini LibGfx LibGL LibJS LibTextCodec LibWasm LibXML
-    )
-    generate_js_wrappers(LibWeb)
+        lagom_lib(Web web
+            SOURCES ${LIBWEB_SOURCES} ${LIBWEB_SUBDIR_SOURCES} ${LIBWEB_SUBSUBDIR_SOURCES} ${LIBWEB_SUBSUBSUBDIR_SOURCES} ${LIBWEB_GENERATED_SOURCES}
+            LIBS LibMarkdown LibGemini LibGfx LibGL LibIDL LibJS LibTextCodec LibWasm LibXML
+        )
+        generate_js_bindings(LibWeb)
+    endif()
 
     # WebSocket
     file(GLOB LIBWEBSOCKET_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWebSocket/*.cpp")
@@ -549,6 +583,12 @@ if (BUILD_LAGOM)
         SOURCES ${LIBWEBSOCKET_SOURCES} ${LIBWEBSOCKET_SUBDIR_SOURCES}
         LIBS LibCrypto LibTLS
     )
+
+    # WebView
+    list(APPEND LIBWEBVIEW_SOURCES "../../Userland/Libraries/LibWebView/DOMTreeModel.cpp")
+    lagom_lib(WebView webview
+        SOURCES ${LIBWEBVIEW_SOURCES}
+        LIBS LibGUI)
 
     # x86
     # FIXME: Excluding arm64 is a temporary hack to circumvent a build problem
@@ -592,9 +632,11 @@ if (BUILD_LAGOM)
         set_target_properties(gml-format_lagom PROPERTIES OUTPUT_NAME gml-format)
         target_link_libraries(gml-format_lagom LibCore LibGML LibMain)
 
-        add_executable(headless_browser_lagom ../../Userland/Utilities/headless-browser.cpp)
-        set_target_properties(headless_browser_lagom PROPERTIES OUTPUT_NAME headless-browser)
-        target_link_libraries(headless_browser_lagom LibWeb LibWebSocket LibHTTP LibJS LibGfx LibMain)
+        if (ENABLE_LAGOM_LIBWEB)
+            add_executable(headless_browser_lagom ../../Userland/Utilities/headless-browser.cpp)
+            set_target_properties(headless_browser_lagom PROPERTIES OUTPUT_NAME headless-browser)
+            target_link_libraries(headless_browser_lagom LibWeb LibWebSocket LibHTTP LibJS LibGfx LibMain)
+        endif()
 
         add_executable(js_lagom ../../Userland/Utilities/js.cpp)
         set_target_properties(js_lagom PROPERTIES OUTPUT_NAME js)
@@ -611,6 +653,10 @@ if (BUILD_LAGOM)
         add_executable(shell_lagom ../../Userland/Shell/main.cpp)
         set_target_properties(shell_lagom PROPERTIES OUTPUT_NAME shell)
         target_link_libraries(shell_lagom LibCore LibShell LibMain)
+
+        add_executable(test262-runner_lagom ../../Tests/LibJS/test262-runner.cpp)
+        set_target_properties(test262-runner_lagom PROPERTIES OUTPUT_NAME test262-runner)
+        target_link_libraries(test262-runner_lagom LibJS LibCore)
 
         add_executable(wasm_lagom ../../Userland/Utilities/wasm.cpp)
         set_target_properties(wasm_lagom PROPERTIES OUTPUT_NAME wasm)
@@ -643,6 +689,12 @@ if (BUILD_LAGOM)
             lagom_test(${source} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../Tests/AK)
         endforeach()
 
+        # LibAudio
+        file(GLOB LIBAUDIO_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibAudio/*.cpp")
+        foreach(source ${LIBAUDIO_TEST_SOURCES})
+            lagom_test(${source} LIBS LibAudio WORKING_DIRECTORY ${FLAC_TEST_PATH})
+        endforeach()
+
         # LibCore
         lagom_test(../../Tests/LibCore/TestLibCoreIODevice.cpp WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../Tests/LibCore)
 
@@ -664,6 +716,12 @@ if (BUILD_LAGOM)
         file(GLOB LIBGL_TESTS CONFIGURE_DEPENDS "../../Tests/LibGL/*.cpp")
         foreach(source ${LIBGL_TESTS})
             lagom_test(${source} WORKING_DIRECTORY LIBS LibGL LibGPU LibSoftGPU)
+        endforeach()
+
+        # Locale
+        file(GLOB LIBLOCALE_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibLocale/*.cpp")
+        foreach(source ${LIBLOCALE_TEST_SOURCES})
+            lagom_test(${source} LIBS LibLocale LibUnicode)
         endforeach()
 
         # PDF
@@ -738,6 +796,7 @@ if (BUILD_LAGOM)
         # Extra tests from Tests/LibJS
         lagom_test(../../Tests/LibJS/test-invalid-unicode-js.cpp LIBS LibJS)
         lagom_test(../../Tests/LibJS/test-bytecode-js.cpp LIBS LibJS)
+        lagom_test(../../Tests/LibJS/test-value-js.cpp LIBS LibJS)
 
         # Spreadsheet
         add_executable(test-spreadsheet_lagom

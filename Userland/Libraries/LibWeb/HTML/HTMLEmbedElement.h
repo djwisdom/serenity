@@ -11,11 +11,13 @@
 namespace Web::HTML {
 
 class HTMLEmbedElement final : public HTMLElement {
-public:
-    using WrapperType = Bindings::HTMLEmbedElementWrapper;
+    WEB_PLATFORM_OBJECT(HTMLEmbedElement, HTMLElement);
 
-    HTMLEmbedElement(DOM::Document&, DOM::QualifiedName);
+public:
     virtual ~HTMLEmbedElement() override;
+
+private:
+    HTMLEmbedElement(DOM::Document&, DOM::QualifiedName);
 };
 
 }

@@ -16,11 +16,12 @@ class ErrorPrototype final : public PrototypeObject<ErrorPrototype, Error> {
     JS_PROTOTYPE_OBJECT(ErrorPrototype, Error, Error);
 
 public:
-    explicit ErrorPrototype(GlobalObject&);
-    virtual void initialize(GlobalObject&) override;
+    virtual void initialize(Realm&) override;
     virtual ~ErrorPrototype() override = default;
 
 private:
+    explicit ErrorPrototype(Realm&);
+
     JS_DECLARE_NATIVE_FUNCTION(to_string);
     JS_DECLARE_NATIVE_FUNCTION(stack_getter);
     JS_DECLARE_NATIVE_FUNCTION(stack_setter);
@@ -31,9 +32,11 @@ private:
         JS_PROTOTYPE_OBJECT(PrototypeName, ClassName, ClassName);                             \
                                                                                               \
     public:                                                                                   \
-        explicit PrototypeName(GlobalObject&);                                                \
-        virtual void initialize(GlobalObject&) override;                                      \
+        virtual void initialize(Realm&) override;                                             \
         virtual ~PrototypeName() override = default;                                          \
+                                                                                              \
+    private:                                                                                  \
+        explicit PrototypeName(Realm&);                                                       \
     };
 
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \

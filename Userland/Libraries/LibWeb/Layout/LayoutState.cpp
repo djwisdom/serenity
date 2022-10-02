@@ -107,18 +107,66 @@ Gfx::FloatRect margin_box_rect(Box const& box, LayoutState const& state)
     return rect;
 }
 
+Gfx::FloatRect border_box_rect(Box const& box, LayoutState const& state)
+{
+    auto const& box_state = state.get(box);
+    auto rect = Gfx::FloatRect { box_state.offset, { box_state.content_width(), box_state.content_height() } };
+    rect.set_x(rect.x() - box_state.border_box_left());
+    rect.set_width(rect.width() + box_state.border_box_left() + box_state.border_box_right());
+    rect.set_y(rect.y() - box_state.border_box_top());
+    rect.set_height(rect.height() + box_state.border_box_top() + box_state.border_box_bottom());
+    return rect;
+}
+
+Gfx::FloatRect border_box_rect_in_ancestor_coordinate_space(Box const& box, Box const& ancestor_box, LayoutState const& state)
+{
+    auto rect = border_box_rect(box, state);
+    if (&box == &ancestor_box)
+        return rect;
+    for (auto const* current = box.containing_block(); current; current = current->containing_block()) {
+        if (current == &ancestor_box)
+            return rect;
+        auto const& current_state = state.get(static_cast<Box const&>(*current));
+        rect.translate_by(current_state.offset);
+    }
+    // If we get here, ancestor_box was not a containing block ancestor of `box`!
+    VERIFY_NOT_REACHED();
+}
+
+Gfx::FloatRect content_box_rect(Box const& box, LayoutState const& state)
+{
+    auto const& box_state = state.get(box);
+    return Gfx::FloatRect { box_state.offset, { box_state.content_width(), box_state.content_height() } };
+}
+
+Gfx::FloatRect content_box_rect_in_ancestor_coordinate_space(Box const& box, Box const& ancestor_box, LayoutState const& state)
+{
+    auto rect = content_box_rect(box, state);
+    if (&box == &ancestor_box)
+        return rect;
+    for (auto const* current = box.containing_block(); current; current = current->containing_block()) {
+        if (current == &ancestor_box)
+            return rect;
+        auto const& current_state = state.get(static_cast<Box const&>(*current));
+        rect.translate_by(current_state.offset);
+    }
+    // If we get here, ancestor_box was not a containing block ancestor of `box`!
+    VERIFY_NOT_REACHED();
+}
+
 Gfx::FloatRect margin_box_rect_in_ancestor_coordinate_space(Box const& box, Box const& ancestor_box, LayoutState const& state)
 {
     auto rect = margin_box_rect(box, state);
-    for (auto const* current = box.parent(); current; current = current->parent()) {
+    if (&box == &ancestor_box)
+        return rect;
+    for (auto const* current = box.containing_block(); current; current = current->containing_block()) {
         if (current == &ancestor_box)
-            break;
-        if (is<Box>(*current)) {
-            auto const& current_state = state.get(static_cast<Box const&>(*current));
-            rect.translate_by(current_state.offset);
-        }
+            return rect;
+        auto const& current_state = state.get(static_cast<Box const&>(*current));
+        rect.translate_by(current_state.offset);
     }
-    return rect;
+    // If we get here, ancestor_box was not a containing block ancestor of `box`!
+    VERIFY_NOT_REACHED();
 }
 
 Gfx::FloatRect absolute_content_rect(Box const& box, LayoutState const& state)
@@ -136,7 +184,7 @@ void LayoutState::UsedValues::set_node(NodeWithStyleAndBoxModelMetrics& node, Us
 
     auto const& computed_values = node.computed_values();
 
-    auto is_definite_size = [&](CSS::LengthPercentage const& size, float& resolved_definite_size, bool width) {
+    auto is_definite_size = [&](CSS::Size const& size, float& resolved_definite_size, bool width) {
         // A size that can be determined without performing layout; that is,
         // a <length>,
         // a measure of text (without consideration of line-wrapping),
@@ -158,6 +206,8 @@ void LayoutState::UsedValues::set_node(NodeWithStyleAndBoxModelMetrics& node, Us
         }
 
         if (size.is_length()) {
+            if (size.length().is_calculated())
+                return false;
             resolved_definite_size = size.length().to_px(node);
             return true;
         }
@@ -185,6 +235,28 @@ void LayoutState::UsedValues::set_content_width(float width)
 void LayoutState::UsedValues::set_content_height(float height)
 {
     m_content_height = height;
+}
+
+float LayoutState::resolved_definite_width(Box const& box) const
+{
+    auto const& computed_value = box.computed_values().width();
+    if (computed_value.is_auto())
+        return get(*box.containing_block()).content_width();
+    if (computed_value.is_length())
+        return get(box).content_width();
+    auto containing_block_size = get(*box.containing_block()).content_width();
+    return computed_value.resolved(box, CSS::Length::make_px(containing_block_size)).to_px(box);
+}
+
+float LayoutState::resolved_definite_height(Box const& box) const
+{
+    auto const& computed_value = box.computed_values().height();
+    if (computed_value.is_auto())
+        return get(*box.containing_block()).content_height();
+    if (computed_value.is_length())
+        return get(box).content_height();
+    auto containing_block_size = get(*box.containing_block()).content_height();
+    return computed_value.resolved(box, CSS::Length::make_px(containing_block_size)).to_px(box);
 }
 
 }

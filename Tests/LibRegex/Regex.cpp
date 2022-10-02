@@ -603,6 +603,7 @@ TEST_CASE(ECMA262_parse)
         { "(?<𝓑𝓻𝓸𝔀𝓷>a)"sv },
         { "((?=lg)?[vl]k\\-?\\d{3}) bui| 3\\.[-\\w; ]{10}lg?-([06cv9]{3,4})"sv, regex::Error::NoError, ECMAScriptFlags::BrowserExtended }, // #12373, quantifiable assertions.
         { parse_test_case_long_disjunction_chain.view() },                                                                                 // A whole lot of disjunctions, should not overflow the stack.
+        { "(\"|')(?:(?!\\2)[^\\\\\\r\\n]|\\\\.)*\\2"sv, regex::Error::NoError, ECMAScriptFlags::BrowserExtended },                         // LegacyOctalEscapeSequence should not consume too many chars (and should not crash)
     };
 
     for (auto& test : tests) {
@@ -690,7 +691,10 @@ TEST_CASE(ECMA262_match)
         { "a|$"sv, "x"sv, true, (ECMAScriptFlags)regex::AllFlags::Global }, // #11940, Global (not the 'g' flag) regexps should attempt to match the zero-length end of the string too.
         { "foo\nbar"sv, "foo\nbar"sv, true }, // #12126, ECMA262 regexp should match literal newlines without the 's' flag.
         { "foo[^]bar"sv, "foo\nbar"sv, true }, // #12126, ECMA262 regexp should match newline with [^].
-        { "^[_A-Z]+$"sv, "_aA"sv, true, ECMAScriptFlags::Insensitive } // Insensitive lookup table: characters in a range do not necessarily lie in the same range after being converted to lowercase.
+        { "^[_A-Z]+$"sv, "_aA"sv, true, ECMAScriptFlags::Insensitive }, // Insensitive lookup table: characters in a range do not necessarily lie in the same range after being converted to lowercase.
+        { "^[a-sy-z]$"sv, "b"sv, true, ECMAScriptFlags::Insensitive },
+        { "^[a-sy-z]$"sv, "y"sv, true, ECMAScriptFlags::Insensitive },
+        { "^[a-sy-z]$"sv, "u"sv, false, ECMAScriptFlags::Insensitive },
     };
     // clang-format on
 

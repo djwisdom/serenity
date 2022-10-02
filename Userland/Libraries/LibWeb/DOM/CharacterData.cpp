@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/CharacterDataPrototype.h>
 #include <LibWeb/DOM/CharacterData.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/MutationType.h>
@@ -16,6 +17,7 @@ CharacterData::CharacterData(Document& document, NodeType type, String const& da
     : Node(document, type)
     , m_data(data)
 {
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::CharacterDataPrototype>(document.realm(), "CharacterData"));
 }
 
 // https://dom.spec.whatwg.org/#dom-characterdata-data
@@ -29,14 +31,14 @@ void CharacterData::set_data(String data)
 }
 
 // https://dom.spec.whatwg.org/#concept-cd-substring
-ExceptionOr<String> CharacterData::substring_data(size_t offset, size_t count) const
+WebIDL::ExceptionOr<String> CharacterData::substring_data(size_t offset, size_t count) const
 {
     // 1. Let length be node’s length.
     auto length = this->length();
 
     // 2. If offset is greater than length, then throw an "IndexSizeError" DOMException.
     if (offset > length)
-        return DOM::IndexSizeError::create("Substring offset out of range.");
+        return WebIDL::IndexSizeError::create(realm(), "Substring offset out of range.");
 
     // 3. If offset plus count is greater than length, return a string whose value is the code units from the offsetth code unit
     //    to the end of node’s data, and then return.
@@ -48,21 +50,21 @@ ExceptionOr<String> CharacterData::substring_data(size_t offset, size_t count) c
 }
 
 // https://dom.spec.whatwg.org/#concept-cd-replace
-ExceptionOr<void> CharacterData::replace_data(size_t offset, size_t count, String const& data)
+WebIDL::ExceptionOr<void> CharacterData::replace_data(size_t offset, size_t count, String const& data)
 {
     // 1. Let length be node’s length.
     auto length = this->length();
 
     // 2. If offset is greater than length, then throw an "IndexSizeError" DOMException.
     if (offset > length)
-        return DOM::IndexSizeError::create("Replacement offset out of range.");
+        return WebIDL::IndexSizeError::create(realm(), "Replacement offset out of range.");
 
     // 3. If offset plus count is greater than length, then set count to length minus offset.
     if (offset + count > length)
         count = length - offset;
 
     // 4. Queue a mutation record of "characterData" for node with null, null, node’s data, « », « », null, and null.
-    queue_mutation_record(MutationType::characterData, {}, {}, m_data, StaticNodeList::create({}), StaticNodeList::create({}), nullptr, nullptr);
+    queue_mutation_record(MutationType::characterData, {}, {}, m_data, StaticNodeList::create(realm(), {}), StaticNodeList::create(realm(), {}), nullptr, nullptr);
 
     // 5. Insert data into node’s data after offset code units.
     // 6. Let delete offset be offset + data’s length.
@@ -107,21 +109,21 @@ ExceptionOr<void> CharacterData::replace_data(size_t offset, size_t count, Strin
 }
 
 // https://dom.spec.whatwg.org/#dom-characterdata-appenddata
-ExceptionOr<void> CharacterData::append_data(String const& data)
+WebIDL::ExceptionOr<void> CharacterData::append_data(String const& data)
 {
     // The appendData(data) method steps are to replace data with node this, offset this’s length, count 0, and data data.
     return replace_data(m_data.length(), 0, data);
 }
 
 // https://dom.spec.whatwg.org/#dom-characterdata-insertdata
-ExceptionOr<void> CharacterData::insert_data(size_t offset, String const& data)
+WebIDL::ExceptionOr<void> CharacterData::insert_data(size_t offset, String const& data)
 {
     // The insertData(offset, data) method steps are to replace data with node this, offset offset, count 0, and data data.
     return replace_data(offset, 0, data);
 }
 
 // https://dom.spec.whatwg.org/#dom-characterdata-deletedata
-ExceptionOr<void> CharacterData::delete_data(size_t offset, size_t count)
+WebIDL::ExceptionOr<void> CharacterData::delete_data(size_t offset, size_t count)
 {
     // The deleteData(offset, count) method steps are to replace data with node this, offset offset, count count, and data the empty string.
     return replace_data(offset, count, String::empty());

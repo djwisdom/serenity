@@ -1,47 +1,37 @@
 /*
- * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/RefCounted.h>
-#include <LibWeb/Bindings/Wrappable.h>
-#include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Forward.h>
-#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
 // https://html.spec.whatwg.org/multipage/web-messaging.html#message-channels
-class MessageChannel final
-    : public RefCounted<MessageChannel>
-    , public Bindings::Wrappable {
+class MessageChannel final : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(MessageChannel, Bindings::PlatformObject);
+
 public:
-    using WrapperType = Bindings::MessageChannelWrapper;
-
-    using RefCounted::ref;
-    using RefCounted::unref;
-
-    static NonnullRefPtr<MessageChannel> create_with_global_object(Bindings::WindowObject&)
-    {
-        return adopt_ref(*new MessageChannel());
-    }
-
+    static JS::NonnullGCPtr<MessageChannel> construct_impl(JS::Realm&);
     virtual ~MessageChannel() override;
 
-    MessagePort* port1() { return m_port1; }
-    MessagePort const* port1() const { return m_port1; }
+    MessagePort* port1();
+    MessagePort const* port1() const;
 
-    MessagePort* port2() { return m_port2; }
-    MessagePort const* port2() const { return m_port2; }
+    MessagePort* port2();
+    MessagePort const* port2() const;
 
 private:
-    MessageChannel();
+    explicit MessageChannel(JS::Realm&);
 
-    RefPtr<MessagePort> m_port1;
-    RefPtr<MessagePort> m_port2;
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    JS::GCPtr<MessagePort> m_port1;
+    JS::GCPtr<MessagePort> m_port2;
 };
 
 }

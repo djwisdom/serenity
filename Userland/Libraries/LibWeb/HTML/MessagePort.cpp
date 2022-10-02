@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/Bindings/MessagePortWrapper.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/EventDispatcher.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
@@ -14,12 +14,24 @@
 
 namespace Web::HTML {
 
-MessagePort::MessagePort()
-    : DOM::EventTarget()
+JS::NonnullGCPtr<MessagePort> MessagePort::create(JS::Realm& realm)
 {
+    return *realm.heap().allocate<MessagePort>(realm, realm);
+}
+
+MessagePort::MessagePort(JS::Realm& realm)
+    : DOM::EventTarget(realm)
+{
+    set_prototype(&Bindings::cached_web_prototype(realm, "MessagePort"));
 }
 
 MessagePort::~MessagePort() = default;
+
+void MessagePort::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_remote_port.ptr());
+}
 
 void MessagePort::disentangle()
 {
@@ -30,7 +42,7 @@ void MessagePort::disentangle()
 // https://html.spec.whatwg.org/multipage/web-messaging.html#entangle
 void MessagePort::entangle_with(MessagePort& remote_port)
 {
-    if (m_remote_port == &remote_port)
+    if (m_remote_port.ptr() == &remote_port)
         return;
 
     // 1. If one of the ports is already entangled, then disentangle it and the port that it was entangled with.
@@ -41,7 +53,7 @@ void MessagePort::entangle_with(MessagePort& remote_port)
 
     // 2. Associate the two ports to be entangled, so that they form the two parts of a new channel.
     //    (There is no MessageChannel object that represents this channel.)
-    remote_port.m_remote_port = *this;
+    remote_port.m_remote_port = this;
     m_remote_port = &remote_port;
 }
 
@@ -76,17 +88,12 @@ void MessagePort::post_message(JS::Value message)
 
     // FIXME: This is an ad-hoc hack implementation instead, since we don't currently
     //        have serialization and deserialization of messages.
-    main_thread_event_loop().task_queue().add(HTML::Task::create(HTML::Task::Source::PostedMessage, nullptr, [strong_port = NonnullRefPtr { *target_port }, message]() mutable {
+    main_thread_event_loop().task_queue().add(HTML::Task::create(HTML::Task::Source::PostedMessage, nullptr, [target_port, message]() mutable {
         MessageEventInit event_init {};
         event_init.data = message;
         event_init.origin = "<origin>";
-        strong_port->dispatch_event(MessageEvent::create(HTML::EventNames::message, event_init));
+        target_port->dispatch_event(*MessageEvent::create(target_port->realm(), HTML::EventNames::message, event_init));
     }));
-}
-
-JS::Object* MessagePort::create_wrapper(JS::GlobalObject& global_object)
-{
-    return wrap(global_object, *this);
 }
 
 void MessagePort::start()
@@ -106,14 +113,14 @@ void MessagePort::close()
 }
 
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                                    \
-    void MessagePort::set_##attribute_name(Optional<Bindings::CallbackType> value) \
-    {                                                                              \
-        set_event_handler_attribute(event_name, move(value));                      \
-    }                                                                              \
-    Bindings::CallbackType* MessagePort::attribute_name()                          \
-    {                                                                              \
-        return event_handler_attribute(event_name);                                \
+#define __ENUMERATE(attribute_name, event_name)                         \
+    void MessagePort::set_##attribute_name(WebIDL::CallbackType* value) \
+    {                                                                   \
+        set_event_handler_attribute(event_name, value);                 \
+    }                                                                   \
+    WebIDL::CallbackType* MessagePort::attribute_name()                 \
+    {                                                                   \
+        return event_handler_attribute(event_name);                     \
     }
 ENUMERATE_MESSAGE_PORT_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE

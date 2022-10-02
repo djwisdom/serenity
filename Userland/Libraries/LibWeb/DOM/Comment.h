@@ -12,15 +12,16 @@
 namespace Web::DOM {
 
 class Comment final : public CharacterData {
-public:
-    using WrapperType = Bindings::CommentWrapper;
+    WEB_PLATFORM_OBJECT(Comment, CharacterData);
 
-    explicit Comment(Document&, String const&);
+public:
+    static JS::NonnullGCPtr<Comment> construct_impl(JS::Realm&, String const& data);
     virtual ~Comment() override = default;
 
     virtual FlyString node_name() const override { return "#comment"; }
 
-    static NonnullRefPtr<Comment> create_with_global_object(Bindings::WindowObject& window, String const& data);
+private:
+    Comment(Document&, String const&);
 };
 
 template<>
