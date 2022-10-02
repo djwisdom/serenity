@@ -2038,7 +2038,7 @@ void generate_constructor_implementation(IDL::Interface const& interface)
 #include <LibWeb/Bindings/@constructor_class@.h>
 #include <LibWeb/Bindings/@prototype_class@.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
-#include <LibWeb/HTML/Window.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #if __has_include(<LibWeb/Crypto/@name@.h>)
 #    include <LibWeb/Crypto/@name@.h>
 #elif __has_include(<LibWeb/CSS/@name@.h>)
@@ -2140,9 +2140,7 @@ JS::ThrowCompletionOr<JS::Object*> @constructor_class@::construct(FunctionObject
 
         generator.append(R"~~~(
     auto& vm = this->vm();
-    [[maybe_unused]] auto& realm = *vm.current_realm();
-
-    auto& window = verify_cast<HTML::Window>(realm.global_object());
+    auto& realm = *vm.current_realm();
 )~~~");
 
         if (!constructor.parameters.is_empty()) {
@@ -2153,11 +2151,11 @@ JS::ThrowCompletionOr<JS::Object*> @constructor_class@::construct(FunctionObject
             generator.set(".constructor_arguments", arguments_builder.string_view());
 
             generator.append(R"~~~(
-    auto impl = TRY(throw_dom_exception_if_needed(vm, [&] { return @fully_qualified_name@::create_with_global_object(window, @.constructor_arguments@); }));
+    auto impl = TRY(throw_dom_exception_if_needed(vm, [&] { return @fully_qualified_name@::construct_impl(realm, @.constructor_arguments@); }));
 )~~~");
         } else {
             generator.append(R"~~~(
-    auto impl = TRY(throw_dom_exception_if_needed(vm, [&] { return @fully_qualified_name@::create_with_global_object(window); }));
+    auto impl = TRY(throw_dom_exception_if_needed(vm, [&] { return @fully_qualified_name@::construct_impl(realm); }));
 )~~~");
         }
         generator.append(R"~~~(
@@ -2174,11 +2172,10 @@ JS::ThrowCompletionOr<JS::Object*> @constructor_class@::construct(FunctionObject
 void @constructor_class@::initialize(JS::Realm& realm)
 {
     auto& vm = this->vm();
-    auto& window = verify_cast<HTML::Window>(realm.global_object());
     [[maybe_unused]] u8 default_attributes = JS::Attribute::Enumerable;
 
     NativeFunction::initialize(realm);
-    define_direct_property(vm.names.prototype, &window.ensure_web_prototype<@prototype_class@>("@name@"), 0);
+    define_direct_property(vm.names.prototype, &ensure_web_prototype<@prototype_class@>(realm, "@name@"), 0);
     define_direct_property(vm.names.length, JS::Value(@constructor.length@), JS::Attribute::Configurable);
 
 )~~~");
@@ -2377,6 +2374,7 @@ void generate_prototype_implementation(IDL::Interface const& interface)
 #include <LibWeb/Bindings/@prototype_class@.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/LocationObject.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/IDLEventListener.h>
@@ -2434,7 +2432,7 @@ namespace Web::Bindings {
 )~~~");
     } else if (!interface.parent_name.is_empty()) {
         generator.append(R"~~~(
-    : Object(verify_cast<HTML::Window>(realm.global_object()).ensure_web_prototype<@prototype_base_class@>("@parent_name@"))
+    : Object(ensure_web_prototype<@prototype_base_class@>(realm, "@parent_name@"))
 )~~~");
     } else {
         generator.append(R"~~~(
@@ -2836,7 +2834,6 @@ void generate_iterator_prototype_implementation(IDL::Interface const& interface)
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibWeb/Bindings/@prototype_class@.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
-#include <LibWeb/HTML/Window.h>
 
 #if __has_include(<LibWeb/@possible_include_path@.h>)
 #    include <LibWeb/@possible_include_path@.h>

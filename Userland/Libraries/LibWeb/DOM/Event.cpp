@@ -7,32 +7,32 @@
  */
 
 #include <AK/TypeCasts.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
-#include <LibWeb/HTML/Window.h>
 
 namespace Web::DOM {
 
-JS::NonnullGCPtr<Event> Event::create(HTML::Window& window_object, FlyString const& event_name, EventInit const& event_init)
+JS::NonnullGCPtr<Event> Event::create(JS::Realm& realm, FlyString const& event_name, EventInit const& event_init)
 {
-    return *window_object.heap().allocate<Event>(window_object.realm(), window_object, event_name, event_init);
+    return *realm.heap().allocate<Event>(realm, realm, event_name, event_init);
 }
 
-JS::NonnullGCPtr<Event> Event::create_with_global_object(HTML::Window& window_object, FlyString const& event_name, EventInit const& event_init)
+JS::NonnullGCPtr<Event> Event::construct_impl(JS::Realm& realm, FlyString const& event_name, EventInit const& event_init)
 {
-    return create(window_object, event_name, event_init);
+    return create(realm, event_name, event_init);
 }
 
-Event::Event(HTML::Window& window, FlyString const& type)
-    : PlatformObject(window.cached_web_prototype("Event"))
+Event::Event(JS::Realm& realm, FlyString const& type)
+    : PlatformObject(Bindings::cached_web_prototype(realm, "Event"))
     , m_type(type)
     , m_initialized(true)
 {
 }
 
-Event::Event(HTML::Window& window, FlyString const& type, EventInit const& event_init)
-    : PlatformObject(window.cached_web_prototype("Event"))
+Event::Event(JS::Realm& realm, FlyString const& type, EventInit const& event_init)
+    : PlatformObject(Bindings::cached_web_prototype(realm, "Event"))
     , m_type(type)
     , m_bubbles(event_init.bubbles)
     , m_cancelable(event_init.cancelable)

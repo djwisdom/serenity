@@ -5,15 +5,15 @@
  */
 
 #include <LibWeb/Bindings/HTMLMediaElementPrototype.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/HTMLMediaElement.h>
-#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
 HTMLMediaElement::HTMLMediaElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
-    set_prototype(&window().cached_web_prototype("HTMLMediaElement"));
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLMediaElement"));
 }
 
 HTMLMediaElement::~HTMLMediaElement() = default;

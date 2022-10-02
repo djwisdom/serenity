@@ -12,7 +12,6 @@
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/Realm.h>
-#include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/Origin.h>
 
@@ -54,7 +53,9 @@ enum class RunScriptDecision {
 // https://html.spec.whatwg.org/multipage/webappapis.html#environment-settings-object
 struct EnvironmentSettingsObject
     : public Environment
-    , public JS::Realm::HostDefined {
+    , public JS::Cell {
+    JS_CELL(EnvironmentSettingsObject, JS::Cell);
+
     virtual ~EnvironmentSettingsObject() override;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#concept-environment-target-browsing-context

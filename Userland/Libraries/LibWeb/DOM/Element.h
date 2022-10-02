@@ -142,6 +142,11 @@ public:
     void clear_pseudo_element_nodes(Badge<Layout::TreeBuilder>);
     void serialize_pseudo_elements_as_json(JsonArraySerializer<StringBuilder>& children_array) const;
 
+    bool is_actually_disabled() const;
+
+    WebIDL::ExceptionOr<JS::GCPtr<Element>> insert_adjacent_element(String const& where, JS::NonnullGCPtr<Element> element);
+    WebIDL::ExceptionOr<void> insert_adjacent_text(String const& where, String const& data);
+
 protected:
     Element(Document&, DOM::QualifiedName);
     virtual void initialize(JS::Realm&) override;
@@ -152,6 +157,8 @@ protected:
 
 private:
     void make_html_uppercased_qualified_name();
+
+    WebIDL::ExceptionOr<JS::GCPtr<Node>> insert_adjacent(String const& where, JS::NonnullGCPtr<Node> node);
 
     QualifiedName m_qualified_name;
     String m_html_uppercased_qualified_name;
@@ -172,6 +179,6 @@ private:
 template<>
 inline bool Node::fast_is<Element>() const { return is_element(); }
 
-WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Object& global_object, FlyString namespace_, FlyString qualified_name);
+WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm&, FlyString namespace_, FlyString qualified_name);
 
 }
