@@ -31,7 +31,7 @@ namespace Web::HTML {
 HTMLElement::HTMLElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : Element(document, move(qualified_name))
 {
-    set_prototype(&window().cached_web_prototype("HTMLElement"));
+    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLElement"));
 }
 
 HTMLElement::~HTMLElement() = default;
@@ -104,7 +104,7 @@ WebIDL::ExceptionOr<void> HTMLElement::set_content_editable(String const& conten
         set_attribute(HTML::AttributeNames::contenteditable, "false");
         return {};
     }
-    return WebIDL::SyntaxError::create(global_object(), "Invalid contentEditable value, must be 'true', 'false', or 'inherit'");
+    return WebIDL::SyntaxError::create(realm(), "Invalid contentEditable value, must be 'true', 'false', or 'inherit'");
 }
 
 void HTMLElement::set_inner_text(StringView text)
@@ -272,7 +272,7 @@ static void run_focus_update_steps(Vector<JS::Handle<DOM::Node>> old_chain, Vect
         //    with related blur target as the related target.
         if (blur_event_target) {
             // FIXME: Implement the "fire a focus event" spec operation.
-            auto blur_event = UIEvents::FocusEvent::create(blur_event_target->global_object(), HTML::EventNames::blur);
+            auto blur_event = UIEvents::FocusEvent::create(blur_event_target->realm(), HTML::EventNames::blur);
             blur_event->set_related_target(related_blur_target);
             blur_event_target->dispatch_event(*blur_event);
         }
@@ -315,7 +315,7 @@ static void run_focus_update_steps(Vector<JS::Handle<DOM::Node>> old_chain, Vect
         //    with related focus target as the related target.
         if (focus_event_target) {
             // FIXME: Implement the "fire a focus event" spec operation.
-            auto focus_event = UIEvents::FocusEvent::create(focus_event_target->global_object(), HTML::EventNames::focus);
+            auto focus_event = UIEvents::FocusEvent::create(focus_event_target->realm(), HTML::EventNames::focus);
             focus_event->set_related_target(related_focus_target);
             focus_event_target->dispatch_event(*focus_event);
         }
@@ -436,7 +436,7 @@ bool HTMLElement::fire_a_synthetic_pointer_event(FlyString const& type, DOM::Ele
     // 1. Let event be the result of creating an event using PointerEvent.
     // 2. Initialize event's type attribute to e.
     // FIXME: Actually create a PointerEvent!
-    auto event = UIEvents::MouseEvent::create(document().window(), type);
+    auto event = UIEvents::MouseEvent::create(realm(), type);
 
     // 3. Initialize event's bubbles and cancelable attributes to true.
     event->set_bubbles(true);

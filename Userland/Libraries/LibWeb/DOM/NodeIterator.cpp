@@ -12,7 +12,7 @@
 namespace Web::DOM {
 
 NodeIterator::NodeIterator(Node& root)
-    : PlatformObject(root.window().cached_web_prototype("NodeIterator"))
+    : PlatformObject(Bindings::cached_web_prototype(root.realm(), "NodeIterator"))
     , m_root(root)
     , m_reference({ root })
 {
@@ -41,8 +41,8 @@ JS::NonnullGCPtr<NodeIterator> NodeIterator::create(Node& root, unsigned what_to
     // 1. Let iterator be a new NodeIterator object.
     // 2. Set iterator’s root and iterator’s reference to root.
     // 3. Set iterator’s pointer before reference to true.
-    auto& window_object = root.document().window();
-    auto* iterator = window_object.heap().allocate<NodeIterator>(window_object.realm(), root);
+    auto& realm = root.realm();
+    auto* iterator = realm.heap().allocate<NodeIterator>(realm, root);
 
     // 4. Set iterator’s whatToShow to whatToShow.
     iterator->m_what_to_show = what_to_show;
@@ -130,7 +130,7 @@ JS::ThrowCompletionOr<NodeFilter::Result> NodeIterator::filter(Node& node)
 {
     // 1. If traverser’s active flag is set, then throw an "InvalidStateError" DOMException.
     if (m_active)
-        return throw_completion(WebIDL::InvalidStateError::create(global_object(), "NodeIterator is already active"));
+        return throw_completion(WebIDL::InvalidStateError::create(realm(), "NodeIterator is already active"));
 
     // 2. Let n be node’s nodeType attribute value − 1.
     auto n = node.node_type() - 1;

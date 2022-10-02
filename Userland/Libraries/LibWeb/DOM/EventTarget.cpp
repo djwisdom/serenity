@@ -227,10 +227,10 @@ WebIDL::ExceptionOr<bool> EventTarget::dispatch_event_binding(Event& event)
 {
     // 1. If event’s dispatch flag is set, or if its initialized flag is not set, then throw an "InvalidStateError" DOMException.
     if (event.dispatched())
-        return WebIDL::InvalidStateError::create(global_object(), "The event is already being dispatched.");
+        return WebIDL::InvalidStateError::create(realm(), "The event is already being dispatched.");
 
     if (!event.initialized())
-        return WebIDL::InvalidStateError::create(global_object(), "Cannot dispatch an uninitialized event.");
+        return WebIDL::InvalidStateError::create(realm(), "Cannot dispatch an uninitialized event.");
 
     // 2. Initialize event’s isTrusted attribute to false.
     event.set_is_trusted(false);
@@ -556,7 +556,7 @@ void EventTarget::activate_event_handler(FlyString const& name, HTML::EventHandl
         0, "", &realm);
 
     // NOTE: As per the spec, the callback context is arbitrary.
-    auto* callback = realm.heap().allocate_without_realm<WebIDL::CallbackType>(*callback_function, verify_cast<HTML::EnvironmentSettingsObject>(*realm.host_defined()));
+    auto* callback = realm.heap().allocate_without_realm<WebIDL::CallbackType>(*callback_function, Bindings::host_defined_environment_settings_object(realm));
 
     // 5. Let listener be a new event listener whose type is the event handler event type corresponding to eventHandler and callback is callback.
     auto* listener = realm.heap().allocate_without_realm<DOMEventListener>();

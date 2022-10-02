@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/DOM/Document.h>
+#include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/NodeFilter.h>
 #include <LibWeb/DOM/TreeWalker.h>
@@ -14,7 +14,7 @@
 namespace Web::DOM {
 
 TreeWalker::TreeWalker(Node& root)
-    : PlatformObject(root.window().cached_web_prototype("TreeWalker"))
+    : PlatformObject(Bindings::cached_web_prototype(root.realm(), "TreeWalker"))
     , m_root(root)
     , m_current(root)
 {
@@ -35,8 +35,8 @@ JS::NonnullGCPtr<TreeWalker> TreeWalker::create(Node& root, unsigned what_to_sho
 {
     // 1. Let walker be a new TreeWalker object.
     // 2. Set walker’s root and walker’s current to root.
-    auto& window_object = root.document().window();
-    auto* walker = window_object.heap().allocate<TreeWalker>(window_object.realm(), root);
+    auto& realm = root.realm();
+    auto* walker = realm.heap().allocate<TreeWalker>(realm, root);
 
     // 3. Set walker’s whatToShow to whatToShow.
     walker->m_what_to_show = what_to_show;
@@ -231,7 +231,7 @@ JS::ThrowCompletionOr<NodeFilter::Result> TreeWalker::filter(Node& node)
 {
     // 1. If traverser’s active flag is set, then throw an "InvalidStateError" DOMException.
     if (m_active)
-        return throw_completion(WebIDL::InvalidStateError::create(global_object(), "NodeIterator is already active"));
+        return throw_completion(WebIDL::InvalidStateError::create(realm(), "NodeIterator is already active"));
 
     // 2. Let n be node’s nodeType attribute value − 1.
     auto n = node.node_type() - 1;

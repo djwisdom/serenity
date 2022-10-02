@@ -25,10 +25,8 @@ class MouseEvent final : public UIEvent {
     WEB_PLATFORM_OBJECT(MouseEvent, UIEvent);
 
 public:
-    static MouseEvent* create(HTML::Window&, FlyString const& event_name, MouseEventInit const& event_init = {});
-    static MouseEvent* create_from_platform_event(HTML::Window&, FlyString const& event_name, double offset_x, double offset_y, double client_x, double client_y, unsigned mouse_button = 1);
-
-    MouseEvent(HTML::Window&, FlyString const& event_name, MouseEventInit const& event_init);
+    static MouseEvent* create(JS::Realm&, FlyString const& event_name, MouseEventInit const& event_init = {});
+    static MouseEvent* create_from_platform_event(JS::Realm&, FlyString const& event_name, double offset_x, double offset_y, double client_x, double client_y, unsigned mouse_button = 1);
 
     virtual ~MouseEvent() override;
 
@@ -46,6 +44,8 @@ public:
     virtual u32 which() const override { return m_button + 1; }
 
 private:
+    MouseEvent(JS::Realm&, FlyString const& event_name, MouseEventInit const& event_init);
+
     void set_event_characteristics();
 
     double m_offset_x { 0 };
