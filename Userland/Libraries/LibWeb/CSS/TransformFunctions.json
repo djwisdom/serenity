@@ -2,6 +2,9 @@
     "matrix": {
         "parameters": "<number>{6}"
     },
+    "matrix3d": {
+        "parameters": "<number>{16}"
+    },
     "translate": {
         "parameters": "<length-percentage>{1,2}"
     },
@@ -21,6 +24,15 @@
         "parameters": "<number>"
     },
     "rotate": {
+        "parameters": "<angle>"
+    },
+    "rotateX": {
+        "parameters": "<angle>"
+    },
+    "rotateY": {
+        "parameters": "<angle>"
+    },
+    "rotateZ": {
         "parameters": "<angle>"
     },
     "skew": {
