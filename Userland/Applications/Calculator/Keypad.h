@@ -21,13 +21,17 @@ public:
     Keypad() = default;
     ~Keypad() = default;
 
-    void type_digit(int digit);
+    unsigned type_digit(int digit);
     void type_decimal_point();
     void type_backspace();
 
     Crypto::BigFraction value() const;
     void set_value(Crypto::BigFraction);
     void set_to_0();
+
+    void shrink(unsigned);
+    void set_rounding_length(unsigned);
+    unsigned rounding_length() const;
 
     String to_string() const;
 
@@ -45,6 +49,8 @@ private:
     // m_frac_length = 6
 
     mutable Crypto::BigFraction m_internal_value {};
+
+    unsigned m_displayed_fraction_length { 0 };
 
     enum class State {
         External,
