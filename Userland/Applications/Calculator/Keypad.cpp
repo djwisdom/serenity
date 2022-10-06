@@ -12,7 +12,7 @@
 #include <LibCrypto/BigInt/UnsignedBigInteger.h>
 #include <LibCrypto/NumberTheory/ModularFunctions.h>
 
-void Keypad::type_digit(int digit)
+unsigned Keypad::type_digit(int digit)
 {
     switch (m_state) {
     case State::External:
@@ -34,6 +34,7 @@ void Keypad::type_digit(int digit)
         m_frac_length.set_to(m_frac_length.plus(1));
         break;
     }
+    return m_frac_length.to_u64();
 }
 
 void Keypad::type_decimal_point()
@@ -113,10 +114,8 @@ void Keypad::set_to_0()
 
 String Keypad::to_string() const
 {
-    // TODO: Implement custom rounding length in the calculator.
-    constexpr auto maximum_precision = 6;
     if (m_state == State::External)
-        return m_internal_value.to_string(maximum_precision);
+        return m_internal_value.to_string(m_displayed_fraction_length);
 
     StringBuilder builder;
 
@@ -135,4 +134,19 @@ String Keypad::to_string() const
     }
 
     return builder.to_string();
+}
+
+void Keypad::set_rounding_length(unsigned rounding_threshold)
+{
+    m_displayed_fraction_length = rounding_threshold;
+}
+
+unsigned Keypad::rounding_length() const
+{
+    return m_displayed_fraction_length;
+}
+
+void Keypad::shrink(unsigned shrink_threshold)
+{
+    m_internal_value = m_internal_value.rounded(shrink_threshold);
 }

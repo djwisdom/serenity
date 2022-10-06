@@ -44,8 +44,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(Core::System::pledge("stdio rpath recvfd sendfd"));
 
+    TRY(Core::System::unveil("/tmp/session/%sid/portal/launch", "rw"));
     TRY(Core::System::unveil("/res", "r"));
-    TRY(Core::System::unveil("/tmp/user/%uid/portal/launch", "rw"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     size_t board_size = Config::read_i32("2048"sv, ""sv, "board_size"sv, 4);
@@ -112,11 +112,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             Config::write_i32("2048"sv, ""sv, "target_tile"sv, target_tile);
             Config::write_bool("2048"sv, ""sv, "evil_ai"sv, evil_ai);
 
-            GUI::MessageBox::show(window, "New settings have been saved and will be applied on a new game"sv, "Settings Changed Successfully"sv, GUI::MessageBox::Type::Information);
+            GUI::MessageBox::show(size_dialog, "New settings have been saved and will be applied on a new game"sv, "Settings Changed Successfully"sv, GUI::MessageBox::Type::Information);
             return;
         }
 
-        GUI::MessageBox::show(window, "New settings have been set and will be applied on the next game"sv, "Settings Changed Successfully"sv, GUI::MessageBox::Type::Information);
+        GUI::MessageBox::show(size_dialog, "New settings have been set and will be applied on the next game"sv, "Settings Changed Successfully"sv, GUI::MessageBox::Type::Information);
     };
     auto start_a_new_game = [&] {
         // Do not leak game states between games.

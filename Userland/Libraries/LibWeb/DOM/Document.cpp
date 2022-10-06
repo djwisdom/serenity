@@ -59,7 +59,7 @@
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/HighResolutionTime/CoarsenTime.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Layout/BlockFormattingContext.h>
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/TreeBuilder.h>
@@ -804,16 +804,15 @@ void Document::update_layout()
 
         auto& icb = static_cast<Layout::InitialContainingBlock&>(*m_layout_root);
         auto& icb_state = layout_state.get_mutable(icb);
-        icb_state.set_has_definite_width(true);
-        icb_state.set_has_definite_height(true);
         icb_state.set_content_width(viewport_rect.width());
         icb_state.set_content_height(viewport_rect.height());
 
         root_formatting_context.run(
             *m_layout_root,
             Layout::LayoutMode::Normal,
-            Layout::AvailableSpace::make_definite(viewport_rect.width()),
-            Layout::AvailableSpace::make_definite(viewport_rect.height()));
+            Layout::AvailableSpace(
+                Layout::AvailableSize::make_definite(viewport_rect.width()),
+                Layout::AvailableSize::make_definite(viewport_rect.height())));
     }
 
     layout_state.commit();
@@ -937,10 +936,29 @@ void Document::set_hovered_node(Node* node)
     JS::GCPtr<Node> old_hovered_node = move(m_hovered_node);
     m_hovered_node = node;
 
-    if (auto* common_ancestor = find_common_ancestor(old_hovered_node, m_hovered_node))
+    auto* common_ancestor = find_common_ancestor(old_hovered_node, m_hovered_node);
+    if (common_ancestor)
         common_ancestor->invalidate_style();
     else
         invalidate_style();
+
+    // https://w3c.github.io/uievents/#mouseleave
+    if (old_hovered_node && (!m_hovered_node || !m_hovered_node->is_descendant_of(*old_hovered_node))) {
+        // FIXME: Check if we need to dispatch these events in a specific order.
+        for (auto target = old_hovered_node; target && target.ptr() != common_ancestor; target = target->parent()) {
+            // FIXME: Populate the event with mouse coordinates, etc.
+            target->dispatch_event(*UIEvents::MouseEvent::create(realm(), UIEvents::EventNames::mouseleave));
+        }
+    }
+
+    // https://w3c.github.io/uievents/#mouseenter
+    if (m_hovered_node && (!old_hovered_node || !m_hovered_node->is_ancestor_of(*old_hovered_node))) {
+        // FIXME: Check if we need to dispatch these events in a specific order.
+        for (auto target = m_hovered_node; target && target.ptr() != common_ancestor; target = target->parent()) {
+            // FIXME: Populate the event with mouse coordinates, etc.
+            target->dispatch_event(*UIEvents::MouseEvent::create(realm(), UIEvents::EventNames::mouseenter));
+        }
+    }
 }
 
 JS::NonnullGCPtr<HTMLCollection> Document::get_elements_by_name(String const& name)
@@ -1432,7 +1450,7 @@ void Document::update_readiness(HTML::DocumentReadyState readiness_value)
     // 3. If document is associated with an HTML parser, then:
     if (m_parser) {
         // 1. Let now be the current high resolution time given document's relevant global object.
-        auto now = HTML::main_thread_event_loop().unsafe_shared_current_time();
+        auto now = HighResolutionTime::unsafe_shared_current_time();
 
         // 2. If readinessValue is "complete", and document's load timing info's DOM complete time is 0,
         //    then set document's load timing info's DOM complete time to now.
@@ -2155,7 +2173,7 @@ void Document::unload(bool recursive_flag, Optional<DocumentUnloadTimingInfo> un
         // then set unloadTimingInfo's unload event start time to the current high resolution time given newGlobal,
         // coarsened given document's relevant settings object's cross-origin isolated capability.
         unload_timing_info->unload_event_start_time = HighResolutionTime::coarsen_time(
-            HTML::main_thread_event_loop().unsafe_shared_current_time(),
+            HighResolutionTime::unsafe_shared_current_time(),
             relevant_settings_object().cross_origin_isolated_capability() == HTML::CanUseCrossOriginIsolatedAPIs::Yes);
     }
 
@@ -2173,7 +2191,7 @@ void Document::unload(bool recursive_flag, Optional<DocumentUnloadTimingInfo> un
         // then set unloadTimingInfo's unload event end time to the current high resolution time given newGlobal,
         // coarsened given document's relevant settings object's cross-origin isolated capability.
         unload_timing_info->unload_event_end_time = HighResolutionTime::coarsen_time(
-            HTML::main_thread_event_loop().unsafe_shared_current_time(),
+            HighResolutionTime::unsafe_shared_current_time(),
             relevant_settings_object().cross_origin_isolated_capability() == HTML::CanUseCrossOriginIsolatedAPIs::Yes);
     }
 
