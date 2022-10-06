@@ -13,6 +13,7 @@
 #include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/File.h>
+#include <LibCore/SessionManagement.h>
 #include <LibCore/System.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -82,7 +83,7 @@ ErrorOr<void> pledge(StringView promises, StringView execpromises)
 
 ErrorOr<void> unveil(StringView path, StringView permissions)
 {
-    auto const parsed_path = Core::Account::parse_path_with_uid(path);
+    auto const parsed_path = TRY(Core::SessionManagement::parse_path_with_sid(path));
 
     Syscall::SC_unveil_params params {
         { parsed_path.characters(), parsed_path.length() },
@@ -744,6 +745,14 @@ ErrorOr<pid_t> setsid()
     int rc = ::setsid();
     if (rc < 0)
         return Error::from_syscall("setsid"sv, -errno);
+    return rc;
+}
+
+ErrorOr<pid_t> getsid(pid_t pid)
+{
+    int rc = ::getsid(pid);
+    if (rc < 0)
+        return Error::from_syscall("getsid"sv, -errno);
     return rc;
 }
 

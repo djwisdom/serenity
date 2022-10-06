@@ -10,6 +10,7 @@
 #include <AK/Error.h>
 #include <AK/Forward.h>
 #include <AK/Optional.h>
+#include <AK/RefCounted.h>
 #include <AK/String.h>
 #include <AK/URL.h>
 #include <AK/Variant.h>
@@ -23,7 +24,7 @@
 namespace Web::Fetch::Infrastructure {
 
 // https://fetch.spec.whatwg.org/#concept-request
-class Request final {
+class Request final : public RefCounted<Request> {
 public:
     enum class CacheMode {
         Default,
@@ -154,7 +155,7 @@ public:
     using ReservedClientType = Variant<Empty, HTML::Environment*, HTML::EnvironmentSettingsObject*>;
     using WindowType = Variant<Window, HTML::EnvironmentSettingsObject*>;
 
-    Request();
+    static NonnullRefPtr<Request> create();
 
     [[nodiscard]] ReadonlyBytes method() const { return m_method; }
     void set_method(ByteBuffer method) { m_method = move(method); }
@@ -175,7 +176,7 @@ public:
 
     [[nodiscard]] HTML::EnvironmentSettingsObject const* client() const { return m_client; }
     [[nodiscard]] HTML::EnvironmentSettingsObject* client() { return m_client; }
-    void set_client(HTML::EnvironmentSettingsObject& client) { m_client = &client; }
+    void set_client(HTML::EnvironmentSettingsObject* client) { m_client = client; }
 
     [[nodiscard]] ReservedClientType const& reserved_client() const { return m_reserved_client; }
     [[nodiscard]] ReservedClientType& reserved_client() { return m_reserved_client; }
@@ -207,6 +208,9 @@ public:
 
     [[nodiscard]] OriginType const& origin() const { return m_origin; }
     void set_origin(OriginType origin) { m_origin = move(origin); }
+
+    [[nodiscard]] PolicyContainerType const& policy_container() const { return m_policy_container; }
+    void set_policy_container(PolicyContainerType policy_container) { m_policy_container = move(policy_container); }
 
     [[nodiscard]] Mode mode() const { return m_mode; }
     void set_mode(Mode mode) { m_mode = mode; }
@@ -287,13 +291,15 @@ public:
     [[nodiscard]] String serialize_origin() const;
     [[nodiscard]] ErrorOr<ByteBuffer> byte_serialize_origin() const;
 
-    [[nodiscard]] WebIDL::ExceptionOr<NonnullOwnPtr<Request>> clone() const;
+    [[nodiscard]] WebIDL::ExceptionOr<NonnullRefPtr<Request>> clone() const;
 
     [[nodiscard]] ErrorOr<void> add_range_reader(u64 first, Optional<u64> const& last);
 
     [[nodiscard]] bool cross_origin_embedder_policy_allows_credentials() const;
 
 private:
+    Request();
+
     // https://fetch.spec.whatwg.org/#concept-request-method
     // A request has an associated method (a method). Unless stated otherwise it is `GET`.
     ByteBuffer m_method { ByteBuffer::copy("GET"sv.bytes()).release_value() };
@@ -390,18 +396,23 @@ private:
     // A request has an associated cache mode, which is "default", "no-store", "reload", "no-cache", "force-cache", or "only-if-cached". Unless stated otherwise, it is "default".
     CacheMode m_cache_mode { CacheMode::Default };
 
+    // https://fetch.spec.whatwg.org/#concept-request-redirect-mode
     // A request has an associated redirect mode, which is "follow", "error", or "manual". Unless stated otherwise, it is "follow".
     RedirectMode m_redirect_mode { RedirectMode::Follow };
 
+    // https://fetch.spec.whatwg.org/#concept-request-integrity-metadata
     // A request has associated integrity metadata (a string). Unless stated otherwise, it is the empty string.
     String m_integrity_metadata { String::empty() };
 
+    // https://fetch.spec.whatwg.org/#concept-request-nonce-metadata
     // A request has associated cryptographic nonce metadata (a string). Unless stated otherwise, it is the empty string.
     String m_cryptographic_nonce_metadata { String::empty() };
 
+    // https://fetch.spec.whatwg.org/#concept-request-parser-metadata
     // A request has associated parser metadata which is the empty string, "parser-inserted", or "not-parser-inserted". Unless otherwise stated, it is the empty string.
     Optional<ParserMetadata> m_parser_metadata;
 
+    // https://fetch.spec.whatwg.org/#concept-request-reload-navigation-flag
     // A request has an associated reload-navigation flag. Unless stated otherwise, it is unset.
     bool m_reload_navigation { false };
 

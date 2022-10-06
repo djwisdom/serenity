@@ -11,7 +11,6 @@
 #include <AK/ByteBuffer.h>
 #include <AK/GenericLexer.h>
 #include <AK/QuickSort.h>
-#include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/GlobalObject.h>
@@ -30,6 +29,7 @@
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/Origin.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/Infra/JSON.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/WebIDL/DOMException.h>
@@ -97,14 +97,16 @@ WebIDL::ExceptionOr<String> XMLHttpRequest::response_text() const
 // https://xhr.spec.whatwg.org/#response
 WebIDL::ExceptionOr<JS::Value> XMLHttpRequest::response()
 {
+    auto& vm = this->vm();
+
     // 1. If this’s response type is the empty string or "text", then:
     if (m_response_type == Bindings::XMLHttpRequestResponseType::Empty || m_response_type == Bindings::XMLHttpRequestResponseType::Text) {
         // 1. If this’s state is not loading or done, then return the empty string.
         if (m_ready_state != ReadyState::Loading && m_ready_state != ReadyState::Done)
-            return JS::Value(JS::js_string(vm(), ""));
+            return JS::js_string(vm, "");
 
         // 2. Return the result of getting a text response for this.
-        return JS::Value(JS::js_string(vm(), get_text_response()));
+        return JS::js_string(vm, get_text_response());
     }
     // 2. If this’s state is not done, then return null.
     if (m_ready_state != ReadyState::Done)
@@ -150,14 +152,12 @@ WebIDL::ExceptionOr<JS::Value> XMLHttpRequest::response()
         // 2. If this’s response’s body is null, then return null.
         // FIXME: Implement this once we have 'Response'.
         if (m_received_bytes.is_empty())
-            return JS::Value(JS::js_null());
+            return JS::js_null();
 
         // 3. Let jsonObject be the result of running parse JSON from bytes on this’s received bytes. If that threw an exception, then return null.
-        TextCodec::UTF8Decoder decoder;
-
-        auto json_object_result = JS::call(vm(), realm().intrinsics().json_parse_function(), JS::js_undefined(), JS::js_string(vm(), decoder.to_utf8({ m_received_bytes.data(), m_received_bytes.size() })));
+        auto json_object_result = Infra::parse_json_bytes_to_javascript_value(vm, m_received_bytes);
         if (json_object_result.is_error())
-            return JS::Value(JS::js_null());
+            return JS::js_null();
 
         // 4. Set this’s response object to jsonObject.
         m_response_object = json_object_result.release_value();

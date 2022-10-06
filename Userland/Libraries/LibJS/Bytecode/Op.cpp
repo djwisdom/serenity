@@ -944,7 +944,10 @@ ThrowCompletionOr<void> NewClass::execute_impl(Bytecode::Interpreter& interprete
     auto name = m_class_expression.name();
     auto scope = interpreter.ast_interpreter_scope();
     auto& ast_interpreter = scope.interpreter();
-    auto class_object = TRY(m_class_expression.class_definition_evaluation(ast_interpreter, name, name.is_null() ? ""sv : name));
+
+    auto* class_object = TRY(m_class_expression.class_definition_evaluation(ast_interpreter, name, name.is_null() ? ""sv : name));
+    class_object->set_source_text(m_class_expression.source_text());
+
     interpreter.accumulator() = class_object;
     return {};
 }
@@ -1152,7 +1155,8 @@ String NewFunction::to_string_impl(Bytecode::Executable const&) const
 
 String NewClass::to_string_impl(Bytecode::Executable const&) const
 {
-    return "NewClass";
+    auto name = m_class_expression.name();
+    return String::formatted("NewClass '{}'", name.is_null() ? ""sv : name);
 }
 
 String Return::to_string_impl(Bytecode::Executable const&) const
