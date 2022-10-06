@@ -299,7 +299,7 @@ bool FrameLoader::load(const AK::URL& url, Type type)
 
 void FrameLoader::load_html(StringView html, const AK::URL& url)
 {
-    auto response = make<Fetch::Infrastructure::Response>();
+    auto response = Fetch::Infrastructure::Response::create();
     response->url_list().append(url);
     HTML::NavigationParams navigation_params {
         .id = {},
@@ -317,10 +317,10 @@ void FrameLoader::load_html(StringView html, const AK::URL& url)
         DOM::Document::Type::HTML,
         "text/html",
         move(navigation_params));
+    browsing_context().set_active_document(document);
 
     auto parser = HTML::HTMLParser::create(document, html, "utf-8");
     parser->run(url);
-    browsing_context().set_active_document(parser->document());
 }
 
 static String s_error_page_url = "file:///res/html/error.html";
@@ -419,7 +419,7 @@ void FrameLoader::resource_did_load()
     // FIXME: Pass incumbentNavigationOrigin
     auto response_origin = HTML::determine_the_origin(browsing_context(), url, final_sandboxing_flag_set, {});
 
-    auto response = make<Fetch::Infrastructure::Response>();
+    auto response = Fetch::Infrastructure::Response::create();
     response->url_list().append(url);
     HTML::NavigationParams navigation_params {
         .id = {},

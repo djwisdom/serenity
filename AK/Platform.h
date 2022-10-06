@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Nico Weber <thakis@chromium.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -24,13 +25,43 @@
 #    define AK_ARCH_32_BIT
 #endif
 
+#if defined(__clang__)
+#    define AK_COMPILER_CLANG
+#elif defined(__GNUC__)
+#    define AK_COMPILER_GCC
+#endif
+
+#if defined(__serenity__)
+#    define AK_OS_SERENITY
+#endif
+
+#if defined(__linux__)
+#    define AK_OS_LINUX
+#endif
+
 #if defined(__APPLE__) && defined(__MACH__)
 #    define AK_OS_MACOS
 #    define AK_OS_BSD_GENERIC
 #endif
 
-#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#if defined(__FreeBSD__)
 #    define AK_OS_BSD_GENERIC
+#    define AK_OS_FREEBSD
+#endif
+
+#if defined(__NetBSD__)
+#    define AK_OS_BSD_GENERIC
+#    define AK_OS_NETBSD
+#endif
+
+#if defined(__OpenBSD__)
+#    define AK_OS_BSD_GENERIC
+#    define AK_OS_OPENBSD
+#endif
+
+#if defined(__DragonFly__)
+#    define AK_OS_BSD_GENERIC
+#    define AK_OS_DRAGONFLY
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -60,7 +91,7 @@
 #    define VALIDATE_IS_X86() static_assert(false, "Trying to include x86 only header on non x86 platform");
 #endif
 
-#if !defined(__clang__) && !defined(__CLION_IDE_) && !defined(__CLION_IDE__)
+#if !defined(AK_COMPILER_CLANG) && !defined(__CLION_IDE_) && !defined(__CLION_IDE__)
 #    define AK_HAS_CONDITIONALLY_TRIVIAL
 #endif
 
@@ -97,7 +128,7 @@
 #ifdef DISALLOW
 #    undef DISALLOW
 #endif
-#ifdef __clang__
+#if defined(AK_COMPILER_CLANG)
 #    define DISALLOW(message) __attribute__((diagnose_if(1, message, "error")))
 #else
 #    define DISALLOW(message) __attribute__((error(message)))

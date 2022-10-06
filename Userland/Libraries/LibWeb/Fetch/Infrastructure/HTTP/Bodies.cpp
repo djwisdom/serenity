@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibJS/Runtime/PromiseReaction.h>
+#include <LibJS/Runtime/PromiseCapability.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
 #include <LibWeb/WebIDL/Promise.h>
@@ -40,7 +40,7 @@ WebIDL::ExceptionOr<Body> Body::clone() const
 }
 
 // https://fetch.spec.whatwg.org/#fully-reading-body-as-promise
-JS::PromiseCapability Body::fully_read_as_promise() const
+JS::NonnullGCPtr<JS::PromiseCapability> Body::fully_read_as_promise() const
 {
     auto& vm = Bindings::main_thread_vm();
     auto& realm = *vm.current_realm();
