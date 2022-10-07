@@ -3336,7 +3336,7 @@ RefPtr<StyleValue> Parser::parse_rect_value(ComponentValue const& component_valu
         // <top>, <right>, <bottom>, and <left> may either have a <length> value or 'auto'.
         // Negative lengths are permitted.
         auto current_token = tokens.next_token().token();
-        if (current_token.to_string() == "auto") {
+        if (current_token.is(Token::Type::Ident) && current_token.ident().equals_ignoring_case("auto"sv)) {
             params.append(Length::make_auto());
         } else {
             auto maybe_length = parse_length(current_token);
@@ -5450,27 +5450,37 @@ RefPtr<StyleValue> Parser::parse_grid_track_placement(Vector<ComponentValue> con
     auto current_token = tokens.next_token().token();
 
     if (!tokens.has_next_token()) {
-        if (current_token.to_string() == "auto"sv)
+        if (current_token.is(Token::Type::Ident) && current_token.ident().equals_ignoring_case("auto"sv))
             return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement());
-        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
+        // https://drafts.csswg.org/css-grid/#grid-placement-span-int
+        // If the <integer> is omitted, it defaults to 1.
+        if (current_token.is(Token::Type::Ident) && current_token.ident().equals_ignoring_case("span"sv))
+            return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement(1, true));
+        // https://drafts.csswg.org/css-grid/#grid-placement-int
+        // [ <integer [−∞,−1]> | <integer [1,∞]> ] && <custom-ident>?
+        // An <integer> value of zero makes the declaration invalid.
+        if (current_token.is(Token::Type::Number) && current_token.number().is_integer() && current_token.number_value() != 0)
             return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement(static_cast<int>(current_token.number_value())));
         return {};
     }
 
-    auto first_grid_track_placement = CSS::GridTrackPlacement();
-    auto has_span = false;
-    if (current_token.to_string() == "span"sv) {
-        has_span = true;
+    auto is_span = false;
+    if (current_token.is(Token::Type::Ident) && current_token.ident().equals_ignoring_case("span"sv)) {
+        is_span = true;
         tokens.skip_whitespace();
         current_token = tokens.next_token().token();
     }
-    if (current_token.is(Token::Type::Number) && current_token.number().is_integer()) {
-        first_grid_track_placement.set_position(static_cast<int>(current_token.number_value()));
-        first_grid_track_placement.set_has_span(has_span);
-    }
 
-    if (!tokens.has_next_token())
-        return GridTrackPlacementStyleValue::create(first_grid_track_placement);
+    // https://drafts.csswg.org/css-grid/#grid-placement-int
+    // [ <integer [−∞,−1]> | <integer [1,∞]> ] && <custom-ident>?
+    // An <integer> value of zero makes the declaration invalid.
+    if (current_token.is(Token::Type::Number) && current_token.number().is_integer() && current_token.number_value() != 0 && !tokens.has_next_token()) {
+        // https://drafts.csswg.org/css-grid/#grid-placement-span-int
+        // Negative integers or zero are invalid.
+        if (is_span && static_cast<int>(current_token.number_value()) < 1)
+            return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement(1, is_span));
+        return GridTrackPlacementStyleValue::create(CSS::GridTrackPlacement(static_cast<int>(current_token.number_value()), is_span));
+    }
     return {};
 }
 
@@ -5479,41 +5489,35 @@ RefPtr<StyleValue> Parser::parse_grid_track_placement_shorthand_value(Vector<Com
     auto tokens = TokenStream { component_values };
     auto current_token = tokens.next_token().token();
 
-    if (!tokens.has_next_token()) {
-        if (current_token.to_string() == "auto"sv)
-            return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement::make_auto());
-        if (current_token.is(Token::Type::Number) && current_token.number().is_integer())
-            return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement(current_token.number_value()));
-        return {};
+    Vector<ComponentValue> track_start_placement_tokens;
+    while (true) {
+        if (current_token.is(Token::Type::Delim) && current_token.delim() == "/"sv)
+            break;
+        track_start_placement_tokens.append(current_token);
+        if (!tokens.has_next_token())
+            break;
+        current_token = tokens.next_token().token();
     }
 
-    auto calculate_grid_track_placement = [](auto& current_token, auto& tokens) -> CSS::GridTrackPlacement {
-        auto grid_track_placement = CSS::GridTrackPlacement();
-        auto has_span = false;
-        if (current_token.to_string() == "span"sv) {
-            has_span = true;
-            tokens.skip_whitespace();
+    Vector<ComponentValue> track_end_placement_tokens;
+    if (tokens.has_next_token()) {
+        current_token = tokens.next_token().token();
+        while (true) {
+            track_end_placement_tokens.append(current_token);
+            if (!tokens.has_next_token())
+                break;
             current_token = tokens.next_token().token();
         }
-        if (current_token.is(Token::Type::Number) && current_token.number().is_integer()) {
-            grid_track_placement.set_position(static_cast<int>(current_token.number_value()));
-            grid_track_placement.set_has_span(has_span);
-        }
-        return grid_track_placement;
-    };
+    }
 
-    auto first_grid_track_placement = calculate_grid_track_placement(current_token, tokens);
-    if (!tokens.has_next_token())
-        return GridTrackPlacementShorthandStyleValue::create(CSS::GridTrackPlacement(first_grid_track_placement));
+    auto parsed_start_value = parse_grid_track_placement(track_start_placement_tokens);
+    if (parsed_start_value && track_end_placement_tokens.is_empty())
+        return GridTrackPlacementShorthandStyleValue::create(parsed_start_value.release_nonnull()->as_grid_track_placement().grid_track_placement());
 
-    tokens.skip_whitespace();
-    current_token = tokens.next_token().token();
-    tokens.skip_whitespace();
-    current_token = tokens.next_token().token();
+    auto parsed_end_value = parse_grid_track_placement(track_end_placement_tokens);
+    if (parsed_start_value && parsed_end_value)
+        return GridTrackPlacementShorthandStyleValue::create(parsed_start_value.release_nonnull()->as_grid_track_placement(), parsed_end_value.release_nonnull()->as_grid_track_placement());
 
-    auto second_grid_track_placement = calculate_grid_track_placement(current_token, tokens);
-    if (!tokens.has_next_token())
-        return GridTrackPlacementShorthandStyleValue::create(GridTrackPlacementStyleValue::create(first_grid_track_placement), GridTrackPlacementStyleValue::create(second_grid_track_placement));
     return {};
 }
 

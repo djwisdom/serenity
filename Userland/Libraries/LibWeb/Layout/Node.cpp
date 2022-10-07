@@ -91,11 +91,11 @@ bool Node::establishes_stacking_context() const
         return true;
 
     // Element that is a child of a flex container, with z-index value other than auto.
-    if (parent() && parent()->computed_values().display().is_flex_inside() && computed_values().z_index().has_value())
+    if (parent() && parent()->display().is_flex_inside() && computed_values().z_index().has_value())
         return true;
 
     // Element that is a child of a grid container, with z-index value other than auto.
-    if (parent() && parent()->computed_values().display().is_grid_inside() && computed_values().z_index().has_value())
+    if (parent() && parent()->display().is_grid_inside() && computed_values().z_index().has_value())
         return true;
 
     return computed_values().opacity() < 1.0f;
@@ -579,9 +579,25 @@ String Node::debug_description() const
     return builder.to_string();
 }
 
+CSS::Display Node::display() const
+{
+    if (!has_style()) {
+        // NOTE: No style means this is dumb text content.
+        return CSS::Display(CSS::Display::Outside::Inline, CSS::Display::Inside::Flow);
+    }
+
+    return computed_values().display();
+}
+
+bool Node::is_inline() const
+{
+    return display().is_inline_outside();
+}
+
 bool Node::is_inline_block() const
 {
-    return is_inline() && is<BlockContainer>(*this);
+    auto display = this->display();
+    return display.is_inline_outside() && display.is_flow_root_inside();
 }
 
 NonnullRefPtr<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const

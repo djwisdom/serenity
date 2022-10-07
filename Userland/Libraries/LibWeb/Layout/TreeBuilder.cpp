@@ -61,7 +61,7 @@ static Layout::Node& insertion_parent_for_inline_node(Layout::NodeWithStyle& lay
     if (layout_parent.is_inline() && !layout_parent.is_inline_block())
         return layout_parent;
 
-    if (layout_parent.computed_values().display().is_flex_inside()) {
+    if (layout_parent.display().is_flex_inside()) {
         layout_parent.append_child(layout_parent.create_anonymous_wrapper());
         return *layout_parent.last_child();
     }
@@ -110,6 +110,74 @@ static Layout::Node& insertion_parent_for_block_node(Layout::NodeWithStyle& layo
     return layout_parent;
 }
 
+void TreeBuilder::insert_node_into_inline_or_block_ancestor(Layout::Node& node, CSS::Display display, AppendOrPrepend mode)
+{
+    if (display.is_inline_outside()) {
+        // Inlines can be inserted into the nearest ancestor.
+        auto& insertion_point = insertion_parent_for_inline_node(m_ancestor_stack.last());
+        if (mode == AppendOrPrepend::Prepend)
+            insertion_point.prepend_child(node);
+        else
+            insertion_point.append_child(node);
+        insertion_point.set_children_are_inline(true);
+    } else {
+        // Non-inlines can't be inserted into an inline parent, so find the nearest non-inline ancestor.
+        auto& nearest_non_inline_ancestor = [&]() -> Layout::NodeWithStyle& {
+            for (auto& ancestor : m_ancestor_stack.in_reverse()) {
+                if (!ancestor.display().is_inline_outside())
+                    return ancestor;
+                if (!ancestor.display().is_flow_inside())
+                    return ancestor;
+            }
+            VERIFY_NOT_REACHED();
+        }();
+        auto& insertion_point = insertion_parent_for_block_node(nearest_non_inline_ancestor, node);
+        if (mode == AppendOrPrepend::Prepend)
+            insertion_point.prepend_child(node);
+        else
+            insertion_point.append_child(node);
+
+        // After inserting an in-flow block-level box into a parent, mark the parent as having non-inline children.
+        if (!node.is_floating() && !node.is_absolutely_positioned())
+            insertion_point.set_children_are_inline(false);
+    }
+}
+
+void TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::Selector::PseudoElement pseudo_element, AppendOrPrepend mode)
+{
+    auto& document = element.document();
+    auto& style_computer = document.style_computer();
+
+    auto pseudo_element_style = style_computer.compute_style(element, pseudo_element);
+    auto pseudo_element_content = pseudo_element_style->content();
+    auto pseudo_element_display = pseudo_element_style->display();
+    // ::before and ::after only exist if they have content. `content: normal` computes to `none` for them.
+    // We also don't create them if they are `display: none`.
+    if (pseudo_element_display.is_none()
+        || pseudo_element_content.type == CSS::ContentData::Type::Normal
+        || pseudo_element_content.type == CSS::ContentData::Type::None)
+        return;
+
+    auto pseudo_element_node = DOM::Element::create_layout_node_for_display_type(document, pseudo_element_display, pseudo_element_style, nullptr);
+    if (!pseudo_element_node)
+        return;
+
+    pseudo_element_node->set_generated(true);
+    // FIXME: Handle images, and multiple values
+    if (pseudo_element_content.type == CSS::ContentData::Type::String) {
+        auto* text = document.heap().allocate<DOM::Text>(document.realm(), document, pseudo_element_content.data);
+        auto text_node = adopt_ref(*new TextNode(document, *text));
+        push_parent(verify_cast<NodeWithStyle>(*pseudo_element_node));
+        insert_node_into_inline_or_block_ancestor(text_node, text_node->display(), AppendOrPrepend::Append);
+        pop_parent();
+    } else {
+        TODO();
+    }
+
+    element.set_pseudo_element_node({}, pseudo_element, pseudo_element_node);
+    insert_node_into_inline_or_block_ancestor(*pseudo_element_node, pseudo_element_display, mode);
+}
+
 void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& context)
 {
     // If the parent doesn't have a layout node, we don't need one either.
@@ -128,63 +196,38 @@ void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
     auto& style_computer = document.style_computer();
     RefPtr<Layout::Node> layout_node;
     RefPtr<CSS::StyleProperties> style;
+    CSS::Display display;
 
     if (is<DOM::Element>(dom_node)) {
         auto& element = static_cast<DOM::Element&>(dom_node);
         element.clear_pseudo_element_nodes({});
         VERIFY(!element.needs_style_update());
         style = element.computed_css_values();
-        if (style->display().is_none())
+        display = style->display();
+        if (display.is_none())
             return;
         layout_node = element.create_layout_node(*style);
     } else if (is<DOM::Document>(dom_node)) {
         style = style_computer.create_document_style();
+        display = style->display();
         layout_node = adopt_ref(*new Layout::InitialContainingBlock(static_cast<DOM::Document&>(dom_node), *style));
     } else if (is<DOM::Text>(dom_node)) {
         layout_node = adopt_ref(*new Layout::TextNode(document, static_cast<DOM::Text&>(dom_node)));
+        display = CSS::Display(CSS::Display::Outside::Inline, CSS::Display::Inside::Flow);
     } else if (is<DOM::ShadowRoot>(dom_node)) {
         layout_node = adopt_ref(*new Layout::BlockContainer(document, &static_cast<DOM::ShadowRoot&>(dom_node), CSS::ComputedValues {}));
+        display = CSS::Display(CSS::Display::Outside::Block, CSS::Display::Inside::FlowRoot);
     }
 
     if (!layout_node)
         return;
-
-    auto insert_node_into_inline_or_block_ancestor = [this](auto& node, bool prepend = false) {
-        if (node->is_inline() && !(node->is_inline_block() && m_ancestor_stack.last().computed_values().display().is_flex_inside())) {
-            // Inlines can be inserted into the nearest ancestor.
-            auto& insertion_point = insertion_parent_for_inline_node(m_ancestor_stack.last());
-            if (prepend)
-                insertion_point.prepend_child(*node);
-            else
-                insertion_point.append_child(*node);
-            insertion_point.set_children_are_inline(true);
-        } else {
-            // Non-inlines can't be inserted into an inline parent, so find the nearest non-inline ancestor.
-            auto& nearest_non_inline_ancestor = [&]() -> Layout::NodeWithStyle& {
-                for (auto& ancestor : m_ancestor_stack.in_reverse()) {
-                    if (!ancestor.is_inline() || ancestor.is_inline_block())
-                        return ancestor;
-                }
-                VERIFY_NOT_REACHED();
-            }();
-            auto& insertion_point = insertion_parent_for_block_node(nearest_non_inline_ancestor, *node);
-            if (prepend)
-                insertion_point.prepend_child(*node);
-            else
-                insertion_point.append_child(*node);
-
-            // After inserting an in-flow block-level box into a parent, mark the parent as having non-inline children.
-            if (!node->is_floating() && !node->is_absolutely_positioned())
-                insertion_point.set_children_are_inline(false);
-        }
-    };
 
     if (!dom_node.parent_or_shadow_host()) {
         m_layout_root = layout_node;
     } else if (layout_node->is_svg_box()) {
         m_ancestor_stack.last().append_child(*layout_node);
     } else {
-        insert_node_into_inline_or_block_ancestor(layout_node);
+        insert_node_into_inline_or_block_ancestor(*layout_node, display, AppendOrPrepend::Append);
     }
 
     auto* shadow_root = is<DOM::Element>(dom_node) ? verify_cast<DOM::Element>(dom_node).shadow_root() : nullptr;
@@ -202,44 +245,9 @@ void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
     // Add nodes for the ::before and ::after pseudo-elements.
     if (is<DOM::Element>(dom_node)) {
         auto& element = static_cast<DOM::Element&>(dom_node);
-        auto create_pseudo_element_if_needed = [&](CSS::Selector::PseudoElement pseudo_element) -> RefPtr<Node> {
-            auto pseudo_element_style = style_computer.compute_style(element, pseudo_element);
-            auto pseudo_element_content = pseudo_element_style->content();
-            auto pseudo_element_display = pseudo_element_style->display();
-            // ::before and ::after only exist if they have content. `content: normal` computes to `none` for them.
-            // We also don't create them if they are `display: none`.
-            if (pseudo_element_display.is_none()
-                || pseudo_element_content.type == CSS::ContentData::Type::Normal
-                || pseudo_element_content.type == CSS::ContentData::Type::None)
-                return nullptr;
-
-            if (auto pseudo_element_node = DOM::Element::create_layout_node_for_display_type(document, pseudo_element_display, move(pseudo_element_style), nullptr)) {
-                pseudo_element_node->set_generated(true);
-                // FIXME: Handle images, and multiple values
-                if (pseudo_element_content.type == CSS::ContentData::Type::String) {
-                    auto* text = document.heap().allocate<DOM::Text>(document.realm(), document, pseudo_element_content.data);
-                    auto text_node = adopt_ref(*new TextNode(document, *text));
-                    push_parent(verify_cast<NodeWithStyle>(*pseudo_element_node));
-                    insert_node_into_inline_or_block_ancestor(text_node);
-                    pop_parent();
-                } else {
-                    TODO();
-                }
-                return pseudo_element_node.ptr();
-            }
-
-            return nullptr;
-        };
-
         push_parent(verify_cast<NodeWithStyle>(*layout_node));
-        if (auto before_node = create_pseudo_element_if_needed(CSS::Selector::PseudoElement::Before)) {
-            element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::Before, before_node.ptr());
-            insert_node_into_inline_or_block_ancestor(before_node, true);
-        }
-        if (auto after_node = create_pseudo_element_if_needed(CSS::Selector::PseudoElement::After)) {
-            element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::After, after_node.ptr());
-            insert_node_into_inline_or_block_ancestor(after_node);
-        }
+        create_pseudo_element_if_needed(element, CSS::Selector::PseudoElement::Before, AppendOrPrepend::Prepend);
+        create_pseudo_element_if_needed(element, CSS::Selector::PseudoElement::After, AppendOrPrepend::Append);
         pop_parent();
     }
 
@@ -248,8 +256,6 @@ void TreeBuilder::create_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
         int child_index = layout_node->parent()->index_of_child<ListItemBox>(*layout_node).value();
         auto marker_style = style_computer.compute_style(element, CSS::Selector::PseudoElement::Marker);
         auto list_item_marker = adopt_ref(*new ListItemMarkerBox(document, layout_node->computed_values().list_style_type(), child_index + 1, *marker_style));
-        if (layout_node->first_child())
-            list_item_marker->set_inline(layout_node->first_child()->is_inline());
         static_cast<ListItemBox&>(*layout_node).set_marker(list_item_marker);
         element.set_pseudo_element_node({}, CSS::Selector::PseudoElement::Marker, list_item_marker);
         layout_node->append_child(move(list_item_marker));
@@ -289,7 +295,7 @@ template<CSS::Display::Internal internal, typename Callback>
 void TreeBuilder::for_each_in_tree_with_internal_display(NodeWithStyle& root, Callback callback)
 {
     root.for_each_in_inclusive_subtree_of_type<Box>([&](auto& box) {
-        auto const& display = box.computed_values().display();
+        auto const display = box.display();
         if (display.is_internal() && display.internal() == internal)
             callback(box);
         return IterationDecision::Continue;
@@ -300,7 +306,7 @@ template<CSS::Display::Inside inside, typename Callback>
 void TreeBuilder::for_each_in_tree_with_inside_display(NodeWithStyle& root, Callback callback)
 {
     root.for_each_in_inclusive_subtree_of_type<Box>([&](auto& box) {
-        auto const& display = box.computed_values().display();
+        auto const display = box.display();
         if (display.is_outside_and_inside() && display.inside() == inside)
             callback(box);
         return IterationDecision::Continue;
@@ -330,7 +336,7 @@ void TreeBuilder::remove_irrelevant_boxes(NodeWithStyle& root)
     // Children of a table-column-group which are not a table-column.
     for_each_in_tree_with_internal_display<CSS::Display::Internal::TableColumnGroup>(root, [&](Box& table_column_group) {
         table_column_group.for_each_child([&](auto& child) {
-            if (child.computed_values().display().is_table_column())
+            if (child.display().is_table_column())
                 to_remove.append(child);
         });
     });
@@ -365,7 +371,7 @@ static bool is_not_proper_table_child(Node const& node)
 {
     if (!node.has_style())
         return true;
-    auto display = node.computed_values().display();
+    auto const display = node.display();
     return !is_table_track_group(display) && !is_table_track(display) && !display.is_table_caption();
 }
 
@@ -373,7 +379,7 @@ static bool is_not_table_row(Node const& node)
 {
     if (!node.has_style())
         return true;
-    auto display = node.computed_values().display();
+    auto const display = node.display();
     return !display.is_table_row();
 }
 
@@ -381,7 +387,7 @@ static bool is_not_table_cell(Node const& node)
 {
     if (!node.has_style())
         return true;
-    auto display = node.computed_values().display();
+    auto const display = node.display();
     return !display.is_table_cell();
 }
 

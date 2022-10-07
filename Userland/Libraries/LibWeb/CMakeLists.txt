@@ -258,6 +258,9 @@ set(SOURCES
     HTML/Scripting/ClassicScript.cpp
     HTML/Scripting/Environments.cpp
     HTML/Scripting/ExceptionReporter.cpp
+    HTML/Scripting/Fetching.cpp
+    HTML/Scripting/ModuleMap.cpp
+    HTML/Scripting/ModuleScript.cpp
     HTML/Scripting/Script.cpp
     HTML/Scripting/WindowEnvironmentSettingsObject.cpp
     HTML/Storage.cpp
@@ -379,7 +382,6 @@ set(SOURCES
     SVG/SVGAnimatedLength.cpp
     SVG/SVGClipPathElement.cpp
     SVG/SVGDefsElement.cpp
-    SVG/SVGElement.cpp
     SVG/SVGElement.cpp
     SVG/SVGGElement.cpp
     SVG/SVGGeometryElement.cpp
