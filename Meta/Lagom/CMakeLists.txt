@@ -482,10 +482,9 @@ if (BUILD_LAGOM)
     )
 
     # Regex
-    file(GLOB LIBREGEX_LIBC_SOURCES "../../Userland/Libraries/LibRegex/C/Regex.cpp")
     file(GLOB LIBREGEX_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibRegex/*.cpp")
     lagom_lib(Regex regex
-        SOURCES ${LIBREGEX_SOURCES} ${LIBREGEX_LIBC_SOURCES}
+        SOURCES ${LIBREGEX_SOURCES}
         LIBS LibUnicode
     )
 
@@ -541,6 +540,14 @@ if (BUILD_LAGOM)
     )
     target_compile_definitions(LibUnicode PRIVATE ENABLE_UNICODE_DATA=$<BOOL:${ENABLE_UNICODE_DATABASE_DOWNLOAD}>)
 
+    # Video
+    file(GLOB LIBVIDEO_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibVideo/*.cpp")
+    file(GLOB LIBVIDEO_SUBDIR_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibVideo/*/*.cpp")
+    lagom_lib(Video video
+        SOURCES ${LIBVIDEO_SOURCES} ${LIBVIDEO_SUBDIR_SOURCES}
+        LIBS LibAudio LibIPC LibGfx
+    )
+
     # WASM
     file(GLOB LIBWASM_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWasm/*/*.cpp")
     lagom_lib(Wasm wasm
@@ -585,10 +592,20 @@ if (BUILD_LAGOM)
     )
 
     # WebView
-    list(APPEND LIBWEBVIEW_SOURCES "../../Userland/Libraries/LibWebView/DOMTreeModel.cpp")
-    lagom_lib(WebView webview
-        SOURCES ${LIBWEBVIEW_SOURCES}
-        LIBS LibGUI)
+    if (ENABLE_LAGOM_LIBWEB)
+        list(APPEND LIBWEBVIEW_SOURCES "../../Userland/Libraries/LibWebView/DOMTreeModel.cpp")
+        list(APPEND LIBWEBVIEW_SOURCES "../../Userland/Libraries/LibWebView/WebContentClient.cpp")
+
+        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/WebContent/WebContentServer.ipc WebContent/WebContentServerEndpoint.h)
+        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/WebContent/WebContentClient.ipc WebContent/WebContentClientEndpoint.h)
+
+        list(APPEND LIBWEBVIEW_GENERATED_SOURCES WebContent/WebContentClientEndpoint.h)
+        list(APPEND LIBWEBVIEW_GENERATED_SOURCES WebContent/WebContentServerEndpoint.h)
+
+        lagom_lib(WebView webview
+            SOURCES ${LIBWEBVIEW_SOURCES} ${LIBWEBVIEW_GENERATED_SOURCES}
+            LIBS LibGUI LibWeb)
+    endif()
 
     # x86
     # FIXME: Excluding arm64 is a temporary hack to circumvent a build problem
@@ -648,7 +665,7 @@ if (BUILD_LAGOM)
 
         add_executable(ntpquery_lagom ../../Userland/Utilities/ntpquery.cpp)
         set_target_properties(ntpquery_lagom PROPERTIES OUTPUT_NAME ntpquery)
-        target_link_libraries(ntpquery_lagom LibCore)
+        target_link_libraries(ntpquery_lagom LibCore LibMain)
 
         add_executable(shell_lagom ../../Userland/Shell/main.cpp)
         set_target_properties(shell_lagom PROPERTIES OUTPUT_NAME shell)
@@ -778,6 +795,13 @@ if (BUILD_LAGOM)
         file(GLOB LIBUNICODE_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibUnicode/*.cpp")
         foreach(source ${LIBUNICODE_TEST_SOURCES})
             lagom_test(${source} LIBS LibUnicode)
+        endforeach()
+
+        # Video
+        file(GLOB LIBVIDEO_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibVideo/*.cpp")
+        foreach(source ${LIBVIDEO_TEST_SOURCES})
+            lagom_test(${source} LIBS LibVideo
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../Tests/LibVideo)
         endforeach()
 
         # JavaScriptTestRunner + LibTest tests

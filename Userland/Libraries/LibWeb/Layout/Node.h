@@ -68,9 +68,9 @@ public:
 
     virtual bool can_have_children() const { return true; }
 
-    bool is_inline() const { return m_inline; }
-    void set_inline(bool b) { m_inline = b; }
+    CSS::Display display() const;
 
+    bool is_inline() const;
     bool is_inline_block() const;
 
     bool is_out_of_flow(FormattingContext const&) const;
@@ -149,7 +149,6 @@ private:
 
     size_t m_serial_id { 0 };
 
-    bool m_inline { false };
     bool m_has_style { false };
     bool m_visible { true };
     bool m_children_are_inline { false };

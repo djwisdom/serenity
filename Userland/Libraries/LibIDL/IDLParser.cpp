@@ -8,6 +8,7 @@
  */
 
 #include "IDLParser.h"
+#include <AK/Assertions.h>
 #include <AK/LexicalPath.h>
 #include <AK/QuickSort.h>
 #include <LibCore/File.h>
@@ -76,9 +77,6 @@ static String convert_enumeration_value_to_cpp_enum_member(String const& value, 
 
 namespace IDL {
 
-HashTable<NonnullOwnPtr<Interface>> Parser::s_interfaces {};
-HashMap<String, Interface*> Parser::s_resolved_imports {};
-
 void Parser::assert_specific(char ch)
 {
     if (!lexer.consume_specific(ch))
@@ -114,7 +112,17 @@ HashMap<String, String> Parser::parse_extended_attributes()
             break;
         auto name = lexer.consume_until([](auto ch) { return ch == ']' || ch == '=' || ch == ','; });
         if (lexer.consume_specific('=')) {
-            auto value = lexer.consume_until([](auto ch) { return ch == ']' || ch == ','; });
+            bool did_open_paren = false;
+            auto value = lexer.consume_until(
+                [&did_open_paren](auto ch) mutable {
+                    if (ch == '(') {
+                        did_open_paren = true;
+                        return false;
+                    }
+                    if (did_open_paren)
+                        return ch == ')';
+                    return ch == ']' || ch == ',';
+                });
             extended_attributes.set(name, value);
         } else {
             extended_attributes.set(name, {});
@@ -133,8 +141,8 @@ Optional<Interface&> Parser::resolve_import(auto path)
         report_parsing_error(String::formatted("{}: No such file or directory", include_path), filename, input, lexer.tell());
 
     auto real_path = Core::File::real_path_for(include_path);
-    if (s_resolved_imports.contains(real_path))
-        return *s_resolved_imports.find(real_path)->value;
+    if (top_level_resolved_imports().contains(real_path))
+        return *top_level_resolved_imports().find(real_path)->value;
 
     if (import_stack.contains(real_path))
         report_parsing_error(String::formatted("Circular import detected: {}", include_path), filename, input, lexer.tell());
@@ -145,10 +153,10 @@ Optional<Interface&> Parser::resolve_import(auto path)
         report_parsing_error(String::formatted("Failed to open {}: {}", real_path, file_or_error.error()), filename, input, lexer.tell());
 
     auto data = file_or_error.value()->read_all();
-    auto& result = Parser(real_path, data, import_base_path).parse();
+    auto& result = Parser(this, real_path, data, import_base_path).parse();
     import_stack.remove(real_path);
 
-    s_resolved_imports.set(real_path, &result);
+    top_level_resolved_imports().set(real_path, &result);
     return result;
 }
 
@@ -217,6 +225,10 @@ NonnullRefPtr<Type> Parser::parse_type()
 
 void Parser::parse_attribute(HashMap<String, String>& extended_attributes, Interface& interface)
 {
+    bool inherit = lexer.consume_specific("inherit");
+    if (inherit)
+        consume_whitespace();
+
     bool readonly = lexer.consume_specific("readonly");
     if (readonly)
         consume_whitespace();
@@ -236,6 +248,7 @@ void Parser::parse_attribute(HashMap<String, String>& extended_attributes, Inter
     auto setter_callback_name = String::formatted("{}_setter", name_as_string.to_snakecase());
 
     Attribute attribute {
+        inherit,
         readonly,
         move(type),
         move(name_as_string),
@@ -361,7 +374,7 @@ void Parser::parse_stringifier(HashMap<String, String>& extended_attributes, Int
     assert_string("stringifier"sv);
     consume_whitespace();
     interface.has_stringifier = true;
-    if (lexer.next_is("readonly"sv) || lexer.next_is("attribute"sv)) {
+    if (lexer.next_is("attribute"sv) || lexer.next_is("inherit"sv) || lexer.next_is("readonly"sv)) {
         parse_attribute(extended_attributes, interface);
         interface.stringifier_attribute = interface.attributes.last().name;
     } else {
@@ -547,7 +560,7 @@ void Parser::parse_interface(Interface& interface)
             continue;
         }
 
-        if (lexer.next_is("readonly") || lexer.next_is("attribute")) {
+        if (lexer.next_is("inherit") || lexer.next_is("readonly") || lexer.next_is("attribute")) {
             parse_attribute(extended_attributes, interface);
             continue;
         }
@@ -721,7 +734,7 @@ void Parser::parse_interface_mixin(Interface& interface)
 {
     auto mixin_interface_ptr = make<Interface>();
     auto& mixin_interface = *mixin_interface_ptr;
-    VERIFY(s_interfaces.set(move(mixin_interface_ptr)) == AK::HashSetResult::InsertedNewEntry);
+    VERIFY(top_level_interfaces().set(move(mixin_interface_ptr)) == AK::HashSetResult::InsertedNewEntry);
     mixin_interface.module_own_path = interface.module_own_path;
     mixin_interface.is_mixin = true;
 
@@ -841,9 +854,9 @@ Interface& Parser::parse()
 
     auto interface_ptr = make<Interface>();
     auto& interface = *interface_ptr;
-    VERIFY(s_interfaces.set(move(interface_ptr)) == AK::HashSetResult::InsertedNewEntry);
+    VERIFY(top_level_interfaces().set(move(interface_ptr)) == AK::HashSetResult::InsertedNewEntry);
     interface.module_own_path = this_module;
-    s_resolved_imports.set(this_module, &interface);
+    top_level_resolved_imports().set(this_module, &interface);
 
     Vector<Interface&> imports;
     HashTable<String> required_imported_paths;
@@ -983,6 +996,9 @@ Interface& Parser::parse()
         interface.required_imported_paths.set(this_module);
     interface.imported_modules = move(imports);
 
+    if (top_level_parser() == this)
+        VERIFY(import_stack.is_empty());
+
     return interface;
 }
 
@@ -992,6 +1008,33 @@ Parser::Parser(String filename, StringView contents, String import_base_path)
     , input(contents)
     , lexer(input)
 {
+}
+
+Parser::Parser(Parser* parent, String filename, StringView contents, String import_base_path)
+    : import_base_path(move(import_base_path))
+    , filename(move(filename))
+    , input(contents)
+    , lexer(input)
+    , parent(parent)
+{
+}
+
+Parser* Parser::top_level_parser()
+{
+    Parser* current = this;
+    for (Parser* next = this; next; next = next->parent)
+        current = next;
+    return current;
+}
+
+HashMap<String, Interface*>& Parser::top_level_resolved_imports()
+{
+    return top_level_parser()->resolved_imports;
+}
+
+HashTable<NonnullOwnPtr<Interface>>& Parser::top_level_interfaces()
+{
+    return top_level_parser()->interfaces;
 }
 
 }

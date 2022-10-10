@@ -44,6 +44,14 @@ struct SpecialCasing {
     String condition;
 };
 
+// Field descriptions: https://www.unicode.org/reports/tr44/#Character_Decomposition_Mappings
+struct CodePointDecomposition {
+    // `tag` is a string since it's used for codegen as an enum value.
+    String tag { "Canonical"sv };
+    size_t decomposition_index { 0 };
+    size_t decomposition_size { 0 };
+};
+
 // PropList source: https://www.unicode.org/Public/13.0.0/ucd/PropList.txt
 // Property descriptions: https://www.unicode.org/reports/tr44/tr44-13.html#PropList.txt
 using PropList = HashMap<String, Vector<CodePointRange>>;
@@ -78,7 +86,7 @@ struct CodePointData {
     Optional<StringIndexType> abbreviation;
     u8 canonical_combining_class { 0 };
     String bidi_class;
-    String decomposition_type;
+    Optional<CodePointDecomposition> decomposition_mapping;
     Optional<i8> numeric_value_decimal;
     Optional<i8> numeric_value_digit;
     Optional<i8> numeric_value_numeric;
@@ -100,6 +108,10 @@ struct UnicodeData {
     UniqueStringStorage<StringIndexType> unique_strings;
 
     u32 code_points_with_non_zero_combining_class { 0 };
+
+    u32 code_points_with_decomposition_mapping { 0 };
+    Vector<u32> decomposition_mappings;
+    Vector<String> compatibility_tags;
 
     u32 simple_uppercase_mapping_size { 0 };
     u32 simple_lowercase_mapping_size { 0 };
@@ -198,11 +210,6 @@ static CodePointRange parse_code_point_range(StringView list)
     return code_point_range;
 }
 
-// gcc-11, gcc-12 have a codegen bug on (at least) intel macOS 10.15, see #15449.
-#if defined(AK_COMPILER_GCC) && defined(AK_OS_MACOS)
-#    pragma GCC push_options
-#    pragma GCC optimize("O0")
-#endif
 static ErrorOr<void> parse_special_casing(Core::Stream::BufferedFile& file, UnicodeData& unicode_data)
 {
     Array<u8, 1024> buffer;
@@ -475,7 +482,7 @@ static ErrorOr<void> parse_normalization_props(Core::Stream::BufferedFile& file,
 
 static void add_canonical_code_point_name(CodePointRange range, StringView name, UnicodeData& unicode_data)
 {
-    // https://www.unicode.org/versions/Unicode14.0.0/ch04.pdf#G142981
+    // https://www.unicode.org/versions/Unicode15.0.0/ch04.pdf#G142981
     // FIXME: Implement the NR1 rules for Hangul syllables.
 
     struct CodePointNameFormat {
@@ -484,22 +491,23 @@ static void add_canonical_code_point_name(CodePointRange range, StringView name,
     };
 
     // These code point ranges are the NR2 set of name replacements defined by Table 4-8.
-    constexpr Array<CodePointNameFormat, 15> s_ideographic_replacements { {
+    constexpr Array<CodePointNameFormat, 16> s_ideographic_replacements { {
         { { 0x3400, 0x4DBF }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
-        { { 0x4E00, 0x9FFC }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
+        { { 0x4E00, 0x9FFF }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0xF900, 0xFA6D }, "CJK COMPATIBILITY IDEOGRAPH-{:X}"sv },
         { { 0xFA70, 0xFAD9 }, "CJK COMPATIBILITY IDEOGRAPH-{:X}"sv },
         { { 0x17000, 0x187F7 }, "TANGUT IDEOGRAPH-{:X}"sv },
         { { 0x18B00, 0x18CD5 }, "KHITAN SMALL SCRIPT CHARACTER-{:X}"sv },
         { { 0x18D00, 0x18D08 }, "TANGUT IDEOGRAPH-{:X}"sv },
         { { 0x1B170, 0x1B2FB }, "NUSHU CHARACTER-{:X}"sv },
-        { { 0x20000, 0x2A6DD }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
-        { { 0x2A700, 0x2B734 }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
+        { { 0x20000, 0x2A6DF }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
+        { { 0x2A700, 0x2B739 }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0x2B740, 0x2B81D }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0x2B820, 0x2CEA1 }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0x2CEB0, 0x2EBE0 }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0x2F800, 0x2FA1D }, "CJK COMPATIBILITY IDEOGRAPH-{:X}"sv },
         { { 0x30000, 0x3134A }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
+        { { 0x31350, 0x323AF }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
     } };
 
     auto it = find_if(s_ideographic_replacements.begin(), s_ideographic_replacements.end(),
@@ -532,6 +540,35 @@ static void add_canonical_code_point_name(CodePointRange range, StringView name,
 
     auto index = unicode_data.unique_strings.ensure(name);
     unicode_data.code_point_display_names.append({ range, index });
+}
+
+static Optional<CodePointDecomposition> parse_decomposition_mapping(StringView string, UnicodeData& unicode_data)
+{
+    if (string.is_empty())
+        return {};
+
+    CodePointDecomposition mapping;
+
+    auto parts = string.split_view(' ');
+
+    VERIFY(parts.size() > 0);
+
+    if (parts.first().starts_with('<')) {
+        auto const tag = parts.take_first().trim("<>"sv);
+
+        mapping.tag = String::formatted("{:c}{}", to_ascii_uppercase(tag[0]), tag.substring_view(1));
+
+        if (!unicode_data.compatibility_tags.contains_slow(mapping.tag))
+            unicode_data.compatibility_tags.append(mapping.tag);
+    }
+
+    mapping.decomposition_index = unicode_data.decomposition_mappings.size();
+    mapping.decomposition_size = parts.size();
+    for (auto part : parts) {
+        unicode_data.decomposition_mappings.append(AK::StringUtils::convert_to_uint_from_hex<u32>(part).value());
+    }
+
+    return mapping;
 }
 
 static ErrorOr<void> parse_block_display_names(Core::Stream::BufferedFile& file, UnicodeData& unicode_data)
@@ -581,7 +618,7 @@ static ErrorOr<void> parse_unicode_data(Core::Stream::BufferedFile& file, Unicod
         data.name = segments[1];
         data.canonical_combining_class = AK::StringUtils::convert_to_uint<u8>(segments[3]).value();
         data.bidi_class = segments[4];
-        data.decomposition_type = segments[5];
+        data.decomposition_mapping = parse_decomposition_mapping(segments[5], unicode_data);
         data.numeric_value_decimal = AK::StringUtils::convert_to_int<i8>(segments[6]);
         data.numeric_value_digit = AK::StringUtils::convert_to_int<i8>(segments[7]);
         data.numeric_value_numeric = AK::StringUtils::convert_to_int<i8>(segments[8]);
@@ -639,6 +676,7 @@ static ErrorOr<void> parse_unicode_data(Core::Stream::BufferedFile& file, Unicod
         unicode_data.code_points_with_non_zero_combining_class += data.canonical_combining_class != 0;
         unicode_data.simple_uppercase_mapping_size += data.simple_uppercase_mapping.has_value();
         unicode_data.simple_lowercase_mapping_size += data.simple_lowercase_mapping.has_value();
+        unicode_data.code_points_with_decomposition_mapping += data.decomposition_mapping.has_value();
 
         unicode_data.code_points_with_special_casing += has_special_casing;
         unicode_data.largest_special_casing_size = max(unicode_data.largest_special_casing_size, data.special_casing_indices.size());
@@ -649,9 +687,6 @@ static ErrorOr<void> parse_unicode_data(Core::Stream::BufferedFile& file, Unicod
 
     return {};
 }
-#if defined(AK_COMPILER_GCC) && defined(AK_OS_MACOS)
-#    pragma GCC pop_options
-#endif
 
 static ErrorOr<void> generate_unicode_data_header(Core::Stream::BufferedFile& file, UnicodeData& unicode_data)
 {
@@ -714,6 +749,7 @@ namespace Unicode {
     generate_enum("GraphemeBreakProperty"sv, {}, unicode_data.grapheme_break_props.keys());
     generate_enum("WordBreakProperty"sv, {}, unicode_data.word_break_props.keys());
     generate_enum("SentenceBreakProperty"sv, {}, unicode_data.sentence_break_props.keys());
+    generate_enum("CompatibilityFormattingTag"sv, "Canonical"sv, unicode_data.compatibility_tags);
 
     generator.append(R"~~~(
 struct SpecialCasing {
@@ -730,6 +766,12 @@ struct SpecialCasing {
 
     Locale locale { Locale::None };
     Condition condition { Condition::None };
+};
+
+struct CodePointDecomposition {
+    u32 code_point { 0 };
+    CompatibilityFormattingTag tag { CompatibilityFormattingTag::Canonical };
+    Span<u32 const> decomposition;
 };
 
 Optional<Locale> locale_from_string(StringView locale);
@@ -760,6 +802,7 @@ static ErrorOr<void> generate_unicode_data_implementation(Core::Stream::Buffered
 #include <AK/StringView.h>
 #include <LibUnicode/CharacterTypes.h>
 #include <LibUnicode/UnicodeData.h>
+#include <LibUnicode/Normalize.h>
 
 namespace Unicode {
 )~~~");
@@ -863,6 +906,11 @@ struct CodePointNameComparator : public CodePointRangeComparator {
 };
 )~~~");
 
+    generator.set("decomposition_mappings_size", String::number(unicode_data.decomposition_mappings.size()));
+    generator.append("\nstatic constexpr Array<u32, @decomposition_mappings_size@> s_decomposition_mappings_data { ");
+    generator.append(String::join(", "sv, unicode_data.decomposition_mappings, "{:#x}"sv));
+    generator.append(" };\n");
+
     auto append_code_point_mappings = [&](StringView name, StringView mapping_type, u32 size, auto mapping_getter) {
         generator.set("name", name);
         generator.set("mapping_type", mapping_type);
@@ -895,6 +943,11 @@ static constexpr Array<@mapping_type@, @size@> s_@name@_mappings { {
             if constexpr (IsSame<decltype(mapping), Optional<u32>> || IsSame<decltype(mapping), Optional<StringIndexType>>) {
                 generator.set("mapping", String::formatted("{:#x}", *mapping));
                 generator.append(", @mapping@ },");
+            } else if constexpr (IsSame<decltype(mapping), Optional<CodePointDecomposition>>) {
+                generator.set("tag", mapping->tag);
+                generator.set("start", String::number(mapping->decomposition_index));
+                generator.set("size", String::number(mapping->decomposition_size));
+                generator.append(", CompatibilityFormattingTag::@tag@, Span<u32 const> { s_decomposition_mappings_data.data() + @start@, @size@ } },");
             } else {
                 append_list_and_size(data.special_casing_indices, "&s_special_casing[{}]"sv);
                 generator.append(" },");
@@ -920,6 +973,11 @@ static constexpr Array<@mapping_type@, @size@> s_@name@_mappings { {
     append_code_point_mappings("lowercase"sv, "CodePointMapping"sv, unicode_data.simple_lowercase_mapping_size, [](auto const& data) { return data.simple_lowercase_mapping; });
     append_code_point_mappings("special_case"sv, "SpecialCaseMapping"sv, unicode_data.code_points_with_special_casing, [](auto const& data) { return data.special_casing_indices; });
     append_code_point_mappings("abbreviation"sv, "CodePointAbbreviation"sv, unicode_data.code_point_abbreviations.size(), [](auto const& data) { return data.abbreviation; });
+
+    append_code_point_mappings("decomposition"sv, "CodePointDecomposition"sv, unicode_data.code_points_with_decomposition_mapping,
+        [](auto const& data) {
+            return data.decomposition_mapping;
+        });
 
     auto append_code_point_range_list = [&](String name, Vector<CodePointRange> const& ranges) {
         generator.set("name", name);
@@ -1093,6 +1151,19 @@ Optional<StringView> code_point_abbreviation(u32 code_point)
         return {};
 
     return decode_string(mapping->abbreviation);
+}
+
+Optional<CodePointDecomposition const&> code_point_decomposition(u32 code_point)
+{
+    auto const* mapping = binary_search(s_decomposition_mappings, code_point, nullptr, CodePointComparator<CodePointDecomposition> {});
+    if (mapping == nullptr)
+        return {};
+    return *mapping;
+}
+
+Span<CodePointDecomposition const> code_point_decompositions()
+{
+    return s_decomposition_mappings;
 }
 )~~~");
 

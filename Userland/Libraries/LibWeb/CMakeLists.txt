@@ -10,8 +10,6 @@ set(SOURCES
     Bindings/LocationConstructor.cpp
     Bindings/LocationObject.cpp
     Bindings/MainThreadVM.cpp
-    Bindings/NavigatorConstructor.cpp
-    Bindings/NavigatorObject.cpp
     Bindings/OptionConstructor.cpp
     Bindings/PlatformObject.cpp
     Bindings/WindowConstructor.cpp
@@ -245,6 +243,8 @@ set(SOURCES
     HTML/MessageChannel.cpp
     HTML/MessageEvent.cpp
     HTML/MessagePort.cpp
+    HTML/Navigator.cpp
+    HTML/NavigatorID.cpp
     HTML/PageTransitionEvent.cpp
     HTML/Parser/Entities.cpp
     HTML/Parser/HTMLEncodingDetection.cpp
@@ -258,6 +258,9 @@ set(SOURCES
     HTML/Scripting/ClassicScript.cpp
     HTML/Scripting/Environments.cpp
     HTML/Scripting/ExceptionReporter.cpp
+    HTML/Scripting/Fetching.cpp
+    HTML/Scripting/ModuleMap.cpp
+    HTML/Scripting/ModuleScript.cpp
     HTML/Scripting/Script.cpp
     HTML/Scripting/WindowEnvironmentSettingsObject.cpp
     HTML/Storage.cpp
@@ -379,7 +382,6 @@ set(SOURCES
     SVG/SVGAnimatedLength.cpp
     SVG/SVGClipPathElement.cpp
     SVG/SVGDefsElement.cpp
-    SVG/SVGElement.cpp
     SVG/SVGElement.cpp
     SVG/SVGGElement.cpp
     SVG/SVGGeometryElement.cpp

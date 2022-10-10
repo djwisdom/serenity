@@ -29,6 +29,7 @@
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/StackingContext.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
 #include <WebContent/ConnectionFromClient.h>
 #include <WebContent/PageHost.h>
 #include <WebContent/WebContentClientEndpoint.h>
@@ -40,12 +41,12 @@ ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSock
     : IPC::ConnectionFromClient<WebContentClientEndpoint, WebContentServerEndpoint>(*this, move(socket), 1)
     , m_page_host(PageHost::create(*this))
 {
-    m_paint_flush_timer = Core::Timer::create_single_shot(0, [this] { flush_pending_paint_requests(); });
+    m_paint_flush_timer = Web::Platform::Timer::create_single_shot(0, [this] { flush_pending_paint_requests(); });
 }
 
 void ConnectionFromClient::die()
 {
-    Core::EventLoop::current().quit(0);
+    Web::Platform::EventLoopPlugin::the().quit();
 }
 
 Web::Page& ConnectionFromClient::page()
@@ -81,6 +82,7 @@ void ConnectionFromClient::load_url(const URL& url)
 {
     dbgln_if(SPAM_DEBUG, "handle: WebContentServer::LoadURL: url={}", url);
 
+#if defined(AK_OS_SERENITY)
     String process_name;
     if (url.host().is_empty())
         process_name = "WebContent";
@@ -88,6 +90,7 @@ void ConnectionFromClient::load_url(const URL& url)
         process_name = String::formatted("WebContent: {}", url.host());
 
     pthread_setname_np(pthread_self(), process_name.characters());
+#endif
 
     page().load(url);
 }

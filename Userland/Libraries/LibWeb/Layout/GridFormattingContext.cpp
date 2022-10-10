@@ -35,39 +35,6 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         return false;
     };
 
-    auto maybe_add_column_to_occupation_grid = [](int needed_number_of_columns, Vector<Vector<bool>>& occupation_grid) -> void {
-        int current_column_count = (int)occupation_grid[0].size();
-        if (needed_number_of_columns <= current_column_count)
-            return;
-        for (auto& occupation_grid_row : occupation_grid)
-            for (int idx = 0; idx < (needed_number_of_columns + 1) - current_column_count; idx++)
-                occupation_grid_row.append(false);
-    };
-
-    auto maybe_add_row_to_occupation_grid = [](int needed_number_of_rows, Vector<Vector<bool>>& occupation_grid) -> void {
-        if (needed_number_of_rows <= (int)occupation_grid.size())
-            return;
-
-        Vector<bool> new_occupation_grid_row;
-        for (int idx = 0; idx < (int)occupation_grid[0].size(); idx++)
-            new_occupation_grid_row.append(false);
-
-        for (int idx = 0; idx < needed_number_of_rows - (int)occupation_grid.size(); idx++)
-            occupation_grid.append(new_occupation_grid_row);
-    };
-
-    auto set_occupied_cells = [](int row_start, int row_end, int column_start, int column_end, Vector<Vector<bool>>& occupation_grid) -> void {
-        for (int row_index = 0; row_index < (int)occupation_grid.size(); row_index++) {
-            if (row_index >= row_start && row_index < row_end) {
-                for (int column_index = 0; column_index < (int)occupation_grid[0].size(); column_index++) {
-                    if (column_index >= column_start && column_index < column_end) {
-                        occupation_grid[row_index][column_index] = true;
-                    }
-                }
-            }
-        }
-    };
-
     // https://drafts.csswg.org/css-grid/#overview-placement
     // 2.2. Placing Items
     // The contents of the grid container are organized into individual grid items (analogous to
@@ -83,14 +50,6 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         float computed_height { 0 };
     };
     Vector<PositionedBox> positioned_boxes;
-
-    Vector<Vector<bool>> occupation_grid;
-    Vector<bool> occupation_grid_row;
-    for (int column_index = 0; column_index < max((int)box.computed_values().grid_template_columns().size(), 1); column_index++)
-        occupation_grid_row.append(false);
-    for (int row_index = 0; row_index < max((int)box.computed_values().grid_template_rows().size(), 1); row_index++)
-        occupation_grid.append(occupation_grid_row);
-
     Vector<Box const&> boxes_to_place;
     box.for_each_child_of_type<Box>([&](Box& child_box) {
         if (should_skip_is_anonymous_text_run(child_box))
@@ -98,6 +57,7 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         boxes_to_place.append(child_box);
         return IterationDecision::Continue;
     });
+    auto occupation_grid = OccupationGrid(static_cast<int>(box.computed_values().grid_template_columns().size()), static_cast<int>(box.computed_values().grid_template_rows().size()));
 
     // https://drafts.csswg.org/css-grid/#auto-placement-algo
     // 8.5. Grid Item Placement Algorithm
@@ -107,54 +67,100 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // 1. Position anything that's not auto-positioned.
     for (size_t i = 0; i < boxes_to_place.size(); i++) {
         auto const& child_box = boxes_to_place[i];
-        if (child_box.computed_values().grid_row_start().is_auto()
-            || child_box.computed_values().grid_row_end().is_auto()
-            || child_box.computed_values().grid_column_start().is_auto()
-            || child_box.computed_values().grid_column_end().is_auto())
+        if (is_auto_positioned_row(child_box.computed_values().grid_row_start(), child_box.computed_values().grid_row_end())
+            || is_auto_positioned_column(child_box.computed_values().grid_column_start(), child_box.computed_values().grid_column_end()))
             continue;
 
-        int row_start = child_box.computed_values().grid_row_start().position();
-        int row_end = child_box.computed_values().grid_row_end().position();
-        int column_start = child_box.computed_values().grid_column_start().position();
-        int column_end = child_box.computed_values().grid_column_end().position();
-        int row_span = 1;
-        int column_span = 1;
+        int row_start = child_box.computed_values().grid_row_start().raw_value();
+        int row_end = child_box.computed_values().grid_row_end().raw_value();
+        int column_start = child_box.computed_values().grid_column_start().raw_value();
+        int column_end = child_box.computed_values().grid_column_end().raw_value();
+
+        // https://drafts.csswg.org/css-grid/#line-placement
+        // 8.3. Line-based Placement: the grid-row-start, grid-column-start, grid-row-end, and grid-column-end properties
+
+        // https://drafts.csswg.org/css-grid/#grid-placement-slot
+        // FIXME: <custom-ident>
+        // First attempt to match the grid area’s edge to a named grid area: if there is a grid line whose
+        // line name is <custom-ident>-start (for grid-*-start) / <custom-ident>-end (for grid-*-end),
+        // contributes the first such line to the grid item’s placement.
+
+        // Note: Named grid areas automatically generate implicitly-assigned line names of this form, so
+        // specifying grid-row-start: foo will choose the start edge of that named grid area (unless another
+        // line named foo-start was explicitly specified before it).
+
+        // Otherwise, treat this as if the integer 1 had been specified along with the <custom-ident>.
 
         // https://drafts.csswg.org/css-grid/#grid-placement-int
         // [ <integer [−∞,−1]> | <integer [1,∞]> ] && <custom-ident>?
         // Contributes the Nth grid line to the grid item’s placement. If a negative integer is given, it
         // instead counts in reverse, starting from the end edge of the explicit grid.
         if (row_end < 0)
-            row_end = static_cast<int>(occupation_grid.size()) + row_end + 2;
+            row_end = occupation_grid.row_count() + row_end + 2;
         if (column_end < 0)
-            column_end = static_cast<int>(occupation_grid[0].size()) + column_end + 2;
-        // FIXME: If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
+            column_end = occupation_grid.column_count() + column_end + 2;
+
+        // If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
         // lines with that name exist, all implicit grid lines are assumed to have that name for the purpose
         // of finding this position.
 
-        // FIXME: An <integer> value of zero makes the declaration invalid.
+        // An <integer> value of zero makes the declaration invalid.
+
+        // https://drafts.csswg.org/css-grid/#grid-placement-span-int
+        // span && [ <integer [1,∞]> || <custom-ident> ]
+        // Contributes a grid span to the grid item’s placement such that the corresponding edge of the grid
+        // item’s grid area is N lines from its opposite edge in the corresponding direction. For example,
+        // grid-column-end: span 2 indicates the second grid line in the endward direction from the
+        // grid-column-start line.
+        int row_span = 1;
+        int column_span = 1;
+        if (child_box.computed_values().grid_row_start().is_position() && child_box.computed_values().grid_row_end().is_span())
+            row_span = child_box.computed_values().grid_row_end().raw_value();
+        if (child_box.computed_values().grid_column_start().is_position() && child_box.computed_values().grid_column_end().is_span())
+            column_span = child_box.computed_values().grid_column_end().raw_value();
+        if (child_box.computed_values().grid_row_end().is_position() && child_box.computed_values().grid_row_start().is_span()) {
+            row_span = child_box.computed_values().grid_row_start().raw_value();
+            row_start = row_end - row_span;
+        }
+        if (child_box.computed_values().grid_column_end().is_position() && child_box.computed_values().grid_column_start().is_span()) {
+            column_span = child_box.computed_values().grid_column_start().raw_value();
+            column_start = column_end - column_span;
+        }
+
+        // If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
+        // lines with that name exist, all implicit grid lines on the side of the explicit grid
+        // corresponding to the search direction are assumed to have that name for the purpose of counting
+        // this span.
+
+        // https://drafts.csswg.org/css-grid/#grid-placement-auto
+        // auto
+        // The property contributes nothing to the grid item’s placement, indicating auto-placement or a
+        // default span of one. (See § 8 Placing Grid Items, above.)
 
         // https://drafts.csswg.org/css-grid/#grid-placement-errors
         // 8.3.1. Grid Placement Conflict Handling
         // If the placement for a grid item contains two lines, and the start line is further end-ward than
         // the end line, swap the two lines. If the start line is equal to the end line, remove the end
         // line.
-        if (row_start > row_end) {
-            auto temp = row_end;
-            row_end = row_start;
-            row_start = temp;
+        if (child_box.computed_values().grid_row_start().is_position() && child_box.computed_values().grid_row_end().is_position()) {
+            if (row_start > row_end)
+                swap(row_start, row_end);
+            if (row_start != row_end)
+                row_span = row_end - row_start;
         }
-        if (column_start > column_end) {
-            auto temp = column_end;
-            column_end = column_start;
-            column_start = temp;
+        if (child_box.computed_values().grid_column_start().is_position() && child_box.computed_values().grid_column_end().is_position()) {
+            if (column_start > column_end)
+                swap(column_start, column_end);
+            if (column_start != column_end)
+                column_span = column_end - column_start;
         }
-        if (row_start != row_end)
-            row_span = row_end - row_start;
-        if (column_start != column_end)
-            column_span = column_end - column_start;
-        // FIXME: If the placement contains two spans, remove the one contributed by the end grid-placement
+
+        // If the placement contains two spans, remove the one contributed by the end grid-placement
         // property.
+        if (child_box.computed_values().grid_row_start().is_span() && child_box.computed_values().grid_row_end().is_span())
+            row_span = child_box.computed_values().grid_row_start().raw_value();
+        if (child_box.computed_values().grid_column_start().is_span() && child_box.computed_values().grid_column_end().is_span())
+            column_span = child_box.computed_values().grid_column_start().raw_value();
 
         // FIXME: If the placement contains only a span for a named line, replace it with a span of 1.
 
@@ -162,9 +168,9 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         column_start -= 1;
         positioned_boxes.append({ child_box, row_start, row_span, column_start, column_span });
 
-        maybe_add_row_to_occupation_grid(row_start + row_span, occupation_grid);
-        maybe_add_column_to_occupation_grid(column_start + column_span, occupation_grid);
-        set_occupied_cells(row_start, row_start + row_span, column_start, column_start + column_span, occupation_grid);
+        occupation_grid.maybe_add_row(row_start + row_span);
+        occupation_grid.maybe_add_column(column_start + column_span);
+        occupation_grid.set_occupied(column_start, column_start + column_span, row_start, row_start + row_span);
         boxes_to_place.remove(i);
         i--;
     }
@@ -173,61 +179,113 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // FIXME: Do "dense" packing
     for (size_t i = 0; i < boxes_to_place.size(); i++) {
         auto const& child_box = boxes_to_place[i];
-        if (child_box.computed_values().grid_row_start().is_auto()
-            || child_box.computed_values().grid_row_end().is_auto())
+        if (is_auto_positioned_row(child_box.computed_values().grid_row_start(), child_box.computed_values().grid_row_end()))
             continue;
 
-        int row_start = child_box.computed_values().grid_row_start().position();
-        int row_end = child_box.computed_values().grid_row_end().position();
-        int row_span = 1;
+        int row_start = child_box.computed_values().grid_row_start().raw_value();
+        int row_end = child_box.computed_values().grid_row_end().raw_value();
+
+        // https://drafts.csswg.org/css-grid/#line-placement
+        // 8.3. Line-based Placement: the grid-row-start, grid-column-start, grid-row-end, and grid-column-end properties
+
+        // https://drafts.csswg.org/css-grid/#grid-placement-slot
+        // FIXME: <custom-ident>
+        // First attempt to match the grid area’s edge to a named grid area: if there is a grid line whose
+        // line name is <custom-ident>-start (for grid-*-start) / <custom-ident>-end (for grid-*-end),
+        // contributes the first such line to the grid item’s placement.
+
+        // Note: Named grid areas automatically generate implicitly-assigned line names of this form, so
+        // specifying grid-row-start: foo will choose the start edge of that named grid area (unless another
+        // line named foo-start was explicitly specified before it).
+
+        // Otherwise, treat this as if the integer 1 had been specified along with the <custom-ident>.
 
         // https://drafts.csswg.org/css-grid/#grid-placement-int
         // [ <integer [−∞,−1]> | <integer [1,∞]> ] && <custom-ident>?
         // Contributes the Nth grid line to the grid item’s placement. If a negative integer is given, it
         // instead counts in reverse, starting from the end edge of the explicit grid.
         if (row_end < 0)
-            row_end = static_cast<int>(occupation_grid.size()) + row_end + 2;
-        // FIXME: If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
+            row_end = occupation_grid.row_count() + row_end + 2;
+
+        // If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
         // lines with that name exist, all implicit grid lines are assumed to have that name for the purpose
         // of finding this position.
 
-        // FIXME: An <integer> value of zero makes the declaration invalid.
+        // An <integer> value of zero makes the declaration invalid.
+
+        // https://drafts.csswg.org/css-grid/#grid-placement-span-int
+        // span && [ <integer [1,∞]> || <custom-ident> ]
+        // Contributes a grid span to the grid item’s placement such that the corresponding edge of the grid
+        // item’s grid area is N lines from its opposite edge in the corresponding direction. For example,
+        // grid-column-end: span 2 indicates the second grid line in the endward direction from the
+        // grid-column-start line.
+        int row_span = 1;
+        if (child_box.computed_values().grid_row_start().is_position() && child_box.computed_values().grid_row_end().is_span())
+            row_span = child_box.computed_values().grid_row_end().raw_value();
+        if (child_box.computed_values().grid_row_end().is_position() && child_box.computed_values().grid_row_start().is_span()) {
+            row_span = child_box.computed_values().grid_row_start().raw_value();
+            row_start = row_end - row_span;
+            // FIXME: Remove me once have implemented spans overflowing into negative indexes, e.g., grid-row: span 2 / 1
+            if (row_start < 0)
+                row_start = 1;
+        }
+
+        // If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
+        // lines with that name exist, all implicit grid lines on the side of the explicit grid
+        // corresponding to the search direction are assumed to have that name for the purpose of counting
+        // this span.
+
+        // https://drafts.csswg.org/css-grid/#grid-placement-auto
+        // auto
+        // The property contributes nothing to the grid item’s placement, indicating auto-placement or a
+        // default span of one. (See § 8 Placing Grid Items, above.)
 
         // https://drafts.csswg.org/css-grid/#grid-placement-errors
         // 8.3.1. Grid Placement Conflict Handling
         // If the placement for a grid item contains two lines, and the start line is further end-ward than
         // the end line, swap the two lines. If the start line is equal to the end line, remove the end
         // line.
-        if (row_start > row_end) {
-            auto temp = row_end;
-            row_end = row_start;
-            row_start = temp;
+        if (child_box.computed_values().grid_row_start().is_position() && child_box.computed_values().grid_row_end().is_position()) {
+            if (row_start > row_end)
+                swap(row_start, row_end);
+            if (row_start != row_end)
+                row_span = row_end - row_start;
         }
-        if (row_start != row_end)
-            row_span = row_end - row_start;
-        // FIXME: If the placement contains two spans, remove the one contributed by the end grid-placement
+        // FIXME: Have yet to find the spec for this.
+        if (!child_box.computed_values().grid_row_start().is_position() && child_box.computed_values().grid_row_end().is_position() && row_end == 1)
+            row_start = 1;
+
+        // If the placement contains two spans, remove the one contributed by the end grid-placement
         // property.
+        if (child_box.computed_values().grid_row_start().is_span() && child_box.computed_values().grid_row_end().is_span())
+            row_span = child_box.computed_values().grid_row_start().raw_value();
 
         // FIXME: If the placement contains only a span for a named line, replace it with a span of 1.
 
         row_start -= 1;
-        maybe_add_row_to_occupation_grid(row_start + row_span, occupation_grid);
+        occupation_grid.maybe_add_row(row_start + row_span);
 
         int column_start = 0;
-        int column_span = 1;
+        auto column_span = child_box.computed_values().grid_column_start().is_span() ? child_box.computed_values().grid_column_start().raw_value() : 1;
+        // https://drafts.csswg.org/css-grid/#auto-placement-algo
+        // 8.5. Grid Item Placement Algorithm
+        // 3.3. If the largest column span among all the items without a definite column position is larger
+        // than the width of the implicit grid, add columns to the end of the implicit grid to accommodate
+        // that column span.
+        occupation_grid.maybe_add_column(column_span);
         bool found_available_column = false;
-        for (int column_index = column_start; column_index < (int)occupation_grid[0].size(); column_index++) {
-            if (!occupation_grid[0][column_index]) {
+        for (int column_index = column_start; column_index < occupation_grid.column_count(); column_index++) {
+            if (!occupation_grid.is_occupied(column_index, row_start)) {
                 found_available_column = true;
                 column_start = column_index;
                 break;
             }
         }
         if (!found_available_column) {
-            column_start = occupation_grid[0].size();
-            maybe_add_column_to_occupation_grid(column_start + column_span, occupation_grid);
+            column_start = occupation_grid.column_count();
+            occupation_grid.maybe_add_column(column_start + column_span);
         }
-        set_occupied_cells(row_start, row_start + row_span, column_start, column_start + column_span, occupation_grid);
+        occupation_grid.set_occupied(column_start, column_start + column_span, row_start, row_start + row_span);
 
         positioned_boxes.append({ child_box, row_start, row_span, column_start, column_span });
         boxes_to_place.remove(i);
@@ -247,11 +305,6 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // and 2, respectively. Adding columns for "items not yet positioned but with a definite column"
     // will be done in step 4.
 
-    // 3.3. If the largest column span among all the items without a definite column position is larger
-    // than the width of the implicit grid, add columns to the end of the implicit grid to accommodate
-    // that column span.
-    // NOTE: Done in step 1, 2, and will be done in step 4.
-
     // 4. Position the remaining grid items.
     // For each grid item that hasn't been positioned by the previous steps, in order-modified document
     // order:
@@ -263,39 +316,85 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // FIXME: no distinction made. See #4.2
 
         // 4.1.1. If the item has a definite column position:
-        if (!child_box.computed_values().grid_column_start().is_auto()) {
-            int column_start = child_box.computed_values().grid_column_start().position();
-            int column_end = child_box.computed_values().grid_column_end().position();
-            int column_span = 1;
+        if (!is_auto_positioned_column(child_box.computed_values().grid_column_start(), child_box.computed_values().grid_column_end())) {
+            int column_start = child_box.computed_values().grid_column_start().raw_value();
+            int column_end = child_box.computed_values().grid_column_end().raw_value();
+
+            // https://drafts.csswg.org/css-grid/#line-placement
+            // 8.3. Line-based Placement: the grid-row-start, grid-column-start, grid-row-end, and grid-column-end properties
+
+            // https://drafts.csswg.org/css-grid/#grid-placement-slot
+            // FIXME: <custom-ident>
+            // First attempt to match the grid area’s edge to a named grid area: if there is a grid line whose
+            // line name is <custom-ident>-start (for grid-*-start) / <custom-ident>-end (for grid-*-end),
+            // contributes the first such line to the grid item’s placement.
+
+            // Note: Named grid areas automatically generate implicitly-assigned line names of this form, so
+            // specifying grid-row-start: foo will choose the start edge of that named grid area (unless another
+            // line named foo-start was explicitly specified before it).
+
+            // Otherwise, treat this as if the integer 1 had been specified along with the <custom-ident>.
 
             // https://drafts.csswg.org/css-grid/#grid-placement-int
             // [ <integer [−∞,−1]> | <integer [1,∞]> ] && <custom-ident>?
             // Contributes the Nth grid line to the grid item’s placement. If a negative integer is given, it
             // instead counts in reverse, starting from the end edge of the explicit grid.
             if (column_end < 0)
-                column_end = static_cast<int>(occupation_grid[0].size()) + column_end + 2;
-            // FIXME: If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
+                column_end = occupation_grid.column_count() + column_end + 2;
+
+            // If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
             // lines with that name exist, all implicit grid lines are assumed to have that name for the purpose
             // of finding this position.
 
-            // FIXME: An <integer> value of zero makes the declaration invalid.
+            // An <integer> value of zero makes the declaration invalid.
+
+            // https://drafts.csswg.org/css-grid/#grid-placement-span-int
+            // span && [ <integer [1,∞]> || <custom-ident> ]
+            // Contributes a grid span to the grid item’s placement such that the corresponding edge of the grid
+            // item’s grid area is N lines from its opposite edge in the corresponding direction. For example,
+            // grid-column-end: span 2 indicates the second grid line in the endward direction from the
+            // grid-column-start line.
+            int column_span = 1;
+            auto row_span = child_box.computed_values().grid_row_start().is_span() ? child_box.computed_values().grid_row_start().raw_value() : 1;
+            if (child_box.computed_values().grid_column_start().is_position() && child_box.computed_values().grid_column_end().is_span())
+                column_span = child_box.computed_values().grid_column_end().raw_value();
+            if (child_box.computed_values().grid_column_end().is_position() && child_box.computed_values().grid_column_start().is_span()) {
+                column_span = child_box.computed_values().grid_column_start().raw_value();
+                column_start = column_end - column_span;
+                // FIXME: Remove me once have implemented spans overflowing into negative indexes, e.g., grid-column: span 2 / 1
+                if (column_start < 0)
+                    column_start = 1;
+            }
+            // FIXME: Have yet to find the spec for this.
+            if (!child_box.computed_values().grid_column_start().is_position() && child_box.computed_values().grid_column_end().is_position() && column_end == 1)
+                column_start = 1;
+
+            // If a name is given as a <custom-ident>, only lines with that name are counted. If not enough
+            // lines with that name exist, all implicit grid lines on the side of the explicit grid
+            // corresponding to the search direction are assumed to have that name for the purpose of counting
+            // this span.
+
+            // https://drafts.csswg.org/css-grid/#grid-placement-auto
+            // auto
+            // The property contributes nothing to the grid item’s placement, indicating auto-placement or a
+            // default span of one. (See § 8 Placing Grid Items, above.)
 
             // https://drafts.csswg.org/css-grid/#grid-placement-errors
             // 8.3.1. Grid Placement Conflict Handling
             // If the placement for a grid item contains two lines, and the start line is further end-ward than
             // the end line, swap the two lines. If the start line is equal to the end line, remove the end
             // line.
-            if (!child_box.computed_values().grid_column_end().is_auto()) {
-                if (column_start > column_end) {
-                    auto temp = column_end;
-                    column_end = column_start;
-                    column_start = temp;
-                }
+            if (child_box.computed_values().grid_column_start().is_position() && child_box.computed_values().grid_column_end().is_position()) {
+                if (column_start > column_end)
+                    swap(column_start, column_end);
                 if (column_start != column_end)
                     column_span = column_end - column_start;
             }
-            // FIXME: If the placement contains two spans, remove the one contributed by the end grid-placement
+
+            // If the placement contains two spans, remove the one contributed by the end grid-placement
             // property.
+            if (child_box.computed_values().grid_column_start().is_span() && child_box.computed_values().grid_column_end().is_span())
+                column_span = child_box.computed_values().grid_column_start().raw_value();
 
             // FIXME: If the placement contains only a span for a named line, replace it with a span of 1.
 
@@ -303,27 +402,27 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
 
             // 4.1.1.1. Set the column position of the cursor to the grid item's column-start line. If this is
             // less than the previous column position of the cursor, increment the row position by 1.
-            auto_placement_cursor_x = column_start;
             if (column_start < auto_placement_cursor_x)
                 auto_placement_cursor_y++;
+            auto_placement_cursor_x = column_start;
 
-            maybe_add_column_to_occupation_grid(auto_placement_cursor_x + 1, occupation_grid);
-            maybe_add_row_to_occupation_grid(auto_placement_cursor_y + 1, occupation_grid);
+            occupation_grid.maybe_add_column(auto_placement_cursor_x + column_span);
+            occupation_grid.maybe_add_row(auto_placement_cursor_y + row_span);
 
             // 4.1.1.2. Increment the cursor's row position until a value is found where the grid item does not
             // overlap any occupied grid cells (creating new rows in the implicit grid as necessary).
             while (true) {
-                if (!occupation_grid[auto_placement_cursor_y][column_start]) {
+                if (!occupation_grid.is_occupied(column_start, auto_placement_cursor_y)) {
                     break;
                 }
                 auto_placement_cursor_y++;
-                maybe_add_row_to_occupation_grid(auto_placement_cursor_y + 1, occupation_grid);
+                occupation_grid.maybe_add_row(auto_placement_cursor_y + row_span);
             }
             // 4.1.1.3. Set the item's row-start line to the cursor's row position, and set the item's row-end
             // line according to its span from that position.
-            set_occupied_cells(auto_placement_cursor_y, auto_placement_cursor_y + 1, column_start, column_start + column_span, occupation_grid);
+            occupation_grid.set_occupied(column_start, column_start + column_span, auto_placement_cursor_y, auto_placement_cursor_y + row_span);
 
-            positioned_boxes.append({ child_box, auto_placement_cursor_y, 1, column_start, column_span });
+            positioned_boxes.append({ child_box, auto_placement_cursor_y, row_span, column_start, column_span });
         }
         // 4.1.2. If the item has an automatic grid position in both axes:
         else {
@@ -332,17 +431,30 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
             // column span, overflow the number of columns in the implicit grid, as determined earlier in this
             // algorithm.
             auto column_start = 0;
-            auto column_span = 1;
+            auto column_span = child_box.computed_values().grid_column_start().is_span() ? child_box.computed_values().grid_column_start().raw_value() : 1;
+            // https://drafts.csswg.org/css-grid/#auto-placement-algo
+            // 8.5. Grid Item Placement Algorithm
+            // 3.3. If the largest column span among all the items without a definite column position is larger
+            // than the width of the implicit grid, add columns to the end of the implicit grid to accommodate
+            // that column span.
+            occupation_grid.maybe_add_column(column_span);
             auto row_start = 0;
-            auto row_span = 1;
-            auto found_unoccupied_cell = false;
-            for (int row_index = auto_placement_cursor_y; row_index < (int)occupation_grid.size(); row_index++) {
-                for (int column_index = auto_placement_cursor_x; column_index < (int)occupation_grid[0].size(); column_index++) {
-                    if (!occupation_grid[row_index][column_index]) {
-                        found_unoccupied_cell = true;
-                        column_start = column_index;
-                        row_start = row_index;
-                        goto finish;
+            auto row_span = child_box.computed_values().grid_row_start().is_span() ? child_box.computed_values().grid_row_start().raw_value() : 1;
+            auto found_unoccupied_area = false;
+            for (int row_index = auto_placement_cursor_y; row_index < occupation_grid.row_count(); row_index++) {
+                for (int column_index = auto_placement_cursor_x; column_index < occupation_grid.column_count(); column_index++) {
+                    if (column_span + column_index <= occupation_grid.column_count()) {
+                        auto found_all_available = true;
+                        for (int span_index = 0; span_index < column_span; span_index++) {
+                            if (occupation_grid.is_occupied(column_index + span_index, row_index))
+                                found_all_available = false;
+                        }
+                        if (found_all_available) {
+                            found_unoccupied_area = true;
+                            column_start = column_index;
+                            row_start = row_index;
+                            goto finish;
+                        }
                     }
                     auto_placement_cursor_x = 0;
                 }
@@ -355,12 +467,12 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
             // and column-start lines to the cursor's position. Otherwise, increment the auto-placement cursor's
             // row position (creating new rows in the implicit grid as necessary), set its column position to the
             // start-most column line in the implicit grid, and return to the previous step.
-            if (!found_unoccupied_cell) {
-                row_start = (int)occupation_grid.size();
-                maybe_add_row_to_occupation_grid((int)occupation_grid.size() + 1, occupation_grid);
+            if (!found_unoccupied_area) {
+                row_start = occupation_grid.row_count();
+                occupation_grid.maybe_add_row(occupation_grid.row_count() + 1);
             }
 
-            set_occupied_cells(row_start, row_start + row_span, column_start, column_start + column_span, occupation_grid);
+            occupation_grid.set_occupied(column_start, column_start + column_span, row_start, row_start + row_span);
             positioned_boxes.append({ child_box, row_start, row_span, column_start, column_span });
         }
         boxes_to_place.remove(i);
@@ -414,9 +526,9 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     for (auto& row_size : box.computed_values().grid_template_rows())
         grid_rows.append({ row_size, row_size });
 
-    for (int column_index = grid_columns.size(); column_index < static_cast<int>(occupation_grid[0].size()); column_index++)
+    for (int column_index = grid_columns.size(); column_index < occupation_grid.column_count(); column_index++)
         grid_columns.append({ CSS::GridTrackSize::make_auto(), CSS::GridTrackSize::make_auto() });
-    for (int row_index = grid_rows.size(); row_index < static_cast<int>(occupation_grid.size()); row_index++)
+    for (int row_index = grid_rows.size(); row_index < occupation_grid.row_count(); row_index++)
         grid_rows.append({ CSS::GridTrackSize::make_auto(), CSS::GridTrackSize::make_auto() });
 
     // https://drafts.csswg.org/css-grid/#algo-overview
@@ -977,7 +1089,6 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
             grid_row.base_size = max(grid_row.base_size, remaining_vertical_space / count_of_auto_max_row_tracks);
     }
 
-    // Do layout
     auto layout_box = [&](int row_start, int row_end, int column_start, int column_end, Box const& child_box) -> void {
         auto& child_box_state = m_state.get_mutable(child_box);
         float x_start = 0;
@@ -997,8 +1108,10 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         child_box_state.offset = { x_start, y_start };
     };
 
-    for (auto& positioned_box : positioned_boxes)
-        layout_box(positioned_box.row, positioned_box.row + positioned_box.row_span, positioned_box.column, positioned_box.column + positioned_box.column_span, positioned_box.box);
+    for (auto& positioned_box : positioned_boxes) {
+        auto resolved_span = positioned_box.row + positioned_box.row_span > static_cast<int>(grid_rows.size()) ? static_cast<int>(grid_rows.size()) - positioned_box.row : positioned_box.row_span;
+        layout_box(positioned_box.row, positioned_box.row + resolved_span, positioned_box.column, positioned_box.column + positioned_box.column_span, positioned_box.box);
+    }
 
     float total_y = 0;
     for (auto& grid_row : grid_rows)
@@ -1009,6 +1122,75 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
 float GridFormattingContext::automatic_content_height() const
 {
     return m_automatic_content_height;
+}
+
+bool GridFormattingContext::is_auto_positioned_row(CSS::GridTrackPlacement const& grid_row_start, CSS::GridTrackPlacement const& grid_row_end) const
+{
+    return is_auto_positioned_track(grid_row_start, grid_row_end);
+}
+
+bool GridFormattingContext::is_auto_positioned_column(CSS::GridTrackPlacement const& grid_column_start, CSS::GridTrackPlacement const& grid_column_end) const
+{
+    return is_auto_positioned_track(grid_column_start, grid_column_end);
+}
+
+bool GridFormattingContext::is_auto_positioned_track(CSS::GridTrackPlacement const& grid_track_start, CSS::GridTrackPlacement const& grid_track_end) const
+{
+    return grid_track_start.is_auto_positioned() && grid_track_end.is_auto_positioned();
+}
+
+OccupationGrid::OccupationGrid(int column_count, int row_count)
+{
+    Vector<bool> occupation_grid_row;
+    for (int column_index = 0; column_index < max(column_count, 1); column_index++)
+        occupation_grid_row.append(false);
+    for (int row_index = 0; row_index < max(row_count, 1); row_index++)
+        m_occupation_grid.append(occupation_grid_row);
+}
+
+void OccupationGrid::maybe_add_column(int needed_number_of_columns)
+{
+    if (needed_number_of_columns <= column_count())
+        return;
+    auto column_count_before_modification = column_count();
+    for (auto& occupation_grid_row : m_occupation_grid)
+        for (int idx = 0; idx < needed_number_of_columns - column_count_before_modification; idx++)
+            occupation_grid_row.append(false);
+}
+
+void OccupationGrid::maybe_add_row(int needed_number_of_rows)
+{
+    if (needed_number_of_rows <= row_count())
+        return;
+
+    Vector<bool> new_occupation_grid_row;
+    for (int idx = 0; idx < column_count(); idx++)
+        new_occupation_grid_row.append(false);
+
+    for (int idx = 0; idx < needed_number_of_rows - row_count(); idx++)
+        m_occupation_grid.append(new_occupation_grid_row);
+}
+
+void OccupationGrid::set_occupied(int column_start, int column_end, int row_start, int row_end)
+{
+    for (int row_index = 0; row_index < row_count(); row_index++) {
+        if (row_index >= row_start && row_index < row_end) {
+            for (int column_index = 0; column_index < column_count(); column_index++) {
+                if (column_index >= column_start && column_index < column_end)
+                    set_occupied(column_index, row_index);
+            }
+        }
+    }
+}
+
+void OccupationGrid::set_occupied(int column_index, int row_index)
+{
+    m_occupation_grid[row_index][column_index] = true;
+}
+
+bool OccupationGrid::is_occupied(int column_index, int row_index)
+{
+    return m_occupation_grid[row_index][column_index];
 }
 
 }

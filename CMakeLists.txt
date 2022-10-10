@@ -244,12 +244,11 @@ endif()
 export_components("${CMAKE_BINARY_DIR}/components.ini")
 
 # it seems like cmake cannot uncompress *.gz files... only ZIP/tar.gz.
-# Lets download the uncompressed versions. 
+# Lets download the uncompressed versions.
 # https://gitlab.kitware.com/cmake/cmake/-/issues/23054
 
 set(PCI_IDS_FILE pci.ids)
 set(PCI_IDS_URL https://pci-ids.ucw.cz/v2.2/${PCI_IDS_FILE})
-set(PCI_IDS_PATH ${CMAKE_BINARY_DIR}/${PCI_IDS_FILE})
 set(PCI_IDS_INSTALL_PATH ${CMAKE_INSTALL_DATAROOTDIR}/${PCI_IDS_FILE})
 
 if(ENABLE_PCI_IDS_DOWNLOAD AND NOT EXISTS ${CMAKE_STAGING_PREFIX}/${PCI_IDS_INSTALL_PATH} )
@@ -258,9 +257,8 @@ endif()
 
 set(USB_IDS_FILE usb.ids)
 set(USB_IDS_URL http://www.linux-usb.org/${USB_IDS_FILE})
-set(USB_IDS_PATH ${CMAKE_BINARY_DIR}/${USB_IDS_FILE})
 set(USB_IDS_INSTALL_PATH ${CMAKE_INSTALL_DATAROOTDIR}/${USB_IDS_FILE})
 
-if(ENABLE_USB_IDS_DOWNLOAD AND NOT EXISTS "${CMAKE_STAGING_PREFIX}/${USB_IDS_PATH}")
-    download_file("${USB_IDS_URL}" "${CMAKE_STAGING_PREFIX}/${USB_IDS_PATH}")
+if(ENABLE_USB_IDS_DOWNLOAD AND NOT EXISTS "${CMAKE_STAGING_PREFIX}/${USB_IDS_INSTALL_PATH}")
+    download_file("${USB_IDS_URL}" "${CMAKE_STAGING_PREFIX}/${USB_IDS_INSTALL_PATH}")
 endif()

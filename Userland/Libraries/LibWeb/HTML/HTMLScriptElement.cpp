@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, networkException <networkexception@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,8 +16,10 @@
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
+#include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/Infra/CharacterTypes.h>
 #include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/MimeSniff/MimeType.h>
 
 namespace Web::HTML {
 
@@ -46,6 +49,8 @@ void HTMLScriptElement::begin_delaying_document_load_event(DOM::Document& docume
 // https://html.spec.whatwg.org/multipage/scripting.html#execute-the-script-block
 void HTMLScriptElement::execute_script()
 {
+    // FIXME: Update the steps to match current spec.
+
     // 1. Let document be scriptElement's node document.
     JS::NonnullGCPtr<DOM::Document> node_document = document();
 
@@ -95,8 +100,8 @@ void HTMLScriptElement::execute_script()
         // 1. Assert: document's currentScript attribute is null.
         VERIFY(!document().current_script());
 
-        // FIXME: 2. Run the module script given by the script's script for scriptElement.
-        TODO();
+        // 2. Run the module script given by the script's script for scriptElement.
+        (void)verify_cast<JavaScriptModuleScript>(*m_script).run();
     }
 
     // 6. Decrement the ignore-destructive-writes counter of document, if it was incremented in the earlier step.
@@ -108,16 +113,11 @@ void HTMLScriptElement::execute_script()
         dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::load));
 }
 
-// https://mimesniff.spec.whatwg.org/#javascript-mime-type-essence-match
-static bool is_javascript_mime_type_essence_match(String const& string)
-{
-    auto lowercase_string = string.to_lowercase();
-    return lowercase_string.is_one_of("application/ecmascript", "application/javascript", "application/x-ecmascript", "application/x-javascript", "text/ecmascript", "text/javascript", "text/javascript1.0", "text/javascript1.1", "text/javascript1.2", "text/javascript1.3", "text/javascript1.4", "text/javascript1.5", "text/jscript", "text/livescript", "text/x-ecmascript", "text/x-javascript");
-}
-
 // https://html.spec.whatwg.org/multipage/scripting.html#prepare-a-script
 void HTMLScriptElement::prepare_script()
 {
+    // FIXME: Update the steps to match current spec.
+
     // 1. If the script element is marked as having "already started", then return. The script is not executed.
     if (m_already_started) {
         dbgln("HTMLScriptElement: Refusing to run script because it has already started.");
@@ -169,7 +169,7 @@ void HTMLScriptElement::prepare_script()
     }
 
     // Determine the script's type as follows:
-    if (is_javascript_mime_type_essence_match(script_block_type.trim(Infra::ASCII_WHITESPACE))) {
+    if (MimeSniff::is_javascript_mime_type_essence_match(script_block_type.trim(Infra::ASCII_WHITESPACE))) {
         // - If the script block's type string with leading and trailing ASCII whitespace stripped is a JavaScript MIME type essence match, the script's type is "classic".
         m_script_type = ScriptType::Classic;
     } else if (script_block_type.equals_ignoring_case("module"sv)) {
@@ -265,10 +265,10 @@ void HTMLScriptElement::prepare_script()
     if (has_attribute(HTML::AttributeNames::src)) {
         // 1. Let src be the value of the element's src attribute.
         auto src = attribute(HTML::AttributeNames::src);
-        // 2. If src is the empty string, queue a task to fire an event named error at the element, and return.
+        // 2. If src is the empty string, then queue an element task on the DOM manipulation task source given el to fire an event named error at el, and return.
         if (src.is_empty()) {
             dbgln("HTMLScriptElement: Refusing to run script because the src attribute is empty.");
-            queue_an_element_task(HTML::Task::Source::Unspecified, [this] {
+            queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
                 dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
             });
             return;
@@ -278,10 +278,10 @@ void HTMLScriptElement::prepare_script()
 
         // 4. Parse src relative to the element's node document.
         auto url = document().parse_url(src);
-        // 5. If the previous step failed, queue a task to fire an event named error at the element, and return. Otherwise, let url be the resulting URL record.
+        // 5. If the previous step failed, then queue an element task on the DOM manipulation task source given el to fire an event named error at el, and return. Otherwise, let url be the resulting URL record.
         if (!url.is_valid()) {
             dbgln("HTMLScriptElement: Refusing to run script because the src URL '{}' is invalid.", url);
-            queue_an_element_task(HTML::Task::Source::Unspecified, [this] {
+            queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
                 dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
             });
             return;
@@ -299,21 +299,26 @@ void HTMLScriptElement::prepare_script()
             auto resource = ResourceLoader::the().load_resource(Resource::Type::Generic, request);
             set_resource(resource);
         } else if (m_script_type == ScriptType::Module) {
-            // FIXME: -> "module"
-            //        Fetch an external module script graph given url, settings object, and options.
+            // Fetch an external module script graph given url, settings object, options, and onComplete.
+            // FIXME: Pass options.
+            fetch_external_module_script_graph(url, document().relevant_settings_object(), [this](auto const* result) {
+                // 1. Mark as ready el given result.
+                m_script = result;
+                script_became_ready();
+            });
         }
     } else {
         // 27. If the element does not have a src content attribute, run these substeps:
 
-        // FIXME: 1. Let base URL be the script element's node document's document base URL.
+        // 1. Let base URL be the script element's node document's document base URL.
+        auto base_url = m_document->base_url();
 
         // 2. Switch on the script's type:
         if (m_script_type == ScriptType::Classic) {
             // -> "classic"
             // 1. Let script be the result of creating a classic script using source text, settings object, base URL, and options.
-
-            // FIXME: Pass settings, base URL and options.
-            auto script = ClassicScript::create(m_document->url().to_string(), source_text, document().relevant_settings_object(), AK::URL(), m_source_line_number);
+            // FIXME: Pass options.
+            auto script = ClassicScript::create(m_document->url().to_string(), source_text, document().relevant_settings_object(), base_url, m_source_line_number);
 
             // 2. Set the script's script to script.
             m_script = script;
@@ -321,10 +326,15 @@ void HTMLScriptElement::prepare_script()
             // 3. The script is ready.
             script_became_ready();
         } else if (m_script_type == ScriptType::Module) {
-            // FIXME: -> "module"
-            // 1. Fetch an inline module script graph, given source text, base URL, settings object, and options.
-            //    When this asynchronously completes, set the script's script to the result. At that time, the script is ready.
-            TODO();
+            // FIXME: 1. Set el's delaying the load event to true.
+
+            // 2. Fetch an inline module script graph, given source text, base URL, settings object, options, and with the following steps given result:
+            // FIXME: Pass options
+            fetch_inline_module_script_graph(m_document->url().to_string(), source_text, base_url, document().relevant_settings_object(), [this](auto const* result) {
+                // 1. Mark as ready el given result.
+                m_script = result;
+                script_became_ready();
+            });
         }
     }
 

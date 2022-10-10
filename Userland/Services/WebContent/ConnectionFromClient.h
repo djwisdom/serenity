@@ -14,6 +14,7 @@
 #include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Loader/FileRequest.h>
+#include <LibWeb/Platform/Timer.h>
 #include <WebContent/Forward.h>
 #include <WebContent/WebContentClientEndpoint.h>
 #include <WebContent/WebContentConsoleClient.h>
@@ -33,6 +34,8 @@ public:
     void initialize_js_console(Badge<PageHost>);
 
     void request_file(NonnullRefPtr<Web::FileRequest>&);
+
+    Optional<int> fd() { return socket().fd(); }
 
 private:
     explicit ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSocket>);
@@ -89,7 +92,7 @@ private:
         i32 bitmap_id { -1 };
     };
     Vector<PaintRequest> m_pending_paint_requests;
-    RefPtr<Core::Timer> m_paint_flush_timer;
+    RefPtr<Web::Platform::Timer> m_paint_flush_timer;
 
     HashMap<i32, NonnullRefPtr<Gfx::Bitmap>> m_backing_stores;
 

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
  * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022, networkException <networkexception@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,6 +11,7 @@
 #include <LibWeb/HTML/PromiseRejectionEvent.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
+#include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Page/Page.h>
 
@@ -31,6 +33,11 @@ JS::ExecutionContext& EnvironmentSettingsObject::realm_execution_context()
 {
     // NOTE: All environment settings objects are created with a realm execution context, so it's stored and returned here in the base class.
     return *m_realm_execution_context;
+}
+
+ModuleMap& EnvironmentSettingsObject::module_map()
+{
+    return m_module_map;
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#environment-settings-object%27s-realm
@@ -264,6 +271,19 @@ bool EnvironmentSettingsObject::is_scripting_disabled() const
 {
     // Scripting is disabled for an environment settings object when scripting is not enabled for it, i.e., when any of the above conditions are false.
     return !is_scripting_enabled();
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#module-type-allowed
+bool EnvironmentSettingsObject::module_type_allowed(AK::String const& module_type) const
+{
+    // 1. If moduleType is not "javascript", "css", or "json", then return false.
+    if (module_type != "javascript"sv && module_type != "css"sv && module_type != "json"sv)
+        return false;
+
+    // FIXME: 2. If moduleType is "css" and the CSSStyleSheet interface is not exposed in settings's Realm, then return false.
+
+    // 3. Return true.
+    return true;
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#incumbent-settings-object

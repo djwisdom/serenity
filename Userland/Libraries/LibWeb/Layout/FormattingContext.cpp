@@ -30,53 +30,77 @@ FormattingContext::FormattingContext(Type type, LayoutState& state, Box const& c
 
 FormattingContext::~FormattingContext() = default;
 
+// https://developer.mozilla.org/en-US/docs/Web/Guide/CSS/Block_formatting_context
 bool FormattingContext::creates_block_formatting_context(Box const& box)
 {
-    if (box.is_root_element())
-        return true;
-    if (box.is_floating())
-        return true;
-    if (box.is_absolutely_positioned())
-        return true;
-    if (box.is_inline_block())
-        return true;
-    if (is<TableCellBox>(box))
-        return true;
-    if (box.computed_values().display().is_flex_inside())
+    // NOTE: Replaced elements never create a BFC.
+    if (box.is_replaced_box())
         return false;
 
+    // NOTE: This function uses MDN as a reference, not because it's authoritative,
+    //       but because they've gathered all the conditions in one convenient location.
+
+    // The root element of the document (<html>).
+    if (box.is_root_element())
+        return true;
+
+    // Floats (elements where float isn't none).
+    if (box.is_floating())
+        return true;
+
+    // Absolutely positioned elements (elements where position is absolute or fixed).
+    if (box.is_absolutely_positioned())
+        return true;
+
+    // Inline-blocks (elements with display: inline-block).
+    if (box.display().is_inline_block())
+        return true;
+
+    // Table cells (elements with display: table-cell, which is the default for HTML table cells).
+    if (box.display().is_table_cell())
+        return true;
+
+    // Table captions (elements with display: table-caption, which is the default for HTML table captions).
+    if (box.display().is_table_caption())
+        return true;
+
+    // FIXME: Anonymous table cells implicitly created by the elements with display: table, table-row, table-row-group, table-header-group, table-footer-group
+    //        (which is the default for HTML tables, table rows, table bodies, table headers, and table footers, respectively), or inline-table.
+
+    // Block elements where overflow has a value other than visible and clip.
     CSS::Overflow overflow_x = box.computed_values().overflow_x();
     if ((overflow_x != CSS::Overflow::Visible) && (overflow_x != CSS::Overflow::Clip))
         return true;
-
     CSS::Overflow overflow_y = box.computed_values().overflow_y();
     if ((overflow_y != CSS::Overflow::Visible) && (overflow_y != CSS::Overflow::Clip))
         return true;
 
-    auto display = box.computed_values().display();
-
-    if (display.is_flow_root_inside())
+    // display: flow-root.
+    if (box.display().is_flow_root_inside())
         return true;
 
+    // FIXME: Elements with contain: layout, content, or paint.
+
     if (box.parent()) {
-        auto parent_display = box.parent()->computed_values().display();
+        auto parent_display = box.parent()->display();
+
+        // Flex items (direct children of the element with display: flex or inline-flex) if they are neither flex nor grid nor table containers themselves.
         if (parent_display.is_flex_inside()) {
-            // FIXME: Flex items (direct children of the element with display: flex or inline-flex) if they are neither flex nor grid nor table containers themselves.
-            if (!display.is_flex_inside())
+            if (!box.display().is_flex_inside())
                 return true;
         }
+        // Grid items (direct children of the element with display: grid or inline-grid) if they are neither flex nor grid nor table containers themselves.
         if (parent_display.is_grid_inside()) {
-            if (!display.is_grid_inside()) {
+            if (!box.display().is_grid_inside()) {
                 return true;
             }
         }
     }
 
-    // FIXME: table-caption
-    // FIXME: anonymous table cells
-    // FIXME: Elements with contain: layout, content, or paint.
-    // FIXME: multicol
-    // FIXME: column-span: all
+    // FIXME: Multicol containers (elements where column-count or column-width isn't auto, including elements with column-count: 1).
+
+    // FIXME: column-span: all should always create a new formatting context, even when the column-span: all element isn't contained by a multicol container (Spec change, Chrome bug).
+
     return false;
 }
 
@@ -102,7 +126,7 @@ OwnPtr<FormattingContext> FormattingContext::create_independent_formatting_conte
     if (!child_box.can_have_children())
         return {};
 
-    auto child_display = child_box.computed_values().display();
+    auto child_display = child_box.display();
 
     if (is<SVGSVGBox>(child_box))
         return make<SVGFormattingContext>(state, child_box, this);
@@ -177,7 +201,7 @@ float FormattingContext::greatest_child_width(Box const& box)
 {
     float max_width = 0;
     if (box.children_are_inline()) {
-        for (auto& line_box : m_state.get(verify_cast<BlockContainer>(box)).line_boxes) {
+        for (auto& line_box : m_state.get(box).line_boxes) {
             max_width = max(max_width, line_box.width());
         }
     } else {
@@ -246,7 +270,7 @@ float FormattingContext::compute_auto_height_for_block_level_element(Box const& 
 
     auto const& box_state = m_state.get(box);
 
-    auto display = box.computed_values().display();
+    auto display = box.display();
     if (display.is_flex_inside()) {
         // https://drafts.csswg.org/css-flexbox-1/#algo-main-container
         // NOTE: The automatic block size of a block-level flex container is its max-content size.
@@ -1127,7 +1151,7 @@ float FormattingContext::containing_block_height_for(Box const& box, LayoutState
 static Box const* previous_block_level_sibling(Box const& box)
 {
     for (auto* sibling = box.previous_sibling_of_type<Box>(); sibling; sibling = sibling->previous_sibling_of_type<Box>()) {
-        if (sibling->computed_values().display().is_block_outside())
+        if (sibling->display().is_block_outside())
             return sibling;
     }
     return nullptr;
