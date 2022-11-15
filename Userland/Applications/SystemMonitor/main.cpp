@@ -191,6 +191,7 @@ public:
                 check(MS_RDONLY, "ro"sv);
                 check(MS_WXALLOWED, "wxallowed"sv);
                 check(MS_AXALLOWED, "axallowed"sv);
+                check(MS_NOREGULAR, "noregular"sv);
                 if (builder.string_view().is_empty())
                     return String("defaults");
                 return builder.to_string();
@@ -201,7 +202,7 @@ public:
             df_fields.empend("total_inode_count", "Total inodes", Gfx::TextAlignment::CenterRight);
             df_fields.empend("block_size", "Block size", Gfx::TextAlignment::CenterRight);
 
-            fs_table_view.set_model(MUST(GUI::SortingProxyModel::create(GUI::JsonArrayModel::create("/proc/df", move(df_fields)))));
+            fs_table_view.set_model(MUST(GUI::SortingProxyModel::create(GUI::JsonArrayModel::create("/sys/kernel/df", move(df_fields)))));
 
             fs_table_view.set_column_painting_delegate(3, make<ProgressbarPaintingDelegate>());
 
@@ -242,8 +243,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/etc/passwd", "r"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/proc", "r"));
+    TRY(Core::System::unveil("/sys/kernel", "r"));
     TRY(Core::System::unveil("/dev", "r"));
     TRY(Core::System::unveil("/bin", "r"));
+    TRY(Core::System::unveil("/bin/Escalator", "x"));
     TRY(Core::System::unveil("/usr/lib", "r"));
 
     // This directory only exists if ports are installed
@@ -446,6 +449,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     make_frequency_action(5);
 
     auto& help_menu = window->add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_about_action("System Monitor", app_icon, window));
 
     process_table_view.on_activation = [&](auto&) {

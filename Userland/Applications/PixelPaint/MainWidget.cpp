@@ -17,6 +17,7 @@
 #include "ResizeImageDialog.h"
 #include <Applications/PixelPaint/PixelPaintWindowGML.h>
 #include <LibConfig/Client.h>
+#include <LibCore/Debounce.h>
 #include <LibCore/File.h>
 #include <LibCore/MimeData.h>
 #include <LibFileSystemAccessClient/Client.h>
@@ -365,6 +366,12 @@ void MainWidget::initialize_menubar(GUI::Window& window)
             VERIFY(editor);
             editor->image().selection().clear();
         }));
+    m_edit_menu->add_action(GUI::Action::create(
+        "&Invert Selection", g_icon_bag.invert_selection, [&](auto&) {
+            auto* editor = current_image_editor();
+            VERIFY(editor);
+            editor->image().selection().invert();
+        }));
 
     m_edit_menu->add_separator();
     m_edit_menu->add_action(GUI::Action::create(
@@ -502,6 +509,26 @@ void MainWidget::initialize_menubar(GUI::Window& window)
         });
     m_show_active_layer_boundary_action->set_checked(Config::read_bool("PixelPaint"sv, "ImageEditor"sv, "ShowActiveLayerBoundary"sv, true));
     m_view_menu->add_action(*m_show_active_layer_boundary_action);
+
+    m_view_menu->add_separator();
+
+    auto histogram_action = GUI::Action::create_checkable("&Histogram", [&](auto& action) {
+        Config::write_bool("PixelPaint"sv, "Scopes"sv, "ShowHistogram"sv, action.is_checked());
+        m_histogram_widget->parent_widget()->set_visible(action.is_checked());
+    });
+    histogram_action->set_checked(Config::read_bool("PixelPaint"sv, "Scopes"sv, "ShowHistogram"sv, false));
+    m_histogram_widget->parent_widget()->set_visible(histogram_action->is_checked());
+
+    auto vectorscope_action = GUI::Action::create_checkable("&Vectorscope", [&](auto& action) {
+        Config::write_bool("PixelPaint"sv, "Scopes"sv, "ShowVectorscope"sv, action.is_checked());
+        m_vectorscope_widget->parent_widget()->set_visible(action.is_checked());
+    });
+    vectorscope_action->set_checked(Config::read_bool("PixelPaint"sv, "Scopes"sv, "ShowVectorscope"sv, false));
+    m_vectorscope_widget->parent_widget()->set_visible(vectorscope_action->is_checked());
+
+    auto& scopes_menu = m_view_menu->add_submenu("&Scopes");
+    scopes_menu.add_action(histogram_action);
+    scopes_menu.add_action(vectorscope_action);
 
     m_tool_menu = window.add_menu("&Tool");
     m_toolbox->for_each_tool([&](auto& tool) {
@@ -871,6 +898,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     }));
 
     auto& help_menu = window.add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(&window));
     help_menu.add_action(GUI::CommonActions::make_about_action("Pixel Paint", GUI::Icon::default_icon("app-pixel-paint"sv), &window));
 
     m_levels_dialog_action = GUI::Action::create(
@@ -1073,9 +1101,11 @@ ImageEditor& MainWidget::create_new_editor(NonnullRefPtr<Image> image)
         m_show_rulers_action->set_checked(show_rulers);
     };
 
-    image_editor.on_scale_change = [this](float scale) {
+    image_editor.on_scale_change = Core::debounce([this](float scale) {
         m_zoom_combobox->set_text(String::formatted("{}%", roundf(scale * 100)));
-    };
+        current_image_editor()->update_tool_cursor();
+    },
+        100);
 
     if (image->layer_count())
         image_editor.set_active_layer(&image->layer(0));
@@ -1113,6 +1143,13 @@ ImageEditor& MainWidget::create_new_editor(NonnullRefPtr<Image> image)
     set_actions_enabled(true);
 
     return image_editor;
+}
+
+void MainWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/uri-list"))
+        event.accept();
 }
 
 void MainWidget::drop_event(GUI::DropEvent& event)

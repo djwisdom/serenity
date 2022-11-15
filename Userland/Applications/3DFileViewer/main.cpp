@@ -91,6 +91,7 @@ private:
         glEndList();
     }
 
+    virtual void drag_enter_event(GUI::DragEvent&) override;
     virtual void drop_event(GUI::DropEvent&) override;
     virtual void paint_event(GUI::PaintEvent&) override;
     virtual void resize_event(GUI::ResizeEvent&) override;
@@ -124,6 +125,13 @@ private:
     GLint m_mag_filter = GL_NEAREST;
     float m_zoom = 1;
 };
+
+void GLContextWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/uri-list"))
+        event.accept();
+}
 
 void GLContextWidget::drop_event(GUI::DropEvent& event)
 {
@@ -360,7 +368,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(Core::System::pledge("stdio thread recvfd sendfd rpath unix prot_exec"));
 
-    TRY(Core::System::unveil("/proc/all", "r"));
+    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/home/anon/Documents/3D Models", "r"));
     TRY(Core::System::unveil("/res", "r"));
@@ -576,6 +584,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     texture_mag_filter_nearest_action->set_checked(true);
 
     auto& help_menu = window->add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_about_action("3D File Viewer", app_icon, window));
 
     window->show();

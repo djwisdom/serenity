@@ -208,6 +208,8 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
 {
     auto file_menu = TRY(window.try_add_menu("&File"));
     TRY(file_menu->try_add_action(GUI::CommonActions::make_open_action([&](auto&) {
+        if (request_close() == GUI::Window::CloseRequestDecision::StayOpen)
+            return;
         auto response = FileSystemAccessClient::Client::the().try_open_file(&window, "Select theme file", "/res/themes"sv);
         if (response.is_error())
             return;
@@ -304,6 +306,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
     TRY(accessibility_menu->try_add_action(achromatomaly_accessibility_action));
 
     auto help_menu = TRY(window.try_add_menu("&Help"));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(&window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Theme Editor", GUI::Icon::default_icon("app-theme-editor"sv), &window)));
 
     return {};

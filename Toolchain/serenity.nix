@@ -4,7 +4,7 @@ with pkgs;
 stdenv.mkDerivation {
   name = "cpp-env";
   nativeBuildInputs = [
-    gcc11
+    gcc12
     curl
     cmake
     mpfr
@@ -18,16 +18,15 @@ stdenv.mkDerivation {
     unzip
     texinfo
     # Example Build-time Additional Dependencies
-    pkgconfig
+    pkg-config
   ];
   buildInputs = [
     # Example Run-time Additional Dependencies
     openssl
+    libxcrypt
     xlibsWrapper
     qemu
     e2fsprogs
-    fuse2fs
-    # glibc
   ];
 
   hardeningDisable = [ "format" "fortify" ];

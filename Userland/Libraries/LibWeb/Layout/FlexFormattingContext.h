@@ -27,7 +27,12 @@ public:
     virtual void determine_width_of_child(Box const&, AvailableSpace const&) override;
     virtual void determine_height_of_child(Box const&, AvailableSpace const&) override;
 
+    virtual Gfx::FloatPoint calculate_static_position(Box const&) const override;
+
 private:
+    [[nodiscard]] bool should_treat_main_size_as_auto(Box const&) const;
+    [[nodiscard]] bool should_treat_cross_size_as_auto(Box const&) const;
+
     void dump_items() const;
 
     struct DirectionAgnosticMargins {
@@ -140,9 +145,11 @@ private:
 
     void determine_hypothetical_cross_size_of_item(FlexItem&, bool resolve_percentage_min_max_sizes);
 
-    void calculate_cross_size_of_each_flex_line(float cross_min_size, float cross_max_size);
+    void calculate_cross_size_of_each_flex_line();
 
-    CSS::AlignItems alignment_for_item(FlexItem const&) const;
+    void handle_align_content_stretch();
+
+    CSS::AlignItems alignment_for_item(Box const&) const;
 
     void determine_used_cross_size_of_each_flex_item();
 
@@ -150,7 +157,7 @@ private:
 
     void align_all_flex_items_along_the_cross_axis();
 
-    void determine_flex_container_used_cross_size(float cross_min_size, float cross_max_size);
+    void determine_flex_container_used_cross_size();
 
     void align_all_flex_lines();
 

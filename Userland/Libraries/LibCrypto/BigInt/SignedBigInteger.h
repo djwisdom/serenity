@@ -69,6 +69,7 @@ public:
 
     [[nodiscard]] UnsignedBigInteger const& unsigned_value() const { return m_unsigned_data; }
     [[nodiscard]] Vector<u32, STARTING_WORD_SIZE> const words() const { return m_unsigned_data.words(); }
+    [[nodiscard]] bool is_positive() const { return !is_negative() && !is_zero(); }
     [[nodiscard]] bool is_negative() const { return m_sign; }
     [[nodiscard]] bool is_zero() const { return m_unsigned_data.is_zero(); }
 
@@ -139,13 +140,7 @@ public:
     [[nodiscard]] bool operator<(UnsignedBigInteger const& other) const;
     [[nodiscard]] bool operator>(UnsignedBigInteger const& other) const;
 
-    enum class CompareResult {
-        DoubleEqualsBigInt,
-        DoubleLessThanBigInt,
-        DoubleGreaterThanBigInt
-    };
-
-    [[nodiscard]] CompareResult compare_to_double(double) const;
+    [[nodiscard]] UnsignedBigInteger::CompareResult compare_to_double(double) const;
 
 private:
     void ensure_sign_is_valid()

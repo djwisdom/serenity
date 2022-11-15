@@ -64,6 +64,10 @@ MainWidget::MainWidget()
     else
         VERIFY_NOT_REACHED();
 
+    auto font_entry = Config::read_string("TextEditor"sv, "Text"sv, "Font"sv, "default"sv);
+    if (font_entry != "default")
+        m_editor->set_font(Gfx::FontDatabase::the().get_by_name(font_entry));
+
     m_editor->on_change = Core::debounce([this] {
         update_preview();
     },
@@ -436,6 +440,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
             if (picker->exec() == GUI::Dialog::ExecResult::OK) {
                 dbgln("setting font {}", picker->font()->qualified_name());
                 m_editor->set_font(picker->font());
+                Config::write_string("TextEditor"sv, "Text"sv, "Font"sv, picker->font()->qualified_name());
             }
         }));
 
@@ -617,6 +622,7 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     syntax_menu.add_action(*m_sql_highlight);
 
     auto& help_menu = window.add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(&window));
     help_menu.add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/TextEditor.md"), "/bin/Help");
     }));
@@ -742,6 +748,13 @@ bool MainWidget::request_close()
     return false;
 }
 
+void MainWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/uri-list"))
+        event.accept();
+}
+
 void MainWidget::drop_event(GUI::DropEvent& event)
 {
     event.accept();
@@ -755,6 +768,8 @@ void MainWidget::drop_event(GUI::DropEvent& event)
             GUI::MessageBox::show(window(), "TextEditor can only open one file at a time!"sv, "One at a time please!"sv, GUI::MessageBox::Type::Error);
             return;
         }
+        if (!request_close())
+            return;
 
         // TODO: A drop event should be considered user consent for opening a file
         auto response = FileSystemAccessClient::Client::the().try_request_file(window(), urls.first().path(), Core::OpenMode::ReadOnly);

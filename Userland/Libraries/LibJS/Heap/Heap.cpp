@@ -20,13 +20,13 @@
 #include <LibJS/SafeFunction.h>
 #include <setjmp.h>
 
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
 #    include <serenity.h>
 #endif
 
 namespace JS {
 
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
 static int gc_perf_string_id;
 #endif
 
@@ -36,7 +36,7 @@ static __thread HashMap<FlatPtr*, size_t>* s_custom_ranges_for_conservative_scan
 Heap::Heap(VM& vm)
     : m_vm(vm)
 {
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
     auto gc_signpost_string = "Garbage collection"sv;
     gc_perf_string_id = perf_register_string(gc_signpost_string.characters_without_null_termination(), gc_signpost_string.length());
 #endif
@@ -91,7 +91,7 @@ void Heap::collect_garbage(CollectionType collection_type, bool print_report)
     VERIFY(!m_collecting_garbage);
     TemporaryChange change(m_collecting_garbage, true);
 
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
     static size_t global_gc_counter = 0;
     perf_event(PERF_EVENT_SIGNPOST, gc_perf_string_id, global_gc_counter++);
 #endif
@@ -106,6 +106,7 @@ void Heap::collect_garbage(CollectionType collection_type, bool print_report)
         gather_roots(roots);
         mark_live_cells(roots);
     }
+    finalize_unmarked_cells();
     sweep_dead_cells(print_report, collection_measurement_timer);
 }
 
@@ -231,6 +232,24 @@ void Heap::mark_live_cells(HashTable<Cell*> const& roots)
     m_uprooted_cells.clear();
 }
 
+bool Heap::cell_must_survive_garbage_collection(Cell const& cell)
+{
+    if (!cell.overrides_must_survive_garbage_collection({}))
+        return false;
+    return cell.must_survive_garbage_collection();
+}
+
+void Heap::finalize_unmarked_cells()
+{
+    for_each_block([&](auto& block) {
+        block.template for_each_cell_in_state<Cell::State::Live>([](Cell* cell) {
+            if (!cell->is_marked() && !cell_must_survive_garbage_collection(*cell))
+                cell->finalize();
+        });
+        return IterationDecision::Continue;
+    });
+}
+
 void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measurement_timer)
 {
     dbgln_if(HEAP_DEBUG, "sweep_dead_cells:");
@@ -246,7 +265,7 @@ void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measure
         bool block_has_live_cells = false;
         bool block_was_full = block.is_full();
         block.template for_each_cell_in_state<Cell::State::Live>([&](Cell* cell) {
-            if (!cell->is_marked()) {
+            if (!cell->is_marked() && !cell_must_survive_garbage_collection(*cell)) {
                 dbgln_if(HEAP_DEBUG, "  ~ {}", cell);
                 block.deallocate(cell);
                 ++collected_cells;

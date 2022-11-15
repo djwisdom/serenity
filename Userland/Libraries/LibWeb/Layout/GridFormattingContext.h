@@ -25,6 +25,50 @@ private:
     bool is_auto_positioned_row(CSS::GridTrackPlacement const&, CSS::GridTrackPlacement const&) const;
     bool is_auto_positioned_column(CSS::GridTrackPlacement const&, CSS::GridTrackPlacement const&) const;
     bool is_auto_positioned_track(CSS::GridTrackPlacement const&, CSS::GridTrackPlacement const&) const;
+
+    struct TemporaryTrack {
+        CSS::GridSize min_track_sizing_function;
+        CSS::GridSize max_track_sizing_function;
+        float base_size { 0 };
+        float growth_limit { 0 };
+        float space_to_distribute { 0 };
+        float planned_increase { 0 };
+        bool is_gap { false };
+
+        TemporaryTrack(CSS::GridSize min_track_sizing_function, CSS::GridSize max_track_sizing_function)
+            : min_track_sizing_function(min_track_sizing_function)
+            , max_track_sizing_function(max_track_sizing_function)
+        {
+        }
+
+        TemporaryTrack(CSS::GridSize track_sizing_function)
+            : min_track_sizing_function(track_sizing_function)
+            , max_track_sizing_function(track_sizing_function)
+        {
+        }
+
+        TemporaryTrack(float size, bool is_gap)
+            : min_track_sizing_function(CSS::GridSize(size))
+            , max_track_sizing_function(CSS::GridSize(size))
+            , base_size(size)
+            , is_gap(is_gap)
+        {
+        }
+
+        TemporaryTrack()
+            : min_track_sizing_function(CSS::GridSize::make_auto())
+            , max_track_sizing_function(CSS::GridSize::make_auto())
+        {
+        }
+    };
+
+    Vector<TemporaryTrack> m_grid_rows;
+    Vector<TemporaryTrack> m_grid_columns;
+
+    float get_free_space_x(AvailableSpace const& available_space);
+    float get_free_space_y(Box const&);
+
+    int get_line_index_by_line_name(String const& line_name, CSS::GridTrackSizeList);
 };
 
 class OccupationGrid {

@@ -8,6 +8,7 @@
 
 #include <AK/Types.h>
 #include <AK/Userspace.h>
+#include <Kernel/API/POSIX/sched.h>
 
 constexpr int syscall_vector = 0x82;
 
@@ -106,6 +107,8 @@ enum class NeedsBigProcessLock {
     S(inode_watcher_remove_watch, NeedsBigProcessLock::Yes) \
     S(ioctl, NeedsBigProcessLock::Yes)                      \
     S(join_thread, NeedsBigProcessLock::Yes)                \
+    S(jail_create, NeedsBigProcessLock::No)                 \
+    S(jail_attach, NeedsBigProcessLock::No)                 \
     S(kill, NeedsBigProcessLock::Yes)                       \
     S(kill_thread, NeedsBigProcessLock::Yes)                \
     S(killpg, NeedsBigProcessLock::Yes)                     \
@@ -121,7 +124,7 @@ enum class NeedsBigProcessLock {
     S(mprotect, NeedsBigProcessLock::Yes)                   \
     S(mremap, NeedsBigProcessLock::Yes)                     \
     S(msync, NeedsBigProcessLock::Yes)                      \
-    S(msyscall, NeedsBigProcessLock::Yes)                   \
+    S(msyscall, NeedsBigProcessLock::No)                    \
     S(munmap, NeedsBigProcessLock::Yes)                     \
     S(open, NeedsBigProcessLock::Yes)                       \
     S(perf_event, NeedsBigProcessLock::Yes)                 \
@@ -145,8 +148,8 @@ enum class NeedsBigProcessLock {
     S(recvmsg, NeedsBigProcessLock::Yes)                    \
     S(rename, NeedsBigProcessLock::No)                      \
     S(rmdir, NeedsBigProcessLock::No)                       \
-    S(sched_getparam, NeedsBigProcessLock::No)              \
-    S(sched_setparam, NeedsBigProcessLock::No)              \
+    S(scheduler_get_parameters, NeedsBigProcessLock::No)    \
+    S(scheduler_set_parameters, NeedsBigProcessLock::No)    \
     S(sendfd, NeedsBigProcessLock::No)                      \
     S(sendmsg, NeedsBigProcessLock::Yes)                    \
     S(set_coredump_metadata, NeedsBigProcessLock::No)       \
@@ -204,7 +207,7 @@ enum Function {
         __Count
 };
 
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
 struct StringArgument {
     char const* characters;
     size_t length { 0 };
@@ -326,6 +329,15 @@ struct SC_setkeymap_params {
     u32 const* altgr_map;
     u32 const* shift_altgr_map;
     StringArgument map_name;
+};
+
+struct SC_jail_create_params {
+    u64 index;
+    StringArgument name;
+};
+
+struct SC_jail_attach_params {
+    u64 index;
 };
 
 struct SC_getkeymap_params {
@@ -480,10 +492,21 @@ struct SC_chmod_params {
     int follow_symlinks;
 };
 
+enum class SchedulerParametersMode : bool {
+    Process,
+    Thread,
+};
+
+struct SC_scheduler_parameters_params {
+    pid_t pid_or_tid;
+    SchedulerParametersMode mode;
+    struct sched_param parameters;
+};
+
 void initialize();
 int sync();
 
-#    if ARCH(I386) || ARCH(X86_64)
+#    if ARCH(I386) || ARCH(X86_64) || ARCH(AARCH64)
 inline uintptr_t invoke(Function function)
 {
     uintptr_t result;
@@ -492,11 +515,19 @@ inline uintptr_t invoke(Function function)
                  : "=a"(result)
                  : "a"(function)
                  : "memory");
-#        else
+#        elif ARCH(X86_64)
     asm volatile("syscall"
                  : "=a"(result)
                  : "a"(function)
                  : "rcx", "r11", "memory");
+#        elif ARCH(AARCH64)
+    register uintptr_t x0 asm("x0");
+    register uintptr_t x8 asm("x8") = function;
+    asm volatile("svc #0"
+                 : "=r"(x0)
+                 : "r"(x8)
+                 : "memory");
+    result = x0;
 #        endif
     return result;
 }
@@ -510,11 +541,20 @@ inline uintptr_t invoke(Function function, T1 arg1)
                  : "=a"(result)
                  : "a"(function), "d"((uintptr_t)arg1)
                  : "memory");
-#        else
+#        elif ARCH(X86_64)
     asm volatile("syscall"
                  : "=a"(result)
                  : "a"(function), "d"((uintptr_t)arg1)
                  : "rcx", "r11", "memory");
+#        else
+    register uintptr_t x0 asm("x0");
+    register uintptr_t x1 asm("x1") = arg1;
+    register uintptr_t x8 asm("x8") = function;
+    asm volatile("svc #0"
+                 : "=r"(x0)
+                 : "r"(x1), "r"(x8)
+                 : "memory");
+    result = x0;
 #        endif
     return result;
 }
@@ -528,11 +568,21 @@ inline uintptr_t invoke(Function function, T1 arg1, T2 arg2)
                  : "=a"(result)
                  : "a"(function), "d"((uintptr_t)arg1), "c"((uintptr_t)arg2)
                  : "memory");
-#        else
+#        elif ARCH(X86_64)
     asm volatile("syscall"
                  : "=a"(result)
                  : "a"(function), "d"((uintptr_t)arg1), "D"((uintptr_t)arg2)
                  : "rcx", "r11", "memory");
+#        else
+    register uintptr_t x0 asm("x0");
+    register uintptr_t x1 asm("x1") = arg1;
+    register uintptr_t x2 asm("x2") = arg2;
+    register uintptr_t x8 asm("x8") = function;
+    asm volatile("svc #0"
+                 : "=r"(x0)
+                 : "r"(x1), "r"(x2), "r"(x8)
+                 : "memory");
+    result = x0;
 #        endif
     return result;
 }
@@ -546,11 +596,22 @@ inline uintptr_t invoke(Function function, T1 arg1, T2 arg2, T3 arg3)
                  : "=a"(result)
                  : "a"(function), "d"((uintptr_t)arg1), "c"((uintptr_t)arg2), "b"((uintptr_t)arg3)
                  : "memory");
-#        else
+#        elif ARCH(X86_64)
     asm volatile("syscall"
                  : "=a"(result)
                  : "a"(function), "d"((uintptr_t)arg1), "D"((uintptr_t)arg2), "b"((uintptr_t)arg3)
                  : "rcx", "r11", "memory");
+#        else
+    register uintptr_t x0 asm("x0");
+    register uintptr_t x1 asm("x1") = arg1;
+    register uintptr_t x2 asm("x2") = arg2;
+    register uintptr_t x3 asm("x3") = arg3;
+    register uintptr_t x8 asm("x8") = function;
+    asm volatile("svc #0"
+                 : "=r"(x0)
+                 : "r"(x1), "r"(x2), "r"(x3), "r"(x8)
+                 : "memory");
+    result = x0;
 #        endif
     return result;
 }
@@ -564,11 +625,23 @@ inline uintptr_t invoke(Function function, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
                  : "=a"(result)
                  : "a"(function), "d"((uintptr_t)arg1), "c"((uintptr_t)arg2), "b"((uintptr_t)arg3), "S"((uintptr_t)arg4)
                  : "memory");
-#        else
+#        elif ARCH(X86_64)
     asm volatile("syscall"
                  : "=a"(result)
                  : "a"(function), "d"((uintptr_t)arg1), "D"((uintptr_t)arg2), "b"((uintptr_t)arg3), "S"((uintptr_t)arg4)
                  : "memory");
+#        else
+    register uintptr_t x0 asm("x0");
+    register uintptr_t x1 asm("x1") = arg1;
+    register uintptr_t x2 asm("x2") = arg2;
+    register uintptr_t x3 asm("x3") = arg3;
+    register uintptr_t x4 asm("x4") = arg4;
+    register uintptr_t x8 asm("x8") = function;
+    asm volatile("svc #0"
+                 : "=r"(x0)
+                 : "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x8)
+                 : "memory");
+    result = x0;
 #        endif
     return result;
 }

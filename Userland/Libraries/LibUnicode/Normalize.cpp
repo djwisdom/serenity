@@ -14,8 +14,8 @@
 
 namespace Unicode {
 
-Optional<CodePointDecomposition const&> __attribute__((weak)) code_point_decomposition(u32) { return {}; }
-Span<CodePointDecomposition const> __attribute__((weak)) code_point_decompositions() { return {}; }
+Optional<CodePointDecomposition const> __attribute__((weak)) code_point_decomposition(u32) { return {}; }
+Optional<CodePointDecomposition const> __attribute__((weak)) code_point_decomposition_by_index(size_t) { return {}; }
 
 NormalizationForm normalization_form_from_string(StringView form)
 {
@@ -111,7 +111,8 @@ static u32 combine_hangul_code_points(u32 a, u32 b)
         auto const leading_vowel_index = leading_index * HANGUL_BLOCK_COUNT + vowel_index * HANGUL_TRAILING_COUNT;
         return HANGUL_SYLLABLE_BASE + leading_vowel_index;
     }
-    if (is_hangul_code_point(a) && is_hangul_trailing(b)) {
+    // LV characters are the first in each "T block", so use this check to avoid combining LVT with T.
+    if (is_hangul_code_point(a) && (a - HANGUL_SYLLABLE_BASE) % HANGUL_TRAILING_COUNT == 0 && is_hangul_trailing(b)) {
         return a + b - HANGUL_TRAILING_BASE;
     }
     return 0;
@@ -121,7 +122,11 @@ static u32 combine_code_points(u32 a, u32 b)
 {
     Array<u32, 2> const points { a, b };
     // FIXME: Do something better than linear search to find reverse mappings.
-    for (auto const& mapping : Unicode::code_point_decompositions()) {
+    for (size_t index = 0;; ++index) {
+        auto mapping_maybe = Unicode::code_point_decomposition_by_index(index);
+        if (!mapping_maybe.has_value())
+            break;
+        auto& mapping = mapping_maybe.value();
         if (mapping.tag == CompatibilityFormattingTag::Canonical && mapping.decomposition == points) {
             if (code_point_has_property(mapping.code_point, Property::Full_Composition_Exclusion))
                 continue;

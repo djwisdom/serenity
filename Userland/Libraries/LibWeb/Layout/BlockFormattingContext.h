@@ -48,9 +48,6 @@ public:
 
     void layout_block_level_box(Box const&, BlockContainer const&, LayoutMode, float& bottom_of_lowest_margin_box, AvailableSpace const&);
 
-    static bool should_treat_width_as_auto(Box const&, AvailableSpace const&);
-    static bool should_treat_height_as_auto(Box const&, AvailableSpace const&);
-
     virtual bool can_determine_size_of_child() const override { return true; }
     virtual void determine_width_of_child(Box const&, AvailableSpace const&) override;
     virtual void determine_height_of_child(Box const&, AvailableSpace const&) override;
@@ -67,9 +64,9 @@ private:
     void layout_block_level_children(BlockContainer const&, LayoutMode, AvailableSpace const&);
     void layout_inline_children(BlockContainer const&, LayoutMode, AvailableSpace const&);
 
-    static void resolve_vertical_box_model_metrics(Box const& box, AvailableSpace const&, LayoutState&);
+    static void resolve_vertical_box_model_metrics(Box const& box, LayoutState&);
     void place_block_level_element_in_normal_flow_horizontally(Box const& child_box, AvailableSpace const&);
-    void place_block_level_element_in_normal_flow_vertically(Box const& child_box, AvailableSpace const&);
+    void place_block_level_element_in_normal_flow_vertically(Box const&);
 
     void layout_list_item_marker(ListItemBox const&);
 

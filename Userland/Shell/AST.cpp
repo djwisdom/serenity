@@ -625,7 +625,7 @@ void BarewordLiteral::highlight_in_editor(Line::Editor& editor, Shell& shell, Hi
             Line::Style bold = { Line::Style::Bold };
             Line::Style style = bold;
 
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
             if (runnable->kind == Shell::RunnablePath::Kind::Executable || runnable->kind == Shell::RunnablePath::Kind::Alias) {
                 auto name = shell.help_path_for({}, *runnable);
                 if (name.has_value()) {
@@ -3577,7 +3577,7 @@ String StringValue::resolve_as_string(RefPtr<Shell> shell)
 Vector<String> StringValue::resolve_as_list(RefPtr<Shell> shell)
 {
     if (is_list()) {
-        auto parts = StringView(m_string).split_view(m_split, m_keep_empty);
+        auto parts = StringView(m_string).split_view(m_split, m_keep_empty ? SplitBehavior::KeepEmpty : SplitBehavior::Nothing);
         Vector<String> result;
         result.ensure_capacity(parts.size());
         for (auto& part : parts)

@@ -102,8 +102,6 @@ public:
         return !__builtin_memcmp(data(), other.data(), size());
     }
 
-    bool operator!=(ByteBuffer const& other) const { return !(*this == other); }
-
     [[nodiscard]] u8& operator[](size_t i)
     {
         VERIFY(i < m_size);
@@ -126,10 +124,10 @@ public:
     [[nodiscard]] ReadonlyBytes bytes() const { return { data(), size() }; }
 
     [[nodiscard]] AK::Span<u8> span() { return { data(), size() }; }
-    [[nodiscard]] AK::Span<const u8> span() const { return { data(), size() }; }
+    [[nodiscard]] AK::Span<u8 const> span() const { return { data(), size() }; }
 
-    [[nodiscard]] u8* offset_pointer(int offset) { return data() + offset; }
-    [[nodiscard]] u8 const* offset_pointer(int offset) const { return data() + offset; }
+    [[nodiscard]] u8* offset_pointer(size_t offset) { return data() + offset; }
+    [[nodiscard]] u8 const* offset_pointer(size_t offset) const { return data() + offset; }
 
     [[nodiscard]] void* end_pointer() { return data() + m_size; }
     [[nodiscard]] void const* end_pointer() const { return data() + m_size; }
@@ -226,7 +224,7 @@ public:
         if (data_size == 0)
             return {};
         VERIFY(data != nullptr);
-        int old_size = size();
+        auto old_size = size();
         TRY(try_resize(size() + data_size));
         __builtin_memcpy(this->data() + old_size, data, data_size);
         return {};

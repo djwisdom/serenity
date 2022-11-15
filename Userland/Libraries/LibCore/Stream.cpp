@@ -14,10 +14,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
 #    include <serenity.h>
 #endif
-#ifdef __FreeBSD__
+#ifdef AK_OS_FREEBSD
 #    include <sys/ucred.h>
 #endif
 
@@ -127,7 +127,7 @@ ErrorOr<NonnullOwnPtr<File>> File::open(StringView filename, OpenMode mode, mode
     return file;
 }
 
-ErrorOr<NonnullOwnPtr<File>> File::adopt_fd(int fd, OpenMode mode)
+ErrorOr<NonnullOwnPtr<File>> File::adopt_fd(int fd, OpenMode mode, ShouldCloseFileDescriptor should_close_file_descriptor)
 {
     if (fd < 0) {
         return Error::from_errno(EBADF);
@@ -138,7 +138,7 @@ ErrorOr<NonnullOwnPtr<File>> File::adopt_fd(int fd, OpenMode mode)
         return Error::from_errno(EINVAL);
     }
 
-    auto file = TRY(adopt_nonnull_own_or_enomem(new (nothrow) File(mode)));
+    auto file = TRY(adopt_nonnull_own_or_enomem(new (nothrow) File(mode, should_close_file_descriptor)));
     file->m_fd = fd;
     return file;
 }
@@ -148,6 +148,19 @@ bool File::exists(StringView filename)
     return !Core::System::stat(filename).is_error();
 }
 
+ErrorOr<NonnullOwnPtr<File>> File::standard_input()
+{
+    return File::adopt_fd(STDIN_FILENO, OpenMode::Read, ShouldCloseFileDescriptor::No);
+}
+ErrorOr<NonnullOwnPtr<File>> File::standard_output()
+{
+    return File::adopt_fd(STDOUT_FILENO, OpenMode::Write, ShouldCloseFileDescriptor::No);
+}
+ErrorOr<NonnullOwnPtr<File>> File::standard_error()
+{
+    return File::adopt_fd(STDERR_FILENO, OpenMode::Write, ShouldCloseFileDescriptor::No);
+}
+
 ErrorOr<NonnullOwnPtr<File>> File::open_file_or_standard_stream(StringView filename, OpenMode mode)
 {
     if (!filename.is_empty() && filename != "-"sv)
@@ -155,9 +168,9 @@ ErrorOr<NonnullOwnPtr<File>> File::open_file_or_standard_stream(StringView filen
 
     switch (mode) {
     case OpenMode::Read:
-        return File::adopt_fd(STDIN_FILENO, mode);
+        return standard_input();
     case OpenMode::Write:
-        return File::adopt_fd(STDOUT_FILENO, mode);
+        return standard_output();
     default:
         VERIFY_NOT_REACHED();
     }
@@ -350,12 +363,17 @@ ErrorOr<IPv4Address> Socket::resolve_host(String const& host, SocketType type)
         return Error::from_string_view({ error_string, strlen(error_string) });
     }
 
-    auto* socket_address = bit_cast<struct sockaddr_in*>(results->ai_addr);
-    NetworkOrdered<u32> network_ordered_address { socket_address->sin_addr.s_addr };
+    ScopeGuard free_results = [results] { freeaddrinfo(results); };
 
-    freeaddrinfo(results);
+    for (auto* result = results; result != nullptr; result = result->ai_next) {
+        if (result->ai_family == AF_INET) {
+            auto* socket_address = bit_cast<struct sockaddr_in*>(result->ai_addr);
+            NetworkOrdered<u32> network_ordered_address { socket_address->sin_addr.s_addr };
+            return IPv4Address { network_ordered_address };
+        }
+    }
 
-    return IPv4Address { network_ordered_address };
+    return Error::from_string_literal("Could not resolve to IPv4 address");
 }
 
 ErrorOr<void> Socket::connect_local(int fd, String const& path)
@@ -563,7 +581,7 @@ ErrorOr<int> LocalSocket::receive_fd(int flags)
 {
 #if defined(AK_OS_SERENITY)
     return Core::System::recvfd(m_helper.fd(), flags);
-#elif defined(AK_OS_LINUX)
+#elif defined(AK_OS_LINUX) || defined(AK_OS_MACOS)
     union {
         struct cmsghdr cmsghdr;
         char control[CMSG_SPACE(sizeof(int))];
@@ -608,7 +626,7 @@ ErrorOr<void> LocalSocket::send_fd(int fd)
 {
 #if defined(AK_OS_SERENITY)
     return Core::System::sendfd(m_helper.fd(), fd);
-#elif defined(AK_OS_LINUX)
+#elif defined(AK_OS_LINUX) || defined(AK_OS_MACOS)
     char c = 'F';
     struct iovec iov {
         .iov_base = &c,
@@ -650,10 +668,10 @@ ErrorOr<pid_t> LocalSocket::peer_pid() const
 #ifdef AK_OS_MACOS
     pid_t pid;
     socklen_t pid_size = sizeof(pid);
-#elif defined(__FreeBSD__)
+#elif defined(AK_OS_FREEBSD)
     struct xucred creds = {};
     socklen_t creds_size = sizeof(creds);
-#elif defined(__OpenBSD__)
+#elif defined(AK_OS_OPENBSD)
     struct sockpeercred creds = {};
     socklen_t creds_size = sizeof(creds);
 #else
@@ -664,7 +682,7 @@ ErrorOr<pid_t> LocalSocket::peer_pid() const
 #ifdef AK_OS_MACOS
     TRY(System::getsockopt(m_helper.fd(), SOL_LOCAL, LOCAL_PEERPID, &pid, &pid_size));
     return pid;
-#elif defined(__FreeBSD__)
+#elif defined(AK_OS_FREEBSD)
     TRY(System::getsockopt(m_helper.fd(), SOL_LOCAL, LOCAL_PEERCRED, &creds, &creds_size));
     return creds.cr_pid;
 #else

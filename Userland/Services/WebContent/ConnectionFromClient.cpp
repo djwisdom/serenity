@@ -1,6 +1,9 @@
 /*
  * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -29,6 +32,7 @@
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/StackingContext.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
 #include <WebContent/ConnectionFromClient.h>
 #include <WebContent/PageHost.h>
 #include <WebContent/WebContentClientEndpoint.h>
@@ -45,7 +49,7 @@ ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSock
 
 void ConnectionFromClient::die()
 {
-    Core::EventLoop::current().quit(0);
+    Web::Platform::EventLoopPlugin::the().quit();
 }
 
 Web::Page& ConnectionFromClient::page()
@@ -56,6 +60,13 @@ Web::Page& ConnectionFromClient::page()
 Web::Page const& ConnectionFromClient::page() const
 {
     return m_page_host->page();
+}
+
+void ConnectionFromClient::connect_to_webdriver(String const& webdriver_ipc_path)
+{
+    // FIXME: Propagate this error back to the browser.
+    if (auto result = m_page_host->connect_to_webdriver(webdriver_ipc_path); result.is_error())
+        dbgln("Unable to connect to the WebDriver process: {}", result.error());
 }
 
 void ConnectionFromClient::update_system_theme(Core::AnonymousBuffer const& theme_buffer)
@@ -146,9 +157,9 @@ void ConnectionFromClient::flush_pending_paint_requests()
     m_pending_paint_requests.clear();
 }
 
-void ConnectionFromClient::mouse_down(Gfx::IntPoint const& position, unsigned int button, [[maybe_unused]] unsigned int buttons, unsigned int modifiers)
+void ConnectionFromClient::mouse_down(Gfx::IntPoint const& position, unsigned int button, unsigned int buttons, unsigned int modifiers)
 {
-    page().handle_mousedown(position, button, modifiers);
+    page().handle_mousedown(position, button, buttons, modifiers);
 }
 
 void ConnectionFromClient::mouse_move(Gfx::IntPoint const& position, [[maybe_unused]] unsigned int button, unsigned int buttons, unsigned int modifiers)
@@ -156,19 +167,19 @@ void ConnectionFromClient::mouse_move(Gfx::IntPoint const& position, [[maybe_unu
     page().handle_mousemove(position, buttons, modifiers);
 }
 
-void ConnectionFromClient::mouse_up(Gfx::IntPoint const& position, unsigned int button, [[maybe_unused]] unsigned int buttons, unsigned int modifiers)
+void ConnectionFromClient::mouse_up(Gfx::IntPoint const& position, unsigned int button, unsigned int buttons, unsigned int modifiers)
 {
-    page().handle_mouseup(position, button, modifiers);
+    page().handle_mouseup(position, button, buttons, modifiers);
 }
 
-void ConnectionFromClient::mouse_wheel(Gfx::IntPoint const& position, unsigned int button, [[maybe_unused]] unsigned int buttons, unsigned int modifiers, i32 wheel_delta_x, i32 wheel_delta_y)
+void ConnectionFromClient::mouse_wheel(Gfx::IntPoint const& position, unsigned int button, unsigned int buttons, unsigned int modifiers, i32 wheel_delta_x, i32 wheel_delta_y)
 {
-    page().handle_mousewheel(position, button, modifiers, wheel_delta_x, wheel_delta_y);
+    page().handle_mousewheel(position, button, buttons, modifiers, wheel_delta_x, wheel_delta_y);
 }
 
-void ConnectionFromClient::doubleclick(Gfx::IntPoint const& position, unsigned int button, [[maybe_unused]] unsigned int buttons, unsigned int modifiers)
+void ConnectionFromClient::doubleclick(Gfx::IntPoint const& position, unsigned int button, unsigned int buttons, unsigned int modifiers)
 {
-    page().handle_doubleclick(position, button, modifiers);
+    page().handle_doubleclick(position, button, buttons, modifiers);
 }
 
 void ConnectionFromClient::key_down(i32 key, unsigned int modifiers, u32 code_point)
@@ -350,7 +361,7 @@ Messages::WebContentServer::InspectDomNodeResponse ConnectionFromClient::inspect
 
         if (pseudo_element.has_value()) {
             auto pseudo_element_node = element.get_pseudo_element_node(pseudo_element.value());
-            if (pseudo_element_node.is_null())
+            if (!pseudo_element_node)
                 return { false, "", "", "", "" };
 
             // FIXME: Pseudo-elements only exist as Layout::Nodes, which don't have style information
@@ -436,6 +447,21 @@ void ConnectionFromClient::js_console_request_messages(i32 start_index)
         m_console_client->send_messages(start_index);
 }
 
+Messages::WebContentServer::TakeDocumentScreenshotResponse ConnectionFromClient::take_document_screenshot()
+{
+    auto* document = page().top_level_browsing_context().active_document();
+    if (!document || !document->document_element())
+        return { {} };
+
+    auto const& content_size = m_page_host->content_size();
+    Gfx::IntRect rect { { 0, 0 }, content_size };
+
+    auto bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, rect.size()).release_value_but_fixme_should_propagate_errors();
+    m_page_host->paint(rect, *bitmap);
+
+    return { bitmap->to_shareable_bitmap() };
+}
+
 Messages::WebContentServer::GetSelectedTextResponse ConnectionFromClient::get_selected_text()
 {
     return page().focused_context().selected_text();
@@ -495,6 +521,16 @@ void ConnectionFromClient::set_has_focus(bool has_focus)
 void ConnectionFromClient::set_is_scripting_enabled(bool is_scripting_enabled)
 {
     m_page_host->set_is_scripting_enabled(is_scripting_enabled);
+}
+
+void ConnectionFromClient::set_window_position(Gfx::IntPoint const& position)
+{
+    m_page_host->set_window_position(position);
+}
+
+void ConnectionFromClient::set_window_size(Gfx::IntSize const& size)
+{
+    m_page_host->set_window_size(size);
 }
 
 Messages::WebContentServer::GetLocalStorageEntriesResponse ConnectionFromClient::get_local_storage_entries()

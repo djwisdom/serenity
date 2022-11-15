@@ -66,21 +66,21 @@ void HTMLCanvasElement::reset_context_to_default_state()
 
 void HTMLCanvasElement::set_width(unsigned value)
 {
-    set_attribute(HTML::AttributeNames::width, String::number(value));
+    MUST(set_attribute(HTML::AttributeNames::width, String::number(value)));
     m_bitmap = nullptr;
     reset_context_to_default_state();
 }
 
 void HTMLCanvasElement::set_height(unsigned value)
 {
-    set_attribute(HTML::AttributeNames::height, String::number(value));
+    MUST(set_attribute(HTML::AttributeNames::height, String::number(value)));
     m_bitmap = nullptr;
     reset_context_to_default_state();
 }
 
-RefPtr<Layout::Node> HTMLCanvasElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
+JS::GCPtr<Layout::Node> HTMLCanvasElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
 {
-    return adopt_ref(*new Layout::CanvasBox(document(), *this, move(style)));
+    return heap().allocate_without_realm<Layout::CanvasBox>(document(), *this, move(style));
 }
 
 HTMLCanvasElement::HasOrCreatedContext HTMLCanvasElement::create_2d_context()

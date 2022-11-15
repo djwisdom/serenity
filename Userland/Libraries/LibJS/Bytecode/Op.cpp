@@ -358,11 +358,16 @@ ThrowCompletionOr<void> GetVariable::execute_impl(Bytecode::Interpreter& interpr
     auto get_reference = [&]() -> ThrowCompletionOr<Reference> {
         auto const& string = interpreter.current_executable().get_identifier(m_identifier);
         if (m_cached_environment_coordinate.has_value()) {
-            auto* environment = vm.running_execution_context().lexical_environment;
-            for (size_t i = 0; i < m_cached_environment_coordinate->hops; ++i)
-                environment = environment->outer_environment();
-            VERIFY(environment);
-            VERIFY(environment->is_declarative_environment());
+            Environment* environment = nullptr;
+            if (m_cached_environment_coordinate->index == EnvironmentCoordinate::global_marker) {
+                environment = &interpreter.vm().current_realm()->global_environment();
+            } else {
+                environment = vm.running_execution_context().lexical_environment;
+                for (size_t i = 0; i < m_cached_environment_coordinate->hops; ++i)
+                    environment = environment->outer_environment();
+                VERIFY(environment);
+                VERIFY(environment->is_declarative_environment());
+            }
             if (!environment->is_permanently_screwed_by_eval()) {
                 return Reference { *environment, string, vm.in_strict_mode(), m_cached_environment_coordinate };
             }
@@ -569,6 +574,12 @@ static MarkedVector<Value> argument_list_evaluation(Bytecode::Interpreter& inter
     MarkedVector<Value> argument_values { vm.heap() };
     auto arguments = interpreter.accumulator();
 
+    if (!(arguments.is_object() && is<Array>(arguments.as_object()))) {
+        dbgln("Call arguments are not an array, but: {}", arguments.to_string_without_side_effects());
+        dbgln("PC: {}[{:4x}]", interpreter.current_block().name(), interpreter.pc());
+        interpreter.current_executable().dump();
+        VERIFY_NOT_REACHED();
+    }
     auto& argument_array = arguments.as_array();
     auto array_length = argument_array.indexed_properties().array_like_size();
 
@@ -584,6 +595,15 @@ static MarkedVector<Value> argument_list_evaluation(Bytecode::Interpreter& inter
     return argument_values;
 }
 
+Completion Call::throw_type_error_for_callee(Bytecode::Interpreter& interpreter, StringView callee_type) const
+{
+    auto callee = interpreter.reg(m_callee);
+    if (m_expression_string.has_value())
+        return interpreter.vm().throw_completion<TypeError>(ErrorType::IsNotAEvaluatedFrom, callee.to_string_without_side_effects(), callee_type, interpreter.current_executable().get_string(m_expression_string->value()));
+
+    return interpreter.vm().throw_completion<TypeError>(ErrorType::IsNotA, callee.to_string_without_side_effects(), callee_type);
+}
+
 ThrowCompletionOr<void> Call::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
@@ -591,10 +611,9 @@ ThrowCompletionOr<void> Call::execute_impl(Bytecode::Interpreter& interpreter) c
     auto callee = interpreter.reg(m_callee);
 
     if (m_type == CallType::Call && !callee.is_function())
-        return vm.throw_completion<TypeError>(ErrorType::IsNotA, callee.to_string_without_side_effects(), "function"sv);
-
+        return throw_type_error_for_callee(interpreter, "function"sv);
     if (m_type == CallType::Construct && !callee.is_constructor())
-        return vm.throw_completion<TypeError>(ErrorType::IsNotA, callee.to_string_without_side_effects(), "constructor"sv);
+        return throw_type_error_for_callee(interpreter, "constructor"sv);
 
     auto& function = callee.as_function();
 
@@ -1138,8 +1157,11 @@ String JumpUndefined::to_string_impl(Bytecode::Executable const&) const
     return String::formatted("JumpUndefined undefined:{} not undefined:{}", true_string, false_string);
 }
 
-String Call::to_string_impl(Bytecode::Executable const&) const
+String Call::to_string_impl(Bytecode::Executable const& executable) const
 {
+    if (m_expression_string.has_value())
+        return String::formatted("Call callee:{}, this:{}, arguments:[...acc] ({})", m_callee, m_this_value, executable.get_string(m_expression_string.value()));
+
     return String::formatted("Call callee:{}, this:{}, arguments:[...acc]", m_callee, m_this_value);
 }
 

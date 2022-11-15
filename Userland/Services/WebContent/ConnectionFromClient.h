@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -37,12 +39,16 @@ public:
 
     Optional<int> fd() { return socket().fd(); }
 
+    PageHost& page_host() { return *m_page_host; }
+    PageHost const& page_host() const { return *m_page_host; }
+
 private:
     explicit ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSocket>);
 
     Web::Page& page();
     Web::Page const& page() const;
 
+    virtual void connect_to_webdriver(String const& webdriver_ipc_path) override;
     virtual void update_system_theme(Core::AnonymousBuffer const&) override;
     virtual void update_system_fonts(String const&, String const&, String const&) override;
     virtual void update_screen_rects(Vector<Gfx::IntRect> const&, u32) override;
@@ -70,12 +76,16 @@ private:
     virtual void set_preferred_color_scheme(Web::CSS::PreferredColorScheme const&) override;
     virtual void set_has_focus(bool) override;
     virtual void set_is_scripting_enabled(bool) override;
+    virtual void set_window_position(Gfx::IntPoint const&) override;
+    virtual void set_window_size(Gfx::IntSize const&) override;
     virtual void handle_file_return(i32 error, Optional<IPC::File> const& file, i32 request_id) override;
     virtual void set_system_visibility_state(bool visible) override;
 
     virtual void js_console_input(String const&) override;
     virtual void run_javascript(String const&) override;
     virtual void js_console_request_messages(i32) override;
+
+    virtual Messages::WebContentServer::TakeDocumentScreenshotResponse take_document_screenshot() override;
 
     virtual Messages::WebContentServer::GetLocalStorageEntriesResponse get_local_storage_entries() override;
     virtual Messages::WebContentServer::GetSessionStorageEntriesResponse get_session_storage_entries() override;

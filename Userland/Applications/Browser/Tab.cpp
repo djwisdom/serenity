@@ -126,6 +126,8 @@ Tab::Tab(BrowserWindow& window)
         m_web_content_view->set_content_filters({});
 
     m_web_content_view->set_proxy_mappings(g_proxies, g_proxy_mappings);
+    if (!g_webdriver_content_ipc_path.is_empty())
+        enable_webdriver_mode();
 
     auto& go_back_button = toolbar.add_action(window.go_back_action());
     go_back_button.on_context_menu_request = [&](auto&) {
@@ -234,6 +236,18 @@ Tab::Tab(BrowserWindow& window)
             m_web_content_view->inspect_dom_tree();
     };
 
+    view().on_navigate_back = [this]() {
+        go_back(1);
+    };
+
+    view().on_navigate_forward = [this]() {
+        go_forward(1);
+    };
+
+    view().on_refresh = [this]() {
+        reload();
+    };
+
     view().on_link_click = [this](auto& url, auto& target, unsigned modifiers) {
         if (target == "_blank" || modifiers == Mod_Ctrl) {
             on_tab_open_request(url);
@@ -244,6 +258,38 @@ Tab::Tab(BrowserWindow& window)
 
     view().on_resource_status_change = [this](auto count_waiting) {
         update_status({}, count_waiting);
+    };
+
+    view().on_restore_window = [this]() {
+        this->window().show();
+        this->window().move_to_front();
+        m_web_content_view->set_system_visibility_state(true);
+    };
+
+    view().on_reposition_window = [this](Gfx::IntPoint const& position) {
+        this->window().move_to(position);
+        return this->window().position();
+    };
+
+    view().on_resize_window = [this](Gfx::IntSize const& size) {
+        this->window().resize(size);
+        return this->window().size();
+    };
+
+    view().on_maximize_window = [this]() {
+        this->window().set_maximized(true);
+        return this->window().rect();
+    };
+
+    view().on_minimize_window = [this]() {
+        this->window().set_minimized(true);
+        m_web_content_view->set_system_visibility_state(false);
+        return this->window().rect();
+    };
+
+    view().on_fullscreen_window = [this]() {
+        this->window().set_fullscreen(true);
+        return this->window().rect();
     };
 
     m_link_context_menu = GUI::Menu::construct();
@@ -322,6 +368,18 @@ Tab::Tab(BrowserWindow& window)
             on_favicon_change(icon);
     };
 
+    view().on_get_all_cookies = [this](auto& url) -> Vector<Web::Cookie::Cookie> {
+        if (on_get_all_cookies)
+            return on_get_all_cookies(url);
+        return {};
+    };
+
+    view().on_get_named_cookie = [this](auto& url, auto& name) -> Optional<Web::Cookie::Cookie> {
+        if (on_get_named_cookie)
+            return on_get_named_cookie(url, name);
+        return {};
+    };
+
     view().on_get_cookie = [this](auto& url, auto source) -> String {
         if (on_get_cookie)
             return on_get_cookie(url, source);
@@ -331,6 +389,11 @@ Tab::Tab(BrowserWindow& window)
     view().on_set_cookie = [this](auto& url, auto& cookie, auto source) {
         if (on_set_cookie)
             on_set_cookie(url, cookie, source);
+    };
+
+    view().on_update_cookie = [this](auto& url, auto& cookie) {
+        if (on_update_cookie)
+            on_update_cookie(url, cookie);
     };
 
     view().on_get_source = [this](auto& url, auto& source) {
@@ -401,6 +464,9 @@ Tab::Tab(BrowserWindow& window)
     m_page_context_menu->add_action(window.view_source_action());
     m_page_context_menu->add_action(window.inspect_dom_tree_action());
     m_page_context_menu->add_action(window.inspect_dom_node_action());
+    m_page_context_menu->add_separator();
+    m_page_context_menu->add_action(window.take_visible_screenshot_action());
+    m_page_context_menu->add_action(window.take_full_screenshot_action());
     view().on_context_menu_request = [&](auto& screen_position) {
         m_page_context_menu->popup(screen_position);
     };
@@ -542,6 +608,16 @@ void Tab::action_left(GUI::Action&)
     m_statusbar->set_override_text({});
 }
 
+void Tab::window_position_changed(Gfx::IntPoint const& position)
+{
+    m_web_content_view->set_window_position(position);
+}
+
+void Tab::window_size_changed(Gfx::IntSize const& size)
+{
+    m_web_content_view->set_window_size(size);
+}
+
 BrowserWindow const& Tab::window() const
 {
     return static_cast<BrowserWindow const&>(*Widget::window());
@@ -611,6 +687,10 @@ void Tab::show_storage_inspector()
         storage_window->set_title("Storage inspector");
         storage_window->set_icon(g_icon_bag.cookie);
         m_storage_widget = storage_window->set_main_widget<StorageWidget>();
+        m_storage_widget->on_update_cookie = [this](Web::Cookie::Cookie cookie) {
+            if (on_update_cookie)
+                on_update_cookie(url(), move(cookie));
+        };
     }
 
     if (on_get_cookies_entries) {
@@ -644,6 +724,13 @@ void Tab::show_event(GUI::ShowEvent&)
 void Tab::hide_event(GUI::HideEvent&)
 {
     m_web_content_view->set_visible(false);
+}
+
+void Tab::enable_webdriver_mode()
+{
+    m_web_content_view->connect_to_webdriver(Browser::g_webdriver_content_ipc_path);
+    auto& webdriver_banner = *find_descendant_of_type_named<GUI::Widget>("webdriver_banner");
+    webdriver_banner.set_visible(true);
 }
 
 }

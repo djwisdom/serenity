@@ -1,5 +1,8 @@
-[]
+// https://drafts.csswg.org/cssom/#cssstyledeclaration
+[Exposed=Window]
 interface CSSStyleDeclaration {
+
+    [CEReactions] attribute CSSOMString cssText;
 
     readonly attribute unsigned long length;
     CSSOMString item(unsigned long index);

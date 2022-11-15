@@ -669,6 +669,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
     TRY(scale_menu->try_add_action(*m_scale_fifteen_action));
 
     auto help_menu = TRY(window.try_add_menu("&Help"));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(&window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/FontEditor.md"), "/bin/Help");
     })));
@@ -869,6 +870,13 @@ void MainWidget::update_preview()
 {
     if (m_font_preview_window)
         m_font_preview_window->update();
+}
+
+void MainWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/uri-list"))
+        event.accept();
 }
 
 void MainWidget::drop_event(GUI::DropEvent& event)

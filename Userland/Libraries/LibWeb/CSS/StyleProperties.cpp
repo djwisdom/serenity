@@ -44,6 +44,11 @@ NonnullRefPtr<StyleValue> StyleProperties::property(CSS::PropertyID property_id)
     return value.release_nonnull();
 }
 
+RefPtr<StyleValue> StyleProperties::maybe_null_property(CSS::PropertyID property_id) const
+{
+    return m_property_values[to_underlying(property_id)];
+}
+
 CSS::Size StyleProperties::size_value(CSS::PropertyID id) const
 {
     auto value = property(id);
@@ -349,6 +354,12 @@ CSS::TransformOrigin StyleProperties::transform_origin() const
     return { x_value.value(), y_value.value() };
 }
 
+Optional<CSS::AlignContent> StyleProperties::align_content() const
+{
+    auto value = property(CSS::PropertyID::AlignContent);
+    return value_id_to_align_content(value->to_identifier());
+}
+
 Optional<CSS::AlignItems> StyleProperties::align_items() const
 {
     auto value = property(CSS::PropertyID::AlignItems);
@@ -597,7 +608,8 @@ Vector<CSS::TextDecorationLine> StyleProperties::text_decoration_line() const
     if (value->is_identifier() && value->to_identifier() == ValueID::None)
         return {};
 
-    VERIFY_NOT_REACHED();
+    dbgln("FIXME: Unsupported value for text-decoration-line: {}", value->to_string());
+    return {};
 }
 
 Optional<CSS::TextDecorationStyle> StyleProperties::text_decoration_style() const
@@ -699,16 +711,16 @@ Optional<CSS::FontVariant> StyleProperties::font_variant() const
     return value_id_to_font_variant(value->to_identifier());
 }
 
-Vector<CSS::GridTrackSize> StyleProperties::grid_template_columns() const
+CSS::GridTrackSizeList StyleProperties::grid_template_columns() const
 {
     auto value = property(CSS::PropertyID::GridTemplateColumns);
-    return value->as_grid_track_size().grid_track_size();
+    return value->as_grid_track_size_list().grid_track_size_list();
 }
 
-Vector<CSS::GridTrackSize> StyleProperties::grid_template_rows() const
+CSS::GridTrackSizeList StyleProperties::grid_template_rows() const
 {
     auto value = property(CSS::PropertyID::GridTemplateRows);
-    return value->as_grid_track_size().grid_track_size();
+    return value->as_grid_track_size_list().grid_track_size_list();
 }
 
 CSS::GridTrackPlacement StyleProperties::grid_column_end() const

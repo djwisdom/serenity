@@ -15,7 +15,10 @@ Threading::Thread::Thread(Function<intptr_t()> action, StringView thread_name)
     , m_thread_name(thread_name.is_null() ? ""sv : thread_name)
 {
     register_property("thread_name", [&] { return JsonValue { m_thread_name }; });
+#if defined(AK_OS_SERENITY) || defined(AK_OS_LINUX)
+    // FIXME: Print out a pretty TID for BSD and macOS platforms, too
     register_property("tid", [&] { return JsonValue { m_tid }; });
+#endif
 }
 
 Threading::Thread::~Thread()
@@ -24,6 +27,27 @@ Threading::Thread::~Thread()
         dbgln("Destroying thread \"{}\"({}) while it is still running!", m_thread_name, m_tid);
         [[maybe_unused]] auto res = join();
     }
+}
+
+ErrorOr<void> Threading::Thread::set_priority(int priority)
+{
+    // MacOS has an extra __opaque field, so list initialization will not compile on MacOS Lagom.
+    sched_param scheduling_parameters {};
+    scheduling_parameters.sched_priority = priority;
+    int result = pthread_setschedparam(m_tid, 0, &scheduling_parameters);
+    if (result != 0)
+        return Error::from_errno(result);
+    return {};
+}
+
+ErrorOr<int> Threading::Thread::get_priority() const
+{
+    sched_param scheduling_parameters {};
+    int policy;
+    int result = pthread_getschedparam(m_tid, &policy, &scheduling_parameters);
+    if (result != 0)
+        return Error::from_errno(result);
+    return scheduling_parameters.sched_priority;
 }
 
 void Threading::Thread::start()
@@ -40,10 +64,12 @@ void Threading::Thread::start()
         static_cast<void*>(this));
 
     VERIFY(rc == 0);
+#ifdef AK_OS_SERENITY
     if (!m_thread_name.is_empty()) {
         rc = pthread_setname_np(m_tid, m_thread_name.characters());
         VERIFY(rc == 0);
     }
+#endif
     dbgln("Started thread \"{}\", tid = {}", m_thread_name, m_tid);
     m_started = true;
 }

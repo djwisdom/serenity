@@ -33,6 +33,21 @@ void WebContentClient::did_finish_loading(AK::URL const& url)
     m_view.notify_server_did_finish_loading({}, url);
 }
 
+void WebContentClient::did_request_navigate_back()
+{
+    m_view.notify_server_did_request_navigate_back({});
+}
+
+void WebContentClient::did_request_navigate_forward()
+{
+    m_view.notify_server_did_request_navigate_forward({});
+}
+
+void WebContentClient::did_request_refresh()
+{
+    m_view.notify_server_did_request_refresh({});
+}
+
 void WebContentClient::did_invalidate_content_rect(Gfx::IntRect const& content_rect)
 {
     dbgln_if(SPAM_DEBUG, "handle: WebContentClient::DidInvalidateContentRect! content_rect={}", content_rect);
@@ -185,6 +200,16 @@ void WebContentClient::did_change_favicon(Gfx::ShareableBitmap const& favicon)
     m_view.notify_server_did_change_favicon(*favicon.bitmap());
 }
 
+Messages::WebContentClient::DidRequestAllCookiesResponse WebContentClient::did_request_all_cookies(AK::URL const& url)
+{
+    return m_view.notify_server_did_request_all_cookies({}, url);
+}
+
+Messages::WebContentClient::DidRequestNamedCookieResponse WebContentClient::did_request_named_cookie(AK::URL const& url, String const& name)
+{
+    return m_view.notify_server_did_request_named_cookie({}, url, name);
+}
+
 Messages::WebContentClient::DidRequestCookieResponse WebContentClient::did_request_cookie(AK::URL const& url, u8 source)
 {
     return m_view.notify_server_did_request_cookie({}, url, static_cast<Web::Cookie::Source>(source));
@@ -195,9 +220,44 @@ void WebContentClient::did_set_cookie(AK::URL const& url, Web::Cookie::ParsedCoo
     m_view.notify_server_did_set_cookie({}, url, cookie, static_cast<Web::Cookie::Source>(source));
 }
 
+void WebContentClient::did_update_cookie(AK::URL const& url, Web::Cookie::Cookie const& cookie)
+{
+    m_view.notify_server_did_update_cookie({}, url, cookie);
+}
+
 void WebContentClient::did_update_resource_count(i32 count_waiting)
 {
     m_view.notify_server_did_update_resource_count(count_waiting);
+}
+
+void WebContentClient::did_request_restore_window()
+{
+    m_view.notify_server_did_request_restore_window();
+}
+
+Messages::WebContentClient::DidRequestRepositionWindowResponse WebContentClient::did_request_reposition_window(Gfx::IntPoint const& position)
+{
+    return m_view.notify_server_did_request_reposition_window(position);
+}
+
+Messages::WebContentClient::DidRequestResizeWindowResponse WebContentClient::did_request_resize_window(Gfx::IntSize const& size)
+{
+    return m_view.notify_server_did_request_resize_window(size);
+}
+
+Messages::WebContentClient::DidRequestMaximizeWindowResponse WebContentClient::did_request_maximize_window()
+{
+    return m_view.notify_server_did_request_maximize_window();
+}
+
+Messages::WebContentClient::DidRequestMinimizeWindowResponse WebContentClient::did_request_minimize_window()
+{
+    return m_view.notify_server_did_request_minimize_window();
+}
+
+Messages::WebContentClient::DidRequestFullscreenWindowResponse WebContentClient::did_request_fullscreen_window()
+{
+    return m_view.notify_server_did_request_fullscreen_window();
 }
 
 void WebContentClient::did_request_file(String const& path, i32 request_id)

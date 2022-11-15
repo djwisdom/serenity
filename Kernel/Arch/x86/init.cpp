@@ -29,8 +29,7 @@
 #include <Kernel/Devices/SelfTTYDevice.h>
 #include <Kernel/Devices/SerialDevice.h>
 #include <Kernel/Devices/ZeroDevice.h>
-#include <Kernel/FileSystem/Ext2FileSystem.h>
-#include <Kernel/FileSystem/SysFS.h>
+#include <Kernel/FileSystem/SysFS/Registry.h>
 #include <Kernel/FileSystem/SysFS/Subsystems/Firmware/Directory.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Firmware/ACPI/Initialize.h>
@@ -39,6 +38,7 @@
 #include <Kernel/Graphics/Console/VGATextModeConsole.h>
 #include <Kernel/Graphics/GraphicsManagement.h>
 #include <Kernel/Heap/kmalloc.h>
+#include <Kernel/JailManagement.h>
 #include <Kernel/KSyms.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Multiboot.h>
@@ -237,6 +237,7 @@ extern "C" [[noreturn]] UNMAP_AFTER_INIT void init(BootInfo const& boot_info)
     __stack_chk_guard = get_fast_random<size_t>();
 
     ProcFSComponentRegistry::initialize();
+    JailManagement::the();
     Process::initialize();
 
     Scheduler::initialize();

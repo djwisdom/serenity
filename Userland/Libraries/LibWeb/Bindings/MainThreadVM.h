@@ -32,6 +32,8 @@ struct WebEngineCustomData final : public JS::VM::CustomData {
     // FIXME: This should be a set.
     Vector<JS::Handle<DOM::MutationObserver>> mutation_observers;
 
+    JS::Handle<JS::Realm> internal_realm;
+
     OwnPtr<JS::ExecutionContext> root_execution_context;
 };
 
@@ -48,7 +50,7 @@ struct WebEngineCustomJobCallbackData final : public JS::JobCallback::CustomData
     OwnPtr<JS::ExecutionContext> active_script_context;
 };
 
-HTML::ClassicScript* active_script();
+HTML::Script* active_script();
 JS::VM& main_thread_vm();
 void queue_mutation_observer_microtask(DOM::Document&);
 NonnullOwnPtr<JS::ExecutionContext> create_a_new_javascript_realm(JS::VM&, Function<JS::Object*(JS::Realm&)> create_global_object, Function<JS::Object*(JS::Realm&)> create_global_this_value);

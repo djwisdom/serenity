@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#ifdef __serenity__
-#    include <serenity.h>
-#endif
 #include <AK/LexicalPath.h>
 #include <AK/ScopeGuard.h>
 #include <LibCore/DirIterator.h>
@@ -20,8 +17,12 @@
 #include <unistd.h>
 #include <utime.h>
 
+#ifdef AK_OS_SERENITY
+#    include <serenity.h>
+#endif
+
 // On Linux distros that use glibc `basename` is defined as a macro that expands to `__xpg_basename`, so we undefine it
-#if defined(__linux__) && defined(basename)
+#if defined(AK_OS_LINUX) && defined(basename)
 #    undef basename
 #endif
 
@@ -241,7 +242,7 @@ String File::absolute_path(String const& path)
     return LexicalPath::canonicalized_path(full_path.string());
 }
 
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
 
 ErrorOr<String> File::read_link(String const& link_path)
 {
@@ -571,8 +572,9 @@ Optional<String> File::resolve_executable_from_environment(StringView filename)
     }
 
     auto const* path_str = getenv("PATH");
-    StringView path { path_str, strlen(path_str) };
-
+    StringView path;
+    if (path_str)
+        path = { path_str, strlen(path_str) };
     if (path.is_empty())
         path = DEFAULT_PATH_SV;
 

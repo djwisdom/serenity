@@ -8,6 +8,7 @@
 #include "UnsignedBigInteger.h"
 #include <AK/BuiltinWrappers.h>
 #include <AK/CharacterTypes.h>
+#include <AK/FloatingPoint.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringHash.h>
 #include <LibCrypto/BigInt/Algorithms/UnsignedBigIntegerAlgorithms.h>
@@ -34,19 +35,6 @@ UnsignedBigInteger::UnsignedBigInteger(u8 const* ptr, size_t length)
     }
 }
 
-static constexpr u64 mantissa_size = 52;
-static constexpr u64 exponent_size = 11;
-static constexpr auto exponent_bias = (1 << (exponent_size - 1)) - 1;
-
-union DoubleExtractor {
-    struct {
-        unsigned long long mantissa : mantissa_size;
-        unsigned exponent : exponent_size;
-        unsigned sign : 1;
-    };
-    double double_value = 0;
-};
-
 UnsignedBigInteger::UnsignedBigInteger(double value)
 {
     // Because this is currently only used for LibJS we VERIFY some preconditions
@@ -61,11 +49,11 @@ UnsignedBigInteger::UnsignedBigInteger(double value)
         return;
     }
 
-    DoubleExtractor extractor;
-    extractor.double_value = value;
+    FloatExtractor<double> extractor;
+    extractor.d = value;
     VERIFY(!extractor.sign);
 
-    i32 real_exponent = extractor.exponent - exponent_bias;
+    i32 real_exponent = extractor.exponent - extractor.exponent_bias;
     VERIFY(real_exponent > 0);
 
     // Ensure we have enough space, we will need 2^exponent bits, so round up in words
@@ -73,10 +61,10 @@ UnsignedBigInteger::UnsignedBigInteger(double value)
     m_words.resize_and_keep_capacity(word_index);
 
     // Now we just need to put the mantissa with explicit 1 bit at the top at the proper location
-    u64 raw_mantissa = extractor.mantissa | (1ull << mantissa_size);
+    u64 raw_mantissa = extractor.mantissa | (1ull << extractor.mantissa_bits);
     VERIFY((raw_mantissa & 0xfff0000000000000) == 0x0010000000000000);
     // Shift it so the bits we need are at the top
-    raw_mantissa <<= 64 - mantissa_size - 1;
+    raw_mantissa <<= 64 - extractor.mantissa_bits - 1;
 
     // The initial bit needs to be exactly aligned with exponent, this is 1-indexed
     auto top_word_bit_offset = real_exponent % BITS_IN_WORD + 1;
@@ -88,7 +76,7 @@ UnsignedBigInteger::UnsignedBigInteger(double value)
     --word_index;
     // Shift used bits away
     raw_mantissa <<= top_word_bit_offset;
-    i32 bits_in_mantissa = mantissa_size + 1 - top_word_bit_offset;
+    i32 bits_in_mantissa = extractor.mantissa_bits + 1 - top_word_bit_offset;
     // Now just put everything at the top of the next words
 
     constexpr auto to_word_shift = 64 - BITS_IN_WORD;
@@ -198,12 +186,14 @@ double UnsignedBigInteger::to_double(UnsignedBigInteger::RoundingMode rounding_m
         return 0;
     --highest_bit;
 
+    using Extractor = FloatExtractor<double>;
+
     // Simple case if less than 2^53 since those number are all exactly representable in doubles
-    if (highest_bit < mantissa_size + 1)
+    if (highest_bit < Extractor::mantissa_bits + 1)
         return static_cast<double>(to_u64());
 
     // If it uses too many bit to represent in a double return infinity
-    if (highest_bit > exponent_bias)
+    if (highest_bit > Extractor::exponent_bias)
         return __builtin_huge_val();
 
     // Otherwise we have to take the top 53 bits, use those as the mantissa,
@@ -211,11 +201,11 @@ double UnsignedBigInteger::to_double(UnsignedBigInteger::RoundingMode rounding_m
     // so we have to ignore the very top bit.
 
     // Since we extract at most 53 bits it will take at most 3 words
-    static_assert(BITS_IN_WORD * 3 >= (mantissa_size + 1));
+    static_assert(BITS_IN_WORD * 3 >= (Extractor::mantissa_bits + 1));
     constexpr auto bits_in_u64 = 64;
-    static_assert(bits_in_u64 > mantissa_size + 1);
+    static_assert(bits_in_u64 > Extractor::mantissa_bits + 1);
 
-    auto bits_to_read = min(mantissa_size, highest_bit);
+    auto bits_to_read = min(static_cast<size_t>(Extractor::mantissa_bits), highest_bit);
 
     auto last_word_index = trimmed_length();
     VERIFY(last_word_index > 0);
@@ -267,7 +257,7 @@ double UnsignedBigInteger::to_double(UnsignedBigInteger::RoundingMode rounding_m
     }
 
     // Now the mantissa should be complete so shift it down
-    mantissa >>= bits_in_u64 - mantissa_size;
+    mantissa >>= bits_in_u64 - Extractor::mantissa_bits;
 
     if (rounding_mode == RoundingMode::IEEERoundAndTiesToEvenMantissa) {
         bool round_up = false;
@@ -327,13 +317,13 @@ double UnsignedBigInteger::to_double(UnsignedBigInteger::RoundingMode rounding_m
 
         if (round_up) {
             ++mantissa;
-            if ((mantissa & (1ull << mantissa_size)) != 0) {
+            if ((mantissa & (1ull << Extractor::mantissa_bits)) != 0) {
                 // we overflowed the mantissa
                 mantissa = 0;
                 highest_bit++;
 
                 // In which case it is possible we have to round to infinity
-                if (highest_bit > exponent_bias)
+                if (highest_bit > Extractor::exponent_bias)
                     return __builtin_huge_val();
             }
         }
@@ -341,14 +331,13 @@ double UnsignedBigInteger::to_double(UnsignedBigInteger::RoundingMode rounding_m
         VERIFY(rounding_mode == RoundingMode::RoundTowardZero);
     }
 
-    DoubleExtractor extractor;
-
-    extractor.exponent = highest_bit + exponent_bias;
+    Extractor extractor;
+    extractor.exponent = highest_bit + extractor.exponent_bias;
 
     VERIFY((mantissa & 0xfff0000000000000) == 0);
     extractor.mantissa = mantissa;
 
-    return extractor.double_value;
+    return extractor.d;
 }
 
 void UnsignedBigInteger::set_to_0()
@@ -600,6 +589,141 @@ bool UnsignedBigInteger::operator>(UnsignedBigInteger const& other) const
 bool UnsignedBigInteger::operator>=(UnsignedBigInteger const& other) const
 {
     return *this > other || *this == other;
+}
+
+UnsignedBigInteger::CompareResult UnsignedBigInteger::compare_to_double(double value) const
+{
+    VERIFY(!isnan(value));
+
+    if (isinf(value)) {
+        bool is_positive_infinity = __builtin_isinf_sign(value) > 0;
+        return is_positive_infinity ? CompareResult::DoubleGreaterThanBigInt : CompareResult::DoubleLessThanBigInt;
+    }
+
+    bool value_is_negative = value < 0;
+
+    if (value_is_negative)
+        return CompareResult::DoubleLessThanBigInt;
+
+    // Value is zero.
+    if (value == 0.0) {
+        VERIFY(!value_is_negative);
+        // Either we are also zero or value is certainly less than us.
+        return is_zero() ? CompareResult::DoubleEqualsBigInt : CompareResult::DoubleLessThanBigInt;
+    }
+
+    // If value is not zero but we are, value must be greater.
+    if (is_zero())
+        return CompareResult::DoubleGreaterThanBigInt;
+
+    FloatExtractor<double> extractor;
+    extractor.d = value;
+
+    // Value cannot be negative at this point.
+    VERIFY(extractor.sign == 0);
+    // Exponent cannot be all set, as then we must be NaN or infinity.
+    VERIFY(extractor.exponent != (1 << extractor.exponent_bits) - 1);
+
+    i32 real_exponent = extractor.exponent - extractor.exponent_bias;
+    if (real_exponent < 0) {
+        // value is less than 1, and we cannot be zero so value must be less.
+        return CompareResult::DoubleLessThanBigInt;
+    }
+
+    u64 bigint_bits_needed = one_based_index_of_highest_set_bit();
+    VERIFY(bigint_bits_needed > 0);
+
+    // Double value is `-1^sign (1.mantissa) * 2^(exponent - bias)` so we need
+    // `exponent - bias + 1` bit to represent doubles value,
+    // for example `exponent - bias` = 3, sign = 0 and mantissa = 0 we get
+    // `-1^0 * 2^3 * 1 = 8` which needs 4 bits to store 8 (0b1000).
+    u32 double_bits_needed = real_exponent + 1;
+
+    // If we need more bits to represent us, we must be of greater value.
+    if (bigint_bits_needed > double_bits_needed)
+        return CompareResult::DoubleLessThanBigInt;
+    // If we need less bits to represent us, we must be of less value.
+    if (bigint_bits_needed < double_bits_needed)
+        return CompareResult::DoubleGreaterThanBigInt;
+
+    u64 mantissa_bits = extractor.mantissa;
+
+    // We add the bit which represents the 1. of the double value calculation.
+    constexpr u64 mantissa_extended_bit = 1ull << extractor.mantissa_bits;
+
+    mantissa_bits |= mantissa_extended_bit;
+
+    // Now we shift value to the left virtually, with `exponent - bias` steps
+    // we then pretend both it and the big int are extended with virtual zeros.
+    auto next_bigint_word = (BITS_IN_WORD - 1 + bigint_bits_needed) / BITS_IN_WORD;
+
+    VERIFY(next_bigint_word == trimmed_length());
+
+    auto msb_in_top_word_index = (bigint_bits_needed - 1) % BITS_IN_WORD;
+    VERIFY(msb_in_top_word_index == (BITS_IN_WORD - count_leading_zeroes(words()[next_bigint_word - 1]) - 1));
+
+    // We will keep the bits which are still valid in the mantissa at the top of mantissa bits.
+    mantissa_bits <<= 64 - (extractor.mantissa_bits + 1);
+
+    auto bits_left_in_mantissa = static_cast<size_t>(extractor.mantissa_bits) + 1;
+
+    auto get_next_value_bits = [&](size_t num_bits) -> Word {
+        VERIFY(num_bits < 63);
+        VERIFY(bits_left_in_mantissa > 0);
+        if (num_bits > bits_left_in_mantissa)
+            num_bits = bits_left_in_mantissa;
+
+        bits_left_in_mantissa -= num_bits;
+
+        u64 extracted_bits = mantissa_bits & (((1ull << num_bits) - 1) << (64 - num_bits));
+        // Now shift the bits down to put the most significant bit on the num_bits position
+        // this means the rest will be "virtual" zeros.
+        extracted_bits >>= 32;
+
+        // Now shift away the used bits and fit the result into a Word.
+        mantissa_bits <<= num_bits;
+
+        VERIFY(extracted_bits <= NumericLimits<Word>::max());
+        return static_cast<Word>(extracted_bits);
+    };
+
+    auto bits_in_next_bigint_word = msb_in_top_word_index + 1;
+
+    while (next_bigint_word > 0 && bits_left_in_mantissa > 0) {
+        Word bigint_word = words()[next_bigint_word - 1];
+        Word double_word = get_next_value_bits(bits_in_next_bigint_word);
+
+        // For the first bit we have to align it with the top bit of bigint
+        // and for all the other cases bits_in_next_bigint_word is 32 so this does nothing.
+        double_word >>= 32 - bits_in_next_bigint_word;
+
+        if (bigint_word < double_word)
+            return CompareResult::DoubleGreaterThanBigInt;
+
+        if (bigint_word > double_word)
+            return CompareResult::DoubleLessThanBigInt;
+
+        --next_bigint_word;
+        bits_in_next_bigint_word = BITS_IN_WORD;
+    }
+
+    // If there are still bits left in bigint than any non zero bit means it has greater value.
+    if (next_bigint_word > 0) {
+        VERIFY(bits_left_in_mantissa == 0);
+        while (next_bigint_word > 0) {
+            if (words()[next_bigint_word - 1] != 0)
+                return CompareResult::DoubleLessThanBigInt;
+            --next_bigint_word;
+        }
+    } else if (bits_left_in_mantissa > 0) {
+        VERIFY(next_bigint_word == 0);
+        // Similarly if there are still any bits set in the mantissa it has greater value.
+        if (mantissa_bits != 0)
+            return CompareResult::DoubleGreaterThanBigInt;
+    }
+
+    // Otherwise if both don't have bits left or the rest of the bits are zero they are equal.
+    return CompareResult::DoubleEqualsBigInt;
 }
 
 }

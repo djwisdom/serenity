@@ -210,11 +210,6 @@ static CodePointRange parse_code_point_range(StringView list)
     return code_point_range;
 }
 
-// gcc-11, gcc-12 have a codegen bug, see #15449.
-#if defined(AK_COMPILER_GCC)
-#    pragma GCC push_options
-#    pragma GCC optimize("O0")
-#endif
 static ErrorOr<void> parse_special_casing(Core::Stream::BufferedFile& file, UnicodeData& unicode_data)
 {
     Array<u8, 1024> buffer;
@@ -228,7 +223,7 @@ static ErrorOr<void> parse_special_casing(Core::Stream::BufferedFile& file, Unic
         if (auto index = line.find('#'); index.has_value())
             line = line.substring_view(0, *index);
 
-        auto segments = line.split_view(';', true);
+        auto segments = line.split_view(';', SplitBehavior::KeepEmpty);
         VERIFY(segments.size() == 5 || segments.size() == 6);
 
         SpecialCasing casing {};
@@ -238,7 +233,7 @@ static ErrorOr<void> parse_special_casing(Core::Stream::BufferedFile& file, Unic
         casing.uppercase_mapping = parse_code_point_list(segments[3]);
 
         if (auto condition = segments[4].trim_whitespace(); !condition.is_empty()) {
-            auto conditions = condition.split_view(' ', true);
+            auto conditions = condition.split_view(' ', SplitBehavior::KeepEmpty);
             VERIFY(conditions.size() == 1 || conditions.size() == 2);
 
             if (conditions.size() == 2) {
@@ -299,7 +294,7 @@ static ErrorOr<void> parse_prop_list(Core::Stream::BufferedFile& file, PropList&
         if (auto index = line.find('#'); index.has_value())
             line = line.substring_view(0, *index);
 
-        auto segments = line.split_view(';', true);
+        auto segments = line.split_view(';', SplitBehavior::KeepEmpty);
         VERIFY(segments.size() == 2);
 
         auto code_point_range = parse_code_point_range(segments[0].trim_whitespace());
@@ -349,7 +344,7 @@ static ErrorOr<void> parse_alias_list(Core::Stream::BufferedFile& file, PropList
         if (current_property != "Binary Properties"sv)
             continue;
 
-        auto segments = line.split_view(';', true);
+        auto segments = line.split_view(';', SplitBehavior::KeepEmpty);
         VERIFY((segments.size() == 2) || (segments.size() == 3));
 
         auto alias = segments[0].trim_whitespace();
@@ -375,7 +370,7 @@ static ErrorOr<void> parse_name_aliases(Core::Stream::BufferedFile& file, Unicod
         if (line.is_empty() || line.starts_with('#'))
             continue;
 
-        auto segments = line.split_view(';', true);
+        auto segments = line.split_view(';', SplitBehavior::KeepEmpty);
         VERIFY(segments.size() == 3);
 
         auto code_point = AK::StringUtils::convert_to_uint_from_hex<u32>(segments[0].trim_whitespace());
@@ -422,7 +417,7 @@ static ErrorOr<void> parse_value_alias_list(Core::Stream::BufferedFile& file, St
         if (auto index = line.find('#'); index.has_value())
             line = line.substring_view(0, *index);
 
-        auto segments = line.split_view(';', true);
+        auto segments = line.split_view(';', SplitBehavior::KeepEmpty);
         auto category = segments[0].trim_whitespace();
 
         if (category != desired_category)
@@ -455,7 +450,7 @@ static ErrorOr<void> parse_normalization_props(Core::Stream::BufferedFile& file,
         if (auto index = line.find('#'); index.has_value())
             line = line.substring_view(0, *index);
 
-        auto segments = line.split_view(';', true);
+        auto segments = line.split_view(';', SplitBehavior::KeepEmpty);
         VERIFY((segments.size() == 2) || (segments.size() == 3));
 
         auto code_point_range = parse_code_point_range(segments[0].trim_whitespace());
@@ -487,7 +482,7 @@ static ErrorOr<void> parse_normalization_props(Core::Stream::BufferedFile& file,
 
 static void add_canonical_code_point_name(CodePointRange range, StringView name, UnicodeData& unicode_data)
 {
-    // https://www.unicode.org/versions/Unicode14.0.0/ch04.pdf#G142981
+    // https://www.unicode.org/versions/Unicode15.0.0/ch04.pdf#G142981
     // FIXME: Implement the NR1 rules for Hangul syllables.
 
     struct CodePointNameFormat {
@@ -496,22 +491,23 @@ static void add_canonical_code_point_name(CodePointRange range, StringView name,
     };
 
     // These code point ranges are the NR2 set of name replacements defined by Table 4-8.
-    constexpr Array<CodePointNameFormat, 15> s_ideographic_replacements { {
+    constexpr Array<CodePointNameFormat, 16> s_ideographic_replacements { {
         { { 0x3400, 0x4DBF }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
-        { { 0x4E00, 0x9FFC }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
+        { { 0x4E00, 0x9FFF }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0xF900, 0xFA6D }, "CJK COMPATIBILITY IDEOGRAPH-{:X}"sv },
         { { 0xFA70, 0xFAD9 }, "CJK COMPATIBILITY IDEOGRAPH-{:X}"sv },
         { { 0x17000, 0x187F7 }, "TANGUT IDEOGRAPH-{:X}"sv },
         { { 0x18B00, 0x18CD5 }, "KHITAN SMALL SCRIPT CHARACTER-{:X}"sv },
         { { 0x18D00, 0x18D08 }, "TANGUT IDEOGRAPH-{:X}"sv },
         { { 0x1B170, 0x1B2FB }, "NUSHU CHARACTER-{:X}"sv },
-        { { 0x20000, 0x2A6DD }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
-        { { 0x2A700, 0x2B734 }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
+        { { 0x20000, 0x2A6DF }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
+        { { 0x2A700, 0x2B739 }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0x2B740, 0x2B81D }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0x2B820, 0x2CEA1 }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0x2CEB0, 0x2EBE0 }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
         { { 0x2F800, 0x2FA1D }, "CJK COMPATIBILITY IDEOGRAPH-{:X}"sv },
         { { 0x30000, 0x3134A }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
+        { { 0x31350, 0x323AF }, "CJK UNIFIED IDEOGRAPH-{:X}"sv },
     } };
 
     auto it = find_if(s_ideographic_replacements.begin(), s_ideographic_replacements.end(),
@@ -583,7 +579,7 @@ static ErrorOr<void> parse_block_display_names(Core::Stream::BufferedFile& file,
         if (line.is_empty() || line.starts_with('#'))
             continue;
 
-        auto segments = line.split_view(';', true);
+        auto segments = line.split_view(';', SplitBehavior::KeepEmpty);
         VERIFY(segments.size() == 2);
 
         auto code_point_range = parse_code_point_range(segments[0].trim_whitespace());
@@ -614,7 +610,7 @@ static ErrorOr<void> parse_unicode_data(Core::Stream::BufferedFile& file, Unicod
         if (line.is_empty())
             continue;
 
-        auto segments = line.split_view(';', true);
+        auto segments = line.split_view(';', SplitBehavior::KeepEmpty);
         VERIFY(segments.size() == 15);
 
         CodePointData data {};
@@ -691,9 +687,6 @@ static ErrorOr<void> parse_unicode_data(Core::Stream::BufferedFile& file, Unicod
 
     return {};
 }
-#if defined(AK_COMPILER_GCC)
-#    pragma GCC pop_options
-#endif
 
 static ErrorOr<void> generate_unicode_data_header(Core::Stream::BufferedFile& file, UnicodeData& unicode_data)
 {
@@ -773,6 +766,13 @@ struct SpecialCasing {
 
     Locale locale { Locale::None };
     Condition condition { Condition::None };
+};
+
+struct CodePointDecompositionRaw {
+    u32 code_point { 0 };
+    CompatibilityFormattingTag tag { CompatibilityFormattingTag::Canonical };
+    size_t decomposition_index { 0 };
+    size_t decomposition_count { 0 };
 };
 
 struct CodePointDecomposition {
@@ -954,7 +954,7 @@ static constexpr Array<@mapping_type@, @size@> s_@name@_mappings { {
                 generator.set("tag", mapping->tag);
                 generator.set("start", String::number(mapping->decomposition_index));
                 generator.set("size", String::number(mapping->decomposition_size));
-                generator.append(", CompatibilityFormattingTag::@tag@, Span<u32 const> { s_decomposition_mappings_data.data() + @start@, @size@ } },");
+                generator.append(", CompatibilityFormattingTag::@tag@, @start@, @size@ },");
             } else {
                 append_list_and_size(data.special_casing_indices, "&s_special_casing[{}]"sv);
                 generator.append(" },");
@@ -981,7 +981,7 @@ static constexpr Array<@mapping_type@, @size@> s_@name@_mappings { {
     append_code_point_mappings("special_case"sv, "SpecialCaseMapping"sv, unicode_data.code_points_with_special_casing, [](auto const& data) { return data.special_casing_indices; });
     append_code_point_mappings("abbreviation"sv, "CodePointAbbreviation"sv, unicode_data.code_point_abbreviations.size(), [](auto const& data) { return data.abbreviation; });
 
-    append_code_point_mappings("decomposition"sv, "CodePointDecomposition"sv, unicode_data.code_points_with_decomposition_mapping,
+    append_code_point_mappings("decomposition"sv, "CodePointDecompositionRaw"sv, unicode_data.code_points_with_decomposition_mapping,
         [](auto const& data) {
             return data.decomposition_mapping;
         });
@@ -1160,17 +1160,20 @@ Optional<StringView> code_point_abbreviation(u32 code_point)
     return decode_string(mapping->abbreviation);
 }
 
-Optional<CodePointDecomposition const&> code_point_decomposition(u32 code_point)
+Optional<CodePointDecomposition const> code_point_decomposition(u32 code_point)
 {
-    auto const* mapping = binary_search(s_decomposition_mappings, code_point, nullptr, CodePointComparator<CodePointDecomposition> {});
+    auto const* mapping = binary_search(s_decomposition_mappings, code_point, nullptr, CodePointComparator<CodePointDecompositionRaw> {});
     if (mapping == nullptr)
         return {};
-    return *mapping;
+    return CodePointDecomposition { mapping->code_point, mapping->tag, Span<u32 const> { s_decomposition_mappings_data.data() + mapping->decomposition_index, mapping->decomposition_count } };
 }
 
-Span<CodePointDecomposition const> code_point_decompositions()
+Optional<CodePointDecomposition const> code_point_decomposition_by_index(size_t index)
 {
-    return s_decomposition_mappings;
+    if (index >= s_decomposition_mappings.size())
+        return {};
+    auto const& mapping = s_decomposition_mappings[index];
+    return CodePointDecomposition { mapping.code_point, mapping.tag, Span<u32 const> { s_decomposition_mappings_data.data() + mapping.decomposition_index, mapping.decomposition_count } };
 }
 )~~~");
 

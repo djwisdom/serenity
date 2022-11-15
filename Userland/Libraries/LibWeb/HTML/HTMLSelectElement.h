@@ -25,6 +25,9 @@ public:
 
     JS::GCPtr<HTMLOptionsCollection> const& options();
 
+    size_t length();
+    DOM::Element* item(size_t index);
+    DOM::Element* named_item(FlyString const& name);
     WebIDL::ExceptionOr<void> add(HTMLOptionOrOptGroupElement element, Optional<HTMLElementOrElementIndex> before = {});
 
     int selected_index() const;
@@ -53,10 +56,15 @@ public:
     // https://html.spec.whatwg.org/multipage/forms.html#category-label
     virtual bool is_labelable() const override { return true; }
 
+    String const& type() const;
+
 private:
     HTMLSelectElement(DOM::Document&, DOM::QualifiedName);
 
     virtual void visit_edges(Cell::Visitor&) override;
+
+    // ^DOM::Element
+    virtual i32 default_tab_index_value() const override;
 
     JS::GCPtr<HTMLOptionsCollection> m_options;
 };

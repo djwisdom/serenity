@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,6 +16,7 @@
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Platform/Timer.h>
 #include <WebContent/WebContentClientEndpoint.h>
+#include <WebContent/WebDriverConnection.h>
 
 namespace WebContent {
 
@@ -28,6 +30,8 @@ PageHost::PageHost(ConnectionFromClient& client)
         m_invalidation_rect = {};
     });
 }
+
+PageHost::~PageHost() = default;
 
 void PageHost::set_has_focus(bool has_focus)
 {
@@ -68,6 +72,28 @@ void PageHost::set_preferred_color_scheme(Web::CSS::PreferredColorScheme color_s
 void PageHost::set_is_scripting_enabled(bool is_scripting_enabled)
 {
     page().set_is_scripting_enabled(is_scripting_enabled);
+}
+
+void PageHost::set_is_webdriver_active(bool is_webdriver_active)
+{
+    page().set_is_webdriver_active(is_webdriver_active);
+}
+
+void PageHost::set_window_position(Gfx::IntPoint const& position)
+{
+    page().set_window_position(position);
+}
+
+void PageHost::set_window_size(Gfx::IntSize const& size)
+{
+    page().set_window_size(size);
+}
+
+ErrorOr<void> PageHost::connect_to_webdriver(String const& webdriver_ipc_path)
+{
+    VERIFY(!m_webdriver);
+    m_webdriver = TRY(WebDriverConnection::connect(m_client, *this, webdriver_ipc_path));
+    return {};
 }
 
 Web::Layout::InitialContainingBlock* PageHost::layout_root()
@@ -125,12 +151,11 @@ void PageHost::page_did_layout()
 {
     auto* layout_root = this->layout_root();
     VERIFY(layout_root);
-    Gfx::IntSize content_size;
     if (layout_root->paint_box()->has_overflow())
-        content_size = enclosing_int_rect(layout_root->paint_box()->scrollable_overflow_rect().value()).size();
+        m_content_size = enclosing_int_rect(layout_root->paint_box()->scrollable_overflow_rect().value()).size();
     else
-        content_size = enclosing_int_rect(layout_root->paint_box()->absolute_rect()).size();
-    m_client.async_did_layout(content_size);
+        m_content_size = enclosing_int_rect(layout_root->paint_box()->absolute_rect()).size();
+    m_client.async_did_layout(m_content_size);
 }
 
 void PageHost::page_did_change_title(String const& title)

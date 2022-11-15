@@ -5,6 +5,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/IPv4Address.h>
+#include <AK/IPv6Address.h>
 #include <AK/URLParser.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/URL/URL.h>
@@ -26,7 +28,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<URL>> URL::construct_impl(JS::Realm& realm,
         parsed_base = base;
         // 2. If parsedBase is failure, then throw a TypeError.
         if (!parsed_base->is_valid())
-            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid base URL" };
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid base URL"sv };
     }
     // 3. Let parsedURL be the result of running the basic URL parser on url with parsedBase.
     AK::URL parsed_url;
@@ -36,7 +38,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<URL>> URL::construct_impl(JS::Realm& realm,
         parsed_url = url;
     // 4. If parsedURL is failure, then throw a TypeError.
     if (!parsed_url.is_valid())
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid URL" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid URL"sv };
     // 5. Let query be parsedURL’s query, if that is non-null, and the empty string otherwise.
     auto& query = parsed_url.query().is_null() ? String::empty() : parsed_url.query();
     // 6. Set this’s URL to parsedURL.
@@ -84,7 +86,7 @@ WebIDL::ExceptionOr<void> URL::set_href(String const& href)
     AK::URL parsed_url = href;
     // 2. If parsedURL is failure, then throw a TypeError.
     if (!parsed_url.is_valid())
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid URL" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid URL"sv };
     // 3. Set this’s URL to parsedURL.
     m_url = move(parsed_url);
     // 4. Empty this’s query object’s list.
@@ -305,6 +307,48 @@ void URL::set_hash(String const& hash)
     auto result_url = URLParser::parse(input, nullptr, move(url), URLParser::State::Fragment);
     if (result_url.is_valid())
         m_url = move(result_url);
+}
+
+// https://url.spec.whatwg.org/#concept-url-origin
+HTML::Origin url_origin(AK::URL const& url)
+{
+    // FIXME: We should probably have an extended version of AK::URL for LibWeb instead of standalone functions like this.
+
+    // The origin of a URL url is the origin returned by running these steps, switching on url’s scheme:
+    // "blob"
+    if (url.scheme() == "blob"sv) {
+        // FIXME: Support 'blob://' URLs
+        return HTML::Origin {};
+    }
+
+    // "ftp"
+    // "http"
+    // "https"
+    // "ws"
+    // "wss"
+    if (url.scheme().is_one_of("ftp"sv, "http"sv, "https"sv, "ws"sv, "wss"sv)) {
+        // Return the tuple origin (url’s scheme, url’s host, url’s port, null).
+        return HTML::Origin(url.scheme(), url.host(), url.port().value_or(0));
+    }
+
+    // "file"
+    if (url.scheme() == "file"sv) {
+        // Unfortunate as it is, this is left as an exercise to the reader. When in doubt, return a new opaque origin.
+        // Note: We must return an origin with the `file://' protocol for `file://' iframes to work from `file://' pages.
+        return HTML::Origin(url.scheme(), String(), 0);
+    }
+
+    // Return a new opaque origin.
+    return HTML::Origin {};
+}
+
+// https://url.spec.whatwg.org/#concept-domain
+bool host_is_domain(StringView host)
+{
+    // A domain is a non-empty ASCII string that identifies a realm within a network.
+    return !host.is_empty()
+        && !IPv4Address::from_string(host).has_value()
+        && !IPv6Address::from_string(host).has_value();
 }
 
 }

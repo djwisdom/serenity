@@ -15,24 +15,28 @@
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Platform/FontPlugin.h>
-#include <typeinfo>
 
 namespace Web::Layout {
 
 Node::Node(DOM::Document& document, DOM::Node* node)
-    : m_document(document)
-    , m_dom_node(node)
+    : m_dom_node(node ? *node : document)
+    , m_browsing_context(*document.browsing_context())
+    , m_anonymous(node == nullptr)
 {
-    m_serial_id = m_document->next_layout_node_serial_id({});
+    m_serial_id = document.next_layout_node_serial_id({});
 
-    if (m_dom_node)
-        m_dom_node->set_layout_node({}, this);
+    if (node)
+        node->set_layout_node({}, *this);
 }
 
-Node::~Node()
+Node::~Node() = default;
+
+void Node::visit_edges(Cell::Visitor& visitor)
 {
-    if (m_dom_node && m_dom_node->layout_node() == this)
-        m_dom_node->set_layout_node({}, nullptr);
+    Base::visit_edges(visitor);
+    visitor.visit(m_dom_node);
+    visitor.visit(m_browsing_context);
+    TreeNode::visit_edges(visitor);
 }
 
 // https://www.w3.org/TR/css-display-3/#out-of-flow
@@ -78,15 +82,30 @@ BlockContainer const* Node::containing_block() const
     return first_ancestor_of_type<BlockContainer>();
 }
 
+// https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Positioning/Understanding_z_index/The_stacking_context
 bool Node::establishes_stacking_context() const
 {
+    // NOTE: While MDN is not authoritative, there isn't a single convenient location
+    //       in the CSS specifications where the rules for stacking contexts is described.
+    //       That's why the "spec link" here points to MDN.
+
     if (!has_style())
         return false;
     if (dom_node() == &document().root())
         return true;
     auto position = computed_values().position();
-    if (position == CSS::Position::Absolute || position == CSS::Position::Relative || position == CSS::Position::Fixed || position == CSS::Position::Sticky)
+
+    // Element with a position value absolute or relative and z-index value other than auto.
+    if (position == CSS::Position::Absolute || position == CSS::Position::Relative) {
+        if (computed_values().z_index().has_value()) {
+            return true;
+        }
+    }
+
+    // Element with a position value fixed or sticky.
+    if (position == CSS::Position::Fixed || position == CSS::Position::Sticky)
         return true;
+
     if (!computed_values().transformations().is_empty())
         return true;
 
@@ -98,19 +117,24 @@ bool Node::establishes_stacking_context() const
     if (parent() && parent()->display().is_grid_inside() && computed_values().z_index().has_value())
         return true;
 
+    // https://drafts.fxtf.org/filter-effects-2/#backdrop-filter-operation
+    // A computed value of other than none results in the creation of both a stacking context [CSS21] and a Containing Block for absolute and fixed position descendants,
+    // unless the element it applies to is a document root element in the current browsing context.
+    // Spec Note: This rule works in the same way as for the filter property.
+    if (!computed_values().backdrop_filter().is_none())
+        return true;
+
     return computed_values().opacity() < 1.0f;
 }
 
 HTML::BrowsingContext const& Node::browsing_context() const
 {
-    VERIFY(document().browsing_context());
-    return *document().browsing_context();
+    return *m_browsing_context;
 }
 
 HTML::BrowsingContext& Node::browsing_context()
 {
-    VERIFY(document().browsing_context());
-    return *document().browsing_context();
+    return *m_browsing_context;
 }
 
 InitialContainingBlock const& Node::root() const
@@ -398,6 +422,10 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     if (justify_content.has_value())
         computed_values.set_justify_content(justify_content.value());
 
+    auto align_content = computed_style.align_content();
+    if (align_content.has_value())
+        computed_values.set_align_content(align_content.value());
+
     auto align_items = computed_style.align_items();
     if (align_items.has_value())
         computed_values.set_align_items(align_items.value());
@@ -545,6 +573,9 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
         computed_values.set_stroke_width(CSS::Length::make_px(stroke_width->to_number()));
     else
         computed_values.set_stroke_width(stroke_width->to_length());
+
+    computed_values.set_column_gap(computed_style.size_value(CSS::PropertyID::ColumnGap));
+    computed_values.set_row_gap(computed_style.size_value(CSS::PropertyID::RowGap));
 }
 
 bool Node::is_root_element() const
@@ -554,16 +585,10 @@ bool Node::is_root_element() const
     return is<HTML::HTMLHtmlElement>(*dom_node());
 }
 
-String Node::class_name() const
-{
-    auto const* mangled_name = typeid(*this).name();
-    return demangle({ mangled_name, strlen(mangled_name) });
-}
-
 String Node::debug_description() const
 {
     StringBuilder builder;
-    builder.append(class_name().substring_view(13));
+    builder.append(class_name());
     if (dom_node()) {
         builder.appendff("<{}>", dom_node()->node_name());
         if (dom_node()->is_element()) {
@@ -600,13 +625,13 @@ bool Node::is_inline_block() const
     return display.is_inline_outside() && display.is_flow_root_inside();
 }
 
-NonnullRefPtr<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const
+JS::NonnullGCPtr<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const
 {
-    auto wrapper = adopt_ref(*new BlockContainer(const_cast<DOM::Document&>(document()), nullptr, m_computed_values.clone_inherited_values()));
+    auto wrapper = heap().allocate_without_realm<BlockContainer>(const_cast<DOM::Document&>(document()), nullptr, m_computed_values.clone_inherited_values());
     static_cast<CSS::MutableComputedValues&>(wrapper->m_computed_values).set_display(CSS::Display(CSS::Display::Outside::Block, CSS::Display::Inside::Flow));
     wrapper->m_font = m_font;
     wrapper->m_line_height = m_line_height;
-    return wrapper;
+    return *wrapper;
 }
 
 void Node::set_paintable(RefPtr<Painting::Paintable> paintable)
@@ -621,27 +646,31 @@ RefPtr<Painting::Paintable> Node::create_paintable() const
 
 bool Node::is_anonymous() const
 {
-    return !m_dom_node.ptr();
+    return m_anonymous;
 }
 
 DOM::Node const* Node::dom_node() const
 {
+    if (m_anonymous)
+        return nullptr;
     return m_dom_node.ptr();
 }
 
 DOM::Node* Node::dom_node()
 {
+    if (m_anonymous)
+        return nullptr;
     return m_dom_node.ptr();
 }
 
 DOM::Document& Node::document()
 {
-    return *m_document;
+    return m_dom_node->document();
 }
 
 DOM::Document const& Node::document() const
 {
-    return *m_document;
+    return m_dom_node->document();
 }
 
 }

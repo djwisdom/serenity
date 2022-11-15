@@ -5,22 +5,34 @@
  */
 
 #include <AK/Array.h>
+#include <LibJS/Heap/Heap.h>
+#include <LibJS/Runtime/Realm.h>
+#include <LibWeb/Fetch/Fetching/PendingResponse.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/URL/URL.h>
 
 namespace Web::Fetch::Infrastructure {
 
-Request::Request()
-    : m_header_list(make_ref_counted<HeaderList>())
+Request::Request(JS::NonnullGCPtr<HeaderList> header_list)
+    : m_header_list(header_list)
 {
 }
 
-NonnullRefPtr<Request> Request::create()
+void Request::visit_edges(JS::Cell::Visitor& visitor)
 {
-    return adopt_ref(*new Request());
+    Base::visit_edges(visitor);
+    visitor.visit(m_header_list);
+    for (auto pending_response : m_pending_responses)
+        visitor.visit(pending_response);
+}
+
+JS::NonnullGCPtr<Request> Request::create(JS::VM& vm)
+{
+    return { *vm.heap().allocate_without_realm<Request>(HeaderList::create(vm)) };
 }
 
 // https://fetch.spec.whatwg.org/#concept-request-url
-AK::URL const& Request::url() const
+AK::URL& Request::url()
 {
     // A request has an associated URL (a URL).
     // NOTE: Implementations are encouraged to make this a pointer to the first URL in request’s URL list. It is provided as a distinct field solely for the convenience of other standards hooking into Fetch.
@@ -28,12 +40,24 @@ AK::URL const& Request::url() const
     return m_url_list.first();
 }
 
+// https://fetch.spec.whatwg.org/#concept-request-url
+AK::URL const& Request::url() const
+{
+    return const_cast<Request&>(*this).url();
+}
+
 // https://fetch.spec.whatwg.org/#concept-request-current-url
-AK::URL const& Request::current_url()
+AK::URL& Request::current_url()
 {
     // A request has an associated current URL. It is a pointer to the last URL in request’s URL list.
     VERIFY(!m_url_list.is_empty());
     return m_url_list.last();
+}
+
+// https://fetch.spec.whatwg.org/#concept-request-current-url
+AK::URL const& Request::current_url() const
+{
+    return const_cast<Request&>(*this).current_url();
 }
 
 void Request::set_url(AK::URL url)
@@ -138,9 +162,11 @@ bool Request::has_redirect_tainted_origin() const
         }
 
         // 2. If url’s origin is not same origin with lastURL’s origin and request’s origin is not same origin with lastURL’s origin, then return true.
-        // FIXME: Actually use the given origins once we have https://url.spec.whatwg.org/#concept-url-origin.
-        if (!HTML::Origin().is_same_origin(HTML::Origin()) && HTML::Origin().is_same_origin(HTML::Origin()))
+        auto const* request_origin = m_origin.get_pointer<HTML::Origin>();
+        if (!URL::url_origin(url).is_same_origin(URL::url_origin(*last_url))
+            && (request_origin == nullptr || !request_origin->is_same_origin(URL::url_origin(*last_url)))) {
             return true;
+        }
 
         // 3. Set lastURL to url.
         last_url = url;
@@ -169,12 +195,12 @@ ErrorOr<ByteBuffer> Request::byte_serialize_origin() const
 }
 
 // https://fetch.spec.whatwg.org/#concept-request-clone
-WebIDL::ExceptionOr<NonnullRefPtr<Request>> Request::clone() const
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::clone(JS::VM& vm) const
 {
     // To clone a request request, run these steps:
 
     // 1. Let newRequest be a copy of request, except for its body.
-    auto new_request = Infrastructure::Request::create();
+    auto new_request = Infrastructure::Request::create(vm);
     new_request->set_method(m_method);
     new_request->set_local_urls_only(m_local_urls_only);
     for (auto const& header : *m_header_list)
@@ -223,7 +249,7 @@ WebIDL::ExceptionOr<NonnullRefPtr<Request>> Request::clone() const
 }
 
 // https://fetch.spec.whatwg.org/#concept-request-add-range-header
-ErrorOr<void> Request::add_range_reader(u64 first, Optional<u64> const& last)
+ErrorOr<void> Request::add_range_header(u64 first, Optional<u64> const& last)
 {
     // To add a range header to a request request, with an integer first, and an optional integer last, run these steps:
 
@@ -231,7 +257,7 @@ ErrorOr<void> Request::add_range_reader(u64 first, Optional<u64> const& last)
     VERIFY(!last.has_value() || first <= last.value());
 
     // 2. Let rangeValue be `bytes=`.
-    auto range_value = TRY(ByteBuffer::copy("bytes"sv.bytes()));
+    auto range_value = MUST(ByteBuffer::copy("bytes"sv.bytes()));
 
     // 3. Serialize and isomorphic encode first, and append the result to rangeValue.
     TRY(range_value.try_append(String::number(first).bytes()));
@@ -245,10 +271,70 @@ ErrorOr<void> Request::add_range_reader(u64 first, Optional<u64> const& last)
 
     // 6. Append (`Range`, rangeValue) to request’s header list.
     auto header = Header {
-        .name = TRY(ByteBuffer::copy("Range"sv.bytes())),
+        .name = MUST(ByteBuffer::copy("Range"sv.bytes())),
         .value = move(range_value),
     };
     TRY(m_header_list->append(move(header)));
+
+    return {};
+}
+
+// https://fetch.spec.whatwg.org/#append-a-request-origin-header
+ErrorOr<void> Request::add_origin_header()
+{
+    // 1. Let serializedOrigin be the result of byte-serializing a request origin with request.
+    auto serialized_origin = TRY(byte_serialize_origin());
+
+    // 2. If request’s response tainting is "cors" or request’s mode is "websocket", then append (`Origin`, serializedOrigin) to request’s header list.
+    if (m_response_tainting == ResponseTainting::CORS || m_mode == Mode::WebSocket) {
+        auto header = Header {
+            .name = MUST(ByteBuffer::copy("Origin"sv.bytes())),
+            .value = move(serialized_origin),
+        };
+        TRY(m_header_list->append(move(header)));
+    }
+    // 3. Otherwise, if request’s method is neither `GET` nor `HEAD`, then:
+    else if (!StringView { m_method }.is_one_of("GET"sv, "HEAD"sv)) {
+        // 1. If request’s mode is not "cors", then switch on request’s referrer policy:
+        if (m_mode != Mode::CORS && m_referrer_policy.has_value()) {
+            switch (*m_referrer_policy) {
+            // -> "no-referrer"
+            case ReferrerPolicy::ReferrerPolicy::NoReferrer:
+                // Set serializedOrigin to `null`.
+                serialized_origin = MUST(ByteBuffer::copy("null"sv.bytes()));
+                break;
+            // -> "no-referrer-when-downgrade"
+            // -> "strict-origin"
+            // -> "strict-origin-when-cross-origin"
+            case ReferrerPolicy::ReferrerPolicy::NoReferrerWhenDowngrade:
+            case ReferrerPolicy::ReferrerPolicy::StrictOrigin:
+            case ReferrerPolicy::ReferrerPolicy::StrictOriginWhenCrossOrigin:
+                // If request’s origin is a tuple origin, its scheme is "https", and request’s current URL’s scheme is
+                // not "https", then set serializedOrigin to `null`.
+                if (m_origin.has<HTML::Origin>() && m_origin.get<HTML::Origin>().scheme() == "https"sv && current_url().scheme() != "https"sv)
+                    serialized_origin = MUST(ByteBuffer::copy("null"sv.bytes()));
+                break;
+            // -> "same-origin"
+            case ReferrerPolicy::ReferrerPolicy::SameOrigin:
+                // If request’s origin is not same origin with request’s current URL’s origin, then set serializedOrigin
+                // to `null`.
+                if (m_origin.has<HTML::Origin>() && !m_origin.get<HTML::Origin>().is_same_origin(URL::url_origin(current_url())))
+                    serialized_origin = MUST(ByteBuffer::copy("null"sv.bytes()));
+                break;
+            // -> Otherwise
+            default:
+                // Do nothing.
+                break;
+            }
+        }
+
+        // 2. Append (`Origin`, serializedOrigin) to request’s header list.
+        auto header = Header {
+            .name = MUST(ByteBuffer::copy("Origin"sv.bytes())),
+            .value = move(serialized_origin),
+        };
+        TRY(m_header_list->append(move(header)));
+    }
 
     return {};
 }

@@ -342,6 +342,10 @@
 #cmakedefine01 PDF_DEBUG
 #endif
 
+#ifndef PLAYBACK_MANAGER_DEBUG
+#cmakedefine01 PLAYBACK_MANAGER_DEBUG
+#endif
+
 #ifndef PNG_DEBUG
 #cmakedefine01 PNG_DEBUG
 #endif
@@ -494,12 +498,20 @@
 #cmakedefine01 WASM_VALIDATOR_DEBUG
 #endif
 
+#ifndef WEBDRIVER_DEBUG
+#cmakedefine01 WEBDRIVER_DEBUG
+#endif
+
 #ifndef WEBGL_CONTEXT_DEBUG
 #cmakedefine01 WEBGL_CONTEXT_DEBUG
 #endif
 
 #ifndef WEBSERVER_DEBUG
 #cmakedefine01 WEBSERVER_DEBUG
+#endif
+
+#ifndef WEB_FETCH_DEBUG
+#cmakedefine01 WEB_FETCH_DEBUG
 #endif
 
 #ifndef WEB_WORKER_DEBUG

@@ -85,9 +85,9 @@ void HTMLImageElement::parse_attribute(FlyString const& name, String const& valu
     }
 }
 
-RefPtr<Layout::Node> HTMLImageElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
+JS::GCPtr<Layout::Node> HTMLImageElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
 {
-    return adopt_ref(*new Layout::ImageBox(document(), *this, move(style), m_image_loader));
+    return heap().allocate_without_realm<Layout::ImageBox>(document(), *this, move(style), m_image_loader);
 }
 
 Gfx::Bitmap const* HTMLImageElement::bitmap() const
@@ -120,7 +120,7 @@ unsigned HTMLImageElement::width() const
 
 void HTMLImageElement::set_width(unsigned width)
 {
-    set_attribute(HTML::AttributeNames::width, String::number(width));
+    MUST(set_attribute(HTML::AttributeNames::width, String::number(width)));
 }
 
 // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-height
@@ -148,7 +148,7 @@ unsigned HTMLImageElement::height() const
 
 void HTMLImageElement::set_height(unsigned height)
 {
-    set_attribute(HTML::AttributeNames::height, String::number(height));
+    MUST(set_attribute(HTML::AttributeNames::height, String::number(height)));
 }
 
 // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-naturalwidth

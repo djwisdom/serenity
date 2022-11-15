@@ -40,7 +40,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::pledge("stdio cpath rpath recvfd sendfd unix"));
     auto app = TRY(GUI::Application::try_create(arguments));
 
-    TRY(Core::System::unveil("/proc/all", "r"));
+    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
@@ -48,7 +48,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto app_icon = GUI::Icon::default_icon("app-magnifier"sv);
 
     // 4px on each side for padding
-    constexpr int window_dimensions = 200 + 4 + 4;
+    constexpr int window_dimensions = 240 + 4 + 4;
     auto window = GUI::Window::construct();
     window->set_title("Magnifier");
     window->resize(window_dimensions, window_dimensions);
@@ -107,6 +107,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             magnifier->pause_capture(action.is_checked());
         });
 
+    auto always_on_top_action = GUI::Action::create_checkable(
+        "&Always on Top", [&](auto& action) {
+            window->set_always_on_top(action.is_checked());
+        });
+
     size_action_group->add_action(two_x_action);
     size_action_group->add_action(four_x_action);
     size_action_group->add_action(eight_x_action);
@@ -119,7 +124,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     two_x_action->set_checked(true);
 
     TRY(view_menu->try_add_separator());
+    TRY(view_menu->try_add_action(always_on_top_action));
     TRY(view_menu->try_add_action(pause_action));
+    always_on_top_action->set_checked(true);
 
     auto timeline_menu = TRY(window->try_add_menu("&Timeline"));
     auto previous_frame_action = GUI::Action::create(
@@ -199,6 +206,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(accessibility_menu->try_add_action(achromatomaly_accessibility_action));
 
     auto help_menu = TRY(window->try_add_menu("&Help"));
+    help_menu->add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu->add_action(GUI::CommonActions::make_about_action("Magnifier", app_icon, window));
 
     window->show();
