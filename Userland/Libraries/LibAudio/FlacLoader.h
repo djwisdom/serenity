@@ -48,10 +48,8 @@ ALWAYS_INLINE ErrorOr<i32> decode_unsigned_exp_golomb(u8 order, BigEndianInputBi
 class FlacLoaderPlugin : public LoaderPlugin {
 public:
     explicit FlacLoaderPlugin(StringView path);
-    explicit FlacLoaderPlugin(Bytes& buffer);
-    ~FlacLoaderPlugin()
-    {
-    }
+    explicit FlacLoaderPlugin(Bytes buffer);
+    virtual ~FlacLoaderPlugin() override = default;
 
     virtual MaybeLoaderError initialize() override;
 
@@ -66,7 +64,6 @@ public:
     virtual u16 num_channels() override { return m_num_channels; }
     virtual String format_name() override { return "FLAC (.flac)"; }
     virtual PcmSampleFormat pcm_format() override { return m_sample_format; }
-    virtual RefPtr<Core::File> file() override { return m_file; }
 
     bool is_fixed_blocksize_stream() const { return m_min_block_size == m_max_block_size; }
     bool sample_count_unknown() const { return m_total_samples == 0; }
@@ -90,14 +87,12 @@ private:
     // decode a single rice partition that has its own rice parameter
     ALWAYS_INLINE ErrorOr<Vector<i32>, LoaderError> decode_rice_partition(u8 partition_type, u32 partitions, u32 partition_index, FlacSubframeHeader& subframe, BigEndianInputBitStream& bit_input);
     MaybeLoaderError load_seektable(FlacRawMetadataBlock&);
+    MaybeLoaderError load_picture(FlacRawMetadataBlock&);
 
     // Converters for special coding used in frame headers
     ALWAYS_INLINE ErrorOr<u32, LoaderError> convert_sample_count_code(u8 sample_count_code);
     ALWAYS_INLINE ErrorOr<u32, LoaderError> convert_sample_rate_code(u8 sample_rate_code);
     ALWAYS_INLINE ErrorOr<PcmSampleFormat, LoaderError> convert_bit_depth_code(u8 bit_depth_code);
-
-    RefPtr<Core::File> m_file;
-    Optional<LoaderError> m_error {};
 
     // Data obtained directly from the FLAC metadata: many values have specific bit counts
     u32 m_sample_rate { 0 };         // 20 bit
@@ -115,7 +110,6 @@ private:
 
     // keep track of the start of the data in the FLAC stream to seek back more easily
     u64 m_data_start_location { 0 };
-    OwnPtr<Core::Stream::SeekableStream> m_stream;
     Optional<FlacFrameHeader> m_current_frame;
     // Whatever the last get_more_samples() call couldn't return gets stored here.
     Vector<Sample, FLAC_BUFFER_SIZE> m_unread_data;

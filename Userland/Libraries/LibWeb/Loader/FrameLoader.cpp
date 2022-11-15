@@ -11,6 +11,7 @@
 #include <LibGemini/Document.h>
 #include <LibGfx/ImageDecoder.h>
 #include <LibMarkdown/Document.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ElementFactory.h>
@@ -103,23 +104,23 @@ static bool build_markdown_document(DOM::Document& document, ByteBuffer const& d
 static bool build_text_document(DOM::Document& document, ByteBuffer const& data)
 {
     auto html_element = document.create_element("html").release_value();
-    document.append_child(html_element);
+    MUST(document.append_child(html_element));
 
     auto head_element = document.create_element("head").release_value();
-    html_element->append_child(head_element);
+    MUST(html_element->append_child(head_element));
     auto title_element = document.create_element("title").release_value();
-    head_element->append_child(title_element);
+    MUST(head_element->append_child(title_element));
 
     auto title_text = document.create_text_node(document.url().basename());
-    title_element->append_child(title_text);
+    MUST(title_element->append_child(title_text));
 
     auto body_element = document.create_element("body").release_value();
-    html_element->append_child(body_element);
+    MUST(html_element->append_child(body_element));
 
     auto pre_element = document.create_element("pre").release_value();
-    body_element->append_child(pre_element);
+    MUST(body_element->append_child(pre_element));
 
-    pre_element->append_child(document.create_text_node(String::copy(data)));
+    MUST(pre_element->append_child(document.create_text_node(String::copy(data))));
     return true;
 }
 
@@ -134,23 +135,23 @@ static bool build_image_document(DOM::Document& document, ByteBuffer const& data
         return false;
 
     auto html_element = document.create_element("html").release_value();
-    document.append_child(html_element);
+    MUST(document.append_child(html_element));
 
     auto head_element = document.create_element("head").release_value();
-    html_element->append_child(head_element);
+    MUST(html_element->append_child(head_element));
     auto title_element = document.create_element("title").release_value();
-    head_element->append_child(title_element);
+    MUST(head_element->append_child(title_element));
 
     auto basename = LexicalPath::basename(document.url().path());
     auto title_text = document.heap().allocate<DOM::Text>(document.realm(), document, String::formatted("{} [{}x{}]", basename, bitmap->width(), bitmap->height()));
-    title_element->append_child(*title_text);
+    MUST(title_element->append_child(*title_text));
 
     auto body_element = document.create_element("body").release_value();
-    html_element->append_child(body_element);
+    MUST(html_element->append_child(body_element));
 
     auto image_element = document.create_element("img").release_value();
-    image_element->set_attribute(HTML::AttributeNames::src, document.url().to_string());
-    body_element->append_child(image_element);
+    MUST(image_element->set_attribute(HTML::AttributeNames::src, document.url().to_string()));
+    MUST(body_element->append_child(image_element));
 
     return true;
 }
@@ -229,7 +230,6 @@ bool FrameLoader::load(LoadRequest& request, Type type)
     //              -> "frame"
     //              -> "iframe"
     //                   `text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`
-    // FIXME: This should be case-insensitive.
     if (!request.headers().contains("Accept"))
         request.set_header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 
@@ -299,12 +299,13 @@ bool FrameLoader::load(const AK::URL& url, Type type)
 
 void FrameLoader::load_html(StringView html, const AK::URL& url)
 {
-    auto response = Fetch::Infrastructure::Response::create();
+    auto& vm = Bindings::main_thread_vm();
+    auto response = Fetch::Infrastructure::Response::create(vm);
     response->url_list().append(url);
     HTML::NavigationParams navigation_params {
         .id = {},
         .request = nullptr,
-        .response = move(response),
+        .response = response,
         .origin = HTML::Origin {},
         .policy_container = HTML::PolicyContainer {},
         .final_sandboxing_flag_set = HTML::SandboxingFlagSet {},
@@ -419,15 +420,16 @@ void FrameLoader::resource_did_load()
     // FIXME: Pass incumbentNavigationOrigin
     auto response_origin = HTML::determine_the_origin(browsing_context(), url, final_sandboxing_flag_set, {});
 
-    auto response = Fetch::Infrastructure::Response::create();
+    auto& vm = Bindings::main_thread_vm();
+    auto response = Fetch::Infrastructure::Response::create(vm);
     response->url_list().append(url);
     HTML::NavigationParams navigation_params {
         .id = {},
         .request = nullptr,
-        .response = move(response),
+        .response = response,
         .origin = move(response_origin),
         .policy_container = HTML::PolicyContainer {},
-        .final_sandboxing_flag_set = move(final_sandboxing_flag_set),
+        .final_sandboxing_flag_set = final_sandboxing_flag_set,
         .cross_origin_opener_policy = HTML::CrossOriginOpenerPolicy {},
         .coop_enforcement_result = HTML::CrossOriginOpenerPolicyEnforcementResult {},
         .reserved_environment = {},

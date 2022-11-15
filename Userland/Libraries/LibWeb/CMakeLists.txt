@@ -3,6 +3,7 @@ include(libweb_generators)
 set(SOURCES
     Bindings/AudioConstructor.cpp
     Bindings/CSSNamespace.cpp
+    Bindings/FetchMethod.cpp
     Bindings/HostDefined.cpp
     Bindings/ImageConstructor.cpp
     Bindings/Intrinsics.cpp
@@ -10,8 +11,6 @@ set(SOURCES
     Bindings/LocationConstructor.cpp
     Bindings/LocationObject.cpp
     Bindings/MainThreadVM.cpp
-    Bindings/NavigatorConstructor.cpp
-    Bindings/NavigatorObject.cpp
     Bindings/OptionConstructor.cpp
     Bindings/PlatformObject.cpp
     Bindings/WindowConstructor.cpp
@@ -68,6 +67,7 @@ set(SOURCES
     CSS/Supports.cpp
     CSS/SyntaxHighlighter/SyntaxHighlighter.cpp
     CSS/Time.cpp
+    Cookie/Cookie.cpp
     Cookie/ParsedCookie.cpp
     DOM/AbortController.cpp
     DOM/AbortSignal.cpp
@@ -123,8 +123,18 @@ set(SOURCES
     Fetch/Body.cpp
     Fetch/BodyInit.cpp
     Fetch/Enums.cpp
+    Fetch/Fetching/Checks.cpp
+    Fetch/Fetching/Fetching.cpp
+    Fetch/Fetching/PendingResponse.cpp
+    Fetch/Fetching/RefCountedFlag.cpp
+    Fetch/FetchMethod.cpp
     Fetch/Headers.cpp
     Fetch/HeadersIterator.cpp
+    Fetch/Infrastructure/ConnectionTimingInfo.cpp
+    Fetch/Infrastructure/FetchAlgorithms.cpp
+    Fetch/Infrastructure/FetchController.cpp
+    Fetch/Infrastructure/FetchParams.cpp
+    Fetch/Infrastructure/FetchTimingInfo.cpp
     Fetch/Infrastructure/HTTP.cpp
     Fetch/Infrastructure/HTTP/Bodies.cpp
     Fetch/Infrastructure/HTTP/Headers.cpp
@@ -132,6 +142,10 @@ set(SOURCES
     Fetch/Infrastructure/HTTP/Requests.cpp
     Fetch/Infrastructure/HTTP/Responses.cpp
     Fetch/Infrastructure/HTTP/Statuses.cpp
+    Fetch/Infrastructure/MimeTypeBlocking.cpp
+    Fetch/Infrastructure/NoSniffBlocking.cpp
+    Fetch/Infrastructure/PortBlocking.cpp
+    Fetch/Infrastructure/Task.cpp
     Fetch/Infrastructure/URL.cpp
     Fetch/Request.cpp
     Fetch/Response.cpp
@@ -164,6 +178,7 @@ set(SOURCES
     HTML/EventLoop/Task.cpp
     HTML/EventLoop/TaskQueue.cpp
     HTML/EventNames.cpp
+    HTML/Focus.cpp
     HTML/FormAssociatedElement.cpp
     HTML/GlobalEventHandlers.cpp
     HTML/History.cpp
@@ -245,6 +260,8 @@ set(SOURCES
     HTML/MessageChannel.cpp
     HTML/MessageEvent.cpp
     HTML/MessagePort.cpp
+    HTML/Navigator.cpp
+    HTML/NavigatorID.cpp
     HTML/PageTransitionEvent.cpp
     HTML/Parser/Entities.cpp
     HTML/Parser/HTMLEncodingDetection.cpp
@@ -258,6 +275,9 @@ set(SOURCES
     HTML/Scripting/ClassicScript.cpp
     HTML/Scripting/Environments.cpp
     HTML/Scripting/ExceptionReporter.cpp
+    HTML/Scripting/Fetching.cpp
+    HTML/Scripting/ModuleMap.cpp
+    HTML/Scripting/ModuleScript.cpp
     HTML/Scripting/Script.cpp
     HTML/Scripting/WindowEnvironmentSettingsObject.cpp
     HTML/Storage.cpp
@@ -370,8 +390,10 @@ set(SOURCES
     Platform/ImageCodecPlugin.cpp
     Platform/Timer.cpp
     Platform/TimerSerenity.cpp
+    ReferrerPolicy/AbstractOperations.cpp
     RequestIdleCallback/IdleDeadline.cpp
     ResizeObserver/ResizeObserver.cpp
+    SecureContexts/AbstractOperations.cpp
     Streams/AbstractOperations.cpp
     Streams/ReadableStream.cpp
     SVG/AttributeNames.cpp
@@ -379,7 +401,6 @@ set(SOURCES
     SVG/SVGAnimatedLength.cpp
     SVG/SVGClipPathElement.cpp
     SVG/SVGDefsElement.cpp
-    SVG/SVGElement.cpp
     SVG/SVGElement.cpp
     SVG/SVGGElement.cpp
     SVG/SVGGeometryElement.cpp
@@ -402,6 +423,7 @@ set(SOURCES
     UIEvents/KeyboardEvent.cpp
     UIEvents/MouseEvent.cpp
     UIEvents/UIEvent.cpp
+    UIEvents/WheelEvent.cpp
     URL/URL.cpp
     URL/URLSearchParams.cpp
     URL/URLSearchParamsIterator.cpp
@@ -416,6 +438,13 @@ set(SOURCES
     WebAssembly/WebAssemblyTableConstructor.cpp
     WebAssembly/WebAssemblyTableObject.cpp
     WebAssembly/WebAssemblyTablePrototype.cpp
+    WebDriver/Client.cpp
+    WebDriver/ElementLocationStrategies.cpp
+    WebDriver/Error.cpp
+    WebDriver/ExecuteScript.cpp
+    WebDriver/Response.cpp
+    WebDriver/Screenshot.cpp
+    WebDriver/TimeoutsConfiguration.cpp
     WebGL/WebGLContextAttributes.cpp
     WebGL/WebGLContextEvent.cpp
     WebGL/WebGLRenderingContext.cpp
@@ -448,7 +477,7 @@ set(GENERATED_SOURCES
 serenity_lib(LibWeb web)
 
 # NOTE: We link with LibSoftGPU here instead of lazy loading it via dlopen() so that we do not have to unveil the library and pledge prot_exec.
-target_link_libraries(LibWeb LibCore LibJS LibMarkdown LibGemini LibGL LibGUI LibGfx LibSoftGPU LibTextCodec LibWasm LibXML LibIDL)
+target_link_libraries(LibWeb PRIVATE LibCore LibCrypto LibJS LibMarkdown LibHTTP LibGemini LibGL LibGUI LibGfx LibIPC LibLocale LibRegex LibSoftGPU LibSyntax LibTextCodec LibUnicode LibWasm LibXML LibIDL)
 link_with_locale_data(LibWeb)
 
 generate_js_bindings(LibWeb)

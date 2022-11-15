@@ -1,12 +1,19 @@
 #include <AK/URL.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/ShareableBitmap.h>
+#include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/Cookie/ParsedCookie.h>
+
+// FIXME: This isn't used here, but the generated IPC fails to compile without this include.
+#include <LibWeb/WebDriver/Response.h>
 
 endpoint WebContentClient
 {
     did_start_loading(URL url) =|
     did_finish_loading(URL url) =|
+    did_request_navigate_back() =|
+    did_request_navigate_forward() =|
+    did_request_refresh() =|
     did_paint(Gfx::IntRect content_rect, i32 bitmap_id) =|
     did_invalidate_content_rect(Gfx::IntRect content_rect) =|
     did_change_selection() =|
@@ -32,9 +39,18 @@ endpoint WebContentClient
     did_get_dom_tree(String dom_tree) =|
     did_get_dom_node_properties(i32 node_id, String specified_style, String computed_style, String custom_properties, String node_box_sizing_json) =|
     did_change_favicon(Gfx::ShareableBitmap favicon) =|
+    did_request_all_cookies(URL url) => (Vector<Web::Cookie::Cookie> cookies)
+    did_request_named_cookie(URL url, String name) => (Optional<Web::Cookie::Cookie> cookie)
     did_request_cookie(URL url, u8 source) => (String cookie)
     did_set_cookie(URL url, Web::Cookie::ParsedCookie cookie, u8 source) =|
+    did_update_cookie(URL url, Web::Cookie::Cookie cookie) =|
     did_update_resource_count(i32 count_waiting) =|
+    did_request_restore_window() =|
+    did_request_reposition_window(Gfx::IntPoint position) => (Gfx::IntPoint window_position)
+    did_request_resize_window(Gfx::IntSize size) => (Gfx::IntSize window_size)
+    did_request_maximize_window() => (Gfx::IntRect window_rect)
+    did_request_minimize_window() => (Gfx::IntRect window_rect)
+    did_request_fullscreen_window() => (Gfx::IntRect window_rect)
     did_request_file(String path, i32 request_id) =|
 
     did_output_js_console_message(i32 message_index) =|

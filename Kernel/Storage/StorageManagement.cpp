@@ -20,7 +20,8 @@
 #include <Kernel/CommandLine.h>
 #include <Kernel/Devices/BlockDevice.h>
 #include <Kernel/Devices/DeviceManagement.h>
-#include <Kernel/FileSystem/Ext2FileSystem.h>
+#include <Kernel/FileSystem/Ext2FS/FileSystem.h>
+#include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Panic.h>
 #include <Kernel/Storage/ATA/AHCI/Controller.h>
 #include <Kernel/Storage/ATA/GenericIDE/Controller.h>
@@ -101,11 +102,16 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_pci_controllers(bool force_pi
                 }
             }
 
-#if ARCH(I386) || ARCH(X86_64)
             auto subclass_code = static_cast<SubclassID>(device_identifier.subclass_code().value());
+#if ARCH(I386) || ARCH(X86_64)
             if (subclass_code == SubclassID::IDEController && kernel_command_line().is_ide_enabled()) {
                 m_controllers.append(PCIIDELegacyModeController::initialize(device_identifier, force_pio));
             }
+#elif ARCH(AARCH64)
+            (void)force_pio;
+            TODO_AARCH64();
+#else
+#    error Unknown architecture
 #endif
 
             if (subclass_code == SubclassID::SATAController
@@ -212,7 +218,7 @@ UNMAP_AFTER_INIT Array<unsigned, 3> StorageManagement::extract_boot_device_addre
     auto parameters_view = m_boot_argument.substring_view(device_prefix.length()).find_first_split_view(';');
     size_t parts_count = 0;
     bool parse_failure = false;
-    parameters_view.for_each_split_view(':', false, [&](StringView parameter_view) {
+    parameters_view.for_each_split_view(':', SplitBehavior::Nothing, [&](StringView parameter_view) {
         if (parse_failure)
             return;
         if (parts_count > 2)

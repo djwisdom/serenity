@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Hunter Salyer <thefalsehonesty@gmail.com>
+ * Copyright (c) 2022, Gregory Bertilson <zaggy1024@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,6 +8,7 @@
 #pragma once
 
 #include "Enums.h"
+#include "MotionVector.h"
 #include "Symbols.h"
 
 namespace Video::VP9 {
@@ -105,15 +107,15 @@ static constexpr int partition_tree[6] = {
 static constexpr int cols_partition_tree[2] = { -PartitionHorizontal, -PartitionSplit };
 static constexpr int rows_partition_tree[2] = { -PartitionVertical, -PartitionSplit };
 static constexpr int intra_mode_tree[18] = {
-    -DcPred, 2,
-    -TmPred, 4,
-    -VPred, 6,
+    -to_underlying(PredictionMode::DcPred), 2,
+    -to_underlying(PredictionMode::TmPred), 4,
+    -to_underlying(PredictionMode::VPred), 6,
     8, 12,
-    -HPred, 10,
-    -D135Pred, -D117Pred,
-    -D45Pred, 14,
-    -D63Pred, 16,
-    -D153Pred, -D207Pred
+    -to_underlying(PredictionMode::HPred), 10,
+    -to_underlying(PredictionMode::D135Pred), -to_underlying(PredictionMode::D117Pred),
+    -to_underlying(PredictionMode::D45Pred), 14,
+    -to_underlying(PredictionMode::D63Pred), 16,
+    -to_underlying(PredictionMode::D153Pred), -to_underlying(PredictionMode::D207Pred)
 };
 static constexpr int segment_tree[14] = {
     2, 4, 6, 8, 10, 12,
@@ -131,9 +133,9 @@ static constexpr int tx_size_16_tree[4] = {
 };
 static constexpr int tx_size_8_tree[2] = { -TX_4x4, -TX_8x8 };
 static constexpr int inter_mode_tree[6] = {
-    -(ZeroMv - NearestMv), 2,
-    -(NearestMv - NearestMv), 4,
-    -(NearMv - NearestMv), -(NewMv - NearestMv)
+    -to_underlying(PredictionMode::ZeroMv), 2,
+    -to_underlying(PredictionMode::NearestMv), 4,
+    -to_underlying(PredictionMode::NearMv), -to_underlying(PredictionMode::NewMv)
 };
 static constexpr int interp_filter_tree[4] = {
     -EightTap, 2,
@@ -287,6 +289,114 @@ static constexpr u8 cat_probs[7][14] = {
     { 176, 155, 140, 135 },
     { 180, 157, 141, 134, 130 },
     { 254, 254, 254, 252, 249, 243, 230, 196, 177, 153, 140, 133, 130, 129 }
+};
+
+static constexpr MotionVector mv_ref_blocks[BLOCK_SIZES][MVREF_NEIGHBOURS] = {
+    { { -1, 0 }, { 0, -1 }, { -1, -1 }, { -2, 0 }, { 0, -2 }, { -2, -1 }, { -1, -2 }, { -2, -2 } },
+    { { -1, 0 }, { 0, -1 }, { -1, -1 }, { -2, 0 }, { 0, -2 }, { -2, -1 }, { -1, -2 }, { -2, -2 } },
+    { { -1, 0 }, { 0, -1 }, { -1, -1 }, { -2, 0 }, { 0, -2 }, { -2, -1 }, { -1, -2 }, { -2, -2 } },
+    { { -1, 0 }, { 0, -1 }, { -1, -1 }, { -2, 0 }, { 0, -2 }, { -2, -1 }, { -1, -2 }, { -2, -2 } },
+    { { 0, -1 }, { -1, 0 }, { 1, -1 }, { -1, -1 }, { 0, -2 }, { -2, 0 }, { -2, -1 }, { -1, -2 } },
+    { { -1, 0 }, { 0, -1 }, { -1, 1 }, { -1, -1 }, { -2, 0 }, { 0, -2 }, { -1, -2 }, { -2, -1 } },
+    { { -1, 0 }, { 0, -1 }, { -1, 1 }, { 1, -1 }, { -1, -1 }, { -3, 0 }, { 0, -3 }, { -3, -3 } },
+    { { 0, -1 }, { -1, 0 }, { 2, -1 }, { -1, -1 }, { -1, 1 }, { 0, -3 }, { -3, 0 }, { -3, -3 } },
+    { { -1, 0 }, { 0, -1 }, { -1, 2 }, { -1, -1 }, { 1, -1 }, { -3, 0 }, { 0, -3 }, { -3, -3 } },
+    { { -1, 1 }, { 1, -1 }, { -1, 2 }, { 2, -1 }, { -1, -1 }, { -3, 0 }, { 0, -3 }, { -3, -3 } },
+    { { 0, -1 }, { -1, 0 }, { 4, -1 }, { -1, 2 }, { -1, -1 }, { 0, -3 }, { -3, 0 }, { 2, -1 } },
+    { { -1, 0 }, { 0, -1 }, { -1, 4 }, { 2, -1 }, { -1, -1 }, { -3, 0 }, { 0, -3 }, { -1, 2 } },
+    { { -1, 3 }, { 3, -1 }, { -1, 4 }, { 4, -1 }, { -1, -1 }, { -1, 0 }, { 0, -1 }, { -1, 6 } }
+};
+
+static constexpr u8 mode_2_counter[MB_MODE_COUNT] = { 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 0, 0, 3, 1 };
+
+static constexpr u8 counter_to_context[19] = {
+    BOTH_PREDICTED,
+    NEW_PLUS_NON_INTRA,
+    BOTH_NEW,
+    ZERO_PLUS_PREDICTED,
+    NEW_PLUS_NON_INTRA,
+    INVALID_CASE,
+    BOTH_ZERO,
+    INVALID_CASE,
+    INVALID_CASE,
+    INTRA_PLUS_NON_INTRA,
+    INTRA_PLUS_NON_INTRA,
+    INVALID_CASE,
+    INTRA_PLUS_NON_INTRA,
+    INVALID_CASE,
+    INVALID_CASE,
+    INVALID_CASE,
+    INVALID_CASE,
+    INVALID_CASE,
+    BOTH_INTRA
+};
+
+// Coefficients used by predict_inter
+static constexpr i32 subpel_filters[4][16][8] = {
+    { { 0, 0, 0, 128, 0, 0, 0, 0 },
+        { 0, 1, -5, 126, 8, -3, 1, 0 },
+        { -1, 3, -10, 122, 18, -6, 2, 0 },
+        { -1, 4, -13, 118, 27, -9, 3, -1 },
+        { -1, 4, -16, 112, 37, -11, 4, -1 },
+        { -1, 5, -18, 105, 48, -14, 4, -1 },
+        { -1, 5, -19, 97, 58, -16, 5, -1 },
+        { -1, 6, -19, 88, 68, -18, 5, -1 },
+        { -1, 6, -19, 78, 78, -19, 6, -1 },
+        { -1, 5, -18, 68, 88, -19, 6, -1 },
+        { -1, 5, -16, 58, 97, -19, 5, -1 },
+        { -1, 4, -14, 48, 105, -18, 5, -1 },
+        { -1, 4, -11, 37, 112, -16, 4, -1 },
+        { -1, 3, -9, 27, 118, -13, 4, -1 },
+        { 0, 2, -6, 18, 122, -10, 3, -1 },
+        { 0, 1, -3, 8, 126, -5, 1, 0 } },
+    { { 0, 0, 0, 128, 0, 0, 0, 0 },
+        { -3, -1, 32, 64, 38, 1, -3, 0 },
+        { -2, -2, 29, 63, 41, 2, -3, 0 },
+        { -2, -2, 26, 63, 43, 4, -4, 0 },
+        { -2, -3, 24, 62, 46, 5, -4, 0 },
+        { -2, -3, 21, 60, 49, 7, -4, 0 },
+        { -1, -4, 18, 59, 51, 9, -4, 0 },
+        { -1, -4, 16, 57, 53, 12, -4, -1 },
+        { -1, -4, 14, 55, 55, 14, -4, -1 },
+        { -1, -4, 12, 53, 57, 16, -4, -1 },
+        { 0, -4, 9, 51, 59, 18, -4, -1 },
+        { 0, -4, 7, 49, 60, 21, -3, -2 },
+        { 0, -4, 5, 46, 62, 24, -3, -2 },
+        { 0, -4, 4, 43, 63, 26, -2, -2 },
+        { 0, -3, 2, 41, 63, 29, -2, -2 },
+        { 0, -3, 1, 38, 64, 32, -1, -3 } },
+    { { 0, 0, 0, 128, 0, 0, 0, 0 },
+        { -1, 3, -7, 127, 8, -3, 1, 0 },
+        { -2, 5, -13, 125, 17, -6, 3, -1 },
+        { -3, 7, -17, 121, 27, -10, 5, -2 },
+        { -4, 9, -20, 115, 37, -13, 6, -2 },
+        { -4, 10, -23, 108, 48, -16, 8, -3 },
+        { -4, 10, -24, 100, 59, -19, 9, -3 },
+        { -4, 11, -24, 90, 70, -21, 10, -4 },
+        { -4, 11, -23, 80, 80, -23, 11, -4 },
+        { -4, 10, -21, 70, 90, -24, 11, -4 },
+        { -3, 9, -19, 59, 100, -24, 10, -4 },
+        { -3, 8, -16, 48, 108, -23, 10, -4 },
+        { -2, 6, -13, 37, 115, -20, 9, -4 },
+        { -2, 5, -10, 27, 121, -17, 7, -3 },
+        { -1, 3, -6, 17, 125, -13, 5, -2 },
+        { 0, 1, -3, 8, 127, -7, 3, -1 } },
+    { { 0, 0, 0, 128, 0, 0, 0, 0 },
+        { 0, 0, 0, 120, 8, 0, 0, 0 },
+        { 0, 0, 0, 112, 16, 0, 0, 0 },
+        { 0, 0, 0, 104, 24, 0, 0, 0 },
+        { 0, 0, 0, 96, 32, 0, 0, 0 },
+        { 0, 0, 0, 88, 40, 0, 0, 0 },
+        { 0, 0, 0, 80, 48, 0, 0, 0 },
+        { 0, 0, 0, 72, 56, 0, 0, 0 },
+        { 0, 0, 0, 64, 64, 0, 0, 0 },
+        { 0, 0, 0, 56, 72, 0, 0, 0 },
+        { 0, 0, 0, 48, 80, 0, 0, 0 },
+        { 0, 0, 0, 40, 88, 0, 0, 0 },
+        { 0, 0, 0, 32, 96, 0, 0, 0 },
+        { 0, 0, 0, 24, 104, 0, 0, 0 },
+        { 0, 0, 0, 16, 112, 0, 0, 0 },
+        { 0, 0, 0, 8, 120, 0, 0, 0 } }
 };
 
 }

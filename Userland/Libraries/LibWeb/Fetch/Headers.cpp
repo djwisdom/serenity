@@ -13,8 +13,10 @@ namespace Web::Fetch {
 // https://fetch.spec.whatwg.org/#dom-headers
 WebIDL::ExceptionOr<JS::NonnullGCPtr<Headers>> Headers::construct_impl(JS::Realm& realm, Optional<HeadersInit> const& init)
 {
+    auto& vm = realm.vm();
+
     // The new Headers(init) constructor steps are:
-    auto* headers = realm.heap().allocate<Headers>(realm, realm);
+    auto* headers = realm.heap().allocate<Headers>(realm, realm, Infrastructure::HeaderList::create(vm));
 
     // 1. Set this’s guard to "none".
     headers->m_guard = Guard::None;
@@ -26,14 +28,20 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Headers>> Headers::construct_impl(JS::Realm
     return JS::NonnullGCPtr(*headers);
 }
 
-Headers::Headers(JS::Realm& realm)
+Headers::Headers(JS::Realm& realm, JS::NonnullGCPtr<Infrastructure::HeaderList> header_list)
     : PlatformObject(realm)
-    , m_header_list(make_ref_counted<Infrastructure::HeaderList>())
+    , m_header_list(header_list)
 {
     set_prototype(&Bindings::cached_web_prototype(realm, "Headers"));
 }
 
 Headers::~Headers() = default;
+
+void Headers::visit_edges(JS::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_header_list);
+}
 
 // https://fetch.spec.whatwg.org/#dom-headers-append
 WebIDL::ExceptionOr<void> Headers::append(String const& name_string, String const& value_string)
@@ -55,11 +63,11 @@ WebIDL::ExceptionOr<void> Headers::delete_(String const& name_string)
 
     // 1. If name is not a header name, then throw a TypeError.
     if (!Infrastructure::is_header_name(name))
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name"sv };
 
     // 2. If this’s guard is "immutable", then throw a TypeError.
     if (m_guard == Guard::Immutable)
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Headers object is immutable" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Headers object is immutable"sv };
 
     // 3. Otherwise, if this’s guard is "request" and name is a forbidden header name, return.
     if (m_guard == Guard::Request && Infrastructure::is_forbidden_header_name(name))
@@ -95,7 +103,7 @@ WebIDL::ExceptionOr<String> Headers::get(String const& name_string)
 
     // 1. If name is not a header name, then throw a TypeError.
     if (!Infrastructure::is_header_name(name))
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name"sv };
 
     // 2. Return the result of getting name from this’s header list.
     auto byte_buffer = TRY_OR_RETURN_OOM(realm(), m_header_list->get(name));
@@ -111,7 +119,7 @@ WebIDL::ExceptionOr<bool> Headers::has(String const& name_string)
 
     // 1. If name is not a header name, then throw a TypeError.
     if (!Infrastructure::is_header_name(name))
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name"sv };
 
     // 2. Return true if this’s header list contains name; otherwise false.
     return m_header_list->contains(name);
@@ -134,13 +142,13 @@ WebIDL::ExceptionOr<void> Headers::set(String const& name_string, String const& 
 
     // 2. If name is not a header name or value is not a header value, then throw a TypeError.
     if (!Infrastructure::is_header_name(name))
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name"sv };
     if (!Infrastructure::is_header_value(value))
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header value" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header value"sv };
 
     // 3. If this’s guard is "immutable", then throw a TypeError.
     if (m_guard == Guard::Immutable)
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Headers object is immutable" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Headers object is immutable"sv };
 
     // 4. Otherwise, if this’s guard is "request" and name is a forbidden header name, return.
     if (m_guard == Guard::Request && Infrastructure::is_forbidden_header_name(name))
@@ -212,13 +220,13 @@ WebIDL::ExceptionOr<void> Headers::append(Infrastructure::Header header)
 
     // 2. If name is not a header name or value is not a header value, then throw a TypeError.
     if (!Infrastructure::is_header_name(name))
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name"sv };
     if (!Infrastructure::is_header_value(value))
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header value" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header value"sv };
 
     // 3. If headers’s guard is "immutable", then throw a TypeError.
     if (m_guard == Guard::Immutable)
-        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Headers object is immutable" };
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Headers object is immutable"sv };
 
     // 4. Otherwise, if headers’s guard is "request" and name is a forbidden header name, return.
     if (m_guard == Guard::Request && Infrastructure::is_forbidden_header_name(name))
@@ -274,13 +282,10 @@ WebIDL::ExceptionOr<void> Headers::fill(HeadersInit const& object)
             for (auto const& entry : object) {
                 // 1. If header does not contain exactly two items, then throw a TypeError.
                 if (entry.size() != 2)
-                    return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Array must contain header key/value pair" };
+                    return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Array must contain header key/value pair"sv };
 
                 // 2. Append (header’s first item, header’s second item) to headers.
-                auto header = Fetch::Infrastructure::Header {
-                    .name = TRY_OR_RETURN_OOM(realm(), ByteBuffer::copy(entry[0].bytes())),
-                    .value = TRY_OR_RETURN_OOM(realm(), ByteBuffer::copy(entry[1].bytes())),
-                };
+                auto header = TRY_OR_RETURN_OOM(realm(), Infrastructure::Header::from_string_pair(entry[0], entry[1].bytes()));
                 TRY(append(move(header)));
             }
             return {};
@@ -288,10 +293,7 @@ WebIDL::ExceptionOr<void> Headers::fill(HeadersInit const& object)
         // 2. Otherwise, object is a record, then for each key → value in object, append (key, value) to headers.
         [this](OrderedHashMap<String, String> const& object) -> WebIDL::ExceptionOr<void> {
             for (auto const& entry : object) {
-                auto header = Fetch::Infrastructure::Header {
-                    .name = TRY_OR_RETURN_OOM(realm(), ByteBuffer::copy(entry.key.bytes())),
-                    .value = TRY_OR_RETURN_OOM(realm(), ByteBuffer::copy(entry.value.bytes())),
-                };
+                auto header = TRY_OR_RETURN_OOM(realm(), Infrastructure::Header::from_string_pair(entry.key, entry.value));
                 TRY(append(move(header)));
             }
             return {};

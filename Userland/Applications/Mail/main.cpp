@@ -24,7 +24,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Config::pledge_domain("Mail");
 
-    TRY(Core::System::unveil("/proc/all", "r"));
+    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/etc", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/webcontent", "rw"));
@@ -54,6 +54,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     }));
 
     auto& help_menu = window->add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_about_action("Mail", app_icon, window));
 
     window->on_close_request = [&] {

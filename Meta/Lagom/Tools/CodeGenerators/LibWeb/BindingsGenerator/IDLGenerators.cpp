@@ -912,7 +912,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
         // FIXME: 2. If the union type includes a nullable type and V is null or undefined, then return the IDL value null.
         if (union_type.includes_nullable_type()) {
-            dbgln("FIXME: 2. If the union type includes a nullable type and V is null or undefined, then return the IDL value null.");
+            // Implement me
         } else if (dictionary_type) {
             // 4. If V is null or undefined, then
             //    4.1 If types includes a dictionary type, then return the result of converting V to that dictionary type.
@@ -1668,6 +1668,12 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@function.name:snakecase@@overload_suffi
     [[maybe_unused]] auto retval = TRY(throw_dom_exception_if_needed(vm, [&] { return impl->@function.cpp_name@(@.arguments@); }));
 )~~~");
     } else {
+        // Make sure first argument for static functions is the Realm.
+        if (arguments_builder.is_empty())
+            function_generator.set(".arguments", "vm");
+        else
+            function_generator.set(".arguments", String::formatted("vm, {}", arguments_builder.string_view()));
+
         function_generator.append(R"~~~(
     [[maybe_unused]] auto retval = TRY(throw_dom_exception_if_needed(vm, [&] { return @interface_fully_qualified_name@::@function.cpp_name@(@.arguments@); }));
 )~~~");
@@ -2384,6 +2390,7 @@ void generate_prototype_implementation(IDL::Interface const& interface)
 #include <LibWeb/HTML/Origin.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/WebIDL/OverloadResolution.h>
 
 #if __has_include(<LibWeb/Bindings/@prototype_base_class@.h>)
@@ -2588,6 +2595,9 @@ static JS::ThrowCompletionOr<@fully_qualified_name@*> impl_from(JS::VM& vm)
     if (is<HTML::Window>(this_object)) {
         return static_cast<HTML::Window*>(this_object);
     }
+    if (is<HTML::WindowProxy>(this_object)) {
+        return static_cast<HTML::WindowProxy*>(this_object)->window().ptr();
+    }
 )~~~");
         }
 
@@ -2667,14 +2677,14 @@ JS_DEFINE_NATIVE_FUNCTION(@prototype_class@::@attribute.setter_callback@)
             if (attribute.extended_attributes.contains("Reflect")) {
                 if (attribute.type->name() != "boolean") {
                     attribute_generator.append(R"~~~(
-    impl->set_attribute(HTML::AttributeNames::@attribute.reflect_name@, cpp_value);
+    MUST(impl->set_attribute(HTML::AttributeNames::@attribute.reflect_name@, cpp_value));
 )~~~");
                 } else {
                     attribute_generator.append(R"~~~(
     if (!cpp_value)
         impl->remove_attribute(HTML::AttributeNames::@attribute.reflect_name@);
     else
-        impl->set_attribute(HTML::AttributeNames::@attribute.reflect_name@, String::empty());
+        MUST(impl->set_attribute(HTML::AttributeNames::@attribute.reflect_name@, String::empty()));
 )~~~");
                 }
             } else {

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -24,6 +25,7 @@
 #include <LibGUI/TabWidget.h>
 #include <LibMain/Main.h>
 #include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWebView/OutOfProcessWebView.h>
 #include <LibWebView/RequestServerAdapter.h>
 #include <unistd.h>
 
@@ -37,6 +39,7 @@ bool g_content_filters_enabled { true };
 Vector<String> g_proxies;
 HashMap<String, size_t> g_proxy_mappings;
 IconBag g_icon_bag;
+String g_webdriver_content_ipc_path;
 
 }
 
@@ -61,12 +64,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    TRY(Core::System::pledge("stdio recvfd sendfd unix cpath rpath wpath proc exec"));
+    TRY(Core::System::pledge("stdio recvfd sendfd unix fattr cpath rpath wpath proc exec"));
 
     Vector<String> specified_urls;
 
     Core::ArgsParser args_parser;
     args_parser.add_positional_argument(specified_urls, "URLs to open", "url", Core::ArgsParser::Required::No);
+    args_parser.add_option(Browser::g_webdriver_content_ipc_path, "Path to WebDriver IPC for WebContent", "webdriver-content-path", 0, "path");
+
     args_parser.parse(arguments);
 
     auto app = TRY(GUI::Application::try_create(arguments));
@@ -80,7 +85,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Desktop::Launcher::add_allowed_url(URL::create_with_file_scheme(Core::StandardPaths::downloads_directory())));
     TRY(Desktop::Launcher::seal_allowlist());
 
-    TRY(Core::System::unveil("/proc/all", "r"));
+    if (!Browser::g_webdriver_content_ipc_path.is_empty())
+        specified_urls.empend("about:blank");
+
+    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/image", "rw"));
@@ -91,6 +99,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/etc/passwd", "r"));
     TRY(Core::System::unveil("/etc/timezone", "r"));
     TRY(Core::System::unveil("/bin/BrowserSettings", "x"));
+    TRY(Core::System::unveil("/bin/Browser", "x"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     Web::ResourceLoader::initialize(TRY(WebView::RequestServerAdapter::try_create()));
@@ -168,6 +177,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         window->create_new_tab(url_from_argument_string(specified_urls[i]), false);
 
     window->show();
+
+    window->broadcast_window_position(window->position());
+    window->broadcast_window_size(window->size());
 
     return app->exec();
 }

@@ -27,6 +27,7 @@ set(AK_TEST_SOURCES
     TestFind.cpp
     TestFixedArray.cpp
     TestFloatingPoint.cpp
+    TestFloatingPointParsing.cpp
     TestFormat.cpp
     TestGenericLexer.cpp
     TestHashFunctions.cpp
@@ -61,6 +62,7 @@ set(AK_TEST_SOURCES
     TestStack.cpp
     TestStdLibExtras.cpp
     TestString.cpp
+    TestStringFloatingPointConversions.cpp
     TestStringUtils.cpp
     TestStringView.cpp
     TestTime.cpp

@@ -18,25 +18,25 @@ namespace Kernel::USB {
 ErrorOr<NonnullLockRefPtr<Hub>> Hub::try_create_root_hub(NonnullLockRefPtr<USBController> controller, DeviceSpeed device_speed)
 {
     // NOTE: Enumeration does not happen here, as the controller must know what the device address is at all times during enumeration to intercept requests.
-    auto pipe = TRY(Pipe::try_create_pipe(controller, Pipe::Type::Control, Pipe::Direction::Bidirectional, 0, 8, 0));
+    auto pipe = TRY(ControlPipe::create(controller, 0, 8, 0));
     auto hub = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) Hub(controller, device_speed, move(pipe))));
     return hub;
 }
 
 ErrorOr<NonnullLockRefPtr<Hub>> Hub::try_create_from_device(Device const& device)
 {
-    auto pipe = TRY(Pipe::try_create_pipe(device.controller(), Pipe::Type::Control, Pipe::Direction::Bidirectional, 0, device.device_descriptor().max_packet_size, device.address()));
+    auto pipe = TRY(ControlPipe::create(device.controller(), 0, device.device_descriptor().max_packet_size, device.address()));
     auto hub = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) Hub(device, move(pipe))));
     TRY(hub->enumerate_and_power_on_hub());
     return hub;
 }
 
-Hub::Hub(NonnullLockRefPtr<USBController> controller, DeviceSpeed device_speed, NonnullOwnPtr<Pipe> default_pipe)
+Hub::Hub(NonnullLockRefPtr<USBController> controller, DeviceSpeed device_speed, NonnullOwnPtr<ControlPipe> default_pipe)
     : Device(move(controller), 1 /* Port 1 */, device_speed, move(default_pipe))
 {
 }
 
-Hub::Hub(Device const& device, NonnullOwnPtr<Pipe> default_pipe)
+Hub::Hub(Device const& device, NonnullOwnPtr<ControlPipe> default_pipe)
     : Device(device, move(default_pipe))
 {
 }
@@ -58,7 +58,7 @@ ErrorOr<void> Hub::enumerate_and_power_on_hub()
     USBHubDescriptor descriptor {};
 
     // Get the first hub descriptor. All hubs are required to have a hub descriptor at index 0. USB 2.0 Specification Section 11.24.2.5.
-    auto transfer_length = TRY(m_default_pipe->control_transfer(USB_REQUEST_TRANSFER_DIRECTION_DEVICE_TO_HOST | USB_REQUEST_TYPE_CLASS, HubRequest::GET_DESCRIPTOR, (DESCRIPTOR_TYPE_HUB << 8), 0, sizeof(USBHubDescriptor), &descriptor));
+    auto transfer_length = TRY(m_default_pipe->submit_control_transfer(USB_REQUEST_TRANSFER_DIRECTION_DEVICE_TO_HOST | USB_REQUEST_TYPE_CLASS, HubRequest::GET_DESCRIPTOR, (DESCRIPTOR_TYPE_HUB << 8), 0, sizeof(USBHubDescriptor), &descriptor));
 
     // FIXME: This be "not equal to" instead of "less than", but control transfers report a higher transfer length than expected.
     if (transfer_length < sizeof(USBHubDescriptor)) {
@@ -78,7 +78,7 @@ ErrorOr<void> Hub::enumerate_and_power_on_hub()
 
     // Enable all the ports
     for (u8 port_index = 0; port_index < descriptor.number_of_downstream_ports; ++port_index) {
-        auto result = m_default_pipe->control_transfer(USB_REQUEST_TRANSFER_DIRECTION_HOST_TO_DEVICE | USB_REQUEST_TYPE_CLASS | USB_REQUEST_RECIPIENT_OTHER, HubRequest::SET_FEATURE, HubFeatureSelector::PORT_POWER, port_index + 1, 0, nullptr);
+        auto result = m_default_pipe->submit_control_transfer(USB_REQUEST_TRANSFER_DIRECTION_HOST_TO_DEVICE | USB_REQUEST_TYPE_CLASS | USB_REQUEST_RECIPIENT_OTHER, HubRequest::SET_FEATURE, HubFeatureSelector::PORT_POWER, port_index + 1, 0, nullptr);
         if (result.is_error())
             dbgln("USB: Failed to power on port {} on hub at address {}.", port_index + 1, m_address);
     }
@@ -98,7 +98,7 @@ ErrorOr<void> Hub::get_port_status(u8 port, HubStatus& hub_status)
     if (port == 0 || port > m_hub_descriptor.number_of_downstream_ports)
         return EINVAL;
 
-    auto transfer_length = TRY(m_default_pipe->control_transfer(USB_REQUEST_TRANSFER_DIRECTION_DEVICE_TO_HOST | USB_REQUEST_TYPE_CLASS | USB_REQUEST_RECIPIENT_OTHER, HubRequest::GET_STATUS, 0, port, sizeof(HubStatus), &hub_status));
+    auto transfer_length = TRY(m_default_pipe->submit_control_transfer(USB_REQUEST_TRANSFER_DIRECTION_DEVICE_TO_HOST | USB_REQUEST_TYPE_CLASS | USB_REQUEST_RECIPIENT_OTHER, HubRequest::GET_STATUS, 0, port, sizeof(HubStatus), &hub_status));
 
     // FIXME: This be "not equal to" instead of "less than", but control transfers report a higher transfer length than expected.
     if (transfer_length < sizeof(HubStatus)) {
@@ -116,7 +116,7 @@ ErrorOr<void> Hub::clear_port_feature(u8 port, HubFeatureSelector feature_select
     if (port == 0 || port > m_hub_descriptor.number_of_downstream_ports)
         return EINVAL;
 
-    TRY(m_default_pipe->control_transfer(USB_REQUEST_TRANSFER_DIRECTION_HOST_TO_DEVICE | USB_REQUEST_TYPE_CLASS | USB_REQUEST_RECIPIENT_OTHER, HubRequest::CLEAR_FEATURE, feature_selector, port, 0, nullptr));
+    TRY(m_default_pipe->submit_control_transfer(USB_REQUEST_TRANSFER_DIRECTION_HOST_TO_DEVICE | USB_REQUEST_TYPE_CLASS | USB_REQUEST_RECIPIENT_OTHER, HubRequest::CLEAR_FEATURE, feature_selector, port, 0, nullptr));
     return {};
 }
 
@@ -127,7 +127,7 @@ ErrorOr<void> Hub::set_port_feature(u8 port, HubFeatureSelector feature_selector
     if (port == 0 || port > m_hub_descriptor.number_of_downstream_ports)
         return EINVAL;
 
-    TRY(m_default_pipe->control_transfer(USB_REQUEST_TRANSFER_DIRECTION_HOST_TO_DEVICE | USB_REQUEST_TYPE_CLASS | USB_REQUEST_RECIPIENT_OTHER, HubRequest::SET_FEATURE, feature_selector, port, 0, nullptr));
+    TRY(m_default_pipe->submit_control_transfer(USB_REQUEST_TRANSFER_DIRECTION_HOST_TO_DEVICE | USB_REQUEST_TYPE_CLASS | USB_REQUEST_RECIPIENT_OTHER, HubRequest::SET_FEATURE, feature_selector, port, 0, nullptr));
     return {};
 }
 

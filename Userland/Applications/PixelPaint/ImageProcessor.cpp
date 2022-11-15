@@ -16,7 +16,7 @@ FilterApplicationCommand::FilterApplicationCommand(NonnullRefPtr<Filter> filter,
 
 void FilterApplicationCommand::execute()
 {
-    m_filter->apply(m_target_layer->content_bitmap(), m_target_layer->content_bitmap());
+    m_filter->apply(m_target_layer->get_scratch_edited_bitmap(), m_target_layer->get_scratch_edited_bitmap());
     m_filter->m_editor->gui_event_loop().deferred_invoke([strong_this = NonnullRefPtr(*this)]() {
         // HACK: we can't tell strong_this to not be const
         (*const_cast<NonnullRefPtr<Layer>*>(&strong_this->m_target_layer))->did_modify_bitmap(strong_this->m_target_layer->rect());
@@ -59,10 +59,8 @@ ErrorOr<void> ImageProcessor::enqueue_command(NonnullRefPtr<ImageProcessingComma
         m_processor_thread->detach();
     }
 
-    m_wakeup_mutex.lock();
+    Threading::MutexLocker const locker(m_wakeup_mutex);
     m_wakeup_variable.signal();
-    m_wakeup_mutex.unlock();
-
     return {};
 }
 

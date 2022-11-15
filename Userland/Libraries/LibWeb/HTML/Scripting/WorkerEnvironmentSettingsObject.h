@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/URL.h>
+#include <LibWeb/Bindings/DedicatedWorkerExposedInterfaces.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Forward.h>
 
@@ -33,6 +34,9 @@ public:
         auto host_defined = make<Bindings::HostDefined>(*settings_object, *intrinsics);
         realm->set_host_defined(move(host_defined));
 
+        // FIXME: Shared workers should use the shared worker method
+        Bindings::add_dedicated_worker_exposed_interfaces(realm->global_object(), *realm);
+
         return *settings_object;
     }
 
@@ -42,12 +46,14 @@ public:
     String api_url_character_encoding() override { return m_api_url_character_encoding; }
     AK::URL api_base_url() override { return m_url; }
     Origin origin() override { return m_origin; }
+    PolicyContainer policy_container() override { return m_policy_container; }
     CanUseCrossOriginIsolatedAPIs cross_origin_isolated_capability() override { TODO(); }
 
 private:
     String m_api_url_character_encoding;
     AK::URL m_url;
     HTML::Origin m_origin;
+    HTML::PolicyContainer m_policy_container;
 };
 
 }

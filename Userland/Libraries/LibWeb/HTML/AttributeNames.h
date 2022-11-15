@@ -24,6 +24,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(alt)                        \
     __ENUMERATE_HTML_ATTRIBUTE(archive)                    \
     __ENUMERATE_HTML_ATTRIBUTE(async)                      \
+    __ENUMERATE_HTML_ATTRIBUTE(autofocus)                  \
     __ENUMERATE_HTML_ATTRIBUTE(autoplay)                   \
     __ENUMERATE_HTML_ATTRIBUTE(axis)                       \
     __ENUMERATE_HTML_ATTRIBUTE(background)                 \
@@ -54,6 +55,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(declare)                    \
     __ENUMERATE_HTML_ATTRIBUTE(default_)                   \
     __ENUMERATE_HTML_ATTRIBUTE(defer)                      \
+    __ENUMERATE_HTML_ATTRIBUTE(dir)                        \
     __ENUMERATE_HTML_ATTRIBUTE(direction)                  \
     __ENUMERATE_HTML_ATTRIBUTE(dirname)                    \
     __ENUMERATE_HTML_ATTRIBUTE(disabled)                   \
@@ -76,8 +78,10 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(id)                         \
     __ENUMERATE_HTML_ATTRIBUTE(imagesizes)                 \
     __ENUMERATE_HTML_ATTRIBUTE(imagesrcset)                \
+    __ENUMERATE_HTML_ATTRIBUTE(inert)                      \
     __ENUMERATE_HTML_ATTRIBUTE(integrity)                  \
     __ENUMERATE_HTML_ATTRIBUTE(ismap)                      \
+    __ENUMERATE_HTML_ATTRIBUTE(itemscope)                  \
     __ENUMERATE_HTML_ATTRIBUTE(label)                      \
     __ENUMERATE_HTML_ATTRIBUTE(lang)                       \
     __ENUMERATE_HTML_ATTRIBUTE(language)                   \
@@ -91,6 +95,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(method)                     \
     __ENUMERATE_HTML_ATTRIBUTE(min)                        \
     __ENUMERATE_HTML_ATTRIBUTE(multiple)                   \
+    __ENUMERATE_HTML_ATTRIBUTE(muted)                      \
     __ENUMERATE_HTML_ATTRIBUTE(name)                       \
     __ENUMERATE_HTML_ATTRIBUTE(nohref)                     \
     __ENUMERATE_HTML_ATTRIBUTE(nomodule)                   \
@@ -208,6 +213,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(step)                       \
     __ENUMERATE_HTML_ATTRIBUTE(style)                      \
     __ENUMERATE_HTML_ATTRIBUTE(summary)                    \
+    __ENUMERATE_HTML_ATTRIBUTE(tabindex)                   \
     __ENUMERATE_HTML_ATTRIBUTE(target)                     \
     __ENUMERATE_HTML_ATTRIBUTE(text)                       \
     __ENUMERATE_HTML_ATTRIBUTE(title)                      \
@@ -227,5 +233,8 @@ ENUMERATE_HTML_ATTRIBUTES
 #undef __ENUMERATE_HTML_ATTRIBUTE
 
 }
+
+bool is_boolean_attribute(FlyString const& attribute);
+
 }
 }

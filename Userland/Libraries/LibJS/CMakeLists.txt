@@ -169,6 +169,7 @@ set(SOURCES
     Runtime/Reference.cpp
     Runtime/ReflectObject.cpp
     Runtime/RegExpConstructor.cpp
+    Runtime/RegExpLegacyStaticProperties.cpp
     Runtime/RegExpObject.cpp
     Runtime/RegExpPrototype.cpp
     Runtime/RegExpStringIterator.cpp
@@ -250,4 +251,4 @@ set(SOURCES
 )
 
 serenity_lib(LibJS js)
-target_link_libraries(LibJS LibCore LibCrypto LibRegex LibSyntax LibLocale LibUnicode)
+target_link_libraries(LibJS PRIVATE LibCore LibCrypto LibRegex LibSyntax LibLocale LibUnicode)

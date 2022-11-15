@@ -13,6 +13,8 @@
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Rect.h>
 #include <LibGfx/Size.h>
+#include <LibJS/Forward.h>
+#include <LibJS/Heap/Cell.h>
 #include <LibWeb/DOM/Position.h>
 #include <LibWeb/HTML/BrowsingContextContainer.h>
 #include <LibWeb/HTML/HistoryHandlingBehavior.h>
@@ -26,12 +28,82 @@
 
 namespace Web::HTML {
 
-class BrowsingContext : public TreeNode<BrowsingContext> {
+class BrowsingContext final
+    : public JS::Cell
+    , public Weakable<BrowsingContext> {
+    JS_CELL(BrowsingContext, JS::Cell);
+
 public:
-    static NonnullRefPtr<BrowsingContext> create_a_new_browsing_context(Page&, JS::GCPtr<DOM::Document> creator, JS::GCPtr<DOM::Element> embedder, BrowsingContextGroup&);
-    static NonnullRefPtr<BrowsingContext> create_a_new_top_level_browsing_context(Page&);
+    static JS::NonnullGCPtr<BrowsingContext> create_a_new_browsing_context(Page&, JS::GCPtr<DOM::Document> creator, JS::GCPtr<DOM::Element> embedder, BrowsingContextGroup&);
+    static JS::NonnullGCPtr<BrowsingContext> create_a_new_top_level_browsing_context(Page&);
 
     ~BrowsingContext();
+
+    JS::GCPtr<BrowsingContext> parent() const { return m_parent; }
+    void append_child(JS::NonnullGCPtr<BrowsingContext>);
+    void remove_child(JS::NonnullGCPtr<BrowsingContext>);
+    JS::GCPtr<BrowsingContext> first_child() const;
+    JS::GCPtr<BrowsingContext> next_sibling() const;
+
+    bool is_ancestor_of(BrowsingContext const&) const;
+
+    template<typename Callback>
+    IterationDecision for_each_in_inclusive_subtree(Callback callback) const
+    {
+        if (callback(*this) == IterationDecision::Break)
+            return IterationDecision::Break;
+        for (auto child = first_child(); child; child = child->next_sibling()) {
+            if (child->for_each_in_inclusive_subtree(callback) == IterationDecision::Break)
+                return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    }
+
+    template<typename Callback>
+    IterationDecision for_each_in_inclusive_subtree(Callback callback)
+    {
+        if (callback(*this) == IterationDecision::Break)
+            return IterationDecision::Break;
+        for (auto child = first_child(); child; child = child->next_sibling()) {
+            if (child->for_each_in_inclusive_subtree(callback) == IterationDecision::Break)
+                return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    }
+
+    template<typename Callback>
+    void for_each_child(Callback callback) const
+    {
+        for (auto node = first_child(); node; node = node->next_sibling())
+            callback(*node);
+    }
+
+    template<typename Callback>
+    void for_each_child(Callback callback)
+    {
+        for (auto node = first_child(); node; node = node->next_sibling())
+            callback(*node);
+    }
+
+    template<typename Callback>
+    IterationDecision for_each_in_subtree(Callback callback) const
+    {
+        for (auto child = first_child(); child; child = child->next_sibling()) {
+            if (child->for_each_in_inclusive_subtree(callback) == IterationDecision::Break)
+                return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    }
+
+    template<typename Callback>
+    IterationDecision for_each_in_subtree(Callback callback)
+    {
+        for (auto child = first_child(); child; child = child->next_sibling()) {
+            if (child->for_each_in_inclusive_subtree(callback) == IterationDecision::Break)
+                return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    }
 
     class ViewportClient {
     public:
@@ -48,6 +120,9 @@ public:
     DOM::Document* active_document();
 
     void set_active_document(JS::NonnullGCPtr<DOM::Document>);
+
+    HTML::WindowProxy* window_proxy();
+    HTML::WindowProxy const* window_proxy() const;
 
     HTML::Window* active_window();
     HTML::Window const* active_window() const;
@@ -126,6 +201,7 @@ public:
 
     Vector<SessionHistoryEntry>& session_history() { return m_session_history; }
     Vector<SessionHistoryEntry> const& session_history() const { return m_session_history; }
+    size_t session_history_index() const { return *m_session_history_index; }
 
     // https://html.spec.whatwg.org/multipage/dom.html#still-on-its-initial-about:blank-document
     bool still_on_its_initial_about_blank_document() const;
@@ -141,14 +217,14 @@ public:
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
     WebIDL::ExceptionOr<void> navigate(
-        NonnullRefPtr<Fetch::Infrastructure::Request> resource,
+        JS::NonnullGCPtr<Fetch::Infrastructure::Request> resource,
         BrowsingContext& source_browsing_context,
         bool exceptions_enabled = false,
         HistoryHandlingBehavior history_handling = HistoryHandlingBehavior::Default,
         Optional<PolicyContainer> history_policy_container = {},
         String navigation_type = "other",
         Optional<String> navigation_id = {},
-        Function<void(NonnullRefPtr<Fetch::Infrastructure::Response>)> process_response_end_of_body = {});
+        Function<void(JS::NonnullGCPtr<Fetch::Infrastructure::Response>)> process_response_end_of_body = {});
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-fragid
     WebIDL::ExceptionOr<void> navigate_to_a_fragment(AK::URL const&, HistoryHandlingBehavior, String navigation_id);
@@ -167,12 +243,15 @@ public:
 
     // https://html.spec.whatwg.org/multipage/window-object.html#a-browsing-context-is-discarded
     void discard();
+    bool has_been_discarded() const { return m_has_been_discarded; }
 
     // https://html.spec.whatwg.org/multipage/window-object.html#close-a-browsing-context
     void close();
 
 private:
     explicit BrowsingContext(Page&, HTML::BrowsingContextContainer*);
+
+    virtual void visit_edges(Cell::Visitor&) override;
 
     void reset_cursor_blink_cycle();
 
@@ -200,10 +279,12 @@ private:
     // https://html.spec.whatwg.org/multipage/browsers.html#creator-origin
     Optional<HTML::Origin> m_creator_origin;
 
-    WeakPtr<HTML::BrowsingContextContainer> m_container;
-    JS::Handle<HTML::Window> m_active_window;
+    JS::GCPtr<HTML::BrowsingContextContainer> m_container;
     Gfx::IntSize m_size;
     Gfx::IntPoint m_viewport_scroll_offset;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#browsing-context
+    JS::GCPtr<HTML::WindowProxy> m_window_proxy;
 
     DOM::Position m_cursor_position;
     RefPtr<Platform::Timer> m_cursor_blink_timer;
@@ -215,10 +296,18 @@ private:
     String m_name;
 
     // https://html.spec.whatwg.org/multipage/browsers.html#tlbc-group
-    RefPtr<BrowsingContextGroup> m_group;
+    JS::GCPtr<BrowsingContextGroup> m_group;
 
     // https://html.spec.whatwg.org/multipage/interaction.html#system-visibility-state
     VisibilityState m_system_visibility_state { VisibilityState::Hidden };
+
+    JS::GCPtr<BrowsingContext> m_parent;
+    JS::GCPtr<BrowsingContext> m_first_child;
+    JS::GCPtr<BrowsingContext> m_last_child;
+    JS::GCPtr<BrowsingContext> m_next_sibling;
+    JS::GCPtr<BrowsingContext> m_previous_sibling;
+
+    bool m_has_been_discarded { false };
 };
 
 HTML::Origin determine_the_origin(BrowsingContext const& browsing_context, Optional<AK::URL> url, SandboxingFlagSet sandbox_flags, Optional<HTML::Origin> invocation_origin);

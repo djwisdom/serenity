@@ -10,10 +10,8 @@
 #include <Kernel/Debug.h>
 #include <Kernel/FileSystem/Custody.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
-#include <Kernel/Library/LockWeakPtr.h>
-#include <Kernel/Memory/AllocationStrategy.h>
+#include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/MemoryManager.h>
-#include <Kernel/Memory/PageDirectory.h>
 #include <Kernel/Memory/Region.h>
 #include <Kernel/Memory/SharedInodeVMObject.h>
 #include <Kernel/Panic.h>
@@ -497,6 +495,7 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
 
     auto old_credentials = this->credentials();
     auto new_credentials = old_credentials;
+    auto old_process_attached_jail = m_attached_jail.with([&](auto& jail) -> RefPtr<Jail> { return jail; });
 
     bool executable_is_setid = false;
 
@@ -555,6 +554,9 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
 
     m_executable.with([&](auto& executable) { executable = main_program_description->custody(); });
     m_arguments = move(arguments);
+    m_attached_jail.with([&](auto& jail) {
+        jail = old_process_attached_jail;
+    });
     m_environment = move(environment);
 
     TRY(m_unveil_data.with([&](auto& unveil_data) -> ErrorOr<void> {

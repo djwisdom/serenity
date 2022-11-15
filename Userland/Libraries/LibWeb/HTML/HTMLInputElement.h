@@ -48,7 +48,7 @@ class HTMLInputElement final
 public:
     virtual ~HTMLInputElement() override;
 
-    virtual RefPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>) override;
+    virtual JS::GCPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>) override;
 
     enum class TypeAttributeState {
 #define __ENUMERATE_HTML_INPUT_TYPE_ATTRIBUTE(_, state) state,
@@ -122,6 +122,9 @@ private:
     virtual void legacy_pre_activation_behavior() override;
     virtual void legacy_cancelled_activation_behavior() override;
     virtual void legacy_cancelled_activation_behavior_was_not_called() override;
+
+    // ^DOM::Element
+    virtual i32 default_tab_index_value() const override;
 
     virtual void visit_edges(Cell::Visitor&) override;
 

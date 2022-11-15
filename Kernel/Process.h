@@ -24,6 +24,7 @@
 #include <Kernel/FileSystem/UnveilNode.h>
 #include <Kernel/Forward.h>
 #include <Kernel/FutexQueue.h>
+#include <Kernel/Jail.h>
 #include <Kernel/Library/LockWeakPtr.h>
 #include <Kernel/Library/LockWeakable.h>
 #include <Kernel/Library/NonnullLockRefPtrVector.h>
@@ -70,6 +71,7 @@ Time kgettimeofday();
     __ENUMERATE_PLEDGE_PROMISE(prot_exec) \
     __ENUMERATE_PLEDGE_PROMISE(map_fixed) \
     __ENUMERATE_PLEDGE_PROMISE(getkeymap) \
+    __ENUMERATE_PLEDGE_PROMISE(jail)      \
     __ENUMERATE_PLEDGE_PROMISE(no_error)
 
 enum class Pledge : u32 {
@@ -213,7 +215,8 @@ public:
     bool is_kernel_process() const { return m_is_kernel_process; }
     bool is_user_process() const { return !m_is_kernel_process; }
 
-    static LockRefPtr<Process> from_pid(ProcessID);
+    static LockRefPtr<Process> from_pid_in_same_jail(ProcessID);
+    static LockRefPtr<Process> from_pid_ignoring_jails(ProcessID);
     static SessionID get_sid_from_pgid(ProcessGroupID pgid);
 
     StringView name() const { return m_name->view(); }
@@ -233,6 +236,8 @@ public:
         return with_protected_data([](auto& protected_data) { return protected_data.ppid; });
     }
 
+    SpinlockProtected<RefPtr<Jail>>& jail() { return m_attached_jail; }
+
     NonnullRefPtr<Credentials> credentials() const;
 
     bool is_dumpable() const
@@ -248,11 +253,11 @@ public:
 
     // Breakable iteration functions
     template<IteratorFunction<Process&> Callback>
-    static void for_each(Callback);
-    template<IteratorFunction<Process&> Callback>
-    static void for_each_in_pgrp(ProcessGroupID, Callback);
-    template<IteratorFunction<Process&> Callback>
-    void for_each_child(Callback);
+    static void for_each_ignoring_jails(Callback);
+
+    static ErrorOr<void> for_each_in_same_jail(Function<ErrorOr<void>(Process&)>);
+    ErrorOr<void> for_each_in_pgrp_in_same_jail(ProcessGroupID, Function<ErrorOr<void>(Process&)>);
+    ErrorOr<void> for_each_child_in_same_jail(Function<ErrorOr<void>(Process&)>);
 
     template<IteratorFunction<Thread&> Callback>
     IterationDecision for_each_thread(Callback);
@@ -262,11 +267,7 @@ public:
 
     // Non-breakable iteration functions
     template<VoidFunction<Process&> Callback>
-    static void for_each(Callback);
-    template<VoidFunction<Process&> Callback>
-    static void for_each_in_pgrp(ProcessGroupID, Callback);
-    template<VoidFunction<Process&> Callback>
-    void for_each_child(Callback);
+    static void for_each_ignoring_jails(Callback);
 
     template<VoidFunction<Thread&> Callback>
     IterationDecision for_each_thread(Callback);
@@ -400,8 +401,8 @@ public:
     ErrorOr<FlatPtr> sys$getsockname(Userspace<Syscall::SC_getsockname_params const*>);
     ErrorOr<FlatPtr> sys$getpeername(Userspace<Syscall::SC_getpeername_params const*>);
     ErrorOr<FlatPtr> sys$socketpair(Userspace<Syscall::SC_socketpair_params const*>);
-    ErrorOr<FlatPtr> sys$sched_setparam(pid_t pid, Userspace<const struct sched_param*>);
-    ErrorOr<FlatPtr> sys$sched_getparam(pid_t pid, Userspace<struct sched_param*>);
+    ErrorOr<FlatPtr> sys$scheduler_set_parameters(Userspace<Syscall::SC_scheduler_parameters_params const*>);
+    ErrorOr<FlatPtr> sys$scheduler_get_parameters(Userspace<Syscall::SC_scheduler_parameters_params*>);
     ErrorOr<FlatPtr> sys$create_thread(void* (*)(void*), Userspace<Syscall::SC_create_thread_params const*>);
     [[noreturn]] void sys$exit_thread(Userspace<void*>, Userspace<void*>, size_t);
     ErrorOr<FlatPtr> sys$join_thread(pid_t tid, Userspace<void**> exit_value);
@@ -437,6 +438,8 @@ public:
     ErrorOr<FlatPtr> sys$statvfs(Userspace<Syscall::SC_statvfs_params const*> user_params);
     ErrorOr<FlatPtr> sys$fstatvfs(int fd, statvfs* buf);
     ErrorOr<FlatPtr> sys$map_time_page();
+    ErrorOr<FlatPtr> sys$jail_create(Userspace<Syscall::SC_jail_create_params*> user_params);
+    ErrorOr<FlatPtr> sys$jail_attach(Userspace<Syscall::SC_jail_attach_params const*> user_params);
 
     template<bool sockname, typename Params>
     ErrorOr<void> get_sock_or_peer_name(Params const&);
@@ -840,6 +843,8 @@ private:
     SpinlockProtected<Thread::ListInProcess>& thread_list() { return m_thread_list; }
     SpinlockProtected<Thread::ListInProcess> const& thread_list() const { return m_thread_list; }
 
+    ErrorOr<NonnullRefPtr<Thread>> get_thread_from_pid_or_tid(pid_t pid_or_tid, Syscall::SchedulerParametersMode mode);
+
     SpinlockProtected<Thread::ListInProcess> m_thread_list { LockRank::None };
 
     MutexProtected<OpenFileDescriptions> m_fds;
@@ -860,6 +865,10 @@ private:
     LockRefPtr<TTY> m_tty;
 
     LockWeakPtr<Memory::Region> m_master_tls_region;
+
+    IntrusiveListNode<Process> m_jail_list_node;
+    SpinlockProtected<RefPtr<Jail>> m_attached_jail { LockRank::Process };
+
     size_t m_master_tls_size { 0 };
     size_t m_master_tls_alignment { 0 };
 
@@ -912,48 +921,6 @@ static_assert(AssertSize<Process, (PAGE_SIZE * 2)>());
 
 extern RecursiveSpinlock g_profiling_lock;
 
-template<IteratorFunction<Process&> Callback>
-inline void Process::for_each(Callback callback)
-{
-    Process::all_instances().with([&](auto const& list) {
-        for (auto it = list.begin(); it != list.end();) {
-            auto& process = *it;
-            ++it;
-            if (callback(process) == IterationDecision::Break)
-                break;
-        }
-    });
-}
-
-template<IteratorFunction<Process&> Callback>
-inline void Process::for_each_child(Callback callback)
-{
-    ProcessID my_pid = pid();
-    Process::all_instances().with([&](auto const& list) {
-        for (auto it = list.begin(); it != list.end();) {
-            auto& process = *it;
-            ++it;
-            if (process.ppid() == my_pid || process.has_tracee_thread(pid())) {
-                if (callback(process) == IterationDecision::Break)
-                    break;
-            }
-        }
-    });
-}
-
-template<IteratorFunction<Thread&> Callback>
-inline IterationDecision Process::for_each_thread(Callback callback) const
-{
-    return thread_list().with([&](auto& thread_list) -> IterationDecision {
-        for (auto& thread : thread_list) {
-            IterationDecision decision = callback(thread);
-            if (decision != IterationDecision::Continue)
-                return decision;
-        }
-        return IterationDecision::Continue;
-    });
-}
-
 template<IteratorFunction<Thread&> Callback>
 inline IterationDecision Process::for_each_thread(Callback callback)
 {
@@ -968,34 +935,27 @@ inline IterationDecision Process::for_each_thread(Callback callback)
 }
 
 template<IteratorFunction<Process&> Callback>
-inline void Process::for_each_in_pgrp(ProcessGroupID pgid, Callback callback)
+inline void Process::for_each_ignoring_jails(Callback callback)
 {
     Process::all_instances().with([&](auto const& list) {
         for (auto it = list.begin(); it != list.end();) {
             auto& process = *it;
             ++it;
-            if (!process.is_dead() && process.pgid() == pgid) {
-                if (callback(process) == IterationDecision::Break)
-                    break;
-            }
+            if (callback(process) == IterationDecision::Break)
+                break;
         }
     });
 }
 
-template<VoidFunction<Process&> Callback>
-inline void Process::for_each(Callback callback)
+template<IteratorFunction<Thread&> Callback>
+inline IterationDecision Process::for_each_thread(Callback callback) const
 {
-    return for_each([&](auto& item) {
-        callback(item);
-        return IterationDecision::Continue;
-    });
-}
-
-template<VoidFunction<Process&> Callback>
-inline void Process::for_each_child(Callback callback)
-{
-    return for_each_child([&](auto& item) {
-        callback(item);
+    return thread_list().with([&](auto& thread_list) -> IterationDecision {
+        for (auto& thread : thread_list) {
+            IterationDecision decision = callback(thread);
+            if (decision != IterationDecision::Continue)
+                return decision;
+        }
         return IterationDecision::Continue;
     });
 }
@@ -1027,15 +987,6 @@ inline IterationDecision Process::for_each_thread(Callback callback)
             callback(thread);
     });
     return IterationDecision::Continue;
-}
-
-template<VoidFunction<Process&> Callback>
-inline void Process::for_each_in_pgrp(ProcessGroupID pgid, Callback callback)
-{
-    return for_each_in_pgrp(pgid, [&](auto& item) {
-        callback(item);
-        return IterationDecision::Continue;
-    });
 }
 
 inline ProcessID Thread::pid() const

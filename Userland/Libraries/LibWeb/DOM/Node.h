@@ -13,6 +13,7 @@
 #include <AK/TypeCasts.h>
 #include <AK/Vector.h>
 #include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/DOMParsing/XMLSerializer.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::DOM {
@@ -43,6 +44,9 @@ class Node : public EventTarget {
 public:
     ParentNode* parent_or_shadow_host();
     ParentNode const* parent_or_shadow_host() const { return const_cast<Node*>(this)->parent_or_shadow_host(); }
+
+    Element* parent_or_shadow_host_element();
+    Element const* parent_or_shadow_host_element() const { return const_cast<Node*>(this)->parent_or_shadow_host_element(); }
 
     virtual ~Node();
 
@@ -156,7 +160,8 @@ public:
     Painting::PaintableBox const* paint_box() const;
     Painting::Paintable const* paintable() const;
 
-    void set_layout_node(Badge<Layout::Node>, Layout::Node*) const;
+    void set_layout_node(Badge<Layout::Node>, JS::NonnullGCPtr<Layout::Node>);
+    void detach_layout_node(Badge<DOM::Document>);
 
     virtual bool is_child_allowed(Node const&) const { return true; }
 
@@ -195,7 +200,7 @@ public:
     i32 id() const { return m_id; }
     static Node* from_id(i32 node_id);
 
-    String serialize_fragment() const;
+    WebIDL::ExceptionOr<String> serialize_fragment(DOMParsing::RequireWellFormed) const;
 
     void replace_all(JS::GCPtr<Node>);
     void string_replace_all(String const&);
@@ -621,9 +626,10 @@ protected:
     Node(Document&, NodeType);
 
     virtual void visit_edges(Cell::Visitor&) override;
+    virtual void finalize() override;
 
     JS::GCPtr<Document> m_document;
-    mutable WeakPtr<Layout::Node> m_layout_node;
+    JS::GCPtr<Layout::Node> m_layout_node;
     NodeType m_type { NodeType::INVALID };
     bool m_needs_style_update { false };
     bool m_child_needs_style_update { false };

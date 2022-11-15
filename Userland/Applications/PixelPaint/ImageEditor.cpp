@@ -127,7 +127,7 @@ void ImageEditor::paint_event(GUI::PaintEvent& event)
     painter.add_clip_rect(frame_inner_rect());
 
     {
-        Gfx::DisjointRectSet background_rects;
+        Gfx::DisjointIntRectSet background_rects;
         background_rects.add(frame_inner_rect());
         background_rects.shatter(content_rect());
         for (auto& rect : background_rects.rects())
@@ -305,12 +305,40 @@ GUI::MouseEvent ImageEditor::event_adjusted_for_layer(GUI::MouseEvent const& eve
     };
 }
 
+void ImageEditor::set_editor_color_to_color_at_mouse_position(GUI::MouseEvent const& event, bool sample_all_layers = false)
+{
+    auto position = event.position();
+    Color color;
+    auto layer = active_layer();
+    if (sample_all_layers) {
+        color = image().color_at(position);
+    } else {
+        if (!layer || !layer->rect().contains(position))
+            return;
+        color = layer->currently_edited_bitmap().get_pixel(position);
+    }
+
+    // We picked a transparent pixel, do nothing.
+    if (!color.alpha())
+        return;
+
+    if (event.button() == GUI::MouseButton::Primary)
+        set_primary_color(color);
+    else if (event.button() == GUI::MouseButton::Secondary)
+        set_secondary_color(color);
+}
+
 void ImageEditor::mousedown_event(GUI::MouseEvent& event)
 {
     if (event.button() == GUI::MouseButton::Middle) {
         start_panning(event.position());
         set_override_cursor(Gfx::StandardCursor::Drag);
         return;
+    }
+
+    if (event.alt() && !m_active_tool->is_overriding_alt()) {
+        set_editor_color_to_color_at_mouse_position(event);
+        return; // Pick Color instead of acivating active tool when holding alt.
     }
 
     if (!m_active_tool)
@@ -326,6 +354,14 @@ void ImageEditor::mousedown_event(GUI::MouseEvent& event)
     auto image_event = event_with_pan_and_scale_applied(event);
     Tool::MouseEvent tool_event(Tool::MouseEvent::Action::MouseDown, layer_event, image_event, event);
     m_active_tool->on_mousedown(m_active_layer.ptr(), tool_event);
+}
+
+void ImageEditor::doubleclick_event(GUI::MouseEvent& event)
+{
+    auto layer_event = m_active_layer ? event_adjusted_for_layer(event, *m_active_layer) : event;
+    auto image_event = event_with_pan_and_scale_applied(event);
+    Tool::MouseEvent tool_event(Tool::MouseEvent::Action::DoubleClick, layer_event, image_event, event);
+    m_active_tool->on_doubleclick(m_active_layer.ptr(), tool_event);
 }
 
 void ImageEditor::mousemove_event(GUI::MouseEvent& event)
@@ -384,8 +420,10 @@ void ImageEditor::keydown_event(GUI::KeyEvent& event)
         return;
     }
 
-    if (m_active_tool)
-        m_active_tool->on_keydown(event);
+    if (m_active_tool && m_active_tool->on_keydown(event))
+        return;
+
+    event.ignore();
 }
 
 void ImageEditor::keyup_event(GUI::KeyEvent& event)
@@ -454,8 +492,11 @@ ErrorOr<void> ImageEditor::add_new_layer_from_selection()
 
 void ImageEditor::set_active_tool(Tool* tool)
 {
-    if (m_active_tool == tool)
+    if (m_active_tool == tool) {
+        if (m_active_tool)
+            m_active_tool->setup(*this);
         return;
+    }
 
     if (m_active_tool)
         m_active_tool->clear();
@@ -509,6 +550,12 @@ void ImageEditor::set_pixel_grid_visibility(bool show_pixel_grid)
     if (m_show_pixel_grid == show_pixel_grid)
         return;
     m_show_pixel_grid = show_pixel_grid;
+    update();
+}
+
+void ImageEditor::clear_guides()
+{
+    m_guides.clear();
     update();
 }
 

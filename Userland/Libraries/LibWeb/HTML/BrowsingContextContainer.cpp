@@ -31,6 +31,12 @@ BrowsingContextContainer::BrowsingContextContainer(DOM::Document& document, DOM:
 
 BrowsingContextContainer::~BrowsingContextContainer() = default;
 
+void BrowsingContextContainer::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_nested_browsing_context);
+}
+
 // https://html.spec.whatwg.org/multipage/browsers.html#creating-a-new-nested-browsing-context
 void BrowsingContextContainer::create_new_nested_browsing_context()
 {
@@ -103,13 +109,11 @@ const DOM::Document* BrowsingContextContainer::get_svg_document() const
     return nullptr;
 }
 
-HTML::Window* BrowsingContextContainer::content_window() const
+HTML::WindowProxy* BrowsingContextContainer::content_window()
 {
-    // FIXME: This should return the WindowProxy
-    auto* document = content_document();
-    if (!document)
+    if (!m_nested_browsing_context)
         return nullptr;
-    return const_cast<HTML::Window*>(&document->window());
+    return m_nested_browsing_context->window_proxy();
 }
 
 // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#matches-about:blank
@@ -142,7 +146,7 @@ void BrowsingContextContainer::shared_attribute_processing_steps_for_iframe_and_
     // 3. If there exists an ancestor browsing context of element's nested browsing context
     //    whose active document's URL, ignoring fragments, is equal to url, then return.
     if (m_nested_browsing_context) {
-        for (auto* ancestor = m_nested_browsing_context->parent(); ancestor; ancestor = ancestor->parent()) {
+        for (auto ancestor = m_nested_browsing_context->parent(); ancestor; ancestor = ancestor->parent()) {
             VERIFY(ancestor->active_document());
             if (ancestor->active_document()->url().equals(url, AK::URL::ExcludeFragment::Yes))
                 return;
@@ -160,10 +164,11 @@ void BrowsingContextContainer::shared_attribute_processing_steps_for_iframe_and_
         }
 
         // 3. Return.
+        return;
     }
 
     // 5. Let resource be a new request whose URL is url and whose referrer policy is the current state of element's referrerpolicy content attribute.
-    auto resource = Fetch::Infrastructure::Request::create();
+    auto resource = Fetch::Infrastructure::Request::create(vm());
     resource->set_url(url);
     // FIXME: Set the referrer policy.
 
@@ -187,11 +192,11 @@ void BrowsingContextContainer::shared_attribute_processing_steps_for_iframe_and_
     }
 
     // 8. Navigate to the resource: navigate an iframe or frame given element and resource.
-    navigate_an_iframe_or_frame(move(resource));
+    navigate_an_iframe_or_frame(resource);
 }
 
 // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#navigate-an-iframe-or-frame
-void BrowsingContextContainer::navigate_an_iframe_or_frame(NonnullRefPtr<Fetch::Infrastructure::Request> resource)
+void BrowsingContextContainer::navigate_an_iframe_or_frame(JS::NonnullGCPtr<Fetch::Infrastructure::Request> resource)
 {
     // 1. Let historyHandling be "default".
     auto history_handling = HistoryHandlingBehavior::Default;
@@ -214,7 +219,7 @@ void BrowsingContextContainer::navigate_an_iframe_or_frame(NonnullRefPtr<Fetch::
     //    FIXME: and processResponseEndOfBody set to reportFrameTiming.
     auto* source_browsing_context = document().browsing_context();
     VERIFY(source_browsing_context);
-    m_nested_browsing_context->navigate(move(resource), *source_browsing_context, false, history_handling);
+    MUST(m_nested_browsing_context->navigate(resource, *source_browsing_context, false, history_handling));
 }
 
 }

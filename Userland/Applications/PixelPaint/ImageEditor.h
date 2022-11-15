@@ -60,7 +60,7 @@ public:
     {
         m_guides.remove_first_matching([&](auto& entry) { return &guide == entry.ptr(); });
     }
-    void clear_guides() { m_guides.clear(); }
+    void clear_guides();
 
     void layers_did_change();
 
@@ -118,11 +118,14 @@ public:
 
     Core::EventLoop& gui_event_loop() { return m_gui_event_loop; }
 
+    void set_editor_color_to_color_at_mouse_position(GUI::MouseEvent const& event, bool sample_all_layers);
+
 private:
     explicit ImageEditor(NonnullRefPtr<Image>);
 
     virtual void paint_event(GUI::PaintEvent&) override;
     virtual void second_paint_event(GUI::PaintEvent&) override;
+    virtual void doubleclick_event(GUI::MouseEvent&) override;
     virtual void mousedown_event(GUI::MouseEvent&) override;
     virtual void mousemove_event(GUI::MouseEvent&) override;
     virtual void mouseup_event(GUI::MouseEvent&) override;

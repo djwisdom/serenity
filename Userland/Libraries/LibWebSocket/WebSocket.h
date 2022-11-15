@@ -25,7 +25,7 @@ enum class ReadyState {
 class WebSocket final : public Core::Object {
     C_OBJECT(WebSocket)
 public:
-    static NonnullRefPtr<WebSocket> create(ConnectionInfo);
+    static NonnullRefPtr<WebSocket> create(ConnectionInfo, RefPtr<WebSocketImpl> = nullptr);
     virtual ~WebSocket() override = default;
 
     URL const& url() const { return m_connection.url(); }
@@ -54,7 +54,7 @@ public:
     Function<void(Error)> on_error;
 
 private:
-    explicit WebSocket(ConnectionInfo);
+    WebSocket(ConnectionInfo, RefPtr<WebSocketImpl>);
 
     // As defined in section 5.2
     enum class OpCode : u8 {
@@ -106,6 +106,8 @@ private:
 
     ConnectionInfo m_connection;
     RefPtr<WebSocketImpl> m_impl;
+
+    Vector<u8> m_buffered_data;
 };
 
 }

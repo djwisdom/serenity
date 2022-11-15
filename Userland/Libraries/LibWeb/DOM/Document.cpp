@@ -59,6 +59,7 @@
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Layout/BlockFormattingContext.h>
 #include <LibWeb/Layout/InitialContainingBlock.h>
@@ -67,6 +68,7 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Platform/Timer.h>
 #include <LibWeb/SVG/TagNames.h>
+#include <LibWeb/Selection/Selection.h>
 #include <LibWeb/UIEvents/EventNames.h>
 #include <LibWeb/UIEvents/FocusEvent.h>
 #include <LibWeb/UIEvents/KeyboardEvent.h>
@@ -77,7 +79,7 @@
 namespace Web::DOM {
 
 // https://html.spec.whatwg.org/multipage/origin.html#obtain-browsing-context-navigation
-static NonnullRefPtr<HTML::BrowsingContext> obtain_a_browsing_context_to_use_for_a_navigation_response(
+static JS::NonnullGCPtr<HTML::BrowsingContext> obtain_a_browsing_context_to_use_for_a_navigation_response(
     HTML::BrowsingContext& browsing_context,
     HTML::SandboxingFlagSet sandbox_flags,
     HTML::CrossOriginOpenerPolicy navigation_coop,
@@ -114,7 +116,8 @@ static NonnullRefPtr<HTML::BrowsingContext> obtain_a_browsing_context_to_use_for
         // 3. Set newBrowsingContext's popup sandboxing flag set to a clone of sandboxFlags.
     }
 
-    // FIXME: 6. Discard browsingContext.
+    // 6. Discard browsingContext.
+    browsing_context.discard();
 
     // 7. Return newBrowsingContext.
     return new_browsing_context;
@@ -127,7 +130,7 @@ JS::NonnullGCPtr<Document> Document::create_and_initialize(Type type, String con
     //    given navigationParams's browsing context, navigationParams's final sandboxing flag set,
     //    navigationParams's cross-origin opener policy, and navigationParams's COOP enforcement result.
     auto browsing_context = obtain_a_browsing_context_to_use_for_a_navigation_response(
-        navigation_params.browsing_context,
+        *navigation_params.browsing_context,
         navigation_params.final_sandboxing_flag_set,
         navigation_params.cross_origin_opener_policy,
         navigation_params.coop_enforcement_result);
@@ -176,9 +179,9 @@ JS::NonnullGCPtr<Document> Document::create_and_initialize(Type type, String con
                 window = HTML::Window::create(realm);
                 return window;
             },
-            [](JS::Realm&) -> JS::Object* {
-                // FIXME: - For the global this binding, use browsingContext's WindowProxy object.
-                return nullptr;
+            [&](JS::Realm&) -> JS::Object* {
+                // - For the global this binding, use browsingContext's WindowProxy object.
+                return browsing_context->window_proxy();
             });
 
         // 6. Let topLevelCreationURL be creationURL.
@@ -324,8 +327,11 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_implementation.ptr());
     visitor.visit(m_current_script.ptr());
     visitor.visit(m_associated_inert_template_document.ptr());
+    visitor.visit(m_appropriate_template_contents_owner_document);
     visitor.visit(m_pending_parsing_blocking_script.ptr());
     visitor.visit(m_history.ptr());
+
+    visitor.visit(m_browsing_context);
 
     visitor.visit(m_applets);
     visitor.visit(m_anchors);
@@ -335,6 +341,9 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_forms);
     visitor.visit(m_scripts);
     visitor.visit(m_all);
+    visitor.visit(m_selection);
+    visitor.visit(m_first_base_element_with_href_in_tree_order);
+    visitor.visit(m_parser);
 
     for (auto& script : m_scripts_to_execute_when_parsing_has_finished)
         visitor.visit(script.ptr());
@@ -348,6 +357,21 @@ void Document::visit_edges(Cell::Visitor& visitor)
         visitor.visit(target.ptr());
     for (auto& target : m_pending_scrollend_event_targets)
         visitor.visit(target.ptr());
+}
+
+// https://w3c.github.io/selection-api/#dom-document-getselection
+JS::GCPtr<Selection::Selection> Document::get_selection()
+{
+    // The method must return the selection associated with this if this has an associated browsing context,
+    // and it must return null otherwise.
+    if (!browsing_context()) {
+        return nullptr;
+    }
+
+    if (!m_selection) {
+        m_selection = Selection::Selection::create(realm(), *this);
+    }
+    return m_selection;
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-write
@@ -391,7 +415,7 @@ WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(String input)
             return {};
 
         // 2. Run the document open steps with document.
-        open();
+        TRY(open());
     }
 
     // 5. Insert input into the input stream just before the insertion point.
@@ -640,11 +664,11 @@ void Document::set_title(String const& title)
     JS::GCPtr<HTML::HTMLTitleElement> title_element = head_element->first_child_of_type<HTML::HTMLTitleElement>();
     if (!title_element) {
         title_element = &static_cast<HTML::HTMLTitleElement&>(*create_element(HTML::TagNames::title).release_value());
-        head_element->append_child(*title_element);
+        MUST(head_element->append_child(*title_element));
     }
 
     title_element->remove_all_children(true);
-    title_element->append_child(*heap().allocate<Text>(realm(), *this, title));
+    MUST(title_element->append_child(*heap().allocate<Text>(realm(), *this, title)));
 
     if (auto* page = this->page()) {
         if (browsing_context() == &page->top_level_browsing_context())
@@ -660,7 +684,7 @@ void Document::tear_down_layout_tree()
     // Gather up all the layout nodes in a vector and detach them from parents
     // while the vector keeps them alive.
 
-    NonnullRefPtrVector<Layout::Node> layout_nodes;
+    Vector<JS::Handle<Layout::Node>> layout_nodes;
 
     m_layout_root->for_each_in_inclusive_subtree([&](auto& layout_node) {
         layout_nodes.append(layout_node);
@@ -668,8 +692,8 @@ void Document::tear_down_layout_tree()
     });
 
     for (auto& layout_node : layout_nodes) {
-        if (layout_node.parent())
-            layout_node.parent()->remove_child(layout_node);
+        if (layout_node->parent())
+            layout_node->parent()->remove_child(*layout_node);
     }
 
     m_layout_root = nullptr;
@@ -708,7 +732,7 @@ Vector<CSS::BackgroundLayerData> const* Document::background_layers() const
     return &body_layout_node->background_layers();
 }
 
-JS::GCPtr<HTML::HTMLBaseElement> Document::first_base_element_with_href_in_tree_order() const
+void Document::update_base_element(Badge<HTML::HTMLBaseElement>)
 {
     JS::GCPtr<HTML::HTMLBaseElement> base_element;
 
@@ -721,7 +745,12 @@ JS::GCPtr<HTML::HTMLBaseElement> Document::first_base_element_with_href_in_tree_
         return IterationDecision::Continue;
     });
 
-    return base_element;
+    m_first_base_element_with_href_in_tree_order = base_element;
+}
+
+JS::GCPtr<HTML::HTMLBaseElement> Document::first_base_element_with_href_in_tree_order() const
+{
+    return m_first_base_element_with_href_in_tree_order;
 }
 
 // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#fallback-base-url
@@ -785,6 +814,10 @@ void Document::update_layout()
     if (!m_needs_layout && m_layout_root)
         return;
 
+    // NOTE: If this is a document hosting <template> contents, layout is unnecessary.
+    if (m_created_for_appropriate_template_contents)
+        return;
+
     if (!browsing_context())
         return;
 
@@ -793,7 +826,7 @@ void Document::update_layout()
     if (!m_layout_root) {
         m_next_layout_node_serial_id = 0;
         Layout::TreeBuilder tree_builder;
-        m_layout_root = static_ptr_cast<Layout::InitialContainingBlock>(tree_builder.build(*this));
+        m_layout_root = verify_cast<Layout::InitialContainingBlock>(*tree_builder.build(*this));
     }
 
     Layout::LayoutState layout_state;
@@ -862,6 +895,11 @@ void Document::update_style()
         return;
     if (!needs_full_style_update() && !needs_style_update() && !child_needs_style_update())
         return;
+
+    // NOTE: If this is a document hosting <template> contents, style update is unnecessary.
+    if (m_created_for_appropriate_template_contents)
+        return;
+
     evaluate_media_rules();
     if (update_style_recursively(*this))
         invalidate_layout();
@@ -1122,7 +1160,7 @@ JS::Value Document::run_javascript(StringView source, StringView filename)
 
     if (result.is_error()) {
         // FIXME: I'm sure the spec could tell us something about error propagation here!
-        HTML::report_exception(result);
+        HTML::report_exception(result, realm());
 
         return {};
     }
@@ -1411,6 +1449,10 @@ void Document::set_focused_element(Element* element)
 
     if (m_layout_root)
         m_layout_root->set_needs_display();
+
+    // Scroll the viewport if necessary to make the newly focused element visible.
+    if (m_focused_element)
+        m_focused_element->scroll_into_view();
 }
 
 void Document::set_active_element(Element* element)
@@ -1666,7 +1708,7 @@ void Document::run_the_resize_steps()
 
     window().dispatch_event(*DOM::Event::create(realm(), UIEvents::EventNames::resize));
 
-    update_layout();
+    schedule_layout_update();
 }
 
 // https://w3c.github.io/csswg-drafts/cssom-view-1/#document-run-the-scroll-steps
@@ -1921,7 +1963,10 @@ void Document::check_favicon_after_loading_link_resource()
 {
     // https://html.spec.whatwg.org/multipage/links.html#rel-icon
     // NOTE: firefox also load favicons outside the head tag, which is against spec (see table 4.6.7)
-    auto head_element = head();
+    auto* head_element = head();
+    if (!head_element)
+        return;
+
     auto favicon_link_elements = HTMLCollection::create(*head_element, [](Element const& element) {
         if (!is<HTML::HTMLLinkElement>(element))
             return false;
@@ -2026,10 +2071,10 @@ HTML::PolicyContainer Document::policy_container() const
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#list-of-the-descendant-browsing-contexts
-Vector<NonnullRefPtr<HTML::BrowsingContext>> Document::list_of_descendant_browsing_contexts() const
+Vector<JS::Handle<HTML::BrowsingContext>> Document::list_of_descendant_browsing_contexts() const
 {
     // 1. Let list be an empty list.
-    Vector<NonnullRefPtr<HTML::BrowsingContext>> list;
+    Vector<JS::Handle<HTML::BrowsingContext>> list;
 
     // 2. For each browsing context container container,
     //    whose nested browsing context is non-null and whose shadow-including root is d, in shadow-including tree order:
@@ -2038,7 +2083,7 @@ Vector<NonnullRefPtr<HTML::BrowsingContext>> Document::list_of_descendant_browsi
     //       of this document's browsing context.
     if (browsing_context()) {
         browsing_context()->for_each_in_subtree([&](auto& context) {
-            list.append(context);
+            list.append(JS::make_handle(const_cast<HTML::BrowsingContext&>(context)));
             return IterationDecision::Continue;
         });
     }
@@ -2126,7 +2171,7 @@ void Document::abort()
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#active-parser
-RefPtr<HTML::HTMLParser> Document::active_parser()
+JS::GCPtr<HTML::HTMLParser> Document::active_parser()
 {
     if (!m_parser)
         return nullptr;
@@ -2231,6 +2276,43 @@ void Document::unload(bool recursive_flag, Optional<DocumentUnloadTimingInfo> un
 
     // 13. Decrease document's unload counter by 1.
     m_unload_counter -= 1;
+}
+
+void Document::did_stop_being_active_document_in_browsing_context(Badge<HTML::BrowsingContext>)
+{
+    tear_down_layout_tree();
+}
+
+// https://w3c.github.io/editing/docs/execCommand/#querycommandsupported()
+bool Document::query_command_supported(String const& command) const
+{
+    dbgln("(STUBBED) Document::query_command_supported(command='{}')", command);
+    return false;
+}
+
+// https://html.spec.whatwg.org/multipage/scripting.html#appropriate-template-contents-owner-document
+JS::NonnullGCPtr<DOM::Document> Document::appropriate_template_contents_owner_document()
+{
+    // 1. If doc is not a Document created by this algorithm, then:
+    if (!created_for_appropriate_template_contents()) {
+        // 1. If doc does not yet have an associated inert template document, then:
+        if (!m_associated_inert_template_document) {
+            // 1. Let new doc be a new Document (whose browsing context is null). This is "a Document created by this algorithm" for the purposes of the step above.
+            auto new_document = DOM::Document::create(realm());
+            new_document->m_created_for_appropriate_template_contents = true;
+
+            // 2. If doc is an HTML document, mark new doc as an HTML document also.
+            if (document_type() == Type::HTML)
+                new_document->set_document_type(Type::HTML);
+
+            // 3. Let doc's associated inert template document be new doc.
+            m_associated_inert_template_document = new_document;
+        }
+        // 2. Set doc to doc's associated inert template document.
+        return *m_associated_inert_template_document;
+    }
+    // 2. Return doc.
+    return *this;
 }
 
 }

@@ -42,6 +42,27 @@ JS::GCPtr<HTMLOptionsCollection> const& HTMLSelectElement::options()
     return m_options;
 }
 
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-select-length
+size_t HTMLSelectElement::length()
+{
+    // The length IDL attribute must return the number of nodes represented by the options collection. On setting, it must act like the attribute of the same name on the options collection.
+    return const_cast<HTMLOptionsCollection&>(*options()).length();
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-select-item
+DOM::Element* HTMLSelectElement::item(size_t index)
+{
+    // The item(index) method must return the value returned by the method of the same name on the options collection, when invoked with the same argument.
+    return const_cast<HTMLOptionsCollection&>(*options()).item(index);
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-select-nameditem
+DOM::Element* HTMLSelectElement::named_item(FlyString const& name)
+{
+    // The namedItem(name) method must return the value returned by the method of the same name on the options collection, when invoked with the same argument.
+    return const_cast<HTMLOptionsCollection&>(*options()).named_item(name);
+}
+
 // https://html.spec.whatwg.org/multipage/form-elements.html#dom-select-add
 WebIDL::ExceptionOr<void> HTMLSelectElement::add(HTMLOptionOrOptGroupElement element, Optional<HTMLElementOrElementIndex> before)
 {
@@ -99,6 +120,26 @@ void HTMLSelectElement::set_selected_index(int index)
     auto& selected_option = options[index];
     selected_option->m_selected = true;
     selected_option->m_dirty = true;
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+i32 HTMLSelectElement::default_tab_index_value() const
+{
+    // See the base function for the spec comments.
+    return 0;
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-select-type
+String const& HTMLSelectElement::type() const
+{
+    // The type IDL attribute, on getting, must return the string "select-one" if the multiple attribute is absent, and the string "select-multiple" if the multiple attribute is present.
+    static String select_one = "select-one"sv;
+    static String select_multiple = "select-multiple"sv;
+
+    if (!has_attribute(AttributeNames::multiple))
+        return select_one;
+
+    return select_multiple;
 }
 
 }

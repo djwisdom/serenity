@@ -345,8 +345,8 @@ pushd "$DIR/Build/$ARCH"
             fi
 
             echo "XXX build gdb"
-            buildstep "gdb/build" "$MAKE" -j "$MAKEJOBS" || exit 1
-            buildstep "gdb/install" "$MAKE" install || exit 1
+            buildstep "gdb/build" "$MAKE" MAKEINFO=true -j "$MAKEJOBS" || exit 1
+            buildstep "gdb/install" "$MAKE" MAKEINFO=true install || exit 1
         popd
     fi
 
@@ -355,6 +355,11 @@ pushd "$DIR/Build/$ARCH"
 
     pushd binutils
         echo "XXX configure binutils"
+
+        # We don't need the documentation that is being built, so
+        # don't force people to install makeinfo just for that.
+        export ac_cv_prog_MAKEINFO=true
+
         buildstep "binutils/configure" "$DIR"/Tarballs/$BINUTILS_NAME/configure --prefix="$PREFIX" \
                                                  --target="$TARGET" \
                                                  --with-sysroot="$SYSROOT" \
@@ -371,8 +376,8 @@ pushd "$DIR/Build/$ARCH"
             popd
         fi
         echo "XXX build binutils"
-        buildstep "binutils/build" "$MAKE" -j "$MAKEJOBS" || exit 1
-        buildstep "binutils/install" "$MAKE" install || exit 1
+        buildstep "binutils/build" "$MAKE" MAKEINFO=true -j "$MAKEJOBS" || exit 1
+        buildstep "binutils/install" "$MAKE" MAKEINFO=true install || exit 1
     popd
 
     echo "XXX serenity libc headers"
