@@ -19,6 +19,7 @@
 #include <LibWeb/HTML/AnimationFrameCallbackDriver.h>
 #include <LibWeb/HTML/CrossOrigin/CrossOriginPropertyDescriptorMap.h>
 #include <LibWeb/HTML/GlobalEventHandlers.h>
+#include <LibWeb/HTML/Scripting/ImportMap.h>
 #include <LibWeb/HTML/WindowEventHandlers.h>
 
 namespace Web::HTML {
@@ -54,6 +55,11 @@ public:
     HTML::BrowsingContext* browsing_context();
 
     JS::ThrowCompletionOr<size_t> document_tree_child_browsing_context_count() const;
+
+    ImportMap const& import_map() const { return m_import_map; }
+
+    bool import_maps_allowed() const { return m_import_maps_allowed; }
+    void set_import_maps_allowed(bool import_maps_allowed) { m_import_maps_allowed = import_maps_allowed; }
 
     void alert_impl(String const&);
     bool confirm_impl(String const&);
@@ -102,10 +108,14 @@ public:
     int screen_x() const;
     int screen_y() const;
 
+    int outer_width() const;
+    int outer_height() const;
+
     JS::NonnullGCPtr<HTML::Storage> local_storage();
     JS::NonnullGCPtr<HTML::Storage> session_storage();
 
-    Window* parent();
+    // https://html.spec.whatwg.org/multipage/browsers.html#dom-parent
+    WindowProxy* parent();
 
     WebIDL::ExceptionOr<void> post_message_impl(JS::Value, String const& target_origin);
 
@@ -126,7 +136,6 @@ public:
 
 private:
     explicit Window(JS::Realm&);
-    virtual void initialize(JS::Realm&) override;
 
     virtual void visit_edges(Cell::Visitor&) override;
 
@@ -151,6 +160,12 @@ private:
 
     IDAllocator m_timer_id_allocator;
     HashMap<int, JS::NonnullGCPtr<Timer>> m_timers;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#concept-window-import-map
+    ImportMap m_import_map;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#import-maps-allowed
+    bool m_import_maps_allowed { true };
 
     JS::GCPtr<HighResolutionTime::Performance> m_performance;
     JS::GCPtr<Crypto::Crypto> m_crypto;
@@ -203,6 +218,10 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(inner_width_getter);
     JS_DECLARE_NATIVE_FUNCTION(inner_height_getter);
 
+    JS_DECLARE_NATIVE_FUNCTION(window_getter);
+    JS_DECLARE_NATIVE_FUNCTION(frames_getter);
+    JS_DECLARE_NATIVE_FUNCTION(self_getter);
+
     JS_DECLARE_NATIVE_FUNCTION(parent_getter);
 
     JS_DECLARE_NATIVE_FUNCTION(device_pixel_ratio_getter);
@@ -216,6 +235,9 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(screen_y_getter);
     JS_DECLARE_NATIVE_FUNCTION(screen_left_getter);
     JS_DECLARE_NATIVE_FUNCTION(screen_top_getter);
+
+    JS_DECLARE_NATIVE_FUNCTION(outer_width_getter);
+    JS_DECLARE_NATIVE_FUNCTION(outer_height_getter);
 
     JS_DECLARE_NATIVE_FUNCTION(post_message);
 
@@ -234,6 +256,7 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(cancel_animation_frame);
     JS_DECLARE_NATIVE_FUNCTION(atob);
     JS_DECLARE_NATIVE_FUNCTION(btoa);
+    JS_DECLARE_NATIVE_FUNCTION(focus);
 
     JS_DECLARE_NATIVE_FUNCTION(get_computed_style);
     JS_DECLARE_NATIVE_FUNCTION(match_media);

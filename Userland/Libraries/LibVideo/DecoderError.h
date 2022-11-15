@@ -22,9 +22,13 @@ using DecoderErrorOr = ErrorOr<T, DecoderError>;
 enum class DecoderErrorCategory : u32 {
     Unknown,
     IO,
+    NeedsMoreInput,
+    EndOfStream,
     Memory,
     // The input is corrupted.
     Corrupted,
+    // Invalid call.
+    Invalid,
     // The input uses features that are not yet implemented.
     NotImplemented,
 };
@@ -43,9 +47,14 @@ public:
         return DecoderError::with_description(category, String::vformatted(format_string.view(), variadic_format_params));
     }
 
+    static DecoderError from_source_location(DecoderErrorCategory category, StringView description, SourceLocation location = SourceLocation::current())
+    {
+        return DecoderError::format(category, "[{} @ {}:{}]: {}", location.function_name(), location.filename(), location.line_number(), description);
+    }
+
     static DecoderError corrupted(StringView description, SourceLocation location = SourceLocation::current())
     {
-        return DecoderError::format(DecoderErrorCategory::Corrupted, "{}: {}", location, description);
+        return DecoderError::from_source_location(DecoderErrorCategory::Corrupted, description, location);
     }
 
     static DecoderError not_implemented(SourceLocation location = SourceLocation::current())
@@ -53,9 +62,9 @@ public:
         return DecoderError::format(DecoderErrorCategory::NotImplemented, "{} is not implemented", location.function_name());
     }
 
-    DecoderErrorCategory category() { return m_category; }
-    StringView description() { return m_description; }
-    StringView string_literal() { return m_description; }
+    DecoderErrorCategory category() const { return m_category; }
+    StringView description() const { return m_description; }
+    StringView string_literal() const { return m_description; }
 
 private:
     DecoderError(DecoderErrorCategory category, String description)
@@ -73,9 +82,8 @@ private:
         auto _result = ((expression));                                     \
         if (_result.is_error()) [[unlikely]] {                             \
             auto _error_string = _result.release_error().string_literal(); \
-            return DecoderError::format(                                   \
-                ((category)), "{}: {}",                                    \
-                SourceLocation::current(), _error_string);                 \
+            return DecoderError::from_source_location(                     \
+                ((category)), _error_string, SourceLocation::current());   \
         }                                                                  \
         _result.release_value();                                           \
     })

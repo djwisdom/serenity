@@ -91,6 +91,12 @@
 #    define VALIDATE_IS_X86() static_assert(false, "Trying to include x86 only header on non x86 platform");
 #endif
 
+#if ARCH(AARCH64)
+#    define VALIDATE_IS_AARCH64()
+#else
+#    define VALIDATE_IS_AARCH64() static_assert(false, "Trying to include aarch64 only header on non aarch64 platform");
+#endif
+
 #if !defined(AK_COMPILER_CLANG) && !defined(__CLION_IDE_) && !defined(__CLION_IDE__)
 #    define AK_HAS_CONDITIONALLY_TRIVIAL
 #endif
@@ -123,7 +129,11 @@
 #ifdef NAKED
 #    undef NAKED
 #endif
-#define NAKED __attribute__((naked))
+#ifndef AK_ARCH_AARCH64
+#    define NAKED __attribute__((naked))
+#else
+#    define NAKED
+#endif
 
 #ifdef DISALLOW
 #    undef DISALLOW
@@ -166,7 +176,7 @@ extern "C" {
 #    define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC
 #endif
 
-#if defined(AK_OS_BSD_GENERIC)
+#if defined(AK_OS_BSD_GENERIC) && !defined(AK_OS_FREEBSD)
 #    define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC
 #    define CLOCK_REALTIME_COARSE CLOCK_REALTIME
 #endif

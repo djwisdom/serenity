@@ -154,7 +154,7 @@ ThrowCompletionOr<PlainMonthDay*> create_temporal_month_day(VM& vm, u8 iso_month
         return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidPlainMonthDay);
 
     // 4. If ISODateTimeWithinLimits(referenceISOYear, isoMonth, isoDay, 12, 0, 0, 0, 0, 0) is false, throw a RangeError exception.
-    if (!iso_date_time_within_limits(vm, reference_iso_year, iso_month, iso_day, 12, 0, 0, 0, 0, 0))
+    if (!iso_date_time_within_limits(reference_iso_year, iso_month, iso_day, 12, 0, 0, 0, 0, 0))
         return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidPlainMonthDay);
 
     // 5. If newTarget is not present, set newTarget to %Temporal.PlainMonthDay%.
@@ -186,8 +186,8 @@ ThrowCompletionOr<String> temporal_month_day_to_string(VM& vm, PlainMonthDay& mo
     // 6. Let calendarID be ? ToString(monthDay.[[Calendar]]).
     auto calendar_id = TRY(Value(&month_day.calendar()).to_string(vm));
 
-    // 7. If showCalendar is "always" or if calendarID is not "iso8601", then
-    if (show_calendar == "always"sv || calendar_id != "iso8601"sv) {
+    // 7. If showCalendar is one of "always" or "critical", or if calendarID is not "iso8601", then
+    if (show_calendar.is_one_of("always"sv, "critical"sv) || calendar_id != "iso8601"sv) {
         // a. Let year be ! PadISOYear(monthDay.[[ISOYear]]).
         // b. Set result to the string-concatenation of year, the code unit 0x002D (HYPHEN-MINUS), and result.
         result = String::formatted("{}-{}", pad_iso_year(month_day.iso_year()), result);

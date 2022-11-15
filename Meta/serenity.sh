@@ -189,31 +189,32 @@ find_newest_compiler() {
 
 pick_host_compiler() {
     if is_supported_compiler "$CC" && is_supported_compiler "$CXX"; then
-        CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$CC")
-        CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=$CXX")
         return
     fi
 
-    find_newest_compiler egcc gcc gcc-11 gcc-12 /usr/local/bin/gcc-11 /opt/homebrew/bin/gcc-11
+    find_newest_compiler egcc gcc gcc-12 /usr/local/bin/gcc-12 /opt/homebrew/bin/gcc-12
     if is_supported_compiler "$HOST_COMPILER"; then
-        CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$HOST_COMPILER")
-        CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=${HOST_COMPILER/gcc/g++}")
+        export CC="${HOST_COMPILER}"
+        export CXX="${HOST_COMPILER/gcc/g++}"
         return
     fi
 
     find_newest_compiler clang clang-13 clang-14 clang-15 /opt/homebrew/opt/llvm/bin/clang
     if is_supported_compiler "$HOST_COMPILER"; then
-        CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$HOST_COMPILER")
-        CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=${HOST_COMPILER/clang/clang++}")
+        export CC="${HOST_COMPILER}"
+        export CXX="${HOST_COMPILER/clang/clang++}"
         return
     fi
 
-    die "Please make sure that GCC version 11, Clang version 13, or higher is installed."
+    die "Please make sure that GCC version 12, Clang version 13, or higher is installed."
 }
 
 cmd_with_target() {
     is_valid_target || ( >&2 echo "Unknown target: $TARGET"; usage )
+
     pick_host_compiler
+    CMAKE_ARGS+=("-DCMAKE_C_COMPILER=${CC}")
+    CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=${CXX}")
 
     if [ ! -d "$SERENITY_SOURCE_DIR" ]; then
         SERENITY_SOURCE_DIR="$(get_top_dir)"
@@ -262,7 +263,7 @@ build_target() {
     fi
 
     # Get either the environment MAKEJOBS or all processors via CMake
-    [ -z "$MAKEJOBS" ] && MAKEJOBS=$(cmake -P "$SERENITY_SOURCE_DIR/Meta/CMake/processor-count.cmake" 2>&1)
+    [ -z "$MAKEJOBS" ] && MAKEJOBS=$(cmake -P "$SERENITY_SOURCE_DIR/Meta/CMake/processor-count.cmake")
 
     # With zero args, we are doing a standard "build"
     # With multiple args, we are doing an install/image/run

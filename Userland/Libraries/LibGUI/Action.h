@@ -52,6 +52,7 @@ NonnullRefPtr<Action> make_zoom_out_action(Function<void(Action&)>, Core::Object
 NonnullRefPtr<Action> make_reset_zoom_action(Function<void(Action&)>, Core::Object* parent = nullptr);
 NonnullRefPtr<Action> make_rotate_clockwise_action(Function<void(Action&)>, Core::Object* parent = nullptr);
 NonnullRefPtr<Action> make_rotate_counterclockwise_action(Function<void(Action&)>, Core::Object* parent = nullptr);
+NonnullRefPtr<Action> make_command_palette_action(Window* window = nullptr);
 
 };
 
@@ -75,6 +76,8 @@ public:
     static NonnullRefPtr<Action> create_checkable(String text, Shortcut const& shortcut, Function<void(Action&)> callback, Core::Object* parent = nullptr);
     static NonnullRefPtr<Action> create_checkable(String text, Shortcut const& shortcut, RefPtr<Gfx::Bitmap> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
 
+    static RefPtr<Action> find_action_for_shortcut(Core::Object& object, Shortcut const& shortcut);
+
     virtual ~Action() override;
 
     String text() const { return m_text; }
@@ -94,6 +97,7 @@ public:
     Function<void(Action&)> on_activation;
 
     void activate(Core::Object* activator = nullptr);
+    void process_event(Window& window, Event& event);
     void flash_menubar_menu(GUI::Window& window);
 
     bool is_enabled() const { return m_enabled; }

@@ -165,7 +165,17 @@ enum class SearchInPath {
     No,
     Yes,
 };
+
+#ifdef AK_OS_SERENITY
+ErrorOr<void> exec_command(Vector<StringView>& command, bool preserve_env);
+#endif
+
 ErrorOr<void> exec(StringView filename, Span<StringView> arguments, SearchInPath, Optional<Span<StringView>> environment = {});
+
+#ifdef AK_OS_SERENITY
+ErrorOr<void> join_jail(u64 jail_index);
+ErrorOr<u64> create_jail(StringView jail_name);
+#endif
 
 ErrorOr<int> socket(int domain, int type, int protocol);
 ErrorOr<void> bind(int sockfd, struct sockaddr const*, socklen_t);
@@ -193,5 +203,6 @@ ErrorOr<int> posix_openpt(int flags);
 ErrorOr<void> grantpt(int fildes);
 ErrorOr<void> unlockpt(int fildes);
 ErrorOr<void> access(StringView pathname, int mode);
+ErrorOr<String> readlink(StringView pathname);
 
 }

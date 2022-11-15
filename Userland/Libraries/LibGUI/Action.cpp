@@ -63,6 +63,19 @@ NonnullRefPtr<Action> Action::create_checkable(String text, Shortcut const& shor
     return adopt_ref(*new Action(move(text), shortcut, Shortcut {}, move(icon), move(callback), parent, true));
 }
 
+RefPtr<Action> Action::find_action_for_shortcut(Core::Object& object, Shortcut const& shortcut)
+{
+    RefPtr<Action> found_action = nullptr;
+    object.for_each_child_of_type<Action>([&](auto& action) {
+        if (action.shortcut() == shortcut || action.alternate_shortcut() == shortcut) {
+            found_action = &action;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+    return found_action;
+}
+
 Action::Action(String text, Function<void(Action&)> on_activation_callback, Core::Object* parent, bool checkable)
     : Action(move(text), Shortcut {}, Shortcut {}, nullptr, move(on_activation_callback), parent, checkable)
 {
@@ -110,6 +123,22 @@ Action::~Action()
         if (auto* app = Application::the())
             app->unregister_global_shortcut_action({}, *this);
     }
+}
+
+void Action::process_event(Window& window, Event& event)
+{
+    if (is_enabled()) {
+        flash_menubar_menu(window);
+        activate();
+        event.accept();
+        return;
+    }
+    if (swallow_key_event_when_disabled()) {
+        event.accept();
+        return;
+    }
+
+    event.ignore();
 }
 
 void Action::activate(Core::Object* activator)
@@ -241,6 +270,9 @@ void Action::set_text(String text)
     if (m_text == text)
         return;
     m_text = move(text);
+    for_each_toolbar_button([&](auto& button) {
+        button.set_text_from_action();
+    });
     for_each_menu_item([&](auto& menu_item) {
         menu_item.update_from_action({});
     });

@@ -9,11 +9,11 @@
 #include <AK/Time.h>
 #include <AK/Types.h>
 #include <Kernel/API/Syscall.h>
-#include <Kernel/Arch/InterruptDisabler.h>
 #include <Kernel/Coredump.h>
 #include <Kernel/Credentials.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Devices/DeviceManagement.h>
+#include <Kernel/InterruptDisabler.h>
 #ifdef ENABLE_KERNEL_COVERAGE_COLLECTION
 #    include <Kernel/Devices/KCOVDevice.h>
 #endif
@@ -61,6 +61,95 @@ MutexProtected<OwnPtr<KString>>& hostname()
 SpinlockProtected<Process::List>& Process::all_instances()
 {
     return *s_all_instances;
+}
+
+ErrorOr<void> Process::for_each_in_same_jail(Function<ErrorOr<void>(Process&)> callback)
+{
+    ErrorOr<void> result {};
+    Process::all_instances().with([&](auto const& list) {
+        Process::current().jail().with([&](auto my_jail) {
+            for (auto& process : list) {
+                if (!my_jail) {
+                    result = callback(process);
+                } else {
+                    // Note: Don't acquire the process jail spinlock twice if it's the same process
+                    // we are currently inspecting.
+                    if (&Process::current() == &process) {
+                        result = callback(process);
+                    } else {
+                        process.jail().with([&](auto& their_jail) {
+                            if (their_jail.ptr() == my_jail.ptr())
+                                result = callback(process);
+                        });
+                    }
+                }
+                if (result.is_error())
+                    break;
+            }
+        });
+    });
+    return result;
+}
+
+ErrorOr<void> Process::for_each_child_in_same_jail(Function<ErrorOr<void>(Process&)> callback)
+{
+    ProcessID my_pid = pid();
+    ErrorOr<void> result {};
+    Process::all_instances().with([&](auto const& list) {
+        jail().with([&](auto my_jail) {
+            for (auto& process : list) {
+                if (!my_jail) {
+                    if (process.ppid() == my_pid || process.has_tracee_thread(pid()))
+                        result = callback(process);
+                } else {
+                    // FIXME: Is it possible to have a child process being pointing to itself
+                    // as the parent process under normal conditions?
+                    // Note: Don't acquire the process jail spinlock twice if it's the same process
+                    // we are currently inspecting.
+                    if (&Process::current() == &process && (process.ppid() == my_pid || process.has_tracee_thread(pid()))) {
+                        result = callback(process);
+                    } else {
+                        process.jail().with([&](auto& their_jail) {
+                            if ((their_jail.ptr() == my_jail.ptr()) && (process.ppid() == my_pid || process.has_tracee_thread(pid())))
+                                result = callback(process);
+                        });
+                    }
+                }
+                if (result.is_error())
+                    break;
+            }
+        });
+    });
+    return result;
+}
+
+ErrorOr<void> Process::for_each_in_pgrp_in_same_jail(ProcessGroupID pgid, Function<ErrorOr<void>(Process&)> callback)
+{
+    ErrorOr<void> result {};
+    Process::all_instances().with([&](auto const& list) {
+        jail().with([&](auto my_jail) {
+            for (auto& process : list) {
+                if (!my_jail) {
+                    if (!process.is_dead() && process.pgid() == pgid)
+                        result = callback(process);
+                } else {
+                    // Note: Don't acquire the process jail spinlock twice if it's the same process
+                    // we are currently inspecting.
+                    if (&Process::current() == &process && !process.is_dead() && process.pgid() == pgid) {
+                        result = callback(process);
+                    } else {
+                        process.jail().with([&](auto& their_jail) {
+                            if ((their_jail.ptr() == my_jail.ptr()) && !process.is_dead() && process.pgid() == pgid)
+                                result = callback(process);
+                        });
+                    }
+                }
+                if (result.is_error())
+                    break;
+            }
+        });
+    });
+    return result;
 }
 
 ProcessID Process::allocate_pid()
@@ -189,6 +278,9 @@ LockRefPtr<Process> Process::create_kernel_process(LockRefPtr<Thread>& first_thr
     first_thread->regs().esp = FlatPtr(entry_data); // entry function argument is expected to be in regs.esp
 #elif ARCH(X86_64)
     first_thread->regs().rdi = FlatPtr(entry_data); // entry function argument is expected to be in regs.rdi
+#elif ARCH(AARCH64)
+    (void)entry_data;
+    TODO_AARCH64();
 #else
 #    error Unknown architecture
 #endif
@@ -423,7 +515,33 @@ void Process::crash(int signal, FlatPtr ip, bool out_of_memory)
     VERIFY_NOT_REACHED();
 }
 
-LockRefPtr<Process> Process::from_pid(ProcessID pid)
+LockRefPtr<Process> Process::from_pid_in_same_jail(ProcessID pid)
+{
+    return Process::current().jail().with([&](auto& my_jail) -> LockRefPtr<Process> {
+        return all_instances().with([&](auto const& list) -> LockRefPtr<Process> {
+            if (!my_jail) {
+                for (auto& process : list) {
+                    if (process.pid() == pid) {
+                        return process;
+                    }
+                }
+            } else {
+                for (auto& process : list) {
+                    if (process.pid() == pid) {
+                        return process.jail().with([&](auto& other_process_jail) -> LockRefPtr<Process> {
+                            if (other_process_jail.ptr() == my_jail.ptr())
+                                return process;
+                            return {};
+                        });
+                    }
+                }
+            }
+            return {};
+        });
+    });
+}
+
+LockRefPtr<Process> Process::from_pid_ignoring_jails(ProcessID pid)
 {
     return all_instances().with([&](auto const& list) -> LockRefPtr<Process> {
         for (auto const& process : list) {
@@ -654,20 +772,25 @@ void Process::finalize()
     m_fds.with_exclusive([](auto& fds) { fds.clear(); });
     m_tty = nullptr;
     m_executable.with([](auto& executable) { executable = nullptr; });
+    m_attached_jail.with([](auto& jail) {
+        if (jail)
+            jail->detach({});
+        jail = nullptr;
+    });
     m_arguments.clear();
     m_environment.clear();
 
     m_state.store(State::Dead, AK::MemoryOrder::memory_order_release);
 
     {
-        if (auto parent_process = Process::from_pid(ppid())) {
+        if (auto parent_process = Process::from_pid_ignoring_jails(ppid())) {
             if (parent_process->is_user_process() && (parent_process->m_signal_action_data[SIGCHLD].flags & SA_NOCLDWAIT) != SA_NOCLDWAIT)
                 (void)parent_process->send_signal(SIGCHLD, this);
         }
     }
 
     if (!!ppid()) {
-        if (auto parent = Process::from_pid(ppid())) {
+        if (auto parent = Process::from_pid_ignoring_jails(ppid())) {
             parent->m_ticks_in_user_for_dead_children += m_ticks_in_user + m_ticks_in_user_for_dead_children;
             parent->m_ticks_in_kernel_for_dead_children += m_ticks_in_kernel + m_ticks_in_kernel_for_dead_children;
         }
@@ -694,9 +817,9 @@ void Process::unblock_waiters(Thread::WaitBlocker::UnblockFlags flags, u8 signal
 {
     LockRefPtr<Process> waiter_process;
     if (auto* my_tracer = tracer())
-        waiter_process = Process::from_pid(my_tracer->tracer_pid());
+        waiter_process = Process::from_pid_ignoring_jails(my_tracer->tracer_pid());
     else
-        waiter_process = Process::from_pid(ppid());
+        waiter_process = Process::from_pid_ignoring_jails(ppid());
 
     if (waiter_process)
         waiter_process->m_wait_blocker_set.unblock(*this, flags, signal);

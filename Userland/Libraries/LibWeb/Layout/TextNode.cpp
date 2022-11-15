@@ -35,6 +35,12 @@ static bool is_all_whitespace(StringView string)
 void TextNode::compute_text_for_rendering(bool collapse)
 {
     auto& data = dom_node().data();
+
+    if (dom_node().is_password_input()) {
+        m_text_for_rendering = String::repeated('*', data.length());
+        return;
+    }
+
     if (!collapse || data.is_empty()) {
         m_text_for_rendering = data;
         return;
@@ -85,10 +91,10 @@ void TextNode::compute_text_for_rendering(bool collapse)
     m_text_for_rendering = builder.to_string();
 }
 
-TextNode::ChunkIterator::ChunkIterator(StringView text, LayoutMode layout_mode, bool wrap_lines, bool respect_linebreaks)
-    : m_layout_mode(layout_mode)
-    , m_wrap_lines(wrap_lines)
+TextNode::ChunkIterator::ChunkIterator(StringView text, bool wrap_lines, bool respect_linebreaks, bool is_generated_empty_string)
+    : m_wrap_lines(wrap_lines)
     , m_respect_linebreaks(respect_linebreaks)
+    , m_should_emit_one_empty_chunk(is_generated_empty_string)
     , m_utf8_view(text)
     , m_iterator(m_utf8_view.begin())
 {
@@ -96,6 +102,17 @@ TextNode::ChunkIterator::ChunkIterator(StringView text, LayoutMode layout_mode, 
 
 Optional<TextNode::Chunk> TextNode::ChunkIterator::next()
 {
+    if (m_should_emit_one_empty_chunk) {
+        m_should_emit_one_empty_chunk = false;
+        return Chunk {
+            .view = {},
+            .start = 0,
+            .length = 0,
+            .has_breaking_newline = false,
+            .is_all_whitespace = false,
+        };
+    }
+
     if (m_iterator == m_utf8_view.end())
         return {};
 

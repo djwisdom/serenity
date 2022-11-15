@@ -40,6 +40,8 @@ static int parse_options(StringView options)
             flags |= MS_WXALLOWED;
         else if (part == "axallowed")
             flags |= MS_AXALLOWED;
+        else if (part == "noregular")
+            flags |= MS_NOREGULAR;
         else
             warnln("Ignoring invalid option: {}", part);
     }
@@ -151,7 +153,7 @@ static ErrorOr<void> mount_all()
 static ErrorOr<void> print_mounts()
 {
     // Output info about currently mounted filesystems.
-    auto df = TRY(Core::File::open("/proc/df", Core::OpenMode::ReadOnly));
+    auto df = TRY(Core::File::open("/sys/kernel/df", Core::OpenMode::ReadOnly));
 
     auto content = df->read_all();
     auto json = TRY(JsonValue::from_string(content));
@@ -173,6 +175,8 @@ static ErrorOr<void> print_mounts()
 
         if (mount_flags & MS_NODEV)
             out(",nodev");
+        if (mount_flags & MS_NOREGULAR)
+            out(",noregular");
         if (mount_flags & MS_NOEXEC)
             out(",noexec");
         if (mount_flags & MS_NOSUID)

@@ -27,11 +27,6 @@ enum ColorSpace : u8 {
     RGB = 7
 };
 
-enum ColorRange {
-    StudioSwing,
-    FullSwing
-};
-
 enum InterpolationFilter : u8 {
     EightTap = 0,
     EightTapSmooth = 1,
@@ -40,7 +35,7 @@ enum InterpolationFilter : u8 {
     Switchable = 4
 };
 
-enum ReferenceFrame : u8 {
+enum ReferenceFrameType : u8 {
     // 0 is both INTRA_FRAME and NONE because the value's meaning changes depending on which index they're in on the ref_frame array
     None = 0,
     IntraFrame = 0,
@@ -94,7 +89,7 @@ enum Partition : u8 {
     PartitionSplit = 3,
 };
 
-enum IntraMode : u8 {
+enum class PredictionMode : u8 {
     DcPred = 0,
     VPred = 1,
     HPred = 2,
@@ -105,9 +100,6 @@ enum IntraMode : u8 {
     D207Pred = 7,
     D63Pred = 8,
     TmPred = 9,
-};
-
-enum InterMode : u8 {
     NearestMv = 10,
     NearMv = 11,
     ZeroMv = 12,

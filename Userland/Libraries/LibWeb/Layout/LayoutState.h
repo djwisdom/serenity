@@ -53,6 +53,11 @@ struct LayoutState {
         void set_content_width(float);
         void set_content_height(float);
 
+        // NOTE: These are used by FlexFormattingContext to assign a temporary main size to items
+        //       early on, so that descendants have something to resolve percentages against.
+        void set_temporary_content_width(float);
+        void set_temporary_content_height(float);
+
         bool has_definite_width() const { return m_has_definite_width && width_constraint == SizeConstraint::None; }
         bool has_definite_height() const { return m_has_definite_height && height_constraint == SizeConstraint::None; }
 
@@ -157,9 +162,9 @@ struct LayoutState {
         Optional<float> max_content_width;
 
         // NOTE: Since intrinsic heights depend on the amount of available width, we have to cache
-        //       three separate results, depending on the available width at the time of calculation.
-        Optional<float> min_content_height_with_definite_available_width;
-        Optional<float> max_content_height_with_definite_available_width;
+        //       three separate kinds of results, depending on the available width at the time of calculation.
+        HashMap<float, Optional<float>> min_content_height_with_definite_available_width;
+        HashMap<float, Optional<float>> max_content_height_with_definite_available_width;
         Optional<float> min_content_height_with_min_content_available_width;
         Optional<float> max_content_height_with_min_content_available_width;
         Optional<float> min_content_height_with_max_content_available_width;

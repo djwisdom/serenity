@@ -6,6 +6,9 @@
 
 #include <AK/Format.h>
 #include <AK/StdLibExtras.h>
+#include <AK/String.h>
+#include <AK/Vector.h>
+#include <LibCore/ArgsParser.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <stdio.h>
@@ -22,10 +25,9 @@ char const* const g_usage = R"(Usage:
 static void print_usage(FILE* stream)
 {
     fputs(g_usage, stream);
-    return;
 }
 
-static double get_double(char const* name, char const* d_string, int* number_of_decimals)
+static double get_double(char const* name, char const* d_string, size_t* number_of_decimals)
 {
     char* end;
     double d = strtod(d_string, &end);
@@ -46,28 +48,34 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::pledge("stdio"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    for (size_t i = 1; i < arguments.strings.size(); i++) {
-        if (arguments.strings[i] == "--help"sv || arguments.strings[i] == "-h") {
-            out("HELP");
-            print_usage(stdout);
-            exit(0);
-        }
-    }
+    StringView separator = "\n"sv;
+    StringView terminator = ""sv;
+    Vector<char const*> parameters;
 
-    double start = 1, step = 1, end = 1;
-    int number_of_start_decimals = 0, number_of_step_decimals = 0, number_of_end_decimals = 0;
-    switch (arguments.strings.size()) {
+    Core::ArgsParser args_parser;
+    args_parser.add_option(separator, "Characters to print after each number (default: \\n)", "separator", 's', "separator");
+    args_parser.add_option(terminator, "Characters to print at the end of the sequence", "terminator", 't', "terminator");
+    args_parser.add_positional_argument(parameters, "1 to 3 parameters, interpreted as LAST, FIRST LAST, or FIRST INCREMENT LAST", "parameters");
+    args_parser.parse(arguments);
+
+    double start = 1;
+    double step = 1;
+    double end = 1;
+    size_t number_of_start_decimals = 0;
+    size_t number_of_step_decimals = 0;
+    size_t number_of_end_decimals = 0;
+    switch (parameters.size()) {
+    case 1:
+        end = get_double(arguments.argv[0], parameters[0], &number_of_end_decimals);
+        break;
     case 2:
-        end = get_double(arguments.argv[0], arguments.argv[1], &number_of_end_decimals);
+        start = get_double(arguments.argv[0], parameters[0], &number_of_start_decimals);
+        end = get_double(arguments.argv[0], parameters[1], &number_of_end_decimals);
         break;
     case 3:
-        start = get_double(arguments.argv[0], arguments.argv[1], &number_of_start_decimals);
-        end = get_double(arguments.argv[0], arguments.argv[2], &number_of_end_decimals);
-        break;
-    case 4:
-        start = get_double(arguments.argv[0], arguments.argv[1], &number_of_start_decimals);
-        step = get_double(arguments.argv[0], arguments.argv[2], &number_of_step_decimals);
-        end = get_double(arguments.argv[0], arguments.argv[3], &number_of_end_decimals);
+        start = get_double(arguments.argv[0], parameters[0], &number_of_start_decimals);
+        step = get_double(arguments.argv[0], parameters[1], &number_of_step_decimals);
+        end = get_double(arguments.argv[0], parameters[2], &number_of_end_decimals);
         break;
     default:
         warnln("{}: unexpected number of arguments", arguments.argv[0]);
@@ -85,9 +93,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    int number_of_decimals = max(number_of_start_decimals, max(number_of_step_decimals, number_of_end_decimals));
+    size_t number_of_decimals = max(number_of_start_decimals, max(number_of_step_decimals, number_of_end_decimals));
 
-    int n = (end - start) / step;
+    int n = static_cast<int>((end - start) / step);
     double d = start;
     for (int i = 0; i <= n; ++i) {
         char buf[40];
@@ -98,9 +106,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             else if ((dot - buf) + 1 + number_of_decimals < (int)sizeof(buf))
                 dot[1 + number_of_decimals] = '\0';
         }
-        outln("{}", buf);
+        out("{}{}", buf, separator);
         d += step;
     }
+
+    if (!terminator.is_empty())
+        out(terminator);
 
     return 0;
 }

@@ -7,7 +7,6 @@ serenity_component(
 
 set(SOURCES
     AudioPlayerLoop.cpp
-    TrackManager.cpp
     KeysWidget.cpp
     KnobsWidget.cpp
     main.cpp
@@ -15,10 +14,11 @@ set(SOURCES
     PlayerWidget.cpp
     RollWidget.cpp
     SamplerWidget.cpp
+    TrackManager.cpp
     WaveWidget.cpp
-    ProcessorParameterWidget/Slider.cpp
     ProcessorParameterWidget/ParameterWidget.cpp
+    ProcessorParameterWidget/Slider.cpp
 )
 
 serenity_app(Piano ICON app-piano)
-target_link_libraries(Piano LibAudio LibDSP LibGUI LibMain)
+target_link_libraries(Piano PRIVATE LibAudio LibCore LibDSP LibGfx LibGUI LibIPC LibMain)

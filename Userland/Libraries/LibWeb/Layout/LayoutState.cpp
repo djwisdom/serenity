@@ -183,6 +183,15 @@ void LayoutState::UsedValues::set_node(NodeWithStyleAndBoxModelMetrics& node, Us
 {
     m_node = &node;
 
+    // NOTE: In the code below, we decide if `node` has definite width and/or height.
+    //       This attempts to cover all the *general* cases where CSS considers sizes to be definite.
+    //       If `node` has definite values for min/max-width or min/max-height and a definite
+    //       preferred size in the same axis, we clamp the preferred size here as well.
+    //
+    //       There are additional cases where CSS considers values to be definite. We model all of
+    //       those by having our engine consider sizes to be definite *once they are assigned to
+    //       the UsedValues by calling set_content_width() or set_content_height().
+
     auto const& computed_values = node.computed_values();
 
     auto is_definite_size = [&](CSS::Size const& size, float& resolved_definite_size, bool width) {
@@ -220,14 +229,16 @@ void LayoutState::UsedValues::set_node(NodeWithStyleAndBoxModelMetrics& node, Us
         }
 
         if (size.is_length() && size.length().is_calculated()) {
-            if (width && size.length().calculated_style_value()->contains_percentage() && containing_block_has_definite_size) {
+            if (size.length().calculated_style_value()->contains_percentage()) {
+                if (!containing_block_has_definite_size)
+                    return false;
                 auto& calc_value = *size.length().calculated_style_value();
-                auto containing_block_width_as_length = CSS::Length::make_px(containing_block_used_values->content_width());
-                resolved_definite_size = calc_value.resolve_length_percentage(node, containing_block_width_as_length).value_or(CSS::Length::make_auto()).to_px(node);
-                return false;
+                auto containing_block_size_as_length = width
+                    ? CSS::Length::make_px(containing_block_used_values->content_width())
+                    : CSS::Length::make_px(containing_block_used_values->content_height());
+                resolved_definite_size = calc_value.resolve_length_percentage(node, containing_block_size_as_length).value_or(CSS::Length::make_auto()).to_px(node);
+                return true;
             }
-            if (size.length().calculated_style_value()->contains_percentage())
-                return false;
             resolved_definite_size = size.length().to_px(node);
             return true;
         }
@@ -250,8 +261,32 @@ void LayoutState::UsedValues::set_node(NodeWithStyleAndBoxModelMetrics& node, Us
         return false;
     };
 
+    float min_width = 0;
+    bool has_definite_min_width = is_definite_size(computed_values.min_width(), min_width, true);
+    float max_width = 0;
+    bool has_definite_max_width = is_definite_size(computed_values.max_width(), max_width, true);
+
+    float min_height = 0;
+    bool has_definite_min_height = is_definite_size(computed_values.min_height(), min_height, false);
+    float max_height = 0;
+    bool has_definite_max_height = is_definite_size(computed_values.max_height(), max_height, false);
+
     m_has_definite_width = is_definite_size(computed_values.width(), m_content_width, true);
     m_has_definite_height = is_definite_size(computed_values.height(), m_content_height, false);
+
+    if (m_has_definite_width) {
+        if (has_definite_min_width)
+            m_content_width = max(min_width, m_content_width);
+        if (has_definite_max_width)
+            m_content_width = min(max_width, m_content_width);
+    }
+
+    if (m_has_definite_height) {
+        if (has_definite_min_height)
+            m_content_height = max(min_height, m_content_height);
+        if (has_definite_max_height)
+            m_content_height = min(max_height, m_content_height);
+    }
 }
 
 void LayoutState::UsedValues::set_content_width(float width)
@@ -264,6 +299,16 @@ void LayoutState::UsedValues::set_content_height(float height)
 {
     m_content_height = height;
     m_has_definite_height = true;
+}
+
+void LayoutState::UsedValues::set_temporary_content_width(float width)
+{
+    m_content_width = width;
+}
+
+void LayoutState::UsedValues::set_temporary_content_height(float height)
+{
+    m_content_height = height;
 }
 
 float LayoutState::resolved_definite_width(Box const& box) const

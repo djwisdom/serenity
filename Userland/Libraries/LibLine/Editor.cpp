@@ -201,8 +201,7 @@ Editor::~Editor()
 void Editor::ensure_free_lines_from_origin(size_t count)
 {
     if (count > m_num_lines) {
-        // It's hopeless...
-        TODO();
+        // FIXME: Implement paging
     }
 
     if (m_origin_row + count <= m_num_lines)
@@ -1779,8 +1778,9 @@ enum VTState {
     Bracket = 5,
     BracketArgsSemi = 7,
     Title = 9,
+    URL = 11,
 };
-static VTState actual_rendered_string_length_step(StringMetrics& metrics, size_t index, StringMetrics::LineMetrics& current_line, u32 c, u32 next_c, VTState state, Optional<Style::Mask> const& mask);
+static VTState actual_rendered_string_length_step(StringMetrics& metrics, size_t index, StringMetrics::LineMetrics& current_line, u32 c, u32 next_c, VTState state, Optional<Style::Mask> const& mask, Optional<size_t> const& maximum_line_width = {}, Optional<size_t&> last_return = {});
 
 enum class MaskedSelectionDecision {
     Skip,
@@ -1814,12 +1814,13 @@ static MaskedSelectionDecision resolve_masked_selection(Optional<Style::Mask>& m
     return MaskedSelectionDecision::Continue;
 }
 
-StringMetrics Editor::actual_rendered_string_metrics(StringView string, RedBlackTree<u32, Optional<Style::Mask>> const& masks)
+StringMetrics Editor::actual_rendered_string_metrics(StringView string, RedBlackTree<u32, Optional<Style::Mask>> const& masks, Optional<size_t> maximum_line_width)
 {
     StringMetrics metrics;
     StringMetrics::LineMetrics current_line;
     VTState state { Free };
     Utf8View view { string };
+    size_t last_return {};
     auto it = view.begin();
     Optional<Style::Mask> mask;
     size_t i = 0;
@@ -1836,7 +1837,7 @@ StringMetrics Editor::actual_rendered_string_metrics(StringView string, RedBlack
             continue;
 
         auto next_c = it_copy == view.end() ? 0 : *it_copy;
-        state = actual_rendered_string_length_step(metrics, view.iterator_offset(it), current_line, c, next_c, state, mask);
+        state = actual_rendered_string_length_step(metrics, view.iterator_offset(it), current_line, c, next_c, state, mask, maximum_line_width, last_return);
         if (!mask_it.is_end() && mask_it.key() <= i) {
             auto mask_it_peek = mask_it;
             ++mask_it_peek;
@@ -1891,8 +1892,31 @@ StringMetrics Editor::actual_rendered_string_metrics(Utf32View const& view, RedB
     return metrics;
 }
 
-VTState actual_rendered_string_length_step(StringMetrics& metrics, size_t index, StringMetrics::LineMetrics& current_line, u32 c, u32 next_c, VTState state, Optional<Style::Mask> const& mask)
+VTState actual_rendered_string_length_step(StringMetrics& metrics, size_t index, StringMetrics::LineMetrics& current_line, u32 c, u32 next_c, VTState state, Optional<Style::Mask> const& mask, Optional<size_t> const& maximum_line_width, Optional<size_t&> last_return)
 {
+    auto const save_line = [&metrics, &current_line, &last_return, &index]() {
+        if (last_return.has_value()) {
+            auto const last_index = index - 1;
+            current_line.bit_length = last_index - *last_return + 1;
+            last_return.value() = last_index + 1;
+        }
+        metrics.line_metrics.append(current_line);
+
+        current_line.masked_chars = {};
+        current_line.length = 0;
+        current_line.visible_length = 0;
+        current_line.bit_length = {};
+    };
+
+    // FIXME: current_line.visible_length can go above maximum_line_width when using masks
+    if (maximum_line_width.has_value() && current_line.visible_length >= maximum_line_width.value())
+        save_line();
+
+    ScopeGuard bit_length_update { [&last_return, &current_line, &index]() {
+        if (last_return.has_value())
+            current_line.bit_length = index - *last_return + 1;
+    } };
+
     switch (state) {
     case Free: {
         if (c == '\x1b') { // escape
@@ -1901,14 +1925,19 @@ VTState actual_rendered_string_length_step(StringMetrics& metrics, size_t index,
         if (c == '\r') { // carriage return
             current_line.masked_chars = {};
             current_line.length = 0;
+            current_line.visible_length = 0;
             if (!metrics.line_metrics.is_empty())
                 metrics.line_metrics.last() = { {}, 0 };
             return state;
         }
         if (c == '\n') { // return
-            metrics.line_metrics.append(current_line);
-            current_line.masked_chars = {};
-            current_line.length = 0;
+            save_line();
+            return state;
+        }
+        if (c == '\t') {
+            // Tabs are a special case, because their width is variable.
+            ++current_line.length;
+            current_line.visible_length += (8 - (current_line.visible_length % 8));
             return state;
         }
         auto is_control = is_ascii_control(c);
@@ -1921,12 +1950,15 @@ VTState actual_rendered_string_length_step(StringMetrics& metrics, size_t index,
         // FIXME: This will not support anything sophisticated
         if (mask.has_value()) {
             current_line.length += mask->replacement_view.length();
+            current_line.visible_length += mask->replacement_view.length();
             metrics.total_length += mask->replacement_view.length();
         } else if (is_control) {
             current_line.length += current_line.masked_chars.last().masked_length;
+            current_line.visible_length += current_line.masked_chars.last().masked_length;
             metrics.total_length += current_line.masked_chars.last().masked_length;
         } else {
             ++current_line.length;
+            ++current_line.visible_length;
             ++metrics.total_length;
         }
         return state;
@@ -1935,6 +1967,8 @@ VTState actual_rendered_string_length_step(StringMetrics& metrics, size_t index,
         if (c == ']') {
             if (next_c == '0')
                 state = Title;
+            if (next_c == '8')
+                state = URL;
             return state;
         }
         if (c == '[') {
@@ -1956,6 +1990,10 @@ VTState actual_rendered_string_length_step(StringMetrics& metrics, size_t index,
         return state;
     case Title:
         if (c == 7)
+            state = Free;
+        return state;
+    case URL:
+        if (c == '\\')
             state = Free;
         return state;
     }
@@ -2174,12 +2212,14 @@ size_t StringMetrics::lines_with_addition(StringMetrics const& offset, size_t co
 {
     size_t lines = 0;
 
-    for (size_t i = 0; i < line_metrics.size() - 1; ++i)
-        lines += (line_metrics[i].total_length() + column_width) / column_width;
+    if (!line_metrics.is_empty()) {
+        for (size_t i = 0; i < line_metrics.size() - 1; ++i)
+            lines += (line_metrics[i].total_length() + column_width) / column_width;
 
-    auto last = line_metrics.last().total_length();
-    last += offset.line_metrics.first().total_length();
-    lines += (last + column_width) / column_width;
+        auto last = line_metrics.last().total_length();
+        last += offset.line_metrics.first().total_length();
+        lines += (last + column_width) / column_width;
+    }
 
     for (size_t i = 1; i < offset.line_metrics.size(); ++i)
         lines += (offset.line_metrics[i].total_length() + column_width) / column_width;
@@ -2192,9 +2232,16 @@ size_t StringMetrics::offset_with_addition(StringMetrics const& offset, size_t c
     if (offset.line_metrics.size() > 1)
         return offset.line_metrics.last().total_length() % column_width;
 
-    auto last = line_metrics.last().total_length();
-    last += offset.line_metrics.first().total_length();
-    return last % column_width;
+    if (!line_metrics.is_empty()) {
+        auto last = line_metrics.last().total_length();
+        last += offset.line_metrics.first().total_length();
+        return last % column_width;
+    }
+
+    if (offset.line_metrics.is_empty())
+        return 0;
+
+    return offset.line_metrics.first().total_length() % column_width;
 }
 
 bool Editor::Spans::contains_up_to_offset(Spans const& other, size_t offset) const

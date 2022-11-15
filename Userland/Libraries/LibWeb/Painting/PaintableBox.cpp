@@ -37,6 +37,13 @@ void PaintableBox::invalidate_stacking_context()
     m_stacking_context = nullptr;
 }
 
+bool PaintableBox::is_out_of_view(PaintContext& context) const
+{
+    return !enclosing_int_rect(absolute_paint_rect())
+                .translated(context.painter().translation())
+                .intersects(context.painter().clip_rect());
+}
+
 PaintableWithLines::PaintableWithLines(Layout::BlockContainer const& layout_box)
     : PaintableBox(layout_box)
 {
@@ -64,6 +71,12 @@ Gfx::FloatPoint PaintableBox::effective_offset() const
 {
     Gfx::FloatPoint offset;
     if (m_containing_line_box_fragment.has_value()) {
+
+        // FIXME: This is a hack to deal with situations where the layout tree has been garbage collected.
+        //        We could avoid this by making the paintable tree garbage collected as well.
+        if (!containing_block() || !containing_block()->paint_box())
+            return offset;
+
         auto const& fragment = containing_block()->paint_box()->line_boxes()[m_containing_line_box_fragment->line_box_index].fragments()[m_containing_line_box_fragment->fragment_index];
         offset = fragment.offset();
     } else {
@@ -636,9 +649,18 @@ Optional<HitTestResult> PaintableBox::hit_test(Gfx::FloatPoint const& position, 
         return stacking_context()->hit_test(position, type);
     }
 
-    if (absolute_border_box_rect().contains(position.x(), position.y()))
-        return HitTestResult { *this };
-    return {};
+    if (!absolute_border_box_rect().contains(position.x(), position.y()))
+        return {};
+
+    for (auto* child = first_child(); child; child = child->next_sibling()) {
+        auto result = child->hit_test(position, type);
+        if (!result.has_value())
+            continue;
+        if (!result->paintable->visible_for_hit_testing())
+            continue;
+        return result;
+    }
+    return HitTestResult { *this };
 }
 
 Optional<HitTestResult> PaintableWithLines::hit_test(Gfx::FloatPoint const& position, HitTestType type) const
@@ -651,6 +673,10 @@ Optional<HitTestResult> PaintableWithLines::hit_test(Gfx::FloatPoint const& posi
         for (auto& fragment : line_box.fragments()) {
             if (is<Layout::Box>(fragment.layout_node()) && static_cast<Layout::Box const&>(fragment.layout_node()).paint_box()->stacking_context())
                 continue;
+            if (!fragment.layout_node().containing_block()) {
+                dbgln("FIXME: PaintableWithLines::hit_test(): Missing containing block on {}", fragment.layout_node().debug_description());
+                continue;
+            }
             auto fragment_absolute_rect = fragment.absolute_rect();
             if (fragment_absolute_rect.contains(position)) {
                 if (is<Layout::BlockContainer>(fragment.layout_node()) && fragment.layout_node().paintable())

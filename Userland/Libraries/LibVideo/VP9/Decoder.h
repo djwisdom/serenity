@@ -9,34 +9,35 @@
 
 #include <AK/ByteBuffer.h>
 #include <AK/Error.h>
+#include <AK/NonnullOwnPtr.h>
+#include <AK/Queue.h>
 #include <AK/Span.h>
+#include <LibVideo/Color/CodingIndependentCodePoints.h>
 #include <LibVideo/DecoderError.h>
+#include <LibVideo/VideoDecoder.h>
+#include <LibVideo/VideoFrame.h>
 
 #include "Parser.h"
 
 namespace Video::VP9 {
 
-class Decoder {
+class Decoder : public VideoDecoder {
     friend class Parser;
 
 public:
     Decoder();
+    ~Decoder() override { }
     /* (8.1) General */
-    DecoderErrorOr<void> decode(Span<const u8>);
-    DecoderErrorOr<void> decode(ByteBuffer const&);
+    DecoderErrorOr<void> receive_sample(ReadonlyBytes) override;
     void dump_frame_info();
 
-    // FIXME: These functions should be replaced by a struct that contains
-    //        all the information needed to display a frame.
-    Vector<u16> const& get_output_buffer_for_plane(u8 plane) const;
-    Gfx::Size<size_t> get_y_plane_size();
-    bool get_uv_subsampling_y();
-    bool get_uv_subsampling_x();
+    DecoderErrorOr<NonnullOwnPtr<VideoFrame>> get_decoded_frame() override;
 
 private:
     typedef i32 Intermediate;
 
-    DecoderErrorOr<void> decode_frame(Span<const u8>);
+    DecoderErrorOr<void> decode_frame(ReadonlyBytes);
+    DecoderErrorOr<void> create_video_frame();
 
     DecoderErrorOr<void> allocate_buffers();
     Vector<Intermediate>& get_temp_buffer(u8 plane);
@@ -136,6 +137,8 @@ private:
     /* (8.10) Reference Frame Update Process */
     DecoderErrorOr<void> update_reference_frames();
 
+    inline CodingIndependentCodePoints get_cicp_color_space();
+
     NonnullOwnPtr<Parser> m_parser;
 
     struct {
@@ -166,6 +169,8 @@ private:
         Vector<Intermediate> intermediate[3];
         Vector<u16> output[3];
     } m_buffers;
+
+    Queue<NonnullOwnPtr<VideoFrame>, 1> m_video_frame_queue;
 };
 
 }

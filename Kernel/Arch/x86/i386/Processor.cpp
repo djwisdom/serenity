@@ -6,7 +6,7 @@
 
 #include <AK/StdLibExtras.h>
 #include <Kernel/Arch/Processor.h>
-#include <Kernel/Arch/x86/TrapFrame.h>
+#include <Kernel/Arch/TrapFrame.h>
 #include <Kernel/Process.h>
 #include <Kernel/Random.h>
 #include <Kernel/Scheduler.h>
@@ -69,7 +69,7 @@ FlatPtr Processor::init_context(Thread& thread, bool leave_crit)
     VERIFY(is_kernel_mode());
     VERIFY(g_scheduler_lock.is_locked());
     if (leave_crit) {
-        // Leave the critical section we set up in in Process::exec,
+        // Leave the critical section we set up in Process::exec,
         // but because we still have the scheduler lock we should end up with 1
         VERIFY(in_critical() == 2);
         m_in_critical = 1; // leave it without triggering anything or restoring flags

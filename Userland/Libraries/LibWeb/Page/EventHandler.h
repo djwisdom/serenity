@@ -22,11 +22,11 @@ public:
     explicit EventHandler(Badge<HTML::BrowsingContext>, HTML::BrowsingContext&);
     ~EventHandler();
 
-    bool handle_mouseup(Gfx::IntPoint const&, unsigned button, unsigned modifiers);
-    bool handle_mousedown(Gfx::IntPoint const&, unsigned button, unsigned modifiers);
+    bool handle_mouseup(Gfx::IntPoint const&, unsigned button, unsigned buttons, unsigned modifiers);
+    bool handle_mousedown(Gfx::IntPoint const&, unsigned button, unsigned buttons, unsigned modifiers);
     bool handle_mousemove(Gfx::IntPoint const&, unsigned buttons, unsigned modifiers);
-    bool handle_mousewheel(Gfx::IntPoint const&, unsigned buttons, unsigned modifiers, int wheel_delta_x, int wheel_delta_y);
-    bool handle_doubleclick(Gfx::IntPoint const&, unsigned buttons, unsigned modifiers);
+    bool handle_mousewheel(Gfx::IntPoint const&, unsigned button, unsigned buttons, unsigned modifiers, int wheel_delta_x, int wheel_delta_y);
+    bool handle_doubleclick(Gfx::IntPoint const&, unsigned button, unsigned buttons, unsigned modifiers);
 
     bool handle_keydown(KeyCode, unsigned modifiers, u32 code_point);
     bool handle_keyup(KeyCode, unsigned modifiers, u32 code_point);
@@ -38,6 +38,8 @@ public:
 private:
     bool focus_next_element();
     bool focus_previous_element();
+
+    bool fire_keyboard_event(FlyString const& event_name, HTML::BrowsingContext& browsing_context, KeyCode key, unsigned modifiers, u32 code_point);
 
     Layout::InitialContainingBlock* layout_root();
     Layout::InitialContainingBlock const* layout_root() const;

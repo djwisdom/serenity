@@ -86,6 +86,7 @@ public:
     RefPtr<StyleValue> parse_as_css_value(PropertyID);
 
     static RefPtr<StyleValue> parse_css_value(Badge<StyleComputer>, ParsingContext const&, PropertyID, Vector<ComponentValue> const&);
+    static RefPtr<CalculatedStyleValue> parse_calculated_value(Badge<StyleComputer>, ParsingContext const&, Vector<ComponentValue> const&);
 
 private:
     enum class ParseError {
@@ -250,6 +251,11 @@ private:
     Optional<Ratio> parse_ratio(TokenStream<ComponentValue>&);
     Optional<UnicodeRange> parse_unicode_range(TokenStream<ComponentValue>&);
     Optional<UnicodeRange> parse_unicode_range(StringView);
+    Optional<GridSize> parse_grid_size(ComponentValue const&);
+    Optional<GridMinMax> parse_min_max(Vector<ComponentValue> const&);
+    Optional<GridRepeat> parse_repeat(Vector<ComponentValue> const&);
+    Optional<ExplicitGridTrack> parse_track_sizing_function(ComponentValue const&);
+    Optional<PositionValue> parse_position(TokenStream<ComponentValue>&);
 
     enum class AllowedDataUrlType {
         None,
@@ -259,12 +265,13 @@ private:
     Optional<AK::URL> parse_url_function(ComponentValue const&, AllowedDataUrlType = AllowedDataUrlType::None);
 
     RefPtr<StyleValue> parse_linear_gradient_function(ComponentValue const&);
+    RefPtr<StyleValue> parse_conic_gradient_function(ComponentValue const&);
 
     ParseErrorOr<NonnullRefPtr<StyleValue>> parse_css_value(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue> parse_css_value(ComponentValue const&);
     RefPtr<StyleValue> parse_builtin_value(ComponentValue const&);
     RefPtr<StyleValue> parse_dynamic_value(ComponentValue const&);
-    RefPtr<StyleValue> parse_calculated_value(Vector<ComponentValue> const&);
+    RefPtr<CalculatedStyleValue> parse_calculated_value(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_dimension_value(ComponentValue const&);
     RefPtr<StyleValue> parse_numeric_value(ComponentValue const&);
     RefPtr<StyleValue> parse_identifier_value(ComponentValue const&);

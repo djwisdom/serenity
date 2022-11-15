@@ -79,7 +79,7 @@ struct MountInfo {
 static void fill_mounts(Vector<MountInfo>& output)
 {
     // Output info about currently mounted filesystems.
-    auto file = Core::File::construct("/proc/df");
+    auto file = Core::File::construct("/sys/kernel/df");
     if (!file->open(Core::OpenMode::ReadOnly)) {
         warnln("Failed to open {}: {}", file->name(), file->error_string());
         return;
@@ -333,6 +333,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     }));
 
     auto& help_menu = window->add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_about_action(APP_NAME, app_icon, window));
 
     // Configure the nodes context menu.

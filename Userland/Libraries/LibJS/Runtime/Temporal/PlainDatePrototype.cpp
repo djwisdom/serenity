@@ -525,23 +525,33 @@ JS_DEFINE_NATIVE_FUNCTION(PlainDatePrototype::to_zoned_date_time)
 
     // 3. If Type(item) is Object, then
     if (item.is_object()) {
-        // a. Let timeZoneLike be ? Get(item, "timeZone").
-        auto time_zone_like = TRY(item.as_object().get(vm.names.timeZone));
-
-        // b. If timeZoneLike is undefined, then
-        if (time_zone_like.is_undefined()) {
-            // i. Let timeZone be ? ToTemporalTimeZone(item).
-            time_zone = TRY(to_temporal_time_zone(vm, item));
+        // a. If item has an [[InitializedTemporalTimeZone]] internal slot, then
+        if (is<TimeZone>(item.as_object())) {
+            // i. Let timeZone be item.
+            time_zone = &item.as_object();
 
             // ii. Let temporalTime be undefined.
         }
-        // c. Else,
+        // b. Else,
         else {
-            // i. Let timeZone be ? ToTemporalTimeZone(timeZoneLike).
-            time_zone = TRY(to_temporal_time_zone(vm, time_zone_like));
+            // i. Let timeZoneLike be ? Get(item, "timeZone").
+            auto time_zone_like = TRY(item.as_object().get(vm.names.timeZone));
 
-            // ii. Let temporalTime be ? Get(item, "plainTime").
-            temporal_time_value = TRY(item.as_object().get(vm.names.plainTime));
+            // ii. If timeZoneLike is undefined, then
+            if (time_zone_like.is_undefined()) {
+                // 1. Let timeZone be ? ToTemporalTimeZone(item).
+                time_zone = TRY(to_temporal_time_zone(vm, item));
+
+                // 2. Let temporalTime be undefined.
+            }
+            // iii. Else,
+            else {
+                // 1. Let timeZone be ? ToTemporalTimeZone(timeZoneLike).
+                time_zone = TRY(to_temporal_time_zone(vm, time_zone_like));
+
+                // 2. Let temporalTime be ? Get(item, "plainTime").
+                temporal_time_value = TRY(item.as_object().get(vm.names.plainTime));
+            }
         }
     }
     // 4. Else,
@@ -585,8 +595,8 @@ JS_DEFINE_NATIVE_FUNCTION(PlainDatePrototype::to_string)
     // 3. Set options to ? GetOptionsObject(options).
     auto* options = TRY(get_options_object(vm, vm.argument(0)));
 
-    // 4. Let showCalendar be ? ToShowCalendarOption(options).
-    auto show_calendar = TRY(to_show_calendar_option(vm, *options));
+    // 4. Let showCalendar be ? ToCalendarNameOption(options).
+    auto show_calendar = TRY(to_calendar_name_option(vm, *options));
 
     // 5. Return ? TemporalDateToString(temporalDate, showCalendar).
     return js_string(vm, TRY(temporal_date_to_string(vm, *temporal_date, show_calendar)));

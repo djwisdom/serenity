@@ -293,12 +293,16 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
     }
     case CSS::PropertyID::BoxSizing:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().box_sizing()));
+    case CSS::PropertyID::Bottom:
+        return style_value_for_length_percentage(layout_node.computed_values().inset().bottom());
     case CSS::PropertyID::Clear:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().clear()));
     case CSS::PropertyID::Clip:
         return RectStyleValue::create(layout_node.computed_values().clip().to_rect());
     case CSS::PropertyID::Color:
         return ColorStyleValue::create(layout_node.computed_values().color());
+    case CSS::PropertyID::ColumnGap:
+        return style_value_for_size(layout_node.computed_values().column_gap());
     case CSS::PropertyID::Cursor:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().cursor()));
     case CSS::PropertyID::Display:
@@ -371,6 +375,8 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().image_rendering()));
     case CSS::PropertyID::JustifyContent:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().justify_content()));
+    case CSS::PropertyID::Left:
+        return style_value_for_length_percentage(layout_node.computed_values().inset().left());
     case CSS::PropertyID::ListStyleType:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().list_style_type()));
     case CSS::PropertyID::Margin: {
@@ -425,6 +431,10 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
         return style_value_for_length_percentage(layout_node.computed_values().padding().top());
     case CSS::PropertyID::Position:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().position()));
+    case CSS::PropertyID::Right:
+        return style_value_for_length_percentage(layout_node.computed_values().inset().right());
+    case CSS::PropertyID::RowGap:
+        return style_value_for_size(layout_node.computed_values().row_gap());
     case CSS::PropertyID::TextAlign:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().text_align()));
     case CSS::PropertyID::TextDecorationLine: {
@@ -441,6 +451,8 @@ RefPtr<StyleValue> ResolvedCSSStyleDeclaration::style_value_for_property(Layout:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().text_decoration_style()));
     case CSS::PropertyID::TextTransform:
         return IdentifierStyleValue::create(to_value_id(layout_node.computed_values().text_transform()));
+    case CSS::PropertyID::Top:
+        return style_value_for_length_percentage(layout_node.computed_values().inset().top());
     case CSS::PropertyID::Transform: {
         // NOTE: The computed value for `transform` serializes as a single `matrix(...)` value, instead of
         //       the original list of transform functions. So, we produce a StyleValue for that.
@@ -520,9 +532,15 @@ Optional<StyleProperty> ResolvedCSSStyleDeclaration::property(PropertyID propert
 
     if (!m_element->layout_node()) {
         auto style = m_element->document().style_computer().compute_style(const_cast<DOM::Element&>(*m_element));
+        // FIXME: This is a stopgap until we implement shorthand -> longhand conversion.
+        auto value = style->maybe_null_property(property_id);
+        if (!value) {
+            dbgln("FIXME: ResolvedCSSStyleDeclaration::property(property_id=0x{:x}) No value for property ID in newly computed style case.", to_underlying(property_id));
+            return {};
+        }
         return StyleProperty {
             .property_id = property_id,
-            .value = style->property(property_id),
+            .value = value.release_nonnull(),
         };
     }
 
@@ -558,6 +576,13 @@ String ResolvedCSSStyleDeclaration::serialized() const
     // NOTE: ResolvedCSSStyleDeclaration is something you would only get from window.getComputedStyle(),
     //       which returns what the spec calls "resolved style". The "computed flag" is always set here.
     return String::empty();
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-csstext
+WebIDL::ExceptionOr<void> ResolvedCSSStyleDeclaration::set_css_text(StringView)
+{
+    // 1. If the computed flag is set, then throw a NoModificationAllowedError exception.
+    return WebIDL::NoModificationAllowedError::create(realm(), "Cannot modify properties in result of getComputedStyle()");
 }
 
 }

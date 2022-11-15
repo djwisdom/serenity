@@ -14,10 +14,13 @@
 #include "CookieJar.h"
 #include "InspectorWidget.h"
 #include "Tab.h"
+#include <AK/LexicalPath.h>
 #include <Applications/Browser/BrowserWindowGML.h>
 #include <LibConfig/Client.h>
+#include <LibCore/DateTime.h>
 #include <LibCore/StandardPaths.h>
 #include <LibCore/Stream.h>
+#include <LibCore/Version.h>
 #include <LibGUI/AboutDialog.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/Clipboard.h>
@@ -32,12 +35,14 @@
 #include <LibGUI/TabWidget.h>
 #include <LibGUI/ToolbarContainer.h>
 #include <LibGUI/Widget.h>
+#include <LibGfx/PNGWriter.h>
 #include <LibJS/Interpreter.h>
 #include <LibWeb/CSS/PreferredColorScheme.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWebView/OutOfProcessWebView.h>
+#include <LibWebView/WebContentClient.h>
 
 namespace Browser {
 
@@ -128,7 +133,7 @@ BrowserWindow::BrowserWindow(CookieJar& cookie_jar, URL url)
 
     m_window_actions.on_about = [this] {
         auto app_icon = GUI::Icon::default_icon("app-browser"sv);
-        GUI::AboutDialog::show("Browser"sv, app_icon.bitmap_for_size(32), this);
+        GUI::AboutDialog::show("Browser"sv, Core::Version::read_long_version_string(), app_icon.bitmap_for_size(32), this);
     };
 
     m_window_actions.on_show_bookmarks_bar = [](auto& action) {
@@ -238,6 +243,22 @@ void BrowserWindow::build_menus()
         },
         this);
     m_inspect_dom_node_action->set_status_tip("Open inspector for this element");
+
+    m_take_visible_screenshot_action = GUI::Action::create(
+        "Take &Visible Screenshot"sv, g_icon_bag.filetype_image, [this](auto&) {
+            if (auto result = take_screenshot(ScreenshotType::Visible); result.is_error())
+                GUI::MessageBox::show_error(this, String::formatted("{}", result.error()));
+        },
+        this);
+    m_take_visible_screenshot_action->set_status_tip("Save a screenshot of the visible portion of the current tab to the Downloads directory"sv);
+
+    m_take_full_screenshot_action = GUI::Action::create(
+        "Take &Full Screenshot"sv, g_icon_bag.filetype_image, [this](auto&) {
+            if (auto result = take_screenshot(ScreenshotType::Full); result.is_error())
+                GUI::MessageBox::show_error(this, String::formatted("{}", result.error()));
+        },
+        this);
+    m_take_full_screenshot_action->set_status_tip("Save a screenshot of the entirety of the current tab to the Downloads directory"sv);
 
     auto& inspect_menu = add_menu("&Inspect");
     inspect_menu.add_action(*m_view_source_action);
@@ -418,6 +439,7 @@ void BrowserWindow::build_menus()
     debug_menu.add_action(same_origin_policy_action);
 
     auto& help_menu = add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(this));
     help_menu.add_action(WindowActions::the().about_action());
 }
 
@@ -553,6 +575,14 @@ void BrowserWindow::create_new_tab(URL url, bool activate)
         });
     };
 
+    new_tab.on_get_all_cookies = [this](auto& url) {
+        return m_cookie_jar.get_all_cookies(url);
+    };
+
+    new_tab.on_get_named_cookie = [this](auto& url, auto& name) {
+        return m_cookie_jar.get_named_cookie(url, name);
+    };
+
     new_tab.on_get_cookie = [this](auto& url, auto source) -> String {
         return m_cookie_jar.get_cookie(url, source);
     };
@@ -565,6 +595,10 @@ void BrowserWindow::create_new_tab(URL url, bool activate)
         m_cookie_jar.dump_cookies();
     };
 
+    new_tab.on_update_cookie = [this](auto const& url, auto cookie) {
+        m_cookie_jar.update_cookie(url, move(cookie));
+    };
+
     new_tab.on_get_cookies_entries = [this]() {
         return m_cookie_jar.get_all_cookies();
     };
@@ -575,6 +609,10 @@ void BrowserWindow::create_new_tab(URL url, bool activate)
 
     new_tab.on_get_session_storage_entries = [this]() {
         return active_tab().view().get_session_storage_entries();
+    };
+
+    new_tab.on_take_screenshot = [this]() {
+        return active_tab().view().take_screenshot();
     };
 
     new_tab.load(url);
@@ -642,6 +680,68 @@ void BrowserWindow::config_bool_did_change(String const& domain, String const& g
     }
 
     // NOTE: CloseDownloadWidgetOnFinish is read each time in DownloadWindow
+}
+
+void BrowserWindow::broadcast_window_position(Gfx::IntPoint const& position)
+{
+    tab_widget().for_each_child_of_type<Browser::Tab>([&](auto& tab) {
+        tab.window_position_changed(position);
+        return IterationDecision::Continue;
+    });
+}
+
+void BrowserWindow::broadcast_window_size(Gfx::IntSize const& size)
+{
+    tab_widget().for_each_child_of_type<Browser::Tab>([&](auto& tab) {
+        tab.window_size_changed(size);
+        return IterationDecision::Continue;
+    });
+}
+
+void BrowserWindow::event(Core::Event& event)
+{
+    switch (event.type()) {
+    case GUI::Event::Move:
+        broadcast_window_position(static_cast<GUI::MoveEvent&>(event).position());
+        break;
+    case GUI::Event::Resize:
+        broadcast_window_size(static_cast<GUI::ResizeEvent&>(event).size());
+        break;
+    default:
+        break;
+    }
+
+    Window::event(event);
+}
+
+ErrorOr<void> BrowserWindow::take_screenshot(ScreenshotType type)
+{
+    if (!active_tab().on_take_screenshot)
+        return {};
+
+    Gfx::ShareableBitmap bitmap;
+
+    switch (type) {
+    case ScreenshotType::Visible:
+        bitmap = active_tab().on_take_screenshot();
+        break;
+    case ScreenshotType::Full:
+        bitmap = active_tab().view().take_document_screenshot();
+        break;
+    }
+
+    if (!bitmap.is_valid())
+        return Error::from_string_view("Failed to take a screenshot of the current tab"sv);
+
+    LexicalPath path { Core::StandardPaths::downloads_directory() };
+    path = path.append(Core::DateTime::now().to_string("screenshot-%Y-%m-%d-%H-%M-%S.png"sv));
+
+    auto encoded = Gfx::PNGWriter::encode(*bitmap.bitmap());
+
+    auto screenshot_file = TRY(Core::Stream::File::open(path.string(), Core::Stream::OpenMode::Write));
+    TRY(screenshot_file->write(encoded));
+
+    return {};
 }
 
 }

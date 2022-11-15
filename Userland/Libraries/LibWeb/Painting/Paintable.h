@@ -56,13 +56,15 @@ public:
     virtual ~Paintable() = default;
 
     Paintable const* first_child() const;
+    Paintable const* last_child() const;
     Paintable const* next_sibling() const;
+    Paintable const* previous_sibling() const;
 
     template<typename U, typename Callback>
     TraversalDecision for_each_in_inclusive_subtree_of_type(Callback callback) const
     {
         if (is<U>(*this)) {
-            if (auto decision = callback(static_cast<const U&>(*this)); decision != TraversalDecision::Continue)
+            if (auto decision = callback(static_cast<U const&>(*this)); decision != TraversalDecision::Continue)
                 return decision;
         }
         for (auto* child = first_child(); child; child = child->next_sibling()) {
@@ -116,6 +118,8 @@ public:
     DOM::Node const* dom_node() const { return layout_node().dom_node(); }
 
     auto const& computed_values() const { return m_layout_node.computed_values(); }
+
+    bool visible_for_hit_testing() const { return computed_values().pointer_events() != CSS::PointerEvents::None; }
 
     HTML::BrowsingContext const& browsing_context() const { return m_layout_node.browsing_context(); }
     HTML::BrowsingContext& browsing_context() { return layout_node().browsing_context(); }

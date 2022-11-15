@@ -264,6 +264,7 @@ void MainWidget::initialize_menu(GUI::Window* window)
     edit_menu.add_action(*m_run_script_action);
 
     auto& help_menu = window->add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/SQLStudio.md"), "/bin/Help");
     }));
@@ -394,6 +395,13 @@ void MainWidget::update_editor_actions(ScriptEditor* editor)
 
     m_undo_action->set_enabled(editor->undo_action().is_enabled());
     m_redo_action->set_enabled(editor->redo_action().is_enabled());
+}
+
+void MainWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/uri-list"))
+        event.accept();
 }
 
 void MainWidget::drop_event(GUI::DropEvent& drop_event)

@@ -7,6 +7,7 @@
 
 #include <AK/IntegralMath.h>
 #include <LibGfx/Size.h>
+#include <LibVideo/Color/CodingIndependentCodePoints.h>
 
 #include "Decoder.h"
 #include "Utilities.h"
@@ -18,7 +19,7 @@ Decoder::Decoder()
 {
 }
 
-DecoderErrorOr<void> Decoder::decode(Span<const u8> chunk_data)
+DecoderErrorOr<void> Decoder::receive_sample(ReadonlyBytes chunk_data)
 {
     auto superframe_sizes = m_parser->parse_superframe_sizes(chunk_data);
 
@@ -29,17 +30,16 @@ DecoderErrorOr<void> Decoder::decode(Span<const u8> chunk_data)
     size_t offset = 0;
 
     for (auto superframe_size : superframe_sizes) {
+        auto checked_size = Checked<size_t>(superframe_size);
+        checked_size += offset;
+        if (checked_size.has_overflow() || checked_size.value() > chunk_data.size())
+            return DecoderError::with_description(DecoderErrorCategory::Corrupted, "Superframe size invalid"sv);
         auto frame_data = chunk_data.slice(offset, superframe_size);
         TRY(decode_frame(frame_data));
-        offset += superframe_size;
+        offset = checked_size.value();
     }
 
     return {};
-}
-
-DecoderErrorOr<void> Decoder::decode(ByteBuffer const& chunk_data)
-{
-    return decode(chunk_data.span());
 }
 
 void Decoder::dump_frame_info()
@@ -52,7 +52,7 @@ inline size_t index_from_row_and_column(u32 row, u32 column, u32 stride)
     return row * stride + column;
 }
 
-DecoderErrorOr<void> Decoder::decode_frame(Span<const u8> frame_data)
+DecoderErrorOr<void> Decoder::decode_frame(ReadonlyBytes frame_data)
 {
     // 1. The syntax elements for the coded frame are extracted as specified in sections 6 and 7. The syntax
     // tables include function calls indicating when the block decode processes should be triggered.
@@ -77,12 +77,49 @@ DecoderErrorOr<void> Decoder::decode_frame(Span<const u8> frame_data)
     }
 
     // 4. The output process as specified in section 8.9 is invoked.
-    // FIXME: Create a struct to store an output frame along with all information needed to display
-    //        it. This function will need to append the images to a vector to ensure that if a superframe
-    //        with multiple output frames is encountered, all of them can be displayed.
+    if (m_parser->m_show_frame)
+        TRY(create_video_frame());
 
     // 5. The reference frame update process as specified in section 8.10 is invoked.
     TRY(update_reference_frames());
+    return {};
+}
+
+DecoderErrorOr<void> Decoder::create_video_frame()
+{
+    u32 decoded_y_width = m_parser->m_mi_cols * 8;
+    Gfx::Size<u32> output_y_size = m_parser->m_frame_size;
+    auto decoded_uv_width = decoded_y_width >> m_parser->m_subsampling_x;
+    Gfx::Size<u32> output_uv_size = {
+        output_y_size.width() >> m_parser->m_subsampling_x,
+        output_y_size.height() >> m_parser->m_subsampling_y,
+    };
+    Array<FixedArray<u16>, 3> output_buffers = {
+        DECODER_TRY_ALLOC(FixedArray<u16>::try_create(output_y_size.width() * output_y_size.height())),
+        DECODER_TRY_ALLOC(FixedArray<u16>::try_create(output_uv_size.width() * output_uv_size.height())),
+        DECODER_TRY_ALLOC(FixedArray<u16>::try_create(output_uv_size.width() * output_uv_size.height())),
+    };
+    for (u8 plane = 0; plane < 3; plane++) {
+        auto& buffer = output_buffers[plane];
+        auto decoded_width = plane == 0 ? decoded_y_width : decoded_uv_width;
+        auto output_size = plane == 0 ? output_y_size : output_uv_size;
+        auto const& decoded_buffer = get_output_buffer(plane);
+
+        for (u32 row = 0; row < output_size.height(); row++) {
+            memcpy(
+                buffer.data() + row * output_size.width(),
+                decoded_buffer.data() + row * decoded_width,
+                output_size.width() * sizeof(*buffer.data()));
+        }
+    }
+
+    auto frame = DECODER_TRY_ALLOC(adopt_nonnull_own_or_enomem(new (nothrow) SubsampledYUVFrame(
+        { output_y_size.width(), output_y_size.height() },
+        m_parser->m_bit_depth, get_cicp_color_space(),
+        m_parser->m_subsampling_x, m_parser->m_subsampling_y,
+        output_buffers[0], output_buffers[1], output_buffers[2])));
+    m_video_frame_queue.enqueue(move(frame));
+
     return {};
 }
 
@@ -125,24 +162,71 @@ Vector<u16>& Decoder::get_output_buffer(u8 plane)
     return m_buffers.output[plane];
 }
 
-Vector<u16> const& Decoder::get_output_buffer_for_plane(u8 plane) const
+inline CodingIndependentCodePoints Decoder::get_cicp_color_space()
 {
-    return m_buffers.output[plane];
+    ColorPrimaries color_primaries;
+    TransferCharacteristics transfer_characteristics;
+    MatrixCoefficients matrix_coefficients;
+
+    switch (m_parser->m_color_space) {
+    case ColorSpace::Unknown:
+        color_primaries = ColorPrimaries::Unspecified;
+        transfer_characteristics = TransferCharacteristics::Unspecified;
+        matrix_coefficients = MatrixCoefficients::Unspecified;
+        break;
+    case ColorSpace::Bt601:
+        color_primaries = ColorPrimaries::BT601;
+        transfer_characteristics = TransferCharacteristics::BT601;
+        matrix_coefficients = MatrixCoefficients::BT601;
+        break;
+    case ColorSpace::Bt709:
+        color_primaries = ColorPrimaries::BT709;
+        transfer_characteristics = TransferCharacteristics::BT709;
+        matrix_coefficients = MatrixCoefficients::BT709;
+        break;
+    case ColorSpace::Smpte170:
+        // https://www.kernel.org/doc/html/v4.9/media/uapi/v4l/pixfmt-007.html#colorspace-smpte-170m-v4l2-colorspace-smpte170m
+        color_primaries = ColorPrimaries::BT601;
+        transfer_characteristics = TransferCharacteristics::BT709;
+        matrix_coefficients = MatrixCoefficients::BT601;
+        break;
+    case ColorSpace::Smpte240:
+        color_primaries = ColorPrimaries::SMPTE240;
+        transfer_characteristics = TransferCharacteristics::SMPTE240;
+        matrix_coefficients = MatrixCoefficients::SMPTE240;
+        break;
+    case ColorSpace::Bt2020:
+        color_primaries = ColorPrimaries::BT2020;
+        // Bit depth doesn't actually matter to our transfer functions since we
+        // convert in floats of range 0-1 (for now?), but just for correctness set
+        // the TC to match the bit depth here.
+        if (m_parser->m_bit_depth == 12)
+            transfer_characteristics = TransferCharacteristics::BT2020BitDepth12;
+        else if (m_parser->m_bit_depth == 10)
+            transfer_characteristics = TransferCharacteristics::BT2020BitDepth10;
+        else
+            transfer_characteristics = TransferCharacteristics::BT709;
+        matrix_coefficients = MatrixCoefficients::BT2020NonConstantLuminance;
+        break;
+    case ColorSpace::RGB:
+        color_primaries = ColorPrimaries::BT709;
+        transfer_characteristics = TransferCharacteristics::Linear;
+        matrix_coefficients = MatrixCoefficients::Identity;
+        break;
+    case ColorSpace::Reserved:
+        VERIFY_NOT_REACHED();
+        break;
+    }
+
+    return { color_primaries, transfer_characteristics, matrix_coefficients, m_parser->m_color_range };
 }
 
-Gfx::Size<size_t> Decoder::get_y_plane_size()
+DecoderErrorOr<NonnullOwnPtr<VideoFrame>> Decoder::get_decoded_frame()
 {
-    return m_parser->get_decoded_size_for_plane(0);
-}
+    if (m_video_frame_queue.is_empty())
+        return DecoderError::format(DecoderErrorCategory::NeedsMoreInput, "No video frame in queue.");
 
-bool Decoder::get_uv_subsampling_y()
-{
-    return m_parser->m_subsampling_y;
-}
-
-bool Decoder::get_uv_subsampling_x()
-{
-    return m_parser->m_subsampling_x;
+    return m_video_frame_queue.dequeue();
 }
 
 u8 Decoder::merge_prob(u8 pre_prob, u8 count_0, u8 count_1, u8 count_sat, u8 max_update_factor)
@@ -279,13 +363,13 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
     //     1. If plane is greater than 0, mode is set equal to uv_mode.
     //     2. Otherwise, if MiSize is greater than or equal to BLOCK_8X8, mode is set equal to y_mode.
     //     3. Otherwise, mode is set equal to sub_modes[ blockIdx ].
-    IntraMode mode;
+    PredictionMode mode;
     if (plane > 0)
-        mode = static_cast<IntraMode>(m_parser->m_uv_mode);
+        mode = m_parser->m_uv_mode;
     else if (m_parser->m_mi_size >= Block_8x8)
-        mode = static_cast<IntraMode>(m_parser->m_y_mode);
+        mode = m_parser->m_y_mode;
     else
-        mode = static_cast<IntraMode>(m_parser->m_block_sub_modes[block_index]);
+        mode = m_parser->m_block_sub_modes[block_index];
 
     // The variable log2Size specifying the base 2 logarithm of the width of the transform block is set equal to txSz + 2.
     u8 log2_of_block_size = tx_size + 2;
@@ -319,7 +403,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
     //           - [0]
     //           - [1 .. block_size]
     //           - [block_size + 1 .. block_size * 2]
-    //       The array indices must be offset by 1 to accomodate index -1.
+    //       The array indices must be offset by 1 to accommodate index -1.
     Vector<Intermediate>& above_row = m_buffers.above_row;
     DECODER_TRY_ALLOC(above_row.try_resize_and_keep_capacity(block_size * 2 + 1));
     auto above_row_at = [&](i32 index) -> Intermediate& {
@@ -389,7 +473,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
 
     // FIXME: One of the two below should be a simple memcpy of 1D arrays.
     switch (mode) {
-    case IntraMode::VPred:
+    case PredictionMode::VPred:
         // − If mode is equal to V_PRED, pred[ i ][ j ] is set equal to aboveRow[ j ] with j = 0..size-1 and i = 0..size-1
         // (each row of the block is filled with a copy of aboveRow).
         for (auto j = 0u; j < block_size; j++) {
@@ -397,7 +481,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
                 predicted_sample_at(i, j) = above_row_at(j);
         }
         break;
-    case IntraMode::HPred:
+    case PredictionMode::HPred:
         // − Otherwise if mode is equal to H_PRED, pred[ i ][ j ] is set equal to leftCol[ i ] with j = 0..size-1 and i =
         // 0..size-1 (each column of the block is filled with a copy of leftCol).
         for (auto j = 0u; j < block_size; j++) {
@@ -405,7 +489,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
                 predicted_sample_at(i, j) = left_column[i];
         }
         break;
-    case IntraMode::D207Pred:
+    case PredictionMode::D207Pred:
         // − Otherwise if mode is equal to D207_PRED, the following applies:
         // 1. pred[ size - 1 ][ j ] = leftCol[ size - 1] for j = 0..size-1
         for (auto j = 0u; j < block_size; j++)
@@ -428,7 +512,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
             i--;
         }
         break;
-    case IntraMode::D45Pred:
+    case PredictionMode::D45Pred:
         // Otherwise if mode is equal to D45_PRED,
         // for i = 0..size-1, for j = 0..size-1.
         for (auto i = 0u; i < block_size; i++) {
@@ -443,7 +527,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
             }
         }
         break;
-    case IntraMode::D63Pred:
+    case PredictionMode::D63Pred:
         // Otherwise if mode is equal to D63_PRED,
         for (auto i = 0u; i < block_size; i++) {
             for (auto j = 0u; j < block_size; j++) {
@@ -459,7 +543,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
             }
         }
         break;
-    case IntraMode::D117Pred:
+    case PredictionMode::D117Pred:
         // Otherwise if mode is equal to D117_PRED, the following applies:
         // 1. pred[ 0 ][ j ] = Round2( aboveRow[ j - 1 ] + aboveRow[ j ], 1 ) for j = 0..size-1
         for (auto j = 0; j < block_size; j++)
@@ -480,7 +564,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
                 predicted_sample_at(i, j) = predicted_sample_at(i - 2, j - 1);
         }
         break;
-    case IntraMode::D135Pred:
+    case PredictionMode::D135Pred:
         // Otherwise if mode is equal to D135_PRED, the following applies:
         // 1. pred[ 0 ][ 0 ] = Round2( leftCol[ 0 ] + 2 * aboveRow[ -1 ] + aboveRow[ 0 ], 2 )
         predicted_sample_at(0, 0) = round_2(left_column[0] + 2 * above_row_at(-1) + above_row_at(0), 2);
@@ -498,7 +582,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
                 predicted_sample_at(i, j) = predicted_sample_at(i - 1, j - 1);
         }
         break;
-    case IntraMode::D153Pred:
+    case PredictionMode::D153Pred:
         // Otherwise if mode is equal to D153_PRED, the following applies:
         // 1. pred[ 0 ][ 0 ] = Round2( leftCol[ 0 ] + aboveRow[ -1 ], 1 )
         predicted_sample_at(0, 0) = round_2(left_column[0] + above_row_at(-1), 1);
@@ -521,7 +605,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
                 predicted_sample_at(i, j) = predicted_sample_at(i - 1, j - 2);
         }
         break;
-    case IntraMode::TmPred:
+    case PredictionMode::TmPred:
         // Otherwise if mode is equal to TM_PRED,
         // pred[ i ][ j ] is set equal to Clip1( aboveRow[ j ] + leftCol[ i ] - aboveRow[ -1 ] )
         // for i = 0..size-1, for j = 0..size-1.
@@ -530,7 +614,7 @@ DecoderErrorOr<void> Decoder::predict_intra(u8 plane, u32 x, u32 y, bool have_le
                 predicted_sample_at(i, j) = clip_1(m_parser->m_bit_depth, above_row_at(j) + left_column[i] - above_row_at(-1));
         }
         break;
-    case IntraMode::DcPred: {
+    case PredictionMode::DcPred: {
         // FIXME: All indices are set equally below, use memset.
         Intermediate average = 0;
 
@@ -729,11 +813,11 @@ DecoderErrorOr<void> Decoder::predict_inter_block(u8 plane, u8 ref_list, u32 x, 
     // − FrameHeight <= 16 * RefFrameHeight[ refIdx ]
     if (m_parser->m_frame_store[reference_frame_index][plane].is_empty())
         return DecoderError::format(DecoderErrorCategory::Corrupted, "Attempted to use reference frame {} that has not been saved", reference_frame_index);
-    if (2 * m_parser->m_frame_width < m_parser->m_ref_frame_width[reference_frame_index]
-        || 2 * m_parser->m_frame_height < m_parser->m_ref_frame_height[reference_frame_index])
+    auto ref_frame_size = m_parser->m_ref_frame_size[reference_frame_index];
+    auto double_frame_size = m_parser->m_frame_size.scaled_by(2);
+    if (double_frame_size.width() < ref_frame_size.width() || double_frame_size.height() < ref_frame_size.height())
         return DecoderError::format(DecoderErrorCategory::Corrupted, "Inter frame size is too small relative to reference frame {}", reference_frame_index);
-    if (m_parser->m_frame_width > 16 * m_parser->m_ref_frame_width[reference_frame_index]
-        || m_parser->m_frame_height > 16 * m_parser->m_ref_frame_height[reference_frame_index])
+    if (!ref_frame_size.scaled_by(16).contains(m_parser->m_frame_size))
         return DecoderError::format(DecoderErrorCategory::Corrupted, "Inter frame size is too large relative to reference frame {}", reference_frame_index);
 
     // FIXME: Convert all the operations in this function to vector operations supported by
@@ -743,8 +827,8 @@ DecoderErrorOr<void> Decoder::predict_inter_block(u8 plane, u8 ref_list, u32 x, 
     // A variable yScale is set equal to (RefFrameHeight[ refIdx ] << REF_SCALE_SHIFT) / FrameHeight.
     // (xScale and yScale specify the size of the reference frame relative to the current frame in units where 16 is
     // equivalent to the reference frame having the same size.)
-    i32 x_scale = (m_parser->m_ref_frame_width[reference_frame_index] << REF_SCALE_SHIFT) / m_parser->m_frame_width;
-    i32 y_scale = (m_parser->m_ref_frame_height[reference_frame_index] << REF_SCALE_SHIFT) / m_parser->m_frame_height;
+    i32 x_scale = (ref_frame_size.width() << REF_SCALE_SHIFT) / m_parser->m_frame_size.width();
+    i32 y_scale = (ref_frame_size.height() << REF_SCALE_SHIFT) / m_parser->m_frame_size.height();
 
     // The variable baseX is set equal to (x * xScale) >> REF_SCALE_SHIFT.
     // The variable baseY is set equal to (y * yScale) >> REF_SCALE_SHIFT.
@@ -798,7 +882,7 @@ DecoderErrorOr<void> Decoder::predict_inter_block(u8 plane, u8 ref_list, u32 x, 
 
     // A variable ref specifying the reference frame contents is set equal to FrameStore[ refIdx ].
     auto& reference_frame_buffer = m_parser->m_frame_store[reference_frame_index][plane];
-    auto reference_frame_width = m_parser->m_ref_frame_width[reference_frame_index] >> subsampling_x;
+    auto reference_frame_width = m_parser->m_ref_frame_size[reference_frame_index].width() >> subsampling_x;
     auto reference_frame_buffer_at = [&](u32 row, u32 column) -> u16& {
         return reference_frame_buffer[row * reference_frame_width + column];
     };
@@ -811,8 +895,8 @@ DecoderErrorOr<void> Decoder::predict_inter_block(u8 plane, u8 ref_list, u32 x, 
     // The variable lastX is set equal to ( (RefFrameWidth[ refIdx ] + subX) >> subX) - 1.
     // The variable lastY is set equal to ( (RefFrameHeight[ refIdx ] + subY) >> subY) - 1.
     // (lastX and lastY specify the coordinates of the bottom right sample of the reference plane.)
-    i32 scaled_right = ((m_parser->m_ref_frame_width[reference_frame_index] + subsampling_x) >> subsampling_x) - 1;
-    i32 scaled_bottom = ((m_parser->m_ref_frame_height[reference_frame_index] + subsampling_y) >> subsampling_y) - 1;
+    i32 scaled_right = ((m_parser->m_ref_frame_size[reference_frame_index].width() + subsampling_x) >> subsampling_x) - 1;
+    i32 scaled_bottom = ((m_parser->m_ref_frame_size[reference_frame_index].height() + subsampling_y) >> subsampling_y) - 1;
 
     // The variable intermediateHeight specifying the height required for the intermediate array is set equal to (((h -
     // 1) * yStep + 15) >> 4) + 8.
@@ -1097,7 +1181,7 @@ inline i32 Decoder::round_2(T value, u8 bits)
 
 inline bool check_bounds(i64 value, u8 bits)
 {
-    const i64 maximum = (1u << (bits - 1u)) - 1u;
+    i64 const maximum = (1ll << (bits - 1ll)) - 1ll;
     return value >= ~maximum && value <= maximum;
 }
 
@@ -1692,9 +1776,8 @@ DecoderErrorOr<void> Decoder::update_reference_frames()
     for (auto i = 0; i < NUM_REF_FRAMES; i++) {
         if ((refresh_flags & 1) != 0) {
             // − RefFrameWidth[ i ] is set equal to FrameWidth.
-            m_parser->m_ref_frame_width[i] = m_parser->m_frame_width;
             // − RefFrameHeight[ i ] is set equal to FrameHeight.
-            m_parser->m_ref_frame_height[i] = m_parser->m_frame_height;
+            m_parser->m_ref_frame_size[i] = m_parser->m_frame_size;
             // − RefSubsamplingX[ i ] is set equal to subsampling_x.
             m_parser->m_ref_subsampling_x[i] = m_parser->m_subsampling_x;
             // − RefSubsamplingY[ i ] is set equal to subsampling_y.
@@ -1711,8 +1794,8 @@ DecoderErrorOr<void> Decoder::update_reference_frames()
             // FIXME: Frame width is not equal to the buffer's stride. If we store the stride of the buffer with the reference
             //        frame, we can just copy the framebuffer data instead. Alternatively, we should crop the output framebuffer.
             for (auto plane = 0u; plane < 3; plane++) {
-                auto width = m_parser->m_frame_width;
-                auto height = m_parser->m_frame_height;
+                auto width = m_parser->m_frame_size.width();
+                auto height = m_parser->m_frame_size.height();
                 auto stride = m_parser->m_mi_cols * 8;
 
                 if (plane > 0) {

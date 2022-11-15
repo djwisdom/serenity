@@ -152,13 +152,16 @@ Optional<InlineLevelIterator::Item> InlineLevelIterator::next(float available_wi
             };
         }
 
+        // NOTE: We never consider `content: ""` to be collapsible whitespace.
+        bool is_generated_empty_string = text_node.is_generated() && chunk.length == 0;
+
         Item item {
             .type = Item::Type::Text,
             .node = &text_node,
             .offset_in_node = chunk.start,
             .length_in_node = chunk.length,
             .width = chunk_width,
-            .is_collapsible_whitespace = m_text_node_context->do_collapse && chunk.is_all_whitespace,
+            .is_collapsible_whitespace = m_text_node_context->do_collapse && chunk.is_all_whitespace && !is_generated_empty_string,
         };
 
         add_extra_box_model_metrics_to_item(item, m_text_node_context->is_first_chunk, m_text_node_context->is_last_chunk);
@@ -261,7 +264,7 @@ void InlineLevelIterator::enter_text_node(Layout::TextNode const& text_node)
         .do_respect_linebreaks = do_respect_linebreaks,
         .is_first_chunk = true,
         .is_last_chunk = false,
-        .chunk_iterator = TextNode::ChunkIterator { text_node.text_for_rendering(), m_layout_mode, do_wrap_lines, do_respect_linebreaks },
+        .chunk_iterator = TextNode::ChunkIterator { text_node.text_for_rendering(), do_wrap_lines, do_respect_linebreaks, text_node.is_generated() && text_node.text_for_rendering().is_empty() },
     };
     m_text_node_context->next_chunk = m_text_node_context->chunk_iterator.next();
 }

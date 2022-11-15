@@ -6,11 +6,13 @@ interface MouseEvent : UIEvent {
     readonly attribute double offsetY;
     readonly attribute double clientX;
     readonly attribute double clientY;
+    readonly attribute double screenX;
+    readonly attribute double screenY;
     readonly attribute double x;
     readonly attribute double y;
 
     readonly attribute short button;
-
+    readonly attribute unsigned short buttons;
 };
 
 dictionary MouseEventInit : EventModifierInit {

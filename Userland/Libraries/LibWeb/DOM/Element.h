@@ -72,6 +72,8 @@ public:
     NamedNodeMap const* attributes() const { return m_attributes.ptr(); }
     Vector<String> get_attribute_names() const;
 
+    JS::GCPtr<Attr> get_attribute_node(FlyString const& name) const;
+
     DOMTokenList* class_list();
 
     WebIDL::ExceptionOr<bool> matches(StringView selectors) const;
@@ -117,7 +119,7 @@ public:
 
     CSS::CSSStyleDeclaration* style_for_bindings();
 
-    String inner_html() const;
+    WebIDL::ExceptionOr<String> inner_html() const;
     WebIDL::ExceptionOr<void> set_inner_html(String const&);
 
     WebIDL::ExceptionOr<void> insert_adjacent_html(String position, String text);
@@ -142,17 +144,30 @@ public:
     JS::NonnullGCPtr<Geometry::DOMRect> get_bounding_client_rect() const;
     JS::NonnullGCPtr<Geometry::DOMRectList> get_client_rects() const;
 
-    virtual RefPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>);
+    virtual JS::GCPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>);
 
     virtual void did_receive_focus() { }
     virtual void did_lose_focus() { }
 
-    static RefPtr<Layout::Node> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, NonnullRefPtr<CSS::StyleProperties>, Element*);
+    static JS::GCPtr<Layout::Node> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, NonnullRefPtr<CSS::StyleProperties>, Element*);
 
-    void set_pseudo_element_node(Badge<Layout::TreeBuilder>, CSS::Selector::PseudoElement, RefPtr<Layout::Node>);
-    RefPtr<Layout::Node> get_pseudo_element_node(CSS::Selector::PseudoElement) const;
+    void set_pseudo_element_node(Badge<Layout::TreeBuilder>, CSS::Selector::PseudoElement, JS::GCPtr<Layout::Node>);
+    JS::GCPtr<Layout::Node> get_pseudo_element_node(CSS::Selector::PseudoElement) const;
     void clear_pseudo_element_nodes(Badge<Layout::TreeBuilder>);
     void serialize_pseudo_elements_as_json(JsonArraySerializer<StringBuilder>& children_array) const;
+
+    i32 tab_index() const;
+    void set_tab_index(i32 tab_index);
+
+    bool is_potentially_scrollable() const;
+
+    double scroll_top() const;
+    double scroll_left() const;
+    void set_scroll_top(double y);
+    void set_scroll_left(double x);
+
+    int scroll_width() const;
+    int scroll_height() const;
 
     bool is_actually_disabled() const;
 
@@ -160,18 +175,21 @@ public:
     WebIDL::ExceptionOr<void> insert_adjacent_text(String const& where, String const& data);
 
     // https://w3c.github.io/csswg-drafts/cssom-view-1/#dom-element-scrollintoview
-    void scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>>);
+    void scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> = {});
 
 protected:
     Element(Document&, DOM::QualifiedName);
     virtual void initialize(JS::Realm&) override;
 
     virtual void children_changed() override;
+    virtual i32 default_tab_index_value() const;
 
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
     void make_html_uppercased_qualified_name();
+
+    void invalidate_style_after_attribute_change(FlyString const& attribute_name);
 
     WebIDL::ExceptionOr<JS::GCPtr<Node>> insert_adjacent(String const& where, JS::NonnullGCPtr<Node> node);
 
@@ -188,7 +206,7 @@ private:
 
     Vector<FlyString> m_classes;
 
-    Array<RefPtr<Layout::Node>, CSS::Selector::PseudoElementCount> m_pseudo_element_nodes;
+    Array<JS::GCPtr<Layout::Node>, CSS::Selector::PseudoElementCount> m_pseudo_element_nodes;
 };
 
 template<>

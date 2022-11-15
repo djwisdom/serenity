@@ -18,7 +18,7 @@ endif()
 
 # Check for toolchain mismatch, user might need to rebuild toolchain
 set(GCC_VERSION "12.2.0")
-set(LLVM_VERSION "15.0.0")
+set(LLVM_VERSION "15.0.3")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(EXPECTED_COMPILER_VERSION "${GCC_VERSION}")
 else()
@@ -182,6 +182,11 @@ if (ENABLE_COMPILETIME_FORMAT_CHECK)
     add_compile_definitions(ENABLE_COMPILETIME_FORMAT_CHECK)
 endif()
 
+if("${SERENITY_ARCH}" STREQUAL "aarch64")
+    # FIXME: re-enable this warning
+    add_compile_options(-Wno-type-limits)
+endif()
+
 add_link_options(-Wno-unused-command-line-argument)
 
 include_directories(.)
@@ -223,20 +228,22 @@ endif()
 
 add_subdirectory(AK)
 add_subdirectory(Kernel)
-if(NOT "${SERENITY_ARCH}" STREQUAL "aarch64")
-    if (ENABLE_MOLD_LINKER)
-        add_link_options(-fuse-ld=mold)
-    endif()
 
+if (ENABLE_MOLD_LINKER)
+    add_link_options(-fuse-ld=mold)
+endif()
+
+if(NOT "${SERENITY_ARCH}" STREQUAL "aarch64")
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang$" OR ENABLE_MOLD_LINKER)
         add_link_options(LINKER:--pack-dyn-relocs=relr)
     else()
         add_link_options(LINKER:-z,pack-relative-relocs)
     endif()
-
-    add_subdirectory(Userland)
-    add_subdirectory(Tests)
 endif()
+
+add_subdirectory(Userland)
+add_subdirectory(Tests)
+
 if (ENABLE_COMPILETIME_HEADER_CHECK)
     add_subdirectory(Meta/HeaderCheck)
 endif()

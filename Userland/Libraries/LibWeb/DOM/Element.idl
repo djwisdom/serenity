@@ -1,4 +1,5 @@
 #import <CSS/CSSStyleDeclaration.idl>
+#import <DOM/Attr.idl>
 #import <DOM/ChildNode.idl>
 #import <DOM/DOMTokenList.idl>
 #import <DOM/InnerHTML.idl>
@@ -38,6 +39,8 @@ interface Element : Node {
     [SameObject] readonly attribute NamedNodeMap attributes;
     sequence<DOMString> getAttributeNames();
 
+    Attr? getAttributeNode(DOMString qualifiedName);
+
     HTMLCollection getElementsByTagName(DOMString tagName);
     HTMLCollection getElementsByTagNameNS(DOMString? namespace, DOMString localName);
     HTMLCollection getElementsByClassName(DOMString className);
@@ -60,6 +63,10 @@ interface Element : Node {
     DOMRect getBoundingClientRect();
     DOMRectList getClientRects();
 
+    attribute unrestricted double scrollTop;
+    attribute unrestricted double scrollLeft;
+    readonly attribute long scrollWidth;
+    readonly attribute long scrollHeight;
     readonly attribute long clientTop;
     readonly attribute long clientLeft;
     readonly attribute long clientWidth;

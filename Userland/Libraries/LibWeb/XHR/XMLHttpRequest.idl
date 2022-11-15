@@ -1,3 +1,4 @@
+#import <DOM/Document.idl>
 #import <DOM/EventHandler.idl>
 #import <Fetch/BodyInit.idl>
 #import <XHR/XMLHttpRequestEventTarget.idl>
@@ -29,11 +30,13 @@ interface XMLHttpRequest : XMLHttpRequestEventTarget {
     readonly attribute any response;
     attribute XMLHttpRequestResponseType responseType;
     attribute unsigned long timeout;
+    attribute boolean withCredentials;
 
     undefined open(DOMString method, DOMString url);
     undefined open(ByteString method, USVString url, boolean async, optional USVString? username = {}, optional USVString? password = {});
     undefined setRequestHeader(DOMString name, DOMString value);
-    undefined send(optional XMLHttpRequestBodyInit? body = null);
+    undefined send(optional (Document or XMLHttpRequestBodyInit)? body = null);
+    undefined abort();
 
     ByteString? getResponseHeader(ByteString name);
     ByteString getAllResponseHeaders();

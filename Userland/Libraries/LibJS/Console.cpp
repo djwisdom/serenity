@@ -427,9 +427,8 @@ MarkedVector<Value> Console::vm_arguments()
     return arguments;
 }
 
-void Console::output_debug_message([[maybe_unused]] LogLevel log_level, [[maybe_unused]] String output) const
+void Console::output_debug_message(LogLevel log_level, String const& output) const
 {
-#ifdef AK_OS_SERENITY
     switch (log_level) {
     case Console::LogLevel::Debug:
         dbgln("\033[32;1m(js debug)\033[0m {}", output);
@@ -450,7 +449,12 @@ void Console::output_debug_message([[maybe_unused]] LogLevel log_level, [[maybe_
         dbgln("\033[32;1m(js)\033[0m {}", output);
         break;
     }
-#endif
+}
+
+void Console::report_exception(JS::Error const& exception, bool in_promise) const
+{
+    if (m_client)
+        m_client->report_exception(exception, in_promise);
 }
 
 ThrowCompletionOr<String> Console::value_vector_to_string(MarkedVector<Value> const& values)

@@ -22,9 +22,9 @@ HTMLIFrameElement::HTMLIFrameElement(DOM::Document& document, DOM::QualifiedName
 
 HTMLIFrameElement::~HTMLIFrameElement() = default;
 
-RefPtr<Layout::Node> HTMLIFrameElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
+JS::GCPtr<Layout::Node> HTMLIFrameElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
 {
-    return adopt_ref(*new Layout::FrameBox(document(), *this, move(style)));
+    return heap().allocate_without_realm<Layout::FrameBox>(document(), *this, move(style));
 }
 
 void HTMLIFrameElement::parse_attribute(FlyString const& name, String const& value)
@@ -48,7 +48,6 @@ void HTMLIFrameElement::inserted()
 
         // 3. Process the iframe attributes for element, with initialInsertion set to true.
         process_the_iframe_attributes(true);
-        load_src(attribute(HTML::AttributeNames::src));
     }
 }
 
@@ -162,6 +161,13 @@ void run_iframe_load_event_steps(HTML::HTMLIFrameElement& element)
     element.dispatch_event(*DOM::Event::create(element.realm(), HTML::EventNames::load));
 
     // FIXME: 6. Unset childDocument's iframe load in progress flag.
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+i32 HTMLIFrameElement::default_tab_index_value() const
+{
+    // See the base function for the spec comments.
+    return 0;
 }
 
 }

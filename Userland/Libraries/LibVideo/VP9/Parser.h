@@ -11,10 +11,12 @@
 #include <AK/OwnPtr.h>
 #include <AK/Span.h>
 #include <AK/Vector.h>
-#include <LibGfx/Forward.h>
+#include <LibGfx/Size.h>
+#include <LibVideo/Color/CodingIndependentCodePoints.h>
 #include <LibVideo/DecoderError.h>
 
 #include "BitStream.h"
+#include "Context.h"
 #include "LookupTables.h"
 #include "MotionVector.h"
 #include "ProbabilityTables.h"
@@ -32,13 +34,13 @@ class Parser {
 public:
     explicit Parser(Decoder&);
     ~Parser();
-    DecoderErrorOr<void> parse_frame(Span<const u8>);
+    DecoderErrorOr<void> parse_frame(ReadonlyBytes);
     void dump_info();
 
 private:
     /* Annex B: Superframes are a method of storing multiple coded frames into a single chunk
      * See also section 5.26. */
-    Vector<size_t> parse_superframe_sizes(Span<const u8>);
+    Vector<size_t> parse_superframe_sizes(ReadonlyBytes);
 
     DecoderErrorOr<FrameType> read_frame_type();
     DecoderErrorOr<ColorRange> read_color_range();
@@ -59,9 +61,10 @@ private:
     DecoderErrorOr<void> uncompressed_header();
     DecoderErrorOr<void> frame_sync_code();
     DecoderErrorOr<void> color_config();
-    DecoderErrorOr<void> frame_size();
-    DecoderErrorOr<void> render_size();
-    DecoderErrorOr<void> frame_size_with_refs();
+    DecoderErrorOr<void> set_frame_size_and_compute_image_size();
+    DecoderErrorOr<Gfx::Size<u32>> frame_size();
+    DecoderErrorOr<Gfx::Size<u32>> frame_size_with_refs();
+    DecoderErrorOr<Gfx::Size<u32>> render_size(Gfx::Size<u32> frame_size);
     void compute_image_size();
     DecoderErrorOr<void> read_interpolation_filter();
     DecoderErrorOr<void> loop_filter_params();
@@ -101,7 +104,7 @@ private:
     u32 get_tile_offset(u32 tile_num, u32 mis, u32 tile_size_log2);
     DecoderErrorOr<void> decode_tile();
     void clear_left_context();
-    DecoderErrorOr<void> decode_partition(u32 row, u32 col, u8 block_subsize);
+    DecoderErrorOr<void> decode_partition(u32 row, u32 col, BlockSubsize block_subsize);
     DecoderErrorOr<void> decode_block(u32 row, u32 col, BlockSubsize subsize);
     DecoderErrorOr<void> mode_info();
     DecoderErrorOr<void> intra_frame_mode_info();
@@ -127,7 +130,7 @@ private:
     DecoderErrorOr<i32> read_coef(Token token);
 
     /* (6.5) Motion Vector Prediction */
-    void find_mv_refs(ReferenceFrame, i32 block);
+    void find_mv_refs(ReferenceFrameType, i32 block);
     void find_best_ref_mvs(u8 ref_list);
     bool use_mv_hp(MotionVector const& delta_mv);
     void append_sub8x8_mvs(i32 block, u8 ref_list);
@@ -136,12 +139,12 @@ private:
     MotionVector clamp_mv(MotionVector mvec, i32 border);
     size_t get_image_index(u32 row, u32 column);
     void get_block_mv(u32 candidate_row, u32 candidate_column, u8 ref_list, bool use_prev);
-    void if_same_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, ReferenceFrame ref_frame, bool use_prev);
-    void if_diff_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, ReferenceFrame ref_frame, bool use_prev);
-    void scale_mv(u8 ref_list, ReferenceFrame ref_frame);
+    void if_same_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, ReferenceFrameType ref_frame, bool use_prev);
+    void if_diff_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, ReferenceFrameType ref_frame, bool use_prev);
+    void scale_mv(u8 ref_list, ReferenceFrameType ref_frame);
     void add_mv_ref_list(u8 ref_list);
 
-    Gfx::Point<size_t> get_decoded_point_for_plane(u8 row, u8 column, u8 plane);
+    Gfx::Point<size_t> get_decoded_point_for_plane(u32 row, u32 column, u8 plane);
     Gfx::Size<size_t> get_decoded_size_for_plane(u8 plane);
 
     u8 m_profile { 0 };
@@ -170,10 +173,8 @@ private:
     ColorRange m_color_range;
     bool m_subsampling_x { false };
     bool m_subsampling_y { false };
-    u32 m_frame_width { 0 };
-    u32 m_frame_height { 0 };
-    u16 m_render_width { 0 };
-    u16 m_render_height { 0 };
+    Gfx::Size<u32> m_frame_size { 0, 0 };
+    Gfx::Size<u32> m_render_size { 0, 0 };
     bool m_render_and_frame_size_different { false };
     u32 m_mi_cols { 0 };
     u32 m_mi_rows { 0 };
@@ -227,37 +228,39 @@ private:
     bool m_has_rows { false };
     bool m_has_cols { false };
     TXSize m_max_tx_size { TX_4x4 };
-    u8 m_block_subsize { 0 };
+    BlockSubsize m_block_subsize { BlockSubsize::Block_4x4 };
     // The row to use for getting partition tree probability lookups.
     u32 m_row { 0 };
     // The column to use for getting partition tree probability lookups.
     u32 m_col { 0 };
     TXSize m_tx_size { TX_4x4 };
-    ReferenceFrame m_ref_frame[2];
+    ReferenceFramePair m_ref_frame;
     bool m_is_inter { false };
     bool m_is_compound { false };
-    IntraMode m_default_intra_mode { DcPred };
-    u8 m_y_mode { 0 };
-    u8 m_block_sub_modes[4];
+    PredictionMode m_default_intra_mode { PredictionMode::DcPred };
+    PredictionMode m_y_mode { 0 };
+    PredictionMode m_block_sub_modes[4];
     u8 m_num_4x4_w { 0 };
     u8 m_num_4x4_h { 0 };
-    u8 m_uv_mode { 0 }; // FIXME: Is u8 the right size?
-    Vector<Array<IntraMode, 4>> m_sub_modes;
-    ReferenceFrame m_left_ref_frame[2];
-    ReferenceFrame m_above_ref_frame[2];
+    PredictionMode m_uv_mode { 0 }; // FIXME: Is u8 the right size?
+    // FIXME: From spec: NOTE – We are using a 2D array to store the SubModes for clarity. It is possible to reduce memory
+    // consumption by only storing one intra mode for each 8x8 horizontal and vertical position, i.e. to use two 1D
+    // arrays instead.
+    Vector<Array<PredictionMode, 4>> m_sub_modes;
+    ReferenceFramePair m_left_ref_frame;
+    ReferenceFramePair m_above_ref_frame;
     bool m_left_intra { false };
     bool m_above_intra { false };
     bool m_left_single { false };
     bool m_above_single { false };
     // The current block's interpolation filter.
     InterpolationFilter m_interp_filter { EightTap };
-    MotionVector m_mv[2];
-    MotionVector m_near_mv[2];
-    MotionVector m_nearest_mv[2];
-    MotionVector m_best_mv[2];
+    MotionVectorPair m_mv;
+    MotionVectorPair m_near_mv;
+    MotionVectorPair m_nearest_mv;
+    MotionVectorPair m_best_mv;
     // FIXME: Move these to a struct to store together in one array.
-    u32 m_ref_frame_width[NUM_REF_FRAMES];
-    u32 m_ref_frame_height[NUM_REF_FRAMES];
+    Gfx::Size<u32> m_ref_frame_size[NUM_REF_FRAMES];
     bool m_ref_subsampling_x[NUM_REF_FRAMES];
     bool m_ref_subsampling_y[NUM_REF_FRAMES];
     u8 m_ref_bit_depth[NUM_REF_FRAMES];
@@ -271,25 +274,25 @@ private:
     bool m_use_hp { false };
     TXMode m_tx_mode;
     ReferenceMode m_reference_mode;
-    ReferenceFrame m_comp_fixed_ref;
-    ReferenceFrame m_comp_var_ref[2];
+    ReferenceFrameType m_comp_fixed_ref;
+    ReferenceFramePair m_comp_var_ref;
     MotionVector m_block_mvs[2][4];
     Vector<u8> m_prev_segment_ids;
 
     Vector<bool> m_skips;
     Vector<TXSize> m_tx_sizes;
     Vector<u32> m_mi_sizes;
-    Vector<u8> m_y_modes;
+    Vector<PredictionMode> m_y_modes;
     Vector<u8> m_segment_ids;
-    Vector<Array<ReferenceFrame, 2>> m_ref_frames;
-    Vector<Array<ReferenceFrame, 2>> m_prev_ref_frames;
-    Vector<Array<MotionVector, 2>> m_mvs;
-    Vector<Array<MotionVector, 2>> m_prev_mvs;
-    MotionVector m_candidate_mv[2];
-    ReferenceFrame m_candidate_frame[2];
+    Vector<ReferenceFramePair> m_ref_frames;
+    Vector<ReferenceFramePair> m_prev_ref_frames;
+    Vector<MotionVectorPair> m_mvs;
+    Vector<MotionVectorPair> m_prev_mvs;
+    MotionVectorPair m_candidate_mv;
+    ReferenceFramePair m_candidate_frame;
     Vector<Array<Array<MotionVector, 4>, 2>> m_sub_mvs;
     u8 m_ref_mv_count { 0 };
-    MotionVector m_ref_list_mv[2];
+    MotionVectorPair m_ref_list_mv;
     bool m_use_prev_frame_mvs;
     Vector<InterpolationFilter> m_interp_filters;
     // Indexed by ReferenceFrame enum.
@@ -298,7 +301,6 @@ private:
     OwnPtr<BitStream> m_bit_stream;
     OwnPtr<ProbabilityTables> m_probability_tables;
     OwnPtr<SyntaxElementCounter> m_syntax_element_counter;
-    NonnullOwnPtr<TreeParser> m_tree_parser;
     Decoder& m_decoder;
 };
 

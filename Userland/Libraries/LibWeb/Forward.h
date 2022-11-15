@@ -36,6 +36,7 @@ class BorderStyleValue;
 class Clip;
 class CalculatedStyleValue;
 class ColorStyleValue;
+class ConicGradientStyleValue;
 class ContentStyleValue;
 class CSSConditionRule;
 class CSSGroupingRule;
@@ -50,6 +51,7 @@ class CSSStyleSheet;
 class CSSSupportsRule;
 class Display;
 class ElementInlineCSSStyleDeclaration;
+class ExplicitGridTrack;
 class FilterValueListStyleValue;
 class FlexFlowStyleValue;
 class FlexStyleValue;
@@ -58,10 +60,13 @@ class FontStyleValue;
 class Frequency;
 class FrequencyPercentage;
 class FrequencyStyleValue;
+class GridMinMax;
+class GridRepeat;
+class GridSize;
 class GridTrackPlacement;
 class GridTrackPlacementShorthandStyleValue;
 class GridTrackPlacementStyleValue;
-class GridTrackSize;
+class GridTrackSizeList;
 class GridTrackSizeStyleValue;
 class IdentifierStyleValue;
 class ImageStyleValue;
@@ -187,9 +192,19 @@ class Request;
 class Response;
 }
 
+namespace Web::Fetch::Fetching {
+class PendingResponse;
+class RefCountedFlag;
+}
+
 namespace Web::Fetch::Infrastructure {
 class Body;
 struct BodyWithType;
+class ConnectionTimingInfo;
+class FetchAlgorithms;
+class FetchController;
+class FetchParams;
+class FetchTimingInfo;
 struct Header;
 class HeaderList;
 class Request;
@@ -477,10 +492,6 @@ namespace Web::Bindings {
 class Intrinsics;
 class LocationObject;
 class OptionConstructor;
-class RangePrototype;
-class Wrappable;
-class Wrapper;
-class XMLHttpRequestPrototype;
 enum class CanPlayTypeResult;
 enum class CanvasFillRule;
 enum class EndingType;

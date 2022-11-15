@@ -19,5 +19,6 @@ extern Vector<String> g_proxies;
 extern HashMap<String, size_t> g_proxy_mappings;
 extern bool g_content_filters_enabled;
 extern IconBag g_icon_bag;
+extern String g_webdriver_content_ipc_path;
 
 }

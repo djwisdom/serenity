@@ -19,7 +19,6 @@ namespace Video::VP9 {
 
 Parser::Parser(Decoder& decoder)
     : m_probability_tables(make<ProbabilityTables>())
-    , m_tree_parser(make<TreeParser>(*this))
     , m_decoder(decoder)
 {
 }
@@ -28,7 +27,7 @@ Parser::~Parser()
 {
 }
 
-Vector<size_t> Parser::parse_superframe_sizes(Span<const u8> frame_data)
+Vector<size_t> Parser::parse_superframe_sizes(ReadonlyBytes frame_data)
 {
     if (frame_data.size() < 1)
         return {};
@@ -76,7 +75,7 @@ Vector<size_t> Parser::parse_superframe_sizes(Span<const u8> frame_data)
 }
 
 /* (6.1) */
-DecoderErrorOr<void> Parser::parse_frame(Span<const u8> frame_data)
+DecoderErrorOr<void> Parser::parse_frame(ReadonlyBytes frame_data)
 {
     m_bit_stream = make<BitStream>(frame_data.data(), frame_data.size());
     m_syntax_element_counter = make<SyntaxElementCounter>();
@@ -136,8 +135,8 @@ DecoderErrorOr<FrameType> Parser::read_frame_type()
 DecoderErrorOr<ColorRange> Parser::read_color_range()
 {
     if (TRY_READ(m_bit_stream->read_bit()))
-        return FullSwing;
-    return StudioSwing;
+        return ColorRange::Full;
+    return ColorRange::Studio;
 }
 
 /* (6.2) */
@@ -168,8 +167,8 @@ DecoderErrorOr<void> Parser::uncompressed_header()
     if (m_frame_type == KeyFrame) {
         TRY(frame_sync_code());
         TRY(color_config());
-        TRY(frame_size());
-        TRY(render_size());
+        m_frame_size = TRY(frame_size());
+        m_render_size = TRY(render_size(m_frame_size));
         m_refresh_frame_flags = 0xFF;
         m_frame_is_intra = true;
     } else {
@@ -193,19 +192,22 @@ DecoderErrorOr<void> Parser::uncompressed_header()
             }
 
             m_refresh_frame_flags = TRY_READ(m_bit_stream->read_f8());
-            TRY(frame_size());
-            TRY(render_size());
+            m_frame_size = TRY(frame_size());
+            m_render_size = TRY(render_size(m_frame_size));
         } else {
             m_refresh_frame_flags = TRY_READ(m_bit_stream->read_f8());
             for (auto i = 0; i < 3; i++) {
                 m_ref_frame_idx[i] = TRY_READ(m_bit_stream->read_bits(3));
                 m_ref_frame_sign_bias[LastFrame + i] = TRY_READ(m_bit_stream->read_bit());
             }
-            TRY(frame_size_with_refs());
+            m_frame_size = TRY(frame_size_with_refs());
+            m_render_size = TRY(render_size(m_frame_size));
             m_allow_high_precision_mv = TRY_READ(m_bit_stream->read_bit());
             TRY(read_interpolation_filter());
         }
     }
+
+    compute_image_size();
 
     if (!m_error_resilient_mode) {
         m_refresh_frame_context = TRY_READ(m_bit_stream->read_bit());
@@ -273,7 +275,7 @@ DecoderErrorOr<void> Parser::color_config()
             m_subsampling_y = true;
         }
     } else {
-        m_color_range = FullSwing;
+        m_color_range = ColorRange::Full;
         if (m_profile == 1 || m_profile == 3) {
             m_subsampling_x = false;
             m_subsampling_y = false;
@@ -284,51 +286,38 @@ DecoderErrorOr<void> Parser::color_config()
     return {};
 }
 
-DecoderErrorOr<void> Parser::frame_size()
+DecoderErrorOr<Gfx::Size<u32>> Parser::frame_size()
 {
-    m_frame_width = TRY_READ(m_bit_stream->read_f16()) + 1;
-    m_frame_height = TRY_READ(m_bit_stream->read_f16()) + 1;
-    compute_image_size();
-    return {};
+    return Gfx::Size<u32> { TRY_READ(m_bit_stream->read_f16()) + 1, TRY_READ(m_bit_stream->read_f16()) + 1 };
 }
 
-DecoderErrorOr<void> Parser::render_size()
+DecoderErrorOr<Gfx::Size<u32>> Parser::render_size(Gfx::Size<u32> frame_size)
 {
-    if (TRY_READ(m_bit_stream->read_bit())) {
-        m_render_width = TRY_READ(m_bit_stream->read_f16()) + 1;
-        m_render_height = TRY_READ(m_bit_stream->read_f16()) + 1;
-    } else {
-        m_render_width = m_frame_width;
-        m_render_height = m_frame_height;
-    }
-    return {};
+    if (!TRY_READ(m_bit_stream->read_bit()))
+        return frame_size;
+    return Gfx::Size<u32> { TRY_READ(m_bit_stream->read_f16()) + 1, TRY_READ(m_bit_stream->read_f16()) + 1 };
 }
 
-DecoderErrorOr<void> Parser::frame_size_with_refs()
+DecoderErrorOr<Gfx::Size<u32>> Parser::frame_size_with_refs()
 {
-    bool found_ref;
+    Optional<Gfx::Size<u32>> size;
     for (auto frame_index : m_ref_frame_idx) {
-        found_ref = TRY_READ(m_bit_stream->read_bit());
-        if (found_ref) {
-            m_frame_width = m_ref_frame_width[frame_index];
-            m_frame_height = m_ref_frame_height[frame_index];
+        if (TRY_READ(m_bit_stream->read_bit())) {
+            size.emplace(m_ref_frame_size[frame_index]);
             break;
         }
     }
 
-    if (!found_ref) {
-        TRY(frame_size());
-    } else {
-        compute_image_size();
-    }
+    if (size.has_value())
+        return size.value();
 
-    return render_size();
+    return TRY(frame_size());
 }
 
 void Parser::compute_image_size()
 {
-    auto new_cols = (m_frame_width + 7u) >> 3u;
-    auto new_rows = (m_frame_height + 7u) >> 3u;
+    auto new_cols = (m_frame_size.width() + 7u) >> 3u;
+    auto new_rows = (m_frame_size.height() + 7u) >> 3u;
 
     // 7.2.6 Compute image size semantics
     // When compute_image_size is invoked, the following ordered steps occur:
@@ -915,7 +904,7 @@ void Parser::clear_left_context()
     clear_context(m_left_partition_context, m_sb64_rows * 8);
 }
 
-DecoderErrorOr<void> Parser::decode_partition(u32 row, u32 col, u8 block_subsize)
+DecoderErrorOr<void> Parser::decode_partition(u32 row, u32 col, BlockSubsize block_subsize)
 {
     if (row >= m_mi_rows || col >= m_mi_cols)
         return {};
@@ -926,7 +915,7 @@ DecoderErrorOr<void> Parser::decode_partition(u32 row, u32 col, u8 block_subsize
     m_has_cols = (col + half_block_8x8) < m_mi_cols;
     m_row = row;
     m_col = col;
-    auto partition = TRY_READ(m_tree_parser->parse_tree(SyntaxElementType::Partition));
+    auto partition = TRY_READ(TreeParser::parse_partition(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, m_has_rows, m_has_cols, m_block_subsize, m_num_8x8, m_above_partition_context, m_left_partition_context, row, col, m_frame_is_intra));
 
     auto subsize = subsize_lookup[partition][block_subsize];
     if (subsize < Block_8x8 || partition == PartitionNone) {
@@ -979,8 +968,8 @@ DecoderErrorOr<void> Parser::decode_block(u32 row, u32 col, BlockSubsize subsize
     // write out of bounds. This check seems consistent with libvpx.
     // See here:
     // https://github.com/webmproject/libvpx/blob/705bf9de8c96cfe5301451f1d7e5c90a41c64e5f/vp9/decoder/vp9_decodeframe.c#L917
-    auto maximum_block_y = min(num_8x8_blocks_high_lookup[subsize], m_mi_rows - row);
-    auto maximum_block_x = min(num_8x8_blocks_wide_lookup[subsize], m_mi_cols - col);
+    auto maximum_block_y = min<u32>(num_8x8_blocks_high_lookup[subsize], m_mi_rows - row);
+    auto maximum_block_x = min<u32>(num_8x8_blocks_wide_lookup[subsize], m_mi_cols - col);
 
     for (size_t y = 0; y < maximum_block_y; y++) {
         for (size_t x = 0; x < maximum_block_x; x++) {
@@ -1003,7 +992,7 @@ DecoderErrorOr<void> Parser::decode_block(u32 row, u32 col, BlockSubsize subsize
                 }
             } else {
                 for (size_t b = 0; b < 4; b++)
-                    m_sub_modes[pos][b] = static_cast<IntraMode>(m_block_sub_modes[b]);
+                    m_sub_modes[pos][b] = static_cast<PredictionMode>(m_block_sub_modes[b]);
             }
         }
     }
@@ -1027,8 +1016,19 @@ DecoderErrorOr<void> Parser::intra_frame_mode_info()
     m_ref_frame[0] = IntraFrame;
     m_ref_frame[1] = None;
     m_is_inter = false;
+    // FIXME: This if statement is also present in parse_default_intra_mode. The selection of parameters for
+    //        the probability table lookup should be inlined here.
     if (m_mi_size >= Block_8x8) {
-        m_default_intra_mode = TRY_READ(m_tree_parser->parse_tree<IntraMode>(SyntaxElementType::DefaultIntraMode));
+        // FIXME: This context should be available in the block setup. Make a struct to store the context
+        //        that is needed to call the tree parses and set it in decode_block().
+        auto above_context = Optional<Array<PredictionMode, 4> const&>();
+        auto left_context = Optional<Array<PredictionMode, 4> const&>();
+        if (m_available_u)
+            above_context = m_sub_modes[get_image_index(m_mi_row - 1, m_mi_col)];
+        if (m_available_l)
+            left_context = m_sub_modes[get_image_index(m_mi_row, m_mi_col - 1)];
+        m_default_intra_mode = TRY_READ(TreeParser::parse_default_intra_mode(*m_bit_stream, *m_probability_tables, m_mi_size, above_context, left_context, m_block_sub_modes, 0, 0));
+
         m_y_mode = m_default_intra_mode;
         for (auto& block_sub_mode : m_block_sub_modes)
             block_sub_mode = m_y_mode;
@@ -1037,8 +1037,15 @@ DecoderErrorOr<void> Parser::intra_frame_mode_info()
         m_num_4x4_h = num_4x4_blocks_high_lookup[m_mi_size];
         for (auto idy = 0; idy < 2; idy += m_num_4x4_h) {
             for (auto idx = 0; idx < 2; idx += m_num_4x4_w) {
-                m_tree_parser->set_default_intra_mode_variables(idx, idy);
-                m_default_intra_mode = TRY_READ(m_tree_parser->parse_tree<IntraMode>(SyntaxElementType::DefaultIntraMode));
+                // FIXME: See the FIXME above.
+                auto above_context = Optional<Array<PredictionMode, 4> const&>();
+                auto left_context = Optional<Array<PredictionMode, 4> const&>();
+                if (m_available_u)
+                    above_context = m_sub_modes[get_image_index(m_mi_row - 1, m_mi_col)];
+                if (m_available_l)
+                    left_context = m_sub_modes[get_image_index(m_mi_row, m_mi_col - 1)];
+                m_default_intra_mode = TRY_READ(TreeParser::parse_default_intra_mode(*m_bit_stream, *m_probability_tables, m_mi_size, above_context, left_context, m_block_sub_modes, idx, idy));
+
                 for (auto y = 0; y < m_num_4x4_h; y++) {
                     for (auto x = 0; x < m_num_4x4_w; x++) {
                         auto index = (idy + y) * 2 + idx + x;
@@ -1049,14 +1056,14 @@ DecoderErrorOr<void> Parser::intra_frame_mode_info()
         }
         m_y_mode = m_default_intra_mode;
     }
-    m_uv_mode = TRY_READ(m_tree_parser->parse_tree<u8>(SyntaxElementType::DefaultUVMode));
+    m_uv_mode = TRY_READ(TreeParser::parse_default_uv_mode(*m_bit_stream, *m_probability_tables, m_y_mode));
     return {};
 }
 
 DecoderErrorOr<void> Parser::intra_segment_id()
 {
     if (m_segmentation_enabled && m_segmentation_update_map)
-        m_segment_id = TRY_READ(m_tree_parser->parse_tree<u8>(SyntaxElementType::SegmentID));
+        m_segment_id = TRY_READ(TreeParser::parse_segment_id(*m_bit_stream, m_segmentation_tree_probs));
     else
         m_segment_id = 0;
     return {};
@@ -1064,10 +1071,13 @@ DecoderErrorOr<void> Parser::intra_segment_id()
 
 DecoderErrorOr<void> Parser::read_skip()
 {
-    if (seg_feature_active(SEG_LVL_SKIP))
+    if (seg_feature_active(SEG_LVL_SKIP)) {
         m_skip = true;
-    else
-        m_skip = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::Skip));
+    } else {
+        Optional<bool> above_skip = m_available_u ? m_skips[get_image_index(m_mi_row - 1, m_mi_col)] : Optional<bool>();
+        Optional<bool> left_skip = m_available_l ? m_skips[get_image_index(m_mi_row, m_mi_col - 1)] : Optional<bool>();
+        m_skip = TRY_READ(TreeParser::parse_skip(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, above_skip, left_skip));
+    }
     return {};
 }
 
@@ -1079,10 +1089,15 @@ bool Parser::seg_feature_active(u8 feature)
 DecoderErrorOr<void> Parser::read_tx_size(bool allow_select)
 {
     m_max_tx_size = max_txsize_lookup[m_mi_size];
-    if (allow_select && m_tx_mode == TXModeSelect && m_mi_size >= Block_8x8)
-        m_tx_size = TRY_READ(m_tree_parser->parse_tree<TXSize>(SyntaxElementType::TXSize));
-    else
+    if (allow_select && m_tx_mode == TXModeSelect && m_mi_size >= Block_8x8) {
+        Optional<bool> above_skip = m_available_u ? m_skips[get_image_index(m_mi_row - 1, m_mi_col)] : Optional<bool>();
+        Optional<bool> left_skip = m_available_l ? m_skips[get_image_index(m_mi_row, m_mi_col - 1)] : Optional<bool>();
+        Optional<TXSize> above_tx_size = m_available_u ? m_tx_sizes[get_image_index(m_mi_row - 1, m_mi_col)] : Optional<TXSize>();
+        Optional<TXSize> left_tx_size = m_available_l ? m_tx_sizes[get_image_index(m_mi_row, m_mi_col - 1)] : Optional<TXSize>();
+        m_tx_size = TRY_READ(TreeParser::parse_tx_size(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, m_max_tx_size, above_skip, left_skip, above_tx_size, left_tx_size));
+    } else {
         m_tx_size = min(m_max_tx_size, tx_mode_to_biggest_tx_size[m_tx_mode]);
+    }
     return {};
 }
 
@@ -1120,15 +1135,15 @@ DecoderErrorOr<void> Parser::inter_segment_id()
         return {};
     }
     if (!m_segmentation_temporal_update) {
-        m_segment_id = TRY_READ(m_tree_parser->parse_tree<u8>(SyntaxElementType::SegmentID));
+        m_segment_id = TRY_READ(TreeParser::parse_segment_id(*m_bit_stream, m_segmentation_tree_probs));
         return {};
     }
 
-    auto seg_id_predicted = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::SegIDPredicted));
+    auto seg_id_predicted = TRY_READ(TreeParser::parse_segment_id_predicted(*m_bit_stream, m_segmentation_pred_prob, m_left_seg_pred_context[m_mi_row], m_above_seg_pred_context[m_mi_col]));
     if (seg_id_predicted)
         m_segment_id = predicted_segment_id;
     else
-        m_segment_id = TRY_READ(m_tree_parser->parse_tree<u8>(SyntaxElementType::SegmentID));
+        m_segment_id = TRY_READ(TreeParser::parse_segment_id(*m_bit_stream, m_segmentation_tree_probs));
 
     for (size_t i = 0; i < num_8x8_blocks_wide_lookup[m_mi_size]; i++) {
         auto index = m_mi_col + i;
@@ -1162,10 +1177,13 @@ u8 Parser::get_segment_id()
 
 DecoderErrorOr<void> Parser::read_is_inter()
 {
-    if (seg_feature_active(SEG_LVL_REF_FRAME))
+    if (seg_feature_active(SEG_LVL_REF_FRAME)) {
         m_is_inter = m_feature_data[m_segment_id][SEG_LVL_REF_FRAME] != IntraFrame;
-    else
-        m_is_inter = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::IsInter));
+    } else {
+        Optional<bool> above_intra = m_available_u ? m_above_intra : Optional<bool>();
+        Optional<bool> left_intra = m_available_l ? m_left_intra : Optional<bool>();
+        m_is_inter = TRY_READ(TreeParser::parse_is_inter(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, above_intra, left_intra));
+    }
     return {};
 }
 
@@ -1174,16 +1192,16 @@ DecoderErrorOr<void> Parser::intra_block_mode_info()
     m_ref_frame[0] = IntraFrame;
     m_ref_frame[1] = None;
     if (m_mi_size >= Block_8x8) {
-        m_y_mode = TRY_READ(m_tree_parser->parse_tree<u8>(SyntaxElementType::IntraMode));
+        m_y_mode = TRY_READ(TreeParser::parse_intra_mode(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, m_mi_size));
         for (auto& block_sub_mode : m_block_sub_modes)
             block_sub_mode = m_y_mode;
     } else {
         m_num_4x4_w = num_4x4_blocks_wide_lookup[m_mi_size];
         m_num_4x4_h = num_4x4_blocks_high_lookup[m_mi_size];
-        u8 sub_intra_mode;
+        PredictionMode sub_intra_mode;
         for (auto idy = 0; idy < 2; idy += m_num_4x4_h) {
             for (auto idx = 0; idx < 2; idx += m_num_4x4_w) {
-                sub_intra_mode = TRY_READ(m_tree_parser->parse_tree<u8>(SyntaxElementType::SubIntraMode));
+                sub_intra_mode = TRY_READ(TreeParser::parse_sub_intra_mode(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter));
                 for (auto y = 0; y < m_num_4x4_h; y++) {
                     for (auto x = 0; x < m_num_4x4_w; x++)
                         m_block_sub_modes[(idy + y) * 2 + idx + x] = sub_intra_mode;
@@ -1192,7 +1210,7 @@ DecoderErrorOr<void> Parser::intra_block_mode_info()
         }
         m_y_mode = sub_intra_mode;
     }
-    m_uv_mode = TRY_READ(m_tree_parser->parse_tree<u8>(SyntaxElementType::UVMode));
+    m_uv_mode = TRY_READ(TreeParser::parse_uv_mode(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, m_y_mode));
     return {};
 }
 
@@ -1207,23 +1225,26 @@ DecoderErrorOr<void> Parser::inter_block_mode_info()
     }
     auto is_compound = m_ref_frame[1] > IntraFrame;
     if (seg_feature_active(SEG_LVL_SKIP)) {
-        m_y_mode = ZeroMv;
+        m_y_mode = PredictionMode::ZeroMv;
     } else if (m_mi_size >= Block_8x8) {
-        auto inter_mode = TRY_READ(m_tree_parser->parse_tree(SyntaxElementType::InterMode));
-        m_y_mode = NearestMv + inter_mode;
+        m_y_mode = TRY_READ(TreeParser::parse_inter_mode(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, m_mode_context[m_ref_frame[0]]));
     }
-    if (m_interpolation_filter == Switchable)
-        m_interp_filter = TRY_READ(m_tree_parser->parse_tree<InterpolationFilter>(SyntaxElementType::InterpFilter));
-    else
+    if (m_interpolation_filter == Switchable) {
+        Optional<ReferenceFrameType> above_ref_frame = m_available_u ? m_ref_frames[get_image_index(m_mi_row - 1, m_mi_col)][0] : Optional<ReferenceFrameType>();
+        Optional<ReferenceFrameType> left_ref_frame = m_available_l ? m_ref_frames[get_image_index(m_mi_row, m_mi_col - 1)][0] : Optional<ReferenceFrameType>();
+        Optional<InterpolationFilter> above_interpolation_filter = m_available_u ? m_interp_filters[get_image_index(m_mi_row - 1, m_mi_col)] : Optional<InterpolationFilter>();
+        Optional<InterpolationFilter> left_interpolation_filter = m_available_l ? m_interp_filters[get_image_index(m_mi_row, m_mi_col - 1)] : Optional<InterpolationFilter>();
+        m_interp_filter = TRY_READ(TreeParser::parse_interpolation_filter(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, above_ref_frame, left_ref_frame, above_interpolation_filter, left_interpolation_filter));
+    } else {
         m_interp_filter = m_interpolation_filter;
+    }
     if (m_mi_size < Block_8x8) {
         m_num_4x4_w = num_4x4_blocks_wide_lookup[m_mi_size];
         m_num_4x4_h = num_4x4_blocks_high_lookup[m_mi_size];
         for (auto idy = 0; idy < 2; idy += m_num_4x4_h) {
             for (auto idx = 0; idx < 2; idx += m_num_4x4_w) {
-                auto inter_mode = TRY_READ(m_tree_parser->parse_tree(SyntaxElementType::InterMode));
-                m_y_mode = NearestMv + inter_mode;
-                if (m_y_mode == NearestMv || m_y_mode == NearMv) {
+                m_y_mode = TRY_READ(TreeParser::parse_inter_mode(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, m_mode_context[m_ref_frame[0]]));
+                if (m_y_mode == PredictionMode::NearestMv || m_y_mode == PredictionMode::NearMv) {
                     for (auto j = 0; j < 1 + is_compound; j++)
                         append_sub8x8_mvs(idy * 2 + idx, j);
                 }
@@ -1252,25 +1273,41 @@ DecoderErrorOr<void> Parser::inter_block_mode_info()
 DecoderErrorOr<void> Parser::read_ref_frames()
 {
     if (seg_feature_active(SEG_LVL_REF_FRAME)) {
-        m_ref_frame[0] = static_cast<ReferenceFrame>(m_feature_data[m_segment_id][SEG_LVL_REF_FRAME]);
+        m_ref_frame[0] = static_cast<ReferenceFrameType>(m_feature_data[m_segment_id][SEG_LVL_REF_FRAME]);
         m_ref_frame[1] = None;
         return {};
     }
     ReferenceMode comp_mode;
-    if (m_reference_mode == ReferenceModeSelect)
-        comp_mode = TRY_READ(m_tree_parser->parse_tree<ReferenceMode>(SyntaxElementType::CompMode));
-    else
+    Optional<bool> above_single = m_available_u ? m_above_single : Optional<bool>();
+    Optional<bool> left_single = m_available_l ? m_left_single : Optional<bool>();
+    Optional<bool> above_intra = m_available_u ? m_above_intra : Optional<bool>();
+    Optional<bool> left_intra = m_available_l ? m_left_intra : Optional<bool>();
+    Optional<ReferenceFrameType> above_ref_frame_0 = m_available_u ? m_above_ref_frame[0] : Optional<ReferenceFrameType>();
+    Optional<ReferenceFrameType> left_ref_frame_0 = m_available_l ? m_left_ref_frame[0] : Optional<ReferenceFrameType>();
+    Optional<ReferenceFramePair> above_ref_frame = m_available_u ? m_above_ref_frame : Optional<ReferenceFramePair>();
+    Optional<ReferenceFramePair> left_ref_frame = m_available_l ? m_left_ref_frame : Optional<ReferenceFramePair>();
+    if (m_reference_mode == ReferenceModeSelect) {
+        comp_mode = TRY_READ(TreeParser::parse_comp_mode(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, m_comp_fixed_ref, above_single, left_single, above_intra, left_intra, above_ref_frame_0, left_ref_frame_0));
+    } else {
         comp_mode = m_reference_mode;
+    }
     if (comp_mode == CompoundReference) {
-        auto idx = m_ref_frame_sign_bias[m_comp_fixed_ref];
-        auto comp_ref = TRY_READ(m_tree_parser->parse_tree(SyntaxElementType::CompRef));
-        m_ref_frame[idx] = m_comp_fixed_ref;
-        m_ref_frame[!idx] = m_comp_var_ref[comp_ref];
+        auto biased_reference_index = m_ref_frame_sign_bias[m_comp_fixed_ref];
+        auto inverse_biased_reference_index = biased_reference_index == 0 ? 1 : 0;
+
+        Optional<ReferenceFrameType> above_ref_frame_biased = m_available_u ? m_above_ref_frame[inverse_biased_reference_index] : Optional<ReferenceFrameType>();
+        Optional<ReferenceFrameType> left_ref_frame_biased = m_available_l ? m_left_ref_frame[inverse_biased_reference_index] : Optional<ReferenceFrameType>();
+        // FIXME: Create an enum for compound frame references using names Primary and Secondary.
+        auto comp_ref = TRY_READ(TreeParser::parse_comp_ref(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, m_comp_fixed_ref, m_comp_var_ref, above_single, left_single, above_intra, left_intra, above_ref_frame_0, left_ref_frame_0, above_ref_frame_biased, left_ref_frame_biased));
+
+        m_ref_frame[biased_reference_index] = m_comp_fixed_ref;
+        m_ref_frame[inverse_biased_reference_index] = m_comp_var_ref[comp_ref];
         return {};
     }
-    auto single_ref_p1 = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::SingleRefP1));
+    // FIXME: Maybe consolidate this into a tree. Context is different between part 1 and 2 but still, it would look nice here.
+    auto single_ref_p1 = TRY_READ(TreeParser::parse_single_ref_part_1(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, above_single, left_single, above_intra, left_intra, above_ref_frame, left_ref_frame));
     if (single_ref_p1) {
-        auto single_ref_p2 = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::SingleRefP2));
+        auto single_ref_p2 = TRY_READ(TreeParser::parse_single_ref_part_2(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, above_single, left_single, above_intra, left_intra, above_ref_frame, left_ref_frame));
         m_ref_frame[0] = single_ref_p2 ? AltRefFrame : GoldenFrame;
     } else {
         m_ref_frame[0] = LastFrame;
@@ -1283,11 +1320,11 @@ DecoderErrorOr<void> Parser::assign_mv(bool is_compound)
 {
     m_mv[1] = {};
     for (auto i = 0; i < 1 + is_compound; i++) {
-        if (m_y_mode == NewMv) {
+        if (m_y_mode == PredictionMode::NewMv) {
             TRY(read_mv(i));
-        } else if (m_y_mode == NearestMv) {
+        } else if (m_y_mode == PredictionMode::NearestMv) {
             m_mv[i] = m_nearest_mv[i];
-        } else if (m_y_mode == NearMv) {
+        } else if (m_y_mode == PredictionMode::NearMv) {
             m_mv[i] = m_near_mv[i];
         } else {
             m_mv[i] = {};
@@ -1300,7 +1337,7 @@ DecoderErrorOr<void> Parser::read_mv(u8 ref)
 {
     m_use_hp = m_allow_high_precision_mv && use_mv_hp(m_best_mv[ref]);
     MotionVector diff_mv;
-    auto mv_joint = TRY_READ(m_tree_parser->parse_tree<MvJoint>(SyntaxElementType::MVJoint));
+    auto mv_joint = TRY_READ(TreeParser::parse_motion_vector_joint(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter));
     if (mv_joint == MvJointHzvnz || mv_joint == MvJointHnzvnz)
         diff_mv.set_row(TRY(read_mv_component(0)));
     if (mv_joint == MvJointHnzvz || mv_joint == MvJointHnzvnz)
@@ -1314,30 +1351,29 @@ DecoderErrorOr<void> Parser::read_mv(u8 ref)
 
 DecoderErrorOr<i32> Parser::read_mv_component(u8 component)
 {
-    m_tree_parser->set_mv_component(component);
-    auto mv_sign = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::MVSign));
-    auto mv_class = TRY_READ(m_tree_parser->parse_tree<MvClass>(SyntaxElementType::MVClass));
-    u32 mag;
+    auto mv_sign = TRY_READ(TreeParser::parse_motion_vector_sign(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, component));
+    auto mv_class = TRY_READ(TreeParser::parse_motion_vector_class(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, component));
+    u32 magnitude;
     if (mv_class == MvClass0) {
-        u32 mv_class0_bit = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::MVClass0Bit));
-        u32 mv_class0_fr = TRY_READ(m_tree_parser->parse_mv_class0_fr(mv_class0_bit));
-        u32 mv_class0_hp = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::MVClass0HP));
-        mag = ((mv_class0_bit << 3) | (mv_class0_fr << 1) | mv_class0_hp) + 1;
+        auto mv_class0_bit = TRY_READ(TreeParser::parse_motion_vector_class0_bit(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, component));
+        auto mv_class0_fr = TRY_READ(TreeParser::parse_motion_vector_class0_fr(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, component, mv_class0_bit));
+        auto mv_class0_hp = TRY_READ(TreeParser::parse_motion_vector_class0_hp(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, component, m_use_hp));
+        magnitude = ((mv_class0_bit << 3) | (mv_class0_fr << 1) | mv_class0_hp) + 1;
     } else {
-        u32 d = 0;
+        u32 bits = 0;
         for (u8 i = 0; i < mv_class; i++) {
-            u32 mv_bit = TRY_READ(m_tree_parser->parse_mv_bit(i));
-            d |= mv_bit << i;
+            auto mv_bit = TRY_READ(TreeParser::parse_motion_vector_bit(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, component, i));
+            bits |= mv_bit << i;
         }
-        mag = CLASS0_SIZE << (mv_class + 2);
-        u32 mv_fr = TRY_READ(m_tree_parser->parse_tree<u8>(SyntaxElementType::MVFR));
-        u32 mv_hp = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::MVHP));
-        mag += ((d << 3) | (mv_fr << 1) | mv_hp) + 1;
+        magnitude = CLASS0_SIZE << (mv_class + 2);
+        auto mv_fr = TRY_READ(TreeParser::parse_motion_vector_fr(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, component));
+        auto mv_hp = TRY_READ(TreeParser::parse_motion_vector_hp(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, component, m_use_hp));
+        magnitude += ((bits << 3) | (mv_fr << 1) | mv_hp) + 1;
     }
-    return (mv_sign ? -1 : 1) * static_cast<i32>(mag);
+    return (mv_sign ? -1 : 1) * static_cast<i32>(magnitude);
 }
 
-Gfx::Point<size_t> Parser::get_decoded_point_for_plane(u8 column, u8 row, u8 plane)
+Gfx::Point<size_t> Parser::get_decoded_point_for_plane(u32 column, u32 row, u8 plane)
 {
     if (plane == 0)
         return { column * 8, row * 8 };
@@ -1426,21 +1462,20 @@ BlockSubsize Parser::get_plane_block_size(u32 subsize, u8 plane)
 
 DecoderErrorOr<bool> Parser::tokens(size_t plane, u32 start_x, u32 start_y, TXSize tx_size, u32 block_index)
 {
-    m_tree_parser->set_start_x_and_y(start_x, start_y);
-    size_t segment_eob = 16 << (tx_size << 1);
+    u32 segment_eob = 16 << (tx_size << 1);
     auto scan = get_scan(plane, tx_size, block_index);
     auto check_eob = true;
-    size_t c = 0;
+    u32 c = 0;
     for (; c < segment_eob; c++) {
         auto pos = scan[c];
         auto band = (tx_size == TX_4x4) ? coefband_4x4[c] : coefband_8x8plus[c];
-        m_tree_parser->set_tokens_variables(band, c, plane, tx_size, pos);
+        auto tokens_context = TreeParser::get_tokens_context(m_subsampling_x, m_subsampling_y, m_mi_rows, m_mi_cols, m_above_nonzero_context, m_left_nonzero_context, m_token_cache, tx_size, m_tx_type, plane, start_x, start_y, pos, m_is_inter, band, c);
         if (check_eob) {
-            auto more_coefs = TRY_READ(m_tree_parser->parse_tree<bool>(SyntaxElementType::MoreCoefs));
+            auto more_coefs = TRY_READ(TreeParser::parse_more_coefficients(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, tokens_context));
             if (!more_coefs)
                 break;
         }
-        auto token = TRY_READ(m_tree_parser->parse_tree<Token>(SyntaxElementType::Token));
+        auto token = TRY_READ(TreeParser::parse_token(*m_bit_stream, *m_probability_tables, *m_syntax_element_counter, tokens_context));
         m_token_cache[pos] = energy_class[token];
         if (token == ZeroToken) {
             m_tokens[pos] = 0;
@@ -1454,7 +1489,7 @@ DecoderErrorOr<bool> Parser::tokens(size_t plane, u32 start_x, u32 start_y, TXSi
     }
     auto non_zero = c > 0;
     m_eob_total += non_zero;
-    for (size_t i = c; i < segment_eob; i++)
+    for (u32 i = c; i < segment_eob; i++)
         m_tokens[scan[i]] = 0;
     return non_zero;
 }
@@ -1467,9 +1502,9 @@ u32 const* Parser::get_scan(size_t plane, TXSize tx_size, u32 block_index)
         if (m_lossless || m_is_inter)
             m_tx_type = DCT_DCT;
         else
-            m_tx_type = mode_to_txfm_map[m_mi_size < Block_8x8 ? m_block_sub_modes[block_index] : m_y_mode];
+            m_tx_type = mode_to_txfm_map[to_underlying(m_mi_size < Block_8x8 ? m_block_sub_modes[block_index] : m_y_mode)];
     } else {
-        m_tx_type = mode_to_txfm_map[m_y_mode];
+        m_tx_type = mode_to_txfm_map[to_underlying(m_y_mode)];
     }
     if (tx_size == TX_4x4) {
         if (m_tx_type == ADST_DCT)
@@ -1547,7 +1582,7 @@ void Parser::get_block_mv(u32 candidate_row, u32 candidate_column, u8 ref_list, 
     }
 }
 
-void Parser::if_same_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, ReferenceFrame ref_frame, bool use_prev)
+void Parser::if_same_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, ReferenceFrameType ref_frame, bool use_prev)
 {
     for (auto ref_list = 0u; ref_list < 2; ref_list++) {
         get_block_mv(candidate_row, candidate_column, ref_list, use_prev);
@@ -1558,23 +1593,23 @@ void Parser::if_same_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, R
     }
 }
 
-void Parser::scale_mv(u8 ref_list, ReferenceFrame ref_frame)
+void Parser::scale_mv(u8 ref_list, ReferenceFrameType ref_frame)
 {
     auto candidate_frame = m_candidate_frame[ref_list];
     if (m_ref_frame_sign_bias[candidate_frame] != m_ref_frame_sign_bias[ref_frame])
         m_candidate_mv[ref_list] *= -1;
 }
 
-void Parser::if_diff_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, ReferenceFrame ref_frame, bool use_prev)
+void Parser::if_diff_ref_frame_add_mv(u32 candidate_row, u32 candidate_column, ReferenceFrameType ref_frame, bool use_prev)
 {
     for (auto ref_list = 0u; ref_list < 2; ref_list++)
         get_block_mv(candidate_row, candidate_column, ref_list, use_prev);
     auto mvs_are_same = m_candidate_mv[0] == m_candidate_mv[1];
-    if (m_candidate_frame[0] > ReferenceFrame::IntraFrame && m_candidate_frame[0] != ref_frame) {
+    if (m_candidate_frame[0] > ReferenceFrameType::IntraFrame && m_candidate_frame[0] != ref_frame) {
         scale_mv(0, ref_frame);
         add_mv_ref_list(0);
     }
-    if (m_candidate_frame[1] > ReferenceFrame::IntraFrame && m_candidate_frame[1] != ref_frame && !mvs_are_same) {
+    if (m_candidate_frame[1] > ReferenceFrameType::IntraFrame && m_candidate_frame[1] != ref_frame && !mvs_are_same) {
         scale_mv(1, ref_frame);
         add_mv_ref_list(1);
     }
@@ -1604,7 +1639,7 @@ void Parser::clamp_mv_ref(u8 i)
 }
 
 // 6.5.1 Find MV refs syntax
-void Parser::find_mv_refs(ReferenceFrame reference_frame, i32 block)
+void Parser::find_mv_refs(ReferenceFrameType reference_frame, i32 block)
 {
     m_ref_mv_count = 0;
     bool different_ref_found = false;
@@ -1623,7 +1658,7 @@ void Parser::find_mv_refs(ReferenceFrame reference_frame, i32 block)
             auto candidate_index = get_image_index(candidate.row(), candidate.column());
             auto index = get_image_index(candidate.row(), candidate.column());
             different_ref_found = true;
-            context_counter += mode_2_counter[m_y_modes[index]];
+            context_counter += mode_2_counter[to_underlying(m_y_modes[index])];
 
             for (auto ref_list = 0u; ref_list < 2; ref_list++) {
                 if (m_ref_frames[candidate_index][ref_list] == reference_frame) {
@@ -1728,8 +1763,8 @@ void Parser::append_sub8x8_mvs(i32 block, u8 ref_list)
 
 void Parser::dump_info()
 {
-    outln("Frame dimensions: {}x{}", m_frame_width, m_frame_height);
-    outln("Render dimensions: {}x{}", m_render_width, m_render_height);
+    outln("Frame dimensions: {}x{}", m_frame_size.width(), m_frame_size.height());
+    outln("Render dimensions: {}x{}", m_render_size.width(), m_render_size.height());
     outln("Bit depth: {}", m_bit_depth);
     outln("Show frame: {}", m_show_frame);
 }

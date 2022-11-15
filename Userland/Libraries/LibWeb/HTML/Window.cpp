@@ -12,10 +12,12 @@
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/Error.h>
 #include <LibJS/Runtime/FunctionObject.h>
+#include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/Shape.h>
 #include <LibTextCodec/Decoder.h>
 #include <LibWeb/Bindings/CSSNamespace.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
+#include <LibWeb/Bindings/FetchMethod.h>
 #include <LibWeb/Bindings/LocationObject.h>
 #include <LibWeb/Bindings/Replaceable.h>
 #include <LibWeb/Bindings/WindowExposedInterfaces.h>
@@ -31,6 +33,7 @@
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/Focus.h>
 #include <LibWeb/HTML/MessageEvent.h>
 #include <LibWeb/HTML/Navigator.h>
 #include <LibWeb/HTML/Origin.h>
@@ -41,6 +44,7 @@
 #include <LibWeb/HTML/Storage.h>
 #include <LibWeb/HTML/Timer.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/HighResolutionTime/Performance.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Layout/InitialContainingBlock.h>
@@ -188,20 +192,16 @@ i32 Window::run_timer_initialization_steps(TimerHandler handler, i32 timeout, JS
     // 8. Assert: initiating script is not null, since this algorithm is always called from some script.
 
     // 9. Let task be a task that runs the following substeps:
-    auto task = [weak_window = make_weak_ptr<Window>(), handler = move(handler), timeout, arguments = move(arguments), repeat, id]() mutable {
-        JS::GCPtr<Window> window = weak_window.ptr();
-        if (!window)
-            return;
-
+    JS::SafeFunction<void()> task = [this, handler = move(handler), timeout, arguments = move(arguments), repeat, id]() mutable {
         // 1. If id does not exist in global's map of active timers, then abort these steps.
-        if (!window->m_timers.contains(id))
+        if (!m_timers.contains(id))
             return;
 
         handler.visit(
             // 2. If handler is a Function, then invoke handler given arguments with the callback this value set to thisArg. If this throws an exception, catch it, and report the exception.
             [&](JS::Handle<WebIDL::CallbackType> callback) {
-                if (auto result = WebIDL::invoke_callback(*callback, window.ptr(), arguments); result.is_error())
-                    HTML::report_exception(result);
+                if (auto result = WebIDL::invoke_callback(*callback, this, arguments); result.is_error())
+                    HTML::report_exception(result, realm());
             },
             // 3. Otherwise:
             [&](String const& source) {
@@ -209,10 +209,10 @@ i32 Window::run_timer_initialization_steps(TimerHandler handler, i32 timeout, JS
                 // FIXME: 2. Perform HostEnsureCanCompileStrings(callerRealm, calleeRealm). If this throws an exception, catch it, report the exception, and abort these steps.
 
                 // 3. Let settings object be global's relevant settings object.
-                auto& settings_object = window->associated_document().relevant_settings_object();
+                auto& settings_object = associated_document().relevant_settings_object();
 
                 // 4. Let base URL be initiating script's base URL.
-                auto url = window->associated_document().url();
+                auto url = associated_document().url();
 
                 // 5. Assert: base URL is not null, as initiating script is a classic script or a JavaScript module script.
 
@@ -225,18 +225,18 @@ i32 Window::run_timer_initialization_steps(TimerHandler handler, i32 timeout, JS
             });
 
         // 4. If id does not exist in global's map of active timers, then abort these steps.
-        if (!window->m_timers.contains(id))
+        if (!m_timers.contains(id))
             return;
 
         switch (repeat) {
         // 5. If repeat is true, then perform the timer initialization steps again, given global, handler, timeout, arguments, true, and id.
         case Repeat::Yes:
-            window->run_timer_initialization_steps(handler, timeout, move(arguments), repeat, id);
+            run_timer_initialization_steps(handler, timeout, move(arguments), repeat, id);
             break;
 
         // 6. Otherwise, remove global's map of active timers[id].
         case Repeat::No:
-            window->m_timers.remove(id);
+            m_timers.remove(id);
             break;
         }
     };
@@ -245,12 +245,8 @@ i32 Window::run_timer_initialization_steps(TimerHandler handler, i32 timeout, JS
     // FIXME: 11. Set task's timer nesting level to nesting level.
 
     // 12. Let completionStep be an algorithm step which queues a global task on the timer task source given global to run task.
-    auto completion_step = [weak_window = make_weak_ptr<Window>(), task = move(task)]() mutable {
-        JS::GCPtr<Window> window = weak_window.ptr();
-        if (!window)
-            return;
-
-        HTML::queue_global_task(HTML::Task::Source::TimerTask, *window, move(task));
+    JS::SafeFunction<void()> completion_step = [this, task = move(task)]() mutable {
+        HTML::queue_global_task(HTML::Task::Source::TimerTask, *this, move(task));
     };
 
     // 13. Run steps after a timeout given global, "setTimeout/setInterval", timeout, completionStep, and id.
@@ -271,7 +267,7 @@ i32 Window::request_animation_frame_impl(WebIDL::CallbackType& js_callback)
 
         // and if an exception is thrown, report the exception.
         if (result.is_error())
-            HTML::report_exception(result);
+            HTML::report_exception(result, realm());
     });
 }
 
@@ -371,8 +367,16 @@ Optional<CSS::MediaFeatureValue> Window::query_media_feature(CSS::MediaFeatureID
     case CSS::MediaFeatureID::ColorIndex:
         return CSS::MediaFeatureValue(0);
     // FIXME: device-aspect-ratio
-    // FIXME: device-height
-    // FIXME: device-width
+    case CSS::MediaFeatureID::DeviceHeight:
+        if (auto* page = this->page()) {
+            return CSS::MediaFeatureValue(CSS::Length::make_px(page->screen_rect().height()));
+        }
+        return CSS::MediaFeatureValue(0);
+    case CSS::MediaFeatureID::DeviceWidth:
+        if (auto* page = this->page()) {
+            return CSS::MediaFeatureValue(CSS::Length::make_px(page->screen_rect().width()));
+        }
+        return CSS::MediaFeatureValue(0);
     case CSS::MediaFeatureID::DisplayMode:
         // FIXME: Detect if window is fullscreen
         return CSS::MediaFeatureValue(CSS::ValueID::Browser);
@@ -495,11 +499,11 @@ void Window::fire_a_page_transition_event(FlyString const& event_name, bool pers
 void Window::queue_microtask_impl(WebIDL::CallbackType& callback)
 {
     // The queueMicrotask(callback) method must queue a microtask to invoke callback,
-    HTML::queue_a_microtask(&associated_document(), [&callback]() mutable {
+    HTML::queue_a_microtask(&associated_document(), [this, &callback]() mutable {
         auto result = WebIDL::invoke_callback(callback, {});
         // and if callback throws an exception, report the exception.
         if (result.is_error())
-            HTML::report_exception(result);
+            HTML::report_exception(result, realm());
     });
 }
 
@@ -514,6 +518,8 @@ int Window::screen_x() const
 {
     // The screenX and screenLeft attributes must return the x-coordinate, relative to the origin of the Web-exposed screen area,
     // of the left of the client window as number of CSS pixels, or zero if there is no such thing.
+    if (auto* page = this->page())
+        return page->window_position().x();
     return 0;
 }
 
@@ -522,6 +528,26 @@ int Window::screen_y() const
 {
     // The screenY and screenTop attributes must return the y-coordinate, relative to the origin of the screen of the Web-exposed screen area,
     // of the top of the client window as number of CSS pixels, or zero if there is no such thing.
+    if (auto* page = this->page())
+        return page->window_position().y();
+    return 0;
+}
+
+// https://drafts.csswg.org/cssom-view/#dom-window-outerwidth
+int Window::outer_width() const
+{
+    // The outerWidth attribute must return the width of the client window. If there is no client window this attribute must return zero.
+    if (auto* page = this->page())
+        return page->window_size().width();
+    return 0;
+}
+
+// https://drafts.csswg.org/cssom-view/#dom-window-screeny
+int Window::outer_height() const
+{
+    // The outerHeight attribute must return the height of the client window. If there is no client window this attribute must return zero.
+    if (auto* page = this->page())
+        return page->window_size().height();
     return 0;
 }
 
@@ -550,10 +576,10 @@ JS::NonnullGCPtr<HTML::Storage> Window::session_storage()
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#dom-parent
-Window* Window::parent()
+WindowProxy* Window::parent()
 {
     // 1. Let current be this Window object's browsing context.
-    auto* current = associated_document().browsing_context();
+    auto* current = browsing_context();
 
     // 2. If current is null, then return null.
     if (!current)
@@ -562,16 +588,14 @@ Window* Window::parent()
     // 3. If current is a child browsing context of another browsing context parent,
     //    then return parent's WindowProxy object.
     if (current->parent()) {
-        VERIFY(current->parent()->active_document());
-        return &current->parent()->active_document()->window();
+        return current->parent()->window_proxy();
     }
 
     // 4. Assert: current is a top-level browsing context.
     VERIFY(current->is_top_level());
 
-    // FIXME: 5. Return current's WindowProxy object.
-    VERIFY(current->active_document());
-    return &current->active_document()->window();
+    // 5. Return current's WindowProxy object.
+    return current->window_proxy();
 }
 
 // https://html.spec.whatwg.org/multipage/web-messaging.html#window-post-message-steps
@@ -655,7 +679,7 @@ void Window::invoke_idle_callbacks()
         // 3. Call callback with deadlineArg as its argument. If an uncaught runtime script error occurs, then report the exception.
         auto result = callback->invoke(deadline_arg);
         if (result.is_error())
-            HTML::report_exception(result);
+            HTML::report_exception(result, realm());
         // 4. If window's list of runnable idle callbacks is not empty, queue a task which performs the steps
         //    in the invoke idle callbacks algorithm with getDeadline and window as a parameters and return from this algorithm
         HTML::queue_global_task(HTML::Task::Source::IdleTask, *this, [this]() mutable {
@@ -723,14 +747,6 @@ HTML::BrowsingContext* Window::browsing_context()
     return m_associated_document->browsing_context();
 }
 
-void Window::initialize(JS::Realm& realm)
-{
-    Base::initialize(realm);
-
-    // FIXME: This is a hack..
-    realm.set_global_object(this, this);
-}
-
 void Window::initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>)
 {
     auto& realm = this->realm();
@@ -741,10 +757,10 @@ void Window::initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>)
     m_crypto = Crypto::Crypto::create(realm);
 
     // FIXME: These should be native accessors, not properties
-    define_direct_property("window", this, JS::Attribute::Enumerable);
-    define_direct_property("frames", this, JS::Attribute::Enumerable);
-    define_direct_property("self", this, JS::Attribute::Enumerable);
     define_native_accessor(realm, "top", top_getter, nullptr, JS::Attribute::Enumerable);
+    define_native_accessor(realm, "window", window_getter, {}, JS::Attribute::Enumerable);
+    define_native_accessor(realm, "frames", frames_getter, {}, JS::Attribute::Enumerable);
+    define_native_accessor(realm, "self", self_getter, {}, JS::Attribute::Enumerable);
     define_native_accessor(realm, "parent", parent_getter, {}, JS::Attribute::Enumerable);
     define_native_accessor(realm, "document", document_getter, {}, JS::Attribute::Enumerable);
     define_native_accessor(realm, "frameElement", frame_element_getter, {}, JS::Attribute::Enumerable);
@@ -768,6 +784,7 @@ void Window::initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>)
     define_native_function(realm, "cancelAnimationFrame", cancel_animation_frame, 1, attr);
     define_native_function(realm, "atob", atob, 1, attr);
     define_native_function(realm, "btoa", btoa, 1, attr);
+    define_native_function(realm, "focus", focus, 0, attr);
 
     define_native_function(realm, "queueMicrotask", queue_microtask, 1, attr);
 
@@ -779,6 +796,8 @@ void Window::initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>)
     define_native_function(realm, "getSelection", get_selection, 0, attr);
 
     define_native_function(realm, "postMessage", post_message, 1, attr);
+
+    define_native_function(realm, "fetch", Bindings::fetch, 1, attr);
 
     // FIXME: These properties should be [Replaceable] according to the spec, but [Writable+Configurable] is the closest we have.
     define_native_accessor(realm, "scrollX", scroll_x_getter, {}, attr);
@@ -795,6 +814,9 @@ void Window::initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>)
     define_native_accessor(realm, "screenY", screen_y_getter, {}, attr);
     define_native_accessor(realm, "screenLeft", screen_left_getter, {}, attr);
     define_native_accessor(realm, "screenTop", screen_top_getter, {}, attr);
+
+    define_native_accessor(realm, "outerWidth", outer_width_getter, {}, attr);
+    define_native_accessor(realm, "outerHeight", outer_height_getter, {}, attr);
 
     define_direct_property("CSS", heap().allocate<Bindings::CSSNamespace>(realm, realm), 0);
 
@@ -851,9 +873,13 @@ static JS::ThrowCompletionOr<HTML::Window*> impl_from(JS::VM& vm)
 
     auto* this_object = MUST(this_value.to_object(vm));
 
-    if (!is<Window>(*this_object))
-        return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "Window");
-    return static_cast<Window*>(this_object);
+    if (is<WindowProxy>(*this_object))
+        return static_cast<WindowProxy*>(this_object)->window().ptr();
+
+    if (is<Window>(*this_object))
+        return static_cast<Window*>(this_object);
+
+    return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "Window");
 }
 
 JS_DEFINE_NATIVE_FUNCTION(Window::alert)
@@ -1066,13 +1092,33 @@ JS_DEFINE_NATIVE_FUNCTION(Window::btoa)
     return JS::js_string(vm, move(encoded));
 }
 
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-window-focus
+JS_DEFINE_NATIVE_FUNCTION(Window::focus)
+{
+    auto* impl = TRY(impl_from(vm));
+
+    // 1. Let current be this Window object's browsing context.
+    auto* current = impl->browsing_context();
+
+    // 2. If current is null, then return.
+    if (!current)
+        return JS::js_undefined();
+
+    // 3. Run the focusing steps with current.
+    // FIXME: We should pass in the browsing context itself instead of the active document, however the focusing steps don't currently accept browsing contexts.
+    //        Passing in a browsing context always makes it resolve to its active document for focus, so this is fine for now.
+    run_focusing_steps(current->active_document());
+
+    // FIXME: 4. If current is a top-level browsing context, user agents are encouraged to trigger some sort of notification to indicate to the user that the page is attempting to gain focus.
+
+    return JS::js_undefined();
+}
+
 // https://html.spec.whatwg.org/multipage/window-object.html#number-of-document-tree-child-browsing-contexts
 JS::ThrowCompletionOr<size_t> Window::document_tree_child_browsing_context_count() const
 {
-    auto* impl = TRY(impl_from(vm()));
-
     // 1. If W's browsing context is null, then return 0.
-    auto* this_browsing_context = impl->associated_document().browsing_context();
+    auto* this_browsing_context = associated_document().browsing_context();
     if (!this_browsing_context)
         return 0;
 
@@ -1094,13 +1140,37 @@ JS_DEFINE_NATIVE_FUNCTION(Window::top_getter)
 {
     auto* impl = TRY(impl_from(vm));
 
-    auto* this_browsing_context = impl->associated_document().browsing_context();
-    if (!this_browsing_context)
+    // 1. If this Window object's browsing context is null, then return null.
+    auto* browsing_context = impl->browsing_context();
+    if (!browsing_context)
         return JS::js_null();
 
-    VERIFY(this_browsing_context->top_level_browsing_context().active_document());
-    auto& top_window = this_browsing_context->top_level_browsing_context().active_document()->window();
-    return &top_window;
+    // 2. Return this Window object's browsing context's top-level browsing context's WindowProxy object.
+    return browsing_context->top_level_browsing_context().window_proxy();
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#dom-self
+JS_DEFINE_NATIVE_FUNCTION(Window::self_getter)
+{
+    auto* impl = TRY(impl_from(vm));
+    // The window, frames, and self getter steps are to return this's relevant realm.[[GlobalEnv]].[[GlobalThisValue]].
+    return &relevant_realm(*impl).global_environment().global_this_value();
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#dom-window
+JS_DEFINE_NATIVE_FUNCTION(Window::window_getter)
+{
+    auto* impl = TRY(impl_from(vm));
+    // The window, frames, and self getter steps are to return this's relevant realm.[[GlobalEnv]].[[GlobalThisValue]].
+    return &relevant_realm(*impl).global_environment().global_this_value();
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#dom-frames
+JS_DEFINE_NATIVE_FUNCTION(Window::frames_getter)
+{
+    auto* impl = TRY(impl_from(vm));
+    // The window, frames, and self getter steps are to return this's relevant realm.[[GlobalEnv]].[[GlobalThisValue]].
+    return &relevant_realm(*impl).global_environment().global_this_value();
 }
 
 JS_DEFINE_NATIVE_FUNCTION(Window::parent_getter)
@@ -1406,11 +1476,25 @@ JS_DEFINE_NATIVE_FUNCTION(Window::screen_y_getter)
     return JS::Value(impl->screen_y());
 }
 
+JS_DEFINE_NATIVE_FUNCTION(Window::outer_width_getter)
+{
+    auto* impl = TRY(impl_from(vm));
+    return JS::Value(impl->outer_width());
+}
+
+JS_DEFINE_NATIVE_FUNCTION(Window::outer_height_getter)
+{
+    auto* impl = TRY(impl_from(vm));
+    return JS::Value(impl->outer_height());
+}
+
 JS_DEFINE_NATIVE_FUNCTION(Window::post_message)
 {
     auto* impl = TRY(impl_from(vm));
     auto target_origin = TRY(vm.argument(1).to_string(vm));
-    impl->post_message_impl(vm.argument(0), target_origin);
+    TRY(Bindings::throw_dom_exception_if_needed(vm, [&] {
+        return impl->post_message_impl(vm.argument(0), target_origin);
+    }));
     return JS::js_undefined();
 }
 

@@ -39,7 +39,7 @@ void paint_box_shadow(PaintContext& context, Gfx::IntRect const& content_rect, B
             continue;
 
         auto fill_rect_masked = [](auto& painter, auto fill_rect, auto mask_rect, auto color) {
-            Gfx::DisjointRectSet rect_set;
+            Gfx::DisjointIntRectSet rect_set;
             rect_set.add(fill_rect);
             auto shattered = rect_set.shatter(mask_rect);
             for (auto& rect : shattered.rects())
@@ -158,7 +158,7 @@ void paint_box_shadow(PaintContext& context, Gfx::IntRect const& content_rect, B
 
         auto shadows_bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, shadow_bitmap_rect.size());
         if (shadows_bitmap.is_error()) {
-            dbgln("Unable to allocate temporary bitmap for box-shadow rendering: {}", shadows_bitmap.error());
+            dbgln("Unable to allocate temporary bitmap {} for box-shadow rendering: {}", shadow_bitmap_rect, shadows_bitmap.error());
             return;
         }
         auto shadow_bitmap = shadows_bitmap.release_value();
@@ -327,7 +327,7 @@ void paint_box_shadow(PaintContext& context, Gfx::IntRect const& content_rect, B
 
 void paint_text_shadow(PaintContext& context, Layout::LineBoxFragment const& fragment, Vector<ShadowData> const& shadow_layers)
 {
-    if (shadow_layers.is_empty())
+    if (shadow_layers.is_empty() || fragment.text().is_empty())
         return;
 
     auto& painter = context.painter();
@@ -351,7 +351,7 @@ void paint_text_shadow(PaintContext& context, Layout::LineBoxFragment const& fra
         // FIXME: Figure out the maximum bitmap size for all shadows and then allocate it once and reuse it?
         auto maybe_shadow_bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, bounding_rect.size());
         if (maybe_shadow_bitmap.is_error()) {
-            dbgln("Unable to allocate temporary bitmap for box-shadow rendering: {}", maybe_shadow_bitmap.error());
+            dbgln("Unable to allocate temporary bitmap {} for text-shadow rendering: {}", bounding_rect.size(), maybe_shadow_bitmap.error());
             return;
         }
         auto shadow_bitmap = maybe_shadow_bitmap.release_value();

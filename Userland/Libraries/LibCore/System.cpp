@@ -81,9 +81,33 @@ ErrorOr<void> pledge(StringView promises, StringView execpromises)
     HANDLE_SYSCALL_RETURN_VALUE("pledge", rc, {});
 }
 
+static ErrorOr<void> unveil_dynamic_loader()
+{
+    static bool dynamic_loader_unveiled { false };
+    if (dynamic_loader_unveiled)
+        return {};
+    // FIXME: Try to find a way to not hardcode the dynamic loader path.
+    constexpr auto dynamic_loader_path = "/usr/lib/Loader.so"sv;
+    constexpr auto dynamic_loader_permissions = "x"sv;
+
+    Syscall::SC_unveil_params params {
+        { dynamic_loader_path.characters_without_null_termination(), dynamic_loader_path.length() },
+        { dynamic_loader_permissions.characters_without_null_termination(), dynamic_loader_permissions.length() },
+    };
+    int rc = syscall(SC_unveil, &params);
+    if (rc < 0) {
+        return Error::from_syscall("unveil (DynamicLoader @ /usr/lib/Loader.so)"sv, rc);
+    }
+    dynamic_loader_unveiled = true;
+    return {};
+}
+
 ErrorOr<void> unveil(StringView path, StringView permissions)
 {
     auto const parsed_path = TRY(Core::SessionManagement::parse_path_with_sid(path));
+
+    if (permissions.contains('x'))
+        TRY(unveil_dynamic_loader());
 
     Syscall::SC_unveil_params params {
         { parsed_path.characters(), parsed_path.length() },
@@ -955,6 +979,43 @@ ErrorOr<void> adjtime(const struct timeval* delta, struct timeval* old_delta)
 }
 #endif
 
+#ifdef AK_OS_SERENITY
+ErrorOr<void> exec_command(Vector<StringView>& command, bool preserve_env)
+{
+    Vector<StringView> exec_environment;
+    for (size_t i = 0; environ[i]; ++i) {
+        StringView env_view { environ[i], strlen(environ[i]) };
+        auto maybe_needle = env_view.find('=');
+
+        if (!maybe_needle.has_value())
+            continue;
+
+        // FIXME: Allow a custom selection of variables once ArgsParser supports options with optional parameters.
+        if (!preserve_env && env_view.substring_view(0, maybe_needle.value()) != "TERM"sv)
+            continue;
+
+        exec_environment.append(env_view);
+    }
+
+    TRY(Core::System::exec(command.at(0), command, Core::System::SearchInPath::Yes, exec_environment));
+    return {};
+}
+
+ErrorOr<void> join_jail(u64 jail_index)
+{
+    Syscall::SC_jail_attach_params params { jail_index };
+    int rc = syscall(SC_jail_attach, &params);
+    HANDLE_SYSCALL_RETURN_VALUE("jail_attach", rc, {});
+}
+
+ErrorOr<u64> create_jail(StringView jail_name)
+{
+    Syscall::SC_jail_create_params params { 0, { jail_name.characters_without_null_termination(), jail_name.length() } };
+    int rc = syscall(SC_jail_create, &params);
+    HANDLE_SYSCALL_RETURN_VALUE("jail_create", rc, static_cast<u64>(params.index));
+}
+#endif
+
 ErrorOr<void> exec(StringView filename, Span<StringView> arguments, SearchInPath search_in_path, Optional<Span<StringView>> environment)
 {
 #ifdef AK_OS_SERENITY
@@ -1299,6 +1360,27 @@ ErrorOr<void> access(StringView pathname, int mode)
     if (::access(path_string.characters(), mode) < 0)
         return Error::from_syscall("access"sv, -errno);
     return {};
+#endif
+}
+
+ErrorOr<String> readlink(StringView pathname)
+{
+    // FIXME: Try again with a larger buffer.
+    char data[PATH_MAX];
+#ifdef AK_OS_SERENITY
+    Syscall::SC_readlink_params small_params {
+        { pathname.characters_without_null_termination(), pathname.length() },
+        { data, sizeof(data) }
+    };
+    int rc = syscall(SC_readlink, &small_params);
+    HANDLE_SYSCALL_RETURN_VALUE("readlink", rc, String(data, rc));
+#else
+    String path_string = pathname;
+    int rc = ::readlink(path_string.characters(), data, sizeof(data));
+    if (rc == -1)
+        return Error::from_syscall("readlink"sv, -errno);
+
+    return String(data, rc);
 #endif
 }
 

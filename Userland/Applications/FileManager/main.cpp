@@ -550,10 +550,14 @@ ErrorOr<int> run_in_desktop_mode()
     } wallpaper_listener;
 
     auto selected_wallpaper = Config::read_string("WindowManager"sv, "Background"sv, "Wallpaper"sv, ""sv);
+    RefPtr<Gfx::Bitmap> wallpaper_bitmap {};
     if (!selected_wallpaper.is_empty()) {
-        auto wallpaper_bitmap = TRY(Gfx::Bitmap::try_load_from_file(selected_wallpaper));
-        GUI::Desktop::the().set_wallpaper(wallpaper_bitmap, {});
+        wallpaper_bitmap = TRY(Gfx::Bitmap::try_load_from_file(selected_wallpaper));
     }
+    // This sets the wallpaper at startup, even if there is no wallpaper, the
+    // desktop should still show the background color. It's fine to pass a
+    // nullptr to Desktop::set_wallpaper.
+    GUI::Desktop::the().set_wallpaper(wallpaper_bitmap, {});
 
     window->show();
     return GUI::Application::the()->exec();
@@ -1043,6 +1047,7 @@ ErrorOr<int> run_in_windowed_mode(String const& initial_location, String const& 
     TRY(go_menu->try_add_action(directory_view->open_terminal_action()));
 
     auto help_menu = TRY(window->try_add_menu("&Help"));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("File Manager"sv, GUI::Icon::default_icon("app-file-manager"sv), window)));
 
     (void)TRY(main_toolbar.try_add_action(go_back_action));

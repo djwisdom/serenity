@@ -19,6 +19,9 @@ GridFormattingContext::~GridFormattingContext() = default;
 
 void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const& available_space)
 {
+    auto& box_state = m_state.get_mutable(box);
+    auto grid_template_columns = box.computed_values().grid_template_columns();
+    auto grid_template_rows = box.computed_values().grid_template_rows();
     auto should_skip_is_anonymous_text_run = [&](Box& child_box) -> bool {
         if (child_box.is_anonymous() && !child_box.first_child_of_type<BlockContainer>()) {
             bool contains_only_white_space = true;
@@ -35,6 +38,62 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         return false;
     };
 
+    auto resolve_definite_track_size = [&](CSS::GridSize const& grid_size) -> float {
+        VERIFY(grid_size.is_definite());
+        switch (grid_size.type()) {
+        case CSS::GridSize::Type::Length:
+            if (grid_size.length().is_auto())
+                break;
+            return grid_size.length().to_px(box);
+        case CSS::GridSize::Type::Percentage:
+            if (available_space.width.is_definite())
+                return grid_size.percentage().as_fraction() * available_space.width.to_px();
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        return 0;
+    };
+
+    auto count_of_gap_columns = [&]() -> size_t {
+        size_t count = 0;
+        for (auto& grid_column : m_grid_columns) {
+            if (grid_column.is_gap)
+                count++;
+        }
+        return count;
+    };
+
+    auto count_of_gap_rows = [&]() -> size_t {
+        size_t count = 0;
+        for (auto& grid_row : m_grid_rows) {
+            if (grid_row.is_gap)
+                count++;
+        }
+        return count;
+    };
+
+    auto resolve_size = [&](CSS::Size const& size, AvailableSize const& available_size) -> float {
+        if (size.is_length() && size.length().is_calculated()) {
+            if (size.length().calculated_style_value()->contains_percentage()) {
+                if (!available_size.is_definite())
+                    return 0;
+                auto& calc_value = *size.length().calculated_style_value();
+                return calc_value.resolve_length_percentage(box, CSS::Length::make_px(available_size.to_px())).value_or(CSS::Length::make_auto()).to_px(box);
+            }
+            return size.length().to_px(box);
+        }
+        if (size.is_length()) {
+            return size.length().to_px(box);
+        }
+        if (size.is_percentage()) {
+            if (!available_size.is_definite())
+                return 0;
+            return available_size.to_px() * size.percentage().as_fraction();
+        }
+        return 0;
+    };
+
     // https://drafts.csswg.org/css-grid/#overview-placement
     // 2.2. Placing Items
     // The contents of the grid container are organized into individual grid items (analogous to
@@ -47,7 +106,6 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         int row_span { 1 };
         int column { 0 };
         int column_span { 1 };
-        float computed_height { 0 };
     };
     Vector<PositionedBox> positioned_boxes;
     Vector<Box const&> boxes_to_place;
@@ -57,7 +115,98 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         boxes_to_place.append(child_box);
         return IterationDecision::Continue;
     });
-    auto occupation_grid = OccupationGrid(static_cast<int>(box.computed_values().grid_template_columns().size()), static_cast<int>(box.computed_values().grid_template_rows().size()));
+    auto column_count = 0;
+    for (auto const& explicit_grid_track : grid_template_columns.track_list()) {
+        if (explicit_grid_track.is_repeat() && explicit_grid_track.repeat().is_default())
+            column_count += explicit_grid_track.repeat().repeat_count() * explicit_grid_track.repeat().grid_track_size_list().track_list().size();
+        else
+            column_count += 1;
+    }
+    auto row_count = 0;
+    for (auto const& explicit_grid_track : grid_template_rows.track_list()) {
+        if (explicit_grid_track.is_repeat() && explicit_grid_track.repeat().is_default())
+            row_count += explicit_grid_track.repeat().repeat_count() * explicit_grid_track.repeat().grid_track_size_list().track_list().size();
+        else
+            row_count += 1;
+    }
+
+    // https://www.w3.org/TR/css-grid-2/#auto-repeat
+    // 7.2.3.2. Repeat-to-fill: auto-fill and auto-fit repetitions
+    // On a subgridded axis, the auto-fill keyword is only valid once per <line-name-list>, and repeats
+    // enough times for the name list to match the subgrid’s specified grid span (falling back to 0 if
+    // the span is already fulfilled).
+
+    // Otherwise on a standalone axis, when auto-fill is given as the repetition number
+    if (grid_template_columns.track_list().size() == 1
+        && grid_template_columns.track_list().first().is_repeat()
+        && (grid_template_columns.track_list().first().repeat().is_auto_fill() || grid_template_columns.track_list().first().repeat().is_auto_fit())) {
+        // If the grid container has a definite size or max size in the relevant axis, then the number of
+        // repetitions is the largest possible positive integer that does not cause the grid to overflow the
+        // content box of its grid container
+
+        auto sum_of_grid_track_sizes = 0;
+        // (treating each track as its max track sizing function if that is definite or its minimum track sizing
+        // function otherwise, flooring the max track sizing function by the min track sizing function if both
+        // are definite, and taking gap into account)
+        // FIXME: take gap into account
+        for (auto& explicit_grid_track : grid_template_columns.track_list().first().repeat().grid_track_size_list().track_list()) {
+            auto track_sizing_function = explicit_grid_track;
+            if (track_sizing_function.is_minmax()) {
+                if (track_sizing_function.minmax().max_grid_size().is_definite() && !track_sizing_function.minmax().min_grid_size().is_definite())
+                    sum_of_grid_track_sizes += resolve_definite_track_size(track_sizing_function.minmax().max_grid_size());
+                else if (track_sizing_function.minmax().min_grid_size().is_definite() && !track_sizing_function.minmax().max_grid_size().is_definite())
+                    sum_of_grid_track_sizes += resolve_definite_track_size(track_sizing_function.minmax().min_grid_size());
+                else if (track_sizing_function.minmax().min_grid_size().is_definite() && track_sizing_function.minmax().max_grid_size().is_definite())
+                    sum_of_grid_track_sizes += min(resolve_definite_track_size(track_sizing_function.minmax().min_grid_size()), resolve_definite_track_size(track_sizing_function.minmax().max_grid_size()));
+            } else {
+                sum_of_grid_track_sizes += min(resolve_definite_track_size(track_sizing_function.grid_size()), resolve_definite_track_size(track_sizing_function.grid_size()));
+            }
+        }
+        column_count = max(1, static_cast<int>(get_free_space_x(available_space) / sum_of_grid_track_sizes));
+
+        // For the purpose of finding the number of auto-repeated tracks in a standalone axis, the UA must
+        // floor the track size to a UA-specified value to avoid division by zero. It is suggested that this
+        // floor be 1px.
+    }
+    if (grid_template_rows.track_list().size() == 1
+        && grid_template_rows.track_list().first().is_repeat()
+        && (grid_template_rows.track_list().first().repeat().is_auto_fill() || grid_template_rows.track_list().first().repeat().is_auto_fit())) {
+        // If the grid container has a definite size or max size in the relevant axis, then the number of
+        // repetitions is the largest possible positive integer that does not cause the grid to overflow the
+        // content box of its grid container
+
+        auto sum_of_grid_track_sizes = 0;
+        // (treating each track as its max track sizing function if that is definite or its minimum track sizing
+        // function otherwise, flooring the max track sizing function by the min track sizing function if both
+        // are definite, and taking gap into account)
+        // FIXME: take gap into account
+        for (auto& explicit_grid_track : grid_template_rows.track_list().first().repeat().grid_track_size_list().track_list()) {
+            auto track_sizing_function = explicit_grid_track;
+            if (track_sizing_function.is_minmax()) {
+                if (track_sizing_function.minmax().max_grid_size().is_definite() && !track_sizing_function.minmax().min_grid_size().is_definite())
+                    sum_of_grid_track_sizes += resolve_definite_track_size(track_sizing_function.minmax().max_grid_size());
+                else if (track_sizing_function.minmax().min_grid_size().is_definite() && !track_sizing_function.minmax().max_grid_size().is_definite())
+                    sum_of_grid_track_sizes += resolve_definite_track_size(track_sizing_function.minmax().min_grid_size());
+                else if (track_sizing_function.minmax().min_grid_size().is_definite() && track_sizing_function.minmax().max_grid_size().is_definite())
+                    sum_of_grid_track_sizes += min(resolve_definite_track_size(track_sizing_function.minmax().min_grid_size()), resolve_definite_track_size(track_sizing_function.minmax().max_grid_size()));
+            } else {
+                sum_of_grid_track_sizes += min(resolve_definite_track_size(track_sizing_function.grid_size()), resolve_definite_track_size(track_sizing_function.grid_size()));
+            }
+        }
+        row_count = max(1, static_cast<int>(get_free_space_y(box) / sum_of_grid_track_sizes));
+
+        // The auto-fit keyword behaves the same as auto-fill, except that after grid item placement any
+        // empty repeated tracks are collapsed. An empty track is one with no in-flow grid items placed into
+        // or spanning across it. (This can result in all tracks being collapsed, if they’re all empty.)
+
+        // A collapsed track is treated as having a fixed track sizing function of 0px, and the gutters on
+        // either side of it—including any space allotted through distributed alignment—collapse.
+
+        // For the purpose of finding the number of auto-repeated tracks in a standalone axis, the UA must
+        // floor the track size to a UA-specified value to avoid division by zero. It is suggested that this
+        // floor be 1px.
+    }
+    auto occupation_grid = OccupationGrid(column_count, row_count);
 
     // https://drafts.csswg.org/css-grid/#auto-placement-algo
     // 8.5. Grid Item Placement Algorithm
@@ -76,23 +225,17 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         int column_start = child_box.computed_values().grid_column_start().raw_value();
         int column_end = child_box.computed_values().grid_column_end().raw_value();
 
-        // https://drafts.csswg.org/css-grid/#line-placement
+        // https://www.w3.org/TR/css-grid-2/#line-placement
         // 8.3. Line-based Placement: the grid-row-start, grid-column-start, grid-row-end, and grid-column-end properties
 
-        // https://drafts.csswg.org/css-grid/#grid-placement-slot
-        // FIXME: <custom-ident>
+        // https://www.w3.org/TR/css-grid-2/#grid-placement-slot
         // First attempt to match the grid area’s edge to a named grid area: if there is a grid line whose
         // line name is <custom-ident>-start (for grid-*-start) / <custom-ident>-end (for grid-*-end),
         // contributes the first such line to the grid item’s placement.
 
-        // Note: Named grid areas automatically generate implicitly-assigned line names of this form, so
-        // specifying grid-row-start: foo will choose the start edge of that named grid area (unless another
-        // line named foo-start was explicitly specified before it).
-
         // Otherwise, treat this as if the integer 1 had been specified along with the <custom-ident>.
 
-        // https://drafts.csswg.org/css-grid/#grid-placement-int
-        // [ <integer [−∞,−1]> | <integer [1,∞]> ] && <custom-ident>?
+        // https://www.w3.org/TR/css-grid-2/#grid-placement-int
         // Contributes the Nth grid line to the grid item’s placement. If a negative integer is given, it
         // instead counts in reverse, starting from the end edge of the explicit grid.
         if (row_end < 0)
@@ -104,10 +247,7 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // lines with that name exist, all implicit grid lines are assumed to have that name for the purpose
         // of finding this position.
 
-        // An <integer> value of zero makes the declaration invalid.
-
-        // https://drafts.csswg.org/css-grid/#grid-placement-span-int
-        // span && [ <integer [1,∞]> || <custom-ident> ]
+        // https://www.w3.org/TR/css-grid-2/#grid-placement-span-int
         // Contributes a grid span to the grid item’s placement such that the corresponding edge of the grid
         // item’s grid area is N lines from its opposite edge in the corresponding direction. For example,
         // grid-column-end: span 2 indicates the second grid line in the endward direction from the
@@ -136,6 +276,49 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // auto
         // The property contributes nothing to the grid item’s placement, indicating auto-placement or a
         // default span of one. (See § 8 Placing Grid Items, above.)
+
+        // https://www.w3.org/TR/css-grid-2/#common-uses-named-lines
+        // 8.1.3. Named Lines and Spans
+        // Instead of counting lines by number, lines can be referenced by their line name:
+        if (child_box.computed_values().grid_column_start().has_line_name()) {
+            auto found_flag_and_index = get_line_index_by_line_name(child_box.computed_values().grid_column_start().line_name(), grid_template_columns);
+            if (found_flag_and_index > -1)
+                column_start = 1 + found_flag_and_index;
+            else
+                column_start = 1; // FIXME
+        }
+        if (child_box.computed_values().grid_column_end().has_line_name()) {
+            auto found_flag_and_index = get_line_index_by_line_name(child_box.computed_values().grid_column_end().line_name(), grid_template_columns);
+            if (found_flag_and_index > -1) {
+                column_end = 1 + found_flag_and_index;
+                if (!child_box.computed_values().grid_column_start().is_position())
+                    column_start = column_end - column_span;
+            } else {
+                column_end = 2;   // FIXME
+                column_start = 1; // FIXME
+            }
+        }
+        if (child_box.computed_values().grid_row_start().has_line_name()) {
+            auto found_flag_and_index = get_line_index_by_line_name(child_box.computed_values().grid_row_start().line_name(), grid_template_rows);
+            if (found_flag_and_index > -1)
+                row_start = 1 + found_flag_and_index;
+            else
+                row_start = 1; // FIXME
+        }
+        if (child_box.computed_values().grid_row_end().has_line_name()) {
+            auto found_flag_and_index = get_line_index_by_line_name(child_box.computed_values().grid_row_end().line_name(), grid_template_rows);
+            if (found_flag_and_index > -1) {
+                row_end = 1 + found_flag_and_index;
+                if (!child_box.computed_values().grid_row_start().is_position())
+                    row_start = row_end - row_span;
+            } else {
+                row_end = 2;   // FIXME
+                row_start = 1; // FIXME
+            }
+        }
+
+        // If there are multiple lines of the same name, they effectively establish a named set of grid
+        // lines, which can be exclusively indexed by filtering the placement by name:
 
         // https://drafts.csswg.org/css-grid/#grid-placement-errors
         // 8.3.1. Grid Placement Conflict Handling
@@ -185,23 +368,17 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         int row_start = child_box.computed_values().grid_row_start().raw_value();
         int row_end = child_box.computed_values().grid_row_end().raw_value();
 
-        // https://drafts.csswg.org/css-grid/#line-placement
+        // https://www.w3.org/TR/css-grid-2/#line-placement
         // 8.3. Line-based Placement: the grid-row-start, grid-column-start, grid-row-end, and grid-column-end properties
 
-        // https://drafts.csswg.org/css-grid/#grid-placement-slot
-        // FIXME: <custom-ident>
+        // https://www.w3.org/TR/css-grid-2/#grid-placement-slot
         // First attempt to match the grid area’s edge to a named grid area: if there is a grid line whose
         // line name is <custom-ident>-start (for grid-*-start) / <custom-ident>-end (for grid-*-end),
         // contributes the first such line to the grid item’s placement.
 
-        // Note: Named grid areas automatically generate implicitly-assigned line names of this form, so
-        // specifying grid-row-start: foo will choose the start edge of that named grid area (unless another
-        // line named foo-start was explicitly specified before it).
-
         // Otherwise, treat this as if the integer 1 had been specified along with the <custom-ident>.
 
-        // https://drafts.csswg.org/css-grid/#grid-placement-int
-        // [ <integer [−∞,−1]> | <integer [1,∞]> ] && <custom-ident>?
+        // https://www.w3.org/TR/css-grid-2/#grid-placement-int
         // Contributes the Nth grid line to the grid item’s placement. If a negative integer is given, it
         // instead counts in reverse, starting from the end edge of the explicit grid.
         if (row_end < 0)
@@ -211,10 +388,7 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // lines with that name exist, all implicit grid lines are assumed to have that name for the purpose
         // of finding this position.
 
-        // An <integer> value of zero makes the declaration invalid.
-
-        // https://drafts.csswg.org/css-grid/#grid-placement-span-int
-        // span && [ <integer [1,∞]> || <custom-ident> ]
+        // https://www.w3.org/TR/css-grid-2/#grid-placement-span-int
         // Contributes a grid span to the grid item’s placement such that the corresponding edge of the grid
         // item’s grid area is N lines from its opposite edge in the corresponding direction. For example,
         // grid-column-end: span 2 indicates the second grid line in the endward direction from the
@@ -239,6 +413,31 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // auto
         // The property contributes nothing to the grid item’s placement, indicating auto-placement or a
         // default span of one. (See § 8 Placing Grid Items, above.)
+
+        // https://www.w3.org/TR/css-grid-2/#common-uses-named-lines
+        // 8.1.3. Named Lines and Spans
+        // Instead of counting lines by number, lines can be referenced by their line name:
+        if (child_box.computed_values().grid_row_start().has_line_name()) {
+            auto found_flag_and_index = get_line_index_by_line_name(child_box.computed_values().grid_row_start().line_name(), grid_template_rows);
+            if (found_flag_and_index > -1)
+                row_start = 1 + found_flag_and_index;
+            else
+                row_start = 1; // FIXME
+        }
+        if (child_box.computed_values().grid_row_end().has_line_name()) {
+            auto found_flag_and_index = get_line_index_by_line_name(child_box.computed_values().grid_row_end().line_name(), grid_template_rows);
+            if (found_flag_and_index > -1) {
+                row_end = 1 + found_flag_and_index;
+                if (!child_box.computed_values().grid_row_start().is_position())
+                    row_start = row_end - row_span;
+            } else {
+                row_start = 1; // FIXME
+                row_end = 2;   // FIXME
+            }
+        }
+
+        // If there are multiple lines of the same name, they effectively establish a named set of grid
+        // lines, which can be exclusively indexed by filtering the placement by name:
 
         // https://drafts.csswg.org/css-grid/#grid-placement-errors
         // 8.3.1. Grid Placement Conflict Handling
@@ -320,23 +519,17 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
             int column_start = child_box.computed_values().grid_column_start().raw_value();
             int column_end = child_box.computed_values().grid_column_end().raw_value();
 
-            // https://drafts.csswg.org/css-grid/#line-placement
+            // https://www.w3.org/TR/css-grid-2/#line-placement
             // 8.3. Line-based Placement: the grid-row-start, grid-column-start, grid-row-end, and grid-column-end properties
 
-            // https://drafts.csswg.org/css-grid/#grid-placement-slot
-            // FIXME: <custom-ident>
+            // https://www.w3.org/TR/css-grid-2/#grid-placement-slot
             // First attempt to match the grid area’s edge to a named grid area: if there is a grid line whose
             // line name is <custom-ident>-start (for grid-*-start) / <custom-ident>-end (for grid-*-end),
             // contributes the first such line to the grid item’s placement.
 
-            // Note: Named grid areas automatically generate implicitly-assigned line names of this form, so
-            // specifying grid-row-start: foo will choose the start edge of that named grid area (unless another
-            // line named foo-start was explicitly specified before it).
-
             // Otherwise, treat this as if the integer 1 had been specified along with the <custom-ident>.
 
-            // https://drafts.csswg.org/css-grid/#grid-placement-int
-            // [ <integer [−∞,−1]> | <integer [1,∞]> ] && <custom-ident>?
+            // https://www.w3.org/TR/css-grid-2/#grid-placement-int
             // Contributes the Nth grid line to the grid item’s placement. If a negative integer is given, it
             // instead counts in reverse, starting from the end edge of the explicit grid.
             if (column_end < 0)
@@ -346,10 +539,7 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
             // lines with that name exist, all implicit grid lines are assumed to have that name for the purpose
             // of finding this position.
 
-            // An <integer> value of zero makes the declaration invalid.
-
-            // https://drafts.csswg.org/css-grid/#grid-placement-span-int
-            // span && [ <integer [1,∞]> || <custom-ident> ]
+            // https://www.w3.org/TR/css-grid-2/#grid-placement-span-int
             // Contributes a grid span to the grid item’s placement such that the corresponding edge of the grid
             // item’s grid area is N lines from its opposite edge in the corresponding direction. For example,
             // grid-column-end: span 2 indicates the second grid line in the endward direction from the
@@ -378,6 +568,31 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
             // auto
             // The property contributes nothing to the grid item’s placement, indicating auto-placement or a
             // default span of one. (See § 8 Placing Grid Items, above.)
+
+            // https://www.w3.org/TR/css-grid-2/#common-uses-named-lines
+            // 8.1.3. Named Lines and Spans
+            // Instead of counting lines by number, lines can be referenced by their line name:
+            if (child_box.computed_values().grid_column_start().has_line_name()) {
+                auto found_flag_and_index = get_line_index_by_line_name(child_box.computed_values().grid_column_start().line_name(), grid_template_columns);
+                if (found_flag_and_index > -1)
+                    column_start = 1 + found_flag_and_index;
+                else
+                    column_start = 1; // FIXME
+            }
+            if (child_box.computed_values().grid_column_end().has_line_name()) {
+                auto found_flag_and_index = get_line_index_by_line_name(child_box.computed_values().grid_column_end().line_name(), grid_template_columns);
+                if (found_flag_and_index > -1) {
+                    column_end = 1 + found_flag_and_index;
+                    if (!child_box.computed_values().grid_column_start().is_position())
+                        column_start = column_end - column_span;
+                } else {
+                    column_end = 2;   // FIXME
+                    column_start = 1; // FIXME
+                }
+            }
+
+            // If there are multiple lines of the same name, they effectively establish a named set of grid
+            // lines, which can be exclusively indexed by filtering the placement by name:
 
             // https://drafts.csswg.org/css-grid/#grid-placement-errors
             // 8.3.1. Grid Placement Conflict Handling
@@ -456,7 +671,6 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
                             goto finish;
                         }
                     }
-                    auto_placement_cursor_x = 0;
                 }
                 auto_placement_cursor_x = 0;
                 auto_placement_cursor_y++;
@@ -481,24 +695,13 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // FIXME: 4.2. For dense packing:
     }
 
-    auto& box_state = m_state.get_mutable(box);
-    for (auto& positioned_box : positioned_boxes) {
-        auto& child_box_state = m_state.get_mutable(positioned_box.box);
-        if (child_box_state.content_height() > positioned_box.computed_height)
-            positioned_box.computed_height = child_box_state.content_height();
-        if (auto independent_formatting_context = layout_inside(positioned_box.box, LayoutMode::Normal, available_space))
-            independent_formatting_context->parent_context_did_dimension_child_root_box();
-        if (child_box_state.content_height() > positioned_box.computed_height)
-            positioned_box.computed_height = child_box_state.content_height();
-    }
-
     // https://drafts.csswg.org/css-grid/#overview-sizing
     // 2.3. Sizing the Grid
     // Once the grid items have been placed, the sizes of the grid tracks (rows and columns) are
     // calculated, accounting for the sizes of their contents and/or available space as specified in
     // the grid definition.
 
-    // https://drafts.csswg.org/css-grid/#layout-algorithm
+    // https://www.w3.org/TR/css-grid-2/#layout-algorithm
     // 12. Grid Sizing
     // This section defines the grid sizing algorithm, which determines the size of all grid tracks and,
     // by extension, the entire grid.
@@ -511,31 +714,102 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // - A flexible sizing function (<flex>).
 
     // The grid sizing algorithm defines how to resolve these sizing constraints into used track sizes.
+    for (auto const& track_in_list : grid_template_columns.track_list()) {
+        auto repeat_count = (track_in_list.is_repeat() && track_in_list.repeat().is_default()) ? track_in_list.repeat().repeat_count() : 1;
+        if (track_in_list.is_repeat()) {
+            if (track_in_list.repeat().is_auto_fill() || track_in_list.repeat().is_auto_fit())
+                repeat_count = column_count;
+        }
+        for (auto _ = 0; _ < repeat_count; _++) {
+            switch (track_in_list.type()) {
+            case CSS::ExplicitGridTrack::Type::MinMax:
+                m_grid_columns.append(TemporaryTrack(track_in_list.minmax().min_grid_size(), track_in_list.minmax().max_grid_size()));
+                break;
+            case CSS::ExplicitGridTrack::Type::Repeat:
+                for (auto& explicit_grid_track : track_in_list.repeat().grid_track_size_list().track_list()) {
+                    auto track_sizing_function = explicit_grid_track;
+                    if (track_sizing_function.is_minmax())
+                        m_grid_columns.append(TemporaryTrack(track_sizing_function.minmax().min_grid_size(), track_sizing_function.minmax().max_grid_size()));
+                    else
+                        m_grid_columns.append(TemporaryTrack(track_sizing_function.grid_size()));
+                }
+                break;
+            case CSS::ExplicitGridTrack::Type::Default:
+                m_grid_columns.append(TemporaryTrack(track_in_list.grid_size()));
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+    }
+    for (auto const& track_in_list : grid_template_rows.track_list()) {
+        auto repeat_count = (track_in_list.is_repeat() && track_in_list.repeat().is_default()) ? track_in_list.repeat().repeat_count() : 1;
+        if (track_in_list.is_repeat()) {
+            if (track_in_list.repeat().is_auto_fill() || track_in_list.repeat().is_auto_fit())
+                repeat_count = row_count;
+        }
+        for (auto _ = 0; _ < repeat_count; _++) {
+            switch (track_in_list.type()) {
+            case CSS::ExplicitGridTrack::Type::MinMax:
+                m_grid_rows.append(TemporaryTrack(track_in_list.minmax().min_grid_size(), track_in_list.minmax().max_grid_size()));
+                break;
+            case CSS::ExplicitGridTrack::Type::Repeat:
+                for (auto& explicit_grid_track : track_in_list.repeat().grid_track_size_list().track_list()) {
+                    auto track_sizing_function = explicit_grid_track;
+                    if (track_sizing_function.is_minmax())
+                        m_grid_rows.append(TemporaryTrack(track_sizing_function.minmax().min_grid_size(), track_sizing_function.minmax().max_grid_size()));
+                    else
+                        m_grid_rows.append(TemporaryTrack(track_sizing_function.grid_size()));
+                }
+                break;
+            case CSS::ExplicitGridTrack::Type::Default:
+                m_grid_rows.append(TemporaryTrack(track_in_list.grid_size()));
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+    }
 
-    struct GridTrack {
-        CSS::GridTrackSize min_track_sizing_function;
-        CSS::GridTrackSize max_track_sizing_function;
-        float base_size { 0 };
-        float growth_limit { 0 };
-    };
-    Vector<GridTrack> grid_rows;
-    Vector<GridTrack> grid_columns;
+    for (int column_index = m_grid_columns.size(); column_index < occupation_grid.column_count(); column_index++)
+        m_grid_columns.append(TemporaryTrack());
+    for (int row_index = m_grid_rows.size(); row_index < occupation_grid.row_count(); row_index++)
+        m_grid_rows.append(TemporaryTrack());
 
-    for (auto& column_size : box.computed_values().grid_template_columns())
-        grid_columns.append({ column_size, column_size });
-    for (auto& row_size : box.computed_values().grid_template_rows())
-        grid_rows.append({ row_size, row_size });
+    // https://www.w3.org/TR/css-grid-2/#gutters
+    // 11.1. Gutters: the row-gap, column-gap, and gap properties
+    // For the purpose of track sizing, each gutter is treated as an extra, empty, fixed-size track of
+    // the specified size, which is spanned by any grid items that span across its corresponding grid
+    // line.
+    if (!box.computed_values().column_gap().is_auto()) {
+        for (int column_index = 1; column_index < (occupation_grid.column_count() * 2) - 1; column_index += 2)
+            m_grid_columns.insert(column_index, TemporaryTrack(resolve_size(box.computed_values().column_gap(), available_space.width), true));
+    }
+    if (!box.computed_values().row_gap().is_auto()) {
+        for (int row_index = 1; row_index < (occupation_grid.row_count() * 2) - 1; row_index += 2)
+            m_grid_rows.insert(row_index, TemporaryTrack(resolve_size(box.computed_values().row_gap(), available_space.height), true));
+    }
 
-    for (int column_index = grid_columns.size(); column_index < occupation_grid.column_count(); column_index++)
-        grid_columns.append({ CSS::GridTrackSize::make_auto(), CSS::GridTrackSize::make_auto() });
-    for (int row_index = grid_rows.size(); row_index < occupation_grid.row_count(); row_index++)
-        grid_rows.append({ CSS::GridTrackSize::make_auto(), CSS::GridTrackSize::make_auto() });
-
-    // https://drafts.csswg.org/css-grid/#algo-overview
+    // https://www.w3.org/TR/css-grid-2/#algo-overview
     // 12.1. Grid Sizing Algorithm
-    // FIXME: Deals with subgrids, min-content, and justify-content.. not implemented yet
 
-    // https://drafts.csswg.org/css-grid/#algo-track-sizing
+    // 1. First, the track sizing algorithm is used to resolve the sizes of the grid columns.
+    // In this process, any grid item which is subgridded in the grid container’s inline axis is treated
+    // as empty and its grid items (the grandchildren) are treated as direct children of the grid
+    // container (their grandparent). This introspection is recursive.
+
+    // Items which are subgridded only in the block axis, and whose grid container size in the inline
+    // axis depends on the size of its contents are also introspected: since the size of the item in
+    // this dimension can be dependent on the sizing of its subgridded tracks in the other, the size
+    // contribution of any such item to this grid’s column sizing (see Resolve Intrinsic Track Sizes) is
+    // taken under the provision of having determined its track sizing only up to the same point in the
+    // Grid Sizing Algorithm as this itself. E.g. for the first pass through this step, the item will
+    // have its tracks sized only through this first step; if a second pass of this step is triggered
+    // then the item will have completed a first pass through steps 1-3 as well as the second pass of
+    // this step prior to returning its size for consideration in this grid’s column sizing. Again, this
+    // introspection is recursive.
+
+    // https://www.w3.org/TR/css-grid-2/#algo-track-sizing
     // 12.3. Track Sizing Algorithm
 
     // The remainder of this section is the track sizing algorithm, which calculates from the min and
@@ -547,28 +821,30 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // 2. Resolve Intrinsic Track Sizes
     // 3. Maximize Tracks
     // 4. Expand Flexible Tracks
-    // 5. [[#algo-stretch|Expand Stretched auto Tracks]]
+    // 5. Expand Stretched auto Tracks
 
-    // https://drafts.csswg.org/css-grid/#algo-init
+    // https://www.w3.org/TR/css-grid-2/#algo-init
     // 12.4. Initialize Track Sizes
 
     // Initialize each track’s base size and growth limit.
-    for (auto& grid_column : grid_columns) {
+    for (auto& grid_column : m_grid_columns) {
+        if (grid_column.is_gap)
+            continue;
         // For each track, if the track’s min track sizing function is:
         switch (grid_column.min_track_sizing_function.type()) {
         // - A fixed sizing function
         // Resolve to an absolute length and use that size as the track’s initial base size.
-        // Indefinite lengths cannot occur, as they’re treated as auto.
-        case CSS::GridTrackSize::Type::Length:
+        case CSS::GridSize::Type::Length:
             if (!grid_column.min_track_sizing_function.length().is_auto())
                 grid_column.base_size = grid_column.min_track_sizing_function.length().to_px(box);
             break;
-        case CSS::GridTrackSize::Type::Percentage:
-            grid_column.base_size = grid_column.min_track_sizing_function.percentage().as_fraction() * box_state.content_width();
+        case CSS::GridSize::Type::Percentage:
+            if (available_space.width.is_definite())
+                grid_column.base_size = grid_column.min_track_sizing_function.percentage().as_fraction() * available_space.width.to_px();
             break;
         // - An intrinsic sizing function
         // Use an initial base size of zero.
-        case CSS::GridTrackSize::Type::FlexibleLength:
+        case CSS::GridSize::Type::FlexibleLength:
             break;
         default:
             VERIFY_NOT_REACHED();
@@ -578,7 +854,7 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         switch (grid_column.max_track_sizing_function.type()) {
         // - A fixed sizing function
         // Resolve to an absolute length and use that size as the track’s initial growth limit.
-        case CSS::GridTrackSize::Type::Length:
+        case CSS::GridSize::Type::Length:
             if (!grid_column.max_track_sizing_function.length().is_auto())
                 grid_column.growth_limit = grid_column.max_track_sizing_function.length().to_px(box);
             else
@@ -586,70 +862,26 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
                 // Use an initial growth limit of infinity.
                 grid_column.growth_limit = -1;
             break;
-        case CSS::GridTrackSize::Type::Percentage:
-            grid_column.growth_limit = grid_column.max_track_sizing_function.percentage().as_fraction() * box_state.content_width();
+        case CSS::GridSize::Type::Percentage:
+            if (available_space.width.is_definite())
+                grid_column.growth_limit = grid_column.max_track_sizing_function.percentage().as_fraction() * available_space.width.to_px();
             break;
         // - A flexible sizing function
         // Use an initial growth limit of infinity.
-        case CSS::GridTrackSize::Type::FlexibleLength:
+        case CSS::GridSize::Type::FlexibleLength:
             grid_column.growth_limit = -1;
             break;
         default:
             VERIFY_NOT_REACHED();
         }
+
+        // In all cases, if the growth limit is less than the base size, increase the growth limit to match
+        // the base size.
+        if (grid_column.growth_limit != -1 && grid_column.growth_limit < grid_column.base_size)
+            grid_column.growth_limit = grid_column.base_size;
     }
 
-    // Initialize each track’s base size and growth limit.
-    for (auto& grid_row : grid_rows) {
-        // For each track, if the track’s min track sizing function is:
-        switch (grid_row.min_track_sizing_function.type()) {
-        // - A fixed sizing function
-        // Resolve to an absolute length and use that size as the track’s initial base size.
-        // Indefinite lengths cannot occur, as they’re treated as auto.
-        case CSS::GridTrackSize::Type::Length:
-            if (!grid_row.min_track_sizing_function.length().is_auto())
-                grid_row.base_size = grid_row.min_track_sizing_function.length().to_px(box);
-            break;
-        case CSS::GridTrackSize::Type::Percentage:
-            grid_row.base_size = grid_row.min_track_sizing_function.percentage().as_fraction() * box_state.content_height();
-            break;
-        // - An intrinsic sizing function
-        // Use an initial base size of zero.
-        case CSS::GridTrackSize::Type::FlexibleLength:
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
-
-        // For each track, if the track’s max track sizing function is:
-        switch (grid_row.max_track_sizing_function.type()) {
-        // - A fixed sizing function
-        // Resolve to an absolute length and use that size as the track’s initial growth limit.
-        case CSS::GridTrackSize::Type::Length:
-            if (!grid_row.max_track_sizing_function.length().is_auto())
-                grid_row.growth_limit = grid_row.max_track_sizing_function.length().to_px(box);
-            else
-                // - An intrinsic sizing function
-                // Use an initial growth limit of infinity.
-                grid_row.growth_limit = -1;
-            break;
-        case CSS::GridTrackSize::Type::Percentage:
-            grid_row.growth_limit = grid_row.max_track_sizing_function.percentage().as_fraction() * box_state.content_height();
-            break;
-        // - A flexible sizing function
-        // Use an initial growth limit of infinity.
-        case CSS::GridTrackSize::Type::FlexibleLength:
-            grid_row.growth_limit = -1;
-            break;
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    }
-
-    // FIXME: In all cases, if the growth limit is less than the base size, increase the growth limit to match
-    // the base size.
-
-    // https://drafts.csswg.org/css-grid/#algo-content
+    // https://www.w3.org/TR/css-grid-2/#algo-content
     // 12.5. Resolve Intrinsic Track Sizes
     // This step resolves intrinsic track sizing functions to absolute lengths. First it resolves those
     // sizes based on items that are contained wholly within a single track. Then it gradually adds in
@@ -668,7 +900,9 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // 2. Size tracks to fit non-spanning items: For each track with an intrinsic track sizing function and
     // not a flexible sizing function, consider the items in it with a span of 1:
     int index = 0;
-    for (auto& grid_column : grid_columns) {
+    for (auto& grid_column : m_grid_columns) {
+        if (grid_column.is_gap)
+            continue;
         if (!grid_column.min_track_sizing_function.is_intrinsic_track_sizing()) {
             ++index;
             continue;
@@ -707,10 +941,6 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // result from assuming the item’s used minimum size as its preferred size; else the item’s minimum
         // contribution is its min-content contribution. Because the minimum contribution often depends on
         // the size of the item’s content, it is considered a type of intrinsic size contribution.
-        // For items with a specified minimum size of auto (the initial value), the minimum contribution is
-        // usually equivalent to the min-content contribution—but can differ in some cases, see § 6.6
-        // Automatic Minimum Size of Grid Items. Also, minimum contribution ≤ min-content contribution ≤
-        // max-content contribution.
         float grid_column_width = 0;
         for (auto& box_of_column : boxes_of_column)
             grid_column_width = max(grid_column_width, calculate_min_content_width(box_of_column));
@@ -731,11 +961,430 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // to match the base size.
         if (grid_column.growth_limit != -1 && grid_column.growth_limit < grid_column.base_size)
             grid_column.growth_limit = grid_column.base_size;
+
         ++index;
     }
 
+    // https://www.w3.org/TR/css-grid-2/#auto-repeat
+    // The auto-fit keyword behaves the same as auto-fill, except that after grid item placement any
+    // empty repeated tracks are collapsed. An empty track is one with no in-flow grid items placed into
+    // or spanning across it. (This can result in all tracks being collapsed, if they’re all empty.)
+    if (grid_template_columns.track_list().size() == 1
+        && grid_template_columns.track_list().first().is_repeat()
+        && grid_template_columns.track_list().first().repeat().is_auto_fit()) {
+        auto idx = 0;
+        for (auto& grid_column : m_grid_columns) {
+            // A collapsed track is treated as having a fixed track sizing function of 0px, and the gutters on
+            // either side of it—including any space allotted through distributed alignment—collapse.
+            if (!occupation_grid.is_occupied(idx, 0)) {
+                grid_column.base_size = 0;
+                grid_column.growth_limit = 0;
+            }
+            idx++;
+        }
+    }
+
+    // 3. Increase sizes to accommodate spanning items crossing content-sized tracks: Next, consider the
+    // items with a span of 2 that do not span a track with a flexible sizing function.
+    // FIXME: Content-sized tracks not implemented (min-content, etc.)
+
+    // 3.1. For intrinsic minimums: First increase the base size of tracks with an intrinsic min track sizing
+    // function by distributing extra space as needed to accommodate these items’ minimum contributions.
+
+    // If the grid container is being sized under a min- or max-content constraint, use the items’
+    // limited min-content contributions in place of their minimum contributions here. (For an item
+    // spanning multiple tracks, the upper limit used to calculate its limited min-/max-content
+    // contribution is the sum of the fixed max track sizing functions of any tracks it spans, and is
+    // applied if it only spans such tracks.)
+
+    // 3.2. For content-based minimums: Next continue to increase the base size of tracks with a min track
+    // sizing function of min-content or max-content by distributing extra space as needed to account
+    // for these items' min-content contributions.
+
+    // 3.3. For max-content minimums: Next, if the grid container is being sized under a max-content
+    // constraint, continue to increase the base size of tracks with a min track sizing function of auto
+    // or max-content by distributing extra space as needed to account for these items' limited
+    // max-content contributions.
+
+    // In all cases, continue to increase the base size of tracks with a min track sizing function of
+    // max-content by distributing extra space as needed to account for these items' max-content
+    // contributions.
+
+    // 3.4. If at this point any track’s growth limit is now less than its base size, increase its growth
+    // limit to match its base size.
+
+    // 3.5. For intrinsic maximums: Next increase the growth limit of tracks with an intrinsic max track
+    // sizing function by distributing extra space as needed to account for these items' min-content
+    // contributions. Mark any tracks whose growth limit changed from infinite to finite in this step as
+    // infinitely growable for the next step.
+
+    // 3.6. For max-content maximums: Lastly continue to increase the growth limit of tracks with a max track
+    // sizing function of max-content by distributing extra space as needed to account for these items'
+    // max-content contributions. However, limit the growth of any fit-content() tracks by their
+    // fit-content() argument.
+
+    // Repeat incrementally for items with greater spans until all items have been considered.
+
+    // FIXME: 4. Increase sizes to accommodate spanning items crossing flexible tracks: Next, repeat the previous
+    // step instead considering (together, rather than grouped by span size) all items that do span a
+    // track with a flexible sizing function while
+
+    // - distributing space only to flexible tracks (i.e. treating all other tracks as having a fixed
+    // sizing function)
+
+    // - if the sum of the flexible sizing functions of all flexible tracks spanned by the item is greater
+    // than zero, distributing space to such tracks according to the ratios of their flexible sizing
+    // functions rather than distributing space equally
+
+    // FIXME: 5. If any track still has an infinite growth limit (because, for example, it had no items placed in
+    // it or it is a flexible track), set its growth limit to its base size.
+
+    // https://www.w3.org/TR/css-grid-2/#extra-space
+    // 12.5.1. Distributing Extra Space Across Spanned Tracks
+    // To distribute extra space by increasing the affected sizes of a set of tracks as required by a
+    // set of intrinsic size contributions,
+    float sum_of_track_sizes = 0;
+    for (auto& it : m_grid_columns)
+        sum_of_track_sizes += it.base_size;
+
+    // 1. Maintain separately for each affected base size or growth limit a planned increase, initially
+    // set to 0. (This prevents the size increases from becoming order-dependent.)
+
+    // 2. For each considered item,
+
+    // 2.1. Find the space to distribute: Subtract the corresponding size (base size or growth limit) of
+    // every spanned track from the item’s size contribution to find the item’s remaining size
+    // contribution. (For infinite growth limits, substitute the track’s base size.) This is the space
+    // to distribute. Floor it at zero.
+
+    // For base sizes, the limit is its growth limit. For growth limits, the limit is infinity if it is
+    // marked as infinitely growable, and equal to the growth limit otherwise. If the affected size was
+    // a growth limit and the track is not marked infinitely growable, then each item-incurred increase
+    // will be zero.
+    // extra-space = max(0, size-contribution - ∑track-sizes)
+    for (auto& grid_column : m_grid_columns) {
+        if (grid_column.is_gap)
+            continue;
+        grid_column.space_to_distribute = max(0, (grid_column.growth_limit == -1 ? grid_column.base_size : grid_column.growth_limit) - grid_column.base_size);
+    }
+
+    auto remaining_free_space = available_space.width.is_definite() ? available_space.width.to_px() - sum_of_track_sizes : 0;
+    // 2.2. Distribute space up to limits: Find the item-incurred increase for each spanned track with an
+    // affected size by: distributing the space equally among such tracks, freezing a track’s
+    // item-incurred increase as its affected size + item-incurred increase reaches its limit (and
+    // continuing to grow the unfrozen tracks as needed).
+    auto count_of_unfrozen_tracks = 0;
+    for (auto& grid_column : m_grid_columns) {
+        if (grid_column.space_to_distribute > 0)
+            count_of_unfrozen_tracks++;
+    }
+    while (remaining_free_space > 0) {
+        if (count_of_unfrozen_tracks == 0)
+            break;
+        auto free_space_to_distribute_per_track = remaining_free_space / count_of_unfrozen_tracks;
+
+        for (auto& grid_column : m_grid_columns) {
+            if (grid_column.space_to_distribute == 0)
+                continue;
+            // 2.4. For each affected track, if the track’s item-incurred increase is larger than the track’s planned
+            // increase set the track’s planned increase to that value.
+            if (grid_column.space_to_distribute <= free_space_to_distribute_per_track) {
+                grid_column.planned_increase += grid_column.space_to_distribute;
+                remaining_free_space -= grid_column.space_to_distribute;
+                grid_column.space_to_distribute = 0;
+            } else {
+                grid_column.space_to_distribute -= free_space_to_distribute_per_track;
+                grid_column.planned_increase += free_space_to_distribute_per_track;
+                remaining_free_space -= free_space_to_distribute_per_track;
+            }
+        }
+
+        count_of_unfrozen_tracks = 0;
+        for (auto& grid_column : m_grid_columns) {
+            if (grid_column.space_to_distribute > 0)
+                count_of_unfrozen_tracks++;
+        }
+        if (remaining_free_space == 0)
+            break;
+    }
+
+    // 2.3. Distribute space beyond limits: If space remains after all tracks are frozen, unfreeze and
+    // continue to distribute space to the item-incurred increase of…
+
+    // - when accommodating minimum contributions or accommodating min-content contributions: any affected
+    // track that happens to also have an intrinsic max track sizing function; if there are no such
+    // tracks, then all affected tracks.
+
+    // - when accommodating max-content contributions: any affected track that happens to also have a
+    // max-content max track sizing function; if there are no such tracks, then all affected tracks.
+
+    // - when handling any intrinsic growth limit: all affected tracks.
+
+    // For this purpose, the max track sizing function of a fit-content() track is treated as
+    // max-content until it reaches the limit specified as the fit-content() argument, after which it is
+    // treated as having a fixed sizing function of that argument.
+
+    // This step prioritizes the distribution of space for accommodating space required by the
+    // tracks’ min track sizing functions beyond their current growth limits based on the types of their
+    // max track sizing functions.
+
+    // 3. Update the tracks' affected sizes by adding in the planned increase so that the next round of
+    // space distribution will account for the increase. (If the affected size is an infinite growth
+    // limit, set it to the track’s base size plus the planned increase.)
+    for (auto& grid_column : m_grid_columns)
+        grid_column.base_size += grid_column.planned_increase;
+
+    // https://www.w3.org/TR/css-grid-2/#algo-grow-tracks
+    // 12.6. Maximize Tracks
+
+    // If the free space is positive, distribute it equally to the base sizes of all tracks, freezing
+    // tracks as they reach their growth limits (and continuing to grow the unfrozen tracks as needed).
+    auto free_space = get_free_space_x(available_space);
+    while (free_space > 0) {
+        auto free_space_to_distribute_per_track = free_space / (m_grid_columns.size() - count_of_gap_columns());
+        for (auto& grid_column : m_grid_columns) {
+            if (grid_column.is_gap)
+                continue;
+            if (grid_column.growth_limit != -1)
+                grid_column.base_size = min(grid_column.growth_limit, grid_column.base_size + free_space_to_distribute_per_track);
+            else
+                grid_column.base_size = grid_column.base_size + free_space_to_distribute_per_track;
+        }
+        if (get_free_space_x(available_space) == free_space)
+            break;
+        free_space = get_free_space_x(available_space);
+    }
+
+    // For the purpose of this step: if sizing the grid container under a max-content constraint, the
+    // free space is infinite; if sizing under a min-content constraint, the free space is zero.
+
+    // If this would cause the grid to be larger than the grid container’s inner size as limited by its
+    // max-width/height, then redo this step, treating the available grid space as equal to the grid
+    // container’s inner size when it’s sized to its max-width/height.
+
+    // https://drafts.csswg.org/css-grid/#algo-flex-tracks
+    // 12.7. Expand Flexible Tracks
+    // This step sizes flexible tracks using the largest value it can assign to an fr without exceeding
+    // the available space.
+
+    // First, find the grid’s used flex fraction:
+    auto column_flex_factor_sum = 0;
+    for (auto& grid_column : m_grid_columns) {
+        if (grid_column.min_track_sizing_function.is_flexible_length())
+            column_flex_factor_sum++;
+    }
+    // See 12.7.1.
+    // Let flex factor sum be the sum of the flex factors of the flexible tracks. If this value is less
+    // than 1, set it to 1 instead.
+    if (column_flex_factor_sum < 1)
+        column_flex_factor_sum = 1;
+
+    // See 12.7.1.
+    float sized_column_widths = 0;
+    for (auto& grid_column : m_grid_columns) {
+        if (!grid_column.min_track_sizing_function.is_flexible_length())
+            sized_column_widths += grid_column.base_size;
+    }
+    // Let leftover space be the space to fill minus the base sizes of the non-flexible grid tracks.
+    double free_horizontal_space = available_space.width.is_definite() ? available_space.width.to_px() - sized_column_widths : 0;
+
+    // If the free space is zero or if sizing the grid container under a min-content constraint:
+    // The used flex fraction is zero.
+    // FIXME: Add min-content constraint check.
+
+    // Otherwise, if the free space is a definite length:
+    // The used flex fraction is the result of finding the size of an fr using all of the grid tracks
+    // and a space to fill of the available grid space.
+    if (free_horizontal_space > 0) {
+        for (auto& grid_column : m_grid_columns) {
+            if (grid_column.min_track_sizing_function.is_flexible_length()) {
+                // See 12.7.1.
+                // Let the hypothetical fr size be the leftover space divided by the flex factor sum.
+                auto hypothetical_fr_size = static_cast<double>(1.0 / column_flex_factor_sum) * free_horizontal_space;
+                // For each flexible track, if the product of the used flex fraction and the track’s flex factor is
+                // greater than the track’s base size, set its base size to that product.
+                grid_column.base_size = max(grid_column.base_size, hypothetical_fr_size);
+            }
+        }
+    }
+
+    // Otherwise, if the free space is an indefinite length:
+    // FIXME: No tracks will have indefinite length as per current implementation.
+
+    // The used flex fraction is the maximum of:
+    // For each flexible track, if the flexible track’s flex factor is greater than one, the result of
+    // dividing the track’s base size by its flex factor; otherwise, the track’s base size.
+
+    // For each grid item that crosses a flexible track, the result of finding the size of an fr using
+    // all the grid tracks that the item crosses and a space to fill of the item’s max-content
+    // contribution.
+
+    // If using this flex fraction would cause the grid to be smaller than the grid container’s
+    // min-width/height (or larger than the grid container’s max-width/height), then redo this step,
+    // treating the free space as definite and the available grid space as equal to the grid container’s
+    // inner size when it’s sized to its min-width/height (max-width/height).
+
+    // For each flexible track, if the product of the used flex fraction and the track’s flex factor is
+    // greater than the track’s base size, set its base size to that product.
+
+    // https://drafts.csswg.org/css-grid/#algo-find-fr-size
+    // 12.7.1. Find the Size of an fr
+
+    // This algorithm finds the largest size that an fr unit can be without exceeding the target size.
+    // It must be called with a set of grid tracks and some quantity of space to fill.
+
+    // 1. Let leftover space be the space to fill minus the base sizes of the non-flexible grid tracks.
+
+    // 2. Let flex factor sum be the sum of the flex factors of the flexible tracks. If this value is less
+    // than 1, set it to 1 instead.
+
+    // 3. Let the hypothetical fr size be the leftover space divided by the flex factor sum.
+
+    // FIXME: 4. If the product of the hypothetical fr size and a flexible track’s flex factor is less than the
+    // track’s base size, restart this algorithm treating all such tracks as inflexible.
+
+    // 5. Return the hypothetical fr size.
+
+    // https://drafts.csswg.org/css-grid/#algo-stretch
+    // 12.8. Stretch auto Tracks
+
+    // When the content-distribution property of the grid container is normal or stretch in this axis,
+    // this step expands tracks that have an auto max track sizing function by dividing any remaining
+    // positive, definite free space equally amongst them. If the free space is indefinite, but the grid
+    // container has a definite min-width/height, use that size to calculate the free space for this
+    // step instead.
+    float used_horizontal_space = 0;
+    for (auto& grid_column : m_grid_columns) {
+        if (!(grid_column.max_track_sizing_function.is_length() && grid_column.max_track_sizing_function.length().is_auto()))
+            used_horizontal_space += grid_column.base_size;
+    }
+
+    float remaining_horizontal_space = available_space.width.is_definite() ? available_space.width.to_px() - used_horizontal_space : 0;
+    auto count_of_auto_max_column_tracks = 0;
+    for (auto& grid_column : m_grid_columns) {
+        if (grid_column.max_track_sizing_function.is_length() && grid_column.max_track_sizing_function.length().is_auto())
+            count_of_auto_max_column_tracks++;
+    }
+    for (auto& grid_column : m_grid_columns) {
+        if (grid_column.max_track_sizing_function.is_length() && grid_column.max_track_sizing_function.length().is_auto())
+            grid_column.base_size = max(grid_column.base_size, remaining_horizontal_space / count_of_auto_max_column_tracks);
+    }
+
+    // If calculating the layout of a grid item in this step depends on the available space in the block
+    // axis, assume the available space that it would have if any row with a definite max track sizing
+    // function had that size and all other rows were infinite. If both the grid container and all
+    // tracks have definite sizes, also apply align-content to find the final effective size of any gaps
+    // spanned by such items; otherwise ignore the effects of track alignment in this estimation.
+
+    // https://www.w3.org/TR/css-grid-2/#algo-overview
+    // 12.1. Grid Sizing Algorithm
+    // 2. Next, the track sizing algorithm resolves the sizes of the grid rows.
+    // In this process, any grid item which is subgridded in the grid container’s block axis is treated
+    // as empty and its grid items (the grandchildren) are treated as direct children of the grid
+    // container (their grandparent). This introspection is recursive.
+
+    // As with sizing columns, items which are subgridded only in the inline axis, and whose grid
+    // container size in the block axis depends on the size of its contents are also introspected. (As
+    // with sizing columns, the size contribution to this grid’s row sizing is taken under the provision
+    // of having determined its track sizing only up to this corresponding point in the algorithm; and
+    // again, this introspection is recursive.)
+
+    // To find the inline-axis available space for any items whose block-axis size contributions require
+    // it, use the grid column sizes calculated in the previous step. If the grid container’s inline
+    // size is definite, also apply justify-content to account for the effective column gap sizes.
+
+    // https://www.w3.org/TR/css-grid-2/#algo-track-sizing
+    // 12.3. Track Sizing Algorithm
+
+    // The remainder of this section is the track sizing algorithm, which calculates from the min and
+    // max track sizing functions the used track size. Each track has a base size, a <length> which
+    // grows throughout the algorithm and which will eventually be the track’s final size, and a growth
+    // limit, a <length> which provides a desired maximum size for the base size. There are 5 steps:
+
+    // 1. Initialize Track Sizes
+    // 2. Resolve Intrinsic Track Sizes
+    // 3. Maximize Tracks
+    // 4. Expand Flexible Tracks
+    // 5. Expand Stretched auto Tracks
+
+    // https://www.w3.org/TR/css-grid-2/#algo-init
+    // 12.4. Initialize Track Sizes
+
+    // Initialize each track’s base size and growth limit.
+    for (auto& grid_row : m_grid_rows) {
+        if (grid_row.is_gap)
+            continue;
+        // For each track, if the track’s min track sizing function is:
+        switch (grid_row.min_track_sizing_function.type()) {
+        // - A fixed sizing function
+        // Resolve to an absolute length and use that size as the track’s initial base size.
+        case CSS::GridSize::Type::Length:
+            if (!grid_row.min_track_sizing_function.length().is_auto())
+                grid_row.base_size = grid_row.min_track_sizing_function.length().to_px(box);
+            break;
+        case CSS::GridSize::Type::Percentage:
+            grid_row.base_size = grid_row.min_track_sizing_function.percentage().as_fraction() * box_state.content_height();
+            break;
+        // - An intrinsic sizing function
+        // Use an initial base size of zero.
+        case CSS::GridSize::Type::FlexibleLength:
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+        // For each track, if the track’s max track sizing function is:
+        switch (grid_row.max_track_sizing_function.type()) {
+        // - A fixed sizing function
+        // Resolve to an absolute length and use that size as the track’s initial growth limit.
+        case CSS::GridSize::Type::Length:
+            if (!grid_row.max_track_sizing_function.length().is_auto())
+                grid_row.growth_limit = grid_row.max_track_sizing_function.length().to_px(box);
+            else
+                // - An intrinsic sizing function
+                // Use an initial growth limit of infinity.
+                grid_row.growth_limit = -1;
+            break;
+        case CSS::GridSize::Type::Percentage:
+            grid_row.growth_limit = grid_row.max_track_sizing_function.percentage().as_fraction() * box_state.content_height();
+            break;
+        // - A flexible sizing function
+        // Use an initial growth limit of infinity.
+        case CSS::GridSize::Type::FlexibleLength:
+            grid_row.growth_limit = -1;
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+        // In all cases, if the growth limit is less than the base size, increase the growth limit to match
+        // the base size.
+        if (grid_row.growth_limit != -1 && grid_row.growth_limit < grid_row.base_size)
+            grid_row.growth_limit = grid_row.base_size;
+    }
+
+    // https://www.w3.org/TR/css-grid-2/#algo-content
+    // 12.5. Resolve Intrinsic Track Sizes
+    // This step resolves intrinsic track sizing functions to absolute lengths. First it resolves those
+    // sizes based on items that are contained wholly within a single track. Then it gradually adds in
+    // the space requirements of items that span multiple tracks, evenly distributing the extra space
+    // across those tracks insofar as possible.
+
+    // FIXME: 1. Shim baseline-aligned items so their intrinsic size contributions reflect their baseline
+    // alignment. For the items in each baseline-sharing group, add a “shim” (effectively, additional
+    // margin) on the start/end side (for first/last-baseline alignment) of each item so that, when
+    // start/end-aligned together their baselines align as specified.
+
+    // Consider these “shims” as part of the items’ intrinsic size contribution for the purpose of track
+    // sizing, below. If an item uses multiple intrinsic size contributions, it can have different shims
+    // for each one.
+
+    // 2. Size tracks to fit non-spanning items: For each track with an intrinsic track sizing function and
+    // not a flexible sizing function, consider the items in it with a span of 1:
     index = 0;
-    for (auto& grid_row : grid_rows) {
+    for (auto& grid_row : m_grid_rows) {
+        if (grid_row.is_gap)
+            continue;
         if (!grid_row.min_track_sizing_function.is_intrinsic_track_sizing()) {
             ++index;
             continue;
@@ -774,13 +1423,9 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         // result from assuming the item’s used minimum size as its preferred size; else the item’s minimum
         // contribution is its min-content contribution. Because the minimum contribution often depends on
         // the size of the item’s content, it is considered a type of intrinsic size contribution.
-        // For items with a specified minimum size of auto (the initial value), the minimum contribution is
-        // usually equivalent to the min-content contribution—but can differ in some cases, see § 6.6
-        // Automatic Minimum Size of Grid Items. Also, minimum contribution ≤ min-content contribution ≤
-        // max-content contribution.
         float grid_row_height = 0;
         for (auto& positioned_box : positioned_boxes_of_row)
-            grid_row_height = max(grid_row_height, positioned_box.computed_height);
+            grid_row_height = max(grid_row_height, calculate_min_content_height(positioned_box.box, AvailableSize::make_definite(m_grid_columns[positioned_box.column].base_size)));
         grid_row.base_size = grid_row_height;
 
         // - For min-content maximums:
@@ -801,12 +1446,17 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         ++index;
     }
 
+    // https://www.w3.org/TR/css-grid-2/#auto-repeat
+    // The auto-fit keyword behaves the same as auto-fill, except that after grid item placement any
+    // empty repeated tracks are collapsed. An empty track is one with no in-flow grid items placed into
+    // or spanning across it. (This can result in all tracks being collapsed, if they’re all empty.)
+
     // 3. Increase sizes to accommodate spanning items crossing content-sized tracks: Next, consider the
     // items with a span of 2 that do not span a track with a flexible sizing function.
     // FIXME: Content-sized tracks not implemented (min-content, etc.)
 
-    // 3.1. For intrinsic minimums: First distribute extra space to base sizes of tracks with an intrinsic
-    // min track sizing function, to accommodate these items’ minimum contributions.
+    // 3.1. For intrinsic minimums: First increase the base size of tracks with an intrinsic min track sizing
+    // function by distributing extra space as needed to accommodate these items’ minimum contributions.
 
     // If the grid container is being sized under a min- or max-content constraint, use the items’
     // limited min-content contributions in place of their minimum contributions here. (For an item
@@ -814,77 +1464,76 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // contribution is the sum of the fixed max track sizing functions of any tracks it spans, and is
     // applied if it only spans such tracks.)
 
-    // 3.2. For content-based minimums: Next continue to distribute extra space to the base sizes of tracks
-    // with a min track sizing function of min-content or max-content, to accommodate these items'
-    // min-content contributions.
+    // 3.2. For content-based minimums: Next continue to increase the base size of tracks with a min track
+    // sizing function of min-content or max-content by distributing extra space as needed to account
+    // for these items' min-content contributions.
 
     // 3.3. For max-content minimums: Next, if the grid container is being sized under a max-content
-    // constraint, continue to distribute extra space to the base sizes of tracks with a min track
-    // sizing function of auto or max-content, to accommodate these items' limited max-content
-    // contributions.
+    // constraint, continue to increase the base size of tracks with a min track sizing function of auto
+    // or max-content by distributing extra space as needed to account for these items' limited
+    // max-content contributions.
 
-    // In all cases, continue to distribute extra space to the base sizes of tracks with a min track
-    // sizing function of max-content, to accommodate these items' max-content contributions.
+    // In all cases, continue to increase the base size of tracks with a min track sizing function of
+    // max-content by distributing extra space as needed to account for these items' max-content
+    // contributions.
 
     // 3.4. If at this point any track’s growth limit is now less than its base size, increase its growth
     // limit to match its base size.
 
-    // 3.5. For intrinsic maximums: Next distribute extra space to the growth limits of tracks with intrinsic
-    // max track sizing function, to accommodate these items' min-content contributions. Mark any tracks
-    // whose growth limit changed from infinite to finite in this step as infinitely growable for the
-    // next step.
+    // 3.5. For intrinsic maximums: Next increase the growth limit of tracks with an intrinsic max track
+    // sizing function by distributing extra space as needed to account for these items' min-content
+    // contributions. Mark any tracks whose growth limit changed from infinite to finite in this step as
+    // infinitely growable for the next step.
 
-    // 3.6. For max-content maximums: Lastly continue to distribute extra space to the growth limits of
-    // tracks with a max track sizing function of max-content, to accommodate these items' max-content
-    // contributions. However, limit the growth of any fit-content() tracks by their fit-content()
-    // argument.
+    // 3.6. For max-content maximums: Lastly continue to increase the growth limit of tracks with a max track
+    // sizing function of max-content by distributing extra space as needed to account for these items'
+    // max-content contributions. However, limit the growth of any fit-content() tracks by their
+    // fit-content() argument.
 
     // Repeat incrementally for items with greater spans until all items have been considered.
 
     // FIXME: 4. Increase sizes to accommodate spanning items crossing flexible tracks: Next, repeat the previous
     // step instead considering (together, rather than grouped by span size) all items that do span a
-    // track with a flexible sizing function while distributing space only to flexible tracks (i.e.
-    // treating all other tracks as having a fixed sizing function)
+    // track with a flexible sizing function while
 
-    // if the sum of the flexible sizing functions of all flexible tracks spanned by the item is greater
-    // than or equal to one, distributing space to such tracks according to the ratios of their flexible
-    // sizing functions rather than distributing space equally; and if the sum is less than one,
-    // distributing that proportion of space according to the ratios of their flexible sizing functions
-    // and the rest equally
+    // - distributing space only to flexible tracks (i.e. treating all other tracks as having a fixed
+    // sizing function)
+
+    // - if the sum of the flexible sizing functions of all flexible tracks spanned by the item is greater
+    // than zero, distributing space to such tracks according to the ratios of their flexible sizing
+    // functions rather than distributing space equally
 
     // FIXME: 5. If any track still has an infinite growth limit (because, for example, it had no items placed in
     // it or it is a flexible track), set its growth limit to its base size.
 
-    // https://drafts.csswg.org/css-grid/#extra-space
+    // https://www.w3.org/TR/css-grid-2/#extra-space
     // 12.5.1. Distributing Extra Space Across Spanned Tracks
+    // To distribute extra space by increasing the affected sizes of a set of tracks as required by a
+    // set of intrinsic size contributions,
 
-    // 1. Maintain separately for each affected track a planned increase, initially set to 0. (This
-    // prevents the size increases from becoming order-dependent.)
+    // 1. Maintain separately for each affected base size or growth limit a planned increase, initially
+    // set to 0. (This prevents the size increases from becoming order-dependent.)
 
-    // 2. For each accommodated item, considering only tracks the item spans:
+    // 2. For each considered item,
 
-    // 2.1. Find the space to distribute: Subtract the affected size of every spanned track (not just the
-    // affected tracks) from the item’s size contribution, flooring it at zero. (For infinite growth
-    // limits, substitute the track’s base size.) This remaining size contribution is the space to
-    // distribute.
-    // space = max(0, size contribution - ∑track-sizes)
-
-    // 2.2. Distribute space up to limits:
-
-    // Find the item-incurred increase for each affected track by: distributing the space equally among
-    // these tracks, freezing a track’s item-incurred increase as its affected size + item-incurred
-    // increase reaches its limit (and continuing to grow the unfrozen tracks as needed).
+    // 2.1. Find the space to distribute: Subtract the corresponding size (base size or growth limit) of
+    // every spanned track from the item’s size contribution to find the item’s remaining size
+    // contribution. (For infinite growth limits, substitute the track’s base size.) This is the space
+    // to distribute. Floor it at zero.
 
     // For base sizes, the limit is its growth limit. For growth limits, the limit is infinity if it is
-    // marked as infinitely growable, and equal to the growth limit otherwise.
+    // marked as infinitely growable, and equal to the growth limit otherwise. If the affected size was
+    // a growth limit and the track is not marked infinitely growable, then each item-incurred increase
+    // will be zero.
+    // extra-space = max(0, size-contribution - ∑track-sizes)
 
-    // If the affected size was a growth limit and the track is not marked infinitely growable, then each
-    // item-incurred increase will be zero.
+    // 2.2. Distribute space up to limits: Find the item-incurred increase for each spanned track with an
+    // affected size by: distributing the space equally among such tracks, freezing a track’s
+    // item-incurred increase as its affected size + item-incurred increase reaches its limit (and
+    // continuing to grow the unfrozen tracks as needed).
 
-    // 2.3. Distribute space beyond limits:
-
-    // If extra space remains at this point, unfreeze and continue to distribute space to the
-    // item-incurred increase of…
+    // 2.3. Distribute space beyond limits: If space remains after all tracks are frozen, unfreeze and
+    // continue to distribute space to the item-incurred increase of…
 
     // - when accommodating minimum contributions or accommodating min-content contributions: any affected
     // track that happens to also have an intrinsic max track sizing function; if there are no such
@@ -899,21 +1548,41 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // max-content until it reaches the limit specified as the fit-content() argument, after which it is
     // treated as having a fixed sizing function of that argument.
 
-    // This step prioritizes the distribution of space for accommodating size contributions beyond the
-    // tracks' current growth limits based on the types of their max track sizing functions.
+    // This step prioritizes the distribution of space for accommodating space required by the
+    // tracks’ min track sizing functions beyond their current growth limits based on the types of their
+    // max track sizing functions.
 
-    // 2.4. For each affected track, if the track’s item-incurred increase is larger than the track’s planned
-    // increase set the track’s planned increase to that value.
-
-    // 3. Update the tracks' affected sizes by adding in the planned increase, so that the next round of
+    // 3. Update the tracks' affected sizes by adding in the planned increase so that the next round of
     // space distribution will account for the increase. (If the affected size is an infinite growth
     // limit, set it to the track’s base size plus the planned increase.)
+    // FIXME: Do for rows.
 
-    // https://drafts.csswg.org/css-grid/#algo-grow-tracks
+    // https://www.w3.org/TR/css-grid-2/#algo-grow-tracks
     // 12.6. Maximize Tracks
 
     // If the free space is positive, distribute it equally to the base sizes of all tracks, freezing
     // tracks as they reach their growth limits (and continuing to grow the unfrozen tracks as needed).
+
+    free_space = get_free_space_y(box);
+    while (free_space > 0) {
+        auto free_space_to_distribute_per_track = free_space / (m_grid_rows.size() - count_of_gap_rows());
+        for (auto& grid_row : m_grid_rows) {
+            if (grid_row.is_gap)
+                continue;
+            grid_row.base_size = min(grid_row.growth_limit, grid_row.base_size + free_space_to_distribute_per_track);
+        }
+        if (get_free_space_y(box) == free_space)
+            break;
+        free_space = get_free_space_y(box);
+    }
+    if (free_space == -1) {
+        for (auto& grid_row : m_grid_rows) {
+            if (grid_row.is_gap)
+                continue;
+            if (grid_row.growth_limit != -1)
+                grid_row.base_size = grid_row.growth_limit;
+        }
+    }
 
     // For the purpose of this step: if sizing the grid container under a max-content constraint, the
     // free space is infinite; if sizing under a min-content constraint, the free space is zero.
@@ -921,7 +1590,6 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // If this would cause the grid to be larger than the grid container’s inner size as limited by its
     // max-width/height, then redo this step, treating the available grid space as equal to the grid
     // container’s inner size when it’s sized to its max-width/height.
-    // FIXME: Do later as at the moment all growth limits are equal to base sizes.
 
     // https://drafts.csswg.org/css-grid/#algo-flex-tracks
     // 12.7. Expand Flexible Tracks
@@ -929,49 +1597,8 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // the available space.
 
     // First, find the grid’s used flex fraction:
-    auto column_flex_factor_sum = 0;
-    for (auto& grid_column : grid_columns) {
-        if (grid_column.min_track_sizing_function.is_flexible_length())
-            column_flex_factor_sum++;
-    }
-    // See 12.7.1.
-    // Let flex factor sum be the sum of the flex factors of the flexible tracks. If this value is less
-    // than 1, set it to 1 instead.
-    if (column_flex_factor_sum < 1)
-        column_flex_factor_sum = 1;
-
-    // See 12.7.1.
-    float sized_column_widths = 0;
-    for (auto& grid_column : grid_columns) {
-        if (!grid_column.min_track_sizing_function.is_flexible_length())
-            sized_column_widths += grid_column.base_size;
-    }
-    // Let leftover space be the space to fill minus the base sizes of the non-flexible grid tracks.
-    double free_horizontal_space = box_state.content_width() - sized_column_widths;
-
-    // If the free space is zero or if sizing the grid container under a min-content constraint:
-    // The used flex fraction is zero.
-    // FIXME: Add min-content constraint check.
-
-    // Otherwise, if the free space is a definite length:
-    // The used flex fraction is the result of finding the size of an fr using all of the grid tracks
-    // and a space to fill of the available grid space.
-    if (free_horizontal_space > 0) {
-        for (auto& grid_column : grid_columns) {
-            if (grid_column.min_track_sizing_function.is_flexible_length()) {
-                // See 12.7.1.
-                // Let the hypothetical fr size be the leftover space divided by the flex factor sum.
-                auto hypothetical_fr_size = static_cast<double>(1.0 / column_flex_factor_sum) * free_horizontal_space;
-                // For each flexible track, if the product of the used flex fraction and the track’s flex factor is
-                // greater than the track’s base size, set its base size to that product.
-                grid_column.base_size = max(grid_column.base_size, hypothetical_fr_size);
-            }
-        }
-    }
-
-    // First, find the grid’s used flex fraction:
     auto row_flex_factor_sum = 0;
-    for (auto& grid_row : grid_rows) {
+    for (auto& grid_row : m_grid_rows) {
         if (grid_row.min_track_sizing_function.is_flexible_length())
             row_flex_factor_sum++;
     }
@@ -983,7 +1610,7 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
 
     // See 12.7.1.
     float sized_row_heights = 0;
-    for (auto& grid_row : grid_rows) {
+    for (auto& grid_row : m_grid_rows) {
         if (!grid_row.min_track_sizing_function.is_flexible_length())
             sized_row_heights += grid_row.base_size;
     }
@@ -998,7 +1625,7 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // The used flex fraction is the result of finding the size of an fr using all of the grid tracks
     // and a space to fill of the available grid space.
     if (free_vertical_space > 0) {
-        for (auto& grid_row : grid_rows) {
+        for (auto& grid_row : m_grid_rows) {
             if (grid_row.min_track_sizing_function.is_flexible_length()) {
                 // See 12.7.1.
                 // Let the hypothetical fr size be the leftover space divided by the flex factor sum.
@@ -1055,39 +1682,48 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     // positive, definite free space equally amongst them. If the free space is indefinite, but the grid
     // container has a definite min-width/height, use that size to calculate the free space for this
     // step instead.
-    float used_horizontal_space = 0;
-    for (auto& grid_column : grid_columns) {
-        if (!(grid_column.max_track_sizing_function.is_length() && grid_column.max_track_sizing_function.length().is_auto()))
-            used_horizontal_space += grid_column.base_size;
-    }
-
-    float remaining_horizontal_space = box_state.content_width() - used_horizontal_space;
-    auto count_of_auto_max_column_tracks = 0;
-    for (auto& grid_column : grid_columns) {
-        if (grid_column.max_track_sizing_function.is_length() && grid_column.max_track_sizing_function.length().is_auto())
-            count_of_auto_max_column_tracks++;
-    }
-    for (auto& grid_column : grid_columns) {
-        if (grid_column.max_track_sizing_function.is_length() && grid_column.max_track_sizing_function.length().is_auto())
-            grid_column.base_size = max(grid_column.base_size, remaining_horizontal_space / count_of_auto_max_column_tracks);
-    }
-
     float used_vertical_space = 0;
-    for (auto& grid_row : grid_rows) {
+    for (auto& grid_row : m_grid_rows) {
         if (!(grid_row.max_track_sizing_function.is_length() && grid_row.max_track_sizing_function.length().is_auto()))
             used_vertical_space += grid_row.base_size;
     }
 
     float remaining_vertical_space = box_state.content_height() - used_vertical_space;
     auto count_of_auto_max_row_tracks = 0;
-    for (auto& grid_row : grid_rows) {
+    for (auto& grid_row : m_grid_rows) {
         if (grid_row.max_track_sizing_function.is_length() && grid_row.max_track_sizing_function.length().is_auto())
             count_of_auto_max_row_tracks++;
     }
-    for (auto& grid_row : grid_rows) {
+    for (auto& grid_row : m_grid_rows) {
         if (grid_row.max_track_sizing_function.is_length() && grid_row.max_track_sizing_function.length().is_auto())
             grid_row.base_size = max(grid_row.base_size, remaining_vertical_space / count_of_auto_max_row_tracks);
     }
+
+    // https://www.w3.org/TR/css-grid-2/#algo-overview
+    // 12.1. Grid Sizing Algorithm
+    // 3. Then, if the min-content contribution of any grid item has changed based on the row sizes and
+    // alignment calculated in step 2, re-resolve the sizes of the grid columns with the new min-content
+    // and max-content contributions (once only).
+
+    // To find the block-axis available space for any items whose inline-axis size contributions require
+    // it, use the grid row sizes calculated in the previous step. If the grid container’s block size is
+    // definite, also apply align-content to account for the effective row gap sizes
+
+    // 4. Next, if the min-content contribution of any grid item has changed based on the column sizes and
+    // alignment calculated in step 3, re-resolve the sizes of the grid rows with the new min-content
+    // and max-content contributions (once only).
+
+    // To find the inline-axis available space for any items whose block-axis size contributions require
+    // it, use the grid column sizes calculated in the previous step. If the grid container’s inline
+    // size is definite, also apply justify-content to account for the effective column gap sizes.
+
+    // 5. Finally, the grid container is sized using the resulting size of the grid as its content size,
+    // and the tracks are aligned within the grid container according to the align-content and
+    // justify-content properties.
+
+    // Once the size of each grid area is thus established, the grid items are laid out into their
+    // respective containing blocks. The grid area’s width and height are considered definite for this
+    // purpose.
 
     auto layout_box = [&](int row_start, int row_end, int column_start, int column_end, Box const& child_box) -> void {
         auto& child_box_state = m_state.get_mutable(child_box);
@@ -1096,25 +1732,43 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
         float y_start = 0;
         float y_end = 0;
         for (int i = 0; i < column_start; i++)
-            x_start += grid_columns[i].base_size;
+            x_start += m_grid_columns[i].base_size;
         for (int i = 0; i < column_end; i++)
-            x_end += grid_columns[i].base_size;
+            x_end += m_grid_columns[i].base_size;
         for (int i = 0; i < row_start; i++)
-            y_start += grid_rows[i].base_size;
+            y_start += m_grid_rows[i].base_size;
         for (int i = 0; i < row_end; i++)
-            y_end += grid_rows[i].base_size;
+            y_end += m_grid_rows[i].base_size;
         child_box_state.set_content_width(x_end - x_start);
         child_box_state.set_content_height(y_end - y_start);
         child_box_state.offset = { x_start, y_start };
+
+        auto available_space_for_children = AvailableSpace(AvailableSize::make_definite(child_box_state.content_width()), AvailableSize::make_definite(child_box_state.content_height()));
+        if (auto independent_formatting_context = layout_inside(child_box, LayoutMode::Normal, available_space_for_children))
+            independent_formatting_context->parent_context_did_dimension_child_root_box();
     };
 
     for (auto& positioned_box : positioned_boxes) {
-        auto resolved_span = positioned_box.row + positioned_box.row_span > static_cast<int>(grid_rows.size()) ? static_cast<int>(grid_rows.size()) - positioned_box.row : positioned_box.row_span;
-        layout_box(positioned_box.row, positioned_box.row + resolved_span, positioned_box.column, positioned_box.column + positioned_box.column_span, positioned_box.box);
+        auto row_span_without_overflows = positioned_box.row + positioned_box.row_span > static_cast<int>(m_grid_rows.size()) ? static_cast<int>(m_grid_rows.size()) - positioned_box.row : positioned_box.row_span;
+
+        auto resolved_row_start = box.computed_values().row_gap().is_auto() ? positioned_box.row : positioned_box.row * 2;
+        auto resolved_row_end = ((positioned_box.row + row_span_without_overflows) * 2) - 1;
+        auto resolved_row_span = box.computed_values().row_gap().is_auto() ? row_span_without_overflows : resolved_row_end - resolved_row_start;
+
+        auto resolved_column_start = box.computed_values().column_gap().is_auto() ? positioned_box.column : positioned_box.column * 2;
+        auto resolved_column_end = ((positioned_box.column + positioned_box.column_span) * 2) - 1;
+        auto resolved_column_span = box.computed_values().column_gap().is_auto() ? positioned_box.column_span : resolved_column_end - resolved_column_start;
+
+        layout_box(
+            resolved_row_start,
+            resolved_row_start + resolved_row_span,
+            resolved_column_start,
+            resolved_column_start + resolved_column_span,
+            positioned_box.box);
     }
 
     float total_y = 0;
-    for (auto& grid_row : grid_rows)
+    for (auto& grid_row : m_grid_rows)
         total_y += grid_row.base_size;
     m_automatic_content_height = total_y;
 }
@@ -1137,6 +1791,69 @@ bool GridFormattingContext::is_auto_positioned_column(CSS::GridTrackPlacement co
 bool GridFormattingContext::is_auto_positioned_track(CSS::GridTrackPlacement const& grid_track_start, CSS::GridTrackPlacement const& grid_track_end) const
 {
     return grid_track_start.is_auto_positioned() && grid_track_end.is_auto_positioned();
+}
+
+float GridFormattingContext::get_free_space_x(AvailableSpace const& available_space)
+{
+    // https://www.w3.org/TR/css-grid-2/#algo-terms
+    // free space: Equal to the available grid space minus the sum of the base sizes of all the grid
+    // tracks (including gutters), floored at zero. If available grid space is indefinite, the free
+    // space is indefinite as well.
+    // FIXME: do indefinite space
+    if (!available_space.width.is_definite())
+        return 0;
+    auto sum_base_sizes = 0;
+    for (auto& grid_column : m_grid_columns)
+        sum_base_sizes += grid_column.base_size;
+    return max(0, available_space.width.to_px() - sum_base_sizes);
+}
+
+float GridFormattingContext::get_free_space_y(Box const& box)
+{
+    // https://www.w3.org/TR/css-grid-2/#algo-terms
+    // free space: Equal to the available grid space minus the sum of the base sizes of all the grid
+    // tracks (including gutters), floored at zero. If available grid space is indefinite, the free
+    // space is indefinite as well.
+    auto sum_base_sizes = 0;
+    for (auto& grid_row : m_grid_rows)
+        sum_base_sizes += grid_row.base_size;
+    auto& box_state = m_state.get_mutable(box);
+    if (box_state.has_definite_height())
+        return max(0, absolute_content_rect(box, m_state).height() - sum_base_sizes);
+    return -1;
+}
+
+int GridFormattingContext::get_line_index_by_line_name(String const& needle, CSS::GridTrackSizeList grid_track_size_list)
+{
+    if (grid_track_size_list.track_list().size() == 0)
+        return -1;
+
+    auto repeated_tracks_count = 0;
+    for (size_t x = 0; x < grid_track_size_list.track_list().size(); x++) {
+        if (grid_track_size_list.track_list()[x].is_repeat()) {
+            // FIXME: Calculate amount of columns/rows if auto-fill/fit
+            if (!grid_track_size_list.track_list()[x].repeat().is_default())
+                return -1;
+            auto repeat = grid_track_size_list.track_list()[x].repeat().grid_track_size_list();
+            for (size_t y = 0; y < repeat.track_list().size(); y++) {
+                for (size_t z = 0; z < repeat.line_names()[y].size(); z++) {
+                    if (repeat.line_names()[y][z] == needle)
+                        return x + repeated_tracks_count;
+                    repeated_tracks_count++;
+                }
+            }
+        } else {
+            for (size_t y = 0; y < grid_track_size_list.line_names()[x].size(); y++) {
+                if (grid_track_size_list.line_names()[x][y] == needle)
+                    return x + repeated_tracks_count;
+            }
+        }
+    }
+    for (size_t y = 0; y < grid_track_size_list.line_names()[grid_track_size_list.track_list().size()].size(); y++) {
+        if (grid_track_size_list.line_names()[grid_track_size_list.track_list().size()][y] == needle)
+            return grid_track_size_list.track_list().size() + repeated_tracks_count;
+    }
+    return -1;
 }
 
 OccupationGrid::OccupationGrid(int column_count, int row_count)

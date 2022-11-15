@@ -2,20 +2,22 @@
  * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
  * Copyright (c) 2022, networkException <networkexception@serenityos.org>
+ * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/Heap/DeferGC.h>
 #include <LibJS/Module.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/Environment.h>
 #include <LibJS/Runtime/FinalizationRegistry.h>
-#include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/NativeFunction.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/LocationObject.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/Bindings/WindowExposedInterfaces.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/PromiseRejectionEvent.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
@@ -30,25 +32,23 @@
 namespace Web::Bindings {
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#active-script
-HTML::ClassicScript* active_script()
+HTML::Script* active_script()
 {
     // 1. Let record be GetActiveScriptOrModule().
     auto record = main_thread_vm().get_active_script_or_module();
 
     // 2. If record is null, return null.
-    if (record.has<Empty>())
-        return nullptr;
-
     // 3. Return record.[[HostDefined]].
-    if (record.has<JS::NonnullGCPtr<JS::Module>>()) {
-        // FIXME: We don't currently have a module script.
-        TODO();
-    }
-
-    auto js_script = record.get<JS::NonnullGCPtr<JS::Script>>();
-    VERIFY(js_script);
-    VERIFY(js_script->host_defined());
-    return verify_cast<HTML::ClassicScript>(js_script->host_defined());
+    return record.visit(
+        [](JS::NonnullGCPtr<JS::Script>& js_script) -> HTML::Script* {
+            return verify_cast<HTML::ClassicScript>(js_script->host_defined());
+        },
+        [](JS::NonnullGCPtr<JS::Module>& js_module) -> HTML::Script* {
+            return verify_cast<HTML::ModuleScript>(js_module->host_defined());
+        },
+        [](Empty) -> HTML::Script* {
+            return nullptr;
+        });
 }
 
 JS::VM& main_thread_vm()
@@ -84,8 +84,8 @@ JS::VM& main_thread_vm()
                 [&script](JS::NonnullGCPtr<JS::Script>& js_script) {
                     script = verify_cast<HTML::ClassicScript>(js_script->host_defined());
                 },
-                [](JS::NonnullGCPtr<JS::Module>&) {
-                    TODO();
+                [&script](JS::NonnullGCPtr<JS::Module>& js_module) {
+                    script = verify_cast<HTML::ModuleScript>(js_module->host_defined());
                 },
                 [](Empty) {
                 });
@@ -106,12 +106,12 @@ JS::VM& main_thread_vm()
             case JS::Promise::RejectionOperation::Reject:
                 // 4. If operation is "reject",
                 //    1. Add promise to settings object's about-to-be-notified rejected promises list.
-                settings_object.push_onto_about_to_be_notified_rejected_promises_list(JS::make_handle(&promise));
+                settings_object.push_onto_about_to_be_notified_rejected_promises_list(promise);
                 break;
             case JS::Promise::RejectionOperation::Handle: {
                 // 5. If operation is "handle",
                 //    1. If settings object's about-to-be-notified rejected promises list contains promise, then remove promise from that list and return.
-                bool removed_about_to_be_notified_rejected_promise = settings_object.remove_from_about_to_be_notified_rejected_promises_list(&promise);
+                bool removed_about_to_be_notified_rejected_promise = settings_object.remove_from_about_to_be_notified_rejected_promises_list(promise);
                 if (removed_about_to_be_notified_rejected_promise)
                     return;
 
@@ -202,7 +202,7 @@ JS::VM& main_thread_vm()
 
                 // 6. If result is an abrupt completion, then report the exception given by result.[[Value]].
                 if (result.is_error())
-                    HTML::report_exception(result);
+                    HTML::report_exception(result, finalization_registry.realm());
             });
         };
 
@@ -247,10 +247,7 @@ JS::VM& main_thread_vm()
                 } else {
                     // FIXME: We need to setup a dummy execution context in case a JS::NativeFunction is called when processing the job.
                     //        This is because JS::NativeFunction::call excepts something to be on the execution context stack to be able to get the caller context to initialize the environment.
-                    //        Since this requires pushing an execution context onto the stack, it also requires a global object. The only thing we can get a global object from in this case is the script or module.
-                    //        To do this, we must assume script or module is not Empty. We must also assume that it is a Script Record for now as we don't currently run modules.
                     //        Do note that the JS spec gives _no_ guarantee that the execution context stack has something on it if HostEnqueuePromiseJob was called with a null realm: https://tc39.es/ecma262/#job-preparedtoevaluatecode
-                    VERIFY(script_or_module.has<JS::NonnullGCPtr<JS::Script>>());
                     dummy_execution_context = JS::ExecutionContext { vm->heap() };
                     dummy_execution_context->script_or_module = script_or_module;
                     vm->push_execution_context(dummy_execution_context.value());
@@ -275,7 +272,7 @@ JS::VM& main_thread_vm()
 
                 // 5. If result is an abrupt completion, then report the exception given by result.[[Value]].
                 if (result.is_error())
-                    HTML::report_exception(result);
+                    HTML::report_exception(result, job_settings->realm());
             });
         };
 
@@ -296,8 +293,18 @@ JS::VM& main_thread_vm()
                 script_execution_context = adopt_own(*new JS::ExecutionContext(vm->heap()));
                 script_execution_context->function = nullptr;
                 script_execution_context->realm = &script->settings_object().realm();
-                VERIFY(script->script_record());
-                script_execution_context->script_or_module = JS::NonnullGCPtr<JS::Script>(*script->script_record());
+                if (is<HTML::ClassicScript>(script)) {
+                    script_execution_context->script_or_module = JS::NonnullGCPtr<JS::Script>(*verify_cast<HTML::ClassicScript>(script)->script_record());
+                } else if (is<HTML::ModuleScript>(script)) {
+                    if (is<HTML::JavaScriptModuleScript>(script)) {
+                        script_execution_context->script_or_module = JS::NonnullGCPtr<JS::Module>(*verify_cast<HTML::JavaScriptModuleScript>(script)->record());
+                    } else {
+                        // NOTE: Handle CSS and JSON module scripts once we have those.
+                        VERIFY_NOT_REACHED();
+                    }
+                } else {
+                    VERIFY_NOT_REACHED();
+                }
             }
 
             // 5. Return the JobCallback Record { [[Callback]]: callable, [[HostDefined]]: { [[IncumbentSettings]]: incumbent settings, [[ActiveScriptContext]]: script execution context } }.
@@ -315,53 +322,50 @@ JS::VM& main_thread_vm()
             return { "type"sv };
         };
 
-        // 8.1.5.5.3 HostResolveImportedModule(referencingScriptOrModule, moduleRequest), https://html.spec.whatwg.org/multipage/webappapis.html#hostresolveimportedmodule(referencingscriptormodule,-modulerequest)
+        // 8.1.6.5.3 HostResolveImportedModule(referencingScriptOrModule, moduleRequest), https://html.spec.whatwg.org/multipage/webappapis.html#hostresolveimportedmodule(referencingscriptormodule,-modulerequest)
         vm->host_resolve_imported_module = [](JS::ScriptOrModule const& referencing_string_or_module, JS::ModuleRequest const& module_request) -> JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Module>> {
-            // 1. Let settings object be the current settings object.
-            auto* settings_object = &HTML::current_settings_object();
+            // 1. Let moduleMap and referencingScript be null.
+            Optional<HTML::ModuleMap&> module_map;
+            Optional<HTML::Script&> referencing_script;
 
-            // 2. Let base URL be settings object's API base URL.
-            auto base_url = settings_object->api_base_url();
-
-            // 3. If referencingScriptOrModule is not null, then:
+            // 2. If referencingScriptOrModule is not null, then:
             if (!referencing_string_or_module.has<Empty>()) {
-                // 1. Let referencing script be referencingScriptOrModule.[[HostDefined]].
-                auto const& referencing_script = verify_cast<HTML::Script>(referencing_string_or_module.has<JS::NonnullGCPtr<JS::Script>>() ? referencing_string_or_module.get<JS::NonnullGCPtr<JS::Script>>()->host_defined() : referencing_string_or_module.get<JS::NonnullGCPtr<JS::Module>>()->host_defined());
+                // 1. Set referencingScript to referencingScriptOrModule.[[HostDefined]].
+                referencing_script = verify_cast<HTML::Script>(referencing_string_or_module.has<JS::NonnullGCPtr<JS::Script>>() ? *referencing_string_or_module.get<JS::NonnullGCPtr<JS::Script>>()->host_defined() : *referencing_string_or_module.get<JS::NonnullGCPtr<JS::Module>>()->host_defined());
 
-                // 2. Set settings object to referencing script's settings object.
-                settings_object = &referencing_script->settings_object();
+                // 2. Set moduleMap to referencingScript's settings object's module map.
+                module_map = referencing_script->settings_object().module_map();
+            }
+            // 3. Otherwise:
+            else {
+                // 1. Assert: there is a current settings object.
+                // NOTE: This is handled by the HTML::current_settings_object() accessor.
 
-                // 3. Set base URL to referencing script's base URL.
-                base_url = referencing_script->base_url();
-
-                // 4. Assert: base URL is not null, as referencing script is a classic script or a JavaScript module script.
-                VERIFY(base_url.is_valid());
+                // 2. Set moduleMap to the current settings object's module map.
+                module_map = HTML::current_settings_object().module_map();
             }
 
-            // 4. Let moduleMap be settings object's module map.
-            auto& module_map = settings_object->module_map();
+            // 4. Let url be the result of resolving a module specifier given referencingScript and moduleRequest.[[Specifier]].
+            auto url = MUST(HTML::resolve_module_specifier(referencing_script, module_request.module_specifier));
 
-            // 5. Let url be the result of resolving a module specifier given base URL and moduleRequest.[[Specifier]].
-            auto url = HTML::resolve_module_specifier(module_request, base_url);
-
-            // 6. Assert: url is never failure, because resolving a module specifier must have been previously successful
+            // 5. Assert: the previous step never throws an exception, because resolving a module specifier must have been previously successful
             //    with these same two arguments (either while creating the corresponding module script, or in fetch an import() module script graph).
-            VERIFY(url.is_valid());
+            // NOTE: Handled by MUST above.
 
-            // 7. Let moduleType be the result of running the module type from module request steps given moduleRequest.
+            // 6. Let moduleType be the result of running the module type from module request steps given moduleRequest.
             auto module_type = HTML::module_type_from_module_request(module_request);
 
-            // 8. Let resolved module script be moduleMap[(url, moduleType)]. (This entry must exist for us to have gotten to this point.)
-            auto resolved_module = module_map.get(url, module_type).value();
+            // 7. Let resolvedModuleScript be moduleMap[(url, moduleType)]. (This entry must exist for us to have gotten to this point.)
+            auto resolved_module_script = module_map->get(url, module_type).value();
 
-            // 9. Assert: resolved module script is a module script (i.e., is not null or "fetching").
-            VERIFY(resolved_module.type == HTML::ModuleMap::EntryType::ModuleScript);
+            // 8. Assert: resolvedModuleScript is a module script (i.e., is not null or "fetching").
+            VERIFY(resolved_module_script.type == HTML::ModuleMap::EntryType::ModuleScript);
 
-            // 10. Assert: resolved module script's record is not null.
-            VERIFY(resolved_module.module_script->record());
+            // 9. Assert: resolvedModuleScript's record is not null.
+            VERIFY(resolved_module_script.module_script->record());
 
-            // 11. Return resolved module script's record.
-            return JS::NonnullGCPtr(*resolved_module.module_script->record());
+            // 10. Return resolvedModuleScript's record.
+            return JS::NonnullGCPtr(*resolved_module_script.module_script->record());
         };
 
         // NOTE: We push a dummy execution context onto the JS execution context stack,
@@ -373,6 +377,16 @@ JS::VM& main_thread_vm()
         auto* intrinsics = root_realm->heap().allocate<Intrinsics>(*root_realm, *root_realm);
         auto host_defined = make<HostDefined>(nullptr, *intrinsics);
         root_realm->set_host_defined(move(host_defined));
+        custom_data.internal_realm = root_realm;
+
+        // NOTE: We make sure the internal realm has all the Window intrinsics initialized.
+        //       The DeferGC is a hack to avoid nested GC allocations due to lazy ensure_web_prototype()
+        //       and ensure_web_constructor() invocations.
+        // FIXME: Find a nicer way to do this.
+        JS::DeferGC defer_gc(root_realm->heap());
+        auto* object = JS::Object::create(*root_realm, nullptr);
+        root_realm->set_global_object(object, object);
+        add_window_exposed_interfaces(*object, *root_realm);
 
         vm->push_execution_context(*custom_data.root_execution_context);
     }
@@ -437,7 +451,7 @@ void queue_mutation_observer_microtask(DOM::Document& document)
 
                 auto result = WebIDL::invoke_callback(callback, mutation_observer.ptr(), wrapped_records, mutation_observer.ptr());
                 if (result.is_abrupt())
-                    HTML::report_exception(result);
+                    HTML::report_exception(result, realm);
             }
         }
 

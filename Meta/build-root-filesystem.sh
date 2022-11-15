@@ -97,6 +97,10 @@ if [ -f mnt/bin/pls ]; then
     chown 0:$wheel_gid mnt/bin/pls
     chmod 4750 mnt/bin/pls
 fi
+if [ -f mnt/bin/Escalator ]; then
+    chown 0:$wheel_gid mnt/bin/Escalator
+    chmod 4750 mnt/bin/Escalator
+fi
 if [ -f mnt/bin/utmpupdate ]; then
     chown 0:$utmp_gid mnt/bin/utmpupdate
     chmod 2755 mnt/bin/utmpupdate
@@ -142,11 +146,6 @@ echo "done"
 
 printf "setting up sysfs folder... "
 mkdir -p mnt/sys
-echo "done"
-
-printf "writing version file... "
-GIT_HASH=$( (git log --pretty=format:'%h' -n 1 | cut -c1-7) || true )
-printf "[Version]\nMajor=1\nMinor=0\nGit=%s\n" "$GIT_HASH" > mnt/res/version.ini
 echo "done"
 
 printf "installing users... "

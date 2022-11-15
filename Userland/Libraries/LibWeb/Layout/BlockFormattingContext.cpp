@@ -107,9 +107,6 @@ void BlockFormattingContext::compute_width(Box const& box, AvailableSpace const&
 
     auto const& computed_values = box.computed_values();
 
-    if (should_treat_width_as_auto(box, available_space) && available_space.width.is_intrinsic_sizing_constraint())
-        return;
-
     float width_of_containing_block = available_space.width.to_px();
     auto width_of_containing_block_as_length_for_resolve = available_space.width.is_definite() ? CSS::Length::make_px(width_of_containing_block) : CSS::Length::make_px(0);
 
@@ -117,8 +114,17 @@ void BlockFormattingContext::compute_width(Box const& box, AvailableSpace const&
 
     auto margin_left = CSS::Length::make_auto();
     auto margin_right = CSS::Length::make_auto();
-    auto padding_left = computed_values.padding().left().resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box);
-    auto padding_right = computed_values.padding().right().resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box);
+    auto const padding_left = computed_values.padding().left().resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box);
+    auto const padding_right = computed_values.padding().right().resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box);
+
+    auto& box_state = m_state.get_mutable(box);
+    box_state.border_left = computed_values.border_left().width;
+    box_state.border_right = computed_values.border_right().width;
+    box_state.padding_left = padding_left.to_px(box);
+    box_state.padding_right = padding_right.to_px(box);
+
+    if (should_treat_width_as_auto(box, available_space) && available_space.width.is_intrinsic_sizing_constraint())
+        return;
 
     auto try_compute_width = [&](auto const& a_width) {
         CSS::Length width = a_width;
@@ -203,17 +209,11 @@ void BlockFormattingContext::compute_width(Box const& box, AvailableSpace const&
         }
     }
 
-    auto& box_state = m_state.get_mutable(box);
-
     if (!is<ReplacedBox>(box) && !used_width.is_auto())
         box_state.set_content_width(used_width.to_px(box));
 
     box_state.margin_left = margin_left.to_px(box);
     box_state.margin_right = margin_right.to_px(box);
-    box_state.border_left = computed_values.border_left().width;
-    box_state.border_right = computed_values.border_right().width;
-    box_state.padding_left = padding_left.to_px(box);
-    box_state.padding_right = padding_right.to_px(box);
 }
 
 void BlockFormattingContext::compute_width_for_floating_box(Box const& box, AvailableSpace const& available_space)
@@ -369,8 +369,8 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
 
     compute_width(box, available_space, layout_mode);
 
-    if (is<ReplacedBox>(box) || is<BlockContainer>(box))
-        place_block_level_element_in_normal_flow_vertically(box);
+    place_block_level_element_in_normal_flow_vertically(box);
+    place_block_level_element_in_normal_flow_horizontally(box, available_space);
 
     if (box_state.has_definite_height()) {
         compute_height(box, available_space);
@@ -392,9 +392,6 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
     compute_height(box, available_space);
 
     compute_inset(box);
-
-    if (is<ReplacedBox>(box) || is<BlockContainer>(box))
-        place_block_level_element_in_normal_flow_horizontally(box, available_space);
 
     if (is<ListItemBox>(box)) {
         layout_list_item_marker(static_cast<ListItemBox const&>(box));
@@ -556,8 +553,7 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
     float width_of_containing_block = available_space.width.to_px();
 
     compute_width(box, available_space, layout_mode);
-    if (auto independent_formatting_context = layout_inside(box, layout_mode, box_state.available_inner_space_or_constraints_from(available_space)))
-        independent_formatting_context->parent_context_did_dimension_child_root_box();
+    auto independent_formatting_context = layout_inside(box, layout_mode, box_state.available_inner_space_or_constraints_from(available_space));
     compute_height(box, available_space);
 
     // First we place the box normally (to get the right y coordinate.)
@@ -674,6 +670,9 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
 
     if (line_builder)
         line_builder->recalculate_available_space();
+
+    if (independent_formatting_context)
+        independent_formatting_context->parent_context_did_dimension_child_root_box();
 }
 
 void BlockFormattingContext::layout_list_item_marker(ListItemBox const& list_item_box)
@@ -774,18 +773,6 @@ float BlockFormattingContext::greatest_child_width(Box const& box)
         });
     }
     return max_width;
-}
-
-bool BlockFormattingContext::should_treat_width_as_auto(Box const& box, AvailableSpace const& available_space)
-{
-    return box.computed_values().width().is_auto()
-        || (box.computed_values().width().contains_percentage() && !available_space.width.is_definite());
-}
-
-bool BlockFormattingContext::should_treat_height_as_auto(Box const& box, AvailableSpace const& available_space)
-{
-    return box.computed_values().height().is_auto()
-        || (box.computed_values().height().contains_percentage() && !available_space.height.is_definite());
 }
 
 void BlockFormattingContext::determine_width_of_child(Box const& box, AvailableSpace const& available_space)

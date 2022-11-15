@@ -454,6 +454,37 @@ void Window::handle_multi_paint_event(MultiPaintEvent& event)
         ConnectionToWindowServer::the().async_did_finish_painting(m_window_id, rects);
 }
 
+void Window::propagate_shortcuts_up_to_application(KeyEvent& event, Widget* widget)
+{
+    VERIFY(event.type() == Event::KeyDown);
+    auto shortcut = Shortcut(event.modifiers(), event.key());
+    Action* action = nullptr;
+
+    if (widget) {
+        VERIFY(widget->window() == this);
+
+        do {
+            action = widget->action_for_shortcut(shortcut);
+            if (action)
+                break;
+
+            widget = widget->parent_widget();
+        } while (widget);
+    }
+
+    if (!action)
+        action = action_for_shortcut(shortcut);
+    if (!action)
+        action = Application::the()->action_for_shortcut(shortcut);
+
+    if (action) {
+        action->process_event(*this, event);
+        return;
+    }
+
+    event.ignore();
+}
+
 void Window::handle_key_event(KeyEvent& event)
 {
     if (!m_focused_widget && event.type() == Event::KeyDown && event.key() == Key_Tab && !event.ctrl() && !event.alt() && !event.super()) {
@@ -465,9 +496,16 @@ void Window::handle_key_event(KeyEvent& event)
             return default_return_key_widget()->dispatch_event(event, this);
 
     if (m_focused_widget)
-        return m_focused_widget->dispatch_event(event, this);
-    if (m_main_widget)
-        return m_main_widget->dispatch_event(event, this);
+        m_focused_widget->dispatch_event(event, this);
+    else if (m_main_widget)
+        m_main_widget->dispatch_event(event, this);
+
+    if (event.is_accepted())
+        return;
+
+    // Only process shortcuts if this is a keydown event.
+    if (event.type() == Event::KeyDown)
+        propagate_shortcuts_up_to_application(event, nullptr);
 }
 
 void Window::handle_resize_event(ResizeEvent& event)
@@ -938,9 +976,9 @@ void Window::apply_icon()
     ConnectionToWindowServer::the().async_set_window_icon_bitmap(m_window_id, m_icon->to_shareable_bitmap());
 }
 
-void Window::start_interactive_resize()
+void Window::start_interactive_resize(ResizeDirection resize_direction)
 {
-    ConnectionToWindowServer::the().async_start_window_resize(m_window_id);
+    ConnectionToWindowServer::the().async_start_window_resize(m_window_id, (i32)resize_direction);
 }
 
 Vector<Widget&> Window::focusable_widgets(FocusSource source) const
@@ -1036,6 +1074,18 @@ void Window::set_maximized(bool maximized)
     ConnectionToWindowServer::the().async_set_maximized(m_window_id, maximized);
 }
 
+void Window::set_minimized(bool minimized)
+{
+    if (!is_minimizable())
+        return;
+
+    m_minimized = minimized;
+    if (!is_visible())
+        return;
+
+    ConnectionToWindowServer::the().async_set_minimized(m_window_id, minimized);
+}
+
 void Window::update_min_size()
 {
     if (main_widget()) {
@@ -1119,15 +1169,7 @@ void Window::notify_input_preempted(Badge<ConnectionToWindowServer>, InputPreemp
 
 Action* Window::action_for_shortcut(Shortcut const& shortcut)
 {
-    Action* found_action = nullptr;
-    for_each_child_of_type<Action>([&](auto& action) {
-        if (action.shortcut() == shortcut || action.alternate_shortcut() == shortcut) {
-            found_action = &action;
-            return IterationDecision::Break;
-        }
-        return IterationDecision::Continue;
-    });
-    return found_action;
+    return Action::find_action_for_shortcut(*this, shortcut);
 }
 
 void Window::set_base_size(Gfx::IntSize const& base_size)
@@ -1279,6 +1321,13 @@ void Window::flush_pending_paints_immediately()
         return;
     MultiPaintEvent paint_event(move(m_pending_paint_event_rects), size());
     handle_multi_paint_event(paint_event);
+}
+
+void Window::set_always_on_top(bool always_on_top)
+{
+    if (!m_window_id)
+        return;
+    ConnectionToWindowServer::the().set_always_on_top(m_window_id, always_on_top);
 }
 
 }

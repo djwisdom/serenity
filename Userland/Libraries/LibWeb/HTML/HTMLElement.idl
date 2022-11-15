@@ -7,6 +7,7 @@ interface HTMLElement : Element {
 
     [Reflect] attribute DOMString title;
     [Reflect] attribute DOMString lang;
+    attribute DOMString dir;
 
     [Reflect] attribute boolean hidden;
 
@@ -32,4 +33,7 @@ HTMLElement includes HTMLOrSVGElement;
 
 interface mixin HTMLOrSVGElement {
     [SameObject] readonly attribute DOMStringMap dataset;
+
+    [CEReactions, Reflect] attribute boolean autofocus;
+    [CEReactions] attribute long tabIndex;
 };

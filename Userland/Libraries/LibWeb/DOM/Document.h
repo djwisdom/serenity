@@ -107,6 +107,7 @@ public:
     AK::URL fallback_base_url() const;
     AK::URL base_url() const;
 
+    void update_base_element(Badge<HTML::HTMLBaseElement>);
     JS::GCPtr<HTML::HTMLBaseElement> first_base_element_with_href_in_tree_order() const;
 
     String url_string() const { return m_url.to_string(); }
@@ -217,7 +218,7 @@ public:
     JS::NonnullGCPtr<HTMLCollection> all();
 
     String const& source() const { return m_source; }
-    void set_source(String const& source) { m_source = source; }
+    void set_source(String source) { m_source = move(source); }
 
     HTML::EnvironmentSettingsObject& relevant_settings_object();
 
@@ -254,6 +255,9 @@ public:
     Type document_type() const { return m_type; }
     void set_document_type(Type type) { m_type = type; }
 
+    // https://dom.spec.whatwg.org/#html-document
+    bool is_html_document() const { return m_type == Type::HTML; }
+
     // https://dom.spec.whatwg.org/#xml-document
     bool is_xml_document() const { return m_type == Type::XML; }
 
@@ -277,11 +281,8 @@ public:
     void set_active_element(Element*);
 
     bool created_for_appropriate_template_contents() const { return m_created_for_appropriate_template_contents; }
-    void set_created_for_appropriate_template_contents(bool value) { m_created_for_appropriate_template_contents = value; }
 
-    Document* associated_inert_template_document() { return m_associated_inert_template_document.ptr(); }
-    Document const* associated_inert_template_document() const { return m_associated_inert_template_document.ptr(); }
-    void set_associated_inert_template_document(Document& document) { m_associated_inert_template_document = &document; }
+    JS::NonnullGCPtr<Document> appropriate_template_contents_owner_document();
 
     String ready_state() const;
     void update_readiness(HTML::DocumentReadyState);
@@ -297,6 +298,7 @@ public:
     WebIDL::ExceptionOr<void> close();
 
     HTML::Window* default_view() { return m_window.ptr(); }
+    HTML::Window const* default_view() const { return m_window.ptr(); }
 
     String const& content_type() const { return m_content_type; }
     void set_content_type(String const& content_type) { m_content_type = content_type; }
@@ -416,7 +418,7 @@ public:
     HTML::PolicyContainer policy_container() const;
 
     // https://html.spec.whatwg.org/multipage/browsers.html#list-of-the-descendant-browsing-contexts
-    Vector<NonnullRefPtr<HTML::BrowsingContext>> list_of_descendant_browsing_contexts() const;
+    Vector<JS::Handle<HTML::BrowsingContext>> list_of_descendant_browsing_contexts() const;
 
     // https://html.spec.whatwg.org/multipage/window-object.html#discard-a-document
     void discard();
@@ -428,7 +430,7 @@ public:
     void unload(bool recursive_flag = false, Optional<DocumentUnloadTimingInfo> = {});
 
     // https://html.spec.whatwg.org/multipage/dom.html#active-parser
-    RefPtr<HTML::HTMLParser> active_parser();
+    JS::GCPtr<HTML::HTMLParser> active_parser();
 
     // https://html.spec.whatwg.org/multipage/dom.html#load-timing-info
     DocumentLoadTimingInfo& load_timing_info() { return m_load_timing_info; }
@@ -439,6 +441,10 @@ public:
     DocumentUnloadTimingInfo& previous_document_unload_timing() { return m_previous_document_unload_timing; }
     DocumentUnloadTimingInfo const& previous_document_unload_timing() const { return m_previous_document_unload_timing; }
     void set_previous_document_unload_timing(DocumentUnloadTimingInfo const& previous_document_unload_timing) { m_previous_document_unload_timing = previous_document_unload_timing; }
+
+    void did_stop_being_active_document_in_browsing_context(Badge<HTML::BrowsingContext>);
+
+    bool query_command_supported(String const&) const;
 
 protected:
     virtual void visit_edges(Cell::Visitor&) override;
@@ -467,7 +473,7 @@ private:
 
     JS::GCPtr<HTML::Window> m_window;
 
-    RefPtr<Layout::InitialContainingBlock> m_layout_root;
+    JS::GCPtr<Layout::InitialContainingBlock> m_layout_root;
 
     Optional<Color> m_link_color;
     Optional<Color> m_active_link_color;
@@ -476,7 +482,7 @@ private:
     RefPtr<Platform::Timer> m_style_update_timer;
     RefPtr<Platform::Timer> m_layout_update_timer;
 
-    RefPtr<HTML::HTMLParser> m_parser;
+    JS::GCPtr<HTML::HTMLParser> m_parser;
     bool m_active_parser_was_aborted { false };
 
     String m_source;
@@ -503,6 +509,7 @@ private:
 
     bool m_created_for_appropriate_template_contents { false };
     JS::GCPtr<Document> m_associated_inert_template_document;
+    JS::GCPtr<Document> m_appropriate_template_contents_owner_document;
 
     HTML::DocumentReadyState m_readiness { HTML::DocumentReadyState::Loading };
     String m_content_type { "application/xml" };
@@ -596,7 +603,11 @@ private:
     // https://html.spec.whatwg.org/multipage/dom.html#previous-document-unload-timing
     DocumentUnloadTimingInfo m_previous_document_unload_timing;
 
+    // https://w3c.github.io/selection-api/#dfn-selection
     JS::GCPtr<Selection::Selection> m_selection;
+
+    // NOTE: This is a cache to make finding the first <base href> element O(1).
+    JS::GCPtr<HTML::HTMLBaseElement> m_first_base_element_with_href_in_tree_order;
 };
 
 }

@@ -12,16 +12,18 @@ configopts=(
     "-DQT_BUILD_TOOLS_WHEN_CROSSCOMPILING=ON"
     "-DQT_HOST_PATH=/usr"
     "-DQT_FEATURE_cxx20=ON"
+    "-DQT_FEATURE_ssl=ON"
+    "-DQT_FEATURE_zstd=ON"
     "-DINPUT_opengl=no"
 )
-depends=("md4c")
+depends=("md4c" "zstd" "openssl")
 
 QT_HOST_PATH=/usr
 QT_HOST_CMAKE_PATH=${QT_HOST_PATH}/lib64/cmake
 QT_HOST_TOOLS="HostInfo CoreTools GuiTools WidgetsTools"
 QT_HOST_TOOLS_PATH="${QT_HOST_CMAKE_PATH}/Qt6%s/\n"
 
-QT_DISABLED_FEATURES="sql opengl dbus systemsemaphore sharedmemory thread network"
+QT_DISABLED_FEATURES="sql opengl dbus systemsemaphore sharedmemory dnslookup"
 
 configure() {
     for host_tool in ${QT_HOST_TOOLS}; do

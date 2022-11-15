@@ -13,6 +13,10 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWebView/ViewImplementation.h>
 
+namespace Messages::WebContentServer {
+class WebdriverExecuteScriptResponse;
+}
+
 namespace WebView {
 
 class WebContentClient;
@@ -61,6 +65,15 @@ public:
     void set_content_filters(Vector<String>);
     void set_proxy_mappings(Vector<String> proxies, HashMap<String, size_t> mappings);
     void set_preferred_color_scheme(Web::CSS::PreferredColorScheme);
+    void connect_to_webdriver(String const& webdriver_ipc_path);
+
+    void set_window_position(Gfx::IntPoint const&);
+    void set_window_size(Gfx::IntSize const&);
+
+    void set_system_visibility_state(bool visible);
+
+    Gfx::ShareableBitmap take_screenshot() const;
+    Gfx::ShareableBitmap take_document_screenshot();
 
     Function<void(Gfx::IntPoint const& screen_position)> on_context_menu_request;
     Function<void(const AK::URL&, String const& target, unsigned modifiers)> on_link_click;
@@ -71,6 +84,9 @@ public:
     Function<void(String const&)> on_title_change;
     Function<void(const AK::URL&)> on_load_start;
     Function<void(const AK::URL&)> on_load_finish;
+    Function<void()> on_navigate_back;
+    Function<void()> on_navigate_forward;
+    Function<void()> on_refresh;
     Function<void(Gfx::Bitmap const&)> on_favicon_change;
     Function<void(const AK::URL&)> on_url_drop;
     Function<void(Web::DOM::Document*)> on_set_document;
@@ -79,9 +95,18 @@ public:
     Function<void(i32 node_id, String const& specified_style, String const& computed_style, String const& custom_properties, String const& node_box_sizing)> on_get_dom_node_properties;
     Function<void(i32 message_id)> on_js_console_new_message;
     Function<void(i32 start_index, Vector<String> const& message_types, Vector<String> const& messages)> on_get_js_console_messages;
+    Function<Vector<Web::Cookie::Cookie>(AK::URL const& url)> on_get_all_cookies;
+    Function<Optional<Web::Cookie::Cookie>(AK::URL const& url, String const& name)> on_get_named_cookie;
     Function<String(const AK::URL& url, Web::Cookie::Source source)> on_get_cookie;
     Function<void(const AK::URL& url, Web::Cookie::ParsedCookie const& cookie, Web::Cookie::Source source)> on_set_cookie;
+    Function<void(AK::URL const& url, Web::Cookie::Cookie const& cookie)> on_update_cookie;
     Function<void(i32 count_waiting)> on_resource_status_change;
+    Function<void()> on_restore_window;
+    Function<Gfx::IntPoint(Gfx::IntPoint const&)> on_reposition_window;
+    Function<Gfx::IntSize(Gfx::IntSize const&)> on_resize_window;
+    Function<Gfx::IntRect()> on_maximize_window;
+    Function<Gfx::IntRect()> on_minimize_window;
+    Function<Gfx::IntRect()> on_fullscreen_window;
 
 private:
     OutOfProcessWebView();
@@ -124,6 +149,9 @@ private:
     virtual void notify_server_did_middle_click_link(Badge<WebContentClient>, const AK::URL&, String const& target, unsigned modifiers) override;
     virtual void notify_server_did_start_loading(Badge<WebContentClient>, const AK::URL&) override;
     virtual void notify_server_did_finish_loading(Badge<WebContentClient>, const AK::URL&) override;
+    virtual void notify_server_did_request_navigate_back(Badge<WebContentClient>) override;
+    virtual void notify_server_did_request_navigate_forward(Badge<WebContentClient>) override;
+    virtual void notify_server_did_request_refresh(Badge<WebContentClient>) override;
     virtual void notify_server_did_request_context_menu(Badge<WebContentClient>, Gfx::IntPoint const&) override;
     virtual void notify_server_did_request_link_context_menu(Badge<WebContentClient>, Gfx::IntPoint const&, const AK::URL&, String const& target, unsigned modifiers) override;
     virtual void notify_server_did_request_image_context_menu(Badge<WebContentClient>, Gfx::IntPoint const&, const AK::URL&, String const& target, unsigned modifiers, Gfx::ShareableBitmap const&) override;
@@ -136,9 +164,18 @@ private:
     virtual void notify_server_did_output_js_console_message(i32 message_index) override;
     virtual void notify_server_did_get_js_console_messages(i32 start_index, Vector<String> const& message_types, Vector<String> const& messages) override;
     virtual void notify_server_did_change_favicon(Gfx::Bitmap const& favicon) override;
+    virtual Vector<Web::Cookie::Cookie> notify_server_did_request_all_cookies(Badge<WebContentClient>, AK::URL const& url) override;
+    virtual Optional<Web::Cookie::Cookie> notify_server_did_request_named_cookie(Badge<WebContentClient>, AK::URL const& url, String const& name) override;
     virtual String notify_server_did_request_cookie(Badge<WebContentClient>, const AK::URL& url, Web::Cookie::Source source) override;
     virtual void notify_server_did_set_cookie(Badge<WebContentClient>, const AK::URL& url, Web::Cookie::ParsedCookie const& cookie, Web::Cookie::Source source) override;
+    virtual void notify_server_did_update_cookie(Badge<WebContentClient>, AK::URL const& url, Web::Cookie::Cookie const& cookie) override;
     virtual void notify_server_did_update_resource_count(i32 count_waiting) override;
+    virtual void notify_server_did_request_restore_window() override;
+    virtual Gfx::IntPoint notify_server_did_request_reposition_window(Gfx::IntPoint const&) override;
+    virtual Gfx::IntSize notify_server_did_request_resize_window(Gfx::IntSize const&) override;
+    virtual Gfx::IntRect notify_server_did_request_maximize_window() override;
+    virtual Gfx::IntRect notify_server_did_request_minimize_window() override;
+    virtual Gfx::IntRect notify_server_did_request_fullscreen_window() override;
     virtual void notify_server_did_request_file(Badge<WebContentClient>, String const& path, i32) override;
 
     void request_repaint();

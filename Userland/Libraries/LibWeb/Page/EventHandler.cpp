@@ -9,6 +9,7 @@
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/Focus.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
 #include <LibWeb/HTML/HTMLIFrameElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
@@ -19,8 +20,32 @@
 #include <LibWeb/UIEvents/EventNames.h>
 #include <LibWeb/UIEvents/KeyboardEvent.h>
 #include <LibWeb/UIEvents/MouseEvent.h>
+#include <LibWeb/UIEvents/WheelEvent.h>
 
 namespace Web {
+
+static JS::GCPtr<DOM::Node> dom_node_for_event_dispatch(Painting::Paintable const& paintable)
+{
+    if (auto node = paintable.mouse_event_target())
+        return node;
+    if (auto node = paintable.dom_node())
+        return node;
+    if (auto* layout_parent = paintable.layout_node().parent())
+        return layout_parent->dom_node();
+    return nullptr;
+}
+
+static bool parent_element_for_event_dispatch(Painting::Paintable const& paintable, JS::GCPtr<DOM::Node>& node, Layout::Node const*& layout_node)
+{
+    layout_node = &paintable.layout_node();
+    while (layout_node && node && !node->is_element() && layout_node->parent()) {
+        layout_node = layout_node->parent();
+        if (layout_node->is_anonymous())
+            continue;
+        node = layout_node->dom_node();
+    }
+    return node && layout_node;
+}
 
 static Gfx::StandardCursor cursor_css_to_gfx(Optional<CSS::Cursor> cursor)
 {
@@ -122,7 +147,7 @@ Painting::PaintableBox const* EventHandler::paint_root() const
     return const_cast<Painting::PaintableBox*>(m_browsing_context.active_document()->paint_box());
 }
 
-bool EventHandler::handle_mousewheel(Gfx::IntPoint const& position, unsigned int buttons, unsigned int modifiers, int wheel_delta_x, int wheel_delta_y)
+bool EventHandler::handle_mousewheel(Gfx::IntPoint const& position, unsigned button, unsigned buttons, unsigned int modifiers, int wheel_delta_x, int wheel_delta_y)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -133,21 +158,47 @@ bool EventHandler::handle_mousewheel(Gfx::IntPoint const& position, unsigned int
     if (modifiers & KeyModifier::Mod_Shift)
         swap(wheel_delta_x, wheel_delta_y);
 
-    // FIXME: Support wheel events in nested browsing contexts.
+    bool handled_event = false;
 
-    auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::Exact);
-    if (result.has_value() && result->paintable->handle_mousewheel({}, position, buttons, modifiers, wheel_delta_x, wheel_delta_y))
-        return true;
-
-    if (auto* page = m_browsing_context.page()) {
-        page->client().page_did_request_scroll(wheel_delta_x * 20, wheel_delta_y * 20);
-        return true;
+    RefPtr<Painting::Paintable> paintable;
+    if (m_mouse_event_tracking_layout_node) {
+        paintable = m_mouse_event_tracking_layout_node->paintable();
+    } else {
+        if (auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::Exact); result.has_value())
+            paintable = result->paintable;
     }
 
-    return false;
+    if (paintable) {
+        paintable->handle_mousewheel({}, position, buttons, modifiers, wheel_delta_x, wheel_delta_y);
+
+        auto node = dom_node_for_event_dispatch(*paintable);
+
+        if (node) {
+            // FIXME: Support wheel events in nested browsing contexts.
+            if (is<HTML::HTMLIFrameElement>(*node)) {
+                return false;
+            }
+
+            // Search for the first parent of the hit target that's an element.
+            Layout::Node const* layout_node;
+            if (!parent_element_for_event_dispatch(*paintable, node, layout_node))
+                return false;
+
+            auto offset = compute_mouse_event_offset(position, *layout_node);
+            if (node->dispatch_event(*UIEvents::WheelEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::wheel, offset.x(), offset.y(), position.x(), position.y(), wheel_delta_x, wheel_delta_y, buttons, button))) {
+                if (auto* page = m_browsing_context.page()) {
+                    page->client().page_did_request_scroll(wheel_delta_x * 20, wheel_delta_y * 20);
+                }
+            }
+
+            handled_event = true;
+        }
+    }
+
+    return handled_event;
 }
 
-bool EventHandler::handle_mouseup(Gfx::IntPoint const& position, unsigned button, unsigned modifiers)
+bool EventHandler::handle_mouseup(Gfx::IntPoint const& position, unsigned button, unsigned buttons, unsigned modifiers)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -177,32 +228,26 @@ bool EventHandler::handle_mouseup(Gfx::IntPoint const& position, unsigned button
     }
 
     if (paintable) {
-        JS::GCPtr<DOM::Node> node = paintable->mouse_event_target();
-        if (!node)
-            node = paintable->dom_node();
+        auto node = dom_node_for_event_dispatch(*paintable);
 
         if (node) {
             if (is<HTML::HTMLIFrameElement>(*node)) {
                 if (auto* nested_browsing_context = static_cast<HTML::HTMLIFrameElement&>(*node).nested_browsing_context())
-                    return nested_browsing_context->event_handler().handle_mouseup(position.translated(compute_mouse_event_offset({}, paintable->layout_node())), button, modifiers);
+                    return nested_browsing_context->event_handler().handle_mouseup(position.translated(compute_mouse_event_offset({}, paintable->layout_node())), button, buttons, modifiers);
                 return false;
             }
 
             // Search for the first parent of the hit target that's an element.
             // "The click event type MUST be dispatched on the topmost event target indicated by the pointer." (https://www.w3.org/TR/uievents/#event-type-click)
             // "The topmost event target MUST be the element highest in the rendering order which is capable of being an event target." (https://www.w3.org/TR/uievents/#topmost-event-target)
-            auto* layout_node = &paintable->layout_node();
-            while (layout_node && node && !node->is_element() && layout_node->parent()) {
-                layout_node = layout_node->parent();
-                node = layout_node->dom_node();
-            }
-            if (!node || !layout_node) {
+            Layout::Node const* layout_node;
+            if (!parent_element_for_event_dispatch(*paintable, node, layout_node)) {
                 // FIXME: This is pretty ugly but we need to bail out here.
                 goto after_node_use;
             }
 
             auto offset = compute_mouse_event_offset(position, *layout_node);
-            node->dispatch_event(*UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::mouseup, offset.x(), offset.y(), position.x(), position.y(), button));
+            node->dispatch_event(*UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::mouseup, offset.x(), offset.y(), position.x(), position.y(), buttons, button));
             handled_event = true;
 
             bool run_activation_behavior = true;
@@ -268,7 +313,7 @@ after_node_use:
     return handled_event;
 }
 
-bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned button, unsigned modifiers)
+bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned button, unsigned buttons, unsigned modifiers)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -280,7 +325,6 @@ bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned butt
     JS::GCPtr<DOM::Node> node;
 
     {
-        // TODO: Allow selecting element behind if one on top has pointer-events set to none.
         RefPtr<Painting::Paintable> paintable;
         if (m_mouse_event_tracking_layout_node) {
             paintable = m_mouse_event_tracking_layout_node->paintable();
@@ -293,12 +337,9 @@ bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned butt
 
         auto pointer_events = paintable->computed_values().pointer_events();
         // FIXME: Handle other values for pointer-events.
-        if (pointer_events == CSS::PointerEvents::None)
-            return false;
+        VERIFY(pointer_events != CSS::PointerEvents::None);
 
-        node = paintable->mouse_event_target();
-        if (!node)
-            node = paintable->dom_node();
+        node = dom_node_for_event_dispatch(*paintable);
         document->set_hovered_node(node);
 
         if (paintable->wants_mouse_events()) {
@@ -311,7 +352,7 @@ bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned butt
 
         if (is<HTML::HTMLIFrameElement>(*node)) {
             if (auto* nested_browsing_context = static_cast<HTML::HTMLIFrameElement&>(*node).nested_browsing_context())
-                return nested_browsing_context->event_handler().handle_mousedown(position.translated(compute_mouse_event_offset({}, paintable->layout_node())), button, modifiers);
+                return nested_browsing_context->event_handler().handle_mousedown(position.translated(compute_mouse_event_offset({}, paintable->layout_node())), button, buttons, modifiers);
             return false;
         }
 
@@ -321,17 +362,13 @@ bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned butt
         // Search for the first parent of the hit target that's an element.
         // "The click event type MUST be dispatched on the topmost event target indicated by the pointer." (https://www.w3.org/TR/uievents/#event-type-click)
         // "The topmost event target MUST be the element highest in the rendering order which is capable of being an event target." (https://www.w3.org/TR/uievents/#topmost-event-target)
-        auto* layout_node = &paintable->layout_node();
-        while (layout_node && node && !node->is_element() && layout_node->parent()) {
-            layout_node = layout_node->parent();
-            node = layout_node->dom_node();
-        }
-        if (!node || !layout_node)
+        Layout::Node const* layout_node;
+        if (!parent_element_for_event_dispatch(*paintable, node, layout_node))
             return false;
 
         m_mousedown_target = node.ptr();
         auto offset = compute_mouse_event_offset(position, *layout_node);
-        node->dispatch_event(*UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::mousedown, offset.x(), offset.y(), position.x(), position.y(), button));
+        node->dispatch_event(*UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::mousedown, offset.x(), offset.y(), position.x(), position.y(), buttons, button));
     }
 
     // NOTE: Dispatching an event may have disturbed the world.
@@ -346,7 +383,9 @@ bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned butt
                 bool did_focus_something = false;
                 for (auto candidate = node; candidate; candidate = candidate->parent()) {
                     if (candidate->is_focusable()) {
-                        document->set_focused_element(verify_cast<DOM::Element>(candidate.ptr()));
+                        // When a user activates a click focusable focusable area, the user agent must run the focusing steps on the focusable area with focus trigger set to "click".
+                        // Spec Note: Note that focusing is not an activation behavior, i.e. calling the click() method on an element or dispatching a synthetic click event on it won't cause the element to get focused.
+                        HTML::run_focusing_steps(candidate.ptr(), nullptr, "click"sv);
                         did_focus_something = true;
                         break;
                     }
@@ -402,9 +441,7 @@ bool EventHandler::handle_mousemove(Gfx::IntPoint const& position, unsigned butt
                 page->client().page_did_request_cursor_change(Gfx::StandardCursor::None);
         }
 
-        JS::GCPtr<DOM::Node> node = paintable->mouse_event_target();
-        if (!node)
-            node = paintable->dom_node();
+        auto node = dom_node_for_event_dispatch(*paintable);
 
         if (node && is<HTML::HTMLIFrameElement>(*node)) {
             if (auto* nested_browsing_context = static_cast<HTML::HTMLIFrameElement&>(*node).nested_browsing_context())
@@ -414,12 +451,16 @@ bool EventHandler::handle_mousemove(Gfx::IntPoint const& position, unsigned butt
 
         auto pointer_events = paintable->computed_values().pointer_events();
         // FIXME: Handle other values for pointer-events.
-        if (pointer_events == CSS::PointerEvents::None)
-            return false;
+        VERIFY(pointer_events != CSS::PointerEvents::None);
 
+        // Search for the first parent of the hit target that's an element.
+        // "The click event type MUST be dispatched on the topmost event target indicated by the pointer." (https://www.w3.org/TR/uievents/#event-type-click)
+        // "The topmost event target MUST be the element highest in the rendering order which is capable of being an event target." (https://www.w3.org/TR/uievents/#topmost-event-target)
+        Layout::Node const* layout_node;
+        bool found_parent_element = parent_element_for_event_dispatch(*paintable, node, layout_node);
         hovered_node_changed = node.ptr() != document.hovered_node();
         document.set_hovered_node(node);
-        if (node) {
+        if (found_parent_element) {
             hovered_link_element = node->enclosing_link_element();
             if (hovered_link_element)
                 is_hovering_link = true;
@@ -438,26 +479,12 @@ bool EventHandler::handle_mousemove(Gfx::IntPoint const& position, unsigned butt
                     hovered_node_cursor = cursor_css_to_gfx(cursor);
             }
 
-            // Search for the first parent of the hit target that's an element.
-            // "The click event type MUST be dispatched on the topmost event target indicated by the pointer." (https://www.w3.org/TR/uievents/#event-type-click)
-            // "The topmost event target MUST be the element highest in the rendering order which is capable of being an event target." (https://www.w3.org/TR/uievents/#topmost-event-target)
-            auto* layout_node = &paintable->layout_node();
-            while (layout_node && node && !node->is_element() && layout_node->parent()) {
-                layout_node = layout_node->parent();
-                node = layout_node->dom_node();
-            }
-            if (!node || !layout_node) {
-                // FIXME: This is pretty ugly but we need to bail out here.
-                goto after_node_use;
-            }
-
             auto offset = compute_mouse_event_offset(position, *layout_node);
-            node->dispatch_event(*UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::mousemove, offset.x(), offset.y(), position.x(), position.y()));
+            node->dispatch_event(*UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::mousemove, offset.x(), offset.y(), position.x(), position.y(), buttons));
             // NOTE: Dispatching an event may have disturbed the world.
             if (!paint_root() || paint_root() != node->document().paint_box())
                 return true;
         }
-    after_node_use:
         if (m_in_mouse_selection) {
             auto hit = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::TextCursor);
             if (start_index.has_value() && hit.has_value() && hit->dom_node()) {
@@ -489,7 +516,7 @@ bool EventHandler::handle_mousemove(Gfx::IntPoint const& position, unsigned butt
     return true;
 }
 
-bool EventHandler::handle_doubleclick(Gfx::IntPoint const& position, unsigned button, unsigned modifiers)
+bool EventHandler::handle_doubleclick(Gfx::IntPoint const& position, unsigned button, unsigned buttons, unsigned modifiers)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -497,7 +524,6 @@ bool EventHandler::handle_doubleclick(Gfx::IntPoint const& position, unsigned bu
     if (!paint_root())
         return false;
 
-    // TODO: Allow selecting element behind if one on top has pointer-events set to none.
     RefPtr<Painting::Paintable> paintable;
     if (m_mouse_event_tracking_layout_node) {
         paintable = m_mouse_event_tracking_layout_node->paintable();
@@ -513,9 +539,7 @@ bool EventHandler::handle_doubleclick(Gfx::IntPoint const& position, unsigned bu
     if (pointer_events == CSS::PointerEvents::None)
         return false;
 
-    JS::GCPtr<DOM::Node> node = paintable->mouse_event_target();
-    if (!node)
-        node = paintable->dom_node();
+    auto node = dom_node_for_event_dispatch(*paintable);
 
     if (paintable->wants_mouse_events()) {
         // FIXME: Handle double clicks.
@@ -526,22 +550,18 @@ bool EventHandler::handle_doubleclick(Gfx::IntPoint const& position, unsigned bu
 
     if (is<HTML::HTMLIFrameElement>(*node)) {
         if (auto* nested_browsing_context = static_cast<HTML::HTMLIFrameElement&>(*node).nested_browsing_context())
-            return nested_browsing_context->event_handler().handle_doubleclick(position.translated(compute_mouse_event_offset({}, paintable->layout_node())), button, modifiers);
+            return nested_browsing_context->event_handler().handle_doubleclick(position.translated(compute_mouse_event_offset({}, paintable->layout_node())), button, buttons, modifiers);
         return false;
     }
 
     // Search for the first parent of the hit target that's an element.
     // "The topmost event target MUST be the element highest in the rendering order which is capable of being an event target." (https://www.w3.org/TR/uievents/#topmost-event-target)
-    auto* layout_node = &paintable->layout_node();
-    while (layout_node && node && !node->is_element() && layout_node->parent()) {
-        layout_node = layout_node->parent();
-        node = layout_node->dom_node();
-    }
-    if (!node || !layout_node)
+    Layout::Node const* layout_node;
+    if (!parent_element_for_event_dispatch(*paintable, node, layout_node))
         return false;
 
     auto offset = compute_mouse_event_offset(position, *layout_node);
-    node->dispatch_event(*UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::dblclick, offset.x(), offset.y(), position.x(), position.y(), button));
+    node->dispatch_event(*UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::dblclick, offset.x(), offset.y(), position.x(), position.y(), buttons, button));
 
     // NOTE: Dispatching an event may have disturbed the world.
     if (!paint_root() || paint_root() != node->document().paint_box())
@@ -632,6 +652,32 @@ constexpr bool should_ignore_keydown_event(u32 code_point)
     return code_point == 0 || code_point == 27;
 }
 
+bool EventHandler::fire_keyboard_event(FlyString const& event_name, HTML::BrowsingContext& browsing_context, KeyCode key, unsigned int modifiers, u32 code_point)
+{
+    JS::NonnullGCPtr<DOM::Document> document = *browsing_context.active_document();
+    if (!document)
+        return false;
+
+    if (JS::GCPtr<DOM::Element> focused_element = document->focused_element()) {
+        if (is<HTML::BrowsingContextContainer>(*focused_element)) {
+            auto& browsing_context_container = verify_cast<HTML::BrowsingContextContainer>(*focused_element);
+            if (browsing_context_container.nested_browsing_context())
+                return fire_keyboard_event(event_name, *browsing_context_container.nested_browsing_context(), key, modifiers, code_point);
+        }
+
+        auto event = UIEvents::KeyboardEvent::create_from_platform_event(document->realm(), event_name, key, modifiers, code_point);
+        return focused_element->dispatch_event(*event);
+    }
+
+    // FIXME: De-duplicate this. This is just to prevent wasting a KeyboardEvent allocation when recursing into an (i)frame.
+    auto event = UIEvents::KeyboardEvent::create_from_platform_event(document->realm(), event_name, key, modifiers, code_point);
+
+    if (JS::GCPtr<HTML::HTMLElement> body = document->body())
+        return body->dispatch_event(*event);
+
+    return document->root().dispatch_event(*event);
+}
+
 bool EventHandler::handle_keydown(KeyCode key, unsigned modifiers, u32 code_point)
 {
     if (!m_browsing_context.active_document())
@@ -641,7 +687,7 @@ bool EventHandler::handle_keydown(KeyCode key, unsigned modifiers, u32 code_poin
     if (!document->layout_node())
         return false;
 
-    NonnullRefPtr<Layout::InitialContainingBlock> layout_root = *document->layout_node();
+    JS::NonnullGCPtr<Layout::InitialContainingBlock> layout_root = *document->layout_node();
 
     if (key == KeyCode::Key_Tab) {
         if (modifiers & KeyModifier::Mod_Shift)
@@ -720,32 +766,17 @@ bool EventHandler::handle_keydown(KeyCode key, unsigned modifiers, u32 code_poin
         return true;
     }
 
-    auto event = UIEvents::KeyboardEvent::create_from_platform_event(document->realm(), UIEvents::EventNames::keydown, key, modifiers, code_point);
+    bool continue_ = fire_keyboard_event(UIEvents::EventNames::keydown, m_browsing_context, key, modifiers, code_point);
+    if (!continue_)
+        return false;
 
-    if (JS::GCPtr<DOM::Element> focused_element = document->focused_element())
-        return focused_element->dispatch_event(*event);
-
-    if (JS::GCPtr<HTML::HTMLElement> body = m_browsing_context.active_document()->body())
-        return body->dispatch_event(*event);
-
-    return document->root().dispatch_event(*event);
+    // FIXME: Work out and implement the difference between this and keydown.
+    return fire_keyboard_event(UIEvents::EventNames::keypress, m_browsing_context, key, modifiers, code_point);
 }
 
 bool EventHandler::handle_keyup(KeyCode key, unsigned modifiers, u32 code_point)
 {
-    JS::GCPtr<DOM::Document> document = m_browsing_context.active_document();
-    if (!document)
-        return false;
-
-    auto event = UIEvents::KeyboardEvent::create_from_platform_event(document->realm(), UIEvents::EventNames::keyup, key, modifiers, code_point);
-
-    if (JS::GCPtr<DOM::Element> focused_element = document->focused_element())
-        return document->focused_element()->dispatch_event(*event);
-
-    if (JS::GCPtr<HTML::HTMLElement> body = document->body())
-        return body->dispatch_event(*event);
-
-    return document->root().dispatch_event(*event);
+    return fire_keyboard_event(UIEvents::EventNames::keyup, m_browsing_context, key, modifiers, code_point);
 }
 
 void EventHandler::set_mouse_event_tracking_layout_node(Layout::Node* layout_node)

@@ -23,11 +23,11 @@ HTMLProgressElement::HTMLProgressElement(DOM::Document& document, DOM::Qualified
 
 HTMLProgressElement::~HTMLProgressElement() = default;
 
-RefPtr<Layout::Node> HTMLProgressElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
+JS::GCPtr<Layout::Node> HTMLProgressElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
 {
     if (style->appearance().value_or(CSS::Appearance::Auto) == CSS::Appearance::None)
         return HTMLElement::create_layout_node(style);
-    return adopt_ref(*new Layout::Progress(document(), *this, move(style)));
+    return heap().allocate_without_realm<Layout::Progress>(document(), *this, move(style));
 }
 
 bool HTMLProgressElement::using_system_appearance() const
@@ -47,15 +47,19 @@ void HTMLProgressElement::progress_position_updated()
 
 double HTMLProgressElement::value() const
 {
-    auto value_characters = attribute(HTML::AttributeNames::value).characters();
+    auto const& value_characters = attribute(HTML::AttributeNames::value);
     if (value_characters == nullptr)
         return 0;
 
-    auto parsed_value = strtod(value_characters, nullptr);
-    if (!isfinite(parsed_value) || parsed_value < 0)
+    // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-floating-point-number-values
+    // 6. Skip ASCII whitespace within input given position.
+    auto maybe_double = value_characters.to_double(AK::TrimWhitespace::Yes);
+    if (!maybe_double.has_value())
+        return 0;
+    if (!isfinite(maybe_double.value()) || maybe_double.value() < 0)
         return 0;
 
-    return min(parsed_value, max());
+    return min(maybe_double.value(), max());
 }
 
 void HTMLProgressElement::set_value(double value)
@@ -63,21 +67,25 @@ void HTMLProgressElement::set_value(double value)
     if (value < 0)
         return;
 
-    set_attribute(HTML::AttributeNames::value, String::number(value));
+    MUST(set_attribute(HTML::AttributeNames::value, String::number(value)));
     progress_position_updated();
 }
 
 double HTMLProgressElement::max() const
 {
-    auto max_characters = attribute(HTML::AttributeNames::max).characters();
+    auto const& max_characters = attribute(HTML::AttributeNames::max);
     if (max_characters == nullptr)
         return 1;
 
-    auto parsed_value = strtod(max_characters, nullptr);
-    if (!isfinite(parsed_value) || parsed_value <= 0)
+    // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-floating-point-number-values
+    // 6. Skip ASCII whitespace within input given position.
+    auto double_or_none = max_characters.to_double(AK::TrimWhitespace::Yes);
+    if (!double_or_none.has_value())
+        return 1;
+    if (!isfinite(double_or_none.value()) || double_or_none.value() <= 0)
         return 1;
 
-    return parsed_value;
+    return double_or_none.value();
 }
 
 void HTMLProgressElement::set_max(double value)
@@ -85,7 +93,7 @@ void HTMLProgressElement::set_max(double value)
     if (value <= 0)
         return;
 
-    set_attribute(HTML::AttributeNames::max, String::number(value));
+    MUST(set_attribute(HTML::AttributeNames::max, String::number(value)));
     progress_position_updated();
 }
 

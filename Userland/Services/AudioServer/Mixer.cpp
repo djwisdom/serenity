@@ -45,11 +45,10 @@ Mixer::Mixer(NonnullRefPtr<Core::ConfigFile> config)
 NonnullRefPtr<ClientAudioStream> Mixer::create_queue(ConnectionFromClient& client)
 {
     auto queue = adopt_ref(*new ClientAudioStream(client));
-    m_pending_mutex.lock();
-
-    m_pending_mixing.append(*queue);
-
-    m_pending_mutex.unlock();
+    {
+        Threading::MutexLocker const locker(m_pending_mutex);
+        m_pending_mixing.append(*queue);
+    }
     // Signal the mixer thread to start back up, in case nobody was connected before.
     m_mixing_necessary.signal();
 
@@ -61,14 +60,15 @@ void Mixer::mix()
     decltype(m_pending_mixing) active_mix_queues;
 
     for (;;) {
-        m_pending_mutex.lock();
-        // While we have nothing to mix, wait on the condition.
-        m_mixing_necessary.wait_while([this, &active_mix_queues]() { return m_pending_mixing.is_empty() && active_mix_queues.is_empty(); });
-        if (!m_pending_mixing.is_empty()) {
-            active_mix_queues.extend(move(m_pending_mixing));
-            m_pending_mixing.clear();
+        {
+            Threading::MutexLocker const locker(m_pending_mutex);
+            // While we have nothing to mix, wait on the condition.
+            m_mixing_necessary.wait_while([this, &active_mix_queues]() { return m_pending_mixing.is_empty() && active_mix_queues.is_empty(); });
+            if (!m_pending_mixing.is_empty()) {
+                active_mix_queues.extend(move(m_pending_mixing));
+                m_pending_mixing.clear();
+            }
         }
-        m_pending_mutex.unlock();
 
         active_mix_queues.remove_all_matching([&](auto& entry) { return !entry->client(); });
 
@@ -96,19 +96,14 @@ void Mixer::mix()
             }
         }
 
-        if (m_muted) {
+        // Even though it's not realistic, the user expects no sound at 0%.
+        if (m_muted || m_main_volume < 0.01) {
             m_device->write(m_zero_filled_buffer.data(), static_cast<int>(m_zero_filled_buffer.size()));
         } else {
-            Array<u8, HARDWARE_BUFFER_SIZE_BYTES> buffer;
-            OutputMemoryStream stream { buffer };
+            OutputMemoryStream stream { m_stream_buffer };
 
             for (auto& mixed_sample : mixed_buffer) {
-
-                // Even though it's not realistic, the user expects no sound at 0%.
-                if (m_main_volume < 0.01)
-                    mixed_sample = Audio::Sample { 0 };
-                else
-                    mixed_sample.log_multiply(static_cast<float>(m_main_volume));
+                mixed_sample.log_multiply(static_cast<float>(m_main_volume));
                 mixed_sample.clip();
 
                 LittleEndian<i16> out_sample;

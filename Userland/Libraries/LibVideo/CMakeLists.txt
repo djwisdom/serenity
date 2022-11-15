@@ -1,5 +1,11 @@
 set(SOURCES
+    Color/ColorConverter.cpp
+    Color/ColorPrimaries.cpp
+    Color/TransferCharacteristics.cpp
+    MatroskaDemuxer.cpp
     MatroskaReader.cpp
+    PlaybackManager.cpp
+    VideoFrame.cpp
     VP9/BitStream.cpp
     VP9/Decoder.cpp
     VP9/Parser.cpp
@@ -9,4 +15,4 @@ set(SOURCES
 )
 
 serenity_lib(LibVideo video)
-target_link_libraries(LibVideo LibAudio LibCore LibIPC LibGfx)
+target_link_libraries(LibVideo PRIVATE LibAudio LibCore LibIPC LibGfx)

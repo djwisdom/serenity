@@ -33,6 +33,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     bool gzip = false;
     bool no_auto_compress = false;
     StringView archive_file;
+    bool dereference;
     StringView directory;
     Vector<String> paths;
 
@@ -45,6 +46,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_option(no_auto_compress, "Do not use the archive suffix to select the compression algorithm", "no-auto-compress", 0);
     args_parser.add_option(directory, "Directory to extract to/create from", "directory", 'C', "DIRECTORY");
     args_parser.add_option(archive_file, "Archive file", "file", 'f', "FILE");
+    args_parser.add_option(dereference, "Follow symlinks", "dereference", 'h');
     args_parser.add_positional_argument(paths, "Paths", "PATHS", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
@@ -96,7 +98,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return {};
         };
 
-        for (; !tar_stream.finished(); tar_stream.advance()) {
+        while (!tar_stream.finished()) {
             Archive::TarFileHeader const& header = tar_stream.header();
 
             // Handle meta-entries earlier to avoid consuming the file content stream.
@@ -158,12 +160,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 String absolute_path = Core::File::absolute_path(filename);
                 auto parent_path = LexicalPath(absolute_path).parent();
 
+                auto header_mode_or_error = header.mode();
+                if (header_mode_or_error.is_error())
+                    return header_mode_or_error.release_error();
+                auto header_mode = header_mode_or_error.release_value();
+
                 switch (header.type_flag()) {
                 case Archive::TarFileType::NormalFile:
                 case Archive::TarFileType::AlternateNormalFile: {
                     MUST(Core::Directory::create(parent_path, Core::Directory::CreateDirectories::Yes));
 
-                    int fd = TRY(Core::System::open(absolute_path, O_CREAT | O_WRONLY, header.mode()));
+                    int fd = TRY(Core::System::open(absolute_path, O_CREAT | O_WRONLY, header_mode));
 
                     Array<u8, buffer_size> buffer;
                     size_t bytes_read;
@@ -182,7 +189,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 case Archive::TarFileType::Directory: {
                     MUST(Core::Directory::create(parent_path, Core::Directory::CreateDirectories::Yes));
 
-                    auto result_or_error = Core::System::mkdir(absolute_path, header.mode());
+                    auto result_or_error = Core::System::mkdir(absolute_path, header_mode);
                     if (result_or_error.is_error() && result_or_error.error().code() != EEXIST)
                         return result_or_error.error();
                     break;
@@ -196,6 +203,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
             // Non-global headers should be cleared after every file.
             local_overrides.clear();
+
+            auto maybe_error = tar_stream.advance();
+            if (maybe_error.is_error())
+                return maybe_error.error();
         }
         file_stream.close();
 
@@ -230,11 +241,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 return {};
             }
 
-            auto statbuf_or_error = Core::System::lstat(path);
-            if (statbuf_or_error.is_error())
-                return statbuf_or_error.error();
-
-            auto statbuf = statbuf_or_error.value();
+            auto statbuf = TRY(Core::System::lstat(path));
             auto canonicalized_path = LexicalPath::canonicalized_path(path);
             tar_stream.add_file(canonicalized_path, statbuf.st_mode, file->read_all());
             if (verbose)
@@ -243,12 +250,20 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return {};
         };
 
-        auto add_directory = [&](String path, auto handle_directory) -> ErrorOr<void> {
-            auto statbuf_or_error = Core::System::lstat(path);
-            if (statbuf_or_error.is_error())
-                return statbuf_or_error.error();
+        auto add_link = [&](String path) -> ErrorOr<void> {
+            auto statbuf = TRY(Core::System::lstat(path));
 
-            auto statbuf = statbuf_or_error.value();
+            auto canonicalized_path = LexicalPath::canonicalized_path(path);
+            tar_stream.add_link(canonicalized_path, statbuf.st_mode, TRY(Core::System::readlink(path)));
+            if (verbose)
+                outln("{}", canonicalized_path);
+
+            return {};
+        };
+
+        auto add_directory = [&](String path, auto handle_directory) -> ErrorOr<void> {
+            auto statbuf = TRY(Core::System::lstat(path));
+
             auto canonicalized_path = LexicalPath::canonicalized_path(path);
             tar_stream.add_directory(canonicalized_path, statbuf.st_mode);
             if (verbose)
@@ -257,7 +272,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             Core::DirIterator it(path, Core::DirIterator::Flags::SkipParentAndBaseDir);
             while (it.has_next()) {
                 auto child_path = it.next_full_path();
-                if (!Core::File::is_directory(child_path)) {
+                if (!dereference && Core::File::is_link(child_path)) {
+                    TRY(add_link(child_path));
+                } else if (!Core::File::is_directory(child_path)) {
                     TRY(add_file(child_path));
                 } else {
                     TRY(handle_directory(child_path, handle_directory));
