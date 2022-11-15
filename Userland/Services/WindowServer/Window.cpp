@@ -16,6 +16,9 @@
 #include <AK/Badge.h>
 #include <AK/CharacterTypes.h>
 #include <AK/Debug.h>
+#include <LibCore/Account.h>
+#include <LibCore/ProcessStatisticsReader.h>
+#include <LibCore/SessionManagement.h>
 
 namespace WindowServer {
 
@@ -107,6 +110,8 @@ Window::Window(ConnectionFromClient& client, WindowType window_type, WindowMode 
 {
     if (parent_window)
         set_parent_window(*parent_window);
+    if (auto title_username_maybe = compute_title_username(&client); !title_username_maybe.is_error())
+        m_title_username = title_username_maybe.release_value();
     WindowManager::the().add_window(*this);
     frame().window_was_constructed({});
 }
@@ -228,6 +233,8 @@ void Window::update_window_menu_items()
     m_window_menu_close_item->set_enabled(m_closeable);
 
     m_window_menu_move_item->set_enabled(m_minimized_state == WindowMinimizedState::None && !is_maximized() && !m_fullscreen);
+
+    m_window_menu->update_alt_shortcuts_for_items();
 }
 
 void Window::set_minimized(bool minimized)
@@ -322,7 +329,7 @@ void Window::start_minimize_animation()
     }
     m_animation = Animation::create();
     m_animation->set_duration(150);
-    m_animation->on_update = [this](float progress, Gfx::Painter& painter, Screen& screen, Gfx::DisjointRectSet& flush_rects) {
+    m_animation->on_update = [this](float progress, Gfx::Painter& painter, Screen& screen, Gfx::DisjointIntRectSet& flush_rects) {
         Gfx::PainterStateSaver saver(painter);
         painter.set_draw_op(Gfx::Painter::DrawOp::Invert);
 
@@ -350,7 +357,7 @@ void Window::start_launch_animation(Gfx::IntRect const& launch_origin_rect)
 
     m_animation = Animation::create();
     m_animation->set_duration(150);
-    m_animation->on_update = [this, launch_origin_rect](float progress, Gfx::Painter& painter, Screen& screen, Gfx::DisjointRectSet& flush_rects) {
+    m_animation->on_update = [this, launch_origin_rect](float progress, Gfx::Painter& painter, Screen& screen, Gfx::DisjointIntRectSet& flush_rects) {
         Gfx::PainterStateSaver saver(painter);
         painter.set_draw_op(Gfx::Painter::DrawOp::Invert);
 
@@ -408,6 +415,7 @@ void Window::set_maximized(bool maximized)
         set_rect(m_floating_rect);
     m_frame.did_set_maximized({}, maximized);
     Core::EventLoop::current().post_event(*this, make<ResizeEvent>(m_rect));
+    Core::EventLoop::current().post_event(*this, make<MoveEvent>(m_rect));
     set_default_positioned(false);
 
     WindowManager::the().notify_minimization_state_changed(*this);
@@ -485,6 +493,9 @@ void Window::event(Core::Event& event)
         break;
     case Event::WindowResized:
         m_client->async_window_resized(m_window_id, static_cast<ResizeEvent const&>(event).rect());
+        break;
+    case Event::WindowMoved:
+        m_client->async_window_moved(m_window_id, static_cast<MoveEvent const&>(event).rect());
         break;
     default:
         break;
@@ -826,6 +837,7 @@ void Window::set_fullscreen(bool fullscreen)
     }
 
     Core::EventLoop::current().post_event(*this, make<ResizeEvent>(new_window_rect));
+    Core::EventLoop::current().post_event(*this, make<MoveEvent>(new_window_rect));
     set_rect(new_window_rect);
 }
 
@@ -896,6 +908,7 @@ bool Window::set_untiled()
     set_rect(m_floating_rect);
 
     Core::EventLoop::current().post_event(*this, make<ResizeEvent>(m_rect));
+    Core::EventLoop::current().post_event(*this, make<MoveEvent>(m_rect));
 
     return true;
 }
@@ -917,6 +930,7 @@ void Window::set_tiled(WindowTileType tile_type)
 
     set_rect(WindowManager::the().tiled_window_rect(*this, tile_type));
     Core::EventLoop::current().post_event(*this, make<ResizeEvent>(m_rect));
+    Core::EventLoop::current().post_event(*this, make<MoveEvent>(m_rect));
 }
 
 void Window::detach_client(Badge<ConnectionFromClient>)
@@ -1053,9 +1067,31 @@ void Window::set_modified(bool modified)
 String Window::computed_title() const
 {
     String title = m_title.replace("[*]"sv, is_modified() ? " (*)"sv : ""sv, ReplaceMode::FirstOnly);
+    if (m_title_username.has_value())
+        title = String::formatted("{} [{}]", title, m_title_username.value());
     if (client() && client()->is_unresponsive())
         return String::formatted("{} (Not responding)", title);
     return title;
+}
+
+ErrorOr<Optional<String>> Window::compute_title_username(ConnectionFromClient* client)
+{
+    if (!client)
+        return Error::from_string_literal("Tried to compute title username without a client");
+    auto stats = Core::ProcessStatisticsReader::get_all(true);
+    if (!stats.has_value())
+        return Error::from_string_literal("Failed to get all process statistics");
+    pid_t client_pid = TRY(client->socket().peer_pid());
+    auto client_stat = stats.value().processes.first_matching([&](auto& stat) { return stat.pid == client_pid; });
+    if (!client_stat.has_value())
+        return Error::from_string_literal("Failed to find client process stat");
+    pid_t login_session_pid = TRY(Core::SessionManagement::root_session_id(client_pid));
+    auto login_session_stat = stats.value().processes.first_matching([&](auto& stat) { return stat.pid == login_session_pid; });
+    if (!login_session_stat.has_value())
+        return Error::from_string_literal("Failed to find login process stat");
+    if (login_session_stat.value().uid == client_stat.value().uid)
+        return Optional<String> {};
+    return client_stat.value().username;
 }
 
 }

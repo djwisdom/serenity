@@ -36,6 +36,8 @@ private:
     void set_search_results_visible(bool visible);
     void set_value_inspector_visible(bool visible);
     void update_inspector_values(size_t position);
+
+    virtual void drag_enter_event(GUI::DragEvent&) override;
     virtual void drop_event(GUI::DropEvent&) override;
 
     RefPtr<HexEditor> m_editor;
@@ -53,6 +55,10 @@ private:
     RefPtr<GUI::Action> m_open_action;
     RefPtr<GUI::Action> m_save_action;
     RefPtr<GUI::Action> m_save_as_action;
+
+    RefPtr<GUI::Action> m_undo_action;
+    RefPtr<GUI::Action> m_redo_action;
+
     RefPtr<GUI::Action> m_find_action;
     RefPtr<GUI::Action> m_goto_offset_action;
     RefPtr<GUI::Action> m_layout_toolbar_action;

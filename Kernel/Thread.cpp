@@ -9,12 +9,12 @@
 #include <AK/StringBuilder.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
-#include <Kernel/Arch/InterruptDisabler.h>
 #include <Kernel/Arch/SmapDisabler.h>
-#include <Kernel/Arch/x86/TrapFrame.h>
+#include <Kernel/Arch/TrapFrame.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Devices/KCOVDevice.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
+#include <Kernel/InterruptDisabler.h>
 #include <Kernel/KSyms.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PageDirectory.h>
@@ -101,6 +101,8 @@ Thread::Thread(NonnullLockRefPtr<Process> process, NonnullOwnPtr<Memory::Region>
         m_regs.cs = GDT_SELECTOR_CODE0;
     else
         m_regs.cs = GDT_SELECTOR_CODE3 | 3;
+#elif ARCH(AARCH64)
+    TODO_AARCH64();
 #else
 #    error Unknown architecture
 #endif
@@ -976,7 +978,7 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
 
     auto& action = m_process->m_signal_action_data[signal];
     auto sender_pid = m_signal_senders[signal];
-    auto sender = Process::from_pid(sender_pid);
+    auto sender = Process::from_pid_ignoring_jails(sender_pid);
 
     if (!current_trap() && !action.handler_or_sigaction.is_null()) {
         // We're trying dispatch a handled signal to a user process that was scheduled
@@ -1153,6 +1155,9 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
         constexpr static FlatPtr thread_red_zone_size = 0;
 #elif ARCH(X86_64)
         constexpr static FlatPtr thread_red_zone_size = 128;
+#elif ARCH(AARCH64)
+        constexpr static FlatPtr thread_red_zone_size = 0; // FIXME
+        TODO_AARCH64();
 #else
 #    error Unknown architecture in dispatch_signal
 #endif
@@ -1298,7 +1303,7 @@ void Thread::set_state(State new_state, u8 stop_signal)
             });
             process.unblock_waiters(Thread::WaitBlocker::UnblockFlags::Continued);
             // Tell the parent process (if any) about this change.
-            if (auto parent = Process::from_pid(process.ppid())) {
+            if (auto parent = Process::from_pid_ignoring_jails(process.ppid())) {
                 [[maybe_unused]] auto result = parent->send_signal(SIGCHLD, &process);
             }
         }
@@ -1322,7 +1327,7 @@ void Thread::set_state(State new_state, u8 stop_signal)
             });
             process.unblock_waiters(Thread::WaitBlocker::UnblockFlags::Stopped, stop_signal);
             // Tell the parent process (if any) about this change.
-            if (auto parent = Process::from_pid(process.ppid())) {
+            if (auto parent = Process::from_pid_ignoring_jails(process.ppid())) {
                 [[maybe_unused]] auto result = parent->send_signal(SIGCHLD, &process);
             }
         }

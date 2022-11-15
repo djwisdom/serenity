@@ -79,8 +79,13 @@ HexEditorWidget::HexEditorWidget()
         m_selecting_from_inspector = false;
     };
 
-    m_editor->on_change = [this] {
-        window()->set_modified(true);
+    m_editor->on_change = [this](bool is_document_dirty) {
+        window()->set_modified(is_document_dirty);
+    };
+
+    m_editor->undo_stack().on_state_change = [this] {
+        m_undo_action->set_enabled(m_editor->undo_stack().can_undo());
+        m_redo_action->set_enabled(m_editor->undo_stack().can_redo());
     };
 
     m_search_results->set_activates_on_selection(true);
@@ -150,6 +155,16 @@ HexEditorWidget::HexEditorWidget()
         set_path(file->filename());
         dbgln("Wrote document to {}", file->filename());
     });
+
+    m_undo_action = GUI::CommonActions::make_undo_action([&](auto&) {
+        m_editor->undo();
+    });
+    m_undo_action->set_enabled(false);
+
+    m_redo_action = GUI::CommonActions::make_redo_action([&](auto&) {
+        m_editor->redo();
+    });
+    m_redo_action->set_enabled(false);
 
     m_find_action = GUI::Action::create("&Find", { Mod_Ctrl, Key_F }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/find.png"sv).release_value_but_fixme_should_propagate_errors(), [&](const GUI::Action&) {
         auto old_buffer = m_search_buffer;
@@ -242,6 +257,9 @@ HexEditorWidget::HexEditorWidget()
     m_toolbar->add_action(*m_new_action);
     m_toolbar->add_action(*m_open_action);
     m_toolbar->add_action(*m_save_action);
+    m_toolbar->add_separator();
+    m_toolbar->add_action(*m_undo_action);
+    m_toolbar->add_action(*m_redo_action);
     m_toolbar->add_separator();
     m_toolbar->add_action(*m_find_action);
     m_toolbar->add_action(*m_goto_offset_action);
@@ -378,6 +396,9 @@ void HexEditorWidget::initialize_menubar(GUI::Window& window)
     }));
 
     auto& edit_menu = window.add_menu("&Edit");
+    edit_menu.add_action(*m_undo_action);
+    edit_menu.add_action(*m_redo_action);
+    edit_menu.add_separator();
     edit_menu.add_action(GUI::CommonActions::make_select_all_action([this](auto&) {
         m_editor->select_all();
         m_editor->update();
@@ -469,6 +490,7 @@ void HexEditorWidget::initialize_menubar(GUI::Window& window)
     little_endian_mode->set_checked(true);
 
     auto& help_menu = window.add_menu("&Help");
+    help_menu.add_action(GUI::CommonActions::make_command_palette_action(&window));
     help_menu.add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/HexEditor.md"), "/bin/Help");
     }));
@@ -542,6 +564,13 @@ void HexEditorWidget::set_value_inspector_visible(bool visible)
     m_side_panel_container->set_visible(visible || m_search_results_container->is_visible());
 }
 
+void HexEditorWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/uri-list"))
+        event.accept();
+}
+
 void HexEditorWidget::drop_event(GUI::DropEvent& event)
 {
     event.accept();
@@ -551,6 +580,8 @@ void HexEditorWidget::drop_event(GUI::DropEvent& event)
         if (urls.is_empty())
             return;
         window()->move_to_front();
+        if (!request_close())
+            return;
 
         // TODO: A drop event should be considered user consent for opening a file
         auto response = FileSystemAccessClient::Client::the().try_request_file(window(), urls.first().path(), Core::OpenMode::ReadOnly);

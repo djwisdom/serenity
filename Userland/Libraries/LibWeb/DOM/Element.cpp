@@ -75,6 +75,8 @@ void Element::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_inline_style.ptr());
     visitor.visit(m_class_list.ptr());
     visitor.visit(m_shadow_root.ptr());
+    for (auto& pseudo_element_layout_node : m_pseudo_element_nodes)
+        visitor.visit(pseudo_element_layout_node);
 }
 
 // https://dom.spec.whatwg.org/#dom-element-getattribute
@@ -89,6 +91,13 @@ String Element::get_attribute(FlyString const& name) const
 
     // 3. Return attr’s value.
     return attribute->value();
+}
+
+// https://dom.spec.whatwg.org/#dom-element-getattributenode
+JS::GCPtr<Attr> Element::get_attribute_node(FlyString const& name) const
+{
+    // The getAttributeNode(qualifiedName) method steps are to return the result of getting an attribute given qualifiedName and this.
+    return m_attributes->get_attribute(name);
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattribute
@@ -121,8 +130,7 @@ WebIDL::ExceptionOr<void> Element::set_attribute(FlyString const& name, String c
 
     parse_attribute(attribute->local_name(), value);
 
-    // FIXME: Invalidate less.
-    document().invalidate_style();
+    invalidate_style_after_attribute_change(name);
 
     return {};
 }
@@ -189,8 +197,7 @@ void Element::remove_attribute(FlyString const& name)
 
     did_remove_attribute(name);
 
-    // FIXME: Invalidate less.
-    document().invalidate_style();
+    invalidate_style_after_attribute_change(name);
 }
 
 // https://dom.spec.whatwg.org/#dom-element-hasattribute
@@ -223,8 +230,7 @@ WebIDL::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optio
 
             parse_attribute(new_attribute->local_name(), "");
 
-            // FIXME: Invalidate less.
-            document().invalidate_style();
+            invalidate_style_after_attribute_change(name);
 
             return true;
         }
@@ -239,8 +245,7 @@ WebIDL::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optio
 
         did_remove_attribute(name);
 
-        // FIXME: Invalidate less.
-        document().invalidate_style();
+        invalidate_style_after_attribute_change(name);
     }
 
     // 6. Return true.
@@ -272,7 +277,7 @@ bool Element::has_class(FlyString const& class_name, CaseSensitivity case_sensit
     }
 }
 
-RefPtr<Layout::Node> Element::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
+JS::GCPtr<Layout::Node> Element::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
 {
     if (local_name() == "noscript" && document().is_scripting_enabled())
         return nullptr;
@@ -281,43 +286,41 @@ RefPtr<Layout::Node> Element::create_layout_node(NonnullRefPtr<CSS::StylePropert
     return create_layout_node_for_display_type(document(), display, move(style), this);
 }
 
-RefPtr<Layout::Node> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, NonnullRefPtr<CSS::StyleProperties> style, Element* element)
+JS::GCPtr<Layout::Node> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, NonnullRefPtr<CSS::StyleProperties> style, Element* element)
 {
     if (display.is_table_inside())
-        return adopt_ref(*new Layout::TableBox(document, element, move(style)));
+        return document.heap().allocate_without_realm<Layout::TableBox>(document, element, move(style));
 
     if (display.is_list_item())
-        return adopt_ref(*new Layout::ListItemBox(document, element, move(style)));
+        return document.heap().allocate_without_realm<Layout::ListItemBox>(document, element, move(style));
 
     if (display.is_table_row())
-        return adopt_ref(*new Layout::TableRowBox(document, element, move(style)));
+        return document.heap().allocate_without_realm<Layout::TableRowBox>(document, element, move(style));
 
     if (display.is_table_cell())
-        return adopt_ref(*new Layout::TableCellBox(document, element, move(style)));
+        return document.heap().allocate_without_realm<Layout::TableCellBox>(document, element, move(style));
 
     if (display.is_table_row_group() || display.is_table_header_group() || display.is_table_footer_group())
-        return adopt_ref(*new Layout::TableRowGroupBox(document, element, move(style)));
+        return document.heap().allocate_without_realm<Layout::TableRowGroupBox>(document, element, move(style));
 
     if (display.is_table_column() || display.is_table_column_group() || display.is_table_caption()) {
         // FIXME: This is just an incorrect placeholder until we improve table layout support.
-        return adopt_ref(*new Layout::BlockContainer(document, element, move(style)));
+        return document.heap().allocate_without_realm<Layout::BlockContainer>(document, element, move(style));
     }
 
     if (display.is_inline_outside()) {
-        if (display.is_flow_root_inside()) {
-            auto block = adopt_ref(*new Layout::BlockContainer(document, element, move(style)));
-            block->set_inline(true);
-            return block;
-        }
+        if (display.is_flow_root_inside())
+            return document.heap().allocate_without_realm<Layout::BlockContainer>(document, element, move(style));
         if (display.is_flow_inside())
-            return adopt_ref(*new Layout::InlineNode(document, element, move(style)));
-
+            return document.heap().allocate_without_realm<Layout::InlineNode>(document, element, move(style));
+        if (display.is_flex_inside())
+            return document.heap().allocate_without_realm<Layout::BlockContainer>(document, element, move(style));
         dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Support display: {}", display.to_string());
-        return adopt_ref(*new Layout::InlineNode(document, element, move(style)));
+        return document.heap().allocate_without_realm<Layout::InlineNode>(document, element, move(style));
     }
 
     if (display.is_flow_inside() || display.is_flow_root_inside() || display.is_flex_inside() || display.is_grid_inside())
-        return adopt_ref(*new Layout::BlockContainer(document, element, move(style)));
+        return document.heap().allocate_without_realm<Layout::BlockContainer>(document, element, move(style));
 
     TODO();
 }
@@ -492,19 +495,13 @@ WebIDL::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) 
 WebIDL::ExceptionOr<void> Element::set_inner_html(String const& markup)
 {
     TRY(DOMParsing::inner_html_setter(*this, markup));
-
-    set_needs_style_update(true);
-
-    // NOTE: Since the DOM has changed, we have to rebuild the layout tree.
-    document().invalidate_layout();
-    document().set_needs_layout();
     return {};
 }
 
 // https://w3c.github.io/DOM-Parsing/#dom-innerhtml-innerhtml
-String Element::inner_html() const
+WebIDL::ExceptionOr<String> Element::inner_html() const
 {
-    return serialize_fragment(/* FIXME: Providing true for the require well-formed flag (which may throw) */);
+    return serialize_fragment(DOMParsing::RequireWellFormed::Yes);
 }
 
 bool Element::is_focused() const
@@ -601,6 +598,9 @@ JS::NonnullGCPtr<Geometry::DOMRect> Element::get_bounding_client_rect() const
 JS::NonnullGCPtr<Geometry::DOMRectList> Element::get_client_rects() const
 {
     Vector<JS::Handle<Geometry::DOMRect>> rects;
+
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<Document&>(document()).update_layout();
 
     // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList object and stop this algorithm.
     if (!layout_node() || !layout_node()->is_box())
@@ -708,19 +708,19 @@ void Element::children_changed()
     set_needs_style_update(true);
 }
 
-void Element::set_pseudo_element_node(Badge<Layout::TreeBuilder>, CSS::Selector::PseudoElement pseudo_element, RefPtr<Layout::Node> pseudo_element_node)
+void Element::set_pseudo_element_node(Badge<Layout::TreeBuilder>, CSS::Selector::PseudoElement pseudo_element, JS::GCPtr<Layout::Node> pseudo_element_node)
 {
-    m_pseudo_element_nodes[to_underlying(pseudo_element)] = move(pseudo_element_node);
+    m_pseudo_element_nodes[to_underlying(pseudo_element)] = pseudo_element_node;
 }
 
-RefPtr<Layout::Node> Element::get_pseudo_element_node(CSS::Selector::PseudoElement pseudo_element) const
+JS::GCPtr<Layout::Node> Element::get_pseudo_element_node(CSS::Selector::PseudoElement pseudo_element) const
 {
     return m_pseudo_element_nodes[to_underlying(pseudo_element)];
 }
 
 void Element::clear_pseudo_element_nodes(Badge<Layout::TreeBuilder>)
 {
-    m_pseudo_element_nodes.fill(nullptr);
+    m_pseudo_element_nodes.fill({});
 }
 
 void Element::serialize_pseudo_elements_as_json(JsonArraySerializer<StringBuilder>& children_array) const
@@ -736,6 +736,281 @@ void Element::serialize_pseudo_elements_as_json(JsonArraySerializer<StringBuilde
         MUST(object.add("pseudo-element"sv, i));
         MUST(object.finish());
     }
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+i32 Element::default_tab_index_value() const
+{
+    // The default value is 0 if the element is an a, area, button, frame, iframe, input, object, select, textarea, or SVG a element, or is a summary element that is a summary for its parent details.
+    // The default value is −1 otherwise.
+    // Note: The varying default value based on element type is a historical artifact.
+    // FIXME: We currently do not have the SVG a element.
+    return -1;
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+i32 Element::tab_index() const
+{
+    // FIXME: I'm not sure if "to_int" exactly matches the specs "rules for parsing integers"
+    auto maybe_table_index = attribute(HTML::AttributeNames::tabindex).to_int<i32>();
+    if (!maybe_table_index.has_value())
+        return default_tab_index_value();
+    return maybe_table_index.value();
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+void Element::set_tab_index(i32 tab_index)
+{
+    MUST(set_attribute(HTML::AttributeNames::tabindex, String::number(tab_index)));
+}
+
+// https://drafts.csswg.org/cssom-view/#potentially-scrollable
+bool Element::is_potentially_scrollable() const
+{
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<Document&>(document()).update_layout();
+
+    // An element body (which will be the body element) is potentially scrollable if all of the following conditions are true:
+    VERIFY(is<HTML::HTMLBodyElement>(this) || is<HTML::HTMLFrameSetElement>(this));
+
+    // Since this should always be the body element, the body element must have a <html> element parent. See Document::body().
+    VERIFY(parent());
+
+    // - body has an associated box.
+    // - body’s parent element’s computed value of the overflow-x or overflow-y properties is neither visible nor clip.
+    // - body’s computed value of the overflow-x or overflow-y properties is neither visible nor clip.
+    return layout_node()
+        && (parent()->layout_node()
+            && parent()->layout_node()->computed_values().overflow_x() != CSS::Overflow::Visible && parent()->layout_node()->computed_values().overflow_x() != CSS::Overflow::Clip
+            && parent()->layout_node()->computed_values().overflow_y() != CSS::Overflow::Visible && parent()->layout_node()->computed_values().overflow_y() != CSS::Overflow::Clip)
+        && (layout_node()->computed_values().overflow_x() != CSS::Overflow::Visible && layout_node()->computed_values().overflow_x() != CSS::Overflow::Clip
+            && layout_node()->computed_values().overflow_y() != CSS::Overflow::Visible && layout_node()->computed_values().overflow_y() != CSS::Overflow::Clip);
+}
+
+// https://drafts.csswg.org/cssom-view/#dom-element-scrolltop
+double Element::scroll_top() const
+{
+    // 1. Let document be the element’s node document.
+    auto& document = this->document();
+
+    // 2. If document is not the active document, return zero and terminate these steps.
+    if (!document.is_active())
+        return 0.0;
+
+    // 3. Let window be the value of document’s defaultView attribute.
+    auto* window = document.default_view();
+
+    // 4. If window is null, return zero and terminate these steps.
+    if (!window)
+        return 0.0;
+
+    // 5. If the element is the root element and document is in quirks mode, return zero and terminate these steps.
+    if (document.document_element() == this && document.in_quirks_mode())
+        return 0.0;
+
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<Document&>(document).update_layout();
+
+    // 6. If the element is the root element return the value of scrollY on window.
+    if (document.document_element() == this)
+        return window->scroll_y();
+
+    // 7. If the element is the body element, document is in quirks mode, and the element is not potentially scrollable, return the value of scrollY on window.
+    if (document.body() == this && document.in_quirks_mode() && !is_potentially_scrollable())
+        return window->scroll_y();
+
+    // 8. If the element does not have any associated box, return zero and terminate these steps.
+    if (!layout_node() || !is<Layout::BlockContainer>(layout_node()))
+        return 0.0;
+
+    auto const* block_container = static_cast<Layout::BlockContainer const*>(layout_node());
+
+    // 9. Return the y-coordinate of the scrolling area at the alignment point with the top of the padding edge of the element.
+    // FIXME: Is this correct?
+    return block_container->scroll_offset().y();
+}
+
+double Element::scroll_left() const
+{
+    // 1. Let document be the element’s node document.
+    auto& document = this->document();
+
+    // 2. If document is not the active document, return zero and terminate these steps.
+    if (!document.is_active())
+        return 0.0;
+
+    // 3. Let window be the value of document’s defaultView attribute.
+    auto* window = document.default_view();
+
+    // 4. If window is null, return zero and terminate these steps.
+    if (!window)
+        return 0.0;
+
+    // 5. If the element is the root element and document is in quirks mode, return zero and terminate these steps.
+    if (document.document_element() == this && document.in_quirks_mode())
+        return 0.0;
+
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    const_cast<Document&>(document).update_layout();
+
+    // 6. If the element is the root element return the value of scrollX on window.
+    if (document.document_element() == this)
+        return window->scroll_x();
+
+    // 7. If the element is the body element, document is in quirks mode, and the element is not potentially scrollable, return the value of scrollX on window.
+    if (document.body() == this && document.in_quirks_mode() && !is_potentially_scrollable())
+        return window->scroll_x();
+
+    // 8. If the element does not have any associated box, return zero and terminate these steps.
+    if (!layout_node() || !is<Layout::BlockContainer>(layout_node()))
+        return 0.0;
+
+    auto const* block_container = static_cast<Layout::BlockContainer const*>(layout_node());
+
+    // 9. Return the x-coordinate of the scrolling area at the alignment point with the left of the padding edge of the element.
+    // FIXME: Is this correct?
+    return block_container->scroll_offset().x();
+}
+
+// https://drafts.csswg.org/cssom-view/#dom-element-scrollleft
+void Element::set_scroll_left(double x)
+{
+    // 1. Let x be the given value.
+
+    // 2. Normalize non-finite values for x.
+    if (!isfinite(x))
+        x = 0.0;
+
+    // 3. Let document be the element’s node document.
+    auto& document = this->document();
+
+    // 4. If document is not the active document, terminate these steps.
+    if (!document.is_active())
+        return;
+
+    // 5. Let window be the value of document’s defaultView attribute.
+    auto* window = document.default_view();
+
+    // 6. If window is null, terminate these steps.
+    if (!window)
+        return;
+
+    // 7. If the element is the root element and document is in quirks mode, terminate these steps.
+    if (document.document_element() == this && document.in_quirks_mode())
+        return;
+
+    // NOTE: Ensure that layout is up-to-date before looking at metrics or scrolling the page.
+    const_cast<Document&>(document).update_layout();
+
+    // 8. If the element is the root element invoke scroll() on window with x as first argument and scrollY on window as second argument, and terminate these steps.
+    if (document.document_element() == this) {
+        // FIXME: Implement this in terms of invoking scroll() on window.
+        if (auto* page = document.page())
+            page->client().page_did_request_scroll_to({ static_cast<float>(x), window->scroll_y() });
+
+        return;
+    }
+
+    // 9. If the element is the body element, document is in quirks mode, and the element is not potentially scrollable, invoke scroll() on window with x as first argument and scrollY on window as second argument, and terminate these steps.
+    if (document.body() == this && document.in_quirks_mode() && !is_potentially_scrollable()) {
+        // FIXME: Implement this in terms of invoking scroll() on window.
+        if (auto* page = document.page())
+            page->client().page_did_request_scroll_to({ static_cast<float>(x), window->scroll_y() });
+
+        return;
+    }
+
+    // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element has no overflow, terminate these steps.
+    if (!layout_node() || !is<Layout::BlockContainer>(layout_node()))
+        return;
+
+    auto* block_container = static_cast<Layout::BlockContainer*>(layout_node());
+    if (!block_container->is_scrollable())
+        return;
+
+    // FIXME: or the element has no overflow.
+
+    // 11. Scroll the element to x,scrollTop, with the scroll behavior being "auto".
+    // FIXME: Implement this in terms of calling "scroll the element".
+    auto scroll_offset = block_container->scroll_offset();
+    scroll_offset.set_x(static_cast<float>(x));
+    block_container->set_scroll_offset(scroll_offset);
+}
+
+void Element::set_scroll_top(double y)
+{
+    // 1. Let y be the given value.
+
+    // 2. Normalize non-finite values for y.
+    if (!isfinite(y))
+        y = 0.0;
+
+    // 3. Let document be the element’s node document.
+    auto& document = this->document();
+
+    // 4. If document is not the active document, terminate these steps.
+    if (!document.is_active())
+        return;
+
+    // 5. Let window be the value of document’s defaultView attribute.
+    auto* window = document.default_view();
+
+    // 6. If window is null, terminate these steps.
+    if (!window)
+        return;
+
+    // 7. If the element is the root element and document is in quirks mode, terminate these steps.
+    if (document.document_element() == this && document.in_quirks_mode())
+        return;
+
+    // NOTE: Ensure that layout is up-to-date before looking at metrics or scrolling the page.
+    const_cast<Document&>(document).update_layout();
+
+    // 8. If the element is the root element invoke scroll() on window with scrollX on window as first argument and y as second argument, and terminate these steps.
+    if (document.document_element() == this) {
+        // FIXME: Implement this in terms of invoking scroll() on window.
+        if (auto* page = document.page())
+            page->client().page_did_request_scroll_to({ window->scroll_x(), static_cast<float>(y) });
+
+        return;
+    }
+
+    // 9. If the element is the body element, document is in quirks mode, and the element is not potentially scrollable, invoke scroll() on window with scrollX as first argument and y as second argument, and terminate these steps.
+    if (document.body() == this && document.in_quirks_mode() && !is_potentially_scrollable()) {
+        // FIXME: Implement this in terms of invoking scroll() on window.
+        if (auto* page = document.page())
+            page->client().page_did_request_scroll_to({ window->scroll_x(), static_cast<float>(y) });
+
+        return;
+    }
+
+    // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element has no overflow, terminate these steps.
+    if (!layout_node() || !is<Layout::BlockContainer>(layout_node()))
+        return;
+
+    auto* block_container = static_cast<Layout::BlockContainer*>(layout_node());
+    if (!block_container->is_scrollable())
+        return;
+
+    // FIXME: or the element has no overflow.
+
+    // 11. Scroll the element to scrollLeft,y, with the scroll behavior being "auto".
+    // FIXME: Implement this in terms of calling "scroll the element".
+    auto scroll_offset = block_container->scroll_offset();
+    scroll_offset.set_y(static_cast<float>(y));
+    block_container->set_scroll_offset(scroll_offset);
+}
+
+int Element::scroll_width() const
+{
+    dbgln("FIXME: Implement Element::scroll_width() (called on element: {})", debug_description());
+    return 0;
+}
+
+int Element::scroll_height() const
+{
+    dbgln("FIXME: Implement Element::scroll_height() (called on element: {})", debug_description());
+    return 0;
 }
 
 // https://html.spec.whatwg.org/multipage/semantics-other.html#concept-element-disabled
@@ -975,6 +1250,15 @@ void Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> ar
     scroll_an_element_into_view(*this, behavior, block, inline_);
 
     // FIXME: 8. Optionally perform some other action that brings the element to the user’s attention.
+}
+
+void Element::invalidate_style_after_attribute_change(FlyString const& attribute_name)
+{
+    // FIXME: Only invalidate if the attribute can actually affect style.
+    (void)attribute_name;
+
+    // FIXME: This will need to become smarter when we implement the :has() selector.
+    invalidate_style();
 }
 
 }

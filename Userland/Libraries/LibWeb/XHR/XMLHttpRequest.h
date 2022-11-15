@@ -23,11 +23,14 @@
 
 namespace Web::XHR {
 
+// https://fetch.spec.whatwg.org/#typedefdef-xmlhttprequestbodyinit
+using DocumentOrXMLHttpRequestBodyInit = Variant<JS::Handle<Web::DOM::Document>, JS::Handle<Web::FileAPI::Blob>, JS::Handle<JS::Object>, JS::Handle<Web::URL::URLSearchParams>, AK::String>;
+
 class XMLHttpRequest final : public XMLHttpRequestEventTarget {
     WEB_PLATFORM_OBJECT(XMLHttpRequest, XMLHttpRequestEventTarget);
 
 public:
-    enum class ReadyState : u16 {
+    enum class State : u16 {
         Unsent = 0,
         Opened = 1,
         HeadersReceived = 2,
@@ -39,7 +42,7 @@ public:
 
     virtual ~XMLHttpRequest() override;
 
-    ReadyState ready_state() const { return m_ready_state; };
+    State ready_state() const { return m_state; };
     Fetch::Infrastructure::Status status() const { return m_status; };
     WebIDL::ExceptionOr<String> response_text() const;
     WebIDL::ExceptionOr<JS::Value> response();
@@ -47,10 +50,10 @@ public:
 
     WebIDL::ExceptionOr<void> open(String const& method, String const& url);
     WebIDL::ExceptionOr<void> open(String const& method, String const& url, bool async, String const& username = {}, String const& password = {});
-    WebIDL::ExceptionOr<void> send(Optional<Fetch::XMLHttpRequestBodyInit> body);
+    WebIDL::ExceptionOr<void> send(Optional<DocumentOrXMLHttpRequestBodyInit> body);
 
     WebIDL::ExceptionOr<void> set_request_header(String const& header, String const& value);
-    void set_response_type(Bindings::XMLHttpRequestResponseType type) { m_response_type = type; }
+    WebIDL::ExceptionOr<void> set_response_type(Bindings::XMLHttpRequestResponseType);
 
     String get_response_header(String const& name) { return m_response_headers.get(name).value_or({}); }
     String get_all_response_headers() const;
@@ -60,13 +63,18 @@ public:
 
     WebIDL::ExceptionOr<void> override_mime_type(String const& mime);
 
-    WebIDL::ExceptionOr<void> set_timeout(u32 timeout);
     u32 timeout() const;
+    WebIDL::ExceptionOr<void> set_timeout(u32 timeout);
+
+    bool with_credentials() const;
+    WebIDL::ExceptionOr<void> set_with_credentials(bool);
+
+    void abort();
 
 private:
     virtual void visit_edges(Cell::Visitor&) override;
+    virtual bool must_survive_garbage_collection() const override;
 
-    void set_ready_state(ReadyState);
     void set_status(Fetch::Infrastructure::Status status) { m_status = status; }
     void fire_progress_event(String const&, u64, u64);
 
@@ -76,36 +84,98 @@ private:
 
     String get_text_response() const;
 
-    explicit XMLHttpRequest(HTML::Window&);
+    XMLHttpRequest(HTML::Window&, Fetch::Infrastructure::HeaderList&);
 
+    // Non-standard
     JS::NonnullGCPtr<HTML::Window> m_window;
-
-    ReadyState m_ready_state { ReadyState::Unsent };
     Fetch::Infrastructure::Status m_status { 0 };
-    bool m_send { false };
-    u32 m_timeout { 0 };
-
-    String m_method;
-    AK::URL m_url;
-
-    Bindings::XMLHttpRequestResponseType m_response_type;
-
-    HashMap<String, String, CaseInsensitiveStringTraits> m_request_headers;
     HashMap<String, String, CaseInsensitiveStringTraits> m_response_headers;
 
+    // https://xhr.spec.whatwg.org/#concept-xmlhttprequest-state
+    // state
+    //     One of unsent, opened, headers received, loading, and done; initially unsent.
+    State m_state { State::Unsent };
+
+    // https://xhr.spec.whatwg.org/#send-flag
+    // send() flag
+    //     A flag, initially unset.
+    bool m_send { false };
+
+    // https://xhr.spec.whatwg.org/#timeout
+    // timeout
+    //     An unsigned integer, initially 0.
+    u32 m_timeout { 0 };
+
+    // https://xhr.spec.whatwg.org/#cross-origin-credentials
+    // cross-origin credentials
+    //     A boolean, initially false.
+    bool m_cross_origin_credentials { false };
+
+    // https://xhr.spec.whatwg.org/#request-method
+    // request method
+    //     A method.
+    String m_request_method;
+
+    // https://xhr.spec.whatwg.org/#request-url
+    // request URL
+    //     A URL.
+    AK::URL m_request_url;
+
+    // https://xhr.spec.whatwg.org/#author-request-headers
+    // author request headers
+    //     A header list, initially empty.
+    JS::NonnullGCPtr<Fetch::Infrastructure::HeaderList> m_author_request_headers;
+
+    // FIXME: https://xhr.spec.whatwg.org/#request-body
+
+    // https://xhr.spec.whatwg.org/#synchronous-flag
+    // synchronous flag
+    //     A flag, initially unset.
     bool m_synchronous { false };
+
+    // https://xhr.spec.whatwg.org/#upload-complete-flag
+    // upload complete flag
+    //     A flag, initially unset.
     bool m_upload_complete { false };
+
+    // https://xhr.spec.whatwg.org/#upload-listener-flag
+    // upload listener flag
+    //     A flag, initially unset.
     bool m_upload_listener { false };
+
+    // https://xhr.spec.whatwg.org/#timed-out-flag
+    // timed out flag
+    //     A flag, initially unset.
     bool m_timed_out { false };
 
+    // FIXME: https://xhr.spec.whatwg.org/#response
+
+    // https://xhr.spec.whatwg.org/#received-bytes
+    // received bytes
+    //     A byte sequence, initially the empty byte sequence.
     ByteBuffer m_received_bytes;
+
+    // https://xhr.spec.whatwg.org/#response-type
+    // response type
+    //     One of the empty string, "arraybuffer", "blob", "document", "json", and "text"; initially the empty string.
+    Bindings::XMLHttpRequestResponseType m_response_type;
 
     enum class Failure {
         /// ????
     };
+
+    // https://xhr.spec.whatwg.org/#response-object
+    // response object
+    //     An object, failure, or null, initially null.
+    //     NOTE: This needs to be a JS::Value as the JSON response might not actually be an object.
     Variant<JS::Value, Failure, Empty> m_response_object;
 
+    // FIXME: https://xhr.spec.whatwg.org/#xmlhttprequest-fetch-controller
+
     // https://xhr.spec.whatwg.org/#override-mime-type
+    // override MIME type
+    //     A MIME type or null, initially null.
+    //     NOTE: Can get a value when overrideMimeType() is invoked.
     Optional<MimeSniff::MimeType> m_override_mime_type;
 };
 

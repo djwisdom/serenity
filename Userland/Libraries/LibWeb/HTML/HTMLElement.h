@@ -7,11 +7,16 @@
 #pragma once
 
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/HTML/DOMStringMap.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/GlobalEventHandlers.h>
 
 namespace Web::HTML {
+
+// https://html.spec.whatwg.org/multipage/dom.html#attr-dir
+#define ENUMERATE_HTML_ELEMENT_DIR_ATTRIBUTES   \
+    __ENUMERATE_HTML_ELEMENT_DIR_ATTRIBUTE(ltr) \
+    __ENUMERATE_HTML_ELEMENT_DIR_ATTRIBUTE(rtl) \
+    __ENUMERATE_HTML_ELEMENT_DIR_ATTRIBUTE(auto)
 
 class HTMLElement
     : public DOM::Element
@@ -22,6 +27,9 @@ public:
     virtual ~HTMLElement() override;
 
     String title() const { return attribute(HTML::AttributeNames::title); }
+
+    String dir() const;
+    void set_dir(String const&);
 
     virtual bool is_editable() const final;
     String content_editable() const;
@@ -43,6 +51,8 @@ public:
     void focus();
 
     void click();
+
+    void blur();
 
     bool fire_a_synthetic_pointer_event(FlyString const& type, DOM::Element& target, bool not_trusted);
 

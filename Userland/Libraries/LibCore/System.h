@@ -32,7 +32,7 @@
 
 namespace Core::System {
 
-#ifdef __serenity__
+#ifdef AK_OS_SERENITY
 ErrorOr<void> beep();
 ErrorOr<void> pledge(StringView promises, StringView execpromises = {});
 ErrorOr<void> unveil(StringView path, StringView permissions);
@@ -87,7 +87,7 @@ ErrorOr<int> accept4(int sockfd, struct sockaddr*, socklen_t*, int flags);
 #endif
 
 ErrorOr<void> sigaction(int signal, struct sigaction const* action, struct sigaction* old_action);
-#if defined(__APPLE__) || defined(__OpenBSD__) || defined(__FreeBSD__)
+#if defined(AK_OS_MACOS) || defined(AK_OS_OPENBSD) || defined(AK_OS_FREEBSD)
 ErrorOr<sig_t> signal(int signal, sig_t handler);
 #else
 ErrorOr<sighandler_t> signal(int signal, sighandler_t handler);
@@ -165,7 +165,17 @@ enum class SearchInPath {
     No,
     Yes,
 };
+
+#ifdef AK_OS_SERENITY
+ErrorOr<void> exec_command(Vector<StringView>& command, bool preserve_env);
+#endif
+
 ErrorOr<void> exec(StringView filename, Span<StringView> arguments, SearchInPath, Optional<Span<StringView>> environment = {});
+
+#ifdef AK_OS_SERENITY
+ErrorOr<void> join_jail(u64 jail_index);
+ErrorOr<u64> create_jail(StringView jail_name);
+#endif
 
 ErrorOr<int> socket(int domain, int type, int protocol);
 ErrorOr<void> bind(int sockfd, struct sockaddr const*, socklen_t);
@@ -193,5 +203,6 @@ ErrorOr<int> posix_openpt(int flags);
 ErrorOr<void> grantpt(int fildes);
 ErrorOr<void> unlockpt(int fildes);
 ErrorOr<void> access(StringView pathname, int mode);
+ErrorOr<String> readlink(StringView pathname);
 
 }

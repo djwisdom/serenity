@@ -10,6 +10,7 @@
 #include <LibGfx/Filters/HueRotateFilter.h>
 #include <LibGfx/Filters/InvertFilter.h>
 #include <LibGfx/Filters/OpacityFilter.h>
+#include <LibGfx/Filters/SaturateFilter.h>
 #include <LibGfx/Filters/SepiaFilter.h>
 #include <LibGfx/Filters/StackBlurFilter.h>
 #include <LibWeb/Layout/Node.h>
@@ -74,7 +75,11 @@ void apply_filter_list(Gfx::Bitmap& target_bitmap, Layout::Node const& node, Spa
                     break;
                 }
                 case CSS::Filter::Color::Operation::Saturate: {
-                    dbgln("TODO: Implement saturate() filter function!");
+                    // Saturates the input image. The passed parameter defines the proportion of the conversion.
+                    // A value of 0% is completely un-saturated. A value of 100% leaves the input unchanged.
+                    // Other values are linear multipliers on the effect.
+                    // Values of amount over 100% are allowed, providing super-saturated results
+                    apply_color_filter(Gfx::SaturateFilter { amount });
                     break;
                 }
                 default:
@@ -82,6 +87,9 @@ void apply_filter_list(Gfx::Bitmap& target_bitmap, Layout::Node const& node, Spa
                 }
             },
             [&](CSS::Filter::HueRotate const& hue_rotate) {
+                // Applies a hue rotation on the input image.
+                // The passed parameter defines the number of degrees around the color circle the input samples will be adjusted.
+                // A value of 0deg leaves the input unchanged. Implementations must not normalize this value in order to allow animations beyond 360deg.
                 apply_color_filter(Gfx::HueRotateFilter { hue_rotate.angle_degrees() });
             },
             [&](CSS::Filter::DropShadow const&) {

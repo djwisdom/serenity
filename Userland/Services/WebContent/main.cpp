@@ -7,6 +7,7 @@
 #include "ImageCodecPluginSerenity.h"
 #include <LibCore/EventLoop.h>
 #include <LibCore/LocalServer.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibIPC/SingleServer.h>
 #include <LibMain/Main.h>
@@ -23,7 +24,12 @@ ErrorOr<int> serenity_main(Main::Arguments)
 {
     Core::EventLoop event_loop;
     TRY(Core::System::pledge("stdio recvfd sendfd accept unix rpath"));
-    TRY(Core::System::unveil("/proc/all", "r"));
+
+    // This must be first; we can't check if /tmp/webdriver exists once we've unveiled other paths.
+    if (Core::Stream::File::exists("/tmp/webdriver"sv))
+        TRY(Core::System::unveil("/tmp/webdriver", "rw"));
+
+    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/etc/timezone", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/request", "rw"));

@@ -122,51 +122,60 @@ void InlineFormattingContext::dimension_box_on_line(Box const& box, LayoutMode l
         return;
     }
 
-    if (box.is_inline_block()) {
-        auto const& inline_block = verify_cast<BlockContainer>(box);
+    // Any box that has simple flow inside should have generated line box fragments already.
+    VERIFY(!box.display().is_flow_inside());
 
-        auto& width_value = inline_block.computed_values().width();
-        if (width_value.is_auto()) {
-            auto result = calculate_shrink_to_fit_widths(inline_block);
+    auto const& width_value = box.computed_values().width();
+    float unconstrained_width = 0;
+    if (width_value.is_auto()) {
+        auto result = calculate_shrink_to_fit_widths(box);
 
-            auto available_width = m_available_space->width.to_px()
-                - box_state.margin_left
-                - box_state.border_left
-                - box_state.padding_left
-                - box_state.padding_right
-                - box_state.border_right
-                - box_state.margin_right;
+        auto available_width = m_available_space->width.to_px()
+            - box_state.margin_left
+            - box_state.border_left
+            - box_state.padding_left
+            - box_state.padding_right
+            - box_state.border_right
+            - box_state.margin_right;
 
-            auto width = min(max(result.preferred_minimum_width, available_width), result.preferred_width);
-            box_state.set_content_width(width);
+        unconstrained_width = min(max(result.preferred_minimum_width, available_width), result.preferred_width);
+    } else {
+        if (width_value.contains_percentage() && !m_available_space->width.is_definite()) {
+            // NOTE: We can't resolve percentages yet. We'll have to wait until after inner layout.
         } else {
-            if (width_value.contains_percentage() && !m_available_space->width.is_definite()) {
-                // NOTE: We can't resolve percentages yet. We'll have to wait until after inner layout.
-            } else {
-                auto container_width = CSS::Length::make_px(m_available_space->width.to_px());
-                box_state.set_content_width(width_value.resolved(box, container_width).to_px(inline_block));
-            }
+            auto container_width = CSS::Length::make_px(m_available_space->width.to_px());
+            unconstrained_width = width_value.resolved(box, container_width).to_px(box);
         }
-        auto independent_formatting_context = layout_inside(inline_block, layout_mode, box_state.available_inner_space_or_constraints_from(*m_available_space));
-
-        auto& height_value = inline_block.computed_values().height();
-        if (height_value.is_auto()) {
-            // FIXME: (10.6.6) If 'height' is 'auto', the height depends on the element's descendants per 10.6.7.
-            parent().compute_height(inline_block, AvailableSpace(AvailableSize::make_indefinite(), AvailableSize::make_indefinite()));
-        } else {
-            auto container_height = CSS::Length::make_px(m_containing_block_state.content_height());
-            box_state.set_content_height(height_value.resolved(box, container_height).to_px(inline_block));
-        }
-
-        if (independent_formatting_context)
-            independent_formatting_context->parent_context_did_dimension_child_root_box();
-        return;
     }
 
-    // Non-replaced, non-inline-block, box on a line!?
-    // I don't think we should be here. Dump the box tree so we can take a look at it.
-    dbgln("FIXME: I've been asked to dimension a non-replaced, non-inline-block box on a line:");
-    dump_tree(box);
+    float width = unconstrained_width;
+    auto computed_max_width = box.computed_values().max_width();
+    if (!computed_max_width.is_none()) {
+        auto max_width = computed_max_width.resolved(box, width_of_containing_block).to_px(box);
+        width = min(width, max_width);
+    }
+
+    auto computed_min_width = box.computed_values().min_width();
+    if (!computed_min_width.is_auto()) {
+        auto min_width = computed_min_width.resolved(box, width_of_containing_block).to_px(box);
+        width = max(width, min_width);
+    }
+
+    box_state.set_content_width(width);
+
+    auto independent_formatting_context = layout_inside(box, layout_mode, box_state.available_inner_space_or_constraints_from(*m_available_space));
+
+    auto const& height_value = box.computed_values().height();
+    if (height_value.is_auto()) {
+        // FIXME: (10.6.6) If 'height' is 'auto', the height depends on the element's descendants per 10.6.7.
+        parent().compute_height(box, AvailableSpace(AvailableSize::make_indefinite(), AvailableSize::make_indefinite()));
+    } else {
+        auto container_height = CSS::Length::make_px(m_containing_block_state.content_height());
+        box_state.set_content_height(height_value.resolved(box, container_height).to_px(box));
+    }
+
+    if (independent_formatting_context)
+        independent_formatting_context->parent_context_did_dimension_child_root_box();
 }
 
 void InlineFormattingContext::apply_justification_to_fragments(CSS::TextJustify text_justify, LineBox& line_box, bool is_last_line)

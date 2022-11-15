@@ -27,9 +27,10 @@ ConnectionToServer::ConnectionToServer(NonnullOwnPtr<Core::Stream::LocalSocket> 
         Core::EventLoop enqueuer_loop;
         m_enqueuer_loop = &enqueuer_loop;
         enqueuer_loop.exec();
-        m_enqueuer_loop_destruction.lock();
-        m_enqueuer_loop = nullptr;
-        m_enqueuer_loop_destruction.unlock();
+        {
+            Threading::MutexLocker const locker(m_enqueuer_loop_destruction);
+            m_enqueuer_loop = nullptr;
+        }
         return (intptr_t) nullptr;
     }))
 {
@@ -44,13 +45,14 @@ ConnectionToServer::~ConnectionToServer()
 
 void ConnectionToServer::die()
 {
-    // We're sometimes getting here after the other thread has already exited and its event loop does no longer exist.
-    m_enqueuer_loop_destruction.lock();
-    if (m_enqueuer_loop != nullptr) {
-        m_enqueuer_loop->wake();
-        m_enqueuer_loop->quit(0);
+    {
+        Threading::MutexLocker const locker(m_enqueuer_loop_destruction);
+        // We're sometimes getting here after the other thread has already exited and its event loop does no longer exist.
+        if (m_enqueuer_loop != nullptr) {
+            m_enqueuer_loop->wake();
+            m_enqueuer_loop->quit(0);
+        }
     }
-    m_enqueuer_loop_destruction.unlock();
     (void)m_background_audio_enqueuer->join();
 }
 

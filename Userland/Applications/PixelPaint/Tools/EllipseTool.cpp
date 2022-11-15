@@ -84,10 +84,10 @@ void EllipseTool::on_mouseup(Layer* layer, MouseEvent& event)
         return;
 
     if (event.layer_event().button() == m_drawing_button) {
-        GUI::Painter painter(layer->currently_edited_bitmap());
+        GUI::Painter painter(layer->get_scratch_edited_bitmap());
         draw_using(painter, m_ellipse_start_position, m_ellipse_end_position, m_thickness);
         m_drawing_button = GUI::MouseButton::None;
-        layer->did_modify_bitmap();
+        layer->did_modify_bitmap(layer->get_scratch_edited_bitmap().rect());
         m_editor->update();
         m_editor->did_complete_action(tool_name());
     }
@@ -123,14 +123,14 @@ void EllipseTool::on_second_paint(Layer const* layer, GUI::PaintEvent& event)
     draw_using(painter, preview_start, preview_end, AK::max(m_thickness * m_editor->scale(), 1));
 }
 
-void EllipseTool::on_keydown(GUI::KeyEvent& event)
+bool EllipseTool::on_keydown(GUI::KeyEvent const& event)
 {
-    Tool::on_keydown(event);
     if (event.key() == Key_Escape && m_drawing_button != GUI::MouseButton::None) {
         m_drawing_button = GUI::MouseButton::None;
         m_editor->update();
-        event.accept();
+        return true;
     }
+    return Tool::on_keydown(event);
 }
 
 GUI::Widget* EllipseTool::get_properties_widget()

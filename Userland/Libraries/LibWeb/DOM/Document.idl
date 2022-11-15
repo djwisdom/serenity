@@ -20,6 +20,7 @@
 #import <HTML/HTMLScriptElement.idl>
 
 // https://dom.spec.whatwg.org/#document
+[Exposed=Window]
 interface Document : Node {
     constructor();
 
@@ -97,6 +98,7 @@ interface Document : Node {
 
     attribute DOMString title;
 
+    boolean queryCommandSupported(DOMString commandId);
     readonly boolean hidden;
     readonly DOMString visibilityState;
 

@@ -13,6 +13,12 @@
 
 namespace JS::Temporal {
 
+struct Annotation {
+    bool critical { false };
+    StringView key;
+    StringView value;
+};
+
 struct ParseResult {
     Optional<StringView> sign;
     Optional<StringView> date_year;
@@ -22,8 +28,8 @@ struct ParseResult {
     Optional<StringView> time_minute;
     Optional<StringView> time_second;
     Optional<StringView> time_fraction;
-    Optional<StringView> calendar_name;
     Optional<StringView> utc_designator;
+    Optional<StringView> time_zone_bracketed_annotation;
     Optional<StringView> time_zone_numeric_utc_offset;
     Optional<StringView> time_zone_utc_offset_sign;
     Optional<StringView> time_zone_utc_offset_hour;
@@ -41,6 +47,9 @@ struct ParseResult {
     Optional<StringView> duration_minutes_fraction;
     Optional<StringView> duration_whole_seconds;
     Optional<StringView> duration_seconds_fraction;
+    Optional<StringView> annotation_key;
+    Optional<StringView> annotation_value;
+    Vector<Annotation> annotations;
 };
 
 enum class Production {
@@ -49,11 +58,12 @@ enum class Production {
     TemporalDurationString,
     TemporalMonthDayString,
     TemporalTimeString,
-    TemporalTimeZoneString,
     TemporalYearMonthString,
     TemporalZonedDateTimeString,
-    TemporalCalendarString,
+    TimeZoneIdentifier,
     TimeZoneNumericUTCOffset,
+    AnnotationValue,
+    DateMonth,
 };
 
 Optional<ParseResult> parse_iso8601(Production, StringView);
@@ -95,6 +105,7 @@ public:
     [[nodiscard]] bool parse_weeks_designator();
     [[nodiscard]] bool parse_years_designator();
     [[nodiscard]] bool parse_utc_designator();
+    [[nodiscard]] bool parse_annotation_critical_flag();
     [[nodiscard]] bool parse_date_year();
     [[nodiscard]] bool parse_date_month();
     [[nodiscard]] bool parse_date_month_with_thirty_days();
@@ -129,15 +140,23 @@ public:
     [[nodiscard]] bool parse_time_zone_offset_required();
     [[nodiscard]] bool parse_time_zone_name_required();
     [[nodiscard]] bool parse_time_zone();
-    [[nodiscard]] bool parse_calendar_name();
-    [[nodiscard]] bool parse_calendar();
+    [[nodiscard]] bool parse_a_key_leading_char();
+    [[nodiscard]] bool parse_a_key_char();
+    [[nodiscard]] bool parse_a_val_char();
+    [[nodiscard]] bool parse_annotation_key_tail();
+    [[nodiscard]] bool parse_annotation_key();
+    [[nodiscard]] bool parse_annotation_value_component();
+    [[nodiscard]] bool parse_annotation_value_tail();
+    [[nodiscard]] bool parse_annotation_value();
+    [[nodiscard]] bool parse_annotation();
+    [[nodiscard]] bool parse_annotations();
     [[nodiscard]] bool parse_time_spec();
     [[nodiscard]] bool parse_time_spec_with_optional_time_zone_not_ambiguous();
     [[nodiscard]] bool parse_time_spec_separator();
     [[nodiscard]] bool parse_date_time();
-    [[nodiscard]] bool parse_calendar_time();
-    [[nodiscard]] bool parse_calendar_date_time();
-    [[nodiscard]] bool parse_calendar_date_time_time_required();
+    [[nodiscard]] bool parse_annotated_time();
+    [[nodiscard]] bool parse_annotated_date_time();
+    [[nodiscard]] bool parse_annotated_date_time_time_required();
     [[nodiscard]] bool parse_duration_whole_seconds();
     [[nodiscard]] bool parse_duration_seconds_fraction();
     [[nodiscard]] bool parse_duration_seconds_part();
@@ -163,10 +182,8 @@ public:
     [[nodiscard]] bool parse_temporal_duration_string();
     [[nodiscard]] bool parse_temporal_month_day_string();
     [[nodiscard]] bool parse_temporal_time_string();
-    [[nodiscard]] bool parse_temporal_time_zone_string();
     [[nodiscard]] bool parse_temporal_year_month_string();
     [[nodiscard]] bool parse_temporal_zoned_date_time_string();
-    [[nodiscard]] bool parse_temporal_calendar_string();
 
 private:
     struct State {

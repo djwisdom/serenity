@@ -143,7 +143,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
     if (!is<Layout::Box>(layout_node)) {
         builder.appendff("{}{}{} <{}{}{}{}>",
             nonbox_color_on,
-            layout_node.class_name().substring_view(13),
+            layout_node.class_name(),
             color_off,
             tag_name,
             nonbox_color_on,
@@ -158,15 +158,12 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
 
         builder.appendff("{}{}{} <{}{}{}{}> ",
             color_on,
-            box.class_name().substring_view(13),
+            box.class_name(),
             color_off,
             color_on,
             tag_name,
             color_off,
             identifier.characters());
-
-        if (interactive)
-            builder.appendff("@{:p} ", &layout_node);
 
         if (auto const* paint_box = box.paint_box()) {
             builder.appendff("at ({},{}) content-size {}x{}",
@@ -182,7 +179,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
             builder.appendff(" {}floating{}", floating_color_on, color_off);
         if (box.is_inline_block())
             builder.appendff(" {}inline-block{}", inline_block_color_on, color_off);
-        if (box.computed_values().display().is_flex_inside()) {
+        if (box.display().is_flex_inside()) {
             StringView direction;
             switch (box.computed_values().flex_direction()) {
             case CSS::FlexDirection::Column:
@@ -507,6 +504,9 @@ void dump_selector(StringBuilder& builder, CSS::Selector const& selector)
                     break;
                 case CSS::Selector::PseudoElement::ProgressValue:
                     pseudo_element_description = "-webkit-progress-value";
+                    break;
+                case CSS::Selector::PseudoElement::Placeholder:
+                    pseudo_element_description = "placeholder";
                     break;
                 }
 

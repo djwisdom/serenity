@@ -34,7 +34,7 @@ private:
 class TarInputStream {
 public:
     TarInputStream(InputStream&);
-    void advance();
+    ErrorOr<void> advance();
     bool finished() const { return m_finished; }
     bool valid() const;
     TarFileHeader const& header() const { return m_header; }
@@ -57,6 +57,7 @@ class TarOutputStream {
 public:
     TarOutputStream(OutputStream&);
     void add_file(String const& path, mode_t, ReadonlyBytes);
+    void add_link(String const& path, mode_t, StringView);
     void add_directory(String const& path, mode_t);
     void finish();
 
@@ -74,8 +75,13 @@ inline ErrorOr<void> TarInputStream::for_each_extended_header(F func)
 
     Archive::TarFileStream file_stream = file_contents();
 
-    ByteBuffer file_contents_buffer = TRY(ByteBuffer::create_zeroed(header().size()));
-    VERIFY(file_stream.read(file_contents_buffer) == header().size());
+    auto header_size_or_error = header().size();
+    if (header_size_or_error.is_error())
+        return header_size_or_error.release_error();
+    auto header_size = header_size_or_error.release_value();
+
+    ByteBuffer file_contents_buffer = TRY(ByteBuffer::create_zeroed(header_size));
+    VERIFY(file_stream.read(file_contents_buffer) == header_size);
 
     StringView file_contents { file_contents_buffer };
 

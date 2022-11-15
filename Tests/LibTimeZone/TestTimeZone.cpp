@@ -24,6 +24,26 @@ static void test_offset(StringView time_zone, i64 time, i64 expected_offset, Tim
 
 #    include <LibTimeZone/TimeZoneData.h>
 
+class TimeZoneGuard {
+public:
+    explicit TimeZoneGuard(char const* tz)
+        : m_tz(getenv("TZ"))
+    {
+        setenv("TZ", tz, 1);
+    }
+
+    ~TimeZoneGuard()
+    {
+        if (m_tz)
+            setenv("TZ", m_tz, 1);
+        else
+            unsetenv("TZ");
+    }
+
+private:
+    char const* m_tz { nullptr };
+};
+
 TEST_CASE(time_zone_from_string)
 {
     EXPECT_EQ(TimeZone::time_zone_from_string("America/New_York"sv), TimeZone::TimeZone::America_New_York);
@@ -95,6 +115,12 @@ TEST_CASE(canonicalize_time_zone)
     EXPECT(!TimeZone::canonicalize_time_zone("I don't exist"sv).has_value());
 }
 
+TEST_CASE(invalid_time_zone)
+{
+    TimeZoneGuard guard { "ladybird" };
+    EXPECT_EQ(TimeZone::current_time_zone(), "UTC"sv);
+}
+
 static i64 offset(i64 sign, i64 hours, i64 minutes, i64 seconds)
 {
     return sign * ((hours * 3600) + (minutes * 60) + seconds);
@@ -102,8 +128,8 @@ static i64 offset(i64 sign, i64 hours, i64 minutes, i64 seconds)
 
 TEST_CASE(get_time_zone_offset)
 {
-    test_offset("America/Chicago"sv, -2717668237, offset(-1, 5, 50, 36), No); // Sunday, November 18, 1883 12:09:23 PM
-    test_offset("America/Chicago"sv, -2717668236, offset(-1, 6, 00, 00), No); // Sunday, November 18, 1883 12:09:24 PM
+    test_offset("America/Chicago"sv, -2717647201, offset(-1, 5, 50, 36), No); // Sunday, November 18, 1883 5:59:59 PM
+    test_offset("America/Chicago"sv, -2717647200, offset(-1, 6, 00, 00), No); // Sunday, November 18, 1883 6:00:00 PM
     test_offset("America/Chicago"sv, -1067810460, offset(-1, 6, 00, 00), No); // Sunday, March 1, 1936 1:59:00 AM
     test_offset("America/Chicago"sv, -1067810400, offset(-1, 5, 00, 00), No); // Sunday, March 1, 1936 2:00:00 AM
     test_offset("America/Chicago"sv, -1045432860, offset(-1, 5, 00, 00), No); // Sunday, November 15, 1936 1:59:00 AM

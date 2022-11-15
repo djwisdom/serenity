@@ -70,7 +70,8 @@ public:
 
     float compute_box_y_position_with_respect_to_siblings(Box const&) const;
 
-    float calculate_stretch_fit_width(Box const&, AvailableSize const&) const;
+    [[nodiscard]] float calculate_stretch_fit_width(Box const&, AvailableSize const&) const;
+    [[nodiscard]] float calculate_stretch_fit_height(Box const&, AvailableSize const&) const;
 
     virtual bool can_determine_size_of_child() const { return false; }
     virtual void determine_width_of_child(Box const&, AvailableSpace const&) { }
@@ -80,6 +81,9 @@ public:
 
 protected:
     FormattingContext(Type, LayoutState&, Box const&, FormattingContext* parent = nullptr);
+
+    static bool should_treat_width_as_auto(Box const&, AvailableSpace const&);
+    static bool should_treat_height_as_auto(Box const&, AvailableSpace const&);
 
     float calculate_fit_content_size(float min_content_size, float max_content_size, AvailableSize const&) const;
 

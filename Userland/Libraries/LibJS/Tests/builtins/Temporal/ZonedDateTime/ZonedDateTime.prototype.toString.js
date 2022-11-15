@@ -72,6 +72,7 @@ describe("correct behavior", () => {
         const values = [
             ["auto", "2021-11-03T01:33:05.1002003+00:00[UTC]"],
             ["never", "2021-11-03T01:33:05.1002003+00:00"],
+            ["critical", "2021-11-03T01:33:05.1002003+00:00[!UTC]"],
         ];
 
         for (const [timeZoneName, expected] of values) {
@@ -125,6 +126,23 @@ describe("correct behavior", () => {
         expect(zonedDateTime.toString(options)).toBe("2022-08-08T14:38:40.1002003+00:00[UTC]");
         expect(calledToString).toBeFalse();
     });
+
+    test("calendarName option", () => {
+        const plainDateTime = new Temporal.PlainDateTime(2022, 11, 2, 19, 4, 35, 100, 200, 300);
+        const timeZone = new Temporal.TimeZone("UTC");
+        const zonedDateTime = plainDateTime.toZonedDateTime(timeZone);
+        const values = [
+            ["auto", "2022-11-02T19:04:35.1002003+00:00[UTC]"],
+            ["always", "2022-11-02T19:04:35.1002003+00:00[UTC][u-ca=iso8601]"],
+            ["never", "2022-11-02T19:04:35.1002003+00:00[UTC]"],
+            ["critical", "2022-11-02T19:04:35.1002003+00:00[UTC][!u-ca=iso8601]"],
+        ];
+
+        for (const [calendarName, expected] of values) {
+            const options = { calendarName };
+            expect(zonedDateTime.toString(options)).toBe(expected);
+        }
+    });
 });
 
 describe("errors", () => {
@@ -139,5 +157,12 @@ describe("errors", () => {
         expect(() => {
             zonedDateTime.toString();
         }).toThrowWithMessage(TypeError, "null is not a function");
+    });
+
+    test("calendarName option must be one of 'auto', 'always', 'never', 'critical'", () => {
+        const zonedDateTime = new Temporal.ZonedDateTime(0n, "UTC");
+        expect(() => {
+            zonedDateTime.toString({ calendarName: "foo" });
+        }).toThrowWithMessage(RangeError, "foo is not a valid value for option calendarName");
     });
 });

@@ -6,28 +6,28 @@
 
 #pragma once
 
+#include <AK/Vector.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/Percentage.h>
 
 namespace Web::CSS {
 
-class GridTrackSize {
+class GridSize {
 public:
     enum class Type {
         Length,
         Percentage,
         FlexibleLength,
-        // TODO: MinMax
-        // TODO: Repeat
         // TODO: Max-Content
     };
 
-    GridTrackSize(Length);
-    GridTrackSize(Percentage);
-    GridTrackSize(float);
-    ~GridTrackSize();
+    GridSize(Length);
+    GridSize(Percentage);
+    GridSize(float);
+    GridSize();
+    ~GridSize();
 
-    static GridTrackSize make_auto();
+    static GridSize make_auto();
 
     Type type() const { return m_type; }
 
@@ -47,8 +47,13 @@ public:
         return (m_type == Type::Length && m_length.is_auto());
     }
 
+    bool is_definite() const
+    {
+        return (m_type == Type::Length && !m_length.is_auto()) || is_percentage();
+    }
+
     String to_string() const;
-    bool operator==(GridTrackSize const& other) const
+    bool operator==(GridSize const& other) const
     {
         return m_type == other.type()
             && m_length == other.length()
@@ -63,6 +68,138 @@ private:
     Length m_length;
     Percentage m_percentage { Percentage(0) };
     float m_flexible_length { 0 };
+};
+
+class GridMinMax {
+public:
+    GridMinMax(CSS::GridSize min_grid_size, CSS::GridSize max_grid_size);
+    GridMinMax() = default;
+
+    GridSize min_grid_size() const& { return m_min_grid_size; }
+    GridSize max_grid_size() const& { return m_max_grid_size; }
+
+    String to_string() const;
+    bool operator==(GridMinMax const& other) const
+    {
+        return m_min_grid_size == other.min_grid_size()
+            && m_max_grid_size == other.max_grid_size();
+    }
+
+private:
+    GridSize m_min_grid_size;
+    GridSize m_max_grid_size;
+};
+
+class GridTrackSizeList {
+public:
+    GridTrackSizeList(Vector<CSS::ExplicitGridTrack> track_list, Vector<Vector<String>> line_names);
+    GridTrackSizeList();
+
+    static GridTrackSizeList make_auto();
+
+    Vector<CSS::ExplicitGridTrack> track_list() const { return m_track_list; }
+    Vector<Vector<String>> line_names() const { return m_line_names; }
+
+    String to_string() const;
+    bool operator==(GridTrackSizeList const& other) const
+    {
+        return m_line_names == other.line_names() && m_track_list == other.track_list();
+    }
+
+private:
+    Vector<CSS::ExplicitGridTrack> m_track_list;
+    Vector<Vector<String>> m_line_names;
+};
+
+class GridRepeat {
+public:
+    enum class Type {
+        AutoFit,
+        AutoFill,
+        Default,
+    };
+    GridRepeat(GridTrackSizeList, int repeat_count);
+    GridRepeat(GridTrackSizeList, Type);
+    GridRepeat();
+
+    bool is_auto_fill() const { return m_type == Type::AutoFill; }
+    bool is_auto_fit() const { return m_type == Type::AutoFit; }
+    bool is_default() const { return m_type == Type::Default; }
+    int repeat_count() const
+    {
+        VERIFY(is_default());
+        return m_repeat_count;
+    }
+    GridTrackSizeList grid_track_size_list() const& { return m_grid_track_size_list; }
+    Type type() const& { return m_type; }
+
+    String to_string() const;
+    bool operator==(GridRepeat const& other) const
+    {
+        if (m_type != other.type())
+            return false;
+        if (m_type == Type::Default && m_repeat_count != other.repeat_count())
+            return false;
+        return m_grid_track_size_list == other.grid_track_size_list();
+    }
+
+private:
+    Type m_type;
+    GridTrackSizeList m_grid_track_size_list;
+    int m_repeat_count { 0 };
+};
+
+class ExplicitGridTrack {
+public:
+    enum class Type {
+        MinMax,
+        Repeat,
+        Default,
+    };
+    ExplicitGridTrack(CSS::GridRepeat);
+    ExplicitGridTrack(CSS::GridMinMax);
+    ExplicitGridTrack(CSS::GridSize);
+
+    bool is_repeat() const { return m_type == Type::Repeat; }
+    GridRepeat repeat() const
+    {
+        VERIFY(is_repeat());
+        return m_grid_repeat;
+    }
+
+    bool is_minmax() const { return m_type == Type::MinMax; }
+    GridMinMax minmax() const
+    {
+        VERIFY(is_minmax());
+        return m_grid_minmax;
+    }
+
+    bool is_default() const { return m_type == Type::Default; }
+    GridSize grid_size() const
+    {
+        VERIFY(is_default());
+        return m_grid_size;
+    }
+
+    Type type() const { return m_type; }
+
+    String to_string() const;
+    bool operator==(ExplicitGridTrack const& other) const
+    {
+        if (is_repeat() && other.is_repeat())
+            return m_grid_repeat == other.repeat();
+        if (is_minmax() && other.is_minmax())
+            return m_grid_minmax == other.minmax();
+        if (is_default() && other.is_default())
+            return m_grid_size == other.grid_size();
+        return false;
+    }
+
+private:
+    Type m_type;
+    GridRepeat m_grid_repeat;
+    GridMinMax m_grid_minmax;
+    GridSize m_grid_size;
 };
 
 }

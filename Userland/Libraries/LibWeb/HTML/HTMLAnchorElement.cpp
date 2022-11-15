@@ -36,7 +36,7 @@ String HTMLAnchorElement::hyperlink_element_utils_href() const
 
 void HTMLAnchorElement::set_hyperlink_element_utils_href(String href)
 {
-    set_attribute(HTML::AttributeNames::href, move(href));
+    MUST(set_attribute(HTML::AttributeNames::href, move(href)));
 }
 
 void HTMLAnchorElement::run_activation_behavior(Web::DOM::Event const&)
@@ -75,6 +75,13 @@ void HTMLAnchorElement::run_activation_behavior(Web::DOM::Event const&)
     // 5. Otherwise, follow the hyperlink created by element given
     // hyperlinkSuffix.
     follow_the_hyperlink(hyperlink_suffix);
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+i32 HTMLAnchorElement::default_tab_index_value() const
+{
+    // See the base function for the spec comments.
+    return 0;
 }
 
 }

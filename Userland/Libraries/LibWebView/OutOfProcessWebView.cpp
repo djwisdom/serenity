@@ -309,6 +309,24 @@ void OutOfProcessWebView::notify_server_did_finish_loading(Badge<WebContentClien
         on_load_finish(url);
 }
 
+void OutOfProcessWebView::notify_server_did_request_navigate_back(Badge<WebContentClient>)
+{
+    if (on_navigate_back)
+        on_navigate_back();
+}
+
+void OutOfProcessWebView::notify_server_did_request_navigate_forward(Badge<WebContentClient>)
+{
+    if (on_navigate_forward)
+        on_navigate_forward();
+}
+
+void OutOfProcessWebView::notify_server_did_request_refresh(Badge<WebContentClient>)
+{
+    if (on_refresh)
+        on_refresh();
+}
+
 void OutOfProcessWebView::notify_server_did_request_context_menu(Badge<WebContentClient>, Gfx::IntPoint const& content_position)
 {
     if (on_context_menu_request)
@@ -382,6 +400,20 @@ void OutOfProcessWebView::notify_server_did_change_favicon(Gfx::Bitmap const& fa
         on_favicon_change(favicon);
 }
 
+Vector<Web::Cookie::Cookie> OutOfProcessWebView::notify_server_did_request_all_cookies(Badge<WebContentClient>, AK::URL const& url)
+{
+    if (on_get_all_cookies)
+        return on_get_all_cookies(url);
+    return {};
+}
+
+Optional<Web::Cookie::Cookie> OutOfProcessWebView::notify_server_did_request_named_cookie(Badge<WebContentClient>, AK::URL const& url, String const& name)
+{
+    if (on_get_named_cookie)
+        return on_get_named_cookie(url, name);
+    return {};
+}
+
 String OutOfProcessWebView::notify_server_did_request_cookie(Badge<WebContentClient>, const AK::URL& url, Web::Cookie::Source source)
 {
     if (on_get_cookie)
@@ -395,10 +427,57 @@ void OutOfProcessWebView::notify_server_did_set_cookie(Badge<WebContentClient>, 
         on_set_cookie(url, cookie, source);
 }
 
+void OutOfProcessWebView::notify_server_did_update_cookie(Badge<WebContentClient>, AK::URL const& url, Web::Cookie::Cookie const& cookie)
+{
+    if (on_update_cookie)
+        on_update_cookie(url, cookie);
+}
+
 void OutOfProcessWebView::notify_server_did_update_resource_count(i32 count_waiting)
 {
     if (on_resource_status_change)
         on_resource_status_change(count_waiting);
+}
+
+void OutOfProcessWebView::notify_server_did_request_restore_window()
+{
+    if (on_restore_window)
+        on_restore_window();
+}
+
+Gfx::IntPoint OutOfProcessWebView::notify_server_did_request_reposition_window(Gfx::IntPoint const& position)
+{
+    if (on_reposition_window)
+        return on_reposition_window(position);
+    return {};
+}
+
+Gfx::IntSize OutOfProcessWebView::notify_server_did_request_resize_window(Gfx::IntSize const& size)
+{
+    if (on_resize_window)
+        return on_resize_window(size);
+    return {};
+}
+
+Gfx::IntRect OutOfProcessWebView::notify_server_did_request_maximize_window()
+{
+    if (on_maximize_window)
+        return on_maximize_window();
+    return {};
+}
+
+Gfx::IntRect OutOfProcessWebView::notify_server_did_request_minimize_window()
+{
+    if (on_minimize_window)
+        return on_minimize_window();
+    return {};
+}
+
+Gfx::IntRect OutOfProcessWebView::notify_server_did_request_fullscreen_window()
+{
+    if (on_fullscreen_window)
+        return on_fullscreen_window();
+    return {};
 }
 
 void OutOfProcessWebView::notify_server_did_request_file(Badge<WebContentClient>, String const& path, i32 request_id)
@@ -530,6 +609,33 @@ void OutOfProcessWebView::set_preferred_color_scheme(Web::CSS::PreferredColorSch
     client().async_set_preferred_color_scheme(color_scheme);
 }
 
+void OutOfProcessWebView::connect_to_webdriver(String const& webdriver_ipc_path)
+{
+    client().async_connect_to_webdriver(webdriver_ipc_path);
+}
+
+void OutOfProcessWebView::set_window_position(Gfx::IntPoint const& position)
+{
+    client().async_set_window_position(position);
+}
+
+void OutOfProcessWebView::set_window_size(Gfx::IntSize const& size)
+{
+    client().async_set_window_size(size);
+}
+
+Gfx::ShareableBitmap OutOfProcessWebView::take_screenshot() const
+{
+    if (auto* bitmap = m_client_state.has_usable_bitmap ? m_client_state.front_bitmap.bitmap.ptr() : m_backup_bitmap.ptr())
+        return bitmap->to_shareable_bitmap();
+    return {};
+}
+
+Gfx::ShareableBitmap OutOfProcessWebView::take_document_screenshot()
+{
+    return client().take_document_screenshot();
+}
+
 void OutOfProcessWebView::focusin_event(GUI::FocusEvent&)
 {
     client().async_set_has_focus(true);
@@ -540,14 +646,19 @@ void OutOfProcessWebView::focusout_event(GUI::FocusEvent&)
     client().async_set_has_focus(false);
 }
 
+void OutOfProcessWebView::set_system_visibility_state(bool visible)
+{
+    client().async_set_system_visibility_state(visible);
+}
+
 void OutOfProcessWebView::show_event(GUI::ShowEvent&)
 {
-    client().async_set_system_visibility_state(true);
+    set_system_visibility_state(true);
 }
 
 void OutOfProcessWebView::hide_event(GUI::HideEvent&)
 {
-    client().async_set_system_visibility_state(false);
+    set_system_visibility_state(false);
 }
 
 }

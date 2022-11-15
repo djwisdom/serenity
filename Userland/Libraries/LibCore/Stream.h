@@ -183,6 +183,11 @@ enum class OpenMode : unsigned {
     Nonblocking = 64,
 };
 
+enum class ShouldCloseFileDescriptor {
+    Yes,
+    No,
+};
+
 AK_ENUM_BITWISE_OPERATORS(OpenMode)
 
 class File final : public SeekableStream {
@@ -190,9 +195,12 @@ class File final : public SeekableStream {
 
 public:
     static ErrorOr<NonnullOwnPtr<File>> open(StringView filename, OpenMode, mode_t = 0644);
-    static ErrorOr<NonnullOwnPtr<File>> adopt_fd(int fd, OpenMode);
+    static ErrorOr<NonnullOwnPtr<File>> adopt_fd(int fd, OpenMode, ShouldCloseFileDescriptor = ShouldCloseFileDescriptor::Yes);
     static bool exists(StringView filename);
 
+    static ErrorOr<NonnullOwnPtr<File>> standard_input();
+    static ErrorOr<NonnullOwnPtr<File>> standard_output();
+    static ErrorOr<NonnullOwnPtr<File>> standard_error();
     static ErrorOr<NonnullOwnPtr<File>> open_file_or_standard_stream(StringView filename, OpenMode mode);
 
     File(File&& other) { operator=(move(other)); }
@@ -219,13 +227,18 @@ public:
     virtual ErrorOr<off_t> seek(i64 offset, SeekMode) override;
     virtual ErrorOr<void> truncate(off_t length) override;
 
-    virtual ~File() override { close(); }
+    virtual ~File() override
+    {
+        if (m_should_close_file_descriptor == ShouldCloseFileDescriptor::Yes)
+            close();
+    }
 
     static int open_mode_to_options(OpenMode mode);
 
 private:
-    File(OpenMode mode)
+    File(OpenMode mode, ShouldCloseFileDescriptor should_close = ShouldCloseFileDescriptor::Yes)
         : m_mode(mode)
+        , m_should_close_file_descriptor(should_close)
     {
     }
 
@@ -234,6 +247,7 @@ private:
     OpenMode m_mode { OpenMode::NotOpen };
     int m_fd { -1 };
     bool m_last_read_was_eof { false };
+    ShouldCloseFileDescriptor m_should_close_file_descriptor { ShouldCloseFileDescriptor::Yes };
 };
 
 class PosixSocketHelper {
@@ -468,6 +482,9 @@ public:
     /// already closed.
     ErrorOr<int> release_fd();
 
+    Optional<int> fd() const;
+    RefPtr<Core::Notifier> notifier() { return m_helper.notifier(); }
+
     virtual ~LocalSocket() { close(); }
 
 private:
@@ -613,6 +630,8 @@ public:
             }
         }
 
+        auto readable_size = min(m_buffered_size, buffer.size());
+
         // The intention here is to try to match all of the possible
         // delimiter candidates and try to find the longest one we can
         // remove from the buffer after copying up to the delimiter to the
@@ -620,7 +639,7 @@ public:
         Optional<size_t> longest_match;
         size_t match_size = 0;
         for (auto& candidate : candidates) {
-            auto result = AK::memmem_optional(m_buffer.data(), m_buffered_size, candidate.bytes().data(), candidate.bytes().size());
+            auto result = AK::memmem_optional(m_buffer.data(), readable_size, candidate.bytes().data(), candidate.bytes().size());
             if (result.has_value()) {
                 auto previous_match = longest_match.value_or(*result);
                 if ((previous_match < *result) || (previous_match == *result && match_size < candidate.length())) {
@@ -645,7 +664,6 @@ public:
         // If we still haven't found anything, then it's most likely the case
         // that the delimiter ends beyond the length of the caller-passed
         // buffer. Let's just fill the caller's buffer up.
-        auto readable_size = min(m_buffered_size, buffer.size());
         auto buffer_to_take = m_buffer.span().slice(0, readable_size);
         auto buffer_to_shift = m_buffer.span().slice(readable_size);
 

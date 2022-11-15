@@ -19,7 +19,7 @@ JS::NonnullGCPtr<DOMStringMap> DOMStringMap::create(DOM::Element& element)
 }
 
 DOMStringMap::DOMStringMap(DOM::Element& element)
-    : PlatformObject(Bindings::cached_web_prototype(element.realm(), "DOMStringMap"))
+    : LegacyPlatformObject(Bindings::cached_web_prototype(element.realm(), "DOMStringMap"))
     , m_associated_element(element)
 {
 }
@@ -144,7 +144,7 @@ WebIDL::ExceptionOr<void> DOMStringMap::set_value_of_new_named_property(String c
     // FIXME: 4. If name does not match the XML Name production, throw an "InvalidCharacterError" DOMException.
 
     // 5. Set an attribute value for the DOMStringMap's associated element using name and value.
-    m_associated_element->set_attribute(data_name, value);
+    MUST(m_associated_element->set_attribute(data_name, value));
 
     return {};
 }
@@ -181,6 +181,11 @@ bool DOMStringMap::delete_existing_named_property(String const& name)
 
     // The spec doesn't have the step. This indicates that the deletion was successful.
     return true;
+}
+
+JS::Value DOMStringMap::named_item_value(FlyString const& name) const
+{
+    return js_string(vm(), determine_value_of_named_property(name));
 }
 
 }

@@ -92,6 +92,13 @@ ThrowCompletionOr<void> ObjectEnvironment::set_mutable_binding(VM&, FlyString co
 {
     auto& vm = this->vm();
 
+    // OPTIMIZATION: For non-with environments in non-strict mode, we don't need the separate HasProperty check since we only use that
+    //               information to throw errors in strict mode.
+    //               We can't do this for with environments, since it would be observable (e.g via a Proxy)
+    // FIXME: I think we could combine HasProperty and Set in strict mode if Set would return a bit more failure information.
+    if (!m_with_environment && !strict)
+        return m_binding_object.set(name, value, Object::ShouldThrowExceptions::No);
+
     // 1. Let bindingObject be envRec.[[BindingObject]].
     // 2. Let stillExists be ? HasProperty(bindingObject, N).
     auto still_exists = TRY(m_binding_object.has_property(name));
@@ -126,6 +133,14 @@ ThrowCompletionOr<void> ObjectEnvironment::set_mutable_binding(VM&, FlyString co
 ThrowCompletionOr<Value> ObjectEnvironment::get_binding_value(VM&, FlyString const& name, bool strict)
 {
     auto& vm = this->vm();
+
+    // OPTIMIZATION: For non-with environments in non-strict mode, we don't need the separate HasProperty check
+    //               since Get will return undefined for missing properties anyway. So we take advantage of this
+    //               to avoid doing both HasProperty and Get.
+    //               We can't do this for with environments, since it would be observable (e.g via a Proxy)
+    // FIXME: We could combine HasProperty and Get in non-strict mode if Get would return a bit more failure information.
+    if (!m_with_environment && !strict)
+        return m_binding_object.get(name);
 
     // 1. Let bindingObject be envRec.[[BindingObject]].
     // 2. Let value be ? HasProperty(bindingObject, N).

@@ -132,12 +132,6 @@ public:
         return x() == other.x() && y() == other.y();
     }
 
-    template<class U>
-    [[nodiscard]] bool operator!=(Point<U> const& other) const
-    {
-        return !(*this == other);
-    }
-
     [[nodiscard]] Point<T> operator+(Point<T> const& other) const { return { m_x + other.m_x, m_y + other.m_y }; }
 
     Point<T>& operator+=(Point<T> const& other)
@@ -285,10 +279,10 @@ inline Point<T> cubic_interpolate(Point<T> const& p1, Point<T> const& p2, Point<
 namespace AK {
 
 template<typename T>
-struct Formatter<Gfx::Point<T>> : Formatter<StringView> {
+struct Formatter<Gfx::Point<T>> : Formatter<FormatString> {
     ErrorOr<void> format(FormatBuilder& builder, Gfx::Point<T> const& value)
     {
-        return Formatter<StringView>::format(builder, value.to_string());
+        return Formatter<FormatString>::format(builder, "[{},{}]"sv, value.x(), value.y());
     }
 };
 

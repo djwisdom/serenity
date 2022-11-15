@@ -51,23 +51,21 @@ void HTMLInputElement::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_selected_files);
 }
 
-RefPtr<Layout::Node> HTMLInputElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
+JS::GCPtr<Layout::Node> HTMLInputElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
 {
     if (type_state() == TypeAttributeState::Hidden)
         return nullptr;
 
     if (type_state() == TypeAttributeState::SubmitButton || type_state() == TypeAttributeState::Button || type_state() == TypeAttributeState::ResetButton || type_state() == TypeAttributeState::FileUpload)
-        return adopt_ref(*new Layout::ButtonBox(document(), *this, move(style)));
+        return heap().allocate_without_realm<Layout::ButtonBox>(document(), *this, move(style));
 
     if (type_state() == TypeAttributeState::Checkbox)
-        return adopt_ref(*new Layout::CheckBox(document(), *this, move(style)));
+        return heap().allocate_without_realm<Layout::CheckBox>(document(), *this, move(style));
 
     if (type_state() == TypeAttributeState::RadioButton)
-        return adopt_ref(*new Layout::RadioButton(document(), *this, move(style)));
+        return heap().allocate_without_realm<Layout::RadioButton>(document(), *this, move(style));
 
-    auto layout_node = adopt_ref(*new Layout::BlockContainer(document(), this, move(style)));
-    layout_node->set_inline(true);
-    return layout_node;
+    return heap().allocate_without_realm<Layout::BlockContainer>(document(), this, move(style));
 }
 
 void HTMLInputElement::set_checked(bool checked, ChangeSource change_source)
@@ -342,12 +340,16 @@ void HTMLInputElement::create_shadow_tree_if_needed()
     if (initial_value.is_null())
         initial_value = String::empty();
     auto element = document().create_element(HTML::TagNames::div).release_value();
-    element->set_attribute(HTML::AttributeNames::style, "white-space: pre; padding-top: 1px; padding-bottom: 1px; padding-left: 2px; padding-right: 2px");
+    MUST(element->set_attribute(HTML::AttributeNames::style, "white-space: pre; padding-top: 1px; padding-bottom: 1px; padding-left: 2px; padding-right: 2px"));
     m_text_node = heap().allocate<DOM::Text>(realm(), document(), initial_value);
     m_text_node->set_always_editable(m_type != TypeAttributeState::FileUpload);
     m_text_node->set_owner_input_element({}, *this);
-    element->append_child(*m_text_node);
-    shadow_root->append_child(move(element));
+
+    if (m_type == TypeAttributeState::Password)
+        m_text_node->set_is_password_input({}, true);
+
+    MUST(element->append_child(*m_text_node));
+    MUST(shadow_root->append_child(move(element)));
     set_shadow_root(move(shadow_root));
 }
 
@@ -420,7 +422,7 @@ String HTMLInputElement::type() const
 
 void HTMLInputElement::set_type(String const& type)
 {
-    set_attribute(HTML::AttributeNames::type, type);
+    MUST(set_attribute(HTML::AttributeNames::type, type));
 }
 
 // https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
@@ -448,9 +450,10 @@ String HTMLInputElement::value_sanitization_algorithm(String value) const
         }
     } else if (type_state() == HTMLInputElement::TypeAttributeState::Number) {
         // If the value of the element is not a valid floating-point number, then set it to the empty string instead.
-        char* end_ptr;
-        auto val = strtod(value.characters(), &end_ptr);
-        if (!isfinite(val) || *end_ptr)
+        // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-floating-point-number-values
+        // 6. Skip ASCII whitespace within input given position.
+        auto maybe_double = value.to_double(TrimWhitespace::Yes);
+        if (!maybe_double.has_value() || !isfinite(maybe_double.value()))
             return "";
     }
 
@@ -550,6 +553,13 @@ void HTMLInputElement::legacy_cancelled_activation_behavior()
 void HTMLInputElement::legacy_cancelled_activation_behavior_was_not_called()
 {
     m_legacy_pre_activation_behavior_checked_element_in_group = nullptr;
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+i32 HTMLInputElement::default_tab_index_value() const
+{
+    // See the base function for the spec comments.
+    return 0;
 }
 
 }
