@@ -16,7 +16,7 @@
 
 namespace PixelPaint {
 
-void CloneTool::draw_point(Gfx::Bitmap& bitmap, Gfx::Color const&, Gfx::IntPoint const& point)
+void CloneTool::draw_point(Gfx::Bitmap& bitmap, Gfx::Color, Gfx::IntPoint point)
 {
     if (!m_sample_location.has_value())
         return;
@@ -39,13 +39,13 @@ void CloneTool::draw_point(Gfx::Bitmap& bitmap, Gfx::Color const&, Gfx::IntPoint
 
             auto falloff = get_falloff(distance);
             auto pixel_color = bitmap.get_pixel(source_x, source_y);
-            pixel_color.set_alpha(falloff * 255);
+            pixel_color.set_alpha(falloff * pixel_color.alpha());
             bitmap.set_pixel(target_x, target_y, bitmap.get_pixel(target_x, target_y).blend(pixel_color));
         }
     }
 }
 
-void CloneTool::draw_line(Gfx::Bitmap& bitmap, Gfx::Color const& color, Gfx::IntPoint const& start, Gfx::IntPoint const& end)
+void CloneTool::draw_line(Gfx::Bitmap& bitmap, Gfx::Color color, Gfx::IntPoint start, Gfx::IntPoint end)
 {
     if (!m_sample_location.has_value())
         return;
@@ -114,7 +114,7 @@ void CloneTool::on_second_paint(Layer const*, GUI::PaintEvent& event)
     painter.draw_ellipse_intersecting(rect, m_marker_color, 1);
 }
 
-bool CloneTool::on_keydown(GUI::KeyEvent const& event)
+bool CloneTool::on_keydown(GUI::KeyEvent& event)
 {
     if (event.key() == KeyCode::Key_Alt && !m_is_selecting_location) {
         m_is_selecting_location = true;

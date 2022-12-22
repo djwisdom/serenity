@@ -15,86 +15,63 @@
 
 namespace Core::Stream {
 
-class MemoryStream final : public SeekableStream {
+/// A stream class that allows for reading/writing on a preallocated memory area
+/// using a single read/write head.
+class FixedMemoryStream final : public SeekableStream {
 public:
-    static ErrorOr<NonnullOwnPtr<MemoryStream>> construct(Bytes bytes)
-    {
-        return adopt_nonnull_own_or_enomem<MemoryStream>(new (nothrow) MemoryStream(bytes));
-    }
+    static ErrorOr<NonnullOwnPtr<FixedMemoryStream>> construct(Bytes bytes);
+    static ErrorOr<NonnullOwnPtr<FixedMemoryStream>> construct(ReadonlyBytes bytes);
 
-    virtual bool is_eof() const override { return m_offset >= m_bytes.size(); }
-    virtual bool is_open() const override { return true; }
-    // FIXME: It doesn't make sense to close an memory stream. Therefore, we don't do anything here. Is that fine?
-    virtual void close() override { }
-    // FIXME: It doesn't make sense to truncate a memory stream. Therefore, we don't do anything here. Is that fine?
-    virtual ErrorOr<void> truncate(off_t) override { return Error::from_errno(ENOTSUP); }
+    virtual bool is_eof() const override;
+    virtual bool is_open() const override;
+    virtual void close() override;
+    virtual ErrorOr<void> truncate(off_t) override;
+    virtual ErrorOr<Bytes> read(Bytes bytes) override;
 
-    virtual ErrorOr<Bytes> read(Bytes bytes) override
-    {
-        auto to_read = min(remaining(), bytes.size());
-        if (to_read == 0)
-            return Bytes {};
+    virtual ErrorOr<off_t> seek(i64 offset, SeekMode seek_mode = SeekMode::SetPosition) override;
 
-        m_bytes.slice(m_offset, to_read).copy_to(bytes);
-        m_offset += to_read;
-        return bytes.trim(to_read);
-    }
+    virtual ErrorOr<size_t> write(ReadonlyBytes bytes) override;
+    virtual ErrorOr<void> write_entire_buffer(ReadonlyBytes bytes) override;
 
-    virtual ErrorOr<off_t> seek(i64 offset, SeekMode seek_mode = SeekMode::SetPosition) override
-    {
-        switch (seek_mode) {
-        case SeekMode::SetPosition:
-            if (offset > static_cast<i64>(m_bytes.size()))
-                return Error::from_string_literal("Offset past the end of the stream memory");
-
-            m_offset = offset;
-            break;
-        case SeekMode::FromCurrentPosition:
-            if (offset + static_cast<i64>(m_offset) > static_cast<i64>(m_bytes.size()))
-                return Error::from_string_literal("Offset past the end of the stream memory");
-
-            m_offset += offset;
-            break;
-        case SeekMode::FromEndPosition:
-            if (offset > static_cast<i64>(m_bytes.size()))
-                return Error::from_string_literal("Offset past the start of the stream memory");
-
-            m_offset = m_bytes.size() - offset;
-            break;
-        }
-        return static_cast<off_t>(m_offset);
-    }
-
-    virtual ErrorOr<size_t> write(ReadonlyBytes bytes) override
-    {
-        // FIXME: Can this not error?
-        auto const nwritten = bytes.copy_trimmed_to(m_bytes.slice(m_offset));
-        m_offset += nwritten;
-        return nwritten;
-    }
-    virtual bool write_or_error(ReadonlyBytes bytes) override
-    {
-        if (remaining() < bytes.size())
-            return false;
-
-        MUST(write(bytes));
-        return true;
-    }
-
-    Bytes bytes() { return m_bytes; }
-    ReadonlyBytes bytes() const { return m_bytes; }
-    size_t offset() const { return m_offset; }
-    size_t remaining() const { return m_bytes.size() - m_offset; }
-
-protected:
-    explicit MemoryStream(Bytes bytes)
-        : m_bytes(bytes)
-    {
-    }
+    Bytes bytes();
+    ReadonlyBytes bytes() const;
+    size_t offset() const;
+    size_t remaining() const;
 
 private:
+    explicit FixedMemoryStream(Bytes bytes);
+    explicit FixedMemoryStream(ReadonlyBytes bytes);
+
     Bytes m_bytes;
     size_t m_offset { 0 };
+    bool m_writing_enabled { true };
+};
+
+/// A stream class that allows for writing to an automatically allocating memory area
+/// and reading back the written data afterwards.
+class AllocatingMemoryStream final : public Stream {
+public:
+    virtual ErrorOr<Bytes> read(Bytes) override;
+    virtual ErrorOr<size_t> write(ReadonlyBytes) override;
+    virtual ErrorOr<void> discard(size_t) override;
+    virtual bool is_eof() const override;
+    virtual bool is_open() const override;
+    virtual void close() override;
+
+    size_t used_buffer_size() const;
+
+private:
+    // Note: We set the inline buffer capacity to zero to make moving chunks as efficient as possible.
+    using Chunk = AK::Detail::ByteBuffer<0>;
+    static constexpr size_t chunk_size = 4096;
+
+    ErrorOr<ReadonlyBytes> next_read_range();
+    ErrorOr<Bytes> next_write_range();
+    void cleanup_unused_chunks();
+
+    Vector<Chunk> m_chunks;
+    size_t m_read_offset = 0;
+    size_t m_write_offset = 0;
 };
 
 }

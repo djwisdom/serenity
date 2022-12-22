@@ -15,7 +15,10 @@
 #include <AK/Tuple.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
-#include <LibGL/Tex/NameAllocator.h>
+#include <LibGL/Buffer/Buffer.h>
+#include <LibGL/NameAllocator.h>
+#include <LibGL/Shaders/Program.h>
+#include <LibGL/Shaders/Shader.h>
 #include <LibGL/Tex/Texture.h>
 #include <LibGL/Tex/TextureUnit.h>
 #include <LibGPU/Device.h>
@@ -200,6 +203,7 @@ public:
     void gl_push_attrib(GLbitfield mask);
     void gl_pop_attrib();
     void gl_light_model(GLenum pname, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
+    void gl_light_modelv(GLenum pname, void const* params, GLenum type);
     void gl_bitmap(GLsizei width, GLsizei height, GLfloat xorig, GLfloat yorig, GLfloat xmove, GLfloat ymove, GLubyte const* bitmap);
     void gl_copy_tex_image_2d(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
     void gl_get_tex_image(GLenum target, GLint level, GLenum format, GLenum type, void* pixels);
@@ -226,6 +230,19 @@ public:
     void gl_buffer_sub_data(GLenum target, GLintptr offset, GLsizeiptr size, void const* data);
     void gl_delete_buffers(GLsizei n, GLuint const* buffers);
     void gl_gen_buffers(GLsizei n, GLuint* buffers);
+
+    GLuint gl_create_shader(GLenum shader_type);
+    void gl_delete_shader(GLuint shader);
+    void gl_shader_source(GLuint shader, GLsizei count, GLchar const** string, GLint const* length);
+    void gl_compile_shader(GLuint shader);
+    void gl_get_shader(GLuint shader, GLenum pname, GLint* params);
+
+    GLuint gl_create_program();
+    void gl_delete_program(GLuint program);
+    void gl_attach_shader(GLuint program, GLuint shader);
+    void gl_link_program(GLuint program);
+    void gl_use_program(GLuint program);
+    void gl_get_program(GLuint program, GLenum pname, GLint* params);
 
 private:
     void sync_device_config();
@@ -373,7 +390,7 @@ private:
         return static_cast<T*>(default_texture.value());
     }
 
-    TextureNameAllocator m_name_allocator;
+    NameAllocator m_texture_name_allocator;
     HashMap<GLuint, RefPtr<Texture>> m_allocated_textures;
     HashMap<GLenum, RefPtr<Texture>> m_default_textures;
     Vector<TextureUnit> m_texture_units;
@@ -396,6 +413,12 @@ private:
 
     bool m_sampler_config_is_dirty { true };
     bool m_light_state_is_dirty { true };
+
+    NameAllocator m_shader_name_allocator;
+    NameAllocator m_program_name_allocator;
+    HashMap<GLuint, RefPtr<Shader>> m_allocated_shaders;
+    HashMap<GLuint, RefPtr<Program>> m_allocated_programs;
+    RefPtr<Program> m_current_program;
 
     struct Listing {
 
@@ -542,8 +565,44 @@ private:
     GLenum m_color_material_mode { GL_AMBIENT_AND_DIFFUSE };
 
     // GL Extension string
-    String m_extensions;
+    DeprecatedString m_extensions;
+
+    // Buffer objects
+    NameAllocator m_buffer_name_allocator;
+    HashMap<GLuint, RefPtr<Buffer>> m_allocated_buffers;
+    RefPtr<Buffer> m_array_buffer;
+    RefPtr<Buffer> m_element_array_buffer;
 };
+
+// Transposes input matrices (column-major) to our Matrix (row-major).
+template<typename I>
+constexpr FloatMatrix4x4 transpose_input_matrix(I const* matrix)
+{
+    Array<float, 16> elements;
+    for (size_t i = 0; i < 16; ++i)
+        elements[i] = static_cast<float>(matrix[i]);
+    // clang-format off
+    return {
+        elements[0], elements[4], elements[8], elements[12],
+        elements[1], elements[5], elements[9], elements[13],
+        elements[2], elements[6], elements[10], elements[14],
+        elements[3], elements[7], elements[11], elements[15],
+    };
+    // clang-format on
+}
+
+template<>
+constexpr FloatMatrix4x4 transpose_input_matrix(float const* matrix)
+{
+    // clang-format off
+    return {
+        matrix[0], matrix[4], matrix[8], matrix[12],
+        matrix[1], matrix[5], matrix[9], matrix[13],
+        matrix[2], matrix[6], matrix[10], matrix[14],
+        matrix[3], matrix[7], matrix[11], matrix[15],
+    };
+    // clang-format on
+}
 
 ErrorOr<NonnullOwnPtr<GLContext>> create_context(Gfx::Bitmap&);
 void make_context_current(GLContext*);

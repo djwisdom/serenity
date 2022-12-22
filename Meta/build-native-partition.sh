@@ -1,10 +1,10 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -e
 
 script_path=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
 
-. "${script_path}/.shell_include.sh"
+. "${script_path}/shell_include.sh"
 
 cleanup() {
     if [ -d mnt ]; then
@@ -16,7 +16,7 @@ cleanup() {
 
 if [ "$(id -u)" != 0 ]; then
     set +e
-    ${SUDO} -E -- sh -c "\"$0\" $* || exit 42"
+    ${SUDO} -- sh -c "\"$0\" $* || exit 42"
     case $? in
         1)
             die "this script needs to run as root"

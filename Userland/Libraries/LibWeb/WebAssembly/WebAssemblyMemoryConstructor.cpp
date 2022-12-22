@@ -23,7 +23,7 @@ JS::ThrowCompletionOr<JS::Value> WebAssemblyMemoryConstructor::call()
     return vm().throw_completion<JS::TypeError>(JS::ErrorType::ConstructorWithoutNew, "WebAssembly.Memory");
 }
 
-JS::ThrowCompletionOr<JS::Object*> WebAssemblyMemoryConstructor::construct(FunctionObject&)
+JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Object>> WebAssemblyMemoryConstructor::construct(FunctionObject&)
 {
     auto& vm = this->vm();
     auto& realm = *vm.current_realm();

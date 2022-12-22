@@ -5,14 +5,18 @@
  */
 
 #include "TreeMapWidget.h"
+#include <AK/Error.h>
 #include <AK/LexicalPath.h>
 #include <AK/Queue.h>
 #include <AK/QuickSort.h>
+#include <AK/String.h>
 #include <AK/StringView.h>
 #include <AK/URL.h>
 #include <Applications/SpaceAnalyzer/SpaceAnalyzerGML.h>
 #include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
+#include <LibCore/IODevice.h>
+#include <LibCore/Stream.h>
 #include <LibDesktop/Launcher.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
@@ -25,6 +29,7 @@
 #include <LibGUI/Menubar.h>
 #include <LibGUI/MessageBox.h>
 #include <LibGUI/Statusbar.h>
+#include <LibGfx/Bitmap.h>
 #include <LibMain/Main.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -34,10 +39,10 @@ static constexpr auto APP_NAME = "Space Analyzer"sv;
 static constexpr size_t FILES_ENCOUNTERED_UPDATE_STEP_SIZE = 25;
 
 struct TreeNode : public SpaceAnalyzer::TreeMapNode {
-    TreeNode(String name)
+    TreeNode(DeprecatedString name)
         : m_name(move(name)) {};
 
-    virtual String name() const override { return m_name; }
+    virtual DeprecatedString name() const override { return m_name; }
     virtual i64 area() const override { return m_area; }
     virtual size_t num_children() const override
     {
@@ -55,13 +60,13 @@ struct TreeNode : public SpaceAnalyzer::TreeMapNode {
         }
     }
 
-    String m_name;
+    DeprecatedString m_name;
     i64 m_area { 0 };
     OwnPtr<Vector<TreeNode>> m_children;
 };
 
 struct Tree : public SpaceAnalyzer::TreeMap {
-    Tree(String root_name)
+    Tree(DeprecatedString root_name)
         : m_root(move(root_name)) {};
     virtual ~Tree() {};
     TreeNode m_root;
@@ -72,37 +77,36 @@ struct Tree : public SpaceAnalyzer::TreeMap {
 };
 
 struct MountInfo {
-    String mount_point;
-    String source;
+    DeprecatedString mount_point;
+    DeprecatedString source;
 };
 
-static void fill_mounts(Vector<MountInfo>& output)
+static ErrorOr<void> fill_mounts(Vector<MountInfo>& output)
 {
     // Output info about currently mounted filesystems.
-    auto file = Core::File::construct("/sys/kernel/df");
-    if (!file->open(Core::OpenMode::ReadOnly)) {
-        warnln("Failed to open {}: {}", file->name(), file->error_string());
-        return;
-    }
+    auto file = TRY(Core::Stream::File::open("/sys/kernel/df"sv, Core::Stream::OpenMode::Read));
 
-    auto content = file->read_all();
-    auto json = JsonValue::from_string(content).release_value_but_fixme_should_propagate_errors();
+    auto content = TRY(file->read_until_eof());
+    auto json = TRY(JsonValue::from_string(content));
 
-    json.as_array().for_each([&output](JsonValue const& value) {
+    TRY(json.as_array().try_for_each([&output](JsonValue const& value) -> ErrorOr<void> {
         auto& filesystem_object = value.as_object();
         MountInfo mount_info;
-        mount_info.mount_point = filesystem_object.get("mount_point"sv).to_string();
+        mount_info.mount_point = filesystem_object.get("mount_point"sv).to_deprecated_string();
         mount_info.source = filesystem_object.get("source"sv).as_string_or("none"sv);
-        output.append(mount_info);
-    });
+        TRY(output.try_append(mount_info));
+        return {};
+    }));
+
+    return {};
 }
 
-static MountInfo* find_mount_for_path(String path, Vector<MountInfo>& mounts)
+static MountInfo* find_mount_for_path(DeprecatedString path, Vector<MountInfo>& mounts)
 {
     MountInfo* result = nullptr;
     size_t length = 0;
     for (auto& mount_info : mounts) {
-        String& mount_point = mount_info.mount_point;
+        DeprecatedString& mount_point = mount_info.mount_point;
         if (path.starts_with(mount_point)) {
             if (!result || mount_point.length() > length) {
                 result = &mount_info;
@@ -153,17 +157,17 @@ static NonnullRefPtr<GUI::Window> create_progress_window()
 
 static void update_progress_label(GUI::Label& progresslabel, size_t files_encountered_count)
 {
-    auto text = String::formatted("{} files...", files_encountered_count);
+    auto text = DeprecatedString::formatted("{} files...", files_encountered_count);
     progresslabel.set_text(text);
 
     Core::EventLoop::current().pump(Core::EventLoop::WaitMode::PollForEvents);
 }
 
 struct QueueEntry {
-    QueueEntry(String path, TreeNode* node)
+    QueueEntry(DeprecatedString path, TreeNode* node)
         : path(move(path))
         , node(node) {};
-    String path;
+    DeprecatedString path;
     TreeNode* node { nullptr };
 };
 
@@ -178,7 +182,7 @@ static void populate_filesize_tree(TreeNode& root, Vector<MountInfo>& mounts, Ha
     StringBuilder builder = StringBuilder();
     builder.append(root.m_name);
     builder.append('/');
-    MountInfo* root_mount_info = find_mount_for_path(builder.to_string(), mounts);
+    MountInfo* root_mount_info = find_mount_for_path(builder.to_deprecated_string(), mounts);
     if (!root_mount_info) {
         return;
     }
@@ -189,12 +193,12 @@ static void populate_filesize_tree(TreeNode& root, Vector<MountInfo>& mounts, Ha
         builder.append(queue_entry.path);
         builder.append('/');
 
-        MountInfo* mount_info = find_mount_for_path(builder.to_string(), mounts);
+        MountInfo* mount_info = find_mount_for_path(builder.to_deprecated_string(), mounts);
         if (!mount_info || (mount_info != root_mount_info && mount_info->source != root_mount_info->source)) {
             continue;
         }
 
-        Core::DirIterator dir_iterator(builder.to_string(), Core::DirIterator::SkipParentAndBaseDir);
+        Core::DirIterator dir_iterator(builder.to_deprecated_string(), Core::DirIterator::SkipParentAndBaseDir);
         if (dir_iterator.has_error()) {
             int error_sum = error_accumulator.get(dir_iterator.error()).value_or(0);
             error_accumulator.set(dir_iterator.error(), error_sum + 1);
@@ -208,7 +212,7 @@ static void populate_filesize_tree(TreeNode& root, Vector<MountInfo>& mounts, Ha
                 if (!(files_encountered_count % FILES_ENCOUNTERED_UPDATE_STEP_SIZE))
                     update_progress_label(progresslabel, files_encountered_count);
 
-                String& name = child.m_name;
+                DeprecatedString& name = child.m_name;
                 int name_len = name.length();
                 builder.append(name);
                 struct stat st;
@@ -218,7 +222,7 @@ static void populate_filesize_tree(TreeNode& root, Vector<MountInfo>& mounts, Ha
                     error_accumulator.set(errno, error_sum + 1);
                 } else {
                     if (S_ISDIR(st.st_mode)) {
-                        queue.enqueue(QueueEntry(builder.to_string(), &child));
+                        queue.enqueue(QueueEntry(builder.to_deprecated_string(), &child));
                     } else {
                         child.m_area = st.st_size;
                     }
@@ -231,7 +235,7 @@ static void populate_filesize_tree(TreeNode& root, Vector<MountInfo>& mounts, Ha
     update_totals(root);
 }
 
-static void analyze(RefPtr<Tree> tree, SpaceAnalyzer::TreeMapWidget& treemapwidget, GUI::Statusbar& statusbar)
+static ErrorOr<void> analyze(RefPtr<Tree> tree, SpaceAnalyzer::TreeMapWidget& treemapwidget, GUI::Statusbar& statusbar)
 {
     statusbar.set_text("");
     auto progress_window = create_progress_window();
@@ -244,7 +248,7 @@ static void analyze(RefPtr<Tree> tree, SpaceAnalyzer::TreeMapWidget& treemapwidg
     // calculate the sum of the file size for all its descendants.
     TreeNode* root = &tree->m_root;
     Vector<MountInfo> mounts;
-    fill_mounts(mounts);
+    TRY(fill_mounts(mounts));
     HashMap<int, int> error_accumulator;
     populate_filesize_tree(*root, mounts, error_accumulator, progresslabel);
 
@@ -263,7 +267,7 @@ static void analyze(RefPtr<Tree> tree, SpaceAnalyzer::TreeMapWidget& treemapwidg
             builder.append({ error, strlen(error) });
             builder.append(" ("sv);
             int value = error_accumulator.get(key).value();
-            builder.append(String::number(value));
+            builder.append(DeprecatedString::number(value));
             if (value == 1) {
                 builder.append(" time"sv);
             } else {
@@ -272,14 +276,16 @@ static void analyze(RefPtr<Tree> tree, SpaceAnalyzer::TreeMapWidget& treemapwidg
             builder.append(')');
             first = false;
         }
-        statusbar.set_text(builder.to_string());
+        statusbar.set_text(builder.to_deprecated_string());
     } else {
         statusbar.set_text("No errors");
     }
     treemapwidget.set_tree(tree);
+
+    return {};
 }
 
-static bool is_removable(String const& absolute_path)
+static bool is_removable(DeprecatedString const& absolute_path)
 {
     VERIFY(!absolute_path.is_empty());
     int access_result = access(LexicalPath::dirname(absolute_path).characters(), W_OK);
@@ -288,7 +294,7 @@ static bool is_removable(String const& absolute_path)
     return access_result == 0;
 }
 
-static String get_absolute_path_to_selected_node(SpaceAnalyzer::TreeMapWidget const& treemapwidget, bool include_last_node = true)
+static DeprecatedString get_absolute_path_to_selected_node(SpaceAnalyzer::TreeMapWidget const& treemapwidget, bool include_last_node = true)
 {
     StringBuilder path_builder;
     for (size_t k = 0; k < treemapwidget.path_size() - (include_last_node ? 0 : 1); k++) {
@@ -325,7 +331,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto& file_menu = window->add_menu("&File");
     file_menu.add_action(GUI::Action::create("&Analyze", [&](auto&) {
-        analyze(tree, treemapwidget, statusbar);
+        if (auto result = analyze(tree, treemapwidget, statusbar); result.is_error()) {
+            GUI::MessageBox::show_error(window, DeprecatedString::formatted("{}", result.error()));
+        }
     }));
     file_menu.add_separator();
     file_menu.add_action(GUI::CommonActions::make_quit_action([&](auto&) {
@@ -336,19 +344,22 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_about_action(APP_NAME, app_icon, window));
 
+    auto open_icon = TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/open.png"sv));
     // Configure the nodes context menu.
-    auto open_folder_action = GUI::Action::create("Open Folder", { Mod_Ctrl, Key_O }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/open.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+    auto open_folder_action = GUI::Action::create("Open Folder", { Mod_Ctrl, Key_O }, open_icon, [&](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme(get_absolute_path_to_selected_node(treemapwidget)));
     });
-    auto open_containing_folder_action = GUI::Action::create("Open Containing Folder", { Mod_Ctrl, Key_O }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/open.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+    auto open_containing_folder_action = GUI::Action::create("Open Containing Folder", { Mod_Ctrl, Key_O }, open_icon, [&](auto&) {
         LexicalPath path { get_absolute_path_to_selected_node(treemapwidget) };
         Desktop::Launcher::open(URL::create_with_file_scheme(path.dirname(), path.basename()));
     });
-    auto copy_path_action = GUI::Action::create("Copy Path to Clipboard", { Mod_Ctrl, Key_C }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-copy.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+
+    auto copy_icon = TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-copy.png"sv));
+    auto copy_path_action = GUI::Action::create("Copy Path to Clipboard", { Mod_Ctrl, Key_C }, copy_icon, [&](auto&) {
         GUI::Clipboard::the().set_plain_text(get_absolute_path_to_selected_node(treemapwidget));
     });
     auto delete_action = GUI::CommonActions::make_delete_action([&](auto&) {
-        String selected_node_path = get_absolute_path_to_selected_node(treemapwidget);
+        DeprecatedString selected_node_path = get_absolute_path_to_selected_node(treemapwidget);
         bool try_again = true;
         while (try_again) {
             try_again = false;
@@ -356,7 +367,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             auto deletion_result = Core::File::remove(selected_node_path, Core::File::RecursionMode::Allowed, true);
             if (deletion_result.is_error()) {
                 auto retry_message_result = GUI::MessageBox::show(window,
-                    String::formatted("Failed to delete \"{}\": {}. Retry?",
+                    DeprecatedString::formatted("Failed to delete \"{}\": {}. Retry?",
                         deletion_result.error().file,
                         static_cast<Error const&>(deletion_result.error())),
                     "Deletion failed"sv,
@@ -367,7 +378,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 }
             } else {
                 GUI::MessageBox::show(window,
-                    String::formatted("Successfully deleted \"{}\".", selected_node_path),
+                    DeprecatedString::formatted("Successfully deleted \"{}\".", selected_node_path),
                     "Deletion completed"sv,
                     GUI::MessageBox::Type::Information,
                     GUI::MessageBox::InputType::OK);
@@ -376,17 +387,16 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
         // TODO: Refreshing data always causes resetting the viewport back to "/".
         // It would be great if we found a way to preserve viewport across refreshes.
-        analyze(tree, treemapwidget, statusbar);
+        if (auto result = analyze(tree, treemapwidget, statusbar); result.is_error()) {
+            GUI::MessageBox::show_error(window, DeprecatedString::formatted("{}", result.error()));
+        }
     });
-    // TODO: Both these menus could've been implemented as one, but it's impossible to change action text after it's shown once.
-    auto folder_node_context_menu = GUI::Menu::construct();
-    folder_node_context_menu->add_action(*open_folder_action);
-    folder_node_context_menu->add_action(*copy_path_action);
-    folder_node_context_menu->add_action(*delete_action);
-    auto file_node_context_menu = GUI::Menu::construct();
-    file_node_context_menu->add_action(*open_containing_folder_action);
-    file_node_context_menu->add_action(*copy_path_action);
-    file_node_context_menu->add_action(*delete_action);
+
+    auto context_menu = GUI::Menu::construct();
+    context_menu->add_action(*open_folder_action);
+    context_menu->add_action(*open_containing_folder_action);
+    context_menu->add_action(*copy_path_action);
+    context_menu->add_action(*delete_action);
 
     // Configure event handlers.
     breadcrumbbar.on_segment_click = [&](size_t index) {
@@ -399,6 +409,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         breadcrumbbar.clear_segments();
         for (size_t k = 0; k < treemapwidget.path_size(); k++) {
             if (k == 0) {
+                if (treemapwidget.viewpoint() == 0)
+                    window->set_title("/ - SpaceAnalyzer");
+
                 breadcrumbbar.append_segment("/", GUI::FileIconProvider::icon_for_path("/").bitmap_for_size(16), "/", "/");
                 continue;
             }
@@ -408,24 +421,31 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             builder.append('/');
             builder.append(node->name());
 
+            // Sneakily set the window title here, while the StringBuilder holds the right amount of the path.
+            if (k == treemapwidget.viewpoint())
+                window->set_title(DeprecatedString::formatted("{} - SpaceAnalyzer", builder.string_view()));
+
             breadcrumbbar.append_segment(node->name(), GUI::FileIconProvider::icon_for_path(builder.string_view()).bitmap_for_size(16), builder.string_view(), builder.string_view());
         }
         breadcrumbbar.set_selected_segment(treemapwidget.viewpoint());
     };
     treemapwidget.on_context_menu_request = [&](const GUI::ContextMenuEvent& event) {
-        String selected_node_path = get_absolute_path_to_selected_node(treemapwidget);
+        DeprecatedString selected_node_path = get_absolute_path_to_selected_node(treemapwidget);
         if (selected_node_path.is_empty())
             return;
         delete_action->set_enabled(is_removable(selected_node_path));
         if (Core::File::is_directory(selected_node_path)) {
-            folder_node_context_menu->popup(event.screen_position());
+            open_folder_action->set_visible(true);
+            open_containing_folder_action->set_visible(false);
         } else {
-            file_node_context_menu->popup(event.screen_position());
+            open_folder_action->set_visible(false);
+            open_containing_folder_action->set_visible(true);
         }
+        context_menu->popup(event.screen_position());
     };
 
     // At startup automatically do an analysis of root.
-    analyze(tree, treemapwidget, statusbar);
+    TRY(analyze(tree, treemapwidget, statusbar));
 
     window->show();
     return app->exec();

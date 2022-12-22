@@ -103,7 +103,7 @@ void RectangleSelectTool::on_mouseup(Layer*, MouseEvent& event)
     m_editor->did_complete_action(tool_name());
 }
 
-bool RectangleSelectTool::on_keydown(GUI::KeyEvent const& key_event)
+bool RectangleSelectTool::on_keydown(GUI::KeyEvent& key_event)
 {
     if (key_event.key() == KeyCode::Key_Space) {
         m_moving_mode = MovingMode::MovingOrigin;
@@ -205,7 +205,7 @@ GUI::Widget* RectangleSelectTool::get_properties_widget()
 
     auto& mode_combo = mode_container.add<GUI::ComboBox>();
     mode_combo.set_only_allow_values_from_model(true);
-    mode_combo.set_model(*GUI::ItemListModel<String>::create(m_merge_mode_names));
+    mode_combo.set_model(*GUI::ItemListModel<DeprecatedString>::create(m_merge_mode_names));
     mode_combo.set_selected_index((int)m_merge_mode);
     mode_combo.on_change = [this](auto&&, GUI::ModelIndex const& index) {
         VERIFY(index.row() >= 0);
@@ -217,7 +217,7 @@ GUI::Widget* RectangleSelectTool::get_properties_widget()
     return m_properties_widget.ptr();
 }
 
-Gfx::IntPoint RectangleSelectTool::point_position_to_preferred_cell(Gfx::FloatPoint const& position) const
+Gfx::IntPoint RectangleSelectTool::point_position_to_preferred_cell(Gfx::FloatPoint position) const
 {
     return position.to_rounded<int>();
 }

@@ -27,7 +27,7 @@ BucketTool::BucketTool()
     m_cursor = Gfx::Bitmap::try_load_from_file("/res/icons/pixelpaint/bucket.png"sv).release_value_but_fixme_should_propagate_errors();
 }
 
-static void flood_fill(Gfx::Bitmap& bitmap, Gfx::IntPoint const& start_position, Color fill_color, int threshold)
+static void flood_fill(Gfx::Bitmap& bitmap, Gfx::IntPoint start_position, Color fill_color, int threshold)
 {
     VERIFY(bitmap.bpp() == 32);
 
@@ -48,6 +48,9 @@ void BucketTool::on_mousedown(Layer* layer, MouseEvent& event)
 
     auto& layer_event = event.layer_event();
     if (!layer->rect().contains(layer_event.position()))
+        return;
+
+    if (auto selection = layer->image().selection(); !selection.is_empty() && !selection.is_selected(layer_event.position()))
         return;
 
     GUI::Painter painter(layer->get_scratch_edited_bitmap());

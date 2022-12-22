@@ -8,10 +8,10 @@
  */
 
 #include <AK/CharacterTypes.h>
+#include <AK/Debug.h>
 #include <AK/StringBuilder.h>
 #include <AK/Utf8View.h>
 #include <LibJS/Interpreter.h>
-#include <LibJS/Parser.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/CSS/MediaQueryList.h>
@@ -29,6 +29,7 @@
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/NodeIterator.h>
+#include <LibWeb/DOM/ProcessingInstruction.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Text.h>
@@ -124,7 +125,7 @@ static JS::NonnullGCPtr<HTML::BrowsingContext> obtain_a_browsing_context_to_use_
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#initialise-the-document-object
-JS::NonnullGCPtr<Document> Document::create_and_initialize(Type type, String content_type, HTML::NavigationParams navigation_params)
+JS::NonnullGCPtr<Document> Document::create_and_initialize(Type type, DeprecatedString content_type, HTML::NavigationParams navigation_params)
 {
     // 1. Let browsingContext be the result of the obtaining a browsing context to use for a navigation response
     //    given navigationParams's browsing context, navigationParams's final sandboxing flag set,
@@ -250,7 +251,7 @@ JS::NonnullGCPtr<Document> Document::create_and_initialize(Type type, String con
     // 12. If navigationParams's request is non-null, then:
     if (navigation_params.request) {
         // 1. Set document's referrer to the empty string.
-        document->m_referrer = String::empty();
+        document->m_referrer = DeprecatedString::empty();
 
         // 2. Let referrer be navigationParams's request's referrer.
         auto& referrer = navigation_params.request->referrer();
@@ -288,7 +289,7 @@ JS::NonnullGCPtr<Document> Document::construct_impl(JS::Realm& realm)
 
 JS::NonnullGCPtr<Document> Document::create(JS::Realm& realm, AK::URL const& url)
 {
-    return *realm.heap().allocate<Document>(realm, realm, url);
+    return realm.heap().allocate<Document>(realm, realm, url);
 }
 
 Document::Document(JS::Realm& realm, const AK::URL& url)
@@ -375,7 +376,7 @@ JS::GCPtr<Selection::Selection> Document::get_selection()
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-write
-WebIDL::ExceptionOr<void> Document::write(Vector<String> const& strings)
+WebIDL::ExceptionOr<void> Document::write(Vector<DeprecatedString> const& strings)
 {
     StringBuilder builder;
     builder.join(""sv, strings);
@@ -384,7 +385,7 @@ WebIDL::ExceptionOr<void> Document::write(Vector<String> const& strings)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-writeln
-WebIDL::ExceptionOr<void> Document::writeln(Vector<String> const& strings)
+WebIDL::ExceptionOr<void> Document::writeln(Vector<DeprecatedString> const& strings)
 {
     StringBuilder builder;
     builder.join(""sv, strings);
@@ -394,7 +395,7 @@ WebIDL::ExceptionOr<void> Document::writeln(Vector<String> const& strings)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#document-write-steps
-WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(String input)
+WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(DeprecatedString input)
 {
     // 1. If document is an XML document, then throw an "InvalidStateError" DOMException.
     if (m_type == Type::XML)
@@ -429,7 +430,7 @@ WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(String input)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-open
-WebIDL::ExceptionOr<Document*> Document::open(String const&, String const&)
+WebIDL::ExceptionOr<Document*> Document::open(DeprecatedString const&, DeprecatedString const&)
 {
     // 1. If document is an XML document, then throw an "InvalidStateError" DOMException exception.
     if (m_type == Type::XML)
@@ -497,6 +498,17 @@ WebIDL::ExceptionOr<Document*> Document::open(String const&, String const&)
 
     // 19. Return document.
     return this;
+}
+
+// https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-open-window
+WebIDL::ExceptionOr<JS::GCPtr<HTML::WindowProxy>> Document::open(DeprecatedString const& url, DeprecatedString const& name, DeprecatedString const& features)
+{
+    // 1. If this is not fully active, then throw an "InvalidAccessError" DOMException exception.
+    if (!is_fully_active())
+        return WebIDL::InvalidAccessError::create(realm(), "Cannot perform open on a document that isn't fully active."sv);
+
+    // 2. Return the result of running the window open steps with url, name, and features.
+    return window().open_impl(url, name, features);
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#closing-the-input-stream
@@ -628,7 +640,7 @@ WebIDL::ExceptionOr<void> Document::set_body(HTML::HTMLElement* new_body)
     return {};
 }
 
-String Document::title() const
+DeprecatedString Document::title() const
 {
     auto* head_element = head();
     if (!head_element)
@@ -652,10 +664,10 @@ String Document::title() const
             last_was_space = false;
         }
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-void Document::set_title(String const& title)
+void Document::set_title(DeprecatedString const& title)
 {
     auto* head_element = const_cast<HTML::HTMLHeadElement*>(head());
     if (!head_element)
@@ -668,7 +680,7 @@ void Document::set_title(String const& title)
     }
 
     title_element->remove_all_children(true);
-    MUST(title_element->append_child(*heap().allocate<Text>(realm(), *this, title)));
+    MUST(title_element->append_child(heap().allocate<Text>(realm(), *this, title)));
 
     if (auto* page = this->page()) {
         if (browsing_context() == &page->top_level_browsing_context())
@@ -776,7 +788,7 @@ AK::URL Document::base_url() const
 }
 
 // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#parse-a-url
-AK::URL Document::parse_url(String const& url) const
+AK::URL Document::parse_url(DeprecatedString const& url) const
 {
     // FIXME: Pass in document's character encoding.
     return base_url().complete_url(url);
@@ -999,7 +1011,7 @@ void Document::set_hovered_node(Node* node)
     }
 }
 
-JS::NonnullGCPtr<HTMLCollection> Document::get_elements_by_name(String const& name)
+JS::NonnullGCPtr<HTMLCollection> Document::get_elements_by_name(DeprecatedString const& name)
 {
     return HTMLCollection::create(*this, [name](Element const& element) {
         return element.name() == name;
@@ -1195,7 +1207,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element(FlyStrin
 // https://dom.spec.whatwg.org/#dom-document-createelementns
 // https://dom.spec.whatwg.org/#internal-createelementns-steps
 // FIXME: This only implements step 4 of the algorithm and does not take in options.
-WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element_ns(String const& namespace_, String const& qualified_name)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element_ns(DeprecatedString const& namespace_, DeprecatedString const& qualified_name)
 {
     // 1. Let namespace, prefix, and localName be the result of passing namespace and qualifiedName to validate and extract.
     auto extracted_qualified_name = TRY(validate_and_extract(realm(), namespace_, qualified_name));
@@ -1209,17 +1221,28 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> Document::create_element_ns(Strin
 
 JS::NonnullGCPtr<DocumentFragment> Document::create_document_fragment()
 {
-    return *heap().allocate<DocumentFragment>(realm(), *this);
+    return heap().allocate<DocumentFragment>(realm(), *this);
 }
 
-JS::NonnullGCPtr<Text> Document::create_text_node(String const& data)
+JS::NonnullGCPtr<Text> Document::create_text_node(DeprecatedString const& data)
 {
-    return *heap().allocate<Text>(realm(), *this, data);
+    return heap().allocate<Text>(realm(), *this, data);
 }
 
-JS::NonnullGCPtr<Comment> Document::create_comment(String const& data)
+JS::NonnullGCPtr<Comment> Document::create_comment(DeprecatedString const& data)
 {
-    return *heap().allocate<Comment>(realm(), *this, data);
+    return heap().allocate<Comment>(realm(), *this, data);
+}
+
+// https://dom.spec.whatwg.org/#dom-document-createprocessinginstruction
+WebIDL::ExceptionOr<JS::NonnullGCPtr<ProcessingInstruction>> Document::create_processing_instruction(DeprecatedString const& target, DeprecatedString const& data)
+{
+    // FIXME: 1. If target does not match the Name production, then throw an "InvalidCharacterError" DOMException.
+
+    // FIXME: 2. If data contains the string "?>", then throw an "InvalidCharacterError" DOMException.
+
+    // 3. Return a new ProcessingInstruction node, with target set to target, data set to data, and node document set to this.
+    return JS::NonnullGCPtr { *heap().allocate<ProcessingInstruction>(realm(), *this, data, target) };
 }
 
 JS::NonnullGCPtr<Range> Document::create_range()
@@ -1228,7 +1251,7 @@ JS::NonnullGCPtr<Range> Document::create_range()
 }
 
 // https://dom.spec.whatwg.org/#dom-document-createevent
-WebIDL::ExceptionOr<JS::NonnullGCPtr<Event>> Document::create_event(String const& interface)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Event>> Document::create_event(DeprecatedString const& interface)
 {
     auto& realm = this->realm();
 
@@ -1414,10 +1437,10 @@ DocumentType const* Document::doctype() const
     return first_child_of_type<DocumentType>();
 }
 
-String const& Document::compat_mode() const
+DeprecatedString const& Document::compat_mode() const
 {
-    static String back_compat = "BackCompat";
-    static String css1_compat = "CSS1Compat";
+    static DeprecatedString back_compat = "BackCompat";
+    static DeprecatedString css1_compat = "CSS1Compat";
 
     if (m_quirks_mode == QuirksMode::Yes)
         return back_compat;
@@ -1466,7 +1489,7 @@ void Document::set_active_element(Element* element)
         m_layout_root->set_needs_display();
 }
 
-String Document::ready_state() const
+DeprecatedString Document::ready_state() const
 {
     switch (m_readiness) {
     case HTML::DocumentReadyState::Loading:
@@ -1548,26 +1571,26 @@ void Document::completely_finish_loading()
 
     // 4. If container is an iframe element, then queue an element task on the DOM manipulation task source given container to run the iframe load event steps given container.
     if (container && is<HTML::HTMLIFrameElement>(*container)) {
-        container->queue_an_element_task(HTML::Task::Source::DOMManipulation, [container]() mutable {
+        container->queue_an_element_task(HTML::Task::Source::DOMManipulation, [container] {
             run_iframe_load_event_steps(static_cast<HTML::HTMLIFrameElement&>(*container));
         });
     }
     // 5. Otherwise, if container is non-null, then queue an element task on the DOM manipulation task source given container to fire an event named load at container.
     else if (container) {
-        container->queue_an_element_task(HTML::Task::Source::DOMManipulation, [container]() mutable {
+        container->queue_an_element_task(HTML::Task::Source::DOMManipulation, [container] {
             container->dispatch_event(*DOM::Event::create(container->realm(), HTML::EventNames::load));
         });
     }
 }
 
-String Document::cookie(Cookie::Source source)
+DeprecatedString Document::cookie(Cookie::Source source)
 {
     if (auto* page = this->page())
         return page->client().page_did_request_cookie(m_url, source);
     return {};
 }
 
-void Document::set_cookie(String const& cookie_string, Cookie::Source source)
+void Document::set_cookie(DeprecatedString const& cookie_string, Cookie::Source source)
 {
     auto cookie = Cookie::parse_cookie(cookie_string);
     if (!cookie.has_value())
@@ -1577,14 +1600,14 @@ void Document::set_cookie(String const& cookie_string, Cookie::Source source)
         page->client().page_did_set_cookie(m_url, cookie.value(), source);
 }
 
-String Document::dump_dom_tree_as_json() const
+DeprecatedString Document::dump_dom_tree_as_json() const
 {
     StringBuilder builder;
     auto json = MUST(JsonObjectSerializer<>::try_create(builder));
     serialize_tree_as_json(json);
 
     MUST(json.finish());
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 // https://html.spec.whatwg.org/multipage/semantics.html#has-a-style-sheet-that-is-blocking-scripts
@@ -1601,12 +1624,12 @@ bool Document::has_a_style_sheet_that_is_blocking_scripts() const
     return browsing_context()->container_document()->m_script_blocking_style_sheet_counter > 0;
 }
 
-String Document::referrer() const
+DeprecatedString Document::referrer() const
 {
     return m_referrer;
 }
 
-void Document::set_referrer(String referrer)
+void Document::set_referrer(DeprecatedString referrer)
 {
     m_referrer = referrer;
 }
@@ -1656,7 +1679,7 @@ bool Document::hidden() const
 }
 
 // https://html.spec.whatwg.org/multipage/interaction.html#dom-document-visibilitystate
-String Document::visibility_state() const
+DeprecatedString Document::visibility_state() const
 {
     switch (m_visibility_state) {
     case HTML::VisibilityState::Hidden:
@@ -1845,7 +1868,7 @@ static inline bool is_valid_name_character(u32 code_point)
         || (code_point >= 0x203f && code_point <= 0x2040);
 }
 
-bool Document::is_valid_name(String const& name)
+bool Document::is_valid_name(DeprecatedString const& name)
 {
     if (name.is_empty())
         return false;
@@ -1862,7 +1885,7 @@ bool Document::is_valid_name(String const& name)
 }
 
 // https://dom.spec.whatwg.org/#validate
-WebIDL::ExceptionOr<Document::PrefixAndTagName> Document::validate_qualified_name(JS::Realm& realm, String const& qualified_name)
+WebIDL::ExceptionOr<Document::PrefixAndTagName> Document::validate_qualified_name(JS::Realm& realm, DeprecatedString const& qualified_name)
 {
     if (qualified_name.is_empty())
         return WebIDL::InvalidCharacterError::create(realm, "Empty string is not a valid qualified name.");
@@ -2031,31 +2054,31 @@ JS::NonnullGCPtr<HTML::History> Document::history()
 }
 
 // https://html.spec.whatwg.org/multipage/origin.html#dom-document-domain
-String Document::domain() const
+DeprecatedString Document::domain() const
 {
     // 1. Let effectiveDomain be this's origin's effective domain.
     auto effective_domain = origin().effective_domain();
 
     // 2. If effectiveDomain is null, then return the empty string.
     if (!effective_domain.has_value())
-        return String::empty();
+        return DeprecatedString::empty();
 
     // 3. Return effectiveDomain, serialized.
     // FIXME: Implement host serialization.
     return effective_domain.release_value();
 }
 
-void Document::set_domain(String const& domain)
+void Document::set_domain(DeprecatedString const& domain)
 {
     dbgln("(STUBBED) Document::set_domain(domain='{}')", domain);
 }
 
-void Document::set_navigation_id(Optional<AK::String> navigation_id)
+void Document::set_navigation_id(Optional<AK::DeprecatedString> navigation_id)
 {
     m_navigation_id = move(navigation_id);
 }
 
-Optional<String> Document::navigation_id() const
+Optional<DeprecatedString> Document::navigation_id() const
 {
     return m_navigation_id;
 }
@@ -2284,7 +2307,7 @@ void Document::did_stop_being_active_document_in_browsing_context(Badge<HTML::Br
 }
 
 // https://w3c.github.io/editing/docs/execCommand/#querycommandsupported()
-bool Document::query_command_supported(String const& command) const
+bool Document::query_command_supported(DeprecatedString const& command) const
 {
     dbgln("(STUBBED) Document::query_command_supported(command='{}')", command);
     return false;

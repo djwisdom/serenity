@@ -29,6 +29,7 @@ public:
     GUI::TabWidget& tab_widget();
     Tab& active_tab();
     void create_new_tab(URL, bool activate);
+    void create_new_window(URL);
 
     GUI::Action& go_back_action() { return *m_go_back_action; }
     GUI::Action& go_forward_action() { return *m_go_forward_action; }
@@ -45,8 +46,8 @@ public:
     void content_filters_changed();
     void proxy_mappings_changed();
 
-    void broadcast_window_position(Gfx::IntPoint const&);
-    void broadcast_window_size(Gfx::IntSize const&);
+    void broadcast_window_position(Gfx::IntPoint);
+    void broadcast_window_size(Gfx::IntSize);
 
 private:
     explicit BrowserWindow(CookieJar&, URL);
@@ -55,8 +56,8 @@ private:
     ErrorOr<void> load_search_engines(GUI::Menu& settings_menu);
     void set_window_title_for_tab(Tab const&);
 
-    virtual void config_string_did_change(String const& domain, String const& group, String const& key, String const& value) override;
-    virtual void config_bool_did_change(String const& domain, String const& group, String const& key, bool value) override;
+    virtual void config_string_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, DeprecatedString const& value) override;
+    virtual void config_bool_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, bool value) override;
 
     virtual void event(Core::Event&) override;
 

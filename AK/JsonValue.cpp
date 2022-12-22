@@ -156,7 +156,7 @@ JsonValue::JsonValue(long long unsigned value)
 }
 
 JsonValue::JsonValue(char const* cstring)
-    : JsonValue(String(cstring))
+    : JsonValue(DeprecatedString(cstring))
 {
 }
 
@@ -168,13 +168,7 @@ JsonValue::JsonValue(double value)
 }
 #endif
 
-JsonValue::JsonValue(bool value)
-    : m_type(Type::Bool)
-{
-    m_value.as_bool = value;
-}
-
-JsonValue::JsonValue(String const& value)
+JsonValue::JsonValue(DeprecatedString const& value)
 {
     if (value.is_null()) {
         m_type = Type::Null;
@@ -186,7 +180,7 @@ JsonValue::JsonValue(String const& value)
 }
 
 JsonValue::JsonValue(StringView value)
-    : JsonValue(value.to_string())
+    : JsonValue(value.to_deprecated_string())
 {
 }
 

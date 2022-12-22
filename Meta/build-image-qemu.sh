@@ -1,22 +1,9 @@
-#!/bin/sh
-
-# Note: This is done before `set -e` to let `command` fail if needed
-FUSE2FS_PATH=$(command -v fuse2fs)
-RESIZE2FS_PATH=$(command -v resize2fs)
-
-if [ -z "$FUSE2FS_PATH" ]; then
-    FUSE2FS_PATH=/usr/sbin/fuse2fs
-fi
-
-if [ -z "$RESIZE2FS_PATH" ]; then
-    RESIZE2FS_PATH=/usr/sbin/resize2fs
-fi
-
+#!/usr/bin/env bash
 set -e
 
 SCRIPT_DIR="$(dirname "${0}")"
 
-. "${SCRIPT_DIR}/.shell_include.sh"
+. "${SCRIPT_DIR}/shell_include.sh"
 
 USE_FUSE2FS=0
 
@@ -25,7 +12,7 @@ if [ "$(id -u)" != 0 ]; then
         USE_FUSE2FS=1
     else
         set +e
-        ${SUDO} -E -- sh -c "\"$0\" $* || exit 42"
+        ${SUDO} -- sh -c "\"$0\" $* || exit 42"
         case $? in
             1)
                 die "this script needs to run as root"
@@ -41,25 +28,6 @@ if [ "$(id -u)" != 0 ]; then
 else
     : "${SUDO_UID:=0}" "${SUDO_GID:=0}"
 fi
-
-if [ "$(uname -s)" = "Darwin" ]; then
-    export PATH="/usr/local/opt/e2fsprogs/bin:$PATH"
-    export PATH="/usr/local/opt/e2fsprogs/sbin:$PATH"
-    export PATH="/opt/homebrew/opt/e2fsprogs/bin:$PATH"
-    export PATH="/opt/homebrew/opt/e2fsprogs/sbin:$PATH"
-
-    E2FSCK="e2fsck"
-    RESIZE2FS_PATH="resize2fs"
-elif [ "$(uname -s)" = "SerenityOS" ]; then
-    E2FSCK="/usr/local/sbin/e2fsck"
-else
-    E2FSCK="/usr/sbin/e2fsck"
-
-    if [ ! -f "$E2FSCK" ]; then
-        E2FSCK=/sbin/e2fsck
-    fi
-fi
-
 
 # Prepend the toolchain qemu directory so we pick up QEMU from there
 PATH="$SCRIPT_DIR/../Toolchain/Local/qemu/bin:$PATH"
@@ -115,7 +83,7 @@ if [ -f _disk_image ]; then
 
     echo "checking existing image"
     result=0
-    "$E2FSCK" -f -y _disk_image || result=$?
+    "$E2FSCK_PATH" -f -y _disk_image || result=$?
     if [ $result -ge 4 ]; then
         rm -f _disk_image
         USE_EXISTING=0
@@ -151,11 +119,7 @@ if [ $USE_EXISTING -ne 1 ]; then
         (echo "e 0"; echo 83; echo n; echo 0; echo "*"; echo "quit") | fdisk -e "$VND"
         newfs_ext2fs -D $INODE_SIZE -n $INODE_COUNT "/dev/r${VND}i" || die "could not create filesystem"
     else
-        if [ -x /sbin/mke2fs ]; then
-            /sbin/mke2fs -q -I $INODE_SIZE -N $INODE_COUNT _disk_image || die "could not create filesystem"
-        else
-            mke2fs -q -I $INODE_SIZE -N $INODE_COUNT _disk_image || die "could not create filesystem"
-        fi
+        "${MKE2FS_PATH}" -q -I "${INODE_SIZE}" -N "${INODE_COUNT}" _disk_image || die "could not create filesystem"
     fi
     echo "done"
 fi

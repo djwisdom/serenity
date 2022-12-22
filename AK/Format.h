@@ -39,6 +39,9 @@ inline constexpr bool HasFormatter = true;
 template<typename T>
 inline constexpr bool HasFormatter<T, typename Formatter<T>::__no_formatter_defined> = false;
 
+template<typename T>
+concept Formattable = HasFormatter<T>;
+
 constexpr size_t max_format_arguments = 256;
 
 struct TypeErasedParameter {
@@ -239,13 +242,13 @@ private:
 
 class TypeErasedFormatParams {
 public:
-    Span<const TypeErasedParameter> parameters() const { return m_parameters; }
+    Span<TypeErasedParameter const> parameters() const { return m_parameters; }
 
-    void set_parameters(Span<const TypeErasedParameter> parameters) { m_parameters = parameters; }
+    void set_parameters(Span<TypeErasedParameter const> parameters) { m_parameters = parameters; }
     size_t take_next_index() { return m_next_index++; }
 
 private:
-    Span<const TypeErasedParameter> m_parameters;
+    Span<TypeErasedParameter const> m_parameters;
     size_t m_next_index { 0 };
 };
 
@@ -255,7 +258,7 @@ ErrorOr<void> __format_value(TypeErasedFormatParams& params, FormatBuilder& buil
     Formatter<T> formatter;
 
     formatter.parse(params, parser);
-    return formatter.format(builder, *static_cast<const T*>(value));
+    return formatter.format(builder, *static_cast<T const*>(value));
 }
 
 template<typename... Parameters>
@@ -329,15 +332,16 @@ struct Formatter<StringView> : StandardFormatter {
     ErrorOr<void> format(FormatBuilder&, StringView);
 };
 
-template<typename T, size_t inline_capacity>
-requires(HasFormatter<T>) struct Formatter<Vector<T, inline_capacity>> : StandardFormatter {
-
+template<typename T>
+requires(HasFormatter<T>)
+struct Formatter<Span<T const>> : StandardFormatter {
     Formatter() = default;
     explicit Formatter(StandardFormatter formatter)
         : StandardFormatter(move(formatter))
     {
     }
-    ErrorOr<void> format(FormatBuilder& builder, Vector<T> value)
+
+    ErrorOr<void> format(FormatBuilder& builder, Span<T const> value)
     {
         if (m_mode == Mode::Pointer) {
             Formatter<FlatPtr> formatter { *this };
@@ -372,6 +376,24 @@ requires(HasFormatter<T>) struct Formatter<Vector<T, inline_capacity>> : Standar
         }
         TRY(builder.put_literal(" ]"sv));
         return {};
+    }
+};
+
+template<typename T>
+requires(HasFormatter<T>)
+struct Formatter<Span<T>> : Formatter<Span<T const>> {
+    ErrorOr<void> format(FormatBuilder& builder, Span<T> value)
+    {
+        return Formatter<Span<T const>>::format(builder, value);
+    }
+};
+
+template<typename T, size_t inline_capacity>
+requires(HasFormatter<T>)
+struct Formatter<Vector<T, inline_capacity>> : Formatter<Span<T const>> {
+    ErrorOr<void> format(FormatBuilder& builder, Vector<T, inline_capacity> const& value)
+    {
+        return Formatter<Span<T const>>::format(builder, value.span());
     }
 };
 
@@ -427,7 +449,7 @@ struct Formatter<unsigned char[Size]> : Formatter<StringView> {
     }
 };
 template<>
-struct Formatter<String> : Formatter<StringView> {
+struct Formatter<DeprecatedString> : Formatter<StringView> {
 };
 template<>
 struct Formatter<FlyString> : Formatter<StringView> {
@@ -522,8 +544,8 @@ struct Formatter<FixedPoint<precision, Underlying>> : StandardFormatter {
 };
 
 template<>
-struct Formatter<std::nullptr_t> : Formatter<FlatPtr> {
-    ErrorOr<void> format(FormatBuilder& builder, std::nullptr_t)
+struct Formatter<nullptr_t> : Formatter<FlatPtr> {
+    ErrorOr<void> format(FormatBuilder& builder, nullptr_t)
     {
         if (m_mode == Mode::Default)
             m_mode = Mode::Pointer;
@@ -624,15 +646,15 @@ void critical_dmesgln(CheckedFormatString<Parameters...>&& fmt, Parameters const
 template<typename T>
 class FormatIfSupported {
 public:
-    explicit FormatIfSupported(const T& value)
+    explicit FormatIfSupported(T const& value)
         : m_value(value)
     {
     }
 
-    const T& value() const { return m_value; }
+    T const& value() const { return m_value; }
 
 private:
-    const T& m_value;
+    T const& m_value;
 };
 template<typename T, bool Supported = false>
 struct __FormatIfSupported : Formatter<StringView> {
@@ -698,16 +720,17 @@ struct Formatter<ErrorOr<T, ErrorType>> : Formatter<FormatString> {
 
 } // namespace AK
 
-#ifdef KERNEL
+#if USING_AK_GLOBALLY
+#    ifdef KERNEL
 using AK::critical_dmesgln;
 using AK::dmesgln;
-#else
+#    else
 using AK::out;
 using AK::outln;
 
 using AK::warn;
 using AK::warnln;
-#endif
+#    endif
 
 using AK::dbgln;
 
@@ -715,8 +738,10 @@ using AK::CheckedFormatString;
 using AK::FormatIfSupported;
 using AK::FormatString;
 
-#define dbgln_if(flag, fmt, ...)       \
-    do {                               \
-        if constexpr (flag)            \
-            dbgln(fmt, ##__VA_ARGS__); \
-    } while (0)
+#    define dbgln_if(flag, fmt, ...)       \
+        do {                               \
+            if constexpr (flag)            \
+                dbgln(fmt, ##__VA_ARGS__); \
+        } while (0)
+
+#endif

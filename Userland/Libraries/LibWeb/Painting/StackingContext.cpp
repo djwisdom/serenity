@@ -72,7 +72,7 @@ static PaintPhase to_paint_phase(StackingContext::StackingContextPaintPhase phas
 void StackingContext::paint_descendants(PaintContext& context, Layout::Node const& box, StackingContextPaintPhase phase) const
 {
     if (auto* paintable = box.paintable())
-        paintable->before_children_paint(context, to_paint_phase(phase), Paintable::ShouldClipOverflow::Yes);
+        paintable->before_children_paint(context, to_paint_phase(phase));
 
     box.for_each_child([&](auto& child) {
         // If `child` establishes its own stacking context, skip over it.
@@ -125,7 +125,7 @@ void StackingContext::paint_descendants(PaintContext& context, Layout::Node cons
     });
 
     if (auto* paintable = box.paintable())
-        paintable->after_children_paint(context, to_paint_phase(phase), Paintable::ShouldClipOverflow::Yes);
+        paintable->after_children_paint(context, to_paint_phase(phase));
 }
 
 void StackingContext::paint_internal(PaintContext& context) const
@@ -137,13 +137,12 @@ void StackingContext::paint_internal(PaintContext& context) const
 
     auto paint_child = [&](auto* child) {
         auto parent = child->m_box.parent();
-        auto should_clip_overflow = child->m_box.is_absolutely_positioned() ? Paintable::ShouldClipOverflow::No : Paintable::ShouldClipOverflow::Yes;
         auto* paintable = parent ? parent->paintable() : nullptr;
         if (paintable)
-            paintable->before_children_paint(context, PaintPhase::Foreground, should_clip_overflow);
+            paintable->before_children_paint(context, PaintPhase::Foreground);
         child->paint(context);
         if (paintable)
-            paintable->after_children_paint(context, PaintPhase::Foreground, should_clip_overflow);
+            paintable->after_children_paint(context, PaintPhase::Foreground);
     };
 
     // Draw positioned descendants with negative z-indices (step 3)
@@ -178,6 +177,10 @@ void StackingContext::paint_internal(PaintContext& context) const
         // At this point, `paint_box` is a positioned descendant with z-index: auto
         // but no stacking context of its own.
         // FIXME: This is basically duplicating logic found elsewhere in this same function. Find a way to make this more elegant.
+        auto parent = paint_box.layout_node().parent();
+        auto* paintable = parent ? parent->paintable() : nullptr;
+        if (paintable)
+            paintable->before_children_paint(context, PaintPhase::Foreground);
         paint_node(paint_box.layout_box(), context, PaintPhase::Background);
         paint_node(paint_box.layout_box(), context, PaintPhase::Border);
         paint_descendants(context, paint_box.layout_box(), StackingContextPaintPhase::BackgroundAndBorders);
@@ -188,6 +191,8 @@ void StackingContext::paint_internal(PaintContext& context) const
         paint_node(paint_box.layout_box(), context, PaintPhase::FocusOutline);
         paint_node(paint_box.layout_box(), context, PaintPhase::Overlay);
         paint_descendants(context, paint_box.layout_box(), StackingContextPaintPhase::FocusAndOverlay);
+        if (paintable)
+            paintable->after_children_paint(context, PaintPhase::Foreground);
 
         return TraversalDecision::Continue;
     });
@@ -314,7 +319,7 @@ Gfx::FloatMatrix4x4 StackingContext::get_transformation_matrix(CSS::Transformati
             return Gfx::rotation_matrix({ 0.0f, 0.0f, 1.0f }, value(0));
         break;
     default:
-        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Unhandled transformation function {}", CSS::TransformationStyleValue::create(transformation.function, {})->to_string());
+        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Unhandled transformation function {}", CSS::TransformationStyleValue::create(transformation.function, {})->to_deprecated_string());
     }
     return Gfx::FloatMatrix4x4::identity();
 }
@@ -352,7 +357,7 @@ void StackingContext::paint(PaintContext& context) const
 
     if (opacity < 1.0f || !affine_transform.is_identity_or_translation()) {
         auto transform_origin = this->transform_origin();
-        auto source_rect = paintable().absolute_paint_rect().translated(-transform_origin);
+        auto source_rect = paintable().absolute_paint_rect().to_type<float>().translated(-transform_origin);
         auto transformed_destination_rect = affine_transform.map(source_rect).translated(transform_origin);
         auto destination_rect = transformed_destination_rect.to_rounded<int>();
 
@@ -361,12 +366,12 @@ void StackingContext::paint(PaintContext& context) const
         // to the size of the source (which could add some artefacts, though just scaling the bitmap already does that).
         // We need to copy the background at the destination because a bunch of our rendering effects now rely on
         // being able to sample the painter (see border radii, shadows, filters, etc).
-        Gfx::FloatPoint destination_clipped_fixup {};
+        CSSPixelPoint destination_clipped_fixup {};
         auto try_get_scaled_destination_bitmap = [&]() -> ErrorOr<NonnullRefPtr<Gfx::Bitmap>> {
             Gfx::IntRect actual_destination_rect;
             auto bitmap = TRY(context.painter().get_region_bitmap(destination_rect, Gfx::BitmapFormat::BGRA8888, actual_destination_rect));
             // get_region_bitmap() may clip to a smaller region if the requested rect goes outside the painter, so we need to account for that.
-            destination_clipped_fixup = Gfx::FloatPoint { destination_rect.location() - actual_destination_rect.location() };
+            destination_clipped_fixup = CSSPixelPoint { destination_rect.location() - actual_destination_rect.location() };
             destination_rect = actual_destination_rect;
             if (source_rect.size() != transformed_destination_rect.size()) {
                 auto sx = static_cast<float>(source_rect.width()) / transformed_destination_rect.width();
@@ -382,7 +387,7 @@ void StackingContext::paint(PaintContext& context) const
             return;
         auto bitmap = bitmap_or_error.release_value_but_fixme_should_propagate_errors();
         Gfx::Painter painter(bitmap);
-        painter.translate((-paintable().absolute_paint_rect().location() + destination_clipped_fixup).to_rounded<int>());
+        painter.translate(context.rounded_device_point(-paintable().absolute_paint_rect().location() + destination_clipped_fixup).to_type<int>());
         auto paint_context = context.clone(painter);
         paint_internal(paint_context);
 
@@ -434,17 +439,22 @@ static TraversalDecision for_each_in_subtree_of_type_within_same_stacking_contex
     return TraversalDecision::Continue;
 }
 
-Optional<HitTestResult> StackingContext::hit_test(Gfx::FloatPoint const& position, HitTestType type) const
+Optional<HitTestResult> StackingContext::hit_test(CSSPixelPoint position, HitTestType type) const
 {
     if (!m_box.is_visible())
         return {};
 
-    auto transform_origin = this->transform_origin();
-    auto transformed_position = affine_transform_matrix().inverse().value_or({}).map(position - transform_origin) + transform_origin;
+    auto transform_origin = this->transform_origin().to_type<CSSPixels>();
+    // NOTE: This CSSPixels -> Float -> CSSPixels conversion is because we can't AffineTransform::map() a CSSPixelPoint.
+    Gfx::FloatPoint offset_position {
+        position.x().value() - transform_origin.x().value(),
+        position.y().value() - transform_origin.y().value()
+    };
+    auto transformed_position = affine_transform_matrix().inverse().value_or({}).map(offset_position).to_type<CSSPixels>() + transform_origin;
 
     // FIXME: Support more overflow variations.
     if (paintable().computed_values().overflow_x() == CSS::Overflow::Hidden && paintable().computed_values().overflow_y() == CSS::Overflow::Hidden) {
-        if (!paintable().absolute_border_box_rect().contains(transformed_position.x(), transformed_position.y()))
+        if (!paintable().absolute_border_box_rect().contains(transformed_position.x().value(), transformed_position.y().value()))
             return {};
     }
 
@@ -468,7 +478,7 @@ Optional<HitTestResult> StackingContext::hit_test(Gfx::FloatPoint const& positio
     for_each_in_subtree_of_type_within_same_stacking_context_in_reverse<PaintableBox>(paintable(), [&](PaintableBox const& paint_box) {
         // FIXME: Support more overflow variations.
         if (paint_box.computed_values().overflow_x() == CSS::Overflow::Hidden && paint_box.computed_values().overflow_y() == CSS::Overflow::Hidden) {
-            if (!paint_box.absolute_border_box_rect().contains(transformed_position.x(), transformed_position.y()))
+            if (!paint_box.absolute_border_box_rect().contains(transformed_position.x().value(), transformed_position.y().value()))
                 return TraversalDecision::SkipChildrenAndContinue;
         }
 
@@ -495,6 +505,16 @@ Optional<HitTestResult> StackingContext::hit_test(Gfx::FloatPoint const& positio
     if (result.has_value() && result->paintable->visible_for_hit_testing())
         return result;
 
+    // "child stacking contexts with stack level 0" is first in the step, so last here to match reverse order.
+    for (ssize_t i = m_children.size() - 1; i >= 0; --i) {
+        auto const& child = *m_children[i];
+        if (child.m_box.computed_values().z_index().value_or(0) != 0)
+            break;
+        auto result = child.hit_test(transformed_position, type);
+        if (result.has_value() && result->paintable->visible_for_hit_testing())
+            return result;
+    }
+
     // 5. the in-flow, inline-level, non-positioned descendants, including inline tables and inline blocks.
     if (m_box.children_are_inline() && is<Layout::BlockContainer>(m_box)) {
         auto result = paintable().hit_test(transformed_position, type);
@@ -506,7 +526,7 @@ Optional<HitTestResult> StackingContext::hit_test(Gfx::FloatPoint const& positio
     for_each_in_subtree_of_type_within_same_stacking_context_in_reverse<PaintableBox>(paintable(), [&](auto const& paint_box) {
         // FIXME: Support more overflow variations.
         if (paint_box.computed_values().overflow_x() == CSS::Overflow::Hidden && paint_box.computed_values().overflow_y() == CSS::Overflow::Hidden) {
-            if (!paint_box.absolute_border_box_rect().contains(transformed_position.x(), transformed_position.y()))
+            if (!paint_box.absolute_border_box_rect().contains(transformed_position.x().value(), transformed_position.y().value()))
                 return TraversalDecision::SkipChildrenAndContinue;
         }
 
@@ -527,7 +547,7 @@ Optional<HitTestResult> StackingContext::hit_test(Gfx::FloatPoint const& positio
         for_each_in_subtree_of_type_within_same_stacking_context_in_reverse<PaintableBox>(paintable(), [&](auto const& paint_box) {
             // FIXME: Support more overflow variations.
             if (paint_box.computed_values().overflow_x() == CSS::Overflow::Hidden && paint_box.computed_values().overflow_y() == CSS::Overflow::Hidden) {
-                if (!paint_box.absolute_border_box_rect().contains(transformed_position.x(), transformed_position.y()))
+                if (!paint_box.absolute_border_box_rect().contains(transformed_position.x().value(), transformed_position.y().value()))
                     return TraversalDecision::SkipChildrenAndContinue;
             }
 
@@ -556,7 +576,7 @@ Optional<HitTestResult> StackingContext::hit_test(Gfx::FloatPoint const& positio
     }
 
     // 1. the background and borders of the element forming the stacking context.
-    if (paintable().absolute_border_box_rect().contains(transformed_position)) {
+    if (paintable().absolute_border_box_rect().contains(transformed_position.x().value(), transformed_position.y().value())) {
         return HitTestResult {
             .paintable = paintable(),
         };

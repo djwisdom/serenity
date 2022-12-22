@@ -125,46 +125,46 @@ Object& set_default_global_bindings(Realm& realm)
     global.define_direct_property(vm.names.undefined, js_undefined(), 0);
 
     // 19.3 Constructor Properties of the Global Object, https://tc39.es/ecma262/#sec-constructor-properties-of-the-global-object
-    global.define_direct_property(vm.names.AggregateError, realm.intrinsics().aggregate_error_constructor(), attr);
-    global.define_direct_property(vm.names.Array, realm.intrinsics().array_constructor(), attr);
-    global.define_direct_property(vm.names.ArrayBuffer, realm.intrinsics().array_buffer_constructor(), attr);
-    global.define_direct_property(vm.names.BigInt, realm.intrinsics().bigint_constructor(), attr);
-    global.define_direct_property(vm.names.BigInt64Array, realm.intrinsics().big_int64_array_constructor(), attr);
-    global.define_direct_property(vm.names.BigUint64Array, realm.intrinsics().big_uint64_array_constructor(), attr);
-    global.define_direct_property(vm.names.Boolean, realm.intrinsics().boolean_constructor(), attr);
-    global.define_direct_property(vm.names.DataView, realm.intrinsics().data_view_constructor(), attr);
-    global.define_direct_property(vm.names.Date, realm.intrinsics().date_constructor(), attr);
-    global.define_direct_property(vm.names.Error, realm.intrinsics().error_constructor(), attr);
-    global.define_direct_property(vm.names.EvalError, realm.intrinsics().eval_error_constructor(), attr);
-    global.define_direct_property(vm.names.FinalizationRegistry, realm.intrinsics().finalization_registry_constructor(), attr);
-    global.define_direct_property(vm.names.Float32Array, realm.intrinsics().float32_array_constructor(), attr);
-    global.define_direct_property(vm.names.Float64Array, realm.intrinsics().float64_array_constructor(), attr);
-    global.define_direct_property(vm.names.Function, realm.intrinsics().function_constructor(), attr);
-    global.define_direct_property(vm.names.Int8Array, realm.intrinsics().int8_array_constructor(), attr);
-    global.define_direct_property(vm.names.Int16Array, realm.intrinsics().int16_array_constructor(), attr);
-    global.define_direct_property(vm.names.Int32Array, realm.intrinsics().int32_array_constructor(), attr);
-    global.define_direct_property(vm.names.Map, realm.intrinsics().map_constructor(), attr);
-    global.define_direct_property(vm.names.Number, realm.intrinsics().number_constructor(), attr);
-    global.define_direct_property(vm.names.Object, realm.intrinsics().object_constructor(), attr);
-    global.define_direct_property(vm.names.Promise, realm.intrinsics().promise_constructor(), attr);
-    global.define_direct_property(vm.names.Proxy, realm.intrinsics().proxy_constructor(), attr);
-    global.define_direct_property(vm.names.RangeError, realm.intrinsics().range_error_constructor(), attr);
-    global.define_direct_property(vm.names.ReferenceError, realm.intrinsics().reference_error_constructor(), attr);
-    global.define_direct_property(vm.names.RegExp, realm.intrinsics().regexp_constructor(), attr);
-    global.define_direct_property(vm.names.Set, realm.intrinsics().set_constructor(), attr);
-    global.define_direct_property(vm.names.ShadowRealm, realm.intrinsics().shadow_realm_constructor(), attr);
-    global.define_direct_property(vm.names.String, realm.intrinsics().string_constructor(), attr);
-    global.define_direct_property(vm.names.Symbol, realm.intrinsics().symbol_constructor(), attr);
-    global.define_direct_property(vm.names.SyntaxError, realm.intrinsics().syntax_error_constructor(), attr);
-    global.define_direct_property(vm.names.TypeError, realm.intrinsics().type_error_constructor(), attr);
-    global.define_direct_property(vm.names.Uint8Array, realm.intrinsics().uint8_array_constructor(), attr);
-    global.define_direct_property(vm.names.Uint8ClampedArray, realm.intrinsics().uint8_clamped_array_constructor(), attr);
-    global.define_direct_property(vm.names.Uint16Array, realm.intrinsics().uint16_array_constructor(), attr);
-    global.define_direct_property(vm.names.Uint32Array, realm.intrinsics().uint32_array_constructor(), attr);
-    global.define_direct_property(vm.names.URIError, realm.intrinsics().uri_error_constructor(), attr);
-    global.define_direct_property(vm.names.WeakMap, realm.intrinsics().weak_map_constructor(), attr);
-    global.define_direct_property(vm.names.WeakRef, realm.intrinsics().weak_ref_constructor(), attr);
-    global.define_direct_property(vm.names.WeakSet, realm.intrinsics().weak_set_constructor(), attr);
+    global.define_intrinsic_accessor(vm.names.AggregateError, attr, [](auto& realm) -> Value { return realm.intrinsics().aggregate_error_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Array, attr, [](auto& realm) -> Value { return realm.intrinsics().array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.ArrayBuffer, attr, [](auto& realm) -> Value { return realm.intrinsics().array_buffer_constructor(); });
+    global.define_intrinsic_accessor(vm.names.BigInt, attr, [](auto& realm) -> Value { return realm.intrinsics().bigint_constructor(); });
+    global.define_intrinsic_accessor(vm.names.BigInt64Array, attr, [](auto& realm) -> Value { return realm.intrinsics().big_int64_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.BigUint64Array, attr, [](auto& realm) -> Value { return realm.intrinsics().big_uint64_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Boolean, attr, [](auto& realm) -> Value { return realm.intrinsics().boolean_constructor(); });
+    global.define_intrinsic_accessor(vm.names.DataView, attr, [](auto& realm) -> Value { return realm.intrinsics().data_view_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Date, attr, [](auto& realm) -> Value { return realm.intrinsics().date_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Error, attr, [](auto& realm) -> Value { return realm.intrinsics().error_constructor(); });
+    global.define_intrinsic_accessor(vm.names.EvalError, attr, [](auto& realm) -> Value { return realm.intrinsics().eval_error_constructor(); });
+    global.define_intrinsic_accessor(vm.names.FinalizationRegistry, attr, [](auto& realm) -> Value { return realm.intrinsics().finalization_registry_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Float32Array, attr, [](auto& realm) -> Value { return realm.intrinsics().float32_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Float64Array, attr, [](auto& realm) -> Value { return realm.intrinsics().float64_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Function, attr, [](auto& realm) -> Value { return realm.intrinsics().function_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Int8Array, attr, [](auto& realm) -> Value { return realm.intrinsics().int8_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Int16Array, attr, [](auto& realm) -> Value { return realm.intrinsics().int16_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Int32Array, attr, [](auto& realm) -> Value { return realm.intrinsics().int32_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Map, attr, [](auto& realm) -> Value { return realm.intrinsics().map_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Number, attr, [](auto& realm) -> Value { return realm.intrinsics().number_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Object, attr, [](auto& realm) -> Value { return realm.intrinsics().object_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Promise, attr, [](auto& realm) -> Value { return realm.intrinsics().promise_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Proxy, attr, [](auto& realm) -> Value { return realm.intrinsics().proxy_constructor(); });
+    global.define_intrinsic_accessor(vm.names.RangeError, attr, [](auto& realm) -> Value { return realm.intrinsics().range_error_constructor(); });
+    global.define_intrinsic_accessor(vm.names.ReferenceError, attr, [](auto& realm) -> Value { return realm.intrinsics().reference_error_constructor(); });
+    global.define_intrinsic_accessor(vm.names.RegExp, attr, [](auto& realm) -> Value { return realm.intrinsics().regexp_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Set, attr, [](auto& realm) -> Value { return realm.intrinsics().set_constructor(); });
+    global.define_intrinsic_accessor(vm.names.ShadowRealm, attr, [](auto& realm) -> Value { return realm.intrinsics().shadow_realm_constructor(); });
+    global.define_intrinsic_accessor(vm.names.String, attr, [](auto& realm) -> Value { return realm.intrinsics().string_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Symbol, attr, [](auto& realm) -> Value { return realm.intrinsics().symbol_constructor(); });
+    global.define_intrinsic_accessor(vm.names.SyntaxError, attr, [](auto& realm) -> Value { return realm.intrinsics().syntax_error_constructor(); });
+    global.define_intrinsic_accessor(vm.names.TypeError, attr, [](auto& realm) -> Value { return realm.intrinsics().type_error_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Uint8Array, attr, [](auto& realm) -> Value { return realm.intrinsics().uint8_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Uint8ClampedArray, attr, [](auto& realm) -> Value { return realm.intrinsics().uint8_clamped_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Uint16Array, attr, [](auto& realm) -> Value { return realm.intrinsics().uint16_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.Uint32Array, attr, [](auto& realm) -> Value { return realm.intrinsics().uint32_array_constructor(); });
+    global.define_intrinsic_accessor(vm.names.URIError, attr, [](auto& realm) -> Value { return realm.intrinsics().uri_error_constructor(); });
+    global.define_intrinsic_accessor(vm.names.WeakMap, attr, [](auto& realm) -> Value { return realm.intrinsics().weak_map_constructor(); });
+    global.define_intrinsic_accessor(vm.names.WeakRef, attr, [](auto& realm) -> Value { return realm.intrinsics().weak_ref_constructor(); });
+    global.define_intrinsic_accessor(vm.names.WeakSet, attr, [](auto& realm) -> Value { return realm.intrinsics().weak_set_constructor(); });
 
     // 19.4 Other Properties of the Global Object, https://tc39.es/ecma262/#sec-other-properties-of-the-global-object
     global.define_direct_property(vm.names.Atomics, vm.heap().allocate<AtomicsObject>(realm, realm), attr);
@@ -226,7 +226,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::parse_float)
     if (vm.argument(0).is_number())
         return vm.argument(0);
     auto input_string = TRY(vm.argument(0).to_string(vm));
-    auto trimmed_string = MUST(trim_string(vm, js_string(vm, input_string), TrimMode::Left));
+    auto trimmed_string = MUST(trim_string(vm, PrimitiveString::create(vm, input_string), TrimMode::Left));
     if (trimmed_string.is_empty())
         return js_nan();
 
@@ -253,7 +253,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::parse_int)
     auto input_string = TRY(vm.argument(0).to_string(vm));
 
     // 2. Let S be ! TrimString(inputString, start).
-    auto string = MUST(trim_string(vm, js_string(vm, input_string), TrimMode::Left));
+    auto string = MUST(trim_string(vm, PrimitiveString::create(vm, input_string), TrimMode::Left));
 
     // 3. Let sign be 1.
     auto sign = 1;
@@ -341,7 +341,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::eval)
 }
 
 // 19.2.6.1.1 Encode ( string, unescapedSet ), https://tc39.es/ecma262/#sec-encode
-static ThrowCompletionOr<String> encode(VM& vm, String const& string, StringView unescaped_set)
+static ThrowCompletionOr<DeprecatedString> encode(VM& vm, DeprecatedString const& string, StringView unescaped_set)
 {
     auto utf16_string = Utf16String(string);
 
@@ -396,7 +396,7 @@ static ThrowCompletionOr<String> encode(VM& vm, String const& string, StringView
 }
 
 // 19.2.6.1.2 Decode ( string, reservedSet ), https://tc39.es/ecma262/#sec-decode
-static ThrowCompletionOr<String> decode(VM& vm, String const& string, StringView reserved_set)
+static ThrowCompletionOr<DeprecatedString> decode(VM& vm, DeprecatedString const& string, StringView reserved_set)
 {
     StringBuilder decoded_builder;
     auto code_point_start_offset = 0u;
@@ -458,7 +458,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::encode_uri)
 {
     auto uri_string = TRY(vm.argument(0).to_string(vm));
     auto encoded = TRY(encode(vm, uri_string, ";/?:@&=+$,abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.!~*'()#"sv));
-    return js_string(vm, move(encoded));
+    return PrimitiveString::create(vm, move(encoded));
 }
 
 // 19.2.6.2 decodeURI ( encodedURI ), https://tc39.es/ecma262/#sec-decodeuri-encodeduri
@@ -466,7 +466,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::decode_uri)
 {
     auto uri_string = TRY(vm.argument(0).to_string(vm));
     auto decoded = TRY(decode(vm, uri_string, ";/?:@&=+$,#"sv));
-    return js_string(vm, move(decoded));
+    return PrimitiveString::create(vm, move(decoded));
 }
 
 // 19.2.6.5 encodeURIComponent ( uriComponent ), https://tc39.es/ecma262/#sec-encodeuricomponent-uricomponent
@@ -474,7 +474,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::encode_uri_component)
 {
     auto uri_string = TRY(vm.argument(0).to_string(vm));
     auto encoded = TRY(encode(vm, uri_string, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.!~*'()"sv));
-    return js_string(vm, move(encoded));
+    return PrimitiveString::create(vm, move(encoded));
 }
 
 // 19.2.6.3 decodeURIComponent ( encodedURIComponent ), https://tc39.es/ecma262/#sec-decodeuricomponent-encodeduricomponent
@@ -482,7 +482,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::decode_uri_component)
 {
     auto uri_string = TRY(vm.argument(0).to_string(vm));
     auto decoded = TRY(decode(vm, uri_string, ""sv));
-    return js_string(vm, move(decoded));
+    return PrimitiveString::create(vm, move(decoded));
 }
 
 // B.2.1.1 escape ( string ), https://tc39.es/ecma262/#sec-escape-string
@@ -500,7 +500,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::escape)
         }
         escaped.appendff("%u{:04X}", code_point);
     }
-    return js_string(vm, escaped.build());
+    return PrimitiveString::create(vm, escaped.build());
 }
 
 // B.2.1.2 unescape ( string ), https://tc39.es/ecma262/#sec-unescape-string
@@ -522,7 +522,7 @@ JS_DEFINE_NATIVE_FUNCTION(GlobalObject::unescape)
         }
         unescaped.append_code_point(code_point);
     }
-    return js_string(vm, unescaped.build());
+    return PrimitiveString::create(vm, unescaped.build());
 }
 
 }

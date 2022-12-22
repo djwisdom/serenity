@@ -16,6 +16,7 @@
 #include <LibJS/Bytecode/Register.h>
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Runtime/Environment.h>
+#include <LibJS/Runtime/ErrorTypes.h>
 
 namespace JS {
 
@@ -82,7 +83,7 @@ Bytecode::CodeGenerationErrorOr<void> ScopeNode::generate_bytecode(Bytecode::Gen
             // b. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
             if (generator.has_binding(identifier)) {
                 // FIXME: Throw an actual SyntaxError instance.
-                generator.emit<Bytecode::Op::NewString>(generator.intern_string(String::formatted("SyntaxError: toplevel variable already declared: {}", name)));
+                generator.emit<Bytecode::Op::NewString>(generator.intern_string(DeprecatedString::formatted("SyntaxError: toplevel variable already declared: {}", name)));
                 generator.emit<Bytecode::Op::Throw>();
                 return {};
             }
@@ -98,7 +99,7 @@ Bytecode::CodeGenerationErrorOr<void> ScopeNode::generate_bytecode(Bytecode::Gen
             // a. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
             if (generator.has_binding(identifier)) {
                 // FIXME: Throw an actual SyntaxError instance.
-                generator.emit<Bytecode::Op::NewString>(generator.intern_string(String::formatted("SyntaxError: toplevel variable already declared: {}", name)));
+                generator.emit<Bytecode::Op::NewString>(generator.intern_string(DeprecatedString::formatted("SyntaxError: toplevel variable already declared: {}", name)));
                 generator.emit<Bytecode::Op::Throw>();
             }
             return {};
@@ -1551,7 +1552,7 @@ Bytecode::CodeGenerationErrorOr<void> CallExpression::generate_bytecode(Bytecode
         generator.emit<Bytecode::Op::Store>(callee_reg);
     }
 
-    TRY(arguments_to_array_for_call(generator, m_arguments));
+    TRY(arguments_to_array_for_call(generator, arguments()));
 
     Bytecode::Op::Call::CallType call_type;
     if (is<NewExpression>(*this)) {
@@ -1591,19 +1592,336 @@ Bytecode::CodeGenerationErrorOr<void> YieldExpression::generate_bytecode(Bytecod
 {
     VERIFY(generator.is_in_generator_function());
 
+    auto received_completion_register = generator.allocate_register();
+    auto received_completion_type_register = generator.allocate_register();
+    auto received_completion_value_register = generator.allocate_register();
+
+    auto type_identifier = generator.intern_identifier("type");
+    auto value_identifier = generator.intern_identifier("value");
+
+    auto get_received_completion_type_and_value = [&]() {
+        // The accumulator is set to an object, for example: { "type": 1 (normal), value: 1337 }
+        generator.emit<Bytecode::Op::Store>(received_completion_register);
+
+        generator.emit<Bytecode::Op::GetById>(type_identifier);
+        generator.emit<Bytecode::Op::Store>(received_completion_type_register);
+
+        generator.emit<Bytecode::Op::Load>(received_completion_register);
+        generator.emit<Bytecode::Op::GetById>(value_identifier);
+        generator.emit<Bytecode::Op::Store>(received_completion_value_register);
+    };
+
     if (m_is_yield_from) {
-        return Bytecode::CodeGenerationError {
-            this,
-            "Unimplemented form: `yield*`"sv,
-        };
+        // 15.5.5 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-generator-function-definitions-runtime-semantics-evaluation
+        // FIXME: 1. Let generatorKind be GetGeneratorKind().
+
+        // 2. Let exprRef be ? Evaluation of AssignmentExpression.
+        // 3. Let value be ? GetValue(exprRef).
+        VERIFY(m_argument);
+        TRY(m_argument->generate_bytecode(generator));
+
+        // 4. Let iteratorRecord be ? GetIterator(value, generatorKind).
+        // FIXME: Consider generatorKind.
+        auto iterator_record_register = generator.allocate_register();
+        generator.emit<Bytecode::Op::GetIterator>();
+        generator.emit<Bytecode::Op::Store>(iterator_record_register);
+
+        // 5. Let iterator be iteratorRecord.[[Iterator]].
+        auto iterator_register = generator.allocate_register();
+        auto iterator_identifier = generator.intern_identifier("iterator");
+        generator.emit<Bytecode::Op::GetById>(iterator_identifier);
+        generator.emit<Bytecode::Op::Store>(iterator_register);
+
+        // Cache iteratorRecord.[[NextMethod]] for use in step 7.a.i.
+        auto next_method_register = generator.allocate_register();
+        auto next_method_identifier = generator.intern_identifier("next");
+        generator.emit<Bytecode::Op::Load>(iterator_record_register);
+        generator.emit<Bytecode::Op::GetById>(next_method_identifier);
+        generator.emit<Bytecode::Op::Store>(next_method_register);
+
+        // 6. Let received be NormalCompletion(undefined).
+        // See get_received_completion_type_and_value above.
+        generator.emit<Bytecode::Op::LoadImmediate>(Value(to_underlying(Completion::Type::Normal)));
+        generator.emit<Bytecode::Op::Store>(received_completion_type_register);
+
+        generator.emit<Bytecode::Op::LoadImmediate>(js_undefined());
+        generator.emit<Bytecode::Op::Store>(received_completion_value_register);
+
+        // 7. Repeat,
+        auto& loop_block = generator.make_block();
+        auto& continuation_block = generator.make_block();
+        auto& loop_end_block = generator.make_block();
+
+        generator.emit<Bytecode::Op::Jump>(Bytecode::Label { loop_block });
+        generator.switch_to_basic_block(loop_block);
+
+        // a. If received.[[Type]] is normal, then
+        auto& type_is_normal_block = generator.make_block();
+        auto& is_type_throw_block = generator.make_block();
+
+        generator.emit<Bytecode::Op::LoadImmediate>(Value(to_underlying(Completion::Type::Normal)));
+        generator.emit<Bytecode::Op::StrictlyEquals>(received_completion_type_register);
+        generator.emit<Bytecode::Op::JumpConditional>(
+            Bytecode::Label { type_is_normal_block },
+            Bytecode::Label { is_type_throw_block });
+
+        generator.switch_to_basic_block(type_is_normal_block);
+
+        // i. Let innerResult be ? Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]], « received.[[Value]] »).
+        generator.emit_with_extra_register_slots<Bytecode::Op::NewArray>(2, AK::Array { received_completion_value_register, received_completion_value_register });
+        generator.emit<Bytecode::Op::Call>(Bytecode::Op::Call::CallType::Call, next_method_register, iterator_register);
+
+        // FIXME: ii. If generatorKind is async, set innerResult to ? Await(innerResult).
+
+        // iii. If innerResult is not an Object, throw a TypeError exception.
+        generator.emit<Bytecode::Op::ThrowIfNotObject>();
+
+        auto inner_result_register = generator.allocate_register();
+        generator.emit<Bytecode::Op::Store>(inner_result_register);
+
+        // iv. Let done be ? IteratorComplete(innerResult).
+        generator.emit<Bytecode::Op::IteratorResultDone>();
+
+        // v. If done is true, then
+        auto& type_is_normal_done_block = generator.make_block();
+        auto& type_is_normal_not_done_block = generator.make_block();
+        generator.emit<Bytecode::Op::JumpConditional>(
+            Bytecode::Label { type_is_normal_done_block },
+            Bytecode::Label { type_is_normal_not_done_block });
+
+        generator.switch_to_basic_block(type_is_normal_done_block);
+
+        // 1. Return ? IteratorValue(innerResult).
+        generator.emit<Bytecode::Op::Load>(inner_result_register);
+        generator.emit<Bytecode::Op::IteratorResultValue>();
+        generator.emit<Bytecode::Op::Jump>(Bytecode::Label { loop_end_block });
+
+        generator.switch_to_basic_block(type_is_normal_not_done_block);
+
+        // FIXME: vi. If generatorKind is async, set received to Completion(AsyncGeneratorYield(? IteratorValue(innerResult))).
+        // vii. Else, set received to Completion(GeneratorYield(innerResult)).
+        // FIXME: Else,
+        generator.emit<Bytecode::Op::Load>(inner_result_register);
+
+        // FIXME: Yield currently only accepts a Value, not an object conforming to the IteratorResult interface, so we have to do an observable lookup of `value` here.
+        generator.emit<Bytecode::Op::IteratorResultValue>();
+
+        generator.emit<Bytecode::Op::Yield>(Bytecode::Label { continuation_block });
+
+        // b. Else if received.[[Type]] is throw, then
+        generator.switch_to_basic_block(is_type_throw_block);
+        auto& type_is_throw_block = generator.make_block();
+        auto& type_is_return_block = generator.make_block();
+
+        generator.emit<Bytecode::Op::LoadImmediate>(Value(to_underlying(Completion::Type::Throw)));
+        generator.emit<Bytecode::Op::StrictlyEquals>(received_completion_type_register);
+        generator.emit<Bytecode::Op::JumpConditional>(
+            Bytecode::Label { type_is_throw_block },
+            Bytecode::Label { type_is_return_block });
+
+        generator.switch_to_basic_block(type_is_throw_block);
+
+        // i. Let throw be ? GetMethod(iterator, "throw").
+        auto throw_method_register = generator.allocate_register();
+        auto throw_identifier = generator.intern_identifier("throw");
+        generator.emit<Bytecode::Op::Load>(iterator_register);
+        generator.emit<Bytecode::Op::GetMethod>(throw_identifier);
+        generator.emit<Bytecode::Op::Store>(throw_method_register);
+
+        // ii. If throw is not undefined, then
+        auto& throw_method_is_defined_block = generator.make_block();
+        auto& throw_method_is_undefined_block = generator.make_block();
+        generator.emit<Bytecode::Op::LoadImmediate>(js_undefined());
+        generator.emit<Bytecode::Op::StrictlyInequals>(throw_method_register);
+        generator.emit<Bytecode::Op::JumpConditional>(
+            Bytecode::Label { throw_method_is_defined_block },
+            Bytecode::Label { throw_method_is_undefined_block });
+
+        generator.switch_to_basic_block(throw_method_is_defined_block);
+
+        // 1. Let innerResult be ? Call(throw, iterator, « received.[[Value]] »).
+        generator.emit_with_extra_register_slots<Bytecode::Op::NewArray>(2, AK::Array { received_completion_value_register, received_completion_value_register });
+        generator.emit<Bytecode::Op::Call>(Bytecode::Op::Call::CallType::Call, throw_method_register, iterator_register);
+
+        // FIXME: 2. If generatorKind is async, set innerResult to ? Await(innerResult).
+
+        // 3. NOTE: Exceptions from the inner iterator throw method are propagated. Normal completions from an inner throw method are processed similarly to an inner next.
+        // 4. If innerResult is not an Object, throw a TypeError exception.
+        generator.emit<Bytecode::Op::ThrowIfNotObject>();
+        generator.emit<Bytecode::Op::Store>(inner_result_register);
+
+        // 5. Let done be ? IteratorComplete(innerResult).
+        generator.emit<Bytecode::Op::IteratorResultDone>();
+
+        // 6. If done is true, then
+        auto& type_is_throw_done_block = generator.make_block();
+        auto& type_is_throw_not_done_block = generator.make_block();
+        generator.emit<Bytecode::Op::JumpConditional>(
+            Bytecode::Label { type_is_throw_done_block },
+            Bytecode::Label { type_is_throw_not_done_block });
+
+        generator.switch_to_basic_block(type_is_throw_done_block);
+
+        // a. Return ? IteratorValue(innerResult).
+        generator.emit<Bytecode::Op::Load>(inner_result_register);
+        generator.emit<Bytecode::Op::IteratorResultValue>();
+        generator.emit<Bytecode::Op::Jump>(Bytecode::Label { loop_end_block });
+
+        generator.switch_to_basic_block(type_is_throw_not_done_block);
+
+        // FIXME: 7. If generatorKind is async, set received to Completion(AsyncGeneratorYield(? IteratorValue(innerResult))).
+        // 8. Else, set received to Completion(GeneratorYield(innerResult)).
+        // FIXME: Else,
+        generator.emit<Bytecode::Op::Load>(inner_result_register);
+
+        // FIXME: Yield currently only accepts a Value, not an object conforming to the IteratorResult interface, so we have to do an observable lookup of `value` here.
+        generator.emit<Bytecode::Op::IteratorResultValue>();
+
+        generator.emit<Bytecode::Op::Yield>(Bytecode::Label { continuation_block });
+
+        generator.switch_to_basic_block(throw_method_is_undefined_block);
+
+        // 1. NOTE: If iterator does not have a throw method, this throw is going to terminate the yield* loop. But first we need to give iterator a chance to clean up.
+
+        // 2. Let closeCompletion be Completion Record { [[Type]]: normal, [[Value]]: empty, [[Target]]: empty }.
+        // FIXME: 3. If generatorKind is async, perform ? AsyncIteratorClose(iteratorRecord, closeCompletion).
+        // 4. Else, perform ? IteratorClose(iteratorRecord, closeCompletion).
+        // FIXME: Else,
+        generator.emit<Bytecode::Op::Load>(iterator_record_register);
+        generator.emit<Bytecode::Op::IteratorClose>(Completion::Type::Normal, Optional<Value> {});
+
+        // 5. NOTE: The next step throws a TypeError to indicate that there was a yield* protocol violation: iterator does not have a throw method.
+        // 6. Throw a TypeError exception.
+        generator.emit<Bytecode::Op::NewTypeError>(generator.intern_string(ErrorType::YieldFromIteratorMissingThrowMethod.message()));
+        generator.perform_needed_unwinds<Bytecode::Op::Throw>();
+        generator.emit<Bytecode::Op::Throw>();
+
+        // c. Else,
+        // i. Assert: received.[[Type]] is return.
+        generator.switch_to_basic_block(type_is_return_block);
+
+        // ii. Let return be ? GetMethod(iterator, "return").
+        auto return_method_register = generator.allocate_register();
+        auto return_identifier = generator.intern_identifier("return");
+        generator.emit<Bytecode::Op::Load>(iterator_register);
+        generator.emit<Bytecode::Op::GetMethod>(return_identifier);
+        generator.emit<Bytecode::Op::Store>(return_method_register);
+
+        // iii. If return is undefined, then
+        auto& return_is_undefined_block = generator.make_block();
+        auto& return_is_defined_block = generator.make_block();
+        generator.emit<Bytecode::Op::LoadImmediate>(js_undefined());
+        generator.emit<Bytecode::Op::StrictlyEquals>(return_method_register);
+        generator.emit<Bytecode::Op::JumpConditional>(
+            Bytecode::Label { return_is_undefined_block },
+            Bytecode::Label { return_is_defined_block });
+
+        generator.switch_to_basic_block(return_is_undefined_block);
+
+        // FIXME: 1. If generatorKind is async, set received.[[Value]] to ? Await(received.[[Value]]).
+        // 2. Return ? received.
+        // NOTE: This will always be a return completion.
+        generator.emit<Bytecode::Op::Load>(received_completion_value_register);
+        generator.perform_needed_unwinds<Bytecode::Op::Yield>();
+        generator.emit<Bytecode::Op::Yield>(nullptr);
+
+        generator.switch_to_basic_block(return_is_defined_block);
+
+        // iv. Let innerReturnResult be ? Call(return, iterator, « received.[[Value]] »).
+        generator.emit_with_extra_register_slots<Bytecode::Op::NewArray>(2, AK::Array { received_completion_value_register, received_completion_value_register });
+        generator.emit<Bytecode::Op::Call>(Bytecode::Op::Call::CallType::Call, return_method_register, iterator_register);
+
+        // FIXME: v. If generatorKind is async, set innerReturnResult to ? Await(innerReturnResult).
+
+        // vi. If innerReturnResult is not an Object, throw a TypeError exception.
+        generator.emit<Bytecode::Op::ThrowIfNotObject>();
+
+        auto inner_return_result_register = generator.allocate_register();
+        generator.emit<Bytecode::Op::Store>(inner_return_result_register);
+
+        // vii. Let done be ? IteratorComplete(innerReturnResult).
+        generator.emit<Bytecode::Op::IteratorResultDone>();
+
+        // viii. If done is true, then
+        auto& type_is_return_done_block = generator.make_block();
+        auto& type_is_return_not_done_block = generator.make_block();
+        generator.emit<Bytecode::Op::JumpConditional>(
+            Bytecode::Label { type_is_return_done_block },
+            Bytecode::Label { type_is_return_not_done_block });
+
+        generator.switch_to_basic_block(type_is_return_done_block);
+
+        // 1. Let value be ? IteratorValue(innerReturnResult).
+        generator.emit<Bytecode::Op::Load>(inner_result_register);
+        generator.emit<Bytecode::Op::IteratorResultValue>();
+
+        // 2. Return Completion Record { [[Type]]: return, [[Value]]: value, [[Target]]: empty }.
+        generator.perform_needed_unwinds<Bytecode::Op::Yield>();
+        generator.emit<Bytecode::Op::Yield>(nullptr);
+
+        generator.switch_to_basic_block(type_is_return_not_done_block);
+
+        // FIXME: ix. If generatorKind is async, set received to Completion(AsyncGeneratorYield(? IteratorValue(innerReturnResult))).
+        // x. Else, set received to Completion(GeneratorYield(innerReturnResult)).
+        // FIXME: Else,
+        generator.emit<Bytecode::Op::Load>(inner_return_result_register);
+
+        // FIXME: Yield currently only accepts a Value, not an object conforming to the IteratorResult interface, so we have to do an observable lookup of `value` here.
+        generator.emit<Bytecode::Op::IteratorResultValue>();
+
+        generator.emit<Bytecode::Op::Yield>(Bytecode::Label { continuation_block });
+
+        generator.switch_to_basic_block(continuation_block);
+        get_received_completion_type_and_value();
+        generator.emit<Bytecode::Op::Jump>(Bytecode::Label { loop_block });
+
+        generator.switch_to_basic_block(loop_end_block);
+        return {};
     }
 
     if (m_argument)
         TRY(m_argument->generate_bytecode(generator));
+    else
+        generator.emit<Bytecode::Op::LoadImmediate>(js_undefined());
 
     auto& continuation_block = generator.make_block();
     generator.emit<Bytecode::Op::Yield>(Bytecode::Label { continuation_block });
     generator.switch_to_basic_block(continuation_block);
+    get_received_completion_type_and_value();
+
+    auto& normal_completion_continuation_block = generator.make_block();
+    auto& throw_completion_continuation_block = generator.make_block();
+
+    generator.emit<Bytecode::Op::LoadImmediate>(Value(to_underlying(Completion::Type::Normal)));
+    generator.emit<Bytecode::Op::StrictlyEquals>(received_completion_type_register);
+    generator.emit<Bytecode::Op::JumpConditional>(
+        Bytecode::Label { normal_completion_continuation_block },
+        Bytecode::Label { throw_completion_continuation_block });
+
+    auto& throw_value_block = generator.make_block();
+    auto& return_value_block = generator.make_block();
+
+    generator.switch_to_basic_block(throw_completion_continuation_block);
+    generator.emit<Bytecode::Op::LoadImmediate>(Value(to_underlying(Completion::Type::Throw)));
+    generator.emit<Bytecode::Op::StrictlyEquals>(received_completion_type_register);
+
+    // If type is not equal to "throw" or "normal", assume it's "return".
+    generator.emit<Bytecode::Op::JumpConditional>(
+        Bytecode::Label { throw_value_block },
+        Bytecode::Label { return_value_block });
+
+    generator.switch_to_basic_block(throw_value_block);
+    generator.emit<Bytecode::Op::Load>(received_completion_value_register);
+    generator.perform_needed_unwinds<Bytecode::Op::Throw>();
+    generator.emit<Bytecode::Op::Throw>();
+
+    generator.switch_to_basic_block(return_value_block);
+    generator.emit<Bytecode::Op::Load>(received_completion_value_register);
+    generator.perform_needed_unwinds<Bytecode::Op::Yield>();
+    generator.emit<Bytecode::Op::Yield>(nullptr);
+
+    generator.switch_to_basic_block(normal_completion_continuation_block);
+    generator.emit<Bytecode::Op::Load>(received_completion_value_register);
     return {};
 }
 
@@ -1651,6 +1969,9 @@ Bytecode::CodeGenerationErrorOr<void> IfStatement::generate_bytecode(Bytecode::G
 
 Bytecode::CodeGenerationErrorOr<void> ContinueStatement::generate_bytecode(Bytecode::Generator& generator) const
 {
+    // FIXME: Handle finally blocks in a graceful manner
+    //        We need to execute the finally block, but tell it to resume
+    //        execution at the designated block
     if (m_target_label.is_null()) {
         generator.perform_needed_unwinds<Bytecode::Op::Jump>();
         generator.emit<Bytecode::Op::Jump>().set_targets(
@@ -1844,6 +2165,9 @@ Bytecode::CodeGenerationErrorOr<void> ThrowStatement::generate_bytecode(Bytecode
 
 Bytecode::CodeGenerationErrorOr<void> BreakStatement::generate_bytecode(Bytecode::Generator& generator) const
 {
+    // FIXME: Handle finally blocks in a graceful manner
+    //        We need to execute the finally block, but tell it to resume
+    //        execution at the designated block
     if (m_target_label.is_null()) {
         generator.perform_needed_unwinds<Bytecode::Op::Jump>(true);
         generator.emit<Bytecode::Op::Jump>().set_targets(
@@ -1871,6 +2195,7 @@ Bytecode::CodeGenerationErrorOr<void> TryStatement::generate_bytecode(Bytecode::
     if (m_finalizer) {
         auto& finalizer_block = generator.make_block();
         generator.switch_to_basic_block(finalizer_block);
+        generator.emit<Bytecode::Op::LeaveUnwindContext>();
         TRY(m_finalizer->generate_bytecode(generator));
         if (!generator.is_current_block_terminated()) {
             next_block = &generator.make_block();
@@ -1880,9 +2205,15 @@ Bytecode::CodeGenerationErrorOr<void> TryStatement::generate_bytecode(Bytecode::
         finalizer_target = Bytecode::Label { finalizer_block };
     }
 
+    if (m_finalizer)
+        generator.start_boundary(Bytecode::Generator::BlockBoundaryType::ReturnToFinally);
     if (m_handler) {
         auto& handler_block = generator.make_block();
         generator.switch_to_basic_block(handler_block);
+
+        if (!m_finalizer)
+            generator.emit<Bytecode::Op::LeaveUnwindContext>();
+
         generator.begin_variable_scope(Bytecode::Generator::BindingMode::Lexical, Bytecode::Generator::SurroundingScopeKind::Block);
         TRY(m_handler->parameter().visit(
             [&](FlyString const& parameter) -> Bytecode::CodeGenerationErrorOr<void> {
@@ -1908,7 +2239,6 @@ Bytecode::CodeGenerationErrorOr<void> TryStatement::generate_bytecode(Bytecode::
 
         if (!generator.is_current_block_terminated()) {
             if (m_finalizer) {
-                generator.emit<Bytecode::Op::LeaveUnwindContext>();
                 generator.emit<Bytecode::Op::Jump>(finalizer_target);
             } else {
                 VERIFY(!next_block);
@@ -1918,11 +2248,15 @@ Bytecode::CodeGenerationErrorOr<void> TryStatement::generate_bytecode(Bytecode::
             }
         }
     }
+    if (m_finalizer)
+        generator.end_boundary(Bytecode::Generator::BlockBoundaryType::ReturnToFinally);
 
     auto& target_block = generator.make_block();
     generator.switch_to_basic_block(saved_block);
     generator.emit<Bytecode::Op::EnterUnwindContext>(Bytecode::Label { target_block }, handler_target, finalizer_target);
     generator.start_boundary(Bytecode::Generator::BlockBoundaryType::Unwind);
+    if (m_finalizer)
+        generator.start_boundary(Bytecode::Generator::BlockBoundaryType::ReturnToFinally);
 
     generator.switch_to_basic_block(target_block);
     TRY(m_block->generate_bytecode(generator));
@@ -1931,10 +2265,14 @@ Bytecode::CodeGenerationErrorOr<void> TryStatement::generate_bytecode(Bytecode::
             generator.emit<Bytecode::Op::Jump>(finalizer_target);
         } else {
             auto& block = generator.make_block();
-            generator.emit<Bytecode::Op::FinishUnwind>(Bytecode::Label { block });
+            generator.emit<Bytecode::Op::LeaveUnwindContext>();
+            generator.emit<Bytecode::Op::Jump>(Bytecode::Label { block });
             next_block = &block;
         }
     }
+
+    if (m_finalizer)
+        generator.end_boundary(Bytecode::Generator::BlockBoundaryType::ReturnToFinally);
     generator.end_boundary(Bytecode::Generator::BlockBoundaryType::Unwind);
 
     generator.switch_to_basic_block(next_block ? *next_block : saved_block);
@@ -2197,13 +2535,13 @@ static Bytecode::CodeGenerationErrorOr<void> for_in_of_body_evaluation(Bytecode:
     auto destructuring = head_result.is_destructuring;
 
     // 5. If destructuring is true and if lhsKind is assignment, then
-    if (destructuring) {
+    if (destructuring && head_result.lhs_kind == LHSKind::Assignment) {
         // a. Assert: lhs is a LeftHandSideExpression.
         // b. Let assignmentPattern be the AssignmentPattern that is covered by lhs.
         // FIXME: Implement this.
         return Bytecode::CodeGenerationError {
             &node,
-            "Unimplemented: destructuring in for-in/of"sv,
+            "Unimplemented: assignment destructuring in for/of"sv,
         };
     }
     // 6. Repeat,
@@ -2250,7 +2588,9 @@ static Bytecode::CodeGenerationErrorOr<void> for_in_of_body_evaluation(Bytecode:
                     TRY(generator.emit_store_to_reference(**ptr));
                 } else {
                     auto& binding_pattern = lhs.get<NonnullRefPtr<BindingPattern>>();
-                    TRY(generate_binding_pattern_bytecode(generator, *binding_pattern, Bytecode::Op::SetVariable::InitializationMode::Set, Bytecode::Register::accumulator()));
+                    auto value_register = generator.allocate_register();
+                    generator.emit<Bytecode::Op::Store>(value_register);
+                    TRY(generate_binding_pattern_bytecode(generator, *binding_pattern, Bytecode::Op::SetVariable::InitializationMode::Set, value_register));
                 }
             }
         }
@@ -2310,9 +2650,9 @@ static Bytecode::CodeGenerationErrorOr<void> for_in_of_body_evaluation(Bytecode:
     }
     //    j. Else,
     else {
-        // FIXME: Implement destructuring
-        //  i. If lhsKind is assignment, then
-        //      1. Let status be Completion(DestructuringAssignmentEvaluation of assignmentPattern with argument nextValue).
+        // FIXME: i. If lhsKind is assignment, then
+        //           1. Let status be Completion(DestructuringAssignmentEvaluation of assignmentPattern with argument nextValue).
+
         //  ii. Else if lhsKind is varBinding, then
         //      1. Assert: lhs is a ForBinding.
         //      2. Let status be Completion(BindingInitialization of lhs with arguments nextValue and undefined).
@@ -2320,10 +2660,20 @@ static Bytecode::CodeGenerationErrorOr<void> for_in_of_body_evaluation(Bytecode:
         //      1. Assert: lhsKind is lexicalBinding.
         //      2. Assert: lhs is a ForDeclaration.
         //      3. Let status be Completion(ForDeclarationBindingInitialization of lhs with arguments nextValue and iterationEnv).
-        return Bytecode::CodeGenerationError {
-            &node,
-            "Unimplemented: destructuring in for-in/of"sv,
-        };
+        if (head_result.lhs_kind == LHSKind::VarBinding || head_result.lhs_kind == LHSKind::LexicalBinding) {
+            auto& declaration = static_cast<VariableDeclaration const&>(*lhs.get<NonnullRefPtr<ASTNode>>());
+            VERIFY(declaration.declarations().size() == 1);
+            auto& binding_pattern = declaration.declarations().first().target().get<NonnullRefPtr<BindingPattern>>();
+
+            auto value_register = generator.allocate_register();
+            generator.emit<Bytecode::Op::Store>(value_register);
+            TRY(generate_binding_pattern_bytecode(generator, *binding_pattern, head_result.lhs_kind == LHSKind::VarBinding ? Bytecode::Op::SetVariable::InitializationMode::Set : Bytecode::Op::SetVariable::InitializationMode::Initialize, value_register));
+        } else {
+            return Bytecode::CodeGenerationError {
+                &node,
+                "Unimplemented: assignment destructuring in for/of"sv,
+            };
+        }
     }
 
     // FIXME: Implement iteration closure.

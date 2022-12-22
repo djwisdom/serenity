@@ -54,7 +54,7 @@ CharacterMapWidget::CharacterMapWidget()
                 continue;
             builder.append_code_point(code_point);
         }
-        GUI::Clipboard::the().set_plain_text(builder.to_string());
+        GUI::Clipboard::the().set_plain_text(builder.to_deprecated_string());
     });
     m_copy_selection_action->set_status_tip("Copy the highlighted characters to the clipboard");
 
@@ -69,7 +69,7 @@ CharacterMapWidget::CharacterMapWidget()
     m_next_glyph_action->set_status_tip("Seek the next visible glyph");
 
     m_go_to_glyph_action = GUI::Action::create("Go to glyph...", { Mod_Ctrl, Key_G }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-to.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
-        String input;
+        DeprecatedString input;
         if (GUI::InputBox::show(window(), input, "Hexadecimal:"sv, "Go to glyph"sv) == GUI::InputBox::ExecResult::OK && !input.is_empty()) {
             auto maybe_code_point = AK::StringUtils::convert_to_uint_from_hex(input);
             if (!maybe_code_point.has_value())
@@ -139,7 +139,7 @@ CharacterMapWidget::CharacterMapWidget()
     for (auto& block : unicode_blocks)
         m_unicode_block_list.append(block.display_name);
 
-    m_unicode_block_model = GUI::ItemListModel<String>::create(m_unicode_block_list);
+    m_unicode_block_model = GUI::ItemListModel<DeprecatedString>::create(m_unicode_block_list);
     m_unicode_block_listview->set_model(*m_unicode_block_model);
     m_unicode_block_listview->set_activates_on_selection(true);
     m_unicode_block_listview->horizontal_scrollbar().set_visible(false);
@@ -166,7 +166,8 @@ void CharacterMapWidget::initialize_menubar(GUI::Window& window)
 
 void CharacterMapWidget::did_change_font()
 {
-    m_glyph_map->set_font(font());
+    // No need to track glyph modifications by cloning
+    m_glyph_map->GUI::AbstractScrollableWidget::set_font(font());
     m_font_name_label->set_text(font().human_readable_name());
     m_output_box->set_font(font());
 }
@@ -178,5 +179,5 @@ void CharacterMapWidget::update_statusbar()
     builder.appendff("U+{:04X}", code_point);
     if (auto display_name = Unicode::code_point_display_name(code_point); display_name.has_value())
         builder.appendff(" - {}", display_name.value());
-    m_statusbar->set_text(builder.to_string());
+    m_statusbar->set_text(builder.to_deprecated_string());
 }

@@ -41,11 +41,11 @@ enum class NeedsBigProcessLock {
 //
 #define ENUMERATE_SYSCALLS(S)                               \
     S(accept4, NeedsBigProcessLock::No)                     \
-    S(access, NeedsBigProcessLock::Yes)                     \
     S(adjtime, NeedsBigProcessLock::No)                     \
     S(alarm, NeedsBigProcessLock::Yes)                      \
     S(allocate_tls, NeedsBigProcessLock::Yes)               \
     S(anon_create, NeedsBigProcessLock::No)                 \
+    S(annotate_mapping, NeedsBigProcessLock::No)            \
     S(beep, NeedsBigProcessLock::No)                        \
     S(bind, NeedsBigProcessLock::No)                        \
     S(chdir, NeedsBigProcessLock::No)                       \
@@ -68,6 +68,7 @@ enum class NeedsBigProcessLock {
     S(execve, NeedsBigProcessLock::Yes)                     \
     S(exit, NeedsBigProcessLock::Yes)                       \
     S(exit_thread, NeedsBigProcessLock::Yes)                \
+    S(faccessat, NeedsBigProcessLock::Yes)                  \
     S(fchdir, NeedsBigProcessLock::No)                      \
     S(fchmod, NeedsBigProcessLock::No)                      \
     S(fchown, NeedsBigProcessLock::No)                      \
@@ -124,7 +125,6 @@ enum class NeedsBigProcessLock {
     S(mprotect, NeedsBigProcessLock::Yes)                   \
     S(mremap, NeedsBigProcessLock::Yes)                     \
     S(msync, NeedsBigProcessLock::Yes)                      \
-    S(msyscall, NeedsBigProcessLock::No)                    \
     S(munmap, NeedsBigProcessLock::Yes)                     \
     S(open, NeedsBigProcessLock::Yes)                       \
     S(perf_event, NeedsBigProcessLock::Yes)                 \
@@ -163,6 +163,7 @@ enum class NeedsBigProcessLock {
     S(sethostname, NeedsBigProcessLock::No)                 \
     S(setkeymap, NeedsBigProcessLock::No)                   \
     S(setpgid, NeedsBigProcessLock::Yes)                    \
+    S(setregid, NeedsBigProcessLock::No)                    \
     S(setresgid, NeedsBigProcessLock::No)                   \
     S(setresuid, NeedsBigProcessLock::No)                   \
     S(setreuid, NeedsBigProcessLock::No)                    \
@@ -194,7 +195,7 @@ enum class NeedsBigProcessLock {
     S(utimensat, NeedsBigProcessLock::No)                   \
     S(waitid, NeedsBigProcessLock::Yes)                     \
     S(write, NeedsBigProcessLock::Yes)                      \
-    S(writev, NeedsBigProcessLock::Yes)                     \
+    S(pwritev, NeedsBigProcessLock::Yes)                    \
     S(yield, NeedsBigProcessLock::No)
 
 namespace Syscall {
@@ -359,7 +360,7 @@ struct SC_create_thread_params {
     // ... ok, if you say so posix. Guess we get to lie to people about guard page size
     unsigned int guard_page_size = 0;          // Rounded up to PAGE_SIZE
     unsigned int reported_guard_page_size = 0; // The lie we tell callers
-    unsigned int stack_size = 1 * MiB;         // Default PTHREAD_STACK_MIN
+    unsigned int stack_size = 1 * MiB;         // Equal to Thread::default_userspace_stack_size
     void* stack_location;                      // nullptr means any, o.w. process virtual address
 #    if ARCH(X86_64)
     FlatPtr rdi;
@@ -389,6 +390,7 @@ struct SC_execve_params {
 struct SC_readlink_params {
     StringArgument path;
     MutableBufferArgument<char, size_t> buffer;
+    int dirfd;
 };
 
 struct SC_link_params {
@@ -413,10 +415,13 @@ struct SC_mknod_params {
 struct SC_symlink_params {
     StringArgument target;
     StringArgument linkpath;
+    int dirfd;
 };
 
 struct SC_rename_params {
+    int olddirfd;
     StringArgument old_path;
+    int newdirfd;
     StringArgument new_path;
 };
 
@@ -433,6 +438,7 @@ struct SC_pledge_params {
 };
 
 struct SC_unveil_params {
+    int flags;
     StringArgument path;
     StringArgument permissions;
 };
@@ -501,6 +507,13 @@ struct SC_scheduler_parameters_params {
     pid_t pid_or_tid;
     SchedulerParametersMode mode;
     struct sched_param parameters;
+};
+
+struct SC_faccessat_params {
+    int dirfd;
+    StringArgument pathname;
+    int mode;
+    int flags;
 };
 
 void initialize();

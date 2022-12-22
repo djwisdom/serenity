@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibGfx/Font/PathRasterizer.h>
 #include <LibPDF/CommonNames.h>
 #include <LibPDF/Encoding.h>
 #include <LibPDF/Fonts/PS1FontProgram.h>
@@ -37,13 +38,14 @@ enum ExtendedCommand {
     DotSection,
     VStem3,
     HStem3,
+    Seac = 6,
     Div = 12,
     CallOtherSubr = 16,
     Pop,
     SetCurrentPoint = 33,
 };
 
-PDFErrorOr<void> PS1FontProgram::parse(ReadonlyBytes const& bytes, size_t cleartext_length, size_t encrypted_length)
+PDFErrorOr<void> PS1FontProgram::create(ReadonlyBytes const& bytes, RefPtr<Encoding> encoding, size_t cleartext_length, size_t encrypted_length)
 {
     Reader reader(bytes);
     if (reader.remaining() == 0)
@@ -56,22 +58,28 @@ PDFErrorOr<void> PS1FontProgram::parse(ReadonlyBytes const& bytes, size_t cleart
     if (!seek_name(reader, CommonNames::Encoding))
         return error("Missing encoding array");
 
-    if (TRY(parse_word(reader)) == "StandardEncoding") {
-        m_encoding = Encoding::standard_encoding();
+    if (encoding) {
+        // 9.6.6.2 Encodings for Type 1 Fonts:
+        // An Encoding entry may override a Type 1 font’s mapping from character codes to character names.
+        m_encoding = encoding;
     } else {
-        HashMap<u16, CharDescriptor> descriptors;
+        if (TRY(parse_word(reader)) == "StandardEncoding") {
+            m_encoding = Encoding::standard_encoding();
+        } else {
+            HashMap<u16, CharDescriptor> descriptors;
 
-        while (reader.remaining()) {
-            auto word = TRY(parse_word(reader));
-            if (word == "readonly") {
-                break;
-            } else if (word == "dup") {
-                u32 code_point = TRY(parse_int(reader));
-                auto name = TRY(parse_word(reader));
-                descriptors.set(code_point, { name.starts_with('/') ? name.substring_view(1) : name.view(), code_point });
+            while (reader.remaining()) {
+                auto word = TRY(parse_word(reader));
+                if (word == "readonly") {
+                    break;
+                } else if (word == "dup") {
+                    u32 char_code = TRY(parse_int(reader));
+                    auto name = TRY(parse_word(reader));
+                    descriptors.set(char_code, { name.starts_with('/') ? name.substring_view(1) : name.view(), char_code });
+                }
             }
+            m_encoding = TRY(Encoding::create(descriptors));
         }
-        m_encoding = TRY(Encoding::create(descriptors));
     }
 
     bool found_font_matrix = seek_name(reader, "FontMatrix");
@@ -86,20 +94,61 @@ PDFErrorOr<void> PS1FontProgram::parse(ReadonlyBytes const& bytes, size_t cleart
     return parse_encrypted_portion(decrypted);
 }
 
-Gfx::Path PS1FontProgram::build_char(u32 code_point, Gfx::FloatPoint const& point, float width)
+RefPtr<Gfx::Bitmap> PS1FontProgram::rasterize_glyph(u32 char_code, float width)
 {
-    if (!m_glyph_map.contains(code_point))
+    auto path = build_char(char_code, width);
+    auto bounding_box = path.bounding_box().size();
+
+    u32 w = (u32)ceilf(bounding_box.width()) + 1;
+    u32 h = (u32)ceilf(bounding_box.height()) + 1;
+
+    Gfx::PathRasterizer rasterizer(Gfx::IntSize(w, h));
+    rasterizer.draw_path(path);
+    return rasterizer.accumulate();
+}
+
+Gfx::Path PS1FontProgram::build_char(u32 char_code, float width)
+{
+    auto maybe_glyph = m_glyph_map.get(char_code);
+    if (!maybe_glyph.has_value())
         return {};
 
-    auto glyph = m_glyph_map.get(code_point).value();
+    auto& glyph = maybe_glyph.value();
+    auto transform = glyph_transform_to_device_space(glyph, width);
+
+    // Translate such that the top-left point is at [0, 0].
+    auto bounding_box = glyph.path.bounding_box();
+    Gfx::FloatPoint translation(-bounding_box.x(), -(bounding_box.y() + bounding_box.height()));
+    transform.translate(translation);
+
+    return glyph.path.copy_transformed(transform);
+}
+
+Gfx::FloatPoint PS1FontProgram::glyph_translation(u32 char_code, float width) const
+{
+    auto maybe_glyph = m_glyph_map.get(char_code);
+    if (!maybe_glyph.has_value())
+        return {};
+
+    auto& glyph = maybe_glyph.value();
+    auto transform = glyph_transform_to_device_space(glyph, width);
+
+    // Undo the translation we applied earlier.
+    auto bounding_box = glyph.path.bounding_box();
+    Gfx::FloatPoint translation(bounding_box.x(), bounding_box.y() + bounding_box.height());
+
+    return transform.map(translation);
+}
+
+Gfx::AffineTransform PS1FontProgram::glyph_transform_to_device_space(Glyph const& glyph, float width) const
+{
     auto scale = width / (m_font_matrix.a() * glyph.width + m_font_matrix.e());
     auto transform = m_font_matrix;
 
     // Convert character space to device space.
     transform.scale(scale, -scale);
-    transform.set_translation(point);
 
-    return glyph.path.copy_transformed(transform);
+    return transform;
 }
 
 PDFErrorOr<PS1FontProgram::Glyph> PS1FontProgram::parse_glyph(ReadonlyBytes const& data, GlyphParserState& state)
@@ -267,6 +316,7 @@ PDFErrorOr<PS1FontProgram::Glyph> PS1FontProgram::parse_glyph(ReadonlyBytes cons
                 case DotSection:
                 case VStem3:
                 case HStem3:
+                case Seac:
                     // FIXME: Do something with these?
                     state.sp = 0;
                     break;
@@ -313,7 +363,7 @@ PDFErrorOr<PS1FontProgram::Glyph> PS1FontProgram::parse_glyph(ReadonlyBytes cons
                 }
 
                 default:
-                    return error(String::formatted("Unhandled command: 12 {}", data[i]));
+                    return error(DeprecatedString::formatted("Unhandled command: 12 {}", data[i]));
                 }
                 break;
             }
@@ -399,7 +449,7 @@ PDFErrorOr<PS1FontProgram::Glyph> PS1FontProgram::parse_glyph(ReadonlyBytes cons
             }
 
             default:
-                return error(String::formatted("Unhandled command: {}", v));
+                return error(DeprecatedString::formatted("Unhandled command: {}", v));
             }
         }
     }
@@ -435,9 +485,9 @@ PDFErrorOr<void> PS1FontProgram::parse_encrypted_portion(ByteBuffer const& buffe
                 auto line = TRY(decrypt(reader.bytes().slice(reader.offset(), encrypted_size), m_encryption_key, m_lenIV));
                 reader.move_by(encrypted_size);
                 auto name_mapping = m_encoding->name_mapping();
-                auto code_point = name_mapping.ensure(word.substring_view(1));
+                auto char_code = name_mapping.ensure(word.substring_view(1));
                 GlyphParserState state;
-                m_glyph_map.set(code_point, TRY(parse_glyph(line, state)));
+                m_glyph_map.set(char_code, TRY(parse_glyph(line, state)));
             }
         }
     }
@@ -512,7 +562,7 @@ PDFErrorOr<Vector<float>> PS1FontProgram::parse_number_array(Reader& reader, siz
     return array;
 }
 
-PDFErrorOr<String> PS1FontProgram::parse_word(Reader& reader)
+PDFErrorOr<DeprecatedString> PS1FontProgram::parse_word(Reader& reader)
 {
     reader.consume_whitespace();
 
@@ -531,7 +581,7 @@ PDFErrorOr<String> PS1FontProgram::parse_word(Reader& reader)
 PDFErrorOr<float> PS1FontProgram::parse_float(Reader& reader)
 {
     auto word = TRY(parse_word(reader));
-    return strtof(String(word).characters(), nullptr);
+    return strtof(DeprecatedString(word).characters(), nullptr);
 }
 
 PDFErrorOr<int> PS1FontProgram::parse_int(Reader& reader)
@@ -561,7 +611,7 @@ PDFErrorOr<ByteBuffer> PS1FontProgram::decrypt(ReadonlyBytes const& encrypted, u
     return decrypted;
 }
 
-bool PS1FontProgram::seek_name(Reader& reader, String const& name)
+bool PS1FontProgram::seek_name(Reader& reader, DeprecatedString const& name)
 {
     auto start = reader.offset();
 
@@ -583,7 +633,7 @@ bool PS1FontProgram::seek_name(Reader& reader, String const& name)
 }
 
 Error PS1FontProgram::error(
-    String const& message
+    DeprecatedString const& message
 #ifdef PDF_DEBUG
     ,
     SourceLocation loc

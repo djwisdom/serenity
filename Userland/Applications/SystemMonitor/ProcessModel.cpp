@@ -71,7 +71,7 @@ int ProcessModel::column_count(GUI::ModelIndex const&) const
     return Column::__Count;
 }
 
-String ProcessModel::column_name(int column) const
+DeprecatedString ProcessModel::column_name(int column) const
 {
     switch (column) {
     case Column::Icon:
@@ -288,12 +288,12 @@ GUI::Variant ProcessModel::data(GUI::ModelIndex const& index, GUI::ModelRole rol
         case Column::PurgeableNonvolatile:
             return human_readable_size(thread.current_state.amount_purgeable_nonvolatile);
         case Column::CPU:
-            return String::formatted("{:.2}", thread.current_state.cpu_percent);
+            return DeprecatedString::formatted("{:.2}", thread.current_state.cpu_percent);
         case Column::Processor:
             return thread.current_state.cpu;
         case Column::Name:
             if (thread.current_state.kernel)
-                return String::formatted("{} (*)", thread.current_state.name);
+                return DeprecatedString::formatted("{} (*)", thread.current_state.name);
             return thread.current_state.name;
         case Column::Command:
             return thread.current_state.command;
@@ -408,16 +408,16 @@ Vector<GUI::ModelIndex> ProcessModel::matches(StringView searching, unsigned fla
     return found_indices;
 }
 
-static ErrorOr<String> try_read_command_line(pid_t pid)
+static ErrorOr<DeprecatedString> try_read_command_line(pid_t pid)
 {
-    auto file = TRY(Core::Stream::File::open(String::formatted("/proc/{}/cmdline", pid), Core::Stream::OpenMode::Read));
-    auto data = TRY(file->read_all());
+    auto file = TRY(Core::Stream::File::open(DeprecatedString::formatted("/proc/{}/cmdline", pid), Core::Stream::OpenMode::Read));
+    auto data = TRY(file->read_until_eof());
     auto json = TRY(JsonValue::from_string(StringView { data.bytes() }));
     auto array = json.as_array().values();
-    return String::join(" "sv, array);
+    return DeprecatedString::join(" "sv, array);
 }
 
-static String read_command_line(pid_t pid)
+static DeprecatedString read_command_line(pid_t pid)
 {
     auto string_or_error = try_read_command_line(pid);
     if (string_or_error.is_error()) {
@@ -433,16 +433,16 @@ void ProcessModel::update()
 
     HashTable<int> live_tids;
     u64 total_time_scheduled_diff = 0;
-    if (all_processes.has_value()) {
+    if (!all_processes.is_error()) {
         if (m_has_total_scheduled_time)
-            total_time_scheduled_diff = all_processes->total_time_scheduled - m_total_time_scheduled;
+            total_time_scheduled_diff = all_processes.value().total_time_scheduled - m_total_time_scheduled;
 
-        m_total_time_scheduled = all_processes->total_time_scheduled;
-        m_total_time_scheduled_kernel = all_processes->total_time_scheduled_kernel;
+        m_total_time_scheduled = all_processes.value().total_time_scheduled;
+        m_total_time_scheduled_kernel = all_processes.value().total_time_scheduled_kernel;
         m_has_total_scheduled_time = true;
 
-        for (size_t i = 0; i < all_processes->processes.size(); ++i) {
-            auto const& process = all_processes->processes[i];
+        for (size_t i = 0; i < all_processes.value().processes.size(); ++i) {
+            auto const& process = all_processes.value().processes[i];
             NonnullOwnPtr<Process>* process_state = nullptr;
             for (size_t i = 0; i < m_processes.size(); ++i) {
                 auto* other_process = &m_processes.ptr_at(i);
@@ -549,7 +549,7 @@ void ProcessModel::update()
         on_cpu_info_change(m_cpus);
 
     if (on_state_update)
-        on_state_update(all_processes.has_value() ? all_processes->processes.size() : 0, m_threads.size());
+        on_state_update(!all_processes.is_error() ? all_processes.value().processes.size() : 0, m_threads.size());
 
     // FIXME: This is a rather hackish way of invalidating indices.
     //        It would be good if GUI::Model had a way to orchestrate removal/insertion while preserving indices.

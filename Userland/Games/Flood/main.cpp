@@ -42,10 +42,10 @@ static ErrorOr<Vector<Color>> get_color_scheme_from_string(StringView name)
         "White"sv
     };
 
-    auto const path = String::formatted("/res/terminal-colors/{}.ini", name);
+    auto const path = DeprecatedString::formatted("/res/terminal-colors/{}.ini", name);
     auto color_config_or_error = Core::ConfigFile::open(path);
     if (color_config_or_error.is_error()) {
-        return Error::from_string_view(String::formatted("Unable to read color scheme file '{}': {}", path, color_config_or_error.error()));
+        return Error::from_string_view(DeprecatedString::formatted("Unable to read color scheme file '{}': {}", path, color_config_or_error.error()));
     }
     auto const color_config = color_config_or_error.release_value();
     Vector<Color> colors;
@@ -72,27 +72,27 @@ static ErrorOr<Vector<Color>> get_color_scheme_from_string(StringView name)
 // A fairly simple way to improve this would be to test deeper moves and then choose the most efficient sequence.
 static int get_number_of_moves_from_ai(Board const& board)
 {
-    Board optimal_board { board };
-    auto const color_scheme = optimal_board.get_color_scheme();
-    optimal_board.set_current_color(optimal_board.cell(0, 0).release_value());
+    Board ai_board { board };
+    auto const color_scheme = ai_board.get_color_scheme();
+    ai_board.set_current_value(ai_board.cell(0, 0));
     int moves { 0 };
-    while (!optimal_board.is_flooded()) {
+    while (!ai_board.is_flooded()) {
         ++moves;
         int most_painted = 0;
-        Color optimal_color = optimal_board.cell(0, 0).release_value();
+        int best_value = ai_board.cell(0, 0);
         for (size_t i = 0; i < color_scheme.size(); ++i) {
-            Board test_board { optimal_board };
-            test_board.set_current_color(color_scheme[i]);
-            // The first update applies the current color, and the second update is done to obtain the new area.
-            test_board.update_colors();
-            int new_area = test_board.update_colors(true);
+            Board test_board { ai_board };
+            test_board.set_current_value(i);
+            // The first update applies the current value, and the second update is done to obtain the new area.
+            test_board.update_values();
+            int new_area = test_board.update_values(true);
             if (new_area > most_painted) {
                 most_painted = new_area;
-                optimal_color = color_scheme[i];
+                best_value = i;
             }
         }
-        optimal_board.set_current_color(optimal_color);
-        optimal_board.update_colors();
+        ai_board.set_current_value(best_value);
+        ai_board.update_values();
     }
     return moves;
 }
@@ -118,7 +118,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     size_t board_rows = Config::read_i32("Flood"sv, ""sv, "board_rows"sv, 16);
     size_t board_columns = Config::read_i32("Flood"sv, ""sv, "board_columns"sv, 16);
-    String color_scheme = Config::read_string("Flood"sv, ""sv, "color_scheme"sv, "Default"sv);
+    DeprecatedString color_scheme = Config::read_string("Flood"sv, ""sv, "color_scheme"sv, "Default"sv);
 
     Config::write_i32("Flood"sv, ""sv, "board_rows"sv, board_rows);
     Config::write_i32("Flood"sv, ""sv, "board_columns"sv, board_columns);
@@ -132,10 +132,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     if (!main_widget.load_from_gml(flood_window_gml))
         VERIFY_NOT_REACHED();
 
-    auto colors_or_error { get_color_scheme_from_string(color_scheme) };
-    if (colors_or_error.is_error())
-        return colors_or_error.release_error();
-    auto colors = colors_or_error.release_value();
+    auto colors = TRY(get_color_scheme_from_string(color_scheme));
     auto background_color = colors.take_last();
 
     auto board_widget = TRY(main_widget.find_descendant_of_type_named<GUI::Widget>("board_widget_container")->try_add<BoardWidget>(board_rows, board_columns, move(colors), move(background_color)));
@@ -158,7 +155,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto update = [&]() {
         board_widget->update();
-        statusbar->set_text(String::formatted("Moves remaining: {}", ai_moves - moves_made));
+        statusbar->set_text(DeprecatedString::formatted("Moves remaining: {}", ai_moves - moves_made));
     };
 
     update();
@@ -176,41 +173,37 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         Config::write_i32("Flood"sv, ""sv, "board_columns"sv, board_columns);
         Config::write_string("Flood"sv, ""sv, "color_scheme"sv, color_scheme);
 
+        auto colors = MUST(get_color_scheme_from_string(color_scheme));
+        board_widget->set_background_color(colors.take_last());
+        board_widget->board()->set_color_scheme(move(colors));
+
         GUI::MessageBox::show(settings_dialog, "New settings have been saved and will be applied on a new game"sv, "Settings Changed Successfully"sv, GUI::MessageBox::Type::Information);
     };
 
     auto start_a_new_game = [&] {
         board_widget->resize_board(board_rows, board_columns);
         board_widget->board()->reset();
-        auto colors_or_error = get_color_scheme_from_string(color_scheme);
-        if (!colors_or_error.is_error()) {
-            auto colors = colors_or_error.release_value();
-            board_widget->set_background_color(colors.take_last());
-            board_widget->board()->set_color_scheme(move(colors));
-            board_widget->board()->randomize();
-            ai_moves = get_number_of_moves_from_ai(*board_widget->board());
-            moves_made = 0;
-        } else {
-            GUI::MessageBox::show(window, "The chosen color scheme could not be set"sv, "Choose another one and try again"sv, GUI::MessageBox::Type::Error);
-        }
+        board_widget->board()->randomize();
+        ai_moves = get_number_of_moves_from_ai(*board_widget->board());
+        moves_made = 0;
         update();
         window->update();
     };
 
     board_widget->on_move = [&](Board::RowAndColumn row_and_column) {
         auto const [row, column] = row_and_column;
-        board_widget->board()->set_current_color(board_widget->board()->cell(row, column).release_value());
-        if (board_widget->board()->get_previous_color() != board_widget->board()->get_current_color()) {
+        board_widget->board()->set_current_value(board_widget->board()->cell(row, column));
+        if (board_widget->board()->get_previous_value() != board_widget->board()->get_current_value()) {
             ++moves_made;
-            board_widget->board()->update_colors();
+            board_widget->board()->update_values();
             update();
             if (board_widget->board()->is_flooded()) {
-                String dialog_text("You have tied with the AI."sv);
+                DeprecatedString dialog_text("You have tied with the AI."sv);
                 auto dialog_title("Congratulations!"sv);
                 if (ai_moves - moves_made == 1)
                     dialog_text = "You defeated the AI by 1 move."sv;
                 else if (ai_moves - moves_made > 1)
-                    dialog_text = String::formatted("You defeated the AI by {} moves.", ai_moves - moves_made);
+                    dialog_text = DeprecatedString::formatted("You defeated the AI by {} moves.", ai_moves - moves_made);
                 else
                     dialog_title = "Game over!"sv;
                 GUI::MessageBox::show(window,

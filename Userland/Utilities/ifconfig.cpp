@@ -10,18 +10,12 @@
 #include <AK/JsonArray.h>
 #include <AK/JsonObject.h>
 #include <AK/NumberFormat.h>
-#include <AK/String.h>
-#include <AK/Types.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
+#include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <net/if.h>
-#include <net/route.h>
 #include <netinet/in.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
@@ -37,17 +31,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     if (value_ipv4.is_empty() && value_adapter.is_empty() && value_mask.is_empty()) {
-        auto file = TRY(Core::File::open("/sys/kernel/net/adapters", Core::OpenMode::ReadOnly));
-        auto json = TRY(JsonValue::from_string(file->read_all()));
+        auto file = TRY(Core::Stream::File::open("/sys/kernel/net/adapters"sv, Core::Stream::OpenMode::Read));
+        auto file_contents = TRY(file->read_until_eof());
+        auto json = TRY(JsonValue::from_string(file_contents));
 
         json.as_array().for_each([](auto& value) {
             auto& if_object = value.as_object();
 
-            auto name = if_object.get("name"sv).to_string();
-            auto class_name = if_object.get("class_name"sv).to_string();
-            auto mac_address = if_object.get("mac_address"sv).to_string();
-            auto ipv4_address = if_object.get("ipv4_address"sv).to_string();
-            auto netmask = if_object.get("ipv4_netmask"sv).to_string();
+            auto name = if_object.get("name"sv).to_deprecated_string();
+            auto class_name = if_object.get("class_name"sv).to_deprecated_string();
+            auto mac_address = if_object.get("mac_address"sv).to_deprecated_string();
+            auto ipv4_address = if_object.get("ipv4_address"sv).to_deprecated_string();
+            auto netmask = if_object.get("ipv4_netmask"sv).to_deprecated_string();
             auto packets_in = if_object.get("packets_in"sv).to_u32();
             auto bytes_in = if_object.get("bytes_in"sv).to_u32();
             auto packets_out = if_object.get("packets_out"sv).to_u32();
@@ -71,7 +66,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return 1;
         }
 
-        String ifname = value_adapter;
+        DeprecatedString ifname = value_adapter;
 
         if (!value_ipv4.is_empty()) {
             auto address = IPv4Address::from_string(value_ipv4);
@@ -81,11 +76,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 return 1;
             }
 
-            int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-            if (fd < 0) {
-                perror("socket");
-                return 1;
-            }
+            auto fd = TRY(Core::System::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP));
 
             struct ifreq ifr;
             memset(&ifr, 0, sizeof(ifr));
@@ -98,11 +89,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             ifr.ifr_addr.sa_family = AF_INET;
             ((sockaddr_in&)ifr.ifr_addr).sin_addr.s_addr = address.value().to_in_addr_t();
 
-            int rc = ioctl(fd, SIOCSIFADDR, &ifr);
-            if (rc < 0) {
-                perror("ioctl(SIOCSIFADDR)");
-                return 1;
-            }
+            TRY(Core::System::ioctl(fd, SIOCSIFADDR, &ifr));
         }
 
         if (!value_mask.is_empty()) {
@@ -113,11 +100,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 return 1;
             }
 
-            int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-            if (fd < 0) {
-                perror("socket");
-                return 1;
-            }
+            auto fd = TRY(Core::System::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP));
 
             struct ifreq ifr;
             memset(&ifr, 0, sizeof(ifr));
@@ -130,11 +113,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             ifr.ifr_netmask.sa_family = AF_INET;
             ((sockaddr_in&)ifr.ifr_netmask).sin_addr.s_addr = address.value().to_in_addr_t();
 
-            int rc = ioctl(fd, SIOCSIFNETMASK, &ifr);
-            if (rc < 0) {
-                perror("ioctl(SIOCSIFNETMASK)");
-                return 1;
-            }
+            TRY(Core::System::ioctl(fd, SIOCSIFNETMASK, &ifr));
         }
     }
     return 0;

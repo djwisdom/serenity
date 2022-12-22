@@ -6,8 +6,8 @@
 
 #include <AK/Assertions.h>
 #include <AK/ByteBuffer.h>
+#include <AK/DeprecatedString.h>
 #include <AK/ScopeGuard.h>
-#include <AK/String.h>
 #include <Kernel/Net/IPv4.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -28,9 +28,11 @@ __thread int h_errno;
 static hostent __gethostbyname_buffer;
 static in_addr_t __gethostbyname_address;
 static in_addr_t* __gethostbyname_address_list_buffer[2];
+static char* __gethostbyname_alias_list_buffer[1];
 
 static hostent __gethostbyaddr_buffer;
 static in_addr_t* __gethostbyaddr_address_list_buffer[2];
+static char* __gethostbyaddr_alias_list_buffer[1];
 // IPCCompiler depends on LibC. Because of this, it cannot be compiled
 // before LibC is. However, the lookup magic can only be obtained from the
 // endpoint itself if IPCCompiler has compiled the IPC file, so this creates
@@ -45,8 +47,8 @@ static char const* services_path = "/etc/services";
 
 static bool fill_getserv_buffers(char const* line, ssize_t read);
 static servent __getserv_buffer;
-static String __getserv_name_buffer;
-static String __getserv_protocol_buffer;
+static DeprecatedString __getserv_name_buffer;
+static DeprecatedString __getserv_protocol_buffer;
 static int __getserv_port_buffer;
 static Vector<ByteBuffer> __getserv_alias_list_buffer;
 static Vector<char*> __getserv_alias_list;
@@ -59,7 +61,7 @@ static char const* protocols_path = "/etc/protocols";
 
 static bool fill_getproto_buffers(char const* line, ssize_t read);
 static protoent __getproto_buffer;
-static String __getproto_name_buffer;
+static DeprecatedString __getproto_name_buffer;
 static Vector<ByteBuffer> __getproto_alias_list_buffer;
 static Vector<char*> __getproto_alias_list;
 static int __getproto_protocol_buffer;
@@ -87,7 +89,7 @@ static int connect_to_lookup_server()
     return fd;
 }
 
-static String gethostbyname_name_buffer;
+static DeprecatedString gethostbyname_name_buffer;
 
 hostent* gethostbyname(char const* name)
 {
@@ -96,9 +98,10 @@ hostent* gethostbyname(char const* name)
     auto ipv4_address = IPv4Address::from_string({ name, strlen(name) });
 
     if (ipv4_address.has_value()) {
-        gethostbyname_name_buffer = ipv4_address.value().to_string();
+        gethostbyname_name_buffer = ipv4_address.value().to_deprecated_string();
         __gethostbyname_buffer.h_name = const_cast<char*>(gethostbyname_name_buffer.characters());
-        __gethostbyname_buffer.h_aliases = nullptr;
+        __gethostbyname_alias_list_buffer[0] = nullptr;
+        __gethostbyname_buffer.h_aliases = __gethostbyname_alias_list_buffer;
         __gethostbyname_buffer.h_addrtype = AF_INET;
         new (&__gethostbyname_address) IPv4Address(ipv4_address.value());
         __gethostbyname_address_list_buffer[0] = &__gethostbyname_address;
@@ -197,7 +200,8 @@ hostent* gethostbyname(char const* name)
 
     gethostbyname_name_buffer = name;
     __gethostbyname_buffer.h_name = const_cast<char*>(gethostbyname_name_buffer.characters());
-    __gethostbyname_buffer.h_aliases = nullptr;
+    __gethostbyname_alias_list_buffer[0] = nullptr;
+    __gethostbyname_buffer.h_aliases = __gethostbyname_alias_list_buffer;
     __gethostbyname_buffer.h_addrtype = AF_INET;
     __gethostbyname_address_list_buffer[0] = &__gethostbyname_address;
     __gethostbyname_address_list_buffer[1] = nullptr;
@@ -207,7 +211,7 @@ hostent* gethostbyname(char const* name)
     return &__gethostbyname_buffer;
 }
 
-static String gethostbyaddr_name_buffer;
+static DeprecatedString gethostbyaddr_name_buffer;
 
 hostent* gethostbyaddr(void const* addr, socklen_t addr_size, int type)
 {
@@ -296,7 +300,8 @@ hostent* gethostbyaddr(void const* addr, socklen_t addr_size, int type)
 
     gethostbyaddr_name_buffer = move(string_impl);
     __gethostbyaddr_buffer.h_name = buffer;
-    __gethostbyaddr_buffer.h_aliases = nullptr;
+    __gethostbyaddr_alias_list_buffer[0] = nullptr;
+    __gethostbyaddr_buffer.h_aliases = __gethostbyaddr_alias_list_buffer;
     __gethostbyaddr_buffer.h_addrtype = AF_INET;
     // FIXME: Should we populate the hostent's address list here with a sockaddr_in for the provided host?
     __gethostbyaddr_address_list_buffer[0] = nullptr;
@@ -462,7 +467,7 @@ static bool fill_getserv_buffers(char const* line, ssize_t read)
     }
     __getserv_name_buffer = split_line[0];
 
-    auto port_protocol_split = String(split_line[1]).split('/');
+    auto port_protocol_split = DeprecatedString(split_line[1]).split('/');
     if (port_protocol_split.size() < 2) {
         warnln("getservent(): malformed services file");
         return false;
@@ -629,7 +634,7 @@ void endprotoent()
 
 static bool fill_getproto_buffers(char const* line, ssize_t read)
 {
-    String string_line = String(line, read);
+    DeprecatedString string_line = DeprecatedString(line, read);
     auto split_line = string_line.replace(" "sv, "\t"sv, ReplaceMode::All).split('\t');
 
     // This indicates an incorrect file format. Protocols file entries should

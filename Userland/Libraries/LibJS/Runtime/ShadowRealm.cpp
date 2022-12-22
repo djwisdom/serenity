@@ -20,7 +20,7 @@
 namespace JS {
 
 ShadowRealm::ShadowRealm(Realm& shadow_realm, ExecutionContext execution_context, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_shadow_realm(shadow_realm)
     , m_execution_context(move(execution_context))
 {
@@ -83,10 +83,10 @@ ThrowCompletionOr<void> copy_name_and_length(VM& vm, FunctionObject& function, F
 
     // 7. If Type(targetName) is not String, set targetName to the empty String.
     if (!target_name.is_string())
-        target_name = js_string(vm, String::empty());
+        target_name = PrimitiveString::create(vm, DeprecatedString::empty());
 
     // 8. Perform SetFunctionName(F, targetName, prefix).
-    function.set_function_name({ target_name.as_string().string() }, move(prefix));
+    function.set_function_name({ target_name.as_string().deprecated_string() }, move(prefix));
 
     return {};
 }
@@ -107,7 +107,7 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, StringView source_tex
     // b. If script is a List of errors, throw a SyntaxError exception.
     if (parser.has_errors()) {
         auto& error = parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_string());
+        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
     }
 
     // c. If script Contains ScriptBody is false, return undefined.
@@ -127,7 +127,7 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, StringView source_tex
     // NOTE: This would be unused due to step 11 and is omitted for that reason.
 
     // 5. Let lexEnv be NewDeclarativeEnvironment(evalRealm.[[GlobalEnv]]).
-    Environment* lexical_environment = new_declarative_environment(eval_realm.global_environment());
+    Environment* lexical_environment = new_declarative_environment(eval_realm.global_environment()).ptr();
 
     // 6. Let varEnv be evalRealm.[[GlobalEnv]].
     Environment* variable_environment = &eval_realm.global_environment();
@@ -202,7 +202,7 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, StringView source_tex
 }
 
 // 3.1.4 ShadowRealmImportValue ( specifierString: a String, exportNameString: a String, callerRealm: a Realm Record, evalRealm: a Realm Record, evalContext: an execution context, ), https://tc39.es/proposal-shadowrealm/#sec-shadowrealmimportvalue
-ThrowCompletionOr<Value> shadow_realm_import_value(VM& vm, String specifier_string, String export_name_string, Realm& caller_realm, Realm& eval_realm, ExecutionContext& eval_context)
+ThrowCompletionOr<Value> shadow_realm_import_value(VM& vm, DeprecatedString specifier_string, DeprecatedString export_name_string, Realm& caller_realm, Realm& eval_realm, ExecutionContext& eval_context)
 {
     // FIXME: evalRealm isn't being used anywhere in this AO (spec issue)
     (void)eval_realm;
@@ -264,15 +264,15 @@ ThrowCompletionOr<Value> shadow_realm_import_value(VM& vm, String specifier_stri
 
     // 10. Let onFulfilled be CreateBuiltinFunction(steps, 1, "", « [[ExportNameString]] », callerRealm).
     // 11. Set onFulfilled.[[ExportNameString]] to exportNameString.
-    auto* on_fulfilled = NativeFunction::create(realm, move(steps), 1, "", &caller_realm);
+    auto on_fulfilled = NativeFunction::create(realm, move(steps), 1, "", &caller_realm);
 
     // 12. Let promiseCapability be ! NewPromiseCapability(%Promise%).
     auto promise_capability = MUST(new_promise_capability(vm, realm.intrinsics().promise_constructor()));
 
     // NOTE: Even though the spec tells us to use %ThrowTypeError%, it's not observable if we actually do.
     // Throw a nicer TypeError forwarding the import error message instead (we know the argument is an Error object).
-    auto* throw_type_error = NativeFunction::create(realm, {}, [](auto& vm) -> ThrowCompletionOr<Value> {
-        return vm.template throw_completion<TypeError>(vm.argument(0).as_object().get_without_side_effects(vm.names.message).as_string().string());
+    auto throw_type_error = NativeFunction::create(realm, {}, [](auto& vm) -> ThrowCompletionOr<Value> {
+        return vm.template throw_completion<TypeError>(vm.argument(0).as_object().get_without_side_effects(vm.names.message).as_string().deprecated_string());
     });
 
     // 13. Return PerformPromiseThen(innerCapability.[[Promise]], onFulfilled, callerRealm.[[Intrinsics]].[[%ThrowTypeError%]], promiseCapability).

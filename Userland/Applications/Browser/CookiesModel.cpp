@@ -34,7 +34,7 @@ int CookiesModel::row_count(GUI::ModelIndex const& index) const
     return 0;
 }
 
-String CookiesModel::column_name(int column) const
+DeprecatedString CookiesModel::column_name(int column) const
 {
     switch (column) {
     case Column::Domain:
@@ -80,7 +80,7 @@ GUI::Variant CookiesModel::data(GUI::ModelIndex const& index, GUI::ModelRole rol
     case Column::Value:
         return cookie.value;
     case Column::ExpiryTime:
-        return cookie.expiry_time.to_string();
+        return cookie.expiry_time.to_deprecated_string();
     case Column::SameSite:
         return Web::Cookie::same_site_to_string(cookie.same_site);
     }
@@ -95,7 +95,7 @@ TriState CookiesModel::data_matches(GUI::ModelIndex const& index, GUI::Variant c
         return TriState::True;
 
     auto const& cookie = m_cookies[index.row()];
-    auto haystack = String::formatted("{} {} {} {}", cookie.domain, cookie.path, cookie.name, cookie.value);
+    auto haystack = DeprecatedString::formatted("{} {} {} {}", cookie.domain, cookie.path, cookie.name, cookie.value);
     if (fuzzy_match(needle, haystack).score > 0)
         return TriState::True;
     return TriState::False;

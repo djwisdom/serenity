@@ -46,22 +46,22 @@ enum class Enummer : u8 {
 TEST_CASE(FundamentalTypeClassification)
 {
     EXPECT_TRAIT_TRUE(IsVoid, void);
-    EXPECT_TRAIT_FALSE(IsVoid, int, Empty, std::nullptr_t);
+    EXPECT_TRAIT_FALSE(IsVoid, int, Empty, nullptr_t);
 
-    EXPECT_TRAIT_TRUE(IsNullPointer, std::nullptr_t);
+    EXPECT_TRAIT_TRUE(IsNullPointer, nullptr_t);
     EXPECT_TRAIT_FALSE(IsNullPointer, void, int, Empty, decltype(0));
 
     EXPECT_TRAIT_TRUE(IsFloatingPoint, float, double, long double);
-    EXPECT_TRAIT_FALSE(IsFloatingPoint, int, Empty, std::nullptr_t, void);
+    EXPECT_TRAIT_FALSE(IsFloatingPoint, int, Empty, nullptr_t, void);
 
     EXPECT_TRAIT_TRUE(IsArithmetic, float, double, long double, bool, size_t);
     EXPECT_TRAIT_TRUE(IsArithmetic, char, signed char, unsigned char, char8_t, char16_t, char32_t);
     EXPECT_TRAIT_TRUE(IsArithmetic, short, int, long, long long);
     EXPECT_TRAIT_TRUE(IsArithmetic, unsigned short, unsigned int, unsigned long, unsigned long long);
 
-    EXPECT_TRAIT_FALSE(IsArithmetic, void, std::nullptr_t, Empty);
+    EXPECT_TRAIT_FALSE(IsArithmetic, void, nullptr_t, Empty);
 
-    EXPECT_TRAIT_TRUE(IsFundamental, void, std::nullptr_t);
+    EXPECT_TRAIT_TRUE(IsFundamental, void, nullptr_t);
     EXPECT_TRAIT_TRUE(IsFundamental, float, double, long double, bool, size_t);
     EXPECT_TRAIT_TRUE(IsFundamental, char, signed char, unsigned char, char8_t, char16_t, char32_t);
     EXPECT_TRAIT_TRUE(IsFundamental, short, int, long, long long);
@@ -89,7 +89,7 @@ TEST_CASE(FundamentalTypeClassification)
     EXPECT_TRAIT_FALSE(IsEnum, Empty);
     EXPECT_TRAIT_FALSE(IsEnum, int);
     EXPECT_TRAIT_FALSE(IsEnum, void);
-    EXPECT_TRAIT_FALSE(IsEnum, std::nullptr_t);
+    EXPECT_TRAIT_FALSE(IsEnum, nullptr_t);
 }
 
 TEST_CASE(AddConst)
@@ -166,7 +166,7 @@ TEST_CASE(IsAssignable)
     EXPECT_TRAIT_TRUE(IsTriviallyMoveAssignable, A);
 
     struct B {
-        B& operator=(const B&) { return *this; }
+        B& operator=(B const&) { return *this; }
         B& operator=(B&&) { return *this; }
     };
     EXPECT_TRAIT_TRUE(IsCopyAssignable, B);
@@ -175,7 +175,7 @@ TEST_CASE(IsAssignable)
     EXPECT_TRAIT_FALSE(IsTriviallyMoveAssignable, B);
 
     struct C {
-        C& operator=(const C&) = delete;
+        C& operator=(C const&) = delete;
         C& operator=(C&&) = delete;
     };
     EXPECT_TRAIT_FALSE(IsCopyAssignable, C);
@@ -194,7 +194,7 @@ TEST_CASE(IsConstructible)
     EXPECT_TRAIT_TRUE(IsTriviallyMoveConstructible, A);
 
     struct B {
-        B(const B&)
+        B(B const&)
         {
         }
         B(B&&)
@@ -207,7 +207,7 @@ TEST_CASE(IsConstructible)
     EXPECT_TRAIT_FALSE(IsTriviallyMoveConstructible, B);
 
     struct C {
-        C(const C&) = delete;
+        C(C const&) = delete;
         C(C&&) = delete;
     };
     EXPECT_TRAIT_FALSE(IsCopyConstructible, C);

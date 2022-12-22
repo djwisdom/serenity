@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Alexander Narsudinov <a.narsudinov@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -71,7 +72,12 @@ FileOperationProgressWidget::FileOperationProgressWidget(FileOperation operation
 
     m_notifier = Core::Notifier::construct(helper_pipe_fd, Core::Notifier::Read);
     m_notifier->on_ready_to_read = [this] {
-        auto line_buffer = ByteBuffer::create_zeroed(1 * KiB).release_value_but_fixme_should_propagate_errors();
+        auto line_buffer_or_error = ByteBuffer::create_zeroed(1 * KiB);
+        if (line_buffer_or_error.is_error()) {
+            did_error("Failed to allocate ByteBuffer for reading data."sv);
+            return;
+        }
+        auto line_buffer = line_buffer_or_error.release_value();
         auto line_or_error = m_helper_pipe->read_line(line_buffer.bytes());
         if (line_or_error.is_error() || line_or_error.value().is_empty()) {
             did_error("Read from pipe returned null."sv);
@@ -129,11 +135,11 @@ void FileOperationProgressWidget::did_error(StringView message)
 {
     // FIXME: Communicate more with the user about errors.
     close_pipe();
-    GUI::MessageBox::show(window(), String::formatted("An error occurred: {}", message), "Error"sv, GUI::MessageBox::Type::Error, GUI::MessageBox::InputType::OK);
+    GUI::MessageBox::show(window(), DeprecatedString::formatted("An error occurred: {}", message), "Error"sv, GUI::MessageBox::Type::Error, GUI::MessageBox::InputType::OK);
     window()->close();
 }
 
-String FileOperationProgressWidget::estimate_time(off_t bytes_done, off_t total_byte_count)
+DeprecatedString FileOperationProgressWidget::estimate_time(off_t bytes_done, off_t total_byte_count)
 {
     int elapsed = m_elapsed_timer.elapsed() / 1000;
 
@@ -144,7 +150,7 @@ String FileOperationProgressWidget::estimate_time(off_t bytes_done, off_t total_
     int seconds_remaining = (bytes_left * elapsed) / bytes_done;
 
     if (seconds_remaining < 30)
-        return String::formatted("{} seconds", 5 + seconds_remaining - seconds_remaining % 5);
+        return DeprecatedString::formatted("{} seconds", 5 + seconds_remaining - seconds_remaining % 5);
     if (seconds_remaining < 60)
         return "About a minute";
     if (seconds_remaining < 90)
@@ -157,14 +163,14 @@ String FileOperationProgressWidget::estimate_time(off_t bytes_done, off_t total_
 
     if (minutes_remaining < 60) {
         if (seconds_remaining < 30)
-            return String::formatted("About {} minutes", minutes_remaining);
-        return String::formatted("Over {} minutes", minutes_remaining);
+            return DeprecatedString::formatted("About {} minutes", minutes_remaining);
+        return DeprecatedString::formatted("Over {} minutes", minutes_remaining);
     }
 
     time_t hours_remaining = minutes_remaining / 60;
     minutes_remaining %= 60;
 
-    return String::formatted("{} hours and {} minutes", hours_remaining, minutes_remaining);
+    return DeprecatedString::formatted("{} hours and {} minutes", hours_remaining, minutes_remaining);
 }
 
 void FileOperationProgressWidget::did_progress(off_t bytes_done, off_t total_byte_count, size_t files_done, size_t total_file_count, [[maybe_unused]] off_t current_file_done, [[maybe_unused]] off_t current_file_size, StringView current_filename)
@@ -178,13 +184,13 @@ void FileOperationProgressWidget::did_progress(off_t bytes_done, off_t total_byt
 
     switch (m_operation) {
     case FileOperation::Copy:
-        files_copied_label.set_text(String::formatted("Copying file {} of {}", files_done, total_file_count));
+        files_copied_label.set_text(DeprecatedString::formatted("Copying file {} of {}", files_done, total_file_count));
         break;
     case FileOperation::Move:
-        files_copied_label.set_text(String::formatted("Moving file {} of {}", files_done, total_file_count));
+        files_copied_label.set_text(DeprecatedString::formatted("Moving file {} of {}", files_done, total_file_count));
         break;
     case FileOperation::Delete:
-        files_copied_label.set_text(String::formatted("Deleting file {} of {}", files_done, total_file_count));
+        files_copied_label.set_text(DeprecatedString::formatted("Deleting file {} of {}", files_done, total_file_count));
         break;
     default:
         VERIFY_NOT_REACHED();

@@ -6,9 +6,9 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/Function.h>
 #include <AK/OwnPtr.h>
-#include <AK/String.h>
 #include <AK/Variant.h>
 #include <AK/WeakPtr.h>
 #include <LibCore/Object.h>
@@ -37,7 +37,9 @@ public:
 
     bool is_modal() const { return m_window_mode != WindowMode::Modeless; }
     bool is_blocking() const { return m_window_mode == WindowMode::Blocking; }
-    bool is_capturing_input() const { return m_window_mode == WindowMode::CaptureInput; }
+
+    bool is_popup() const { return m_window_type == WindowType::Popup; }
+    bool is_autocomplete() const { return m_window_type == WindowType::Autocomplete; }
 
     bool is_fullscreen() const { return m_fullscreen; }
     void set_fullscreen(bool);
@@ -84,8 +86,8 @@ public:
 
     void make_window_manager(unsigned event_mask);
 
-    String title() const;
-    void set_title(String);
+    DeprecatedString title() const;
+    void set_title(DeprecatedString);
 
     enum class CloseRequestDecision {
         StayOpen,
@@ -94,9 +96,8 @@ public:
 
     Function<void()> on_close;
     Function<CloseRequestDecision()> on_close_request;
-    Function<void(bool is_active_input)> on_active_input_change;
+    Function<void(bool is_preempted)> on_input_preemption_change;
     Function<void(bool is_active_window)> on_active_window_change;
-    Function<void(InputPreemptor)> on_input_preemption;
 
     int x() const { return rect().x(); }
     int y() const { return rect().y(); }
@@ -112,14 +113,14 @@ public:
     Gfx::IntPoint position() const { return rect().location(); }
 
     Gfx::IntSize minimum_size() const;
-    void set_minimum_size(Gfx::IntSize const&);
+    void set_minimum_size(Gfx::IntSize);
     void set_minimum_size(int width, int height) { set_minimum_size({ width, height }); }
 
     void move_to(int x, int y) { move_to({ x, y }); }
-    void move_to(Gfx::IntPoint const& point) { set_rect({ point, size() }); }
+    void move_to(Gfx::IntPoint point) { set_rect({ point, size() }); }
 
     void resize(int width, int height) { resize({ width, height }); }
-    void resize(Gfx::IntSize const& size) { set_rect({ position(), size }); }
+    void resize(Gfx::IntSize size) { set_rect({ position(), size }); }
 
     void center_on_screen();
     void center_within(Window const&);
@@ -128,7 +129,7 @@ public:
 
     bool is_visible() const;
     bool is_active() const;
-    bool is_active_input() const { return m_is_active_input; }
+    bool is_focusable() const { return is_active() || is_popup() || is_autocomplete(); }
 
     void show();
     void hide();
@@ -179,9 +180,9 @@ public:
     Gfx::Bitmap* back_bitmap();
 
     Gfx::IntSize size_increment() const { return m_size_increment; }
-    void set_size_increment(Gfx::IntSize const&);
+    void set_size_increment(Gfx::IntSize);
     Gfx::IntSize base_size() const { return m_base_size; }
-    void set_base_size(Gfx::IntSize const&);
+    void set_base_size(Gfx::IntSize);
     Optional<Gfx::IntSize> const& resize_aspect_ratio() const { return m_resize_aspect_ratio; }
     void set_resize_aspect_ratio(int width, int height) { set_resize_aspect_ratio(Gfx::IntSize(width, height)); }
     void set_no_resize_aspect_ratio() { set_resize_aspect_ratio({}); }
@@ -203,7 +204,6 @@ public:
     static void for_each_window(Badge<ConnectionToWindowServer>, Function<void(Window&)>);
     static void update_all_windows(Badge<ConnectionToWindowServer>);
     void notify_state_changed(Badge<ConnectionToWindowServer>, bool minimized, bool maximized, bool occluded);
-    void notify_input_preempted(Badge<ConnectionToWindowServer>, InputPreemptor);
 
     virtual bool is_visible_for_timer_purposes() const override { return m_visible_for_timer_purposes; }
 
@@ -220,8 +220,9 @@ public:
 
     void did_disable_focused_widget(Badge<Widget>);
 
-    Menu& add_menu(String name);
-    ErrorOr<NonnullRefPtr<Menu>> try_add_menu(String name);
+    Menu& add_menu(DeprecatedString name);
+    ErrorOr<NonnullRefPtr<Menu>> try_add_menu(DeprecatedString name);
+    ErrorOr<void> try_add_menu(NonnullRefPtr<Menu> menu);
     void flash_menubar_menu_for(MenuItem const&);
 
     void flush_pending_paints_immediately();
@@ -256,7 +257,7 @@ private:
     void handle_multi_paint_event(MultiPaintEvent&);
     void handle_key_event(KeyEvent&);
     void handle_resize_event(ResizeEvent&);
-    void handle_input_entered_or_left_event(Core::Event&);
+    void handle_input_preemption_event(Core::Event&);
     void handle_became_active_or_inactive_event(Core::Event&);
     void handle_close_request();
     void handle_theme_change_event(ThemeChangeEvent&);
@@ -269,7 +270,7 @@ private:
 
     void server_did_destroy();
 
-    OwnPtr<WindowBackingStore> create_backing_store(Gfx::IntSize const&);
+    OwnPtr<WindowBackingStore> create_backing_store(Gfx::IntSize);
     void set_current_backing_store(WindowBackingStore&, bool flush_immediately = false);
     void flip(Vector<Gfx::IntRect, 32> const& dirty_rects);
     void force_update();
@@ -294,7 +295,7 @@ private:
     WeakPtr<Widget> m_hovered_widget;
     Gfx::IntRect m_rect_when_windowless;
     Gfx::IntSize m_minimum_size_when_windowless { 0, 0 };
-    String m_title_when_windowless;
+    DeprecatedString m_title_when_windowless;
     Vector<Gfx::IntRect, 32> m_pending_paint_event_rects;
     Gfx::IntSize m_size_increment;
     Gfx::IntSize m_base_size;
@@ -302,7 +303,6 @@ private:
     WindowMode m_window_mode { WindowMode::Modeless };
     AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_cursor { Gfx::StandardCursor::None };
     AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_effective_cursor { Gfx::StandardCursor::None };
-    bool m_is_active_input { false };
     bool m_has_alpha_channel { false };
     bool m_double_buffering_enabled { true };
     bool m_resizable { true };

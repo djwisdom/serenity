@@ -87,13 +87,13 @@ WebIDL::ExceptionOr<Infrastructure::BodyWithType> extract_body(JS::Realm& realm,
         },
         [&](JS::Handle<URL::URLSearchParams> const& url_search_params) -> WebIDL::ExceptionOr<void> {
             // Set source to the result of running the application/x-www-form-urlencoded serializer with object’s list.
-            source = url_search_params->to_string().to_byte_buffer();
+            source = url_search_params->to_deprecated_string().to_byte_buffer();
             // Set type to `application/x-www-form-urlencoded;charset=UTF-8`.
             type = TRY_OR_RETURN_OOM(realm, ByteBuffer::copy("application/x-www-form-urlencoded;charset=UTF-8"sv.bytes()));
             return {};
         },
-        [&](String const& scalar_value_string) -> WebIDL::ExceptionOr<void> {
-            // NOTE: AK::String is always UTF-8.
+        [&](DeprecatedString const& scalar_value_string) -> WebIDL::ExceptionOr<void> {
+            // NOTE: AK::DeprecatedString is always UTF-8.
             // Set source to the UTF-8 encoding of object.
             source = scalar_value_string.to_byte_buffer();
             // Set type to `text/plain;charset=UTF-8`.

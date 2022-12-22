@@ -11,6 +11,7 @@
 #include <LibGUI/AbstractScrollableWidget.h>
 #include <LibGfx/Bitmap.h>
 #include <LibPDF/Document.h>
+#include <LibPDF/Renderer.h>
 
 static constexpr size_t initial_zoom_level = 8;
 
@@ -52,6 +53,7 @@ public:
     PDF::PDFErrorOr<void> set_document(RefPtr<PDF::Document>);
 
     Function<void(u32 new_page)> on_page_change;
+    Function<void(u32 page, PDF::Errors const& errors)> on_render_errors;
 
     void zoom_in();
     void zoom_out();
@@ -60,6 +62,10 @@ public:
 
     PageViewMode page_view_mode() const { return m_page_view_mode; }
     void set_page_view_mode(PageViewMode);
+    bool show_clipping_paths() const { return m_rendering_preferences.show_clipping_paths; }
+    void set_show_clipping_paths(bool);
+    bool show_images() const { return m_rendering_preferences.show_images; }
+    void set_show_images(bool);
 
 protected:
     PDFViewer();
@@ -90,6 +96,7 @@ private:
     u8 m_zoom_level { initial_zoom_level };
     PageDimensionCache m_page_dimension_cache;
     PageViewMode m_page_view_mode;
+    PDF::RenderingPreferences m_rendering_preferences;
 
     Gfx::IntPoint m_pan_starting_position;
     int m_rotations { 0 };

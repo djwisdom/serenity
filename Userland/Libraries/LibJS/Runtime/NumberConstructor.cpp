@@ -90,7 +90,7 @@ ThrowCompletionOr<Value> NumberConstructor::call()
 }
 
 // 21.1.1.1 Number ( value ), https://tc39.es/ecma262/#sec-number-constructor-number-value
-ThrowCompletionOr<Object*> NumberConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> NumberConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
     // NOTE: get_value_from_constructor_argument performs steps 1 and 2 and returns n.

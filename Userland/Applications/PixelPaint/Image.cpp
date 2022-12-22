@@ -24,7 +24,7 @@
 
 namespace PixelPaint {
 
-ErrorOr<NonnullRefPtr<Image>> Image::try_create_with_size(Gfx::IntSize const& size)
+ErrorOr<NonnullRefPtr<Image>> Image::try_create_with_size(Gfx::IntSize size)
 {
     VERIFY(!size.is_empty());
 
@@ -34,7 +34,7 @@ ErrorOr<NonnullRefPtr<Image>> Image::try_create_with_size(Gfx::IntSize const& si
     return adopt_nonnull_ref_or_enomem(new (nothrow) Image(size));
 }
 
-Image::Image(Gfx::IntSize const& size)
+Image::Image(Gfx::IntSize size)
     : m_size(size)
     , m_selection(*this)
 {
@@ -121,31 +121,31 @@ ErrorOr<NonnullRefPtr<Image>> Image::try_create_from_pixel_paint_json(JsonObject
     return image;
 }
 
-void Image::serialize_as_json(JsonObjectSerializer<StringBuilder>& json) const
+ErrorOr<void> Image::serialize_as_json(JsonObjectSerializer<StringBuilder>& json) const
 {
-    MUST(json.add("width"sv, m_size.width()));
-    MUST(json.add("height"sv, m_size.height()));
+    TRY(json.add("width"sv, m_size.width()));
+    TRY(json.add("height"sv, m_size.height()));
     {
-        auto json_layers = MUST(json.add_array("layers"sv));
+        auto json_layers = TRY(json.add_array("layers"sv));
         for (auto const& layer : m_layers) {
-            Gfx::BMPWriter bmp_writer;
-            auto json_layer = MUST(json_layers.add_object());
-            MUST(json_layer.add("width"sv, layer.size().width()));
-            MUST(json_layer.add("height"sv, layer.size().height()));
-            MUST(json_layer.add("name"sv, layer.name()));
-            MUST(json_layer.add("locationx"sv, layer.location().x()));
-            MUST(json_layer.add("locationy"sv, layer.location().y()));
-            MUST(json_layer.add("opacity_percent"sv, layer.opacity_percent()));
-            MUST(json_layer.add("visible"sv, layer.is_visible()));
-            MUST(json_layer.add("selected"sv, layer.is_selected()));
-            MUST(json_layer.add("bitmap"sv, encode_base64(bmp_writer.dump(layer.content_bitmap()))));
+            auto json_layer = TRY(json_layers.add_object());
+            TRY(json_layer.add("width"sv, layer.size().width()));
+            TRY(json_layer.add("height"sv, layer.size().height()));
+            TRY(json_layer.add("name"sv, layer.name()));
+            TRY(json_layer.add("locationx"sv, layer.location().x()));
+            TRY(json_layer.add("locationy"sv, layer.location().y()));
+            TRY(json_layer.add("opacity_percent"sv, layer.opacity_percent()));
+            TRY(json_layer.add("visible"sv, layer.is_visible()));
+            TRY(json_layer.add("selected"sv, layer.is_selected()));
+            TRY(json_layer.add("bitmap"sv, TRY(encode_base64(TRY(Gfx::PNGWriter::encode(layer.content_bitmap()))))));
             if (layer.is_masked())
-                MUST(json_layer.add("mask"sv, encode_base64(bmp_writer.dump(*layer.mask_bitmap()))));
-            MUST(json_layer.finish());
+                TRY(json_layer.add("mask"sv, TRY(encode_base64(TRY(Gfx::PNGWriter::encode(*layer.mask_bitmap()))))));
+            TRY(json_layer.finish());
         }
 
-        MUST(json_layers.finish());
+        TRY(json_layers.finish());
     }
+    return {};
 }
 
 ErrorOr<NonnullRefPtr<Gfx::Bitmap>> Image::try_compose_bitmap(Gfx::BitmapFormat format) const
@@ -193,7 +193,7 @@ ErrorOr<void> Image::export_png_to_file(Core::File& file, bool preserve_alpha_ch
     auto bitmap_format = preserve_alpha_channel ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888;
     auto bitmap = TRY(try_compose_bitmap(bitmap_format));
 
-    auto encoded_data = Gfx::PNGWriter::encode(*bitmap);
+    auto encoded_data = TRY(Gfx::PNGWriter::encode(*bitmap));
     if (!file.write(encoded_data.data(), encoded_data.size()))
         return Error::from_errno(file.error());
 
@@ -474,7 +474,7 @@ void Image::did_change_rect(Gfx::IntRect const& a_modified_rect)
         client->image_did_change_rect(modified_rect);
 }
 
-ImageUndoCommand::ImageUndoCommand(Image& image, String action_text)
+ImageUndoCommand::ImageUndoCommand(Image& image, DeprecatedString action_text)
     : m_snapshot(image.take_snapshot().release_value_but_fixme_should_propagate_errors())
     , m_image(image)
     , m_action_text(move(action_text))
@@ -548,7 +548,7 @@ Optional<Gfx::IntRect> Image::nonempty_content_bounding_rect() const
     return bounding_rect;
 }
 
-void Image::resize(Gfx::IntSize const& new_size, Gfx::Painter::ScalingMode scaling_mode)
+void Image::resize(Gfx::IntSize new_size, Gfx::Painter::ScalingMode scaling_mode)
 {
     float scale_x = 1.0f;
     float scale_y = 1.0f;
@@ -570,7 +570,7 @@ void Image::resize(Gfx::IntSize const& new_size, Gfx::Painter::ScalingMode scali
     did_change_rect();
 }
 
-Color Image::color_at(Gfx::IntPoint const& point) const
+Color Image::color_at(Gfx::IntPoint point) const
 {
     Color color;
     for (auto& layer : m_layers) {

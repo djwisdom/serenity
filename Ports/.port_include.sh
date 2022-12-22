@@ -9,11 +9,12 @@ fi
 unset SERENITY_STRIPPED_ENV
 
 export MAKEJOBS="${MAKEJOBS:-$(nproc)}"
+export CMAKE_BUILD_PARALLEL_LEVEL="$MAKEJOBS"
 
 buildstep() {
     local buildstep_name=$1
     shift
-    if [ -z "$@" ]; then
+    if [ "$#" -eq '0' ]; then
         "${buildstep_name}"
     else
         "$@"

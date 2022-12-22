@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Sergey Bugaev <bugaevc@serenityos.org>
+ * Copyright (c) 2022, Alexander Narsudinov <a.narsudinov@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -20,7 +21,7 @@ using namespace DNS;
 class MulticastDNS : public Core::UDPServer {
     C_OBJECT(MulticastDNS)
 public:
-    Vector<Answer> lookup(Name const&, RecordType record_type);
+    ErrorOr<Vector<Answer>> lookup(Name const&, RecordType record_type);
 
 private:
     explicit MulticastDNS(Object* parent = nullptr);
@@ -28,7 +29,7 @@ private:
     void announce();
     ErrorOr<size_t> emit_packet(Packet const&, sockaddr_in const* destination = nullptr);
 
-    void handle_packet();
+    ErrorOr<void> handle_packet();
     void handle_query(Packet const&);
 
     Vector<IPv4Address> local_addresses() const;

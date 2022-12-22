@@ -42,7 +42,7 @@ ThrowCompletionOr<Value> SegmenterConstructor::call()
 }
 
 // 18.1.1 Intl.Segmenter ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-intl.segmenter
-ThrowCompletionOr<Object*> SegmenterConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> SegmenterConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -51,7 +51,7 @@ ThrowCompletionOr<Object*> SegmenterConstructor::construct(FunctionObject& new_t
 
     // 2. Let internalSlotsList be « [[InitializedSegmenter]], [[Locale]], [[SegmenterGranularity]] ».
     // 3. Let segmenter be ? OrdinaryCreateFromConstructor(NewTarget, "%Segmenter.prototype%", internalSlotsList).
-    auto* segmenter = TRY(ordinary_create_from_constructor<Segmenter>(vm, new_target, &Intrinsics::intl_segmenter_prototype));
+    auto segmenter = TRY(ordinary_create_from_constructor<Segmenter>(vm, new_target, &Intrinsics::intl_segmenter_prototype));
 
     // 4. Let requestedLocales be ? CanonicalizeLocaleList(locales).
     auto requested_locales = TRY(canonicalize_locale_list(vm, locales));
@@ -80,7 +80,7 @@ ThrowCompletionOr<Object*> SegmenterConstructor::construct(FunctionObject& new_t
     auto granularity = TRY(get_option(vm, *options, vm.names.granularity, OptionType::String, { "grapheme"sv, "word"sv, "sentence"sv }, "grapheme"sv));
 
     // 13. Set segmenter.[[SegmenterGranularity]] to granularity.
-    segmenter->set_segmenter_granularity(granularity.as_string().string());
+    segmenter->set_segmenter_granularity(granularity.as_string().deprecated_string());
 
     // 14. Return segmenter.
     return segmenter;

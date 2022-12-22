@@ -105,9 +105,9 @@ public:
 
     void screen_resolution_changed();
 
-    bool set_background_color(String const& background_color);
+    bool set_background_color(DeprecatedString const& background_color);
 
-    bool set_wallpaper_mode(String const& mode);
+    bool set_wallpaper_mode(DeprecatedString const& mode);
 
     bool set_wallpaper(RefPtr<Gfx::Bitmap>);
     RefPtr<Gfx::Bitmap> wallpaper_bitmap() const { return m_wallpaper; }
@@ -180,7 +180,7 @@ public:
 
     Gfx::Bitmap const* cursor_bitmap_for_screenshot(Badge<ConnectionFromClient>, Screen&) const;
     Gfx::Bitmap const& front_bitmap_for_screenshot(Badge<ConnectionFromClient>, Screen&) const;
-    Gfx::Color color_at_position(Badge<ConnectionFromClient>, Screen&, Gfx::IntPoint const&) const;
+    Gfx::Color color_at_position(Badge<ConnectionFromClient>, Screen&, Gfx::IntPoint) const;
 
     void register_animation(Badge<Animation>, Animation&);
     void unregister_animation(Badge<Animation>, Animation&);

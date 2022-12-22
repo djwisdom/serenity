@@ -11,9 +11,10 @@
 
 namespace Video::VP9 {
 
-enum FrameType {
+enum class FrameType {
     KeyFrame,
-    NonKeyFrame
+    IntraOnlyFrame,
+    InterFrame
 };
 
 enum ColorSpace : u8 {
@@ -36,33 +37,53 @@ enum InterpolationFilter : u8 {
 };
 
 enum ReferenceFrameType : u8 {
-    // 0 is both INTRA_FRAME and NONE because the value's meaning changes depending on which index they're in on the ref_frame array
+    // None represents both INTRA_FRAME and NONE in the spec. When the primary reference
+    // frame type is None, that means that the frame/block is not inter-predicted.
     None = 0,
-    IntraFrame = 0,
     LastFrame = 1,
     GoldenFrame = 2,
     AltRefFrame = 3,
 };
 
-enum TXMode : u8 {
+enum class TransformMode : u8 {
     Only_4x4 = 0,
     Allow_8x8 = 1,
     Allow_16x16 = 2,
     Allow_32x32 = 3,
-    TXModeSelect = 4,
+    Select = 4,
 };
 
-enum TXSize : u8 {
-    TX_4x4 = 0,
-    TX_8x8 = 1,
-    TX_16x16 = 2,
-    TX_32x32 = 3,
+enum TransformSize : u8 {
+    Transform_4x4 = 0,
+    Transform_8x8 = 1,
+    Transform_16x16 = 2,
+    Transform_32x32 = 3,
+};
+
+enum class TransformType : u8 {
+    DCT = 0,
+    ADST = 1,
+};
+
+struct TransformSet {
+    TransformType first_transform : 1;
+    TransformType second_transform : 1;
+
+    bool operator==(TransformSet const& other) const
+    {
+        return first_transform == other.first_transform && second_transform == other.second_transform;
+    }
 };
 
 enum ReferenceMode : u8 {
     SingleReference = 0,
     CompoundReference = 1,
     ReferenceModeSelect = 2,
+};
+
+enum class ReferenceIndex : u8 {
+    Primary = 0,
+    Secondary = 1,
 };
 
 enum BlockSubsize : u8 {
@@ -107,10 +128,9 @@ enum class PredictionMode : u8 {
 };
 
 enum MvJoint : u8 {
-    MvJointZero = 0,
-    MvJointHnzvz = 1,
-    MvJointHzvnz = 2,
-    MvJointHnzvnz = 3,
+    MotionVectorAllZero = 0,
+    MotionVectorNonZeroColumn = 1,
+    MotionVectorNonZeroRow = 2,
 };
 
 enum MvClass : u8 {

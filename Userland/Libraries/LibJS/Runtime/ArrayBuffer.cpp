@@ -11,7 +11,7 @@
 
 namespace JS {
 
-ThrowCompletionOr<ArrayBuffer*> ArrayBuffer::create(Realm& realm, size_t byte_length)
+ThrowCompletionOr<NonnullGCPtr<ArrayBuffer>> ArrayBuffer::create(Realm& realm, size_t byte_length)
 {
     auto buffer = ByteBuffer::create_zeroed(byte_length);
     if (buffer.is_error())
@@ -20,25 +20,25 @@ ThrowCompletionOr<ArrayBuffer*> ArrayBuffer::create(Realm& realm, size_t byte_le
     return realm.heap().allocate<ArrayBuffer>(realm, buffer.release_value(), *realm.intrinsics().array_buffer_prototype());
 }
 
-ArrayBuffer* ArrayBuffer::create(Realm& realm, ByteBuffer buffer)
+NonnullGCPtr<ArrayBuffer> ArrayBuffer::create(Realm& realm, ByteBuffer buffer)
 {
     return realm.heap().allocate<ArrayBuffer>(realm, move(buffer), *realm.intrinsics().array_buffer_prototype());
 }
 
-ArrayBuffer* ArrayBuffer::create(Realm& realm, ByteBuffer* buffer)
+NonnullGCPtr<ArrayBuffer> ArrayBuffer::create(Realm& realm, ByteBuffer* buffer)
 {
     return realm.heap().allocate<ArrayBuffer>(realm, buffer, *realm.intrinsics().array_buffer_prototype());
 }
 
 ArrayBuffer::ArrayBuffer(ByteBuffer buffer, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_buffer(move(buffer))
     , m_detach_key(js_undefined())
 {
 }
 
 ArrayBuffer::ArrayBuffer(ByteBuffer* buffer, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_buffer(buffer)
     , m_detach_key(js_undefined())
 {
@@ -54,7 +54,7 @@ void ArrayBuffer::visit_edges(Cell::Visitor& visitor)
 ThrowCompletionOr<ArrayBuffer*> allocate_array_buffer(VM& vm, FunctionObject& constructor, size_t byte_length)
 {
     // 1. Let obj be ? OrdinaryCreateFromConstructor(constructor, "%ArrayBuffer.prototype%", « [[ArrayBufferData]], [[ArrayBufferByteLength]], [[ArrayBufferDetachKey]] »).
-    auto* obj = TRY(ordinary_create_from_constructor<ArrayBuffer>(vm, constructor, &Intrinsics::array_buffer_prototype, nullptr));
+    auto obj = TRY(ordinary_create_from_constructor<ArrayBuffer>(vm, constructor, &Intrinsics::array_buffer_prototype, nullptr));
 
     // 2. Let block be ? CreateByteDataBlock(byteLength).
     auto block = ByteBuffer::create_zeroed(byte_length);
@@ -67,7 +67,7 @@ ThrowCompletionOr<ArrayBuffer*> allocate_array_buffer(VM& vm, FunctionObject& co
     // 4. Set obj.[[ArrayBufferByteLength]] to byteLength.
 
     // 5. Return obj.
-    return obj;
+    return obj.ptr();
 }
 
 // 25.1.2.3 DetachArrayBuffer ( arrayBuffer [ , key ] ), https://tc39.es/ecma262/#sec-detacharraybuffer

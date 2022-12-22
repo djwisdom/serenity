@@ -11,7 +11,7 @@
 #include <AK/StringBuilder.h>
 
 #ifndef KERNEL
-#    include <AK/String.h>
+#    include <AK/DeprecatedString.h>
 #endif
 
 namespace AK {
@@ -55,12 +55,20 @@ public:
 #if !defined(KERNEL)
     JsonValue(double);
 #endif
-    JsonValue(bool);
     JsonValue(char const*);
 #ifndef KERNEL
-    JsonValue(String const&);
+    JsonValue(DeprecatedString const&);
 #endif
     JsonValue(StringView);
+
+    template<typename T>
+    requires(SameAs<RemoveCVReference<T>, bool>)
+    JsonValue(T value)
+        : m_type(Type::Bool)
+        , m_value { .as_bool = value }
+    {
+    }
+
     JsonValue(JsonArray const&);
     JsonValue(JsonObject const&);
 
@@ -77,14 +85,14 @@ public:
     void serialize(Builder&) const;
 
 #ifndef KERNEL
-    String as_string_or(String const& alternative) const
+    DeprecatedString as_string_or(DeprecatedString const& alternative) const
     {
         if (is_string())
             return as_string();
         return alternative;
     }
 
-    String to_string() const
+    DeprecatedString to_deprecated_string() const
     {
         if (is_string())
             return as_string();
@@ -157,17 +165,29 @@ public:
     }
 
 #ifndef KERNEL
-    String as_string() const
+    DeprecatedString as_string() const
     {
         VERIFY(is_string());
         return *m_value.as_string;
     }
 #endif
 
+    JsonObject& as_object()
+    {
+        VERIFY(is_object());
+        return *m_value.as_object;
+    }
+
     JsonObject const& as_object() const
     {
         VERIFY(is_object());
         return *m_value.as_object;
+    }
+
+    JsonArray& as_array()
+    {
+        VERIFY(is_array());
+        return *m_value.as_array;
     }
 
     JsonArray const& as_array() const
@@ -271,11 +291,13 @@ template<>
 struct Formatter<JsonValue> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, JsonValue const& value)
     {
-        return Formatter<StringView>::format(builder, value.to_string());
+        return Formatter<StringView>::format(builder, value.to_deprecated_string());
     }
 };
 #endif
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::JsonValue;
+#endif

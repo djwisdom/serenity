@@ -14,7 +14,7 @@
 namespace Web::Bindings {
 
 CSSNamespace::CSSNamespace(JS::Realm& realm)
-    : JS::Object(*realm.intrinsics().object_prototype())
+    : JS::Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
 {
 }
 
@@ -33,7 +33,7 @@ JS_DEFINE_NATIVE_FUNCTION(CSSNamespace::escape)
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::BadArgCountAtLeastOne, "CSS.escape");
 
     auto identifier = TRY(vm.argument(0).to_string(vm));
-    return JS::js_string(vm, Web::CSS::serialize_an_identifier(identifier));
+    return JS::PrimitiveString::create(vm, Web::CSS::serialize_an_identifier(identifier));
 }
 
 // https://www.w3.org/TR/css-conditional-3/#dom-css-supports
@@ -71,7 +71,7 @@ JS_DEFINE_NATIVE_FUNCTION(CSSNamespace::supports)
             return JS::Value(true);
 
         // Otherwise, If conditionText, wrapped in parentheses and then parsed and evaluated as a <supports-condition>, would return true, return true.
-        if (auto supports = parse_css_supports({}, String::formatted("({})", supports_text)); supports && supports->matches())
+        if (auto supports = parse_css_supports({}, DeprecatedString::formatted("({})", supports_text)); supports && supports->matches())
             return JS::Value(true);
 
         // Otherwise, return false.

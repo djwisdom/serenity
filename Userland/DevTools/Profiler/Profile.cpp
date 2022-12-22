@@ -238,7 +238,7 @@ ErrorOr<NonnullOwnPtr<Profile>> Profile::load_from_perfcore_file(StringView path
 {
     auto file = TRY(Core::Stream::File::open(path, Core::Stream::OpenMode::Read));
 
-    auto json = JsonValue::from_string(TRY(file->read_all()));
+    auto json = JsonValue::from_string(TRY(file->read_until_eof()));
     if (json.is_error() || !json.value().is_object())
         return Error::from_string_literal("Invalid perfcore format (not a JSON object)");
 
@@ -257,10 +257,10 @@ ErrorOr<NonnullOwnPtr<Profile>> Profile::load_from_perfcore_file(StringView path
     if (!strings_value || !strings_value->is_array())
         return Error::from_string_literal("Malformed profile (strings is not an array)");
 
-    HashMap<FlatPtr, String> profile_strings;
+    HashMap<FlatPtr, DeprecatedString> profile_strings;
     for (FlatPtr string_id = 0; string_id < strings_value->as_array().size(); ++string_id) {
         auto const& value = strings_value->as_array().at(string_id);
-        profile_strings.set(string_id, value.to_string());
+        profile_strings.set(string_id, value.to_deprecated_string());
     }
 
     auto const* events_value = object.get_ptr("events"sv);
@@ -286,7 +286,7 @@ ErrorOr<NonnullOwnPtr<Profile>> Profile::load_from_perfcore_file(StringView path
         event.pid = perf_event.get("pid"sv).to_i32();
         event.tid = perf_event.get("tid"sv).to_i32();
 
-        auto type_string = perf_event.get("type"sv).to_string();
+        auto type_string = perf_event.get("type"sv).to_deprecated_string();
 
         if (type_string == "sample"sv) {
             event.data = Event::SampleData {};
@@ -302,13 +302,13 @@ ErrorOr<NonnullOwnPtr<Profile>> Profile::load_from_perfcore_file(StringView path
         } else if (type_string == "signpost"sv) {
             auto string_id = perf_event.get("arg1"sv).to_number<FlatPtr>();
             event.data = Event::SignpostData {
-                .string = profile_strings.get(string_id).value_or(String::formatted("Signpost #{}", string_id)),
+                .string = profile_strings.get(string_id).value_or(DeprecatedString::formatted("Signpost #{}", string_id)),
                 .arg = perf_event.get("arg2"sv).to_number<FlatPtr>(),
             };
         } else if (type_string == "mmap"sv) {
             auto ptr = perf_event.get("ptr"sv).to_number<FlatPtr>();
             auto size = perf_event.get("size"sv).to_number<size_t>();
-            auto name = perf_event.get("name"sv).to_string();
+            auto name = perf_event.get("name"sv).to_deprecated_string();
 
             event.data = Event::MmapData {
                 .ptr = ptr,
@@ -328,7 +328,7 @@ ErrorOr<NonnullOwnPtr<Profile>> Profile::load_from_perfcore_file(StringView path
             continue;
         } else if (type_string == "process_create"sv) {
             auto parent_pid = perf_event.get("parent_pid"sv).to_number<pid_t>();
-            auto executable = perf_event.get("executable"sv).to_string();
+            auto executable = perf_event.get("executable"sv).to_deprecated_string();
             event.data = Event::ProcessCreateData {
                 .parent_pid = parent_pid,
                 .executable = executable,
@@ -346,7 +346,7 @@ ErrorOr<NonnullOwnPtr<Profile>> Profile::load_from_perfcore_file(StringView path
             all_processes.append(move(sampled_process));
             continue;
         } else if (type_string == "process_exec"sv) {
-            auto executable = perf_event.get("executable"sv).to_string();
+            auto executable = perf_event.get("executable"sv).to_deprecated_string();
             event.data = Event::ProcessExecData {
                 .executable = executable,
             };
@@ -411,13 +411,13 @@ ErrorOr<NonnullOwnPtr<Profile>> Profile::load_from_perfcore_file(StringView path
             auto ptr = frame.to_number<u64>();
             u32 offset = 0;
             FlyString object_name;
-            String symbol;
+            DeprecatedString symbol;
 
             if (maybe_kernel_base.has_value() && ptr >= maybe_kernel_base.value()) {
                 if (g_kernel_debuginfo_object.has_value()) {
                     symbol = g_kernel_debuginfo_object->elf.symbolicate(ptr - maybe_kernel_base.value(), &offset);
                 } else {
-                    symbol = String::formatted("?? <{:p}>", ptr);
+                    symbol = DeprecatedString::formatted("?? <{:p}>", ptr);
                 }
             } else {
                 auto it = current_processes.find(event.pid);
@@ -429,7 +429,7 @@ ErrorOr<NonnullOwnPtr<Profile>> Profile::load_from_perfcore_file(StringView path
                     object_name = library->name;
                     symbol = library->symbolicate(ptr, &offset);
                 } else {
-                    symbol = String::formatted("?? <{:p}>", ptr);
+                    symbol = DeprecatedString::formatted("?? <{:p}>", ptr);
                 }
             }
 
@@ -610,7 +610,7 @@ ProfileNode::ProfileNode(Process const& process)
 {
 }
 
-ProfileNode::ProfileNode(Process const& process, FlyString const& object_name, String symbol, FlatPtr address, u32 offset, u64 timestamp, pid_t pid)
+ProfileNode::ProfileNode(Process const& process, FlyString const& object_name, DeprecatedString symbol, FlatPtr address, u32 offset, u64 timestamp, pid_t pid)
     : m_process(process)
     , m_symbol(move(symbol))
     , m_pid(pid)
@@ -618,7 +618,7 @@ ProfileNode::ProfileNode(Process const& process, FlyString const& object_name, S
     , m_offset(offset)
     , m_timestamp(timestamp)
 {
-    String object;
+    DeprecatedString object;
     if (object_name.ends_with(": .text"sv)) {
         object = object_name.view().substring_view(0, object_name.length() - 7);
     } else {

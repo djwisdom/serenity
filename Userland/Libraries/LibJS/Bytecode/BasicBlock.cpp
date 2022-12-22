@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibJS/Bytecode/BasicBlock.h>
 #include <LibJS/Bytecode/Op.h>
 #include <sys/mman.h>
 
 namespace JS::Bytecode {
 
-NonnullOwnPtr<BasicBlock> BasicBlock::create(String name, size_t size)
+NonnullOwnPtr<BasicBlock> BasicBlock::create(DeprecatedString name, size_t size)
 {
     return adopt_own(*new BasicBlock(move(name), max(size, static_cast<size_t>(4 * KiB))));
 }
 
-BasicBlock::BasicBlock(String name, size_t size)
+BasicBlock::BasicBlock(DeprecatedString name, size_t size)
     : m_name(move(name))
 {
     // FIXME: This is not the smartest solution ever. Find something cleverer!
@@ -53,7 +53,7 @@ void BasicBlock::dump(Bytecode::Executable const& executable) const
     if (!m_name.is_empty())
         warnln("{}:", m_name);
     while (!it.at_end()) {
-        warnln("[{:4x}] {}", it.offset(), (*it).to_string(executable));
+        warnln("[{:4x}] {}", it.offset(), (*it).to_deprecated_string(executable));
         ++it;
     }
 }

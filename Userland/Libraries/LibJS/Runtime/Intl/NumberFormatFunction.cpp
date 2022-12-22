@@ -12,7 +12,7 @@ namespace JS::Intl {
 
 // 15.5.2 Number Format Functions, https://tc39.es/ecma402/#sec-number-format-functions
 // 1.1.4 Number Format Functions, https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-number-format-functions
-NumberFormatFunction* NumberFormatFunction::create(Realm& realm, NumberFormat& number_format)
+NonnullGCPtr<NumberFormatFunction> NumberFormatFunction::create(Realm& realm, NumberFormat& number_format)
 {
     return realm.heap().allocate<NumberFormatFunction>(realm, number_format, *realm.intrinsics().function_prototype());
 }
@@ -29,7 +29,7 @@ void NumberFormatFunction::initialize(Realm& realm)
 
     Base::initialize(realm);
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
-    define_direct_property(vm.names.name, js_string(vm, String::empty()), Attribute::Configurable);
+    define_direct_property(vm.names.name, PrimitiveString::create(vm, DeprecatedString::empty()), Attribute::Configurable);
 }
 
 ThrowCompletionOr<Value> NumberFormatFunction::call()
@@ -47,7 +47,7 @@ ThrowCompletionOr<Value> NumberFormatFunction::call()
     // 5. Return ? FormatNumeric(nf, x).
     // Note: Our implementation of FormatNumeric does not throw.
     auto formatted = format_numeric(vm, m_number_format, move(mathematical_value));
-    return js_string(vm, move(formatted));
+    return PrimitiveString::create(vm, move(formatted));
 }
 
 void NumberFormatFunction::visit_edges(Cell::Visitor& visitor)

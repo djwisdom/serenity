@@ -15,9 +15,9 @@
 
 namespace GUI {
 
-InputBox::InputBox(Window* parent_window, String& text_value, StringView prompt, StringView title, StringView placeholder, InputType input_type)
+InputBox::InputBox(Window* parent_window, DeprecatedString text_value, StringView prompt, StringView title, StringView placeholder, InputType input_type)
     : Dialog(parent_window)
-    , m_text_value(text_value)
+    , m_text_value(move(text_value))
     , m_prompt(prompt)
     , m_placeholder(placeholder)
 {
@@ -25,7 +25,7 @@ InputBox::InputBox(Window* parent_window, String& text_value, StringView prompt,
     build(input_type);
 }
 
-Dialog::ExecResult InputBox::show(Window* parent_window, String& text_value, StringView prompt, StringView title, StringView placeholder, InputType input_type)
+Dialog::ExecResult InputBox::show(Window* parent_window, DeprecatedString& text_value, StringView prompt, StringView title, StringView placeholder, InputType input_type)
 {
     auto box = InputBox::construct(parent_window, text_value, prompt, title, placeholder, input_type);
     box->set_resizable(false);
@@ -34,6 +34,17 @@ Dialog::ExecResult InputBox::show(Window* parent_window, String& text_value, Str
     auto result = box->exec();
     text_value = box->text_value();
     return result;
+}
+
+void InputBox::set_text_value(DeprecatedString text_value)
+{
+    m_text_editor->set_text(move(text_value));
+}
+
+void InputBox::on_done(ExecResult result)
+{
+    if (result == ExecResult::OK)
+        m_text_value = m_text_editor->text();
 }
 
 void InputBox::build(InputType input_type)
@@ -86,7 +97,6 @@ void InputBox::build(InputType input_type)
     m_ok_button->set_text("OK");
     m_ok_button->on_click = [this](auto) {
         dbgln("GUI::InputBox: OK button clicked");
-        m_text_value = m_text_editor->text();
         done(ExecResult::OK);
     };
     m_ok_button->set_default(true);

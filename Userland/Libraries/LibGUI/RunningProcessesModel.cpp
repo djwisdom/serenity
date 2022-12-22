@@ -21,7 +21,7 @@ void RunningProcessesModel::update()
     m_processes.clear();
 
     auto all_processes = Core::ProcessStatisticsReader::get_all();
-    if (all_processes.has_value()) {
+    if (!all_processes.is_error()) {
         for (auto& it : all_processes.value().processes) {
             Process process;
             process.pid = it.pid;
@@ -45,7 +45,7 @@ int RunningProcessesModel::column_count(const GUI::ModelIndex&) const
     return Column::__Count;
 }
 
-String RunningProcessesModel::column_name(int column_index) const
+DeprecatedString RunningProcessesModel::column_name(int column_index) const
 {
     switch (column_index) {
     case Column::Icon:

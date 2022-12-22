@@ -56,7 +56,7 @@ public:
     void remove_widget(Widget&);
 
     template<class T, class... Args>
-    ErrorOr<NonnullRefPtr<T>> try_add_tab(String title, Args&&... args)
+    ErrorOr<NonnullRefPtr<T>> try_add_tab(DeprecatedString title, Args&&... args)
     {
         auto t = TRY(T::try_create(forward<Args>(args)...));
         t->set_title(move(title));
@@ -65,7 +65,7 @@ public:
     }
 
     template<class T, class... Args>
-    T& add_tab(String title, Args&&... args)
+    T& add_tab(DeprecatedString title, Args&&... args)
     {
         auto t = T::construct(forward<Args>(args)...);
         t->set_title(move(title));
@@ -73,11 +73,22 @@ public:
         return *t;
     }
 
+    ErrorOr<void> add_tab(NonnullRefPtr<Widget> const& tab, DeprecatedString title)
+    {
+        tab->set_title(move(title));
+        TRY(try_add_widget(*tab));
+        return {};
+    }
+
     void remove_tab(Widget& tab) { remove_widget(tab); }
     void remove_all_tabs_except(Widget& tab);
 
     void set_tab_title(Widget& tab, StringView title);
     void set_tab_icon(Widget& tab, Gfx::Bitmap const*);
+
+    bool is_tab_modified(Widget& tab);
+    void set_tab_modified(Widget& tab, bool modified);
+    bool is_any_tab_modified();
 
     void activate_next_tab();
     void activate_previous_tab();
@@ -121,7 +132,7 @@ protected:
     virtual void doubleclick_event(MouseEvent&) override;
 
 private:
-    Gfx::IntRect child_rect_for_size(Gfx::IntSize const&) const;
+    Gfx::IntRect child_rect_for_size(Gfx::IntSize) const;
     Gfx::IntRect button_rect(size_t index) const;
     Gfx::IntRect vertical_button_rect(size_t index) const;
     Gfx::IntRect horizontal_button_rect(size_t index) const;
@@ -136,9 +147,10 @@ private:
 
     struct TabData {
         int width(Gfx::Font const&) const;
-        String title;
+        DeprecatedString title;
         RefPtr<Gfx::Bitmap> icon;
         Widget* widget { nullptr };
+        bool modified { false };
     };
     Vector<TabData> m_tabs;
     TabPosition m_tab_position { TabPosition::Top };

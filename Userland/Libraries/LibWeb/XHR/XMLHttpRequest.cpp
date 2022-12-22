@@ -44,7 +44,7 @@ JS::NonnullGCPtr<XMLHttpRequest> XMLHttpRequest::construct_impl(JS::Realm& realm
 {
     auto& window = verify_cast<HTML::Window>(realm.global_object());
     auto author_request_headers = Fetch::Infrastructure::HeaderList::create(realm.vm());
-    return *realm.heap().allocate<XMLHttpRequest>(realm, window, *author_request_headers);
+    return realm.heap().allocate<XMLHttpRequest>(realm, window, *author_request_headers);
 }
 
 XMLHttpRequest::XMLHttpRequest(HTML::Window& window, Fetch::Infrastructure::HeaderList& author_request_headers)
@@ -69,7 +69,7 @@ void XMLHttpRequest::visit_edges(Cell::Visitor& visitor)
         visitor.visit(*value);
 }
 
-void XMLHttpRequest::fire_progress_event(String const& event_name, u64 transmitted, u64 length)
+void XMLHttpRequest::fire_progress_event(DeprecatedString const& event_name, u64 transmitted, u64 length)
 {
     ProgressEventInit event_init {};
     event_init.length_computable = true;
@@ -79,7 +79,7 @@ void XMLHttpRequest::fire_progress_event(String const& event_name, u64 transmitt
 }
 
 // https://xhr.spec.whatwg.org/#dom-xmlhttprequest-responsetext
-WebIDL::ExceptionOr<String> XMLHttpRequest::response_text() const
+WebIDL::ExceptionOr<DeprecatedString> XMLHttpRequest::response_text() const
 {
     // 1. If this’s response type is not the empty string or "text", then throw an "InvalidStateError" DOMException.
     if (m_response_type != Bindings::XMLHttpRequestResponseType::Empty && m_response_type != Bindings::XMLHttpRequestResponseType::Text)
@@ -87,7 +87,7 @@ WebIDL::ExceptionOr<String> XMLHttpRequest::response_text() const
 
     // 2. If this’s state is not loading or done, then return the empty string.
     if (m_state != State::Loading && m_state != State::Done)
-        return String::empty();
+        return DeprecatedString::empty();
 
     return get_text_response();
 }
@@ -121,10 +121,10 @@ WebIDL::ExceptionOr<JS::Value> XMLHttpRequest::response()
     if (m_response_type == Bindings::XMLHttpRequestResponseType::Empty || m_response_type == Bindings::XMLHttpRequestResponseType::Text) {
         // 1. If this’s state is not loading or done, then return the empty string.
         if (m_state != State::Loading && m_state != State::Done)
-            return JS::js_string(vm, "");
+            return JS::PrimitiveString::create(vm, "");
 
         // 2. Return the result of getting a text response for this.
-        return JS::js_string(vm, get_text_response());
+        return JS::PrimitiveString::create(vm, get_text_response());
     }
     // 2. If this’s state is not done, then return null.
     if (m_state != State::Done)
@@ -186,7 +186,7 @@ WebIDL::ExceptionOr<JS::Value> XMLHttpRequest::response()
 }
 
 // https://xhr.spec.whatwg.org/#text-response
-String XMLHttpRequest::get_text_response() const
+DeprecatedString XMLHttpRequest::get_text_response() const
 {
     // FIXME: 1. If xhr’s response’s body is null, then return the empty string.
 
@@ -257,7 +257,7 @@ MimeSniff::MimeType XMLHttpRequest::get_response_mime_type() const
 Optional<StringView> XMLHttpRequest::get_final_encoding() const
 {
     // 1. Let label be null.
-    Optional<String> label;
+    Optional<DeprecatedString> label;
 
     // 2. Let responseMIME be the result of get a response MIME type for xhr.
     auto response_mime = get_response_mime_type();
@@ -287,7 +287,7 @@ Optional<StringView> XMLHttpRequest::get_final_encoding() const
 }
 
 // https://xhr.spec.whatwg.org/#dom-xmlhttprequest-setrequestheader
-WebIDL::ExceptionOr<void> XMLHttpRequest::set_request_header(String const& name_string, String const& value_string)
+WebIDL::ExceptionOr<void> XMLHttpRequest::set_request_header(DeprecatedString const& name_string, DeprecatedString const& value_string)
 {
     auto& realm = this->realm();
     auto name = name_string.to_byte_buffer();
@@ -310,28 +310,29 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::set_request_header(String const& name_
     if (!Fetch::Infrastructure::is_header_value(value))
         return WebIDL::SyntaxError::create(realm, "Header value contains invalid characters.");
 
-    // 5. If name is a forbidden header name, then return.
-    if (Fetch::Infrastructure::is_forbidden_header_name(name))
-        return {};
-
-    // 6. Combine (name, value) in this’s author request headers.
     auto header = Fetch::Infrastructure::Header {
         .name = move(name),
         .value = move(value),
     };
+
+    // 5. If (name, value) is a forbidden request-header, then return.
+    if (TRY_OR_RETURN_OOM(realm, Fetch::Infrastructure::is_forbidden_request_header(header)))
+        return {};
+
+    // 6. Combine (name, value) in this’s author request headers.
     TRY_OR_RETURN_OOM(realm, m_author_request_headers->combine(move(header)));
 
     return {};
 }
 
 // https://xhr.spec.whatwg.org/#dom-xmlhttprequest-open
-WebIDL::ExceptionOr<void> XMLHttpRequest::open(String const& method_string, String const& url)
+WebIDL::ExceptionOr<void> XMLHttpRequest::open(DeprecatedString const& method_string, DeprecatedString const& url)
 {
     // 8. If the async argument is omitted, set async to true, and set username and password to null.
     return open(method_string, url, true, {}, {});
 }
 
-WebIDL::ExceptionOr<void> XMLHttpRequest::open(String const& method_string, String const& url, bool async, String const& username, String const& password)
+WebIDL::ExceptionOr<void> XMLHttpRequest::open(DeprecatedString const& method_string, DeprecatedString const& url, bool async, DeprecatedString const& username, DeprecatedString const& password)
 {
     auto method = method_string.to_byte_buffer();
 
@@ -431,7 +432,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
         body = {};
 
     Optional<Fetch::Infrastructure::BodyWithType> body_with_type {};
-    Optional<String> serialized_document {};
+    Optional<DeprecatedString> serialized_document {};
     if (body.has_value()) {
         if (body->has<JS::Handle<DOM::Document>>())
             serialized_document = TRY(body->get<JS::Handle<DOM::Document>>().cell()->serialize_fragment(DOMParsing::RequireWellFormed::No));
@@ -439,7 +440,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
             body_with_type = TRY(Fetch::extract_body(realm, body->downcast<Fetch::BodyInitOrReadableBytes>()));
     }
 
-    AK::URL request_url = m_window->associated_document().parse_url(m_request_url.to_string());
+    AK::URL request_url = m_window->associated_document().parse_url(m_request_url.to_deprecated_string());
     dbgln("XHR send from {} to {}", m_window->associated_document().url(), request_url);
 
     // TODO: Add support for preflight requests to support CORS requests
@@ -481,13 +482,13 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
     // If this’s headers’s header list does not contain `Content-Type`, then append (`Content-Type`, type) to this’s headers.
     if (!m_author_request_headers->contains("Content-Type"sv.bytes())) {
         if (body_with_type.has_value() && body_with_type->type.has_value()) {
-            request.set_header("Content-Type", String { body_with_type->type->span() });
+            request.set_header("Content-Type", DeprecatedString { body_with_type->type->span() });
         } else if (body.has_value() && body->has<JS::Handle<DOM::Document>>()) {
             request.set_header("Content-Type", "text/html;charset=UTF-8");
         }
     }
     for (auto& it : *m_author_request_headers)
-        request.set_header(String::copy(it.name), String::copy(it.value));
+        request.set_header(DeprecatedString::copy(it.name), DeprecatedString::copy(it.value));
 
     m_upload_complete = false;
     m_timed_out = false;
@@ -573,7 +574,7 @@ void XMLHttpRequest::set_onreadystatechange(WebIDL::CallbackType* value)
 }
 
 // https://xhr.spec.whatwg.org/#the-getallresponseheaders()-method
-String XMLHttpRequest::get_all_response_headers() const
+DeprecatedString XMLHttpRequest::get_all_response_headers() const
 {
     // FIXME: Implement the spec-compliant sort order.
 
@@ -587,11 +588,11 @@ String XMLHttpRequest::get_all_response_headers() const
         builder.append(m_response_headers.get(key).value());
         builder.append("\r\n"sv);
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 // https://xhr.spec.whatwg.org/#dom-xmlhttprequest-overridemimetype
-WebIDL::ExceptionOr<void> XMLHttpRequest::override_mime_type(String const& mime)
+WebIDL::ExceptionOr<void> XMLHttpRequest::override_mime_type(DeprecatedString const& mime)
 {
     // 1. If this’s state is loading or done, then throw an "InvalidStateError" DOMException.
     if (m_state == State::Loading || m_state == State::Done)

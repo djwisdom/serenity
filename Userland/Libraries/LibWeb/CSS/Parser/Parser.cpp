@@ -77,12 +77,12 @@ bool ParsingContext::in_quirks_mode() const
 }
 
 // https://www.w3.org/TR/css-values-4/#relative-urls
-AK::URL ParsingContext::complete_url(String const& addr) const
+AK::URL ParsingContext::complete_url(DeprecatedString const& addr) const
 {
     return m_url.complete_url(addr);
 }
 
-Parser::Parser(ParsingContext const& context, StringView input, String const& encoding)
+Parser::Parser(ParsingContext const& context, StringView input, DeprecatedString const& encoding)
     : m_context(context)
     , m_tokenizer(input, encoding)
     , m_tokens(m_tokenizer.parse())
@@ -562,7 +562,7 @@ Parser::ParseErrorOr<Selector::SimpleSelector> Parser::parse_pseudo_simple_selec
             }
             // FIXME: Support multiple, comma-separated, language ranges.
             Vector<FlyString> languages;
-            languages.append(pseudo_function.values().first().token().to_string());
+            languages.append(pseudo_function.values().first().token().to_deprecated_string());
             return Selector::SimpleSelector {
                 .type = Selector::SimpleSelector::Type::PseudoClass,
                 .value = Selector::SimpleSelector::PseudoClass {
@@ -1395,7 +1395,7 @@ Optional<Supports::Feature> Parser::parse_supports_feature(TokenStream<Component
         if (auto declaration = consume_a_declaration(block_tokens); declaration.has_value()) {
             transaction.commit();
             return Supports::Feature {
-                Supports::Declaration { declaration->to_string() }
+                Supports::Declaration { declaration->to_deprecated_string() }
             };
         }
     }
@@ -1405,10 +1405,10 @@ Optional<Supports::Feature> Parser::parse_supports_feature(TokenStream<Component
         // FIXME: Parsing and then converting back to a string is weird.
         StringBuilder builder;
         for (auto const& item : first_token.function().values())
-            builder.append(item.to_string());
+            builder.append(item.to_deprecated_string());
         transaction.commit();
         return Supports::Feature {
-            Supports::Selector { builder.to_string() }
+            Supports::Selector { builder.to_deprecated_string() }
         };
     }
 
@@ -1425,13 +1425,13 @@ Optional<GeneralEnclosed> Parser::parse_general_enclosed(TokenStream<ComponentVa
     // `[ <function-token> <any-value>? ) ]`
     if (first_token.is_function()) {
         transaction.commit();
-        return GeneralEnclosed { first_token.to_string() };
+        return GeneralEnclosed { first_token.to_deprecated_string() };
     }
 
     // `( <any-value>? )`
     if (first_token.is_block() && first_token.block().is_paren()) {
         transaction.commit();
-        return GeneralEnclosed { first_token.to_string() };
+        return GeneralEnclosed { first_token.to_deprecated_string() };
     }
 
     return {};
@@ -2386,6 +2386,30 @@ static Optional<Vector<TElement>> parse_color_stop_list(auto& tokens, auto is_po
     return color_stops;
 }
 
+Optional<Vector<LinearColorStopListElement>> Parser::parse_linear_color_stop_list(TokenStream<ComponentValue>& tokens)
+{
+    // <color-stop-list> =
+    //   <linear-color-stop> , [ <linear-color-hint>? , <linear-color-stop> ]#
+    return parse_color_stop_list<LinearColorStopListElement>(
+        tokens,
+        [](Dimension& dimension) { return dimension.is_length_percentage(); },
+        [](Dimension& dimension) { return dimension.length_percentage(); },
+        [&](auto& token) { return parse_color(token); },
+        [&](auto& token) { return parse_dimension(token); });
+}
+
+Optional<Vector<AngularColorStopListElement>> Parser::parse_angular_color_stop_list(TokenStream<ComponentValue>& tokens)
+{
+    // <angular-color-stop-list> =
+    //   <angular-color-stop> , [ <angular-color-hint>? , <angular-color-stop> ]#
+    return parse_color_stop_list<AngularColorStopListElement>(
+        tokens,
+        [](Dimension& dimension) { return dimension.is_angle_percentage(); },
+        [](Dimension& dimension) { return dimension.angle_percentage(); },
+        [&](auto& token) { return parse_color(token); },
+        [&](auto& token) { return parse_dimension(token); });
+}
+
 static StringView consume_if_starts_with(StringView str, StringView start, auto found_callback)
 {
     if (str.starts_with(start, CaseSensitivity::CaseInsensitive)) {
@@ -2516,19 +2540,7 @@ RefPtr<StyleValue> Parser::parse_linear_gradient_function(ComponentValue const& 
     if (has_direction_param && !tokens.next_token().is(Token::Type::Comma))
         return {};
 
-    // <color-stop-list> =
-    //      <linear-color-stop> , [ <linear-color-hint>? , <linear-color-stop> ]#
-    auto is_length_percentage = [](Dimension& dimension) {
-        return dimension.is_length_percentage();
-    };
-    auto get_length_percentage = [](Dimension& dimension) {
-        return dimension.length_percentage();
-    };
-    auto color_stops = parse_color_stop_list<LinearColorStopListElement>(
-        tokens, is_length_percentage, get_length_percentage,
-        [&](auto& token) { return parse_color(token); },
-        [&](auto& token) { return parse_dimension(token); });
-
+    auto color_stops = parse_linear_color_stop_list(tokens);
     if (!color_stops.has_value())
         return {};
 
@@ -2567,8 +2579,8 @@ RefPtr<StyleValue> Parser::parse_conic_gradient_function(ComponentValue const& c
     bool got_color_interpolation_method = false;
     bool got_at_position = false;
     while (token.is(Token::Type::Ident)) {
-        auto token_string = token.token().ident();
         auto consume_identifier = [&](auto identifier) {
+            auto token_string = token.token().ident();
             if (token_string.equals_ignoring_case(identifier)) {
                 (void)tokens.next_token();
                 tokens.skip_whitespace();
@@ -2625,26 +2637,165 @@ RefPtr<StyleValue> Parser::parse_conic_gradient_function(ComponentValue const& c
     if ((got_from_angle || got_at_position || got_color_interpolation_method) && !tokens.next_token().is(Token::Type::Comma))
         return {};
 
-    // <angular-color-stop-list> =
-    //   <angular-color-stop> , [ <angular-color-hint>? , <angular-color-stop> ]#
-    auto is_angle_percentage = [](Dimension& dimension) {
-        return dimension.is_angle_percentage();
-    };
-    auto get_angle_percentage = [](Dimension& dimension) {
-        return dimension.angle_percentage();
-    };
-    auto color_stops = parse_color_stop_list<AngularColorStopListElement>(
-        tokens, is_angle_percentage, get_angle_percentage,
-        [&](auto& token) { return parse_color(token); },
-        [&](auto& token) { return parse_dimension(token); });
-
+    auto color_stops = parse_angular_color_stop_list(tokens);
     if (!color_stops.has_value())
         return {};
 
     return ConicGradientStyleValue::create(from_angle, at_position, move(*color_stops), repeating_gradient);
 }
 
-Optional<PositionValue> Parser::parse_position(TokenStream<ComponentValue>& tokens)
+RefPtr<StyleValue> Parser::parse_radial_gradient_function(ComponentValue const& component_value)
+{
+    using EndingShape = RadialGradientStyleValue::EndingShape;
+    using Extent = RadialGradientStyleValue::Extent;
+    using CircleSize = RadialGradientStyleValue::CircleSize;
+    using EllipseSize = RadialGradientStyleValue::EllipseSize;
+    using Size = RadialGradientStyleValue::Size;
+
+    if (!component_value.is_function())
+        return {};
+
+    auto repeating_gradient = GradientRepeating::No;
+
+    auto function_name = component_value.function().name();
+
+    function_name = consume_if_starts_with(function_name, "repeating-"sv, [&] {
+        repeating_gradient = GradientRepeating::Yes;
+    });
+
+    if (!function_name.equals_ignoring_case("radial-gradient"sv))
+        return {};
+
+    TokenStream tokens { component_value.function().values() };
+    tokens.skip_whitespace();
+    if (!tokens.has_next_token())
+        return {};
+
+    bool expect_comma = false;
+
+    auto commit_value = [&]<typename... T>(auto value, T&... transactions) {
+        (transactions.commit(), ...);
+        return value;
+    };
+
+    // radial-gradient( [ <ending-shape> || <size> ]? [ at <position> ]? , <color-stop-list> )
+
+    Size size = Extent::FarthestCorner;
+    EndingShape ending_shape = EndingShape::Circle;
+    PositionValue at_position = PositionValue::center();
+
+    auto parse_ending_shape = [&]() -> Optional<EndingShape> {
+        auto transaction = tokens.begin_transaction();
+        tokens.skip_whitespace();
+        auto& token = tokens.next_token();
+        if (!token.is(Token::Type::Ident))
+            return {};
+        auto ident = token.token().ident();
+        if (ident.equals_ignoring_case("circle"sv))
+            return commit_value(EndingShape::Circle, transaction);
+        if (ident.equals_ignoring_case("ellipse"sv))
+            return commit_value(EndingShape::Ellipse, transaction);
+        return {};
+    };
+
+    auto parse_extent_keyword = [](StringView keyword) -> Optional<Extent> {
+        if (keyword.equals_ignoring_case("closest-corner"sv))
+            return Extent::ClosestCorner;
+        if (keyword.equals_ignoring_case("closest-side"sv))
+            return Extent::ClosestSide;
+        if (keyword.equals_ignoring_case("farthest-corner"sv))
+            return Extent::FarthestCorner;
+        if (keyword.equals_ignoring_case("farthest-side"sv))
+            return Extent::FarthestSide;
+        return {};
+    };
+
+    auto parse_size = [&]() -> Optional<Size> {
+        // <size> =
+        //      <extent-keyword>              |
+        //      <length [0,∞]>                |
+        //      <length-percentage [0,∞]>{2}
+        auto transaction_size = tokens.begin_transaction();
+        tokens.skip_whitespace();
+        if (!tokens.has_next_token())
+            return {};
+        auto& token = tokens.next_token();
+        if (token.is(Token::Type::Ident)) {
+            auto extent = parse_extent_keyword(token.token().ident());
+            if (!extent.has_value())
+                return {};
+            return commit_value(*extent, transaction_size);
+        }
+        auto first_dimension = parse_dimension(token);
+        if (!first_dimension.has_value())
+            return {};
+        if (!first_dimension->is_length_percentage())
+            return {};
+        auto transaction_second_dimension = tokens.begin_transaction();
+        tokens.skip_whitespace();
+        if (tokens.has_next_token()) {
+            auto& second_token = tokens.next_token();
+            auto second_dimension = parse_dimension(second_token);
+            if (second_dimension.has_value() && second_dimension->is_length_percentage())
+                return commit_value(EllipseSize { first_dimension->length_percentage(), second_dimension->length_percentage() },
+                    transaction_size, transaction_second_dimension);
+        }
+        if (first_dimension->is_length())
+            return commit_value(CircleSize { first_dimension->length() }, transaction_size);
+        return {};
+    };
+
+    {
+        // [ <ending-shape> || <size> ]?
+        auto maybe_ending_shape = parse_ending_shape();
+        auto maybe_size = parse_size();
+        if (!maybe_ending_shape.has_value() && maybe_size.has_value())
+            maybe_ending_shape = parse_ending_shape();
+        if (maybe_size.has_value()) {
+            size = *maybe_size;
+            expect_comma = true;
+        }
+        if (maybe_ending_shape.has_value()) {
+            expect_comma = true;
+            ending_shape = *maybe_ending_shape;
+            if (ending_shape == EndingShape::Circle && size.has<EllipseSize>())
+                return {};
+            if (ending_shape == EndingShape::Ellipse && size.has<CircleSize>())
+                return {};
+        } else {
+            ending_shape = size.has<CircleSize>() ? EndingShape::Circle : EndingShape::Ellipse;
+        }
+    }
+
+    tokens.skip_whitespace();
+    if (!tokens.has_next_token())
+        return {};
+
+    auto& token = tokens.peek_token();
+    if (token.is(Token::Type::Ident) && token.token().ident().equals_ignoring_case("at"sv)) {
+        (void)tokens.next_token();
+        auto position = parse_position(tokens);
+        if (!position.has_value())
+            return {};
+        at_position = *position;
+        expect_comma = true;
+    }
+
+    tokens.skip_whitespace();
+    if (!tokens.has_next_token())
+        return {};
+    if (expect_comma && !tokens.next_token().is(Token::Type::Comma))
+        return {};
+
+    // <color-stop-list>
+    auto color_stops = parse_linear_color_stop_list(tokens);
+    if (!color_stops.has_value())
+        return {};
+
+    return RadialGradientStyleValue::create(ending_shape, size, at_position, move(*color_stops), repeating_gradient);
+}
+
+Optional<PositionValue> Parser::parse_position(TokenStream<ComponentValue>& tokens, PositionValue initial_value)
 {
     auto transaction = tokens.begin_transaction();
     tokens.skip_whitespace();
@@ -2700,7 +2851,7 @@ Optional<PositionValue> Parser::parse_position(TokenStream<ComponentValue>& toke
     // [ left | center | right ] || [ top | center | bottom ]
     auto alternation_1 = [&]() -> Optional<PositionValue> {
         auto transaction = tokens.begin_transaction();
-        PositionValue position {};
+        PositionValue position = initial_value;
         auto& first_token = tokens.next_token();
         if (!first_token.is(Token::Type::Ident))
             return {};
@@ -2709,15 +2860,17 @@ Optional<PositionValue> Parser::parse_position(TokenStream<ComponentValue>& toke
         auto horizontal_position = parse_horizontal_preset(ident);
         if (horizontal_position.has_value()) {
             position.horizontal_position = *horizontal_position;
+            auto transaction_optional_parse = tokens.begin_transaction();
             tokens.skip_whitespace();
             if (tokens.has_next_token()) {
                 auto& second_token = tokens.next_token();
-                if (!second_token.is(Token::Type::Ident))
-                    return {};
-                auto vertical_position = parse_vertical_preset(second_token.token().ident());
-                if (!vertical_position.has_value())
-                    return {};
-                position.vertical_position = *vertical_position;
+                if (second_token.is(Token::Type::Ident)) {
+                    auto vertical_position = parse_vertical_preset(second_token.token().ident());
+                    if (vertical_position.has_value()) {
+                        transaction_optional_parse.commit();
+                        position.vertical_position = *vertical_position;
+                    }
+                }
             }
         } else {
             // <vertical-position> <horizontal-position>?
@@ -2725,14 +2878,17 @@ Optional<PositionValue> Parser::parse_position(TokenStream<ComponentValue>& toke
             if (!vertical_position.has_value())
                 return {};
             position.vertical_position = *vertical_position;
+            auto transaction_optional_parse = tokens.begin_transaction();
+            tokens.skip_whitespace();
             if (tokens.has_next_token()) {
                 auto& second_token = tokens.next_token();
-                if (!second_token.is(Token::Type::Ident))
-                    return {};
-                auto horizontal_position = parse_horizontal_preset(second_token.token().ident());
-                if (!horizontal_position.has_value())
-                    return {};
-                position.horizontal_position = *horizontal_position;
+                if (second_token.is(Token::Type::Ident)) {
+                    auto horizontal_position = parse_horizontal_preset(second_token.token().ident());
+                    if (horizontal_position.has_value()) {
+                        transaction_optional_parse.commit();
+                        position.horizontal_position = *horizontal_position;
+                    }
+                }
             }
         }
         transaction.commit();
@@ -2743,7 +2899,7 @@ Optional<PositionValue> Parser::parse_position(TokenStream<ComponentValue>& toke
     // [ top | center | bottom | <length-percentage> ]?
     auto alternation_2 = [&]() -> Optional<PositionValue> {
         auto transaction = tokens.begin_transaction();
-        PositionValue position {};
+        PositionValue position = initial_value;
         auto& first_token = tokens.next_token();
         if (first_token.is(Token::Type::Ident)) {
             auto horizontal_position = parse_horizontal_preset(first_token.token().ident());
@@ -2756,19 +2912,22 @@ Optional<PositionValue> Parser::parse_position(TokenStream<ComponentValue>& toke
                 return {};
             position.horizontal_position = dimension->length_percentage();
         }
+        auto transaction_optional_parse = tokens.begin_transaction();
         tokens.skip_whitespace();
         if (tokens.has_next_token()) {
             auto& second_token = tokens.next_token();
             if (second_token.is(Token::Type::Ident)) {
                 auto vertical_position = parse_vertical_preset(second_token.token().ident());
-                if (!vertical_position.has_value())
-                    return {};
-                position.vertical_position = *vertical_position;
+                if (vertical_position.has_value()) {
+                    transaction_optional_parse.commit();
+                    position.vertical_position = *vertical_position;
+                }
             } else {
                 auto dimension = parse_dimension(second_token);
-                if (!dimension.has_value() || !dimension->is_length_percentage())
-                    return {};
-                position.vertical_position = dimension->length_percentage();
+                if (dimension.has_value() && dimension->is_length_percentage()) {
+                    transaction_optional_parse.commit();
+                    position.vertical_position = dimension->length_percentage();
+                }
             }
         }
         transaction.commit();
@@ -3223,10 +3382,10 @@ Optional<UnicodeRange> Parser::parse_unicode_range(TokenStream<ComponentValue>& 
         // Integers like `+34` get serialized as `34`, so manually include the `+` sign.
         if (component_value.is(Token::Type::Number) && component_value.token().number().is_integer_with_explicit_sign()) {
             auto int_value = component_value.token().number().integer_value();
-            return String::formatted("{:+}", int_value);
+            return DeprecatedString::formatted("{:+}", int_value);
         }
 
-        return component_value.to_string();
+        return component_value.to_deprecated_string();
     };
 
     auto create_unicode_range = [&](StringView text, auto& local_transaction) -> Optional<UnicodeRange> {
@@ -3720,7 +3879,7 @@ Optional<Color> Parser::parse_color(ComponentValue const& component_value)
             return color;
 
     } else if (component_value.is(Token::Type::Hash)) {
-        auto color = Color::from_string(String::formatted("#{}", component_value.token().hash_value()));
+        auto color = Color::from_string(DeprecatedString::formatted("#{}", component_value.token().hash_value()));
         if (color.has_value())
             return color;
         return {};
@@ -3739,7 +3898,7 @@ Optional<Color> Parser::parse_color(ComponentValue const& component_value)
 
         // 1. Let cv be the component value.
         auto const& cv = component_value;
-        String serialization;
+        DeprecatedString serialization;
         // 2. If cv is a <number-token> or a <dimension-token>, follow these substeps:
         if (cv.is(Token::Type::Number) || cv.is(Token::Type::Dimension)) {
             // 1. If cv’s type flag is not "integer", return an error.
@@ -3761,13 +3920,13 @@ Optional<Color> Parser::parse_color(ComponentValue const& component_value)
                 serialization_builder.append(cv.token().dimension_unit());
 
             // 5. If serialization consists of fewer than six characters, prepend zeros (U+0030) so that it becomes six characters.
-            serialization = serialization_builder.to_string();
+            serialization = serialization_builder.to_deprecated_string();
             if (serialization_builder.length() < 6) {
                 StringBuilder builder;
                 for (size_t i = 0; i < (6 - serialization_builder.length()); i++)
                     builder.append('0');
                 builder.append(serialization_builder.string_view());
-                serialization = builder.to_string();
+                serialization = builder.to_deprecated_string();
             }
         }
         // 3. Otherwise, cv is an <ident-token>; let serialization be cv’s value.
@@ -3788,7 +3947,7 @@ Optional<Color> Parser::parse_color(ComponentValue const& component_value)
         }
 
         // 6. Return the concatenation of "#" (U+0023) and serialization.
-        String concatenation = String::formatted("#{}", serialization);
+        DeprecatedString concatenation = DeprecatedString::formatted("#{}", serialization);
         return Color::from_string(concatenation);
     }
 
@@ -3817,11 +3976,13 @@ RefPtr<StyleValue> Parser::parse_image_value(ComponentValue const& component_val
     auto url = parse_url_function(component_value, AllowedDataUrlType::Image);
     if (url.has_value())
         return ImageStyleValue::create(url.value());
-    // FIXME: Implement other kinds of gradient
     auto linear_gradient = parse_linear_gradient_function(component_value);
     if (linear_gradient)
         return linear_gradient;
-    return parse_conic_gradient_function(component_value);
+    auto conic_gradient = parse_conic_gradient_function(component_value);
+    if (conic_gradient)
+        return conic_gradient;
+    return parse_radial_gradient_function(component_value);
 }
 
 template<typename ParseFunction>
@@ -4101,9 +4262,6 @@ RefPtr<StyleValue> Parser::parse_single_background_position_value(TokenStream<Co
         }
     };
 
-    LengthPercentage zero_offset = Length::make_px(0);
-    LengthPercentage center_offset = Percentage { 50 };
-
     struct EdgeOffset {
         PositionEdge edge;
         LengthPercentage offset;
@@ -4114,6 +4272,19 @@ RefPtr<StyleValue> Parser::parse_single_background_position_value(TokenStream<Co
     Optional<EdgeOffset> horizontal;
     Optional<EdgeOffset> vertical;
     bool found_center = false;
+
+    auto const center_offset = Percentage { 50 };
+    auto const zero_offset = Length::make_px(0);
+
+    auto value_to_length_percentage = [&](auto value) -> Optional<LengthPercentage> {
+        if (value->is_percentage())
+            return LengthPercentage { value->as_percentage().percentage() };
+        if (value->has_length())
+            return LengthPercentage { value->to_length() };
+        if (value->is_calculated())
+            return LengthPercentage { value->as_calculated() };
+        return {};
+    };
 
     while (tokens.has_next_token()) {
         // Check if we're done
@@ -4128,53 +4299,43 @@ RefPtr<StyleValue> Parser::parse_single_background_position_value(TokenStream<Co
         tokens.next_token();
         auto value = maybe_value.release_nonnull();
 
-        if (value->is_percentage()) {
+        auto offset = value_to_length_percentage(value);
+        if (offset.has_value()) {
             if (!horizontal.has_value()) {
-                horizontal = EdgeOffset { PositionEdge::Left, value->as_percentage().percentage(), false, true };
+                horizontal = EdgeOffset { PositionEdge::Left, *offset, false, true };
             } else if (!vertical.has_value()) {
-                vertical = EdgeOffset { PositionEdge::Top, value->as_percentage().percentage(), false, true };
+                vertical = EdgeOffset { PositionEdge::Top, *offset, false, true };
             } else {
                 return nullptr;
             }
             continue;
         }
 
-        if (value->has_length()) {
-            if (!horizontal.has_value()) {
-                horizontal = EdgeOffset { PositionEdge::Left, value->to_length(), false, true };
-            } else if (!vertical.has_value()) {
-                vertical = EdgeOffset { PositionEdge::Top, value->to_length(), false, true };
-            } else {
-                return nullptr;
+        auto try_parse_offset = [&](bool& offset_provided) -> LengthPercentage {
+            if (tokens.has_next_token()) {
+                auto& token = tokens.peek_token();
+                auto maybe_value = parse_css_value(token);
+                if (!maybe_value)
+                    return zero_offset;
+                auto offset = value_to_length_percentage(maybe_value.release_nonnull());
+                if (offset.has_value()) {
+                    offset_provided = true;
+                    tokens.next_token();
+                    return *offset;
+                }
             }
-            continue;
-        }
+            return zero_offset;
+        };
 
         if (value->has_identifier()) {
             auto identifier = value->to_identifier();
             if (is_horizontal(identifier)) {
-                LengthPercentage offset = zero_offset;
                 bool offset_provided = false;
-                if (tokens.has_next_token()) {
-                    auto maybe_offset = parse_dimension(tokens.peek_token());
-                    if (maybe_offset.has_value() && maybe_offset.value().is_length_percentage()) {
-                        offset = maybe_offset.value().length_percentage();
-                        offset_provided = true;
-                        tokens.next_token();
-                    }
-                }
+                auto offset = try_parse_offset(offset_provided);
                 horizontal = EdgeOffset { *to_edge(identifier), offset, true, offset_provided };
             } else if (is_vertical(identifier)) {
-                LengthPercentage offset = zero_offset;
                 bool offset_provided = false;
-                if (tokens.has_next_token()) {
-                    auto maybe_offset = parse_dimension(tokens.peek_token());
-                    if (maybe_offset.has_value() && maybe_offset.value().is_length_percentage()) {
-                        offset = maybe_offset.value().length_percentage();
-                        offset_provided = true;
-                        tokens.next_token();
-                    }
-                }
+                auto offset = try_parse_offset(offset_provided);
                 vertical = EdgeOffset { *to_edge(identifier), offset, true, offset_provided };
             } else if (identifier == ValueID::Center) {
                 found_center = true;
@@ -5067,7 +5228,7 @@ RefPtr<StyleValue> Parser::parse_font_family_value(Vector<ComponentValue> const&
     //     font-family: my cool     font\!, serif;
     //     font-family: "my cool font!", serif;
     NonnullRefPtrVector<StyleValue> font_families;
-    Vector<String> current_name_parts;
+    Vector<DeprecatedString> current_name_parts;
     for (size_t i = start_index; i < component_values.size(); ++i) {
         auto const& part = component_values[i];
 
@@ -5105,7 +5266,7 @@ RefPtr<StyleValue> Parser::parse_font_family_value(Vector<ComponentValue> const&
         if (part.is(Token::Type::Comma)) {
             if (current_name_parts.is_empty())
                 return nullptr;
-            font_families.append(StringStyleValue::create(String::join(' ', current_name_parts)));
+            font_families.append(StringStyleValue::create(DeprecatedString::join(' ', current_name_parts)));
             current_name_parts.clear();
             // Can't have a trailing comma
             if (i + 1 == component_values.size())
@@ -5115,7 +5276,7 @@ RefPtr<StyleValue> Parser::parse_font_family_value(Vector<ComponentValue> const&
     }
 
     if (!current_name_parts.is_empty()) {
-        font_families.append(StringStyleValue::create(String::join(' ', current_name_parts)));
+        font_families.append(StringStyleValue::create(DeprecatedString::join(' ', current_name_parts)));
         current_name_parts.clear();
     }
 
@@ -5142,7 +5303,7 @@ CSSRule* Parser::parse_font_face_rule(TokenStream<ComponentValue>& tokens)
         if (declaration.name().equals_ignoring_case("font-family"sv)) {
             // FIXME: This is very similar to, but different from, the logic in parse_font_family_value().
             //        Ideally they could share code.
-            Vector<String> font_family_parts;
+            Vector<DeprecatedString> font_family_parts;
             bool had_syntax_error = false;
             for (size_t i = 0; i < declaration.values().size(); ++i) {
                 auto const& part = declaration.values()[i];
@@ -5180,7 +5341,7 @@ CSSRule* Parser::parse_font_face_rule(TokenStream<ComponentValue>& tokens)
             if (had_syntax_error || font_family_parts.is_empty())
                 continue;
 
-            font_family = String::join(' ', font_family_parts);
+            font_family = DeprecatedString::join(' ', font_family_parts);
             continue;
         }
         if (declaration.name().equals_ignoring_case("src"sv)) {
@@ -5853,11 +6014,11 @@ Optional<CSS::GridRepeat> Parser::parse_repeat(Vector<ComponentValue> const& com
         return {};
 
     Vector<CSS::ExplicitGridTrack> repeat_params;
-    Vector<Vector<String>> line_names_list;
+    Vector<Vector<DeprecatedString>> line_names_list;
     auto last_object_was_line_names = false;
     while (part_two_tokens.has_next_token()) {
         auto token = part_two_tokens.next_token();
-        Vector<String> line_names;
+        Vector<DeprecatedString> line_names;
         if (token.is_block()) {
             if (last_object_was_line_names)
                 return {};
@@ -5868,6 +6029,7 @@ Optional<CSS::GridRepeat> Parser::parse_repeat(Vector<ComponentValue> const& com
             while (block_tokens.has_next_token()) {
                 auto current_block_token = block_tokens.next_token();
                 line_names.append(current_block_token.token().ident());
+                block_tokens.skip_whitespace();
             }
             line_names_list.append(line_names);
             part_two_tokens.skip_whitespace();
@@ -5950,7 +6112,7 @@ Optional<CSS::ExplicitGridTrack> Parser::parse_track_sizing_function(ComponentVa
 RefPtr<StyleValue> Parser::parse_grid_track_sizes(Vector<ComponentValue> const& component_values)
 {
     Vector<CSS::ExplicitGridTrack> track_list;
-    Vector<Vector<String>> line_names_list;
+    Vector<Vector<DeprecatedString>> line_names_list;
     auto last_object_was_line_names = false;
     TokenStream tokens { component_values };
     while (tokens.has_next_token()) {
@@ -5959,13 +6121,14 @@ RefPtr<StyleValue> Parser::parse_grid_track_sizes(Vector<ComponentValue> const& 
             if (last_object_was_line_names)
                 return GridTrackSizeStyleValue::make_auto();
             last_object_was_line_names = true;
-            Vector<String> line_names;
+            Vector<DeprecatedString> line_names;
             if (!token.block().is_square())
                 return GridTrackSizeStyleValue::make_auto();
             TokenStream block_tokens { token.block().values() };
             while (block_tokens.has_next_token()) {
                 auto current_block_token = block_tokens.next_token();
                 line_names.append(current_block_token.token().ident());
+                block_tokens.skip_whitespace();
             }
             line_names_list.append(line_names);
         } else {
@@ -6033,7 +6196,7 @@ RefPtr<StyleValue> Parser::parse_grid_track_placement(Vector<ComponentValue> con
 
     auto span_value = false;
     auto span_or_position_value = 0;
-    String line_name_value;
+    DeprecatedString line_name_value;
     while (true) {
         if (is_auto(current_token))
             return {};

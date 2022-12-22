@@ -75,7 +75,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         dbgln("Imported PGN file from {}", result.value()->filename());
     })));
     TRY(game_menu->try_add_action(GUI::Action::create("&Export PGN...", { Mod_Ctrl, Key_S }, [&](auto&) {
-        auto result = FileSystemAccessClient::Client::the().try_save_file(window, "Untitled", "pgn");
+        auto result = FileSystemAccessClient::Client::the().try_save_file_deprecated(window, "Untitled", "pgn");
         if (result.is_error())
             return;
 
@@ -169,7 +169,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             }
         });
         engines_action_group.add_action(*action);
-        if (engine == String("Human"))
+        if (engine == DeprecatedString("Human"))
             action->set_checked(true);
 
         TRY(engine_submenu->try_add_action(*action));

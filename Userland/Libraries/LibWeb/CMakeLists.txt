@@ -281,6 +281,7 @@ set(SOURCES
     HTML/Scripting/Script.cpp
     HTML/Scripting/WindowEnvironmentSettingsObject.cpp
     HTML/Storage.cpp
+    HTML/StructuredSerialize.cpp
     HTML/SubmitEvent.cpp
     HTML/SyntaxHighlighter/SyntaxHighlighter.cpp
     HTML/TagNames.cpp
@@ -408,6 +409,7 @@ set(SOURCES
     SVG/SVGPathElement.cpp
     SVG/SVGCircleElement.cpp
     SVG/SVGEllipseElement.cpp
+    SVG/SVGForeignObjectElement.cpp
     SVG/SVGLength.cpp
     SVG/SVGLineElement.cpp
     SVG/SVGPolygonElement.cpp
@@ -438,6 +440,7 @@ set(SOURCES
     WebAssembly/WebAssemblyTableConstructor.cpp
     WebAssembly/WebAssemblyTableObject.cpp
     WebAssembly/WebAssemblyTablePrototype.cpp
+    WebDriver/Capabilities.cpp
     WebDriver/Client.cpp
     WebDriver/ElementLocationStrategies.cpp
     WebDriver/Error.cpp

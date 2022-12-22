@@ -16,7 +16,7 @@ namespace JS {
 
 // 10.3.3 CreateBuiltinFunction ( behaviour, length, name, additionalInternalSlotsList [ , realm [ , prototype [ , prefix ] ] ] ), https://tc39.es/ecma262/#sec-createbuiltinfunction
 // NOTE: This doesn't consider additionalInternalSlotsList, which is rarely used, and can either be implemented using only the `function` lambda, or needs a NativeFunction subclass.
-NativeFunction* NativeFunction::create(Realm& allocating_realm, SafeFunction<ThrowCompletionOr<Value>(VM&)> behaviour, i32 length, PropertyKey const& name, Optional<Realm*> realm, Optional<Object*> prototype, Optional<StringView> const& prefix)
+NonnullGCPtr<NativeFunction> NativeFunction::create(Realm& allocating_realm, SafeFunction<ThrowCompletionOr<Value>(VM&)> behaviour, i32 length, PropertyKey const& name, Optional<Realm*> realm, Optional<Object*> prototype, Optional<StringView> const& prefix)
 {
     auto& vm = allocating_realm.vm();
 
@@ -36,7 +36,7 @@ NativeFunction* NativeFunction::create(Realm& allocating_realm, SafeFunction<Thr
     // 7. Set func.[[Extensible]] to true.
     // 8. Set func.[[Realm]] to realm.
     // 9. Set func.[[InitialName]] to null.
-    auto* function = allocating_realm.heap().allocate<NativeFunction>(allocating_realm, move(behaviour), prototype.value(), *realm.value());
+    auto function = allocating_realm.heap().allocate<NativeFunction>(allocating_realm, move(behaviour), prototype.value(), *realm.value());
 
     // 10. Perform SetFunctionLength(func, length).
     function->set_function_length(length);
@@ -51,7 +51,7 @@ NativeFunction* NativeFunction::create(Realm& allocating_realm, SafeFunction<Thr
     return function;
 }
 
-NativeFunction* NativeFunction::create(Realm& realm, FlyString const& name, SafeFunction<ThrowCompletionOr<Value>(VM&)> function)
+NonnullGCPtr<NativeFunction> NativeFunction::create(Realm& realm, FlyString const& name, SafeFunction<ThrowCompletionOr<Value>(VM&)> function)
 {
     return realm.heap().allocate<NativeFunction>(realm, name, move(function), *realm.intrinsics().function_prototype());
 }
@@ -160,7 +160,7 @@ ThrowCompletionOr<Value> NativeFunction::internal_call(Value this_argument, Mark
 }
 
 // 10.3.2 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-built-in-function-objects-construct-argumentslist-newtarget
-ThrowCompletionOr<Object*> NativeFunction::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> NativeFunction::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -219,7 +219,7 @@ ThrowCompletionOr<Object*> NativeFunction::internal_construct(MarkedVector<Value
     vm.pop_execution_context();
 
     // 12. Return ? result.
-    return result;
+    return *TRY(result);
 }
 
 ThrowCompletionOr<Value> NativeFunction::call()
@@ -227,7 +227,7 @@ ThrowCompletionOr<Value> NativeFunction::call()
     return m_native_function(vm());
 }
 
-ThrowCompletionOr<Object*> NativeFunction::construct(FunctionObject&)
+ThrowCompletionOr<NonnullGCPtr<Object>> NativeFunction::construct(FunctionObject&)
 {
     // Needs to be overridden if [[Construct]] is needed.
     VERIFY_NOT_REACHED();

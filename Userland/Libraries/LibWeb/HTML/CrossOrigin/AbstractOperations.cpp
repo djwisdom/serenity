@@ -78,7 +78,7 @@ JS::ThrowCompletionOr<JS::PropertyDescriptor> cross_origin_property_fallback(JS:
         return JS::PropertyDescriptor { .value = JS::js_undefined(), .writable = false, .enumerable = false, .configurable = true };
 
     // 2. Throw a "SecurityError" DOMException.
-    return throw_completion(WebIDL::SecurityError::create(*vm.current_realm(), String::formatted("Can't access property '{}' on cross-origin object", property_key)));
+    return throw_completion(WebIDL::SecurityError::create(*vm.current_realm(), DeprecatedString::formatted("Can't access property '{}' on cross-origin object", property_key)));
 }
 
 // 7.2.3.3 IsPlatformObjectSameOrigin ( O ), https://html.spec.whatwg.org/multipage/browsers.html#isplatformobjectsameorigin-(-o-)
@@ -196,7 +196,7 @@ JS::ThrowCompletionOr<JS::Value> cross_origin_get(JS::VM& vm, JS::Object const& 
 
     // 6. If getter is undefined, then throw a "SecurityError" DOMException.
     if (!getter.has_value())
-        return throw_completion(WebIDL::SecurityError::create(*vm.current_realm(), String::formatted("Can't get property '{}' on cross-origin object", property_key)));
+        return throw_completion(WebIDL::SecurityError::create(*vm.current_realm(), DeprecatedString::formatted("Can't get property '{}' on cross-origin object", property_key)));
 
     // 7. Return ? Call(getter, Receiver).
     return JS::call(vm, *getter, receiver);
@@ -222,7 +222,7 @@ JS::ThrowCompletionOr<bool> cross_origin_set(JS::VM& vm, JS::Object& object, JS:
     }
 
     // 4. Throw a "SecurityError" DOMException.
-    return throw_completion(WebIDL::SecurityError::create(*vm.current_realm(), String::formatted("Can't set property '{}' on cross-origin object", property_key)));
+    return throw_completion(WebIDL::SecurityError::create(*vm.current_realm(), DeprecatedString::formatted("Can't set property '{}' on cross-origin object", property_key)));
 }
 
 // 7.2.3.7 CrossOriginOwnPropertyKeys ( O ), https://html.spec.whatwg.org/multipage/browsers.html#crossoriginownpropertykeys-(-o-)
@@ -236,10 +236,10 @@ JS::MarkedVector<JS::Value> cross_origin_own_property_keys(Variant<Bindings::Loc
 
     // 2. For each e of CrossOriginProperties(O), append e.[[Property]] to keys.
     for (auto& entry : cross_origin_properties(object))
-        keys.append(JS::js_string(vm, move(entry.property)));
+        keys.append(JS::PrimitiveString::create(vm, move(entry.property)));
 
     // 3. Return the concatenation of keys and « "then", @@toStringTag, @@hasInstance, @@isConcatSpreadable ».
-    keys.append(JS::js_string(vm, vm.names.then.as_string()));
+    keys.append(JS::PrimitiveString::create(vm, vm.names.then.as_string()));
     keys.append(vm.well_known_symbol_to_string_tag());
     keys.append(vm.well_known_symbol_has_instance());
     keys.append(vm.well_known_symbol_is_concat_spreadable());

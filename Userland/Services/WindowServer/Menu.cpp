@@ -38,7 +38,7 @@ u32 find_ampersand_shortcut_character(StringView string)
     return 0;
 }
 
-Menu::Menu(ConnectionFromClient* client, int menu_id, String name)
+Menu::Menu(ConnectionFromClient* client, int menu_id, DeprecatedString name)
     : Core::Object(client)
     , m_client(client)
     , m_menu_id(menu_id)
@@ -73,6 +73,8 @@ int Menu::content_width() const
     int widest_text = 0;
     int widest_shortcut = 0;
     for (auto& item : m_items) {
+        if (!item.is_visible())
+            continue;
         if (item.type() != MenuItem::Text)
             continue;
         auto& use_font = item.is_default() ? font().bold_variant() : font();
@@ -108,11 +110,18 @@ void Menu::redraw(MenuItem const& menu_item)
 {
     if (!menu_window())
         return;
+    if (!menu_item.is_visible())
+        return;
     draw(menu_item);
     menu_window()->invalidate(menu_item.rect());
 }
 
-Window& Menu::ensure_menu_window(Gfx::IntPoint const& position)
+void Menu::invalidate_menu_window()
+{
+    m_menu_window = nullptr;
+}
+
+Window& Menu::ensure_menu_window(Gfx::IntPoint position)
 {
     auto& screen = Screen::closest_to_location(position);
     int width = this->content_width();
@@ -131,6 +140,8 @@ Window& Menu::ensure_menu_window(Gfx::IntPoint const& position)
 
     Gfx::IntPoint next_item_location(frame_thickness(), frame_thickness());
     for (auto& item : m_items) {
+        if (!item.is_visible())
+            continue;
         int height = 0;
         if (item.type() == MenuItem::Text)
             height = item_height();
@@ -191,13 +202,6 @@ void Menu::draw()
     painter.draw_rect(rect, Color::Black);
     painter.fill_rect(rect.shrunken(2, 2), palette.menu_base());
 
-    bool has_checkable_items = false;
-    bool has_items_with_icon = false;
-    for (auto& item : m_items) {
-        has_checkable_items = has_checkable_items | item.is_checkable();
-        has_items_with_icon = has_items_with_icon | !!item.icon();
-    }
-
     // Draw the stripe first, which may extend outside of individual items. We can
     // skip this step when painting an individual item since we're drawing all of them
     painter.fill_rect(stripe_rect(), palette.menu_stripe());
@@ -218,6 +222,9 @@ void Menu::draw()
 
 void Menu::draw(MenuItem const& item, bool is_drawing_all)
 {
+    if (!item.is_visible())
+        return;
+
     auto palette = WindowManager::the().palette();
     int width = this->content_width();
     Gfx::Painter painter(*menu_window()->backing_store());
@@ -400,6 +407,8 @@ void Menu::event(Core::Event& event)
                 // Default to the last enabled, non-separator item on key press if one has not been selected yet
                 for (auto i = static_cast<int>(m_items.size()) - 1; i >= 0; i--) {
                     auto& item = m_items.at(i);
+                    if (!item.is_visible())
+                        continue;
                     if (item.type() != MenuItem::Separator && item.is_enabled()) {
                         set_hovered_index(i, key == Key_Right);
                         break;
@@ -409,6 +418,8 @@ void Menu::event(Core::Event& event)
                 // Default to the first enabled, non-separator item on key press if one has not been selected yet
                 int counter = 0;
                 for (auto const& item : m_items) {
+                    if (!item.is_visible())
+                        continue;
                     if (item.type() != MenuItem::Separator && item.is_enabled()) {
                         set_hovered_index(counter, key == Key_Right);
                         break;
@@ -434,7 +445,7 @@ void Menu::event(Core::Event& event)
                     --new_index;
                 if (new_index == original_index)
                     return;
-            } while (item(new_index).type() == MenuItem::Separator || !item(new_index).is_enabled());
+            } while (item(new_index).type() == MenuItem::Separator || !item(new_index).is_enabled() || !item(new_index).is_visible());
 
             VERIFY(new_index >= 0);
             VERIFY(new_index <= static_cast<int>(m_items.size()) - 1);
@@ -461,7 +472,7 @@ void Menu::event(Core::Event& event)
                     ++new_index;
                 if (new_index == original_index)
                     return;
-            } while (item(new_index).type() == MenuItem::Separator || !item(new_index).is_enabled());
+            } while (item(new_index).type() == MenuItem::Separator || !item(new_index).is_enabled() || !item(new_index).is_visible());
 
             VERIFY(new_index >= 0);
             VERIFY(new_index <= static_cast<int>(m_items.size()) - 1);
@@ -550,6 +561,8 @@ void Menu::did_activate(MenuItem& item, bool leave_menu_open)
 bool Menu::activate_default()
 {
     for (auto& item : m_items) {
+        if (!item.is_visible())
+            continue;
         if (item.type() == MenuItem::Type::Separator)
             continue;
         if (item.is_enabled() && item.is_default()) {
@@ -574,13 +587,14 @@ bool Menu::remove_item_with_identifier(unsigned identifier)
     return m_items.remove_first_matching([&](auto& item) { return item->identifier() == identifier; });
 }
 
-int Menu::item_index_at(Gfx::IntPoint const& position)
+int Menu::item_index_at(Gfx::IntPoint position)
 {
-    int i = 0;
-    for (auto& item : m_items) {
+    for (int i = 0; i < static_cast<int>(m_items.size()); ++i) {
+        auto const& item = m_items[i];
+        if (!item.is_visible())
+            continue;
         if (item.rect().contains(position))
             return i;
-        ++i;
     }
     return -1;
 }
@@ -596,7 +610,7 @@ void Menu::redraw_if_theme_changed()
         redraw();
 }
 
-void Menu::open_button_menu(Gfx::IntPoint const& position, Gfx::IntRect const& button_rect)
+void Menu::open_button_menu(Gfx::IntPoint position, Gfx::IntRect const& button_rect)
 {
     if (is_empty())
         return;
@@ -617,12 +631,12 @@ void Menu::open_button_menu(Gfx::IntPoint const& position, Gfx::IntRect const& b
     WindowManager::the().did_popup_a_menu({});
 }
 
-void Menu::popup(Gfx::IntPoint const& position)
+void Menu::popup(Gfx::IntPoint position)
 {
     do_popup(position, true);
 }
 
-void Menu::do_popup(Gfx::IntPoint const& position, bool make_input, bool as_submenu)
+void Menu::do_popup(Gfx::IntPoint position, bool make_input, bool as_submenu)
 {
     if (is_empty()) {
         dbgln("Menu: Empty menu popup");

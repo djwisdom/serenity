@@ -79,14 +79,14 @@ PDFErrorOr<void> DocumentParser::parse_header()
 
     char major_ver = m_reader.read();
     if (major_ver != '1' && major_ver != '2')
-        return error(String::formatted("Unknown major version \"{}\"", major_ver));
+        return error(DeprecatedString::formatted("Unknown major version \"{}\"", major_ver));
 
     if (m_reader.read() != '.')
         return error("Malformed PDF version");
 
     char minor_ver = m_reader.read();
     if (minor_ver < '0' || minor_ver > '7')
-        return error(String::formatted("Unknown minor version \"{}\"", minor_ver));
+        return error(DeprecatedString::formatted("Unknown minor version \"{}\"", minor_ver));
 
     m_reader.consume_eol();
 
@@ -197,7 +197,7 @@ PDFErrorOr<void> DocumentParser::initialize_linearized_xref_table()
     auto main_xref_table = TRY(parse_xref_table());
     TRY(m_xref_table->merge(move(*main_xref_table)));
 
-    return {};
+    return validate_xref_table_and_fix_if_necessary();
 }
 
 PDFErrorOr<void> DocumentParser::initialize_hint_tables()
@@ -275,6 +275,56 @@ PDFErrorOr<void> DocumentParser::initialize_non_linearized_xref_table()
     m_xref_table = TRY(parse_xref_table());
     if (!m_trailer)
         m_trailer = TRY(parse_file_trailer());
+    return validate_xref_table_and_fix_if_necessary();
+}
+
+PDFErrorOr<void> DocumentParser::validate_xref_table_and_fix_if_necessary()
+{
+    /* While an xref table may start with an object number other than zero, this is
+       very uncommon and likely a sign of a document with broken indices.
+       Like most other PDF parsers seem to do, we still try to salvage the situation.
+       NOTE: This is probably not spec-compliant behavior.*/
+    size_t first_valid_index = 0;
+    while (m_xref_table->byte_offset_for_object(first_valid_index) == invalid_byte_offset)
+        first_valid_index++;
+
+    if (first_valid_index) {
+        auto& entries = m_xref_table->entries();
+
+        bool need_to_rebuild_table = true;
+        for (size_t i = first_valid_index; i < entries.size(); ++i) {
+            if (!entries[i].in_use)
+                continue;
+
+            size_t actual_object_number = 0;
+            if (entries[i].compressed) {
+                auto object_stream_index = m_xref_table->object_stream_for_object(i);
+                auto stream_offset = m_xref_table->byte_offset_for_object(object_stream_index);
+                m_reader.move_to(stream_offset);
+                auto first_number = TRY(parse_number());
+                actual_object_number = first_number.get_u32();
+            } else {
+                auto byte_offset = m_xref_table->byte_offset_for_object(i);
+                m_reader.move_to(byte_offset);
+                auto indirect_value = TRY(parse_indirect_value());
+                actual_object_number = indirect_value->index();
+            }
+
+            if (actual_object_number != i - first_valid_index) {
+                /* Our suspicion was wrong, not all object numbers are shifted equally.
+                   This could mean that the document is hopelessly broken, or it just
+                   starts at a non-zero object index for some reason. */
+                need_to_rebuild_table = false;
+                break;
+            }
+        }
+
+        if (need_to_rebuild_table) {
+            warnln("Broken xref table detected, trying to fix it.");
+            entries.remove(0, first_valid_index);
+        }
+    }
+
     return {};
 }
 
@@ -298,23 +348,23 @@ PDFErrorOr<NonnullRefPtr<XRefTable>> DocumentParser::parse_xref_stream()
     if (field_sizes->size() != 3)
         return error("Malformed xref dictionary");
 
-    auto object_count = dict->get_value("Size").get<int>();
+    auto highest_object_number = dict->get_value("Size").get<int>() - 1;
 
-    Vector<Tuple<int, int>> subsection_indices;
+    Vector<Tuple<int, int>> subsections;
     if (dict->contains(CommonNames::Index)) {
         auto index_array = TRY(dict->get_array(m_document, CommonNames::Index));
         if (index_array->size() % 2 != 0)
             return error("Malformed xref dictionary");
 
         for (size_t i = 0; i < index_array->size(); i += 2)
-            subsection_indices.append({ index_array->at(i).get<int>(), index_array->at(i + 1).get<int>() - 1 });
+            subsections.append({ index_array->at(i).get<int>(), index_array->at(i + 1).get<int>() - 1 });
     } else {
-        subsection_indices.append({ 0, object_count - 1 });
+        subsections.append({ 0, highest_object_number });
     }
     auto stream = TRY(parse_stream(dict));
     auto table = adopt_ref(*new XRefTable());
 
-    auto field_to_long = [](Span<const u8> field) -> long {
+    auto field_to_long = [](Span<u8 const> field) -> long {
         long value = 0;
         const u8 max = (field.size() - 1) * 8;
         for (size_t i = 0; i < field.size(); ++i) {
@@ -328,10 +378,14 @@ PDFErrorOr<NonnullRefPtr<XRefTable>> DocumentParser::parse_xref_stream()
 
     Vector<XRefEntry> entries;
 
-    for (int entry_index = 0; entry_index < object_count; ++entry_index) {
+    for (int entry_index = 0; subsection_index < subsections.size(); ++entry_index) {
         Array<long, 3> fields;
         for (size_t field_index = 0; field_index < 3; ++field_index) {
             auto field_size = field_sizes->at(field_index).get_u32();
+
+            if (byte_index + field_size > stream->bytes().size())
+                return error("The xref stream data cut off early");
+
             auto field = stream->bytes().slice(byte_index, field_size);
             fields[field_index] = field_to_long(field);
             byte_index += field_size;
@@ -343,9 +397,9 @@ PDFErrorOr<NonnullRefPtr<XRefTable>> DocumentParser::parse_xref_stream()
 
         entries.append({ fields[1], static_cast<u16>(fields[2]), type != 0, type == 2 });
 
-        auto indices = subsection_indices[subsection_index];
-        if (entry_index >= indices.get<1>()) {
-            table->add_section({ indices.get<0>(), indices.get<1>(), entries });
+        auto subsection = subsections[subsection_index];
+        if (entry_index >= subsection.get<1>()) {
+            table->add_section({ subsection.get<0>(), subsection.get<1>(), entries });
             entries.clear();
             subsection_index++;
         }
@@ -381,12 +435,12 @@ PDFErrorOr<NonnullRefPtr<XRefTable>> DocumentParser::parse_xref_table()
         auto object_count = object_count_value.get<int>();
 
         for (int i = 0; i < object_count; i++) {
-            auto offset_string = String(m_reader.bytes().slice(m_reader.offset(), 10));
+            auto offset_string = DeprecatedString(m_reader.bytes().slice(m_reader.offset(), 10));
             m_reader.move_by(10);
             if (!m_reader.consume(' '))
                 return error("Malformed xref entry");
 
-            auto generation_string = String(m_reader.bytes().slice(m_reader.offset(), 5));
+            auto generation_string = DeprecatedString(m_reader.bytes().slice(m_reader.offset(), 5));
             m_reader.move_by(5);
             if (!m_reader.consume(' '))
                 return error("Malformed xref entry");
@@ -647,7 +701,7 @@ PDFErrorOr<RefPtr<DictObject>> DocumentParser::conditionally_parse_page_tree_nod
     auto dict_value = TRY(parse_object_with_index(object_index));
     auto dict_object = dict_value.get<NonnullRefPtr<Object>>();
     if (!dict_object->is<DictObject>())
-        return error(String::formatted("Invalid page tree with xref index {}", object_index));
+        return error(DeprecatedString::formatted("Invalid page tree with xref index {}", object_index));
 
     auto dict = dict_object->cast<DictObject>();
     if (!dict->contains_any_of(CommonNames::Type, CommonNames::Parent, CommonNames::Kids, CommonNames::Count))
@@ -687,7 +741,7 @@ struct Formatter<PDF::DocumentParser::LinearizationDictionary> : Formatter<Strin
         builder.appendff("  offset_of_main_xref_table={}\n", dict.offset_of_main_xref_table);
         builder.appendff("  first_page={}\n", dict.first_page);
         builder.append('}');
-        return Formatter<StringView>::format(format_builder, builder.to_string());
+        return Formatter<StringView>::format(format_builder, builder.to_deprecated_string());
     }
 };
 
@@ -711,7 +765,7 @@ struct Formatter<PDF::DocumentParser::PageOffsetHintTable> : Formatter<StringVie
         builder.appendff("  bits_required_for_fraction_numerator={}\n", table.bits_required_for_fraction_numerator);
         builder.appendff("  shared_object_reference_fraction_denominator={}\n", table.shared_object_reference_fraction_denominator);
         builder.append('}');
-        return Formatter<StringView>::format(format_builder, builder.to_string());
+        return Formatter<StringView>::format(format_builder, builder.to_deprecated_string());
     }
 };
 
@@ -735,7 +789,7 @@ struct Formatter<PDF::DocumentParser::PageOffsetHintTableEntry> : Formatter<Stri
         builder.appendff("  page_content_stream_offset_number={}\n", entry.page_content_stream_offset_number);
         builder.appendff("  page_content_stream_length_number={}\n", entry.page_content_stream_length_number);
         builder.append('}');
-        return Formatter<StringView>::format(format_builder, builder.to_string());
+        return Formatter<StringView>::format(format_builder, builder.to_deprecated_string());
     }
 };
 

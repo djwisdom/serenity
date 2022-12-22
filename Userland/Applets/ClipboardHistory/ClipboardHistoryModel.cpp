@@ -21,7 +21,7 @@ ClipboardHistoryModel::ClipboardHistoryModel()
 {
 }
 
-String ClipboardHistoryModel::column_name(int column) const
+DeprecatedString ClipboardHistoryModel::column_name(int column) const
 {
     switch (column) {
     case Column::Data:
@@ -37,7 +37,7 @@ String ClipboardHistoryModel::column_name(int column) const
     }
 }
 
-static StringView bpp_for_format_resilient(String format)
+static StringView bpp_for_format_resilient(DeprecatedString format)
 {
     unsigned format_uint = format.to_uint().value_or(static_cast<unsigned>(Gfx::BitmapFormat::Invalid));
     // Cannot use Gfx::Bitmap::bpp_for_format here, as we have to accept invalid enum values.
@@ -70,7 +70,7 @@ GUI::Variant ClipboardHistoryModel::data(const GUI::ModelIndex& index, GUI::Mode
     switch (index.column()) {
     case Column::Data:
         if (data_and_type.mime_type.starts_with("text/"sv))
-            return String::copy(data_and_type.data);
+            return DeprecatedString::copy(data_and_type.data);
         if (data_and_type.mime_type == "image/x-serenityos") {
             StringBuilder builder;
             builder.append('[');
@@ -81,7 +81,7 @@ GUI::Variant ClipboardHistoryModel::data(const GUI::ModelIndex& index, GUI::Mode
             builder.append(bpp_for_format_resilient(data_and_type.metadata.get("format").value_or("0")));
             builder.append(']');
             builder.append(" bitmap"sv);
-            return builder.to_string();
+            return builder.to_deprecated_string();
         }
         if (data_and_type.mime_type.starts_with("glyph/"sv)) {
             StringBuilder builder;
@@ -96,7 +96,7 @@ GUI::Variant ClipboardHistoryModel::data(const GUI::ModelIndex& index, GUI::Mode
                 builder.append_code_point(start);
                 builder.appendff(") [{}x{}]", width, height);
             }
-            return builder.to_string();
+            return builder.to_deprecated_string();
         }
         return "<...>";
     case Column::Type:
@@ -104,7 +104,7 @@ GUI::Variant ClipboardHistoryModel::data(const GUI::ModelIndex& index, GUI::Mode
     case Column::Size:
         return AK::human_readable_size(data_and_type.data.size());
     case Column::Time:
-        return time.to_string();
+        return time.to_deprecated_string();
     default:
         VERIFY_NOT_REACHED();
     }
@@ -128,7 +128,7 @@ void ClipboardHistoryModel::remove_item(int index)
     m_history_items.remove(index);
 }
 
-void ClipboardHistoryModel::config_string_did_change(String const& domain, String const& group, String const& key, String const& value_string)
+void ClipboardHistoryModel::config_string_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, DeprecatedString const& value_string)
 {
     if (domain != "ClipboardHistory" || group != "ClipboardHistory")
         return;

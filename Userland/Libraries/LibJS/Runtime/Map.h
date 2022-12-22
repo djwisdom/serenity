@@ -19,11 +19,8 @@ namespace JS {
 class Map : public Object {
     JS_OBJECT(Map, Object);
 
-    // NOTE: This awkwardness is due to Set using a Map internally.
-    friend class Set;
-
 public:
-    static Map* create(Realm&);
+    static NonnullGCPtr<Map> create(Realm&);
 
     virtual ~Map() override = default;
 
@@ -68,13 +65,15 @@ public:
 
     private:
         friend class Map;
-        IteratorImpl(Map const& map) requires(IsConst)
+        IteratorImpl(Map const& map)
+        requires(IsConst)
             : m_map(map)
         {
             ensure_index();
         }
 
-        IteratorImpl(Map& map) requires(!IsConst)
+        IteratorImpl(Map& map)
+        requires(!IsConst)
             : m_map(map)
         {
             ensure_index();

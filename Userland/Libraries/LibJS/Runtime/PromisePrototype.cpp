@@ -32,7 +32,7 @@ void PromisePrototype::initialize(Realm& realm)
     define_native_function(realm, vm.names.finally, finally, 1, attr);
 
     // 27.2.5.5 Promise.prototype [ @@toStringTag ], https://tc39.es/ecma262/#sec-promise.prototype-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, vm.names.Promise.as_string()), Attribute::Configurable);
+    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, vm.names.Promise.as_string()), Attribute::Configurable);
 }
 
 // 27.2.5.4 Promise.prototype.then ( onFulfilled, onRejected ), https://tc39.es/ecma262/#sec-promise.prototype.then
@@ -45,7 +45,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromisePrototype::then)
 
     // 1. Let promise be the this value.
     // 2. If IsPromise(promise) is false, throw a TypeError exception.
-    auto* promise = TRY(typed_this_object(vm));
+    auto promise = TRY(typed_this_object(vm));
 
     // 3. Let C be ? SpeciesConstructor(promise, %Promise%).
     auto* constructor = TRY(species_constructor(vm, *promise, *realm.intrinsics().promise_constructor()));
@@ -113,7 +113,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromisePrototype::finally)
             auto result = TRY(call(vm, on_finally, js_undefined()));
 
             // ii. Let promise be ? PromiseResolve(C, result).
-            auto* promise = TRY(promise_resolve(vm, constructor, result));
+            auto promise = TRY(promise_resolve(vm, constructor, result));
 
             // iii. Let returnValue be a new Abstract Closure with no parameters that captures value and performs the following steps when called:
             auto return_value = [value_handle = make_handle(value)](auto&) -> ThrowCompletionOr<Value> {
@@ -122,7 +122,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromisePrototype::finally)
             };
 
             // iv. Let valueThunk be CreateBuiltinFunction(returnValue, 0, "", « »).
-            auto* value_thunk = NativeFunction::create(realm, move(return_value), 0, "");
+            auto value_thunk = NativeFunction::create(realm, move(return_value), 0, "");
 
             // v. Return ? Invoke(promise, "then", « valueThunk »).
             return TRY(Value(promise).invoke(vm, vm.names.then, value_thunk));
@@ -142,7 +142,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromisePrototype::finally)
             auto result = TRY(call(vm, on_finally, js_undefined()));
 
             // ii. Let promise be ? PromiseResolve(C, result).
-            auto* promise = TRY(promise_resolve(vm, constructor, result));
+            auto promise = TRY(promise_resolve(vm, constructor, result));
 
             // iii. Let throwReason be a new Abstract Closure with no parameters that captures reason and performs the following steps when called:
             auto throw_reason = [reason_handle = make_handle(reason)](auto&) -> ThrowCompletionOr<Value> {
@@ -151,7 +151,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromisePrototype::finally)
             };
 
             // iv. Let thrower be CreateBuiltinFunction(throwReason, 0, "", « »).
-            auto* thrower = NativeFunction::create(realm, move(throw_reason), 0, "");
+            auto thrower = NativeFunction::create(realm, move(throw_reason), 0, "");
 
             // v. Return ? Invoke(promise, "then", « thrower »).
             return TRY(Value(promise).invoke(vm, vm.names.then, thrower));

@@ -57,7 +57,7 @@ Sheet::Sheet(Workbook& workbook)
             warnln("Spreadsheet: Failed to parse runtime code");
             for (auto& error : script_or_error.error()) {
                 // FIXME: This doesn't print hints anymore
-                warnln("SyntaxError: {}", error.to_string());
+                warnln("SyntaxError: {}", error.to_deprecated_string());
             }
         } else {
             auto result = interpreter().run(script_or_error.value());
@@ -71,7 +71,7 @@ Sheet::Sheet(Workbook& workbook)
                     for (auto& traceback_frame : error.traceback()) {
                         auto& function_name = traceback_frame.function_name;
                         auto& source_range = traceback_frame.source_range;
-                        dbgln("  {} at {}:{}:{}", function_name, source_range.filename, source_range.start.line, source_range.start.column);
+                        dbgln("  {} at {}:{}:{}", function_name, source_range.filename(), source_range.start.line, source_range.start.column);
                     }
                 } else {
                     warnln();
@@ -114,9 +114,9 @@ static Optional<size_t> convert_from_string(StringView str, unsigned base = 26, 
     return value;
 }
 
-String Sheet::add_column()
+DeprecatedString Sheet::add_column()
 {
-    auto next_column = String::bijective_base_from(m_columns.size());
+    auto next_column = DeprecatedString::bijective_base_from(m_columns.size());
     m_columns.append(next_column);
     return next_column;
 }
@@ -172,7 +172,7 @@ JS::ThrowCompletionOr<JS::Value> Sheet::evaluate(StringView source, Cell* on_beh
         name);
 
     if (script_or_error.is_error())
-        return interpreter().vm().throw_completion<JS::SyntaxError>(script_or_error.error().first().to_string());
+        return interpreter().vm().throw_completion<JS::SyntaxError>(script_or_error.error().first().to_deprecated_string());
 
     return interpreter().run(script_or_error.value());
 }
@@ -229,7 +229,7 @@ Optional<size_t> Sheet::column_index(StringView column_name) const
     return index;
 }
 
-Optional<String> Sheet::column_arithmetic(StringView column_name, int offset)
+Optional<DeprecatedString> Sheet::column_arithmetic(StringView column_name, int offset)
 {
     auto maybe_index = column_index(column_name);
     if (!maybe_index.has_value())
@@ -260,17 +260,17 @@ Cell* Sheet::from_url(const URL& url)
 Optional<Position> Sheet::position_from_url(const URL& url) const
 {
     if (!url.is_valid()) {
-        dbgln("Invalid url: {}", url.to_string());
+        dbgln("Invalid url: {}", url.to_deprecated_string());
         return {};
     }
 
     if (url.scheme() != "spreadsheet" || url.host() != "cell") {
-        dbgln("Bad url: {}", url.to_string());
+        dbgln("Bad url: {}", url.to_deprecated_string());
         return {};
     }
 
     // FIXME: Figure out a way to do this cross-process.
-    VERIFY(url.path() == String::formatted("/{}", getpid()));
+    VERIFY(url.path() == DeprecatedString::formatted("/{}", getpid()));
 
     return parse_cell_name(url.fragment());
 }
@@ -422,21 +422,21 @@ RefPtr<Sheet> Sheet::from_json(JsonObject const& object, Workbook& workbook)
             OwnPtr<Cell> cell;
             switch (kind) {
             case Cell::LiteralString:
-                cell = make<Cell>(obj.get("value"sv).to_string(), position, *sheet);
+                cell = make<Cell>(obj.get("value"sv).to_deprecated_string(), position, *sheet);
                 break;
             case Cell::Formula: {
                 auto& vm = sheet->interpreter().vm();
-                auto value_or_error = JS::call(vm, parse_function, json, JS::js_string(vm, obj.get("value"sv).as_string()));
+                auto value_or_error = JS::call(vm, parse_function, json, JS::PrimitiveString::create(vm, obj.get("value"sv).as_string()));
                 if (value_or_error.is_error()) {
                     warnln("Failed to load previous value for cell {}, leaving as undefined", position.to_cell_identifier(sheet));
                     value_or_error = JS::js_undefined();
                 }
-                cell = make<Cell>(obj.get("source"sv).to_string(), value_or_error.release_value(), position, *sheet);
+                cell = make<Cell>(obj.get("source"sv).to_deprecated_string(), value_or_error.release_value(), position, *sheet);
                 break;
             }
             }
 
-            auto type_name = obj.has("type"sv) ? obj.get("type"sv).to_string() : "Numeric";
+            auto type_name = obj.has("type"sv) ? obj.get("type"sv).to_deprecated_string() : "Numeric";
             cell->set_type(type_name);
 
             auto type_meta = obj.get("type_metadata"sv);
@@ -465,7 +465,7 @@ RefPtr<Sheet> Sheet::from_json(JsonObject const& object, Workbook& workbook)
                         return IterationDecision::Continue;
 
                     auto& fmt_obj = fmt_val.as_object();
-                    auto fmt_cond = fmt_obj.get("condition"sv).to_string();
+                    auto fmt_cond = fmt_obj.get("condition"sv).to_deprecated_string();
                     if (fmt_cond.is_empty())
                         return IterationDecision::Continue;
 
@@ -518,7 +518,7 @@ Position Sheet::written_data_bounds(Optional<size_t> column_index) const
 bool Sheet::columns_are_standard() const
 {
     for (size_t i = 0; i < m_columns.size(); ++i) {
-        if (m_columns[i] != String::bijective_base_from(i))
+        if (m_columns[i] != DeprecatedString::bijective_base_from(i))
             return false;
     }
 
@@ -532,9 +532,9 @@ JsonObject Sheet::to_json() const
 
     auto save_format = [](auto const& format, auto& obj) {
         if (format.foreground_color.has_value())
-            obj.set("foreground_color", format.foreground_color.value().to_string());
+            obj.set("foreground_color", format.foreground_color.value().to_deprecated_string());
         if (format.background_color.has_value())
-            obj.set("background_color", format.background_color.value().to_string());
+            obj.set("background_color", format.background_color.value().to_deprecated_string());
     };
 
     auto bottom_right = written_data_bounds();
@@ -552,7 +552,7 @@ JsonObject Sheet::to_json() const
         StringBuilder builder;
         builder.append(column(it.key.column));
         builder.appendff("{}", it.key.row);
-        auto key = builder.to_string();
+        auto key = builder.to_deprecated_string();
 
         JsonObject data;
         data.set("kind", it.value->kind() == Cell::Kind::Formula ? "Formula" : "LiteralString");
@@ -605,9 +605,9 @@ JsonObject Sheet::to_json() const
     return object;
 }
 
-Vector<Vector<String>> Sheet::to_xsv() const
+Vector<Vector<DeprecatedString>> Sheet::to_xsv() const
 {
-    Vector<Vector<String>> data;
+    Vector<Vector<DeprecatedString>> data;
 
     auto bottom_right = written_data_bounds();
 
@@ -615,7 +615,7 @@ Vector<Vector<String>> Sheet::to_xsv() const
     size_t column_count = m_columns.size();
     if (columns_are_standard()) {
         column_count = bottom_right.column + 1;
-        Vector<String> cols;
+        Vector<DeprecatedString> cols;
         for (size_t i = 0; i < column_count; ++i)
             cols.append(m_columns[i]);
         data.append(move(cols));
@@ -624,7 +624,7 @@ Vector<Vector<String>> Sheet::to_xsv() const
     }
 
     for (size_t i = 0; i <= bottom_right.row; ++i) {
-        Vector<String> row;
+        Vector<DeprecatedString> row;
         row.resize(column_count);
         for (size_t j = 0; j < column_count; ++j) {
             auto cell = at({ j, i });
@@ -652,7 +652,7 @@ RefPtr<Sheet> Sheet::from_xsv(Reader::XSV const& xsv, Workbook& workbook)
     } else {
         sheet->m_columns.ensure_capacity(cols.size());
         for (size_t i = 0; i < cols.size(); ++i)
-            sheet->m_columns.append(String::bijective_base_from(i));
+            sheet->m_columns.append(DeprecatedString::bijective_base_from(i));
     }
     for (size_t i = 0; i < max(rows, Sheet::default_row_count); ++i)
         sheet->add_row();
@@ -712,7 +712,7 @@ JsonObject Sheet::gather_documentation() const
     return m_cached_documentation.value();
 }
 
-String Sheet::generate_inline_documentation_for(StringView function, size_t argument_index)
+DeprecatedString Sheet::generate_inline_documentation_for(StringView function, size_t argument_index)
 {
     if (!m_cached_documentation.has_value())
         gather_documentation();
@@ -720,13 +720,13 @@ String Sheet::generate_inline_documentation_for(StringView function, size_t argu
     auto& docs = m_cached_documentation.value();
     auto entry = docs.get(function);
     if (entry.is_null() || !entry.is_object())
-        return String::formatted("{}(...???{})", function, argument_index);
+        return DeprecatedString::formatted("{}(...???{})", function, argument_index);
 
     auto& entry_object = entry.as_object();
     size_t argc = entry_object.get("argc"sv).to_int(0);
     auto argnames_value = entry_object.get("argnames"sv);
     if (!argnames_value.is_array())
-        return String::formatted("{}(...{}???{})", function, argc, argument_index);
+        return DeprecatedString::formatted("{}(...{}???{})", function, argc, argument_index);
     auto& argnames = argnames_value.as_array();
     StringBuilder builder;
     builder.appendff("{}(", function);
@@ -737,7 +737,7 @@ String Sheet::generate_inline_documentation_for(StringView function, size_t argu
             builder.append('<');
         else if (i >= argc)
             builder.append('[');
-        builder.append(argnames[i].to_string());
+        builder.append(argnames[i].to_deprecated_string());
         if (i == argument_index)
             builder.append('>');
         else if (i >= argc)
@@ -748,9 +748,9 @@ String Sheet::generate_inline_documentation_for(StringView function, size_t argu
     return builder.build();
 }
 
-String Position::to_cell_identifier(Sheet const& sheet) const
+DeprecatedString Position::to_cell_identifier(Sheet const& sheet) const
 {
-    return String::formatted("{}{}", sheet.column(column), row);
+    return DeprecatedString::formatted("{}{}", sheet.column(column), row);
 }
 
 URL Position::to_url(Sheet const& sheet) const
@@ -758,12 +758,12 @@ URL Position::to_url(Sheet const& sheet) const
     URL url;
     url.set_scheme("spreadsheet");
     url.set_host("cell");
-    url.set_paths({ String::number(getpid()) });
+    url.set_paths({ DeprecatedString::number(getpid()) });
     url.set_fragment(to_cell_identifier(sheet));
     return url;
 }
 
-CellChange::CellChange(Cell& cell, String const& previous_data)
+CellChange::CellChange(Cell& cell, DeprecatedString const& previous_data)
     : m_cell(cell)
     , m_previous_data(previous_data)
 {

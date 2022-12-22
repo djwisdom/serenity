@@ -7,9 +7,8 @@
 #include <AK/JsonArray.h>
 #include <AK/JsonObject.h>
 #include <AK/NumberFormat.h>
-#include <AK/String.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibMain/Main.h>
 #include <inttypes.h>
 #include <stdlib.h>
@@ -17,13 +16,13 @@
 static bool flag_human_readable = false;
 
 struct FileSystem {
-    String fs;
+    DeprecatedString fs;
     size_t total_block_count { 0 };
     size_t free_block_count { 0 };
     size_t total_inode_count { 0 };
     size_t free_inode_count { 0 };
     size_t block_size { 0 };
-    String mount_point;
+    DeprecatedString mount_point;
 };
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
@@ -33,7 +32,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_option(flag_human_readable, "Print human-readable sizes", "human-readable", 'h');
     args_parser.parse(arguments);
 
-    auto file = TRY(Core::File::open("/sys/kernel/df", Core::OpenMode::ReadOnly));
+    auto file = TRY(Core::Stream::File::open("/sys/kernel/df"sv, Core::Stream::OpenMode::Read));
 
     if (flag_human_readable) {
         outln("Filesystem      Size        Used    Available   Mount point");
@@ -41,18 +40,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         outln("Filesystem    Blocks        Used    Available   Mount point");
     }
 
-    auto file_contents = file->read_all();
+    auto file_contents = TRY(file->read_until_eof());
     auto json_result = TRY(JsonValue::from_string(file_contents));
     auto const& json = json_result.as_array();
     json.for_each([](auto& value) {
         auto& fs_object = value.as_object();
-        auto fs = fs_object.get("class_name"sv).to_string();
+        auto fs = fs_object.get("class_name"sv).to_deprecated_string();
         auto total_block_count = fs_object.get("total_block_count"sv).to_u64();
         auto free_block_count = fs_object.get("free_block_count"sv).to_u64();
         [[maybe_unused]] auto total_inode_count = fs_object.get("total_inode_count"sv).to_u64();
         [[maybe_unused]] auto free_inode_count = fs_object.get("free_inode_count"sv).to_u64();
         auto block_size = fs_object.get("block_size"sv).to_u64();
-        auto mount_point = fs_object.get("mount_point"sv).to_string();
+        auto mount_point = fs_object.get("mount_point"sv).to_deprecated_string();
 
         out("{:10}", fs);
 

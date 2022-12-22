@@ -121,11 +121,6 @@ if [ "$installed_major_version" -lt "$SERENITY_QEMU_MIN_REQ_MAJOR_VERSION" ] ||
     die
 fi
 
-# https://github.com/SerenityOS/serenity/issues/14952
-if [ "$installed_major_version" -ge 7 ] && [ "$installed_minor_version" -gt 0  ]; then
-    SERENITY_MACHINE_FORCE_VERSION_SEVEN_ZERO="-machine pc-i440fx-7.0"
-fi
-
 NATIVE_WINDOWS_QEMU="0"
 
 if command -v wslpath >/dev/null; then
@@ -238,6 +233,16 @@ if [ -z "$SERENITY_HOST_IP" ]; then
     SERENITY_HOST_IP="127.0.0.1"
 fi
 
+if command -v wslpath >/dev/null; then
+   SERENITY_DISABLE_GDB_SOCKET=1
+fi
+
+if [ "$(uname)" = "Darwin" ] &&
+   [ "${SERENITY_VIRT_TECH_ARG}" = "--accel hvf" ]; then
+  # HVF doesn't support gdbstub per https://wiki.qemu.org/Features/HVF
+  SERENITY_DISABLE_GDB_SOCKET=1
+fi
+
 if [ -z "$SERENITY_DISABLE_GDB_SOCKET" ]; then
     SERENITY_EXTRA_QEMU_ARGS="$SERENITY_EXTRA_QEMU_ARGS -gdb tcp:${SERENITY_HOST_IP}:1234"
 fi
@@ -263,7 +268,6 @@ if [ -z "$SERENITY_MACHINE" ]; then
         SERENITY_MACHINE="-M raspi3b -serial stdio"
     else
         SERENITY_MACHINE="
-        $SERENITY_MACHINE_FORCE_VERSION_SEVEN_ZERO
         -m $SERENITY_RAM_SIZE
         -smp $SERENITY_CPUS
         -display $SERENITY_QEMU_DISPLAY_BACKEND

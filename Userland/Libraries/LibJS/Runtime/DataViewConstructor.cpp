@@ -5,6 +5,7 @@
  */
 
 #include <AK/Checked.h>
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/DataViewConstructor.h>
@@ -37,7 +38,7 @@ ThrowCompletionOr<Value> DataViewConstructor::call()
 }
 
 // 25.3.2.1 DataView ( buffer [ , byteOffset [ , byteLength ] ] ), https://tc39.es/ecma262/#sec-dataview-buffer-byteoffset-bytelength
-ThrowCompletionOr<Object*> DataViewConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> DataViewConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -66,7 +67,7 @@ ThrowCompletionOr<Object*> DataViewConstructor::construct(FunctionObject& new_ta
             return vm.throw_completion<RangeError>(ErrorType::InvalidLength, vm.names.DataView);
     }
 
-    auto* data_view = TRY(ordinary_create_from_constructor<DataView>(vm, new_target, &Intrinsics::data_view_prototype, &array_buffer, view_byte_length, offset));
+    auto data_view = TRY(ordinary_create_from_constructor<DataView>(vm, new_target, &Intrinsics::data_view_prototype, &array_buffer, view_byte_length, offset));
 
     if (array_buffer.is_detached())
         return vm.throw_completion<TypeError>(ErrorType::DetachedArrayBuffer);

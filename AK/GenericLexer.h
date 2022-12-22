@@ -70,7 +70,7 @@ public:
     }
 
     template<typename T>
-    constexpr bool consume_specific(const T& next)
+    constexpr bool consume_specific(T const& next)
     {
         if (!next_is(next))
             return false;
@@ -84,7 +84,7 @@ public:
     }
 
 #ifndef KERNEL
-    bool consume_specific(String const& next)
+    bool consume_specific(DeprecatedString const& next)
     {
         return consume_specific(StringView { next });
     }
@@ -118,7 +118,7 @@ public:
     StringView consume_until(StringView);
     StringView consume_quoted_string(char escape_char = 0);
 #ifndef KERNEL
-    String consume_and_unescape_string(char escape_char = '\\');
+    DeprecatedString consume_and_unescape_string(char escape_char = '\\');
 #endif
 
     enum class UnicodeEscapeError {
@@ -239,7 +239,9 @@ constexpr auto is_quote = is_any_of("'\""sv);
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::GenericLexer;
 using AK::is_any_of;
 using AK::is_path_separator;
 using AK::is_quote;
+#endif

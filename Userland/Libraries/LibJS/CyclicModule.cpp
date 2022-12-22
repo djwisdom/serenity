@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Debug.h>
+#include <AK/TypeCasts.h>
 #include <LibJS/CyclicModule.h>
+#include <LibJS/Runtime/ModuleRequest.h>
 #include <LibJS/Runtime/PromiseCapability.h>
 #include <LibJS/Runtime/PromiseConstructor.h>
 #include <LibJS/Runtime/VM.h>
@@ -75,7 +78,7 @@ ThrowCompletionOr<u32> CyclicModule::inner_module_linking(VM& vm, Vector<Module*
     //    b. Return index.
     // Note: Step 1, 1.a and 1.b are handled in Module.cpp
 
-    dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] inner_module_linking[{}](vm, {}, {})", this, String::join(',', stack), index);
+    dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] inner_module_linking[{}](vm, {}, {})", this, DeprecatedString::join(',', stack), index);
 
     // 2. If module.[[Status]] is linking, linked, evaluating-async, or evaluated, then
     if (m_status == ModuleStatus::Linking || m_status == ModuleStatus::Linked || m_status == ModuleStatus::EvaluatingAsync || m_status == ModuleStatus::Evaluated) {
@@ -188,10 +191,19 @@ ThrowCompletionOr<Promise*> CyclicModule::evaluate(VM& vm)
     // 2. Assert: module.[[Status]] is linked, evaluating-async, or evaluated.
     VERIFY(m_status == ModuleStatus::Linked || m_status == ModuleStatus::EvaluatingAsync || m_status == ModuleStatus::Evaluated);
 
+    // NOTE: The spec does not catch the case where evaluate is called twice on a script which failed
+    //       during evaluation. This means the script is evaluated but does not have a cycle root.
+    //       In that case we first check if this module itself has a top level capability.
+    //       See also: https://github.com/tc39/ecma262/issues/2823 .
+    if (m_top_level_capability != nullptr)
+        return verify_cast<Promise>(m_top_level_capability->promise().ptr());
+
     // 3. If module.[[Status]] is evaluating-async or evaluated, set module to module.[[CycleRoot]].
     if (m_status == ModuleStatus::EvaluatingAsync || m_status == ModuleStatus::Evaluated) {
         // Note: This will continue this function with module.[[CycleRoot]]
-        VERIFY(m_cycle_root && m_cycle_root->m_status == ModuleStatus::Linked && this != m_cycle_root);
+        VERIFY(m_cycle_root);
+        VERIFY(this != m_cycle_root);
+        VERIFY(m_cycle_root->m_status == ModuleStatus::Linked);
         dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] evaluate[{}](vm) deferring to cycle root at {}", this, m_cycle_root);
         return m_cycle_root->evaluate(vm);
     }
@@ -270,7 +282,7 @@ ThrowCompletionOr<Promise*> CyclicModule::evaluate(VM& vm)
 // 16.2.1.5.2.1 InnerModuleEvaluation ( module, stack, index ), https://tc39.es/ecma262/#sec-innermoduleevaluation
 ThrowCompletionOr<u32> CyclicModule::inner_module_evaluation(VM& vm, Vector<Module*>& stack, u32 index)
 {
-    dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] inner_module_evaluation[{}](vm, {}, {})", this, String::join(", "sv, stack), index);
+    dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] inner_module_evaluation[{}](vm, {}, {})", this, DeprecatedString::join(", "sv, stack), index);
     // Note: Step 1 is performed in Module.cpp
 
     // 2. If module.[[Status]] is evaluating-async or evaluated, then
@@ -461,7 +473,7 @@ void CyclicModule::execute_async_module(VM& vm)
     };
 
     // 5. Let onFulfilled be CreateBuiltinFunction(fulfilledClosure, 0, "", « »).
-    auto* on_fulfilled = NativeFunction::create(realm, move(fulfilled_closure), 0, "");
+    auto on_fulfilled = NativeFunction::create(realm, move(fulfilled_closure), 0, "");
 
     // 6. Let rejectedClosure be a new Abstract Closure with parameters (error) that captures module and performs the following steps when called:
     auto rejected_closure = [&](VM& vm) -> ThrowCompletionOr<Value> {
@@ -475,7 +487,7 @@ void CyclicModule::execute_async_module(VM& vm)
     };
 
     // 7. Let onRejected be CreateBuiltinFunction(rejectedClosure, 0, "", « »).
-    auto* on_rejected = NativeFunction::create(realm, move(rejected_closure), 0, "");
+    auto on_rejected = NativeFunction::create(realm, move(rejected_closure), 0, "");
 
     // 8. Perform PerformPromiseThen(capability.[[Promise]], onFulfilled, onRejected).
     verify_cast<Promise>(capability->promise().ptr())->perform_then(on_fulfilled, on_rejected, {});

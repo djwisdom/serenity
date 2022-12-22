@@ -5,6 +5,7 @@
  */
 
 #include <AK/Debug.h>
+#include <AK/TypeCasts.h>
 #include <AK/URLParser.h>
 #include <LibJS/Heap/Heap.h>
 #include <LibJS/Runtime/VM.h>
@@ -28,7 +29,7 @@ void Response::visit_edges(JS::Cell::Visitor& visitor)
 
 JS::NonnullGCPtr<Response> Response::create(JS::VM& vm)
 {
-    return { *vm.heap().allocate_without_realm<Response>(HeaderList::create(vm)) };
+    return vm.heap().allocate_without_realm<Response>(HeaderList::create(vm));
 }
 
 // https://fetch.spec.whatwg.org/#ref-for-concept-network-error%E2%91%A3
@@ -42,7 +43,7 @@ JS::NonnullGCPtr<Response> Response::aborted_network_error(JS::VM& vm)
     return response;
 }
 
-JS::NonnullGCPtr<Response> Response::network_error(JS::VM& vm, String message)
+JS::NonnullGCPtr<Response> Response::network_error(JS::VM& vm, DeprecatedString message)
 {
     dbgln_if(WEB_FETCH_DEBUG, "Fetch: Creating network error response with message: {}", message);
     auto response = Response::create(vm);
@@ -92,7 +93,7 @@ Optional<AK::URL const&> Response::url() const
 }
 
 // https://fetch.spec.whatwg.org/#concept-response-location-url
-ErrorOr<Optional<AK::URL>> Response::location_url(Optional<String> const& request_fragment) const
+ErrorOr<Optional<AK::URL>> Response::location_url(Optional<DeprecatedString> const& request_fragment) const
 {
     // The location URL of a response response, given null or an ASCII string requestFragment, is the value returned by the following steps. They return null, failure, or a URL.
 
@@ -192,7 +193,7 @@ ErrorOr<JS::NonnullGCPtr<BasicFilteredResponse>> BasicFilteredResponse::create(J
             TRY(header_list->append(header));
     }
 
-    return { *vm.heap().allocate_without_realm<BasicFilteredResponse>(internal_response, header_list) };
+    return vm.heap().allocate_without_realm<BasicFilteredResponse>(internal_response, header_list);
 }
 
 BasicFilteredResponse::BasicFilteredResponse(JS::NonnullGCPtr<Response> internal_response, JS::NonnullGCPtr<HeaderList> header_list)
@@ -222,7 +223,7 @@ ErrorOr<JS::NonnullGCPtr<CORSFilteredResponse>> CORSFilteredResponse::create(JS:
             TRY(header_list->append(header));
     }
 
-    return { *vm.heap().allocate_without_realm<CORSFilteredResponse>(internal_response, header_list) };
+    return vm.heap().allocate_without_realm<CORSFilteredResponse>(internal_response, header_list);
 }
 
 CORSFilteredResponse::CORSFilteredResponse(JS::NonnullGCPtr<Response> internal_response, JS::NonnullGCPtr<HeaderList> header_list)
@@ -241,7 +242,7 @@ JS::NonnullGCPtr<OpaqueFilteredResponse> OpaqueFilteredResponse::create(JS::VM& 
 {
     // An opaque filtered response is a filtered response whose type is "opaque", URL list is the empty list,
     // status is 0, status message is the empty byte sequence, header list is empty, and body is null.
-    return { *vm.heap().allocate_without_realm<OpaqueFilteredResponse>(internal_response, HeaderList::create(vm)) };
+    return vm.heap().allocate_without_realm<OpaqueFilteredResponse>(internal_response, HeaderList::create(vm));
 }
 
 OpaqueFilteredResponse::OpaqueFilteredResponse(JS::NonnullGCPtr<Response> internal_response, JS::NonnullGCPtr<HeaderList> header_list)
@@ -260,7 +261,7 @@ JS::NonnullGCPtr<OpaqueRedirectFilteredResponse> OpaqueRedirectFilteredResponse:
 {
     // An opaque-redirect filtered response is a filtered response whose type is "opaqueredirect",
     // status is 0, status message is the empty byte sequence, header list is empty, and body is null.
-    return { *vm.heap().allocate_without_realm<OpaqueRedirectFilteredResponse>(internal_response, HeaderList::create(vm)) };
+    return vm.heap().allocate_without_realm<OpaqueRedirectFilteredResponse>(internal_response, HeaderList::create(vm));
 }
 
 OpaqueRedirectFilteredResponse::OpaqueRedirectFilteredResponse(JS::NonnullGCPtr<Response> internal_response, JS::NonnullGCPtr<HeaderList> header_list)

@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
-#include <AK/String.h>
 #include <LibCore/FileStream.h>
 #include <LibGL/GL/gl.h>
 #include <LibGL/GLContext.h>
@@ -31,7 +31,7 @@ static NonnullOwnPtr<GL::GLContext> create_testing_context(int width, int height
 
 static void expect_bitmap_equals_reference(Gfx::Bitmap const& bitmap, StringView test_name)
 {
-    auto reference_filename = String::formatted("{}.qoi", test_name);
+    auto reference_filename = DeprecatedString::formatted("{}.qoi", test_name);
 
     if constexpr (SAVE_OUTPUT) {
         auto target_path = LexicalPath("/home/anon").append(reference_filename);
@@ -42,7 +42,7 @@ static void expect_bitmap_equals_reference(Gfx::Bitmap const& bitmap, StringView
         EXPECT_EQ(number_of_bytes_written, qoi_buffer.size());
     }
 
-    auto reference_image_path = String::formatted(REFERENCE_IMAGE_DIR "/{}", reference_filename);
+    auto reference_image_path = DeprecatedString::formatted(REFERENCE_IMAGE_DIR "/{}", reference_filename);
     auto reference_bitmap = MUST(Gfx::Bitmap::try_load_from_file(reference_image_path));
     EXPECT_EQ(reference_bitmap->visually_equals(bitmap), true);
 }
@@ -268,4 +268,34 @@ TEST_CASE(0009_test_draw_elements_in_display_list)
 
     context->present();
     expect_bitmap_equals_reference(context->frontbuffer(), "0009_test_draw_elements_in_display_list"sv);
+}
+
+TEST_CASE(0010_test_store_data_in_buffer)
+{
+    auto context = create_testing_context(64, 64);
+
+    glColor3f(1.f, 0.f, 0.f);
+    glEnableClientState(GL_VERTEX_ARRAY);
+
+    float vertices[] = { 0.f, .5f, -.5f, -.5f, .5f, -.5f };
+    u8 indices[] = { 0, 1, 2 };
+
+    GLuint buffers[2];
+    glGenBuffers(2, buffers);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buffers[0]);
+    glBufferData(GL_ARRAY_BUFFER, 6 * sizeof(float), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[1]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, 3, indices, GL_STATIC_DRAW);
+
+    glVertexPointer(2, GL_FLOAT, 0, 0);
+    glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_BYTE, 0);
+
+    glDeleteBuffers(2, buffers);
+
+    EXPECT_EQ(glGetError(), 0u);
+
+    context->present();
+    expect_bitmap_equals_reference(context->frontbuffer(), "0010_test_store_data_in_buffer"sv);
 }

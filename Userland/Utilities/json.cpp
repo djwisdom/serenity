@@ -14,7 +14,7 @@
 #include <AK/Types.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <unistd.h>
@@ -43,15 +43,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     VERIFY(spaces_in_indent >= 0);
     args_parser.parse(arguments);
 
-    RefPtr<Core::File> file;
-    if (path == nullptr)
-        file = Core::File::standard_input();
-    else
-        file = TRY(Core::File::open(path, Core::OpenMode::ReadOnly));
+    auto file = TRY(Core::Stream::File::open_file_or_standard_stream(path, Core::Stream::OpenMode::Read));
 
     TRY(Core::System::pledge("stdio"));
 
-    auto file_contents = file->read_all();
+    auto file_contents = TRY(file->read_until_eof());
     auto json = TRY(JsonValue::from_string(file_contents));
     if (!dotted_key.is_empty()) {
         auto key_parts = dotted_key.split_view('.');
@@ -114,7 +110,7 @@ void print(JsonValue const& value, int spaces_per_indent, int indent, bool use_c
     }
     if (value.is_string())
         out("\"");
-    out("{}", value.to_string());
+    out("{}", value.to_deprecated_string());
     if (value.is_string())
         out("\"");
     if (use_color)

@@ -17,7 +17,7 @@
 namespace JS {
 
 // 10.4.2.2 ArrayCreate ( length [ , proto ] ), https://tc39.es/ecma262/#sec-arraycreate
-ThrowCompletionOr<Array*> Array::create(Realm& realm, u64 length, Object* prototype)
+ThrowCompletionOr<NonnullGCPtr<Array>> Array::create(Realm& realm, u64 length, Object* prototype)
 {
     auto& vm = realm.vm();
 
@@ -32,7 +32,7 @@ ThrowCompletionOr<Array*> Array::create(Realm& realm, u64 length, Object* protot
     // 3. Let A be MakeBasicObject(« [[Prototype]], [[Extensible]] »).
     // 4. Set A.[[Prototype]] to proto.
     // 5. Set A.[[DefineOwnProperty]] as specified in 10.4.2.1.
-    auto* array = realm.heap().allocate<Array>(realm, *prototype);
+    auto array = realm.heap().allocate<Array>(realm, *prototype);
 
     // 6. Perform ! OrdinaryDefineOwnProperty(A, "length", PropertyDescriptor { [[Value]]: 𝔽(length), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false }).
     MUST(array->internal_define_own_property(vm.names.length, { .value = Value(length), .writable = true, .enumerable = false, .configurable = false }));
@@ -42,10 +42,10 @@ ThrowCompletionOr<Array*> Array::create(Realm& realm, u64 length, Object* protot
 }
 
 // 7.3.18 CreateArrayFromList ( elements ), https://tc39.es/ecma262/#sec-createarrayfromlist
-Array* Array::create_from(Realm& realm, Vector<Value> const& elements)
+NonnullGCPtr<Array> Array::create_from(Realm& realm, Vector<Value> const& elements)
 {
     // 1. Let array be ! ArrayCreate(0).
-    auto* array = MUST(Array::create(realm, 0));
+    auto array = MUST(Array::create(realm, 0));
 
     // 2. Let n be 0.
     // 3. For each element e of elements, do
@@ -61,7 +61,7 @@ Array* Array::create_from(Realm& realm, Vector<Value> const& elements)
 }
 
 Array::Array(Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
 {
 }
 
@@ -186,10 +186,10 @@ ThrowCompletionOr<double> compare_array_elements(VM& vm, Value x, Value y, Funct
     }
 
     // 5. Let xString be ? ToString(x).
-    auto* x_string = js_string(vm, TRY(x.to_string(vm)));
+    auto x_string = PrimitiveString::create(vm, TRY(x.to_string(vm)));
 
     // 6. Let yString be ? ToString(y).
-    auto* y_string = js_string(vm, TRY(y.to_string(vm)));
+    auto y_string = PrimitiveString::create(vm, TRY(y.to_string(vm)));
 
     // 7. Let xSmaller be ! IsLessThan(xString, yString, true).
     auto x_smaller = MUST(is_less_than(vm, x_string, y_string, true));
@@ -330,7 +330,7 @@ ThrowCompletionOr<MarkedVector<Value>> Array::internal_own_property_keys() const
     auto& vm = this->vm();
     auto keys = TRY(Object::internal_own_property_keys());
     // FIXME: This is pretty expensive, find a better way to do this
-    keys.insert(indexed_properties().real_size(), js_string(vm, vm.names.length.as_string()));
+    keys.insert(indexed_properties().real_size(), PrimitiveString::create(vm, vm.names.length.as_string()));
     return { move(keys) };
 }
 

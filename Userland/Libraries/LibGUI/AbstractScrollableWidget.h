@@ -50,22 +50,28 @@ public:
     Widget& corner_widget() { return *m_corner_widget; }
     Widget const& corner_widget() const { return *m_corner_widget; }
 
+    void set_banner_widget(Widget*);
+    Widget* banner_widget() { return m_banner_widget; }
+    Widget const* banner_widget() const { return m_banner_widget; }
+
     void scroll_to_top();
     void scroll_to_bottom();
+    void update_scrollbar_ranges();
 
     void set_automatic_scrolling_timer(bool active);
-    virtual Gfx::IntPoint automatic_scroll_delta_from_position(Gfx::IntPoint const&) const;
+    virtual Gfx::IntPoint automatic_scroll_delta_from_position(Gfx::IntPoint) const;
 
     int width_occupied_by_vertical_scrollbar() const;
     int height_occupied_by_horizontal_scrollbar() const;
+    int height_occupied_by_banner_widget() const;
 
     virtual Margins content_margins() const override;
 
     void set_should_hide_unnecessary_scrollbars(bool);
     bool should_hide_unnecessary_scrollbars() const { return m_should_hide_unnecessary_scrollbars; }
 
-    Gfx::IntPoint to_content_position(Gfx::IntPoint const& widget_position) const;
-    Gfx::IntPoint to_widget_position(Gfx::IntPoint const& content_position) const;
+    Gfx::IntPoint to_content_position(Gfx::IntPoint widget_position) const;
+    Gfx::IntPoint to_widget_position(Gfx::IntPoint content_position) const;
 
     Gfx::IntRect to_content_rect(Gfx::IntRect const& widget_rect) const { return { to_content_position(widget_rect.location()), widget_rect.size() }; }
     Gfx::IntRect to_widget_rect(Gfx::IntRect const& content_rect) const { return { to_widget_position(content_rect.location()), content_rect.size() }; }
@@ -78,13 +84,12 @@ protected:
     virtual void resize_event(ResizeEvent&) override;
     virtual void mousewheel_event(MouseEvent&) override;
     virtual void did_scroll() { }
-    void set_content_size(Gfx::IntSize const&);
-    void set_min_content_size(Gfx::IntSize const&);
-    void set_size_occupied_by_fixed_elements(Gfx::IntSize const&);
+    void set_content_size(Gfx::IntSize);
+    void set_min_content_size(Gfx::IntSize);
+    void set_size_occupied_by_fixed_elements(Gfx::IntSize);
     virtual void on_automatic_scrolling_timer_fired() {};
     int autoscroll_threshold() const { return m_autoscroll_threshold; }
     void update_scrollbar_visibility();
-    void update_scrollbar_ranges();
 
 private:
     class AbstractScrollableWidgetScrollbar final : public Scrollbar {
@@ -111,6 +116,7 @@ private:
     RefPtr<AbstractScrollableWidgetScrollbar> m_vertical_scrollbar;
     RefPtr<AbstractScrollableWidgetScrollbar> m_horizontal_scrollbar;
     RefPtr<Widget> m_corner_widget;
+    WeakPtr<Widget> m_banner_widget;
     Gfx::IntSize m_content_size;
     Gfx::IntSize m_min_content_size;
     Gfx::IntSize m_size_occupied_by_fixed_elements;

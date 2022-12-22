@@ -6,6 +6,7 @@
  */
 
 #include <AK/StringBuilder.h>
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/GlobalObject.h>
@@ -23,7 +24,7 @@ namespace JS::Temporal {
 
 // 7 Temporal.Duration Objects, https://tc39.es/proposal-temporal/#sec-temporal-duration-objects
 Duration::Duration(double years, double months, double weeks, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, double nanoseconds, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_years(years)
     , m_months(months)
     , m_weeks(weeks)
@@ -162,32 +163,53 @@ ThrowCompletionOr<DurationRecord> to_temporal_duration_record(VM& vm, Value temp
     // 4. Let partial be ? ToTemporalPartialDurationRecord(temporalDurationLike).
     auto partial = TRY(to_temporal_partial_duration_record(vm, temporal_duration_like));
 
-    auto duration_record_fields = temporal_duration_record_fields<DurationRecord, double>(vm);
-    auto partial_duration_record_fields = temporal_duration_record_fields<PartialDurationRecord, Optional<double>>(vm);
+    // 5. If partial.[[Years]] is not undefined, set result.[[Years]] to partial.[[Years]].
+    if (partial.years.has_value())
+        result.years = partial.years.value();
 
-    // 5. For each row of Table 8, except the header row, in table order, do
-    for (size_t i = 0; i < duration_record_fields.size(); ++i) {
-        // a. Let fieldName be the Field Name value of the current row.
-        auto field_name = duration_record_fields[i].field_name;
-        auto partial_field_name = partial_duration_record_fields[i].field_name;
+    // 6. If partial.[[Months]] is not undefined, set result.[[Months]] to partial.[[Months]].
+    if (partial.months.has_value())
+        result.months = partial.months.value();
 
-        // b. Let value be the value of the field of partial whose name is fieldName.
-        auto value = partial.*partial_field_name;
+    // 7. If partial.[[Weeks]] is not undefined, set result.[[Weeks]] to partial.[[Weeks]].
+    if (partial.weeks.has_value())
+        result.weeks = partial.weeks.value();
 
-        // c. If value is not undefined, then
-        if (value.has_value()) {
-            // i. Set the field of result whose name is fieldName to value.
-            result.*field_name = *value;
-        }
-    }
+    // 8. If partial.[[Days]] is not undefined, set result.[[Days]] to partial.[[Days]].
+    if (partial.days.has_value())
+        result.days = partial.days.value();
 
-    // 6. If ! IsValidDuration(result.[[Years]], result.[[Months]], result.[[Weeks]], result.[[Days]], result.[[Hours]], result.[[Minutes]], result.[[Seconds]], result.[[Milliseconds]], result.[[Microseconds]], result.[[Nanoseconds]]) is false, then
+    // 9. If partial.[[Hours]] is not undefined, set result.[[Hours]] to partial.[[Hours]].
+    if (partial.hours.has_value())
+        result.hours = partial.hours.value();
+
+    // 10. If partial.[[Minutes]] is not undefined, set result.[[Minutes]] to partial.[[Minutes]].
+    if (partial.minutes.has_value())
+        result.minutes = partial.minutes.value();
+
+    // 11. If partial.[[Seconds]] is not undefined, set result.[[Seconds]] to partial.[[Seconds]].
+    if (partial.seconds.has_value())
+        result.seconds = partial.seconds.value();
+
+    // 12. If partial.[[Milliseconds]] is not undefined, set result.[[Milliseconds]] to partial.[[Milliseconds]].
+    if (partial.milliseconds.has_value())
+        result.milliseconds = partial.milliseconds.value();
+
+    // 13. If partial.[[Microseconds]] is not undefined, set result.[[Microseconds]] to partial.[[Microseconds]].
+    if (partial.microseconds.has_value())
+        result.microseconds = partial.microseconds.value();
+
+    // 14. If partial.[[Nanoseconds]] is not undefined, set result.[[Nanoseconds]] to partial.[[Nanoseconds]].
+    if (partial.nanoseconds.has_value())
+        result.nanoseconds = partial.nanoseconds.value();
+
+    // 15. If ! IsValidDuration(result.[[Years]], result.[[Months]], result.[[Weeks]], result.[[Days]], result.[[Hours]], result.[[Minutes]], result.[[Seconds]], result.[[Milliseconds]], result.[[Microseconds]], result.[[Nanoseconds]]) is false, then
     if (!is_valid_duration(result.years, result.months, result.weeks, result.days, result.hours, result.minutes, result.seconds, result.milliseconds, result.microseconds, result.nanoseconds)) {
         // a. Throw a RangeError exception.
         return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidDuration);
     }
 
-    // 7. Return result.
+    // 16. Return result.
     return result;
 }
 
@@ -289,37 +311,81 @@ ThrowCompletionOr<PartialDurationRecord> to_temporal_partial_duration_record(VM&
     // 2. Let result be a new partial Duration Record with each field set to undefined.
     auto result = PartialDurationRecord {};
 
-    // 3. Let any be false.
-    auto any = false;
+    // 3. Let days be ? Get(temporalDurationLike, "days").
+    auto days = TRY(temporal_duration_like.as_object().get(vm.names.days));
 
-    // 4. For each row of Table 7, except the header row, in table order, do
-    for (auto& [field_name, property] : temporal_duration_record_fields<PartialDurationRecord, Optional<double>>(vm)) {
-        // a. Let property be the Property Name value of the current row.
+    // 4. If days is not undefined, set result.[[Days]] to ? ToIntegerIfIntegral(days).
+    if (!days.is_undefined())
+        result.days = TRY(to_integer_if_integral(vm, days, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "days"sv, days));
 
-        // b. Let value be ? Get(temporalDurationLike, property).
-        auto value = TRY(temporal_duration_like.as_object().get(property));
+    // 5. Let hours be ? Get(temporalDurationLike, "hours").
+    auto hours = TRY(temporal_duration_like.as_object().get(vm.names.hours));
 
-        // c. If value is not undefined, then
-        if (!value.is_undefined()) {
-            // i. Set any to true.
-            any = true;
+    // 6. If hours is not undefined, set result.[[Hours]] to ? ToIntegerIfIntegral(hours).
+    if (!hours.is_undefined())
+        result.hours = TRY(to_integer_if_integral(vm, hours, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "hours"sv, hours));
 
-            // ii. Set value to ? ToIntegerWithoutRounding(value).
-            auto value_integer = TRY(to_integer_without_rounding(vm, value, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, property.as_string(), value.to_string_without_side_effects()));
+    // 7. Let microseconds be ? Get(temporalDurationLike, "microseconds").
+    auto microseconds = TRY(temporal_duration_like.as_object().get(vm.names.microseconds));
 
-            // iii. Let fieldName be the Field Name value of the current row.
-            // iv. Set the field of result whose name is fieldName to value.
-            result.*field_name = value_integer;
-        }
-    }
+    // 8. If microseconds is not undefined, set result.[[Microseconds]] to ? ToIntegerIfIntegral(microseconds).
+    if (!microseconds.is_undefined())
+        result.microseconds = TRY(to_integer_if_integral(vm, microseconds, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "microseconds"sv, microseconds));
 
-    // 5. If any is false, then
-    if (!any) {
-        // a. Throw a TypeError exception.
+    // 9. Let milliseconds be ? Get(temporalDurationLike, "milliseconds").
+    auto milliseconds = TRY(temporal_duration_like.as_object().get(vm.names.milliseconds));
+
+    // 10. If milliseconds is not undefined, set result.[[Milliseconds]] to ? ToIntegerIfIntegral(milliseconds).
+    if (!milliseconds.is_undefined())
+        result.milliseconds = TRY(to_integer_if_integral(vm, milliseconds, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "milliseconds"sv, milliseconds));
+
+    // 11. Let minutes be ? Get(temporalDurationLike, "minutes").
+    auto minutes = TRY(temporal_duration_like.as_object().get(vm.names.minutes));
+
+    // 12. If minutes is not undefined, set result.[[Minutes]] to ? ToIntegerIfIntegral(minutes).
+    if (!minutes.is_undefined())
+        result.minutes = TRY(to_integer_if_integral(vm, minutes, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "minutes"sv, minutes));
+
+    // 13. Let months be ? Get(temporalDurationLike, "months").
+    auto months = TRY(temporal_duration_like.as_object().get(vm.names.months));
+
+    // 14. If months is not undefined, set result.[[Months]] to ? ToIntegerIfIntegral(months).
+    if (!months.is_undefined())
+        result.months = TRY(to_integer_if_integral(vm, months, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "months"sv, months));
+
+    // 15. Let nanoseconds be ? Get(temporalDurationLike, "nanoseconds").
+    auto nanoseconds = TRY(temporal_duration_like.as_object().get(vm.names.nanoseconds));
+
+    // 16. If nanoseconds is not undefined, set result.[[Nanoseconds]] to ? ToIntegerIfIntegral(nanoseconds).
+    if (!nanoseconds.is_undefined())
+        result.nanoseconds = TRY(to_integer_if_integral(vm, nanoseconds, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "nanoseconds"sv, nanoseconds));
+
+    // 17. Let seconds be ? Get(temporalDurationLike, "seconds").
+    auto seconds = TRY(temporal_duration_like.as_object().get(vm.names.seconds));
+
+    // 18. If seconds is not undefined, set result.[[Seconds]] to ? ToIntegerIfIntegral(seconds).
+    if (!seconds.is_undefined())
+        result.seconds = TRY(to_integer_if_integral(vm, seconds, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "seconds"sv, seconds));
+
+    // 19. Let weeks be ? Get(temporalDurationLike, "weeks").
+    auto weeks = TRY(temporal_duration_like.as_object().get(vm.names.weeks));
+
+    // 20. If weeks is not undefined, set result.[[Weeks]] to ? ToIntegerIfIntegral(weeks).
+    if (!weeks.is_undefined())
+        result.weeks = TRY(to_integer_if_integral(vm, weeks, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "weeks"sv, weeks));
+
+    // 21. Let years be ? Get(temporalDurationLike, "years").
+    auto years = TRY(temporal_duration_like.as_object().get(vm.names.years));
+
+    // 22. If years is not undefined, set result.[[Years]] to ? ToIntegerIfIntegral(years).
+    if (!years.is_undefined())
+        result.years = TRY(to_integer_if_integral(vm, years, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, "years"sv, years));
+
+    // 23. If years, months, weeks, days, hours, minutes, seconds, milliseconds, microseconds, and nanoseconds are all undefined, throw a TypeError exception.
+    if (years.is_undefined() && months.is_undefined() && weeks.is_undefined() && days.is_undefined() && hours.is_undefined() && minutes.is_undefined() && seconds.is_undefined() && milliseconds.is_undefined() && microseconds.is_undefined() && nanoseconds.is_undefined())
         return vm.throw_completion<TypeError>(ErrorType::TemporalInvalidDurationLikeObject);
-    }
 
-    // 6. Return result.
+    // 24. Return result.
     return result;
 }
 
@@ -347,10 +413,10 @@ ThrowCompletionOr<Duration*> create_temporal_duration(VM& vm, double years, doub
     // 11. Set object.[[Milliseconds]] to ℝ(𝔽(milliseconds)).
     // 12. Set object.[[Microseconds]] to ℝ(𝔽(microseconds)).
     // 13. Set object.[[Nanoseconds]] to ℝ(𝔽(nanoseconds)).
-    auto* object = TRY(ordinary_create_from_constructor<Duration>(vm, *new_target, &Intrinsics::temporal_duration_prototype, years, months, weeks, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds));
+    auto object = TRY(ordinary_create_from_constructor<Duration>(vm, *new_target, &Intrinsics::temporal_duration_prototype, years, months, weeks, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds));
 
     // 14. Return object.
-    return object;
+    return object.ptr();
 }
 
 // 7.5.15 CreateNegatedTemporalDuration ( duration ), https://tc39.es/proposal-temporal/#sec-temporal-createnegatedtemporalduration
@@ -415,7 +481,7 @@ Crypto::SignedBigInteger total_duration_nanoseconds(double days, double hours, d
 }
 
 // 7.5.18 BalanceDuration ( days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds, largestUnit [ , relativeTo ] ), https://tc39.es/proposal-temporal/#sec-temporal-balanceduration
-ThrowCompletionOr<TimeDurationRecord> balance_duration(VM& vm, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, Crypto::SignedBigInteger const& nanoseconds, String const& largest_unit, Object* relative_to)
+ThrowCompletionOr<TimeDurationRecord> balance_duration(VM& vm, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, Crypto::SignedBigInteger const& nanoseconds, DeprecatedString const& largest_unit, Object* relative_to)
 {
     // 1. If relativeTo is not present, set relativeTo to undefined.
 
@@ -561,7 +627,7 @@ ThrowCompletionOr<TimeDurationRecord> balance_duration(VM& vm, double days, doub
 }
 
 // 7.5.19 UnbalanceDurationRelative ( years, months, weeks, days, largestUnit, relativeTo ), https://tc39.es/proposal-temporal/#sec-temporal-unbalancedurationrelative
-ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double years, double months, double weeks, double days, String const& largest_unit, Value relative_to)
+ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double years, double months, double weeks, double days, DeprecatedString const& largest_unit, Value relative_to)
 {
     auto& realm = *vm.current_realm();
 
@@ -623,10 +689,10 @@ ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double
             auto* new_relative_to = TRY(calendar_date_add(vm, *calendar, relative_to, *one_year, nullptr, date_add));
 
             // ii. Let untilOptions be OrdinaryObjectCreate(null).
-            auto* until_options = Object::create(realm, nullptr);
+            auto until_options = Object::create(realm, nullptr);
 
             // iii. Perform ! CreateDataPropertyOrThrow(untilOptions, "largestUnit", "month").
-            MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, js_string(vm, "month"sv)));
+            MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, "month"sv)));
 
             // iv. Let untilResult be ? CalendarDateUntil(calendar, relativeTo, newRelativeTo, untilOptions, dateUntil).
             auto* until_result = TRY(calendar_date_until(vm, *calendar, relative_to, new_relative_to, *until_options, date_until));
@@ -750,7 +816,7 @@ ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double
 }
 
 // 7.5.20 BalanceDurationRelative ( years, months, weeks, days, largestUnit, relativeTo ), https://tc39.es/proposal-temporal/#sec-temporal-balancedurationrelative
-ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double years, double months, double weeks, double days, String const& largest_unit, Value relative_to_value)
+ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double years, double months, double weeks, double days, DeprecatedString const& largest_unit, Value relative_to_value)
 {
     auto& realm = *vm.current_realm();
 
@@ -859,10 +925,10 @@ ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double y
         auto* date_until = TRY(Value(&calendar).get_method(vm, vm.names.dateUntil));
 
         // l. Let untilOptions be OrdinaryObjectCreate(null).
-        auto* until_options = Object::create(realm, nullptr);
+        auto until_options = Object::create(realm, nullptr);
 
         // m. Perform ! CreateDataPropertyOrThrow(untilOptions, "largestUnit", "month").
-        MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, js_string(vm, "month"sv)));
+        MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, "month"sv)));
 
         // n. Let untilResult be ? CalendarDateUntil(calendar, relativeTo, newRelativeTo, untilOptions, dateUntil).
         auto* until_result = TRY(calendar_date_until(vm, calendar, relative_to, new_relative_to, *until_options, date_until));
@@ -888,7 +954,7 @@ ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double y
             until_options = Object::create(realm, nullptr);
 
             // vi. Perform ! CreateDataPropertyOrThrow(untilOptions, "largestUnit", "month").
-            MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, js_string(vm, "month"sv)));
+            MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, "month"sv)));
 
             // vii. Set untilResult to ? CalendarDateUntil(calendar, relativeTo, newRelativeTo, untilOptions, dateUntil).
             until_result = TRY(calendar_date_until(vm, calendar, relative_to, new_relative_to, *until_options, date_until));
@@ -1040,10 +1106,10 @@ ThrowCompletionOr<DurationRecord> add_duration(VM& vm, double years1, double mon
         auto date_largest_unit = larger_of_two_temporal_units("day"sv, largest_unit);
 
         // h. Let differenceOptions be OrdinaryObjectCreate(null).
-        auto* difference_options = Object::create(realm, nullptr);
+        auto difference_options = Object::create(realm, nullptr);
 
         // i. Perform ! CreateDataPropertyOrThrow(differenceOptions, "largestUnit", dateLargestUnit).
-        MUST(difference_options->create_data_property_or_throw(vm.names.largestUnit, js_string(vm, date_largest_unit)));
+        MUST(difference_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, date_largest_unit)));
 
         // j. Let dateDifference be ? CalendarDateUntil(calendar, relativeTo, end, differenceOptions).
         auto* date_difference = TRY(calendar_date_until(vm, calendar, &relative_to, end, *difference_options));
@@ -1243,10 +1309,10 @@ ThrowCompletionOr<RoundedDuration> round_duration(VM& vm, double years, double m
         auto* days_later = TRY(calendar_date_add(vm, *calendar, relative_to, *days_duration, nullptr, date_add));
 
         // k. Let untilOptions be OrdinaryObjectCreate(null).
-        auto* until_options = Object::create(realm, nullptr);
+        auto until_options = Object::create(realm, nullptr);
 
         // l. Perform ! CreateDataPropertyOrThrow(untilOptions, "largestUnit", "year").
-        MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, js_string(vm, "year"sv)));
+        MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, "year"sv)));
 
         // m. Let timePassed be ? CalendarDateUntil(calendar, relativeTo, daysLater, untilOptions).
         auto* time_passed = TRY(calendar_date_until(vm, *calendar, relative_to, days_later, *until_options));
@@ -1576,7 +1642,7 @@ ThrowCompletionOr<DurationRecord> adjust_rounded_duration_days(VM& vm, double ye
     }
 
     // 10. Set timeRemainderNs to ! RoundTemporalInstant(ℤ(timeRemainderNs - dayLengthNs), increment, unit, roundingMode).
-    time_remainder_ns = round_temporal_instant(vm, *js_bigint(vm, time_remainder_ns.minus(day_length_ns)), increment, unit, rounding_mode)->big_integer();
+    time_remainder_ns = round_temporal_instant(vm, BigInt::create(vm, time_remainder_ns.minus(day_length_ns)), increment, unit, rounding_mode)->big_integer();
 
     // 11. Let adjustedDateDuration be ? AddDuration(years, months, weeks, days, 0, 0, 0, 0, 0, 0, 0, 0, 0, direction, 0, 0, 0, 0, 0, 0, relativeTo).
     auto adjusted_date_duration = TRY(add_duration(vm, years, months, weeks, days, 0, 0, 0, 0, 0, 0, 0, 0, 0, direction, 0, 0, 0, 0, 0, 0, &relative_to));
@@ -1589,7 +1655,7 @@ ThrowCompletionOr<DurationRecord> adjust_rounded_duration_days(VM& vm, double ye
 }
 
 // 7.5.27 TemporalDurationToString ( years, months, weeks, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds, precision ), https://tc39.es/proposal-temporal/#sec-temporal-temporaldurationtostring
-String temporal_duration_to_string(double years, double months, double weeks, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, double nanoseconds, Variant<StringView, u8> const& precision)
+DeprecatedString temporal_duration_to_string(double years, double months, double weeks, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, double nanoseconds, Variant<StringView, u8> const& precision)
 {
     if (precision.has<StringView>())
         VERIFY(precision.get<StringView>() == "auto"sv);
@@ -1670,7 +1736,7 @@ String temporal_duration_to_string(double years, double months, double weeks, do
 
         // b. Let decimalPart be ToZeroPaddedDecimalString(fraction, 9).
         // NOTE: padding with zeros leads to weird results when applied to a double. Not sure if that's a bug in AK/Format.h or if I'm doing this wrong.
-        auto decimal_part = String::formatted("{:09}", (u64)fraction);
+        auto decimal_part = DeprecatedString::formatted("{:09}", (u64)fraction);
 
         // c. If precision is "auto", then
         if (precision.has<StringView>() && precision.get<StringView>() == "auto"sv) {
@@ -1682,7 +1748,7 @@ String temporal_duration_to_string(double years, double months, double weeks, do
         // d. Else if precision = 0, then
         else if (precision.get<u8>() == 0) {
             // i. Set decimalPart to "".
-            decimal_part = String::empty();
+            decimal_part = DeprecatedString::empty();
         }
         // e. Else,
         else {
@@ -1723,7 +1789,7 @@ String temporal_duration_to_string(double years, double months, double weeks, do
     }
 
     // 20. Return result.
-    return result.to_string();
+    return result.to_deprecated_string();
 }
 
 // 7.5.28 AddDurationToOrSubtractDurationFromDuration ( operation, duration, other, options ), https://tc39.es/proposal-temporal/#sec-temporal-adddurationtoorsubtractdurationfromduration

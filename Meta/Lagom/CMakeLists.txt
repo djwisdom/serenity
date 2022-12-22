@@ -34,7 +34,7 @@ if(NOT COMMAND serenity_option)
 endif()
 
 include(check_for_dependencies)
-include(lagom_options)
+include(lagom_options NO_POLICY_SCOPE)
 
 if(ENABLE_ALL_THE_DEBUG_MACROS)
     include(all_the_debug_macros)
@@ -49,11 +49,7 @@ option(BUILD_SHARED_LIBS "Build shared libraries instead of static libraries" ON
 find_package(Threads REQUIRED)
 
 if (ENABLE_LAGOM_CCACHE)
-    find_program(CCACHE_PROGRAM ccache)
-    if(CCACHE_PROGRAM)
-        set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE FILEPATH "Path to a compiler launcher program, e.g. ccache")
-        set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE FILEPATH "Path to a compiler launcher program, e.g. ccache")
-    endif()
+    include(setup_ccache)
 endif()
 
 if (ENABLE_FUZZERS_LIBFUZZER OR ENABLE_FUZZERS_OSSFUZZ)
@@ -69,7 +65,6 @@ if (ENABLE_FUZZERS OR CMAKE_CROSSCOMPILING)
     set(BUILD_LAGOM_TOOLS OFF)
 endif()
 
-include(wasm_spec_tests)
 include(flac_spec_tests)
 include(lagom_compile_options)
 
@@ -92,6 +87,12 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
+
+if (EMSCRIPTEN)
+    set(CMAKE_EXECUTABLE_SUFFIX ".js")
+    add_compile_options(-gsource-map)
+    add_link_options(--emrun "SHELL:-s ALLOW_MEMORY_GROWTH")
+endif()
 
 if (ENABLE_ADDRESS_SANITIZER)
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
@@ -290,7 +291,7 @@ endif()
 add_library(LibC INTERFACE)
 add_library(LibCrypt INTERFACE)
 add_library(LibSystem INTERFACE)
-if (NOT APPLE AND NOT ANDROID AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
+if (NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
     target_link_libraries(LibCrypt INTERFACE crypt) # LibCore::Account uses crypt() but it's not in libcrypt on macOS
 endif()
 if (SERENITYOS)
@@ -346,6 +347,7 @@ if (BUILD_LAGOM)
         Gemini
         Gfx
         GL
+        GLSL
         GPU
         HTTP
         IMAP
@@ -374,6 +376,7 @@ if (BUILD_LAGOM)
 
         # WebView
         list(APPEND LIBWEBVIEW_SOURCES "../../Userland/Libraries/LibWebView/DOMTreeModel.cpp")
+        list(APPEND LIBWEBVIEW_SOURCES "../../Userland/Libraries/LibWebView/StylePropertiesModel.cpp")
         list(APPEND LIBWEBVIEW_SOURCES "../../Userland/Libraries/LibWebView/WebContentClient.cpp")
 
         compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/WebContent/WebContentServer.ipc WebContent/WebContentServerEndpoint.h)
@@ -395,7 +398,7 @@ if (BUILD_LAGOM)
 
     # FIXME: Excluding arm64 is a temporary hack to circumvent a build problem
     #        for Lagom on Apple M1
-    if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+    if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" AND NOT EMSCRIPTEN)
         # FIXME: Create a LIBELF_SOURCES macro similar to AK
         file(GLOB LIBELF_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibELF/*.cpp")
         # There's no way we can reliably make the dynamic loading classes cross platform
@@ -430,7 +433,9 @@ if (BUILD_LAGOM)
     # FIXME: LibLocaleData is an object lib in Lagom, because the weak symbol trick we use on serenity
     #    straight up isn't supposed to work per ELF rules
     target_link_libraries(LibLocale PRIVATE LibTimeZone)
-    install(TARGETS LibLocaleData EXPORT LagomTargets)
+    if (ENABLE_UNICODE_DATABASE_DOWNLOAD)
+        install(TARGETS LibLocaleData EXPORT LagomTargets)
+    endif()
 
     add_serenity_subdirectory(Userland/Shell)
 
@@ -438,20 +443,15 @@ if (BUILD_LAGOM)
         # Lagom Services
         add_serenity_subdirectory(Userland/Services)
 
-        # Lagom Examples
-        add_executable(TestApp TestApp.cpp)
-        target_link_libraries(TestApp LibCore)
-
-        add_executable(TestJson TestJson.cpp)
-        target_link_libraries(TestJson LibCore)
-
         # Lagom Utilities
-        add_executable(adjtime ../../Userland/Utilities/adjtime.cpp)
-        target_link_libraries(adjtime LibCore LibMain)
+        if (NOT EMSCRIPTEN)
+            add_executable(adjtime ../../Userland/Utilities/adjtime.cpp)
+            target_link_libraries(adjtime LibCore LibMain)
+        endif()
 
         # FIXME: Excluding arm64 is a temporary hack to circumvent a build problem
         #        for Lagom on Apple M1
-        if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+        if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" AND NOT EMSCRIPTEN)
             add_executable(disasm ../../Userland/Utilities/disasm.cpp)
             target_link_libraries(disasm LibCore LibELF LibX86 LibMain)
         endif()
@@ -460,21 +460,51 @@ if (BUILD_LAGOM)
         target_link_libraries(gml-format LibCore LibGUI LibMain)
 
         if (ENABLE_LAGOM_LIBWEB)
-            add_executable(headless-browser ../../Userland/Utilities/headless-browser.cpp)
-            target_link_libraries(headless-browser LibWeb LibWebSocket LibCrypto LibGemini LibHTTP LibJS LibGfx LibMain LibTLS)
+            add_executable(headless-browser ../../Userland/Utilities/headless-browser.cpp ../../Userland/Services/WebContent/WebDriverConnection.cpp)
+            target_link_libraries(headless-browser LibWeb LibWebSocket LibCrypto LibGemini LibHTTP LibJS LibGfx LibMain LibTLS LibIPC LibJS)
         endif()
 
         add_executable(js ../../Userland/Utilities/js.cpp)
         target_link_libraries(js LibCrypto LibJS LibLine LibLocale LibMain LibTextCodec Threads::Threads)
+        if (EMSCRIPTEN)
+            add_executable(libjs Wasm/js_repl.cpp)
+            target_link_libraries(libjs LibJS LibLocale LibTimeZone LibUnicode)
+            target_link_options(libjs PRIVATE
+                    -sEXPORTED_FUNCTIONS=_initialize_repl,_execute
+                    -sEXPORTED_RUNTIME_METHODS=allocateUTF8
+                    -sERROR_ON_UNDEFINED_SYMBOLS=0
+                    -sENVIRONMENT=web)
+        endif()
 
         add_executable(markdown-check ../../Userland/Utilities/markdown-check.cpp)
         target_link_libraries(markdown-check LibMarkdown LibMain)
 
-        add_executable(ntpquery ../../Userland/Utilities/ntpquery.cpp)
-        target_link_libraries(ntpquery LibCore LibMain)
+        if (NOT EMSCRIPTEN)
+            add_executable(ntpquery ../../Userland/Utilities/ntpquery.cpp)
+            target_link_libraries(ntpquery LibCore LibMain)
+        endif()
+
+        add_executable(sql ../../Userland/Utilities/sql.cpp)
+        target_link_libraries(sql LibCore LibIPC LibLine LibMain LibSQL)
 
         add_executable(test262-runner ../../Tests/LibJS/test262-runner.cpp)
         target_link_libraries(test262-runner LibJS LibCore)
+
+        if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            include(CheckCSourceCompiles)
+            # Check for musl's declaration of __assert_fail
+            check_c_source_compiles(
+                "
+                #include <assert.h>
+                __attribute__((__noreturn__)) void __assert_fail(char const* assertion, char const* file, int line, char const* function) {}
+                int main() {}
+                "
+                ASSERT_FAIL_HAS_INT
+            )
+        endif()
+        if (ASSERT_FAIL_HAS_INT OR EMSCRIPTEN)
+            target_compile_definitions(test262-runner PRIVATE ASSERT_FAIL_HAS_INT)
+        endif()
 
         add_executable(wasm ../../Userland/Utilities/wasm.cpp)
         target_link_libraries(wasm LibCore LibWasm LibLine LibMain)
@@ -645,13 +675,12 @@ if (BUILD_LAGOM)
             ../../Tests/LibWasm/test-wasm.cpp
             ../../Userland/Libraries/LibTest/JavaScriptTestRunnerMain.cpp)
         target_link_libraries(test-wasm LibCore LibTest LibWasm LibJS)
+        # FIXME: Don't require passing test-common.js path if you only want to pass a custom Test root path
         add_test(
             NAME WasmParser
-            COMMAND test-wasm --show-progress=false
+            COMMAND test-wasm --show-progress=false ${CMAKE_CURRENT_BINARY_DIR}/Userland/Libraries/LibWasm/Tests ${SERENITY_PROJECT_ROOT}/Userland/Libraries/LibJS/Tests/test-common.js
         )
-        set_tests_properties(WasmParser PROPERTIES
-            ENVIRONMENT SERENITY_SOURCE_DIR=${SERENITY_PROJECT_ROOT}
-            SKIP_RETURN_CODE 1)
+        set_tests_properties(WasmParser PROPERTIES SKIP_RETURN_CODE 1)
 
         # Tests that are not LibTest based
         # Shell
@@ -681,7 +710,18 @@ if (BUILD_LAGOM)
         set(CPACK_STRIP_FILES TRUE)
         set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
         set(CPACK_COMPONENTS_ALL js)
-        set(CPACK_PACKAGE_FILE_NAME serenity-js)
+        if (APPLE)
+            if("arm64" IN_LIST CMAKE_OSX_ARCHITECTURES AND "x86_64" IN_LIST CMAKE_OSX_ARCHITECTURES)
+                set(CPACK_SYSTEM_NAME "macOS-universal2")
+            else()
+                set(CPACK_SYSTEM_NAME "macOS-${CMAKE_SYSTEM_PROCESSOR}")
+            endif()
+        else()
+            set(CPACK_SYSTEM_NAME "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+        endif()
+
+        set(CPACK_ARCHIVE_JS_FILE_NAME "serenity-js-${CPACK_SYSTEM_NAME}")
+        set(CPACK_PACKAGE_FILE_NAME "serenity-js-${CPACK_SYSTEM_NAME}")
         include(CPack)
     endif()
 endif()

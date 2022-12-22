@@ -58,6 +58,7 @@ set(SOURCES
     Tools/EllipseTool.cpp
     Tools/EraseTool.cpp
     Tools/GuideTool.cpp
+    Tools/LassoSelectTool.cpp
     Tools/LineTool.cpp
     Tools/MoveTool.cpp
     Tools/PenTool.cpp
@@ -66,6 +67,7 @@ set(SOURCES
     Tools/RectangleSelectTool.cpp
     Tools/RectangleTool.cpp
     Tools/SprayTool.cpp
+    Tools/TextTool.cpp
     Tools/Tool.cpp
     Tools/WandSelectTool.cpp
     Tools/ZoomTool.cpp

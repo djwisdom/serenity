@@ -28,7 +28,7 @@ public:
     Color color() const { return m_color; }
 
 private:
-    explicit ColorPicker(Color, Window* parent_window = nullptr, String title = "Edit Color");
+    explicit ColorPicker(Color, Window* parent_window = nullptr, DeprecatedString title = "Edit Color");
 
     void build_ui();
     void build_ui_custom(Widget& root_container);
@@ -41,6 +41,7 @@ private:
 
     Vector<ColorButton&> m_color_widgets;
     RefPtr<CustomColorWidget> m_custom_color;
+    RefPtr<GUI::VerticalOpacitySlider> m_alpha;
     RefPtr<ColorPreview> m_preview_widget;
     RefPtr<Button> m_selector_button;
     RefPtr<TextBox> m_html_text;

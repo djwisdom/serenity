@@ -14,7 +14,7 @@
 
 namespace Gfx {
 
-void Path::elliptical_arc_to(FloatPoint const& point, FloatPoint const& radii, double x_axis_rotation, bool large_arc, bool sweep)
+void Path::elliptical_arc_to(FloatPoint point, FloatPoint radii, double x_axis_rotation, bool large_arc, bool sweep)
 {
     auto next_point = point;
 
@@ -120,7 +120,7 @@ void Path::close()
     if (m_segments.size() <= 1)
         return;
 
-    auto& last_point = m_segments.last().point();
+    auto last_point = m_segments.last().point();
 
     for (ssize_t i = m_segments.size() - 1; i >= 0; --i) {
         auto& segment = m_segments[i];
@@ -177,7 +177,7 @@ void Path::close_all_subpaths()
     }
 }
 
-String Path::to_string() const
+DeprecatedString Path::to_deprecated_string() const
 {
     StringBuilder builder;
     builder.append("Path { "sv);
@@ -207,19 +207,19 @@ String Path::to_string() const
         switch (segment.type()) {
         case Segment::Type::QuadraticBezierCurveTo:
             builder.append(", "sv);
-            builder.append(static_cast<QuadraticBezierCurveSegment const&>(segment).through().to_string());
+            builder.append(static_cast<QuadraticBezierCurveSegment const&>(segment).through().to_deprecated_string());
             break;
         case Segment::Type::CubicBezierCurveTo:
             builder.append(", "sv);
-            builder.append(static_cast<CubicBezierCurveSegment const&>(segment).through_0().to_string());
+            builder.append(static_cast<CubicBezierCurveSegment const&>(segment).through_0().to_deprecated_string());
             builder.append(", "sv);
-            builder.append(static_cast<CubicBezierCurveSegment const&>(segment).through_1().to_string());
+            builder.append(static_cast<CubicBezierCurveSegment const&>(segment).through_1().to_deprecated_string());
             break;
         case Segment::Type::EllipticalArcTo: {
             auto& arc = static_cast<EllipticalArcSegment const&>(segment);
             builder.appendff(", {}, {}, {}, {}, {}",
-                arc.radii().to_string().characters(),
-                arc.center().to_string().characters(),
+                arc.radii().to_deprecated_string().characters(),
+                arc.center().to_deprecated_string().characters(),
                 arc.x_axis_rotation(),
                 arc.theta_1(),
                 arc.theta_delta());
@@ -232,7 +232,7 @@ String Path::to_string() const
         builder.append(") "sv);
     }
     builder.append('}');
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 void Path::segmentize_path()
@@ -243,7 +243,7 @@ void Path::segmentize_path()
     float max_x = 0;
     float max_y = 0;
 
-    auto add_point_to_bbox = [&](Gfx::FloatPoint const& point) {
+    auto add_point_to_bbox = [&](Gfx::FloatPoint point) {
         float x = point.x();
         float y = point.y();
         min_x = min(min_x, x);
@@ -291,8 +291,8 @@ void Path::segmentize_path()
             break;
         }
         case Segment::Type::QuadraticBezierCurveTo: {
-            auto& control = static_cast<QuadraticBezierCurveSegment&>(segment).through();
-            Painter::for_each_line_segment_on_bezier_curve(control, cursor, segment.point(), [&](FloatPoint const& p0, FloatPoint const& p1) {
+            auto control = static_cast<QuadraticBezierCurveSegment&>(segment).through();
+            Painter::for_each_line_segment_on_bezier_curve(control, cursor, segment.point(), [&](FloatPoint p0, FloatPoint p1) {
                 add_line(p0, p1);
             });
             cursor = segment.point();
@@ -300,9 +300,9 @@ void Path::segmentize_path()
         }
         case Segment::Type::CubicBezierCurveTo: {
             auto& curve = static_cast<CubicBezierCurveSegment const&>(segment);
-            auto& control_0 = curve.through_0();
-            auto& control_1 = curve.through_1();
-            Painter::for_each_line_segment_on_cubic_bezier_curve(control_0, control_1, cursor, segment.point(), [&](FloatPoint const& p0, FloatPoint const& p1) {
+            auto control_0 = curve.through_0();
+            auto control_1 = curve.through_1();
+            Painter::for_each_line_segment_on_cubic_bezier_curve(control_0, control_1, cursor, segment.point(), [&](FloatPoint p0, FloatPoint p1) {
                 add_line(p0, p1);
             });
             cursor = segment.point();
@@ -310,7 +310,7 @@ void Path::segmentize_path()
         }
         case Segment::Type::EllipticalArcTo: {
             auto& arc = static_cast<EllipticalArcSegment&>(segment);
-            Painter::for_each_line_segment_on_elliptical_arc(cursor, arc.point(), arc.center(), arc.radii(), arc.x_axis_rotation(), arc.theta_1(), arc.theta_delta(), [&](FloatPoint const& p0, FloatPoint const& p1) {
+            Painter::for_each_line_segment_on_elliptical_arc(cursor, arc.point(), arc.center(), arc.radii(), arc.x_axis_rotation(), arc.theta_1(), arc.theta_delta(), [&](FloatPoint p0, FloatPoint p1) {
                 add_line(p0, p1);
             });
             cursor = segment.point();

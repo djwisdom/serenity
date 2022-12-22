@@ -12,7 +12,7 @@
 namespace SpaceAnalyzer {
 
 struct TreeMapNode {
-    virtual String name() const = 0;
+    virtual DeprecatedString name() const = 0;
     virtual i64 area() const = 0;
     virtual size_t num_children() const = 0;
     virtual TreeMapNode const& child_at(size_t i) const = 0;
@@ -43,13 +43,13 @@ public:
 private:
     TreeMapWidget() = default;
     virtual void paint_event(GUI::PaintEvent&) override;
+    virtual void mousemove_event(GUI::MouseEvent&) override;
     virtual void mousedown_event(GUI::MouseEvent&) override;
     virtual void doubleclick_event(GUI::MouseEvent&) override;
     virtual void mousewheel_event(GUI::MouseEvent&) override;
     virtual void context_menu_event(GUI::ContextMenuEvent&) override;
     virtual void keydown_event(GUI::KeyEvent&) override;
 
-    bool rect_can_contain_children(Gfx::IntRect const& rect) const;
     bool rect_can_contain_label(Gfx::IntRect const& rect) const;
 
     enum class HasLabel {
@@ -64,7 +64,7 @@ private:
     template<typename Function>
     void lay_out_children(TreeMapNode const&, Gfx::IntRect const&, int depth, Function);
     void paint_cell_frame(GUI::Painter&, TreeMapNode const&, Gfx::IntRect const&, Gfx::IntRect const&, int depth, HasLabel has_label) const;
-    Vector<int> path_to_position(Gfx::IntPoint const&);
+    Vector<int> path_to_position(Gfx::IntPoint);
 
     RefPtr<TreeMap> m_tree;
     Vector<int> m_path;

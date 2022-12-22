@@ -21,7 +21,7 @@
 
 namespace PixelPaint {
 
-static void set_flood_selection(Gfx::Bitmap& bitmap, Image& image, Gfx::IntPoint const& start_position, Gfx::IntPoint const& selection_offset, int threshold, Selection::MergeMode merge_mode)
+static void set_flood_selection(Gfx::Bitmap& bitmap, Image& image, Gfx::IntPoint start_position, Gfx::IntPoint selection_offset, int threshold, Selection::MergeMode merge_mode)
 {
     VERIFY(bitmap.bpp() == 32);
 
@@ -37,7 +37,7 @@ static void set_flood_selection(Gfx::Bitmap& bitmap, Image& image, Gfx::IntPoint
     image.selection().merge(selection_mask, merge_mode);
 }
 
-bool WandSelectTool::on_keydown(GUI::KeyEvent const& key_event)
+bool WandSelectTool::on_keydown(GUI::KeyEvent& key_event)
 {
     if (key_event.key() == KeyCode::Key_Escape) {
         m_editor->image().selection().clear();
@@ -120,7 +120,7 @@ GUI::Widget* WandSelectTool::get_properties_widget()
 
     auto& mode_combo = mode_container.add<GUI::ComboBox>();
     mode_combo.set_only_allow_values_from_model(true);
-    mode_combo.set_model(*GUI::ItemListModel<String>::create(m_merge_mode_names));
+    mode_combo.set_model(*GUI::ItemListModel<DeprecatedString>::create(m_merge_mode_names));
     mode_combo.set_selected_index((int)m_merge_mode);
     mode_combo.on_change = [this](auto&&, GUI::ModelIndex const& index) {
         VERIFY(index.row() >= 0);

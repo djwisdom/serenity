@@ -9,13 +9,13 @@
 
 namespace JS {
 
-MapIterator* MapIterator::create(Realm& realm, Map& map, Object::PropertyKind iteration_kind)
+NonnullGCPtr<MapIterator> MapIterator::create(Realm& realm, Map& map, Object::PropertyKind iteration_kind)
 {
     return realm.heap().allocate<MapIterator>(realm, map, iteration_kind, *realm.intrinsics().map_iterator_prototype());
 }
 
 MapIterator::MapIterator(Map& map, Object::PropertyKind iteration_kind, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_map(map)
     , m_iteration_kind(iteration_kind)
     , m_iterator(static_cast<Map const&>(map).begin())

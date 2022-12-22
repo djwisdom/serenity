@@ -21,12 +21,12 @@ ErrorOr<int> serenity_main(Main::Arguments)
     TRY(Core::System::pledge("stdio"));
 
     outln("Index    Name");
-    auto file_contents = TRY(jails_data->read_all());
+    auto file_contents = TRY(jails_data->read_until_eof());
     auto json = TRY(JsonValue::from_string(file_contents));
     json.as_array().for_each([](auto& value) {
         auto& jail = value.as_object();
-        auto index = jail.get("index"sv).to_string();
-        auto name = jail.get("name"sv).to_string();
+        auto index = jail.get("index"sv).to_deprecated_string();
+        auto name = jail.get("name"sv).to_deprecated_string();
 
         outln("{:4}     {:10}", index, name);
     });

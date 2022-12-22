@@ -9,10 +9,29 @@
 
 #include <AK/Assertions.h>
 #include <AK/StdLibExtras.h>
+#include <AK/Try.h>
 #include <AK/Types.h>
 #include <AK/kmalloc.h>
 
 namespace AK {
+
+namespace Detail {
+template<auto condition, typename T>
+struct ConditionallyResultType;
+
+template<typename T>
+struct ConditionallyResultType<true, T> {
+    using Type = typename T::ResultType;
+};
+
+template<typename T>
+struct ConditionallyResultType<false, T> {
+    using Type = T;
+};
+}
+
+template<auto condition, typename T>
+using ConditionallyResultType = typename Detail::ConditionallyResultType<condition, T>::Type;
 
 // NOTE: If you're here because of an internal compiler error in GCC 10.3.0+,
 //       it's because of the following bug:
@@ -24,6 +43,10 @@ namespace AK {
 
 template<typename>
 class Optional;
+
+struct OptionalNone {
+    explicit OptionalNone() = default;
+};
 
 template<typename T>
 requires(!IsLvalueReference<T>) class [[nodiscard]] Optional<T> {
@@ -37,24 +60,44 @@ public:
 
     ALWAYS_INLINE Optional() = default;
 
+    template<SameAs<OptionalNone> V>
+    Optional(V) { }
+
+    template<SameAs<OptionalNone> V>
+    Optional& operator=(V)
+    {
+        clear();
+        return *this;
+    }
+
 #ifdef AK_HAS_CONDITIONALLY_TRIVIAL
-    Optional(Optional const& other) requires(!IsCopyConstructible<T>) = delete;
+    Optional(Optional const& other)
+    requires(!IsCopyConstructible<T>)
+    = delete;
     Optional(Optional const& other) = default;
 
-    Optional(Optional&& other) requires(!IsMoveConstructible<T>) = delete;
+    Optional(Optional&& other)
+    requires(!IsMoveConstructible<T>)
+    = delete;
 
-    Optional& operator=(Optional const&) requires(!IsCopyConstructible<T> || !IsDestructible<T>) = delete;
+    Optional& operator=(Optional const&)
+    requires(!IsCopyConstructible<T> || !IsDestructible<T>)
+    = delete;
     Optional& operator=(Optional const&) = default;
 
-    Optional& operator=(Optional&& other) requires(!IsMoveConstructible<T> || !IsDestructible<T>) = delete;
+    Optional& operator=(Optional&& other)
+    requires(!IsMoveConstructible<T> || !IsDestructible<T>)
+    = delete;
 
-    ~Optional() requires(!IsDestructible<T>) = delete;
+    ~Optional()
+    requires(!IsDestructible<T>)
+    = delete;
     ~Optional() = default;
 #endif
 
     ALWAYS_INLINE Optional(Optional const& other)
 #ifdef AK_HAS_CONDITIONALLY_TRIVIAL
-        requires(!IsTriviallyCopyConstructible<T>)
+    requires(!IsTriviallyCopyConstructible<T>)
 #endif
         : m_has_value(other.m_has_value)
     {
@@ -78,7 +121,7 @@ public:
     }
 
     template<typename U>
-    requires(IsConstructible<T, U&&> && !IsSpecializationOf<T, Optional> && !IsSpecializationOf<U, Optional>) ALWAYS_INLINE explicit Optional(Optional<U>&& other)
+    requires(IsConstructible<T, U &&> && !IsSpecializationOf<T, Optional> && !IsSpecializationOf<U, Optional>) ALWAYS_INLINE explicit Optional(Optional<U>&& other)
         : m_has_value(other.m_has_value)
     {
         if (other.has_value())
@@ -86,7 +129,9 @@ public:
     }
 
     template<typename U = T>
-    ALWAYS_INLINE explicit(!IsConvertible<U&&, T>) Optional(U&& value) requires(!IsSame<RemoveCVReference<U>, Optional<T>> && IsConstructible<T, U&&>)
+    requires(!IsSame<OptionalNone, RemoveCVReference<U>>)
+    ALWAYS_INLINE explicit(!IsConvertible<U&&, T>) Optional(U&& value)
+    requires(!IsSame<RemoveCVReference<U>, Optional<T>> && IsConstructible<T, U &&>)
         : m_has_value(true)
     {
         new (&m_storage) T(forward<U>(value));
@@ -94,7 +139,7 @@ public:
 
     ALWAYS_INLINE Optional& operator=(Optional const& other)
 #ifdef AK_HAS_CONDITIONALLY_TRIVIAL
-        requires(!IsTriviallyCopyConstructible<T> || !IsTriviallyDestructible<T>)
+    requires(!IsTriviallyCopyConstructible<T> || !IsTriviallyDestructible<T>)
 #endif
     {
         if (this != &other) {
@@ -133,7 +178,7 @@ public:
 
     ALWAYS_INLINE ~Optional()
 #ifdef AK_HAS_CONDITIONALLY_TRIVIAL
-        requires(!IsTriviallyDestructible<T>)
+    requires(!IsTriviallyDestructible<T>)
 #endif
     {
         clear();
@@ -153,6 +198,14 @@ public:
         clear();
         m_has_value = true;
         new (&m_storage) T(forward<Parameters>(parameters)...);
+    }
+
+    template<typename Callable>
+    ALWAYS_INLINE void lazy_emplace(Callable callable)
+    {
+        clear();
+        m_has_value = true;
+        new (&m_storage) T { callable() };
     }
 
     [[nodiscard]] ALWAYS_INLINE bool has_value() const { return m_has_value; }
@@ -197,11 +250,73 @@ public:
         return move(fallback);
     }
 
+    template<typename Callback>
+    [[nodiscard]] ALWAYS_INLINE T value_or_lazy_evaluated(Callback callback) const
+    {
+        if (m_has_value)
+            return value();
+        return callback();
+    }
+
+    template<typename Callback>
+    [[nodiscard]] ALWAYS_INLINE Optional<T> value_or_lazy_evaluated_optional(Callback callback) const
+    {
+        if (m_has_value)
+            return value();
+        return callback();
+    }
+
+    template<typename Callback>
+    [[nodiscard]] ALWAYS_INLINE ErrorOr<T> try_value_or_lazy_evaluated(Callback callback) const
+    {
+        if (m_has_value)
+            return value();
+        return TRY(callback());
+    }
+
+    template<typename Callback>
+    [[nodiscard]] ALWAYS_INLINE ErrorOr<Optional<T>> try_value_or_lazy_evaluated_optional(Callback callback) const
+    {
+        if (m_has_value)
+            return value();
+        return TRY(callback());
+    }
+
     ALWAYS_INLINE T const& operator*() const { return value(); }
     ALWAYS_INLINE T& operator*() { return value(); }
 
     ALWAYS_INLINE T const* operator->() const { return &value(); }
     ALWAYS_INLINE T* operator->() { return &value(); }
+
+    template<typename F, typename MappedType = decltype(declval<F>()(declval<T&>())), auto IsErrorOr = IsSpecializationOf<MappedType, ErrorOr>, typename OptionalType = Optional<ConditionallyResultType<IsErrorOr, MappedType>>>
+    ALWAYS_INLINE Conditional<IsErrorOr, ErrorOr<OptionalType>, OptionalType> map(F&& mapper)
+    {
+        if constexpr (IsErrorOr) {
+            if (m_has_value)
+                return OptionalType { TRY(mapper(value())) };
+            return OptionalType {};
+        } else {
+            if (m_has_value)
+                return OptionalType { mapper(value()) };
+
+            return OptionalType {};
+        }
+    }
+
+    template<typename F, typename MappedType = decltype(declval<F>()(declval<T&>())), auto IsErrorOr = IsSpecializationOf<MappedType, ErrorOr>, typename OptionalType = Optional<ConditionallyResultType<IsErrorOr, MappedType>>>
+    ALWAYS_INLINE Conditional<IsErrorOr, ErrorOr<OptionalType>, OptionalType> map(F&& mapper) const
+    {
+        if constexpr (IsErrorOr) {
+            if (m_has_value)
+                return OptionalType { TRY(mapper(value())) };
+            return OptionalType {};
+        } else {
+            if (m_has_value)
+                return OptionalType { mapper(value()) };
+
+            return OptionalType {};
+        }
+    }
 
 private:
     alignas(T) u8 m_storage[sizeof(T)];
@@ -222,7 +337,8 @@ public:
     ALWAYS_INLINE Optional() = default;
 
     template<typename U = T>
-    ALWAYS_INLINE Optional(U& value) requires(CanBePlacedInOptional<U&>)
+    ALWAYS_INLINE Optional(U& value)
+    requires(CanBePlacedInOptional<U&>)
         : m_pointer(&value)
     {
     }
@@ -244,13 +360,15 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE Optional(Optional<U> const& other) requires(CanBePlacedInOptional<U>)
+    ALWAYS_INLINE Optional(Optional<U> const& other)
+    requires(CanBePlacedInOptional<U>)
         : m_pointer(other.m_pointer)
     {
     }
 
     template<typename U>
-    ALWAYS_INLINE Optional(Optional<U>&& other) requires(CanBePlacedInOptional<U>)
+    ALWAYS_INLINE Optional(Optional<U>&& other)
+    requires(CanBePlacedInOptional<U>)
         : m_pointer(other.m_pointer)
     {
         other.m_pointer = nullptr;
@@ -270,14 +388,16 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE Optional& operator=(Optional<U> const& other) requires(CanBePlacedInOptional<U>)
+    ALWAYS_INLINE Optional& operator=(Optional<U> const& other)
+    requires(CanBePlacedInOptional<U>)
     {
         m_pointer = other.m_pointer;
         return *this;
     }
 
     template<typename U>
-    ALWAYS_INLINE Optional& operator=(Optional<U>&& other) requires(CanBePlacedInOptional<U>)
+    ALWAYS_INLINE Optional& operator=(Optional<U>&& other)
+    requires(CanBePlacedInOptional<U>)
     {
         m_pointer = other.m_pointer;
         other.m_pointer = nullptr;
@@ -286,7 +406,8 @@ public:
 
     // Note: Disallows assignment from a temporary as this does not do any lifetime extension.
     template<typename U>
-    ALWAYS_INLINE Optional& operator=(U&& value) requires(CanBePlacedInOptional<U>&& IsLvalueReference<U>)
+    ALWAYS_INLINE Optional& operator=(U&& value)
+    requires(CanBePlacedInOptional<U> && IsLvalueReference<U>)
     {
         m_pointer = &value;
         return *this;
@@ -358,10 +479,74 @@ public:
         return {};
     }
 
+    template<typename Callback>
+    [[nodiscard]] ALWAYS_INLINE T value_or_lazy_evaluated(Callback callback) const
+    {
+        if (m_pointer != nullptr)
+            return value();
+        return callback();
+    }
+
+    template<typename Callback>
+    [[nodiscard]] ALWAYS_INLINE Optional<T> value_or_lazy_evaluated_optional(Callback callback) const
+    {
+        if (m_pointer != nullptr)
+            return value();
+        return callback();
+    }
+
+    template<typename Callback>
+    [[nodiscard]] ALWAYS_INLINE ErrorOr<T> try_value_or_lazy_evaluated(Callback callback) const
+    {
+        if (m_pointer != nullptr)
+            return value();
+        return TRY(callback());
+    }
+
+    template<typename Callback>
+    [[nodiscard]] ALWAYS_INLINE ErrorOr<Optional<T>> try_value_or_lazy_evaluated_optional(Callback callback) const
+    {
+        if (m_pointer != nullptr)
+            return value();
+        return TRY(callback());
+    }
+
+    template<typename F, typename MappedType = decltype(declval<F>()(declval<T&>())), auto IsErrorOr = IsSpecializationOf<MappedType, ErrorOr>, typename OptionalType = Optional<ConditionallyResultType<IsErrorOr, MappedType>>>
+    ALWAYS_INLINE Conditional<IsErrorOr, ErrorOr<OptionalType>, OptionalType> map(F&& mapper)
+    {
+        if constexpr (IsErrorOr) {
+            if (m_pointer != nullptr)
+                return OptionalType { TRY(mapper(value())) };
+            return OptionalType {};
+        } else {
+            if (m_pointer != nullptr)
+                return OptionalType { mapper(value()) };
+
+            return OptionalType {};
+        }
+    }
+
+    template<typename F, typename MappedType = decltype(declval<F>()(declval<T&>())), auto IsErrorOr = IsSpecializationOf<MappedType, ErrorOr>, typename OptionalType = Optional<ConditionallyResultType<IsErrorOr, MappedType>>>
+    ALWAYS_INLINE Conditional<IsErrorOr, ErrorOr<OptionalType>, OptionalType> map(F&& mapper) const
+    {
+        if constexpr (IsErrorOr) {
+            if (m_pointer != nullptr)
+                return OptionalType { TRY(mapper(value())) };
+            return OptionalType {};
+        } else {
+            if (m_pointer != nullptr)
+                return OptionalType { mapper(value()) };
+
+            return OptionalType {};
+        }
+    }
+
 private:
     RemoveReference<T>* m_pointer { nullptr };
 };
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::Optional;
+#endif

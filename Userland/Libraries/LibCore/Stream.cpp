@@ -9,7 +9,6 @@
 #include <LibCore/System.h>
 #include <fcntl.h>
 #include <netdb.h>
-#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -23,14 +22,14 @@
 
 namespace Core::Stream {
 
-bool Stream::read_or_error(Bytes buffer)
+ErrorOr<void> Stream::read_entire_buffer(Bytes buffer)
 {
     VERIFY(buffer.size());
 
     size_t nread = 0;
     do {
         if (is_eof())
-            return false;
+            return Error::from_string_literal("Reached end-of-file before filling the entire buffer");
 
         auto result = read(buffer.slice(nread));
         if (result.is_error()) {
@@ -38,21 +37,21 @@ bool Stream::read_or_error(Bytes buffer)
                 continue;
             }
 
-            return false;
+            return result.release_error();
         }
 
         nread += result.value().size();
     } while (nread < buffer.size());
 
-    return true;
+    return {};
 }
 
-ErrorOr<ByteBuffer> Stream::read_all(size_t block_size)
+ErrorOr<ByteBuffer> Stream::read_until_eof(size_t block_size)
 {
-    return read_all_impl(block_size);
+    return read_until_eof_impl(block_size);
 }
 
-ErrorOr<ByteBuffer> Stream::read_all_impl(size_t block_size, size_t expected_file_size)
+ErrorOr<ByteBuffer> Stream::read_until_eof_impl(size_t block_size, size_t expected_file_size)
 {
     ByteBuffer data;
     data.ensure_capacity(expected_file_size);
@@ -73,7 +72,26 @@ ErrorOr<ByteBuffer> Stream::read_all_impl(size_t block_size, size_t expected_fil
     return data;
 }
 
-bool Stream::write_or_error(ReadonlyBytes buffer)
+ErrorOr<void> Stream::discard(size_t discarded_bytes)
+{
+    // Note: This was chosen arbitrarily.
+    // Note: This can't be PAGE_SIZE because it is defined to sysconf() on Lagom.
+    constexpr size_t continuous_read_size = 4096;
+
+    Array<u8, continuous_read_size> buffer;
+
+    while (discarded_bytes > 0) {
+        if (is_eof())
+            return Error::from_string_literal("Reached end-of-file before reading all discarded bytes");
+
+        auto slice = TRY(read(buffer.span().slice(0, min(discarded_bytes, continuous_read_size))));
+        discarded_bytes -= slice.size();
+    }
+
+    return {};
+}
+
+ErrorOr<void> Stream::write_entire_buffer(ReadonlyBytes buffer)
 {
     VERIFY(buffer.size());
 
@@ -85,13 +103,13 @@ bool Stream::write_or_error(ReadonlyBytes buffer)
                 continue;
             }
 
-            return false;
+            return result.release_error();
         }
 
         nwritten += result.value();
     } while (nwritten < buffer.size());
 
-    return true;
+    return {};
 }
 
 ErrorOr<off_t> SeekableStream::tell() const
@@ -120,6 +138,12 @@ ErrorOr<off_t> SeekableStream::size()
     return seek_result.value();
 }
 
+ErrorOr<void> SeekableStream::discard(size_t discarded_bytes)
+{
+    TRY(seek(discarded_bytes, SeekMode::FromCurrentPosition));
+    return {};
+}
+
 ErrorOr<NonnullOwnPtr<File>> File::open(StringView filename, OpenMode mode, mode_t permissions)
 {
     auto file = TRY(adopt_nonnull_own_or_enomem(new (nothrow) File(mode)));
@@ -141,11 +165,6 @@ ErrorOr<NonnullOwnPtr<File>> File::adopt_fd(int fd, OpenMode mode, ShouldCloseFi
     auto file = TRY(adopt_nonnull_own_or_enomem(new (nothrow) File(mode, should_close_file_descriptor)));
     file->m_fd = fd;
     return file;
-}
-
-bool File::exists(StringView filename)
-{
-    return !Core::System::stat(filename).is_error();
 }
 
 ErrorOr<NonnullOwnPtr<File>> File::standard_input()
@@ -212,9 +231,6 @@ ErrorOr<void> File::open_path(StringView filename, mode_t permissions)
     return {};
 }
 
-bool File::is_readable() const { return has_flag(m_mode, OpenMode::Read); }
-bool File::is_writable() const { return has_flag(m_mode, OpenMode::Write); }
-
 ErrorOr<Bytes> File::read(Bytes buffer)
 {
     if (!has_flag(m_mode, OpenMode::Read)) {
@@ -229,12 +245,12 @@ ErrorOr<Bytes> File::read(Bytes buffer)
     return buffer.trim(nread);
 }
 
-ErrorOr<ByteBuffer> File::read_all(size_t block_size)
+ErrorOr<ByteBuffer> File::read_until_eof(size_t block_size)
 {
     // Note: This is used as a heuristic, it's not valid for devices or virtual files.
     auto const potential_file_size = TRY(System::fstat(m_fd)).st_size;
 
-    return read_all_impl(block_size, potential_file_size);
+    return read_until_eof_impl(block_size, potential_file_size);
 }
 
 ErrorOr<size_t> File::write(ReadonlyBytes buffer)
@@ -331,7 +347,7 @@ ErrorOr<int> Socket::create_fd(SocketDomain domain, SocketType type)
 #endif
 }
 
-ErrorOr<IPv4Address> Socket::resolve_host(String const& host, SocketType type)
+ErrorOr<IPv4Address> Socket::resolve_host(DeprecatedString const& host, SocketType type)
 {
     int socket_type;
     switch (type) {
@@ -351,24 +367,12 @@ ErrorOr<IPv4Address> Socket::resolve_host(String const& host, SocketType type)
     hints.ai_flags = 0;
     hints.ai_protocol = 0;
 
-    // FIXME: Convert this to Core::System
-    struct addrinfo* results = nullptr;
-    int rc = getaddrinfo(host.characters(), nullptr, &hints, &results);
-    if (rc != 0) {
-        if (rc == EAI_SYSTEM) {
-            return Error::from_syscall("getaddrinfo"sv, -errno);
-        }
+    auto const results = TRY(Core::System::getaddrinfo(host.characters(), nullptr, hints));
 
-        auto const* error_string = gai_strerror(rc);
-        return Error::from_string_view({ error_string, strlen(error_string) });
-    }
-
-    ScopeGuard free_results = [results] { freeaddrinfo(results); };
-
-    for (auto* result = results; result != nullptr; result = result->ai_next) {
-        if (result->ai_family == AF_INET) {
-            auto* socket_address = bit_cast<struct sockaddr_in*>(result->ai_addr);
-            NetworkOrdered<u32> network_ordered_address { socket_address->sin_addr.s_addr };
+    for (auto const& result : results.addresses()) {
+        if (result.ai_family == AF_INET) {
+            auto* socket_address = bit_cast<struct sockaddr_in*>(result.ai_addr);
+            NetworkOrdered<u32> const network_ordered_address { socket_address->sin_addr.s_addr };
             return IPv4Address { network_ordered_address };
         }
     }
@@ -376,7 +380,7 @@ ErrorOr<IPv4Address> Socket::resolve_host(String const& host, SocketType type)
     return Error::from_string_literal("Could not resolve to IPv4 address");
 }
 
-ErrorOr<void> Socket::connect_local(int fd, String const& path)
+ErrorOr<void> Socket::connect_local(int fd, DeprecatedString const& path)
 {
     auto address = SocketAddress::local(path);
     auto maybe_sockaddr = address.to_sockaddr_un();
@@ -413,13 +417,13 @@ ErrorOr<Bytes> PosixSocketHelper::read(Bytes buffer, int flags)
     return buffer.trim(nread);
 }
 
-ErrorOr<size_t> PosixSocketHelper::write(ReadonlyBytes buffer)
+ErrorOr<size_t> PosixSocketHelper::write(ReadonlyBytes buffer, int flags)
 {
     if (!is_open()) {
         return Error::from_errno(ENOTCONN);
     }
 
-    return TRY(System::send(m_fd, buffer.data(), buffer.size(), 0));
+    return TRY(System::send(m_fd, buffer.data(), buffer.size(), flags));
 }
 
 void PosixSocketHelper::close()
@@ -444,15 +448,13 @@ ErrorOr<bool> PosixSocketHelper::can_read_without_blocking(int timeout) const
 {
     struct pollfd the_fd = { .fd = m_fd, .events = POLLIN, .revents = 0 };
 
-    // FIXME: Convert this to Core::System
-    int rc;
+    ErrorOr<int> result { 0 };
     do {
-        rc = ::poll(&the_fd, 1, timeout);
-    } while (rc < 0 && errno == EINTR);
+        result = Core::System::poll({ &the_fd, 1 }, timeout);
+    } while (result.is_error() && result.error().code() == EINTR);
 
-    if (rc < 0) {
-        return Error::from_syscall("poll"sv, -errno);
-    }
+    if (result.is_error())
+        return result.release_error();
 
     return (the_fd.revents & POLLIN) > 0;
 }
@@ -488,7 +490,7 @@ void PosixSocketHelper::setup_notifier()
         m_notifier = Core::Notifier::construct(m_fd, Core::Notifier::Read);
 }
 
-ErrorOr<NonnullOwnPtr<TCPSocket>> TCPSocket::connect(String const& host, u16 port)
+ErrorOr<NonnullOwnPtr<TCPSocket>> TCPSocket::connect(DeprecatedString const& host, u16 port)
 {
     auto ip_address = TRY(resolve_host(host, SocketType::Stream));
     return connect(SocketAddress { ip_address, port });
@@ -530,7 +532,7 @@ ErrorOr<size_t> PosixSocketHelper::pending_bytes() const
     return static_cast<size_t>(value);
 }
 
-ErrorOr<NonnullOwnPtr<UDPSocket>> UDPSocket::connect(String const& host, u16 port, Optional<Time> timeout)
+ErrorOr<NonnullOwnPtr<UDPSocket>> UDPSocket::connect(DeprecatedString const& host, u16 port, Optional<Time> timeout)
 {
     auto ip_address = TRY(resolve_host(host, SocketType::Datagram));
     return connect(SocketAddress { ip_address, port }, timeout);
@@ -552,9 +554,9 @@ ErrorOr<NonnullOwnPtr<UDPSocket>> UDPSocket::connect(SocketAddress const& addres
     return socket;
 }
 
-ErrorOr<NonnullOwnPtr<LocalSocket>> LocalSocket::connect(String const& path)
+ErrorOr<NonnullOwnPtr<LocalSocket>> LocalSocket::connect(DeprecatedString const& path, PreventSIGPIPE prevent_sigpipe)
 {
-    auto socket = TRY(adopt_nonnull_own_or_enomem(new (nothrow) LocalSocket()));
+    auto socket = TRY(adopt_nonnull_own_or_enomem(new (nothrow) LocalSocket(prevent_sigpipe)));
 
     auto fd = TRY(create_fd(SocketDomain::Local, SocketType::Stream));
     socket->m_helper.set_fd(fd);
@@ -565,13 +567,13 @@ ErrorOr<NonnullOwnPtr<LocalSocket>> LocalSocket::connect(String const& path)
     return socket;
 }
 
-ErrorOr<NonnullOwnPtr<LocalSocket>> LocalSocket::adopt_fd(int fd)
+ErrorOr<NonnullOwnPtr<LocalSocket>> LocalSocket::adopt_fd(int fd, PreventSIGPIPE prevent_sigpipe)
 {
     if (fd < 0) {
         return Error::from_errno(EBADF);
     }
 
-    auto socket = TRY(adopt_nonnull_own_or_enomem(new (nothrow) LocalSocket()));
+    auto socket = TRY(adopt_nonnull_own_or_enomem(new (nothrow) LocalSocket(prevent_sigpipe)));
     socket->m_helper.set_fd(fd);
     socket->setup_notifier();
     return socket;
@@ -591,15 +593,11 @@ ErrorOr<int> LocalSocket::receive_fd(int flags)
         .iov_base = &c,
         .iov_len = 1,
     };
-    struct msghdr msg {
-        .msg_name = NULL,
-        .msg_namelen = 0,
-        .msg_iov = &iov,
-        .msg_iovlen = 1,
-        .msg_control = cmsgu.control,
-        .msg_controllen = sizeof(cmsgu.control),
-        .msg_flags = 0,
-    };
+    struct msghdr msg = {};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsgu.control;
+    msg.msg_controllen = sizeof(cmsgu.control);
     TRY(Core::System::recvmsg(m_helper.fd(), &msg, 0));
 
     struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
@@ -638,15 +636,11 @@ ErrorOr<void> LocalSocket::send_fd(int fd)
         char control[CMSG_SPACE(sizeof(int))];
     } cmsgu {};
 
-    struct msghdr msg {
-        .msg_name = NULL,
-        .msg_namelen = 0,
-        .msg_iov = &iov,
-        .msg_iovlen = 1,
-        .msg_control = cmsgu.control,
-        .msg_controllen = sizeof(cmsgu.control),
-        .msg_flags = 0,
-    };
+    struct msghdr msg = {};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsgu.control;
+    msg.msg_controllen = sizeof(cmsgu.control);
 
     struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
     cmsg->cmsg_len = CMSG_LEN(sizeof(int));
@@ -712,6 +706,128 @@ ErrorOr<int> LocalSocket::release_fd()
     auto fd = m_helper.fd();
     m_helper.set_fd(-1);
     return fd;
+}
+
+WrappedAKInputStream::WrappedAKInputStream(NonnullOwnPtr<InputStream> stream)
+    : m_stream(move(stream))
+{
+}
+
+ErrorOr<Bytes> WrappedAKInputStream::read(Bytes bytes)
+{
+    auto bytes_read = m_stream->read(bytes);
+
+    if (m_stream->has_any_error())
+        return Error::from_string_literal("Underlying InputStream indicated an error");
+
+    return bytes.slice(0, bytes_read);
+}
+
+ErrorOr<void> WrappedAKInputStream::discard(size_t discarded_bytes)
+{
+    if (!m_stream->discard_or_error(discarded_bytes))
+        return Error::from_string_literal("Underlying InputStream indicated an error");
+
+    return {};
+}
+
+ErrorOr<size_t> WrappedAKInputStream::write(ReadonlyBytes)
+{
+    VERIFY_NOT_REACHED();
+}
+
+bool WrappedAKInputStream::is_eof() const
+{
+    return m_stream->unreliable_eof();
+}
+
+bool WrappedAKInputStream::is_open() const
+{
+    return true;
+}
+
+void WrappedAKInputStream::close()
+{
+}
+
+WrappedAKOutputStream::WrappedAKOutputStream(NonnullOwnPtr<OutputStream> stream)
+    : m_stream(move(stream))
+{
+}
+
+ErrorOr<Bytes> WrappedAKOutputStream::read(Bytes)
+{
+    VERIFY_NOT_REACHED();
+}
+
+ErrorOr<size_t> WrappedAKOutputStream::write(ReadonlyBytes bytes)
+{
+    auto bytes_written = m_stream->write(bytes);
+
+    if (m_stream->has_any_error())
+        return Error::from_string_literal("Underlying OutputStream indicated an error");
+
+    return bytes_written;
+}
+
+bool WrappedAKOutputStream::is_eof() const
+{
+    VERIFY_NOT_REACHED();
+}
+
+bool WrappedAKOutputStream::is_open() const
+{
+    return true;
+}
+
+void WrappedAKOutputStream::close()
+{
+}
+
+WrapInAKInputStream::WrapInAKInputStream(Core::Stream::Stream& stream)
+    : m_stream(stream)
+{
+}
+
+size_t WrapInAKInputStream::read(Bytes bytes)
+{
+    if (has_any_error())
+        return 0;
+
+    auto data_or_error = m_stream.read(bytes);
+    if (data_or_error.is_error()) {
+        set_fatal_error();
+        return 0;
+    }
+
+    return data_or_error.value().size();
+}
+
+bool WrapInAKInputStream::unreliable_eof() const
+{
+    return m_stream.is_eof();
+}
+
+bool WrapInAKInputStream::read_or_error(Bytes bytes)
+{
+    if (read(bytes) < bytes.size()) {
+        set_fatal_error();
+        return false;
+    }
+
+    return true;
+}
+
+bool WrapInAKInputStream::discard_or_error(size_t count)
+{
+    auto maybe_error = m_stream.discard(count);
+
+    if (maybe_error.is_error()) {
+        set_fatal_error();
+        return false;
+    }
+
+    return true;
 }
 
 }

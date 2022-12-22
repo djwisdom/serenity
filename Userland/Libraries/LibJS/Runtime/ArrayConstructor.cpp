@@ -47,7 +47,7 @@ ThrowCompletionOr<Value> ArrayConstructor::call()
 }
 
 // 23.1.1.1 Array ( ...values ), https://tc39.es/ecma262/#sec-array
-ThrowCompletionOr<Object*> ArrayConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> ArrayConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
     auto& realm = *vm.current_realm();
@@ -59,7 +59,7 @@ ThrowCompletionOr<Object*> ArrayConstructor::construct(FunctionObject& new_targe
 
     if (vm.argument_count() == 1) {
         auto length = vm.argument(0);
-        auto* array = MUST(Array::create(realm, 0, proto));
+        auto array = MUST(Array::create(realm, 0, proto));
         size_t int_length;
         if (!length.is_number()) {
             MUST(array->create_data_property_or_throw(0, length));
@@ -73,7 +73,7 @@ ThrowCompletionOr<Object*> ArrayConstructor::construct(FunctionObject& new_targe
         return array;
     }
 
-    auto* array = TRY(Array::create(realm, vm.argument_count(), proto));
+    auto array = TRY(Array::create(realm, vm.argument_count(), proto));
 
     for (size_t k = 0; k < vm.argument_count(); ++k)
         MUST(array->create_data_property_or_throw(k, vm.argument(k)));

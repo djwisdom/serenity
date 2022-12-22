@@ -22,7 +22,7 @@ public:
     virtual ~WandSelectTool() = default;
 
     virtual void on_mousedown(Layer*, MouseEvent& event) override;
-    virtual bool on_keydown(GUI::KeyEvent const&) override;
+    virtual bool on_keydown(GUI::KeyEvent&) override;
     virtual GUI::Widget* get_properties_widget() override;
     virtual Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> cursor() override { return Gfx::StandardCursor::Crosshair; }
 
@@ -31,7 +31,7 @@ private:
 
     int m_threshold { 0 };
     RefPtr<GUI::Widget> m_properties_widget;
-    Vector<String> m_merge_mode_names {};
+    Vector<DeprecatedString> m_merge_mode_names {};
     Selection::MergeMode m_merge_mode { Selection::MergeMode::Set };
 };
 

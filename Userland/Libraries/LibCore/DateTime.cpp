@@ -84,7 +84,7 @@ void DateTime::set_time(int year, int month, int day, int hour, int minute, int 
     m_second = tm.tm_sec;
 }
 
-String DateTime::to_string(StringView format) const
+DeprecatedString DateTime::to_deprecated_string(StringView format) const
 {
     struct tm tm;
     localtime_r(&m_timestamp, &tm);
@@ -120,7 +120,7 @@ String DateTime::to_string(StringView format) const
             builder.append(format[i]);
         } else {
             if (++i == format_len)
-                return String();
+                return DeprecatedString();
 
             switch (format[i]) {
             case 'a':
@@ -163,6 +163,13 @@ String DateTime::to_string(StringView format) const
             case 'j':
                 builder.appendff("{:03}", tm.tm_yday + 1);
                 break;
+            case 'l': {
+                int display_hour = tm.tm_hour % 12;
+                if (display_hour == 0)
+                    display_hour = 12;
+                builder.appendff("{:2}", display_hour);
+                break;
+            }
             case 'm':
                 builder.appendff("{:02}", tm.tm_mon + 1);
                 break;
@@ -269,13 +276,14 @@ String DateTime::to_string(StringView format) const
     return builder.build();
 }
 
-Optional<DateTime> DateTime::parse(StringView format, String const& string)
+Optional<DateTime> DateTime::parse(StringView format, DeprecatedString const& string)
 {
     unsigned format_pos = 0;
     unsigned string_pos = 0;
     struct tm tm = {};
 
     auto parsing_failed = false;
+    auto tm_represents_utc_time = false;
 
     auto parse_number = [&] {
         if (string_pos >= string.length()) {
@@ -480,6 +488,7 @@ Optional<DateTime> DateTime::parse(StringView format, String const& string)
             break;
         }
         case 'z': {
+            tm_represents_utc_time = true;
             if (string[string_pos] == 'Z') {
                 // UTC time
                 string_pos++;
@@ -529,6 +538,13 @@ Optional<DateTime> DateTime::parse(StringView format, String const& string)
     }
     if (string_pos != string.length() || format_pos != format.length()) {
         return {};
+    }
+
+    // If an explicit timezone was present, the time in tm was shifted to UTC.
+    // Convert it to local time, since that is what `mktime` expects.
+    if (tm_represents_utc_time) {
+        auto utc_time = timegm(&tm);
+        localtime_r(&utc_time, &tm);
     }
 
     return DateTime::from_timestamp(mktime(&tm));

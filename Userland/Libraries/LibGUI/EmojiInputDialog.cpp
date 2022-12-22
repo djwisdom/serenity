@@ -19,7 +19,6 @@
 #include <LibGUI/Button.h>
 #include <LibGUI/EmojiInputDialog.h>
 #include <LibGUI/EmojiInputDialogGML.h>
-#include <LibGUI/Event.h>
 #include <LibGUI/Frame.h>
 #include <LibGUI/ScrollableContainerWidget.h>
 #include <LibGUI/TextBox.h>
@@ -98,9 +97,9 @@ EmojiInputDialog::EmojiInputDialog(Window* parent_window)
     if (!main_widget.load_from_gml(emoji_input_dialog_gml))
         VERIFY_NOT_REACHED();
 
-    set_frameless(true);
+    set_window_type(GUI::WindowType::Popup);
+    set_window_mode(GUI::WindowMode::Modeless);
     set_blocks_emoji_input(true);
-    set_window_mode(GUI::WindowMode::CaptureInput);
     resize(400, 300);
 
     auto& scrollable_container = *main_widget.find_descendant_of_type_named<GUI::ScrollableContainerWidget>("scrollable_container"sv);
@@ -139,16 +138,6 @@ EmojiInputDialog::EmojiInputDialog(Window* parent_window)
     scrollable_container.horizontal_scrollbar().set_visible(false);
     update_displayed_emoji();
 
-    on_active_input_change = [this](bool is_active_input) {
-        if (!is_active_input)
-            close();
-    };
-
-    on_input_preemption = [this](InputPreemptor preemptor) {
-        if (preemptor != InputPreemptor::ContextMenu)
-            close();
-    };
-
     m_search_box->on_change = [this]() {
         update_displayed_emoji();
     };
@@ -185,7 +174,7 @@ auto EmojiInputDialog::supported_emoji() -> Vector<Emoji>
             builder.append_code_point(*code_point);
             code_points.append(*code_point);
         });
-        auto text = builder.to_string();
+        auto text = builder.to_deprecated_string();
 
         auto emoji = Unicode::find_emoji_for_code_points(code_points);
         if (!emoji.has_value()) {
@@ -270,18 +259,6 @@ void EmojiInputDialog::select_first_displayed_emoji()
 
     m_selected_emoji_text = m_first_displayed_emoji->text;
     done(ExecResult::OK);
-}
-
-void EmojiInputDialog::event(Core::Event& event)
-{
-    if (event.type() == Event::KeyDown) {
-        auto& key_event = static_cast<KeyEvent&>(event);
-        if (key_event.key() == Key_Escape) {
-            done(ExecResult::Cancel);
-            return;
-        }
-    }
-    Dialog::event(event);
 }
 
 }

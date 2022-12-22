@@ -14,6 +14,7 @@
 #include <LibCore/File.h>
 #include <LibCore/MappedFile.h>
 #include <LibCore/System.h>
+#include <LibCrypto/Checksum/CRC32.h>
 #include <sys/stat.h>
 
 static bool unpack_zip_member(Archive::ZipMember zip_member, bool quiet)
@@ -37,19 +38,20 @@ static bool unpack_zip_member(Archive::ZipMember zip_member, bool quiet)
     if (!quiet)
         outln(" extracting: {}", zip_member.name);
 
-    // TODO: verify CRC32s match!
+    Crypto::Checksum::CRC32 checksum;
     switch (zip_member.compression_method) {
     case Archive::ZipCompressionMethod::Store: {
         if (!new_file->write(zip_member.compressed_data.data(), zip_member.compressed_data.size())) {
             warnln("Can't write file contents in {}: {}", zip_member.name, new_file->error_string());
             return false;
         }
+        checksum.update({ zip_member.compressed_data.data(), zip_member.compressed_data.size() });
         break;
     }
     case Archive::ZipCompressionMethod::Deflate: {
         auto decompressed_data = Compress::DeflateDecompressor::decompress_all(zip_member.compressed_data);
-        if (!decompressed_data.has_value()) {
-            warnln("Failed decompressing file {}", zip_member.name);
+        if (decompressed_data.is_error()) {
+            warnln("Failed decompressing file {}: {}", zip_member.name, decompressed_data.error());
             return false;
         }
         if (decompressed_data.value().size() != zip_member.uncompressed_size) {
@@ -60,6 +62,7 @@ static bool unpack_zip_member(Archive::ZipMember zip_member, bool quiet)
             warnln("Can't write file contents in {}: {}", zip_member.name, new_file->error_string());
             return false;
         }
+        checksum.update({ decompressed_data.value().data(), decompressed_data.value().size() });
         break;
     }
     default:
@@ -71,24 +74,28 @@ static bool unpack_zip_member(Archive::ZipMember zip_member, bool quiet)
         return false;
     }
 
+    if (checksum.digest() != zip_member.crc32) {
+        warnln("Failed decompressing file {}: CRC32 mismatch", zip_member.name);
+        MUST(new_file->remove(zip_member.name, Core::File::RecursionMode::Disallowed, true));
+        return false;
+    }
+
     return true;
 }
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    char const* path;
+    StringView zip_file_path;
     bool quiet { false };
-    String output_directory_path;
+    StringView output_directory_path;
     Vector<StringView> file_filters;
 
     Core::ArgsParser args_parser;
     args_parser.add_option(output_directory_path, "Directory to receive the archive content", "output-directory", 'd', "path");
     args_parser.add_option(quiet, "Be less verbose", "quiet", 'q');
-    args_parser.add_positional_argument(path, "File to unzip", "path", Core::ArgsParser::Required::Yes);
+    args_parser.add_positional_argument(zip_file_path, "File to unzip", "path", Core::ArgsParser::Required::Yes);
     args_parser.add_positional_argument(file_filters, "Files or filters in the archive to extract", "files", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
-
-    String zip_file_path { path };
 
     struct stat st = TRY(Core::System::stat(zip_file_path));
 

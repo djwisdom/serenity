@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibJS/AST.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
 #include <LibJS/Runtime/Error.h>
 #include <LibJS/Runtime/GlobalObject.h>
@@ -195,7 +194,7 @@ ThrowCompletionOr<bool> Reference::delete_(VM& vm)
     return m_base_environment->delete_binding(vm, m_name.as_string());
 }
 
-String Reference::to_string() const
+DeprecatedString Reference::to_deprecated_string() const
 {
     StringBuilder builder;
     builder.append("Reference { Base="sv);
@@ -217,7 +216,7 @@ String Reference::to_string() const
     if (!m_name.is_valid())
         builder.append("<invalid>"sv);
     else if (m_name.is_symbol())
-        builder.appendff("{}", m_name.as_symbol()->to_string());
+        builder.appendff("{}", m_name.as_symbol()->to_deprecated_string());
     else
         builder.appendff("{}", m_name.to_string());
     builder.appendff(", Strict={}", m_strict);
@@ -228,7 +227,7 @@ String Reference::to_string() const
         builder.appendff("{}", m_this_value.to_string_without_side_effects());
 
     builder.append(" }"sv);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 // 6.2.4.8 InitializeReferencedBinding ( V, W ), https://tc39.es/ecma262/#sec-object.prototype.hasownproperty

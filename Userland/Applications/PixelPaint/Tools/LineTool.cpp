@@ -22,7 +22,7 @@
 
 namespace PixelPaint {
 
-static Gfx::IntPoint constrain_line_angle(Gfx::IntPoint const& start_pos, Gfx::IntPoint const& end_pos, float angle_increment)
+static Gfx::IntPoint constrain_line_angle(Gfx::IntPoint start_pos, Gfx::IntPoint end_pos, float angle_increment)
 {
     float current_angle = AK::atan2<float>(end_pos.y() - start_pos.y(), end_pos.x() - start_pos.x()) + float { M_PI * 2 };
 
@@ -56,7 +56,7 @@ void LineTool::on_mousedown(Layer* layer, MouseEvent& event)
     m_editor->update();
 }
 
-void LineTool::draw_using(GUI::Painter& painter, Gfx::IntPoint const& start_position, Gfx::IntPoint const& end_position, Color color, int thickness)
+void LineTool::draw_using(GUI::Painter& painter, Gfx::IntPoint start_position, Gfx::IntPoint end_position, Color color, int thickness)
 {
     if (m_antialias_enabled) {
         Gfx::AntiAliasingPainter aa_painter { painter };
@@ -124,7 +124,7 @@ void LineTool::on_second_paint(Layer const* layer, GUI::PaintEvent& event)
     draw_using(painter, preview_start, preview_end, m_editor->color_for(m_drawing_button), AK::max(m_thickness * m_editor->scale(), 1));
 }
 
-bool LineTool::on_keydown(GUI::KeyEvent const& event)
+bool LineTool::on_keydown(GUI::KeyEvent& event)
 {
     if (event.key() == Key_Escape && m_drawing_button != GUI::MouseButton::None) {
         m_drawing_button = GUI::MouseButton::None;
@@ -169,6 +169,7 @@ GUI::Widget* LineTool::get_properties_widget()
         aa_enable_checkbox.on_checked = [&](bool checked) {
             m_antialias_enabled = checked;
         };
+        aa_enable_checkbox.set_checked(true);
     }
 
     return m_properties_widget.ptr();

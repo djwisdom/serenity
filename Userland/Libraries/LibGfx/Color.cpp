@@ -5,9 +5,9 @@
  */
 
 #include <AK/Assertions.h>
+#include <AK/DeprecatedString.h>
 #include <AK/FloatingPointStringConversions.h>
 #include <AK/Optional.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/SystemTheme.h>
@@ -18,14 +18,14 @@
 
 namespace Gfx {
 
-String Color::to_string() const
+DeprecatedString Color::to_deprecated_string() const
 {
-    return String::formatted("#{:02x}{:02x}{:02x}{:02x}", red(), green(), blue(), alpha());
+    return DeprecatedString::formatted("#{:02x}{:02x}{:02x}{:02x}", red(), green(), blue(), alpha());
 }
 
-String Color::to_string_without_alpha() const
+DeprecatedString Color::to_deprecated_string_without_alpha() const
 {
-    return String::formatted("#{:02x}{:02x}{:02x}", red(), green(), blue());
+    return DeprecatedString::formatted("#{:02x}{:02x}{:02x}", red(), green(), blue());
 }
 
 static Optional<Color> parse_rgb_color(StringView string)
@@ -316,7 +316,7 @@ Optional<Color> Color::from_string(StringView string)
     return Color(r.value(), g.value(), b.value(), a.value());
 }
 
-Color Color::mixed_with(Color const& other, float weight) const
+Color Color::mixed_with(Color other, float weight) const
 {
     if (alpha() == other.alpha() || with_alpha(0) == other.with_alpha(0)) {
         return Gfx::Color {
@@ -330,7 +330,7 @@ Color Color::mixed_with(Color const& other, float weight) const
     // This is needed for linear-gradient()s in LibWeb.
     auto mixed_alpha = mix<float>(alpha(), other.alpha(), weight);
     auto premultiplied_mix_channel = [&](float channel, float other_channel, float weight) {
-        return round_to<u8>(mix<float>(channel * (alpha() / 255.0f), other_channel * (other.alpha() / 255.0f), weight) / (mixed_alpha / 255.0f));
+        return round_to<u8>(mix<float>(channel * alpha(), other_channel * other.alpha(), weight) / mixed_alpha);
     };
     return Gfx::Color {
         premultiplied_mix_channel(red(), other.red(), weight),
@@ -366,12 +366,14 @@ Vector<Color> Color::tints(u32 steps, float max) const
 
 }
 
+template<>
 bool IPC::encode(Encoder& encoder, Color const& color)
 {
     encoder << color.value();
     return true;
 }
 
+template<>
 ErrorOr<void> IPC::decode(Decoder& decoder, Color& color)
 {
     u32 rgba;
@@ -380,7 +382,7 @@ ErrorOr<void> IPC::decode(Decoder& decoder, Color& color)
     return {};
 }
 
-ErrorOr<void> AK::Formatter<Gfx::Color>::format(FormatBuilder& builder, Gfx::Color const& value)
+ErrorOr<void> AK::Formatter<Gfx::Color>::format(FormatBuilder& builder, Gfx::Color value)
 {
-    return Formatter<StringView>::format(builder, value.to_string());
+    return Formatter<StringView>::format(builder, value.to_deprecated_string());
 }

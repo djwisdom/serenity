@@ -14,7 +14,7 @@ namespace JS::Intl {
 
 // 18 Segmenter Objects, https://tc39.es/ecma402/#segmenter-objects
 Segmenter::Segmenter(Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
 {
 }
 
@@ -62,19 +62,19 @@ Object* create_segment_data_object(VM& vm, Segmenter const& segmenter, Utf16View
     VERIFY(start_index < end_index);
 
     // 5. Let result be OrdinaryObjectCreate(%Object.prototype%).
-    auto* result = Object::create(realm, realm.intrinsics().object_prototype());
+    auto result = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 6. Let segment be the substring of string from startIndex to endIndex.
     auto segment = string.substring_view(start_index, end_index - start_index);
 
     // 7. Perform ! CreateDataPropertyOrThrow(result, "segment", segment).
-    MUST(result->create_data_property_or_throw(vm.names.segment, js_string(vm, segment)));
+    MUST(result->create_data_property_or_throw(vm.names.segment, PrimitiveString::create(vm, segment)));
 
     // 8. Perform ! CreateDataPropertyOrThrow(result, "index", 𝔽(startIndex)).
     MUST(result->create_data_property_or_throw(vm.names.index, Value(start_index)));
 
     // 9. Perform ! CreateDataPropertyOrThrow(result, "input", string).
-    MUST(result->create_data_property_or_throw(vm.names.input, js_string(vm, string)));
+    MUST(result->create_data_property_or_throw(vm.names.input, PrimitiveString::create(vm, string)));
 
     // 10. Let granularity be segmenter.[[SegmenterGranularity]].
     auto granularity = segmenter.segmenter_granularity();

@@ -146,7 +146,7 @@ UnsignedBigInteger UnsignedBigInteger::from_base(u16 N, StringView str)
     return result;
 }
 
-String UnsignedBigInteger::to_base(u16 N) const
+DeprecatedString UnsignedBigInteger::to_base(u16 N) const
 {
     VERIFY(N <= 36);
     if (*this == UnsignedBigInteger { 0 })
@@ -164,7 +164,7 @@ String UnsignedBigInteger::to_base(u16 N) const
         temp.set_to(quotient);
     }
 
-    return builder.to_string().reverse();
+    return builder.to_deprecated_string().reverse();
 }
 
 u64 UnsignedBigInteger::to_u64() const

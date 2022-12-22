@@ -7,7 +7,7 @@
 #pragma once
 
 #include "HitTestResult.h"
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/WeakPtr.h>
 #include <LibCore/Object.h>
 #include <LibGfx/Bitmap.h>
@@ -89,7 +89,7 @@ public:
     bool is_modified() const { return m_modified; }
     void set_modified(bool);
 
-    void popup_window_menu(Gfx::IntPoint const&, WindowMenuDefaultAction);
+    void popup_window_menu(Gfx::IntPoint, WindowMenuDefaultAction);
     void handle_window_menu_action(WindowMenuAction);
     void window_menu_activate_default();
     void request_close();
@@ -106,7 +106,7 @@ public:
     bool is_closeable() const { return m_closeable; }
     void set_closeable(bool);
 
-    bool is_resizable() const { return m_resizable && !m_fullscreen; }
+    bool is_resizable() const { return m_type != WindowType::Popup && m_resizable && !m_fullscreen; }
     void set_resizable(bool);
 
     bool is_maximized() const { return m_tile_type == WindowTileType::Maximized; }
@@ -148,10 +148,10 @@ public:
     bool is_internal() const { return m_client_id == -1; }
     i32 client_id() const { return m_client_id; }
 
-    String title() const { return m_title; }
-    void set_title(String const&);
+    DeprecatedString title() const { return m_title; }
+    void set_title(DeprecatedString const&);
 
-    String computed_title() const;
+    DeprecatedString computed_title() const;
 
     float opacity() const { return m_opacity; }
     void set_opacity(float);
@@ -166,7 +166,7 @@ public:
         m_alpha_hit_threshold = threshold;
     }
 
-    Optional<HitTestResult> hit_test(Gfx::IntPoint const&, bool include_frame = true);
+    Optional<HitTestResult> hit_test(Gfx::IntPoint, bool include_frame = true);
 
     int x() const { return m_rect.x(); }
     int y() const { return m_rect.y(); }
@@ -182,9 +182,6 @@ public:
     bool is_passive() { return m_mode == WindowMode::Passive; }
     bool is_rendering_above() { return m_mode == WindowMode::RenderAbove; }
 
-    bool is_capturing_input() const { return m_mode == WindowMode::CaptureInput; }
-    bool is_capturing_active_input_from(Window const&) const;
-
     bool is_blocking() const { return m_mode == WindowMode::Blocking; }
     Window* blocking_modal_window();
 
@@ -199,20 +196,20 @@ public:
     bool apply_minimum_size(Gfx::IntRect&);
 
     Gfx::IntSize minimum_size() const { return m_minimum_size; }
-    void set_minimum_size(Gfx::IntSize const&);
+    void set_minimum_size(Gfx::IntSize);
     void set_minimum_size(int width, int height) { set_minimum_size({ width, height }); }
 
     void set_taskbar_rect(Gfx::IntRect const&);
     Gfx::IntRect const& taskbar_rect() const { return m_taskbar_rect; }
 
-    void move_to(Gfx::IntPoint const& position) { set_rect({ position, size() }); }
+    void move_to(Gfx::IntPoint position) { set_rect({ position, size() }); }
     void move_to(int x, int y) { move_to({ x, y }); }
 
-    void move_by(Gfx::IntPoint const& delta) { set_position_without_repaint(position().translated(delta)); }
+    void move_by(Gfx::IntPoint delta) { set_position_without_repaint(position().translated(delta)); }
 
     Gfx::IntPoint position() const { return m_rect.location(); }
-    void set_position(Gfx::IntPoint const& position) { set_rect({ position.x(), position.y(), width(), height() }); }
-    void set_position_without_repaint(Gfx::IntPoint const& position) { set_rect_without_repaint({ position.x(), position.y(), width(), height() }); }
+    void set_position(Gfx::IntPoint position) { set_rect({ position.x(), position.y(), width(), height() }); }
+    void set_position_without_repaint(Gfx::IntPoint position) { set_rect_without_repaint({ position.x(), position.y(), width(), height() }); }
 
     Gfx::IntSize size() const { return m_rect.size(); }
 
@@ -263,7 +260,7 @@ public:
     void set_has_alpha_channel(bool value);
 
     Gfx::IntSize size_increment() const { return m_size_increment; }
-    void set_size_increment(Gfx::IntSize const& increment) { m_size_increment = increment; }
+    void set_size_increment(Gfx::IntSize increment) { m_size_increment = increment; }
 
     Optional<Gfx::IntSize> const& resize_aspect_ratio() const { return m_resize_aspect_ratio; }
     void set_resize_aspect_ratio(Optional<Gfx::IntSize> const& ratio)
@@ -278,7 +275,7 @@ public:
     }
 
     Gfx::IntSize base_size() const { return m_base_size; }
-    void set_base_size(Gfx::IntSize const& size) { m_base_size = size; }
+    void set_base_size(Gfx::IntSize size) { m_base_size = size; }
 
     Gfx::Bitmap const& icon() const { return *m_icon; }
     void set_icon(NonnullRefPtr<Gfx::Bitmap>&& icon) { m_icon = move(icon); }
@@ -389,7 +386,7 @@ private:
     void ensure_window_menu();
     void update_window_menu_items();
     void modal_unparented();
-    ErrorOr<Optional<String>> compute_title_username(ConnectionFromClient* client);
+    ErrorOr<Optional<DeprecatedString>> compute_title_username(ConnectionFromClient* client);
 
     ConnectionFromClient* m_client { nullptr };
 
@@ -398,8 +395,8 @@ private:
 
     Menubar m_menubar;
 
-    String m_title;
-    Optional<String> m_title_username;
+    DeprecatedString m_title;
+    Optional<DeprecatedString> m_title_username;
     Gfx::IntRect m_rect;
     Gfx::IntRect m_saved_nonfullscreen_rect;
     Gfx::IntRect m_taskbar_rect;

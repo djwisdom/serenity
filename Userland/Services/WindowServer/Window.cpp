@@ -22,7 +22,7 @@
 
 namespace WindowServer {
 
-static String default_window_icon_path()
+static DeprecatedString default_window_icon_path()
 {
     return "/res/icons/16x16/window.png";
 }
@@ -110,8 +110,10 @@ Window::Window(ConnectionFromClient& client, WindowType window_type, WindowMode 
 {
     if (parent_window)
         set_parent_window(*parent_window);
-    if (auto title_username_maybe = compute_title_username(&client); !title_username_maybe.is_error())
-        m_title_username = title_username_maybe.release_value();
+    if (!is_frameless() && type() == WindowType::Normal) {
+        if (auto title_username_maybe = compute_title_username(&client); !title_username_maybe.is_error())
+            m_title_username = title_username_maybe.release_value();
+    }
     WindowManager::the().add_window(*this);
     frame().window_was_constructed({});
 }
@@ -131,7 +133,7 @@ void Window::destroy()
     set_visible(false);
 }
 
-void Window::set_title(String const& title)
+void Window::set_title(DeprecatedString const& title)
 {
     if (m_title == title)
         return;
@@ -186,7 +188,7 @@ bool Window::apply_minimum_size(Gfx::IntRect& rect)
     return did_size_clamp;
 }
 
-void Window::set_minimum_size(Gfx::IntSize const& size)
+void Window::set_minimum_size(Gfx::IntSize size)
 {
     VERIFY(size.width() >= 0 && size.height() >= 0);
     if (m_minimum_size == size)
@@ -233,6 +235,9 @@ void Window::update_window_menu_items()
     m_window_menu_close_item->set_enabled(m_closeable);
 
     m_window_menu_move_item->set_enabled(m_minimized_state == WindowMinimizedState::None && !is_maximized() && !m_fullscreen);
+
+    if (m_window_menu_always_on_top_item)
+        m_window_menu_always_on_top_item->set_checked(m_always_on_top);
 
     m_window_menu->update_alt_shortcuts_for_items();
 }
@@ -450,9 +455,9 @@ void Window::event(Core::Event& event)
         return;
     }
 
-    if (blocking_modal_window()) {
+    if (blocking_modal_window() && type() != WindowType::Popup) {
         // Allow windows to process their inactivity after being blocked
-        if (event.type() != Event::WindowDeactivated && event.type() != Event::WindowInputLeft)
+        if (event.type() != Event::WindowDeactivated && event.type() != Event::WindowInputPreempted)
             return;
     }
 
@@ -482,11 +487,11 @@ void Window::event(Core::Event& event)
     case Event::WindowDeactivated:
         m_client->async_window_deactivated(m_window_id);
         break;
-    case Event::WindowInputEntered:
-        m_client->async_window_input_entered(m_window_id);
+    case Event::WindowInputPreempted:
+        m_client->async_window_input_preempted(m_window_id);
         break;
-    case Event::WindowInputLeft:
-        m_client->async_window_input_left(m_window_id);
+    case Event::WindowInputRestored:
+        m_client->async_window_input_restored(m_window_id);
         break;
     case Event::WindowCloseRequest:
         m_client->async_window_close_request(m_window_id);
@@ -785,7 +790,7 @@ void Window::handle_window_menu_action(WindowMenuAction action)
     }
 }
 
-void Window::popup_window_menu(Gfx::IntPoint const& position, WindowMenuDefaultAction default_action)
+void Window::popup_window_menu(Gfx::IntPoint position, WindowMenuDefaultAction default_action)
 {
     ensure_window_menu();
     if (default_action == WindowMenuDefaultAction::BasedOnWindowState) {
@@ -980,13 +985,6 @@ Window* Window::modeless_ancestor()
     return nullptr;
 }
 
-bool Window::is_capturing_active_input_from(Window const& window) const
-{
-    if (!is_capturing_input())
-        return false;
-    return parent_window() == &window;
-}
-
 void Window::set_progress(Optional<int> progress)
 {
     if (m_progress == progress)
@@ -1004,7 +1002,7 @@ bool Window::is_descendant_of(Window& window) const
     return false;
 }
 
-Optional<HitTestResult> Window::hit_test(Gfx::IntPoint const& position, bool include_frame)
+Optional<HitTestResult> Window::hit_test(Gfx::IntPoint position, bool include_frame)
 {
     if (!m_hit_testing_enabled)
         return {};
@@ -1064,33 +1062,31 @@ void Window::set_modified(bool modified)
     frame().invalidate_titlebar();
 }
 
-String Window::computed_title() const
+DeprecatedString Window::computed_title() const
 {
-    String title = m_title.replace("[*]"sv, is_modified() ? " (*)"sv : ""sv, ReplaceMode::FirstOnly);
+    DeprecatedString title = m_title.replace("[*]"sv, is_modified() ? " (*)"sv : ""sv, ReplaceMode::FirstOnly);
     if (m_title_username.has_value())
-        title = String::formatted("{} [{}]", title, m_title_username.value());
+        title = DeprecatedString::formatted("{} [{}]", title, m_title_username.value());
     if (client() && client()->is_unresponsive())
-        return String::formatted("{} (Not responding)", title);
+        return DeprecatedString::formatted("{} (Not responding)", title);
     return title;
 }
 
-ErrorOr<Optional<String>> Window::compute_title_username(ConnectionFromClient* client)
+ErrorOr<Optional<DeprecatedString>> Window::compute_title_username(ConnectionFromClient* client)
 {
     if (!client)
         return Error::from_string_literal("Tried to compute title username without a client");
-    auto stats = Core::ProcessStatisticsReader::get_all(true);
-    if (!stats.has_value())
-        return Error::from_string_literal("Failed to get all process statistics");
+    auto stats = TRY(Core::ProcessStatisticsReader::get_all(true));
     pid_t client_pid = TRY(client->socket().peer_pid());
-    auto client_stat = stats.value().processes.first_matching([&](auto& stat) { return stat.pid == client_pid; });
+    auto client_stat = stats.processes.first_matching([&](auto& stat) { return stat.pid == client_pid; });
     if (!client_stat.has_value())
         return Error::from_string_literal("Failed to find client process stat");
     pid_t login_session_pid = TRY(Core::SessionManagement::root_session_id(client_pid));
-    auto login_session_stat = stats.value().processes.first_matching([&](auto& stat) { return stat.pid == login_session_pid; });
+    auto login_session_stat = stats.processes.first_matching([&](auto& stat) { return stat.pid == login_session_pid; });
     if (!login_session_stat.has_value())
         return Error::from_string_literal("Failed to find login process stat");
     if (login_session_stat.value().uid == client_stat.value().uid)
-        return Optional<String> {};
+        return Optional<DeprecatedString> {};
     return client_stat.value().username;
 }
 

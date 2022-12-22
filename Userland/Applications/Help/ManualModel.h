@@ -23,9 +23,9 @@ public:
 
     Optional<GUI::ModelIndex> index_from_path(StringView) const;
 
-    String page_name(const GUI::ModelIndex&) const;
-    String page_path(const GUI::ModelIndex&) const;
-    String page_and_section(const GUI::ModelIndex&) const;
+    Optional<String> page_name(const GUI::ModelIndex&) const;
+    Optional<String> page_path(const GUI::ModelIndex&) const;
+    Optional<String> page_and_section(const GUI::ModelIndex&) const;
     ErrorOr<StringView> page_view(String const& path) const;
 
     void update_section_node_on_toggle(const GUI::ModelIndex&, bool const);

@@ -7,6 +7,7 @@
 
 #include <AK/QuickSort.h>
 #include <LibJS/Interpreter.h>
+#include <LibJS/Parser.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/ModuleEnvironment.h>
 #include <LibJS/SourceTextModule.h>
@@ -14,7 +15,7 @@
 namespace JS {
 
 // 2.7 Static Semantics: AssertClauseToAssertions, https://tc39.es/proposal-import-assertions/#sec-assert-clause-to-assertions
-static Vector<ModuleRequest::Assertion> assert_clause_to_assertions(Vector<ModuleRequest::Assertion> const& source_assertions, Vector<String> const& supported_import_assertions)
+static Vector<ModuleRequest::Assertion> assert_clause_to_assertions(Vector<ModuleRequest::Assertion> const& source_assertions, Vector<DeprecatedString> const& supported_import_assertions)
 {
     // AssertClause : assert { AssertEntries ,opt }
     // 1. Let assertions be AssertClauseToAssertions of AssertEntries.
@@ -41,32 +42,31 @@ static Vector<ModuleRequest::Assertion> assert_clause_to_assertions(Vector<Modul
 }
 
 // 16.2.1.3 Static Semantics: ModuleRequests, https://tc39.es/ecma262/#sec-static-semantics-modulerequests
-static Vector<ModuleRequest> module_requests(Program& program, Vector<String> const& supported_import_assertions)
+static Vector<ModuleRequest> module_requests(Program& program, Vector<DeprecatedString> const& supported_import_assertions)
 {
     // A List of all the ModuleSpecifier strings used by the module represented by this record to request the importation of a module.
     // Note: The List is source text occurrence ordered!
     struct RequestedModuleAndSourceIndex {
-        u64 source_index { 0 };
+        u32 source_offset { 0 };
         ModuleRequest* module_request { nullptr };
     };
 
     Vector<RequestedModuleAndSourceIndex> requested_modules_with_indices;
 
-    for (auto& import_statement : program.imports()) {
-        requested_modules_with_indices.empend(import_statement.source_range().start.offset, &import_statement.module_request());
-    }
+    for (auto& import_statement : program.imports())
+        requested_modules_with_indices.empend(import_statement.start_offset(), &import_statement.module_request());
 
     for (auto& export_statement : program.exports()) {
         for (auto& export_entry : export_statement.entries()) {
             if (!export_entry.is_module_request())
                 continue;
-            requested_modules_with_indices.empend(export_statement.source_range().start.offset, &export_statement.module_request());
+            requested_modules_with_indices.empend(export_statement.start_offset(), &export_statement.module_request());
         }
     }
 
     // Note: The List is source code occurrence ordered. https://tc39.es/proposal-import-assertions/#table-cyclic-module-fields
     quick_sort(requested_modules_with_indices, [&](RequestedModuleAndSourceIndex const& lhs, RequestedModuleAndSourceIndex const& rhs) {
-        return lhs.source_index < rhs.source_index;
+        return lhs.source_offset < rhs.source_offset;
     });
 
     Vector<ModuleRequest> requested_modules_in_source_order;
@@ -120,7 +120,7 @@ void SourceTextModule::visit_edges(Cell::Visitor& visitor)
 }
 
 // 16.2.1.6.1 ParseModule ( sourceText, realm, hostDefined ), https://tc39.es/ecma262/#sec-parsemodule
-Result<NonnullGCPtr<SourceTextModule>, Vector<Parser::Error>> SourceTextModule::parse(StringView source_text, Realm& realm, StringView filename, Script::HostDefined* host_defined)
+Result<NonnullGCPtr<SourceTextModule>, Vector<ParserError>> SourceTextModule::parse(StringView source_text, Realm& realm, StringView filename, Script::HostDefined* host_defined)
 {
     // 1. Let body be ParseText(sourceText, Module).
     auto parser = Parser(Lexer(source_text, filename), Program::Type::Module);
@@ -168,7 +168,7 @@ Result<NonnullGCPtr<SourceTextModule>, Vector<Parser::Error>> SourceTextModule::
             VERIFY(export_statement.has_statement());
 
             auto const& entry = export_statement.entries()[0];
-            VERIFY(entry.kind == ExportStatement::ExportEntry::Kind::NamedExport);
+            VERIFY(entry.kind == ExportEntry::Kind::NamedExport);
             VERIFY(!entry.is_module_request());
             VERIFY(import_entries.find_if(
                                      [&](ImportEntry const& import_entry) {
@@ -182,7 +182,7 @@ Result<NonnullGCPtr<SourceTextModule>, Vector<Parser::Error>> SourceTextModule::
 
             // Special case, export {} from "module" should add "module" to
             // required_modules but not any import or export so skip here.
-            if (export_entry.kind == ExportStatement::ExportEntry::Kind::EmptyNamedExport) {
+            if (export_entry.kind == ExportEntry::Kind::EmptyNamedExport) {
                 VERIFY(export_statement.entries().size() == 1);
                 break;
             }
@@ -220,7 +220,7 @@ Result<NonnullGCPtr<SourceTextModule>, Vector<Parser::Error>> SourceTextModule::
                 }
             }
             // b. Else if ee.[[ImportName]] is all-but-default, then
-            else if (export_entry.kind == ExportStatement::ExportEntry::Kind::ModuleRequestAllButDefault) {
+            else if (export_entry.kind == ExportEntry::Kind::ModuleRequestAllButDefault) {
                 // i. Assert: ee.[[ExportName]] is null.
                 VERIFY(export_entry.export_name.is_null());
                 // ii. Append ee to starExportEntries.
@@ -244,8 +244,7 @@ Result<NonnullGCPtr<SourceTextModule>, Vector<Parser::Error>> SourceTextModule::
     //          [[HostDefined]]: hostDefined, [[ECMAScriptCode]]: body, [[Context]]: empty, [[ImportMeta]]: empty,
     //          [[RequestedModules]]: requestedModules, [[ImportEntries]]: importEntries, [[LocalExportEntries]]: localExportEntries,
     //          [[IndirectExportEntries]]: indirectExportEntries, [[StarExportEntries]]: starExportEntries, [[DFSIndex]]: empty, [[DFSAncestorIndex]]: empty }.
-    // FIXME: Add HostDefined
-    return NonnullGCPtr(*realm.heap().allocate_without_realm<SourceTextModule>(
+    return realm.heap().allocate_without_realm<SourceTextModule>(
         realm,
         filename,
         host_defined,
@@ -256,7 +255,7 @@ Result<NonnullGCPtr<SourceTextModule>, Vector<Parser::Error>> SourceTextModule::
         move(local_export_entries),
         move(indirect_export_entries),
         move(star_export_entries),
-        move(default_export)));
+        move(default_export));
 }
 
 // 16.2.1.6.2 GetExportedNames ( [ exportStarSet ] ), https://tc39.es/ecma262/#sec-getexportednames
@@ -348,7 +347,7 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
     // Note: This must be true because we use a reference.
 
     // 5. Let env be NewModuleEnvironment(realm.[[GlobalEnv]]).
-    auto* environment = vm.heap().allocate_without_realm<ModuleEnvironment>(&realm().global_environment());
+    auto environment = vm.heap().allocate_without_realm<ModuleEnvironment>(&realm().global_environment());
 
     // 6. Set module.[[Environment]] to env.
     set_environment(environment);
@@ -482,7 +481,7 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
                 FlyString function_name = function_declaration.name();
                 if (function_name == ExportStatement::local_name_for_default)
                     function_name = "default"sv;
-                auto* function = ECMAScriptFunctionObject::create(realm(), function_name, function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
+                auto function = ECMAScriptFunctionObject::create(realm(), function_name, function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
 
                 // 2. Perform ! env.InitializeBinding(dn, fo).
                 MUST(environment->initialize_binding(vm, name, function));
@@ -564,7 +563,7 @@ ThrowCompletionOr<ResolvedBinding> SourceTextModule::resolve_export(VM& vm, FlyS
         auto imported_module = TRY(vm.host_resolve_imported_module(NonnullGCPtr<Module>(*this), entry.module_request()));
 
         // ii. If e.[[ImportName]] is all, then
-        if (entry.kind == ExportStatement::ExportEntry::Kind::ModuleRequestAll) {
+        if (entry.kind == ExportEntry::Kind::ModuleRequestAll) {
             // 1. Assert: module does not provide the direct binding for this export.
             // FIXME: What does this mean? / How do we check this
 

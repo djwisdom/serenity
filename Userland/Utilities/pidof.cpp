@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/ProcessStatisticsReader.h>
 #include <LibCore/System.h>
@@ -14,15 +14,13 @@
 #include <string.h>
 #include <unistd.h>
 
-static ErrorOr<int> pid_of(String const& process_name, bool single_shot, bool omit_pid, pid_t pid)
+static ErrorOr<int> pid_of(DeprecatedString const& process_name, bool single_shot, bool omit_pid, pid_t pid)
 {
     bool displayed_at_least_one = false;
 
-    auto all_processes = Core::ProcessStatisticsReader::get_all();
-    if (!all_processes.has_value())
-        return 1;
+    auto all_processes = TRY(Core::ProcessStatisticsReader::get_all());
 
-    for (auto& it : all_processes.value().processes) {
+    for (auto& it : all_processes.processes) {
         if (it.name == process_name) {
             if (!omit_pid || it.pid != pid) {
                 out(displayed_at_least_one ? " {}"sv : "{}"sv, it.pid);

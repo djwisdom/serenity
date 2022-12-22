@@ -15,12 +15,12 @@ class BoundFunction final : public FunctionObject {
     JS_OBJECT(BoundFunction, FunctionObject);
 
 public:
-    static ThrowCompletionOr<BoundFunction*> create(Realm&, FunctionObject& target_function, Value bound_this, Vector<Value> bound_arguments);
+    static ThrowCompletionOr<NonnullGCPtr<BoundFunction>> create(Realm&, FunctionObject& target_function, Value bound_this, Vector<Value> bound_arguments);
 
     virtual ~BoundFunction() override = default;
 
     virtual ThrowCompletionOr<Value> internal_call(Value this_argument, MarkedVector<Value> arguments_list) override;
-    virtual ThrowCompletionOr<Object*> internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target) override;
+    virtual ThrowCompletionOr<NonnullGCPtr<Object>> internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target) override;
 
     virtual FlyString const& name() const override { return m_name; }
     virtual bool is_strict_mode() const override { return m_bound_target_function->is_strict_mode(); }

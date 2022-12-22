@@ -25,7 +25,7 @@ JS::ThrowCompletionOr<JS::Value> WebAssemblyModuleConstructor::call()
     return vm().throw_completion<JS::TypeError>(JS::ErrorType::ConstructorWithoutNew, "WebAssembly.Module");
 }
 
-JS::ThrowCompletionOr<JS::Object*> WebAssemblyModuleConstructor::construct(FunctionObject&)
+JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Object>> WebAssemblyModuleConstructor::construct(FunctionObject&)
 {
     auto& vm = this->vm();
     auto& realm = *vm.current_realm();

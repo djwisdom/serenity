@@ -12,9 +12,12 @@
 #include "Language.h"
 #include <AK/ByteBuffer.h>
 #include <AK/Debug.h>
+#include <AK/JsonParser.h>
 #include <AK/LexicalPath.h>
+#include <LibConfig/Client.h>
 #include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibCore/Timer.h>
 #include <LibCpp/SemanticSyntaxHighlighter.h>
 #include <LibCpp/SyntaxHighlighter.h>
@@ -78,6 +81,10 @@ Editor::Editor()
     add_custom_context_menu_action(*m_move_execution_to_line_action);
 
     set_gutter_visible(true);
+
+    if (Config::read_string("HackStudio"sv, "Global"sv, "DocumentationSearchPaths"sv).is_empty()) {
+        Config::write_string("HackStudio"sv, "Global"sv, "DocumentationSearchPaths"sv, "[\"/usr/share/man/man2\", \"/usr/share/man/man3\"]"sv);
+    }
 }
 
 ErrorOr<void> Editor::initialize_tooltip_window()
@@ -177,23 +184,38 @@ void Editor::paint_event(GUI::PaintEvent& event)
     }
 }
 
-static HashMap<String, String>& man_paths()
+static HashMap<DeprecatedString, DeprecatedString>& man_paths()
 {
-    static HashMap<String, String> paths;
+    static HashMap<DeprecatedString, DeprecatedString> paths;
     if (paths.is_empty()) {
-        // FIXME: This should also search man3, possibly other places..
-        Core::DirIterator it("/usr/share/man/man2", Core::DirIterator::Flags::SkipDots);
-        while (it.has_next()) {
-            auto path = it.next_full_path();
-            auto title = LexicalPath::title(path);
-            paths.set(title, path);
+        auto json = Config::read_string("HackStudio"sv, "Global"sv, "DocumentationSearchPaths"sv);
+        AK::JsonParser parser(json);
+
+        auto value_or_error = parser.parse();
+        if (value_or_error.is_error())
+            return paths;
+
+        auto value = value_or_error.release_value();
+        if (!value.is_array())
+            return paths;
+
+        for (auto& json_value : value.as_array().values()) {
+            if (!json_value.is_string())
+                continue;
+
+            Core::DirIterator it(json_value.as_string(), Core::DirIterator::Flags::SkipDots);
+            while (it.has_next()) {
+                auto path = it.next_full_path();
+                auto title = LexicalPath::title(path);
+                paths.set(title, path);
+            }
         }
     }
 
     return paths;
 }
 
-void Editor::show_documentation_tooltip_if_available(String const& hovered_token, Gfx::IntPoint const& screen_location)
+void Editor::show_documentation_tooltip_if_available(DeprecatedString const& hovered_token, Gfx::IntPoint screen_location)
 {
     auto it = man_paths().find(hovered_token);
     if (it == man_paths().end()) {
@@ -210,14 +232,19 @@ void Editor::show_documentation_tooltip_if_available(String const& hovered_token
     }
 
     dbgln_if(EDITOR_DEBUG, "opening {}", it->value);
-    auto file = Core::File::construct(it->value);
-    if (!file->open(Core::OpenMode::ReadOnly)) {
-        dbgln("failed to open {}, {}", it->value, file->error_string());
+    auto file_or_error = Core::Stream::File::open(it->value, Core::Stream::OpenMode::Read);
+    if (file_or_error.is_error()) {
+        dbgln("Failed to open {}, {}", it->value, file_or_error.error());
         return;
     }
 
-    auto man_document = Markdown::Document::parse(file->read_all());
+    auto buffer_or_error = file_or_error.release_value()->read_until_eof();
+    if (buffer_or_error.is_error()) {
+        dbgln("Couldn't read file: {}", buffer_or_error.error());
+        return;
+    }
 
+    auto man_document = Markdown::Document::parse(buffer_or_error.release_value());
     if (!man_document) {
         dbgln("failed to parse markdown");
         return;
@@ -385,11 +412,11 @@ void Editor::leave_event(Core::Event& event)
     GUI::TextEditor::leave_event(event);
 }
 
-static HashMap<String, String>& include_paths()
+static HashMap<DeprecatedString, DeprecatedString>& include_paths()
 {
-    static HashMap<String, String> paths;
+    static HashMap<DeprecatedString, DeprecatedString> paths;
 
-    auto add_directory = [](String base, Optional<String> recursive, auto handle_directory) -> void {
+    auto add_directory = [](DeprecatedString base, Optional<DeprecatedString> recursive, auto handle_directory) -> void {
         Core::DirIterator it(recursive.value_or(base), Core::DirIterator::Flags::SkipDots);
         while (it.has_next()) {
             auto path = it.next_full_path();
@@ -413,7 +440,7 @@ static HashMap<String, String>& include_paths()
     return paths;
 }
 
-void Editor::navigate_to_include_if_available(String path)
+void Editor::navigate_to_include_if_available(DeprecatedString path)
 {
     auto it = include_paths().find(path);
     if (it == include_paths().end()) {
@@ -588,7 +615,7 @@ void Editor::on_identifier_click(const GUI::TextDocumentSpan& span)
     if (!m_language_client)
         return;
 
-    m_language_client->on_declaration_found = [](String const& file, size_t line, size_t column) {
+    m_language_client->on_declaration_found = [](DeprecatedString const& file, size_t line, size_t column) {
         HackStudio::open_file(file, line, column);
     };
     m_language_client->search_declaration(code_document().file_path(), span.range.start().line(), span.range.start().column());
@@ -692,7 +719,7 @@ void Editor::handle_function_parameters_hint_request()
     if (!m_language_client)
         return;
 
-    m_language_client->on_function_parameters_hint_result = [this](Vector<String> const& params, size_t argument_index) {
+    m_language_client->on_function_parameters_hint_result = [this](Vector<DeprecatedString> const& params, size_t argument_index) {
         dbgln("on_function_parameters_hint_result");
 
         StringBuilder html;

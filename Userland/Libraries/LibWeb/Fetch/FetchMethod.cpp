@@ -5,6 +5,7 @@
  */
 
 #include <AK/Debug.h>
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/PromiseCapability.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/DOM/AbortSignal.h>
@@ -106,7 +107,7 @@ JS::NonnullGCPtr<JS::Promise> fetch_impl(JS::VM& vm, RequestInfo const& input, R
         // 4. Set responseObject to the result of creating a Response object, given response, "immutable", and
         //    relevantRealm.
         auto response_object = Response::create(relevant_realm, response, Headers::Guard::Immutable);
-        response_object_handle = JS::make_handle(response_object.ptr());
+        response_object_handle = JS::make_handle(response_object);
 
         // 5. Resolve p with responseObject.
         WebIDL::resolve_promise(vm, promise_capability, response_object);
@@ -125,7 +126,7 @@ JS::NonnullGCPtr<JS::Promise> fetch_impl(JS::VM& vm, RequestInfo const& input, R
             })));
 
     // 11. Add the following abort steps to requestObject’s signal:
-    request_object->signal()->add_abort_algorithm([&vm, locally_aborted, request, controller, promise_capability_handle = JS::make_handle(*promise_capability), request_object_handle = JS::make_handle(*request_object), response_object_handle]() mutable {
+    request_object->signal()->add_abort_algorithm([&vm, locally_aborted, request, controller, promise_capability_handle = JS::make_handle(*promise_capability), request_object_handle = JS::make_handle(*request_object), response_object_handle] {
         dbgln_if(WEB_FETCH_DEBUG, "Fetch: Request object signal's abort algorithm called");
 
         auto& promise_capability = *promise_capability_handle;

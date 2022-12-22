@@ -74,12 +74,12 @@ private:
         };
     }
 
-    String title() const
+    DeprecatedString title() const
     {
         return m_title_textbox->text();
     }
 
-    String url() const
+    DeprecatedString url() const
     {
         return m_url_textbox->text();
     }
@@ -97,7 +97,7 @@ BookmarksBarWidget& BookmarksBarWidget::the()
     return *s_the;
 }
 
-BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enabled)
+BookmarksBarWidget::BookmarksBarWidget(DeprecatedString const& bookmarks_file, bool enabled)
 {
     s_the = this;
     set_layout<GUI::HorizontalBoxLayout>();
@@ -125,7 +125,7 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
     auto default_action = GUI::Action::create(
         "&Open", g_icon_bag.go_to, [this](auto&) {
             if (on_bookmark_click)
-                on_bookmark_click(m_context_menu_url, OpenInNewTab::No);
+                on_bookmark_click(m_context_menu_url, Open::InSameTab);
         },
         this);
     m_context_menu_default_action = default_action;
@@ -133,7 +133,14 @@ BookmarksBarWidget::BookmarksBarWidget(String const& bookmarks_file, bool enable
     m_context_menu->add_action(GUI::Action::create(
         "Open in New &Tab", g_icon_bag.new_tab, [this](auto&) {
             if (on_bookmark_click)
-                on_bookmark_click(m_context_menu_url, OpenInNewTab::Yes);
+                on_bookmark_click(m_context_menu_url, Open::InNewTab);
+        },
+        this));
+    m_context_menu->add_action(GUI::Action::create(
+        "Open in New Window", g_icon_bag.new_window, [this](auto&) {
+            if (on_bookmark_click) {
+                on_bookmark_click(m_context_menu_url, Open::InNewWindow);
+            }
         },
         this));
     m_context_menu->add_separator();
@@ -186,8 +193,8 @@ void BookmarksBarWidget::model_did_update(unsigned)
     int width = 0;
     for (int item_index = 0; item_index < model()->row_count(); ++item_index) {
 
-        auto title = model()->index(item_index, 0).data().to_string();
-        auto url = model()->index(item_index, 1).data().to_string();
+        auto title = model()->index(item_index, 0).data().to_deprecated_string();
+        auto url = model()->index(item_index, 1).data().to_deprecated_string();
 
         Gfx::IntRect rect { width, 0, font().width(title) + 32, height() };
 
@@ -205,12 +212,12 @@ void BookmarksBarWidget::model_did_update(unsigned)
 
         button.on_click = [title, url, this](auto) {
             if (on_bookmark_click)
-                on_bookmark_click(url, OpenInNewTab::No);
+                on_bookmark_click(url, Open::InSameTab);
         };
 
         button.on_middle_mouse_click = [title, url, this](auto) {
             if (on_bookmark_click)
-                on_bookmark_click(url, OpenInNewTab::Yes);
+                on_bookmark_click(url, Open::InNewTab);
         };
 
         button.on_context_menu_request = [this, url](auto& context_menu_event) {
@@ -259,12 +266,12 @@ void BookmarksBarWidget::update_content_size()
     }
 }
 
-bool BookmarksBarWidget::contains_bookmark(String const& url)
+bool BookmarksBarWidget::contains_bookmark(DeprecatedString const& url)
 {
     for (int item_index = 0; item_index < model()->row_count(); ++item_index) {
 
-        auto item_title = model()->index(item_index, 0).data().to_string();
-        auto item_url = model()->index(item_index, 1).data().to_string();
+        auto item_title = model()->index(item_index, 0).data().to_deprecated_string();
+        auto item_url = model()->index(item_index, 1).data().to_deprecated_string();
         if (item_url == url) {
             return true;
         }
@@ -272,12 +279,12 @@ bool BookmarksBarWidget::contains_bookmark(String const& url)
     return false;
 }
 
-bool BookmarksBarWidget::remove_bookmark(String const& url)
+bool BookmarksBarWidget::remove_bookmark(DeprecatedString const& url)
 {
     for (int item_index = 0; item_index < model()->row_count(); ++item_index) {
 
-        auto item_title = model()->index(item_index, 0).data().to_string();
-        auto item_url = model()->index(item_index, 1).data().to_string();
+        auto item_title = model()->index(item_index, 0).data().to_deprecated_string();
+        auto item_url = model()->index(item_index, 1).data().to_deprecated_string();
         if (item_url == url) {
             auto& json_model = *static_cast<GUI::JsonArrayModel*>(model());
 
@@ -292,7 +299,7 @@ bool BookmarksBarWidget::remove_bookmark(String const& url)
     return false;
 }
 
-bool BookmarksBarWidget::add_bookmark(String const& url, String const& title)
+bool BookmarksBarWidget::add_bookmark(DeprecatedString const& url, DeprecatedString const& title)
 {
     Vector<JsonValue> values;
     values.append(title);
@@ -306,11 +313,11 @@ bool BookmarksBarWidget::add_bookmark(String const& url, String const& title)
     return false;
 }
 
-bool BookmarksBarWidget::edit_bookmark(String const& url)
+bool BookmarksBarWidget::edit_bookmark(DeprecatedString const& url)
 {
     for (int item_index = 0; item_index < model()->row_count(); ++item_index) {
-        auto item_title = model()->index(item_index, 0).data().to_string();
-        auto item_url = model()->index(item_index, 1).data().to_string();
+        auto item_title = model()->index(item_index, 0).data().to_deprecated_string();
+        auto item_url = model()->index(item_index, 1).data().to_deprecated_string();
 
         if (item_url == url) {
             auto values = BookmarkEditor::edit_bookmark(window(), item_title, item_url);

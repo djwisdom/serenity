@@ -33,8 +33,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         exit(1);
     }
 
-    auto hash_name = program_name.substring_view(0, program_name.length() - 3).to_string().to_uppercase();
-    auto paths_help_string = String::formatted("File(s) to print {} checksum of", hash_name);
+    auto hash_name = program_name.substring_view(0, program_name.length() - 3).to_deprecated_string().to_uppercase();
+    auto paths_help_string = DeprecatedString::formatted("File(s) to print {} checksum of", hash_name);
 
     bool verify_from_paths = false;
     Vector<StringView> paths;
@@ -97,7 +97,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 hash.reset();
                 while (!file_from_filename->is_eof())
                     hash.update(TRY(file_from_filename->read(buffer)));
-                if (String::formatted("{:hex-dump}", hash.digest().bytes()) == line[0])
+                if (DeprecatedString::formatted("{:hex-dump}", hash.digest().bytes()) == line[0])
                     outln("{}: OK", filename);
                 else {
                     ++failed_verification_count;

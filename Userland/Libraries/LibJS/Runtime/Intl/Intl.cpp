@@ -28,7 +28,7 @@ namespace JS::Intl {
 
 // 8 The Intl Object, https://tc39.es/ecma402/#intl-object
 Intl::Intl(Realm& realm)
-    : Object(*realm.intrinsics().object_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
 {
 }
 
@@ -39,19 +39,19 @@ void Intl::initialize(Realm& realm)
     auto& vm = this->vm();
 
     // 8.1.1 Intl[ @@toStringTag ], https://tc39.es/ecma402/#sec-Intl-toStringTag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Intl"), Attribute::Configurable);
+    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Intl"), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    define_direct_property(vm.names.Collator, realm.intrinsics().intl_collator_constructor(), attr);
-    define_direct_property(vm.names.DateTimeFormat, realm.intrinsics().intl_date_time_format_constructor(), attr);
-    define_direct_property(vm.names.DisplayNames, realm.intrinsics().intl_display_names_constructor(), attr);
-    define_direct_property(vm.names.DurationFormat, realm.intrinsics().intl_duration_format_constructor(), attr);
-    define_direct_property(vm.names.ListFormat, realm.intrinsics().intl_list_format_constructor(), attr);
-    define_direct_property(vm.names.Locale, realm.intrinsics().intl_locale_constructor(), attr);
-    define_direct_property(vm.names.NumberFormat, realm.intrinsics().intl_number_format_constructor(), attr);
-    define_direct_property(vm.names.PluralRules, realm.intrinsics().intl_plural_rules_constructor(), attr);
-    define_direct_property(vm.names.RelativeTimeFormat, realm.intrinsics().intl_relative_time_format_constructor(), attr);
-    define_direct_property(vm.names.Segmenter, realm.intrinsics().intl_segmenter_constructor(), attr);
+    define_intrinsic_accessor(vm.names.Collator, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_collator_constructor(); });
+    define_intrinsic_accessor(vm.names.DateTimeFormat, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_date_time_format_constructor(); });
+    define_intrinsic_accessor(vm.names.DisplayNames, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_display_names_constructor(); });
+    define_intrinsic_accessor(vm.names.DurationFormat, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_duration_format_constructor(); });
+    define_intrinsic_accessor(vm.names.ListFormat, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_list_format_constructor(); });
+    define_intrinsic_accessor(vm.names.Locale, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_locale_constructor(); });
+    define_intrinsic_accessor(vm.names.NumberFormat, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_number_format_constructor(); });
+    define_intrinsic_accessor(vm.names.PluralRules, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_plural_rules_constructor(); });
+    define_intrinsic_accessor(vm.names.RelativeTimeFormat, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_relative_time_format_constructor(); });
+    define_intrinsic_accessor(vm.names.Segmenter, attr, [](auto& realm) -> Value { return realm.intrinsics().intl_segmenter_constructor(); });
 
     define_native_function(realm, vm.names.getCanonicalLocales, get_canonical_locales, 1, attr);
     define_native_function(realm, vm.names.supportedValuesOf, supported_values_of, 1, attr);
@@ -70,7 +70,7 @@ JS_DEFINE_NATIVE_FUNCTION(Intl::get_canonical_locales)
     MarkedVector<Value> marked_locale_list { vm.heap() };
     marked_locale_list.ensure_capacity(locale_list.size());
     for (auto& locale : locale_list)
-        marked_locale_list.append(js_string(vm, move(locale)));
+        marked_locale_list.append(PrimitiveString::create(vm, move(locale)));
 
     // 2. Return CreateArrayFromList(ll).
     return Array::create_from(realm, marked_locale_list);
@@ -154,7 +154,7 @@ JS_DEFINE_NATIVE_FUNCTION(Intl::supported_values_of)
     }
 
     // 9. Return CreateArrayFromList( list ).
-    return Array::create_from<StringView>(realm, list, [&](auto value) { return js_string(vm, value); });
+    return Array::create_from<StringView>(realm, list, [&](auto value) { return PrimitiveString::create(vm, value); });
 }
 
 }

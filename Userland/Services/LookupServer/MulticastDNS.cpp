@@ -1,16 +1,18 @@
 /*
  * Copyright (c) 2021, Sergey Bugaev <bugaevc@serenityos.org>
+ * Copyright (c) 2022, Alexander Narsudinov <a.narsudinov@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "MulticastDNS.h"
+#include <AK/DeprecatedString.h>
 #include <AK/IPv4Address.h>
 #include <AK/JsonArray.h>
 #include <AK/JsonObject.h>
 #include <AK/JsonValue.h>
-#include <AK/String.h>
 #include <LibCore/File.h>
+#include <LibCore/System.h>
 #include <limits.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -26,7 +28,7 @@ MulticastDNS::MulticastDNS(Object* parent)
     if (gethostname(buffer, sizeof(buffer)) < 0) {
         perror("gethostname");
     } else {
-        m_hostname = String::formatted("{}.local", buffer);
+        m_hostname = DeprecatedString::formatted("{}.local", buffer);
     }
 
     u8 zero = 0;
@@ -42,25 +44,28 @@ MulticastDNS::MulticastDNS(Object* parent)
     bind(IPv4Address(), 5353);
 
     on_ready_to_receive = [this]() {
-        handle_packet();
+        if (auto result = handle_packet(); result.is_error()) {
+            dbgln("Failed to handle packet: {}", result.error());
+        }
     };
 
     // TODO: Announce on startup. We cannot just call announce() here,
     // because it races with the network interfaces getting configured.
 }
 
-void MulticastDNS::handle_packet()
+ErrorOr<void> MulticastDNS::handle_packet()
 {
-    auto buffer = receive(1024);
+    auto buffer = TRY(receive(1024));
     auto optional_packet = Packet::from_raw_packet(buffer.data(), buffer.size());
     if (!optional_packet.has_value()) {
         dbgln("Got an invalid mDNS packet");
-        return;
+        return {};
     }
     auto& packet = optional_packet.value();
 
     if (packet.is_query())
         handle_query(packet);
+    return {};
 }
 
 void MulticastDNS::handle_query(Packet const& packet)
@@ -93,7 +98,7 @@ void MulticastDNS::announce()
             RecordType::A,
             RecordClass::IN,
             120,
-            String { (char const*)&raw_addr, sizeof(raw_addr) },
+            DeprecatedString { (char const*)&raw_addr, sizeof(raw_addr) },
             true,
         };
         response.add_answer(answer);
@@ -127,7 +132,7 @@ Vector<IPv4Address> MulticastDNS::local_addresses() const
 
     json.as_array().for_each([&addresses](auto& value) {
         auto if_object = value.as_object();
-        auto address = if_object.get("ipv4_address"sv).to_string();
+        auto address = if_object.get("ipv4_address"sv).to_deprecated_string();
         auto ipv4_address = IPv4Address::from_string(address);
         // Skip unconfigured interfaces.
         if (!ipv4_address.has_value())
@@ -141,35 +146,28 @@ Vector<IPv4Address> MulticastDNS::local_addresses() const
     return addresses;
 }
 
-Vector<Answer> MulticastDNS::lookup(Name const& name, RecordType record_type)
+ErrorOr<Vector<Answer>> MulticastDNS::lookup(Name const& name, RecordType record_type)
 {
     Packet request;
     request.set_is_query();
     request.set_recursion_desired(false);
     request.add_question({ name, record_type, RecordClass::IN, false });
 
-    if (emit_packet(request).is_error()) {
-        perror("failed to emit request packet");
-        return {};
-    }
-
+    TRY(emit_packet(request));
     Vector<Answer> answers;
 
     // FIXME: It would be better not to block
     // the main loop while we wait for a response.
     while (true) {
-        pollfd pfd { fd(), POLLIN, 0 };
-        auto rc = poll(&pfd, 1, 1000);
-        if (rc < 0) {
-            perror("poll");
-        } else if (rc == 0) {
+        auto pfd = pollfd { fd(), POLLIN, 0 };
+        auto rc = TRY(Core::System::poll({ &pfd, 1 }, 1000));
+        if (rc == 0) {
             // Timed out.
-            return {};
+            return Vector<Answer> {};
         }
-
-        auto buffer = receive(1024);
+        auto buffer = TRY(receive(1024));
         if (buffer.is_empty())
-            return {};
+            return Vector<Answer> {};
         auto optional_packet = Packet::from_raw_packet(buffer.data(), buffer.size());
         if (!optional_packet.has_value()) {
             dbgln("Got an invalid mDNS packet");

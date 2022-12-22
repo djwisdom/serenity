@@ -44,10 +44,7 @@ NonnullRefPtr<SQL::TableDef> setup_table(SQL::Database& db)
 
 void insert_into_table(SQL::Database& db, int count)
 {
-    auto table_or_error = db.get_table("TestSchema", "TestTable");
-    EXPECT(!table_or_error.is_error());
-    auto table = table_or_error.value();
-    EXPECT(table);
+    auto table = MUST(db.get_table("TestSchema", "TestTable"));
 
     for (int ix = 0; ix < count; ix++) {
         SQL::Row row(*table);
@@ -63,10 +60,7 @@ void insert_into_table(SQL::Database& db, int count)
 
 void verify_table_contents(SQL::Database& db, int expected_count)
 {
-    auto table_or_error = db.get_table("TestSchema", "TestTable");
-    EXPECT(!table_or_error.is_error());
-    auto table = table_or_error.value();
-    EXPECT(table);
+    auto table = MUST(db.get_table("TestSchema", "TestTable"));
 
     int sum = 0;
     int count = 0;
@@ -74,10 +68,10 @@ void verify_table_contents(SQL::Database& db, int expected_count)
     EXPECT(!rows_or_error.is_error());
     for (auto& row : rows_or_error.value()) {
         StringBuilder builder;
-        builder.appendff("Test{}", row["IntColumn"].to_int().value());
-        EXPECT_EQ(row["TextColumn"].to_string(), builder.build());
+        builder.appendff("Test{}", row["IntColumn"].to_int<i32>().value());
+        EXPECT_EQ(row["TextColumn"].to_deprecated_string(), builder.build());
         count++;
-        sum += row["IntColumn"].to_int().value();
+        sum += row["IntColumn"].to_int<i32>().value();
     }
     EXPECT_EQ(count, expected_count);
     EXPECT_EQ(sum, (expected_count * (expected_count - 1)) / 2);
@@ -116,7 +110,7 @@ TEST_CASE(create_heap)
     ScopeGuard guard([]() { unlink("/tmp/test.db"); });
     auto heap = SQL::Heap::construct("/tmp/test.db");
     EXPECT(!heap->open().is_error());
-    EXPECT_EQ(heap->version(), 0x00000001u);
+    EXPECT_EQ(heap->version(), SQL::Heap::current_version);
 }
 
 TEST_CASE(create_from_dev_random)
@@ -172,7 +166,6 @@ TEST_CASE(get_schema_from_database)
         EXPECT(!db->open().is_error());
         auto schema_or_error = db->get_schema("TestSchema");
         EXPECT(!schema_or_error.is_error());
-        EXPECT(schema_or_error.value());
     }
 }
 
@@ -197,10 +190,8 @@ TEST_CASE(get_table_from_database)
     {
         auto db = SQL::Database::construct("/tmp/test.db");
         EXPECT(!db->open().is_error());
-        auto table_or_error = db->get_table("TestSchema", "TestTable");
-        EXPECT(!table_or_error.is_error());
-        auto table = table_or_error.value();
-        EXPECT(table);
+
+        auto table = MUST(db->get_table("TestSchema", "TestTable"));
         EXPECT_EQ(table->name(), "TestTable");
         EXPECT_EQ(table->num_columns(), 2u);
     }

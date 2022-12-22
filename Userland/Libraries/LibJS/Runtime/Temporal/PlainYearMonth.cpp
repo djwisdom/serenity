@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/GlobalObject.h>
@@ -18,7 +19,7 @@ namespace JS::Temporal {
 
 // 9 Temporal.PlainYearMonth Objects, https://tc39.es/proposal-temporal/#sec-temporal-plainyearmonth-objects
 PlainYearMonth::PlainYearMonth(i32 iso_year, u8 iso_month, u8 iso_day, Object& calendar, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_iso_year(iso_year)
     , m_iso_month(iso_month)
     , m_iso_day(iso_day)
@@ -71,7 +72,7 @@ ThrowCompletionOr<PlainYearMonth*> to_temporal_year_month(VM& vm, Value item, Ob
     auto result = TRY(parse_temporal_year_month_string(vm, string));
 
     // 7. Let calendar be ? ToTemporalCalendarWithISODefault(result.[[Calendar]]).
-    auto* calendar = TRY(to_temporal_calendar_with_iso_default(vm, result.calendar.has_value() ? js_string(vm, *result.calendar) : js_undefined()));
+    auto* calendar = TRY(to_temporal_calendar_with_iso_default(vm, result.calendar.has_value() ? PrimitiveString::create(vm, *result.calendar) : js_undefined()));
 
     // 8. Set result to ? CreateTemporalYearMonth(result.[[Year]], result.[[Month]], calendar, result.[[Day]]).
     auto* creation_result = TRY(create_temporal_year_month(vm, result.year, result.month, *calendar, result.day));
@@ -193,14 +194,14 @@ ThrowCompletionOr<PlainYearMonth*> create_temporal_year_month(VM& vm, i32 iso_ye
     // 8. Set object.[[ISOMonth]] to isoMonth.
     // 9. Set object.[[Calendar]] to calendar.
     // 10. Set object.[[ISODay]] to referenceISODay.
-    auto* object = TRY(ordinary_create_from_constructor<PlainYearMonth>(vm, *new_target, &Intrinsics::temporal_plain_year_month_prototype, iso_year, iso_month, reference_iso_day, calendar));
+    auto object = TRY(ordinary_create_from_constructor<PlainYearMonth>(vm, *new_target, &Intrinsics::temporal_plain_year_month_prototype, iso_year, iso_month, reference_iso_day, calendar));
 
     // 11. Return object.
-    return object;
+    return object.ptr();
 }
 
 // 9.5.6 TemporalYearMonthToString ( yearMonth, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-temporalyearmonthtostring
-ThrowCompletionOr<String> temporal_year_month_to_string(VM& vm, PlainYearMonth& year_month, StringView show_calendar)
+ThrowCompletionOr<DeprecatedString> temporal_year_month_to_string(VM& vm, PlainYearMonth& year_month, StringView show_calendar)
 {
     // 1. Assert: Type(yearMonth) is Object.
     // 2. Assert: yearMonth has an [[InitializedTemporalYearMonth]] internal slot.
@@ -208,7 +209,7 @@ ThrowCompletionOr<String> temporal_year_month_to_string(VM& vm, PlainYearMonth& 
     // 3. Let year be ! PadISOYear(yearMonth.[[ISOYear]]).
     // 4. Let month be ToZeroPaddedDecimalString(yearMonth.[[ISOMonth]], 2).
     // 5. Let result be the string-concatenation of year, the code unit 0x002D (HYPHEN-MINUS), and month.
-    auto result = String::formatted("{}-{:02}", pad_iso_year(year_month.iso_year()), year_month.iso_month());
+    auto result = DeprecatedString::formatted("{}-{:02}", pad_iso_year(year_month.iso_year()), year_month.iso_month());
 
     // 6. Let calendarID be ? ToString(yearMonth.[[Calendar]]).
     auto calendar_id = TRY(Value(&year_month.calendar()).to_string(vm));
@@ -217,7 +218,7 @@ ThrowCompletionOr<String> temporal_year_month_to_string(VM& vm, PlainYearMonth& 
     if (show_calendar.is_one_of("always"sv, "critical"sv) || calendar_id != "iso8601") {
         // a. Let day be ToZeroPaddedDecimalString(yearMonth.[[ISODay]], 2).
         // b. Set result to the string-concatenation of result, the code unit 0x002D (HYPHEN-MINUS), and day.
-        result = String::formatted("{}-{:02}", result, year_month.iso_day());
+        result = DeprecatedString::formatted("{}-{:02}", result, year_month.iso_day());
     }
 
     // 8. Let calendarString be ! FormatCalendarAnnotation(calendarID, showCalendar).
@@ -225,7 +226,7 @@ ThrowCompletionOr<String> temporal_year_month_to_string(VM& vm, PlainYearMonth& 
 
     // 9. Set result to the string-concatenation of result and calendarString.
     // 10. Return result.
-    return String::formatted("{}{}", result, calendar_string);
+    return DeprecatedString::formatted("{}{}", result, calendar_string);
 }
 
 // 9.5.7 DifferenceTemporalPlainYearMonth ( operation, yearMonth, other, options ), https://tc39.es/proposal-temporal/#sec-temporal-differencetemporalplainyearmonth
@@ -344,7 +345,7 @@ ThrowCompletionOr<PlainYearMonth*> add_duration_to_or_subtract_duration_from_pla
     auto* duration_to_add = MUST(create_temporal_duration(vm, duration->years(), duration->months(), duration->weeks(), balance_result.days, 0, 0, 0, 0, 0, 0));
 
     // 14. Let optionsCopy be OrdinaryObjectCreate(null).
-    auto* options_copy = Object::create(realm, nullptr);
+    auto options_copy = Object::create(realm, nullptr);
 
     // 15. Let entries be ? EnumerableOwnPropertyNames(options, key+value).
     auto entries = TRY(options->enumerable_own_property_names(Object::PropertyKind::KeyAndValue));

@@ -54,7 +54,7 @@ bool JsonArrayModel::store()
         return false;
     }
 
-    file->write(m_array.to_string());
+    file->write(m_array.to_deprecated_string());
     file->close();
     return true;
 }
@@ -124,7 +124,7 @@ Variant JsonArrayModel::data(ModelIndex const& index, ModelRole role) const
             return field_spec.massage_for_display(object);
         if (data.is_number())
             return data;
-        return object.get(json_field_name).to_string();
+        return object.get(json_field_name).to_deprecated_string();
     }
 
     if (role == ModelRole::Sort) {
@@ -142,7 +142,7 @@ Variant JsonArrayModel::data(ModelIndex const& index, ModelRole role) const
     return {};
 }
 
-void JsonArrayModel::set_json_path(String const& json_path)
+void JsonArrayModel::set_json_path(DeprecatedString const& json_path)
 {
     if (m_json_path == json_path)
         return;

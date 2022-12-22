@@ -47,7 +47,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     bool attempt_interactive = false;
 
     auto initialize = [&] {
-        editor = Line::Editor::construct();
+        auto configuration = Line::Configuration::from_config();
+        if (!attempt_interactive) {
+            configuration.set(Line::Configuration::Flags::None);
+            configuration.set(Line::Configuration::SignalHandler::NoSignalHandlers);
+            configuration.set(Line::Configuration::OperationMode::NonInteractive);
+            configuration.set(Line::Configuration::RefreshBehavior::Eager);
+        }
+
+        editor = Line::Editor::construct(move(configuration));
         editor->initialize();
 
         shell = Shell::Shell::construct(*editor, attempt_interactive);
@@ -104,7 +112,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             }
 
             if (should_escape) {
-                String escaped_string;
+                DeprecatedString escaped_string;
                 Optional<char> trivia {};
                 bool starting_trivia_already_provided = false;
                 auto escape_mode = Shell::Shell::EscapeMode::Bareword;
@@ -156,7 +164,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     StringView command_to_run = {};
     StringView file_to_read_from = {};
-    Vector<String> script_args;
+    Vector<DeprecatedString> script_args;
     bool skip_rc_files = false;
     char const* format = nullptr;
     bool should_format_live = false;
@@ -199,7 +207,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     }
 
     auto execute_file = !file_to_read_from.is_empty() && "-"sv != file_to_read_from;
-    attempt_interactive = !execute_file;
+    attempt_interactive = !execute_file && (command_to_run.is_empty() || keep_open);
 
     if (keep_open && command_to_run.is_empty() && !execute_file) {
         warnln("Option --keep-open can only be used in combination with -c or when specifying a file to execute.");
@@ -213,7 +221,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     if (!skip_rc_files) {
         auto run_rc_file = [&](auto& name) {
-            String file_path = name;
+            DeprecatedString file_path = name;
             if (file_path.starts_with('~'))
                 file_path = shell->expand_tilde(file_path);
             if (Core::File::exists(file_path)) {

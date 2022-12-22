@@ -47,7 +47,7 @@ void SVGGeometryPaintable::paint(PaintContext& context, PaintPhase phase) const
     auto const* svg_element = geometry_element.first_ancestor_of_type<SVG::SVGSVGElement>();
     auto maybe_view_box = svg_element->view_box();
 
-    context.painter().add_clip_rect(enclosing_int_rect(absolute_rect()));
+    context.painter().add_clip_rect(context.enclosing_device_rect(absolute_rect()).to_type<int>());
 
     Gfx::Path path = const_cast<SVG::SVGGeometryElement&>(geometry_element).get_path();
 
@@ -56,7 +56,7 @@ void SVGGeometryPaintable::paint(PaintContext& context, PaintPhase phase) const
         auto scaling = layout_box().viewbox_scaling();
         auto origin = layout_box().viewbox_origin();
 
-        auto transform_point = [&scaling, &origin](Gfx::FloatPoint const& point) -> Gfx::FloatPoint {
+        auto transform_point = [&scaling, &origin](Gfx::FloatPoint point) -> Gfx::FloatPoint {
             auto new_point = point;
             new_point.translate_by({ -origin.x(), -origin.y() });
             new_point.scale_by(scaling);

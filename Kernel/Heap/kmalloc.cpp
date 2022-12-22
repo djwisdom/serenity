@@ -28,6 +28,7 @@ static constexpr size_t CHUNK_SIZE = 64;
 static_assert(is_power_of_two(CHUNK_SIZE));
 
 static constexpr size_t INITIAL_KMALLOC_MEMORY_SIZE = 2 * MiB;
+static constexpr size_t KMALLOC_DEFAULT_ALIGNMENT = 16;
 
 // Treat the heap as logically separate from .bss
 __attribute__((section(".heap"))) static u8 initial_kmalloc_memory[INITIAL_KMALLOC_MEMORY_SIZE];
@@ -123,15 +124,15 @@ public:
 
     size_t slab_size() const { return m_slab_size; }
 
-    void* allocate()
+    void* allocate(CallerWillInitializeMemory caller_will_initialize_memory)
     {
         if (m_usable_blocks.is_empty()) {
             // FIXME: This allocation wastes `block_size` bytes due to the implementation of kmalloc_aligned().
             //        Handle this with a custom VM+page allocator instead of using kmalloc_aligned().
             auto* slot = kmalloc_aligned(KmallocSlabBlock::block_size, KmallocSlabBlock::block_size);
             if (!slot) {
-                // FIXME: Dare to return nullptr!
-                PANIC("OOM while growing slabheap ({})", m_slab_size);
+                dbgln_if(KMALLOC_DEBUG, "OOM while growing slabheap ({})", m_slab_size);
+                return nullptr;
             }
             auto* block = new (slot) KmallocSlabBlock(m_slab_size);
             m_usable_blocks.append(*block);
@@ -141,7 +142,9 @@ public:
         if (block->is_full())
             m_full_blocks.append(*block);
 
-        memset(ptr, KMALLOC_SCRUB_BYTE, m_slab_size);
+        if (caller_will_initialize_memory == CallerWillInitializeMemory::No) {
+            memset(ptr, KMALLOC_SCRUB_BYTE, m_slab_size);
+        }
         return ptr;
     }
 
@@ -190,7 +193,7 @@ public:
             ++block;
             block_to_remove.list_node.remove();
             block_to_remove.~KmallocSlabBlock();
-            kfree_aligned(&block_to_remove);
+            kfree_sized(&block_to_remove, KmallocSlabBlock::block_size);
 
             did_purge = true;
         }
@@ -220,17 +223,17 @@ struct KmallocGlobalData {
         subheaps.append(*subheap);
     }
 
-    void* allocate(size_t size)
+    void* allocate(size_t size, size_t alignment, CallerWillInitializeMemory caller_will_initialize_memory)
     {
         VERIFY(!expansion_in_progress);
 
         for (auto& slabheap : slabheaps) {
-            if (size <= slabheap.slab_size())
-                return slabheap.allocate();
+            if (size <= slabheap.slab_size() && alignment <= slabheap.slab_size())
+                return slabheap.allocate(caller_will_initialize_memory);
         }
 
         for (auto& subheap : subheaps) {
-            if (auto* ptr = subheap.allocator.allocate(size))
+            if (auto* ptr = subheap.allocator.allocate(size, alignment, caller_will_initialize_memory))
                 return ptr;
         }
 
@@ -247,14 +250,15 @@ struct KmallocGlobalData {
                 }
             }
             if (did_purge)
-                return allocate(size);
+                return allocate(size, alignment, caller_will_initialize_memory);
         }
 
         if (!try_expand(size)) {
-            PANIC("OOM when trying to expand kmalloc heap.");
+            dbgln_if(KMALLOC_DEBUG, "OOM when trying to expand kmalloc heap");
+            return nullptr;
         }
 
-        return allocate(size);
+        return allocate(size, alignment, caller_will_initialize_memory);
     }
 
     void deallocate(void* ptr, size_t size)
@@ -318,14 +322,14 @@ struct KmallocGlobalData {
         dbgln_if(KMALLOC_DEBUG, "Unable to allocate {}, expanding kmalloc heap", allocation_request);
 
         if (!expansion_data->virtual_range.contains(new_subheap_base, new_subheap_size)) {
-            // FIXME: Dare to return false and allow kmalloc() to fail!
-            PANIC("Out of address space when expanding kmalloc heap.");
+            dbgln_if(KMALLOC_DEBUG, "Out of address space when expanding kmalloc heap");
+            return false;
         }
 
         auto physical_pages_or_error = MM.commit_physical_pages(new_subheap_size / PAGE_SIZE);
         if (physical_pages_or_error.is_error()) {
-            // FIXME: Dare to return false!
-            PANIC("Out of physical pages when expanding kmalloc heap.");
+            dbgln_if(KMALLOC_DEBUG, "Out of address space when expanding kmalloc heap");
+            return false;
         }
         auto physical_pages = physical_pages_or_error.release_value();
 
@@ -419,12 +423,15 @@ UNMAP_AFTER_INIT void kmalloc_init()
     s_lock.initialize();
 }
 
-void* kmalloc(size_t size)
+static void* kmalloc_impl(size_t size, size_t alignment, CallerWillInitializeMemory caller_will_initialize_memory)
 {
     // Catch bad callers allocating under spinlock.
     if constexpr (KMALLOC_VERIFY_NO_SPINLOCK_HELD) {
         Processor::verify_no_spinlocks_held();
     }
+
+    // Alignment must be a power of two.
+    VERIFY(is_power_of_two(alignment));
 
     SpinlockLocker lock(s_lock);
     ++g_kmalloc_call_count;
@@ -434,7 +441,7 @@ void* kmalloc(size_t size)
         Kernel::dump_backtrace();
     }
 
-    void* ptr = g_kmalloc_global->allocate(size);
+    void* ptr = g_kmalloc_global->allocate(size, alignment, caller_will_initialize_memory);
 
     Thread* current_thread = Thread::current();
     if (!current_thread)
@@ -449,13 +456,17 @@ void* kmalloc(size_t size)
     return ptr;
 }
 
+void* kmalloc(size_t size)
+{
+    return kmalloc_impl(size, KMALLOC_DEFAULT_ALIGNMENT, CallerWillInitializeMemory::No);
+}
+
 void* kcalloc(size_t count, size_t size)
 {
     if (Checked<size_t>::multiplication_would_overflow(count, size))
         return nullptr;
     size_t new_size = count * size;
-    auto* ptr = kmalloc(new_size);
-    // FIXME: Avoid redundantly scrubbing the memory in kmalloc()
+    auto* ptr = kmalloc_impl(new_size, KMALLOC_DEFAULT_ALIGNMENT, CallerWillInitializeMemory::Yes);
     if (ptr)
         memset(ptr, 0, new_size);
     return ptr;
@@ -504,17 +515,7 @@ size_t kmalloc_good_size(size_t size)
 
 void* kmalloc_aligned(size_t size, size_t alignment)
 {
-    Checked<size_t> real_allocation_size = size;
-    real_allocation_size += alignment;
-    real_allocation_size += sizeof(ptrdiff_t) + sizeof(size_t);
-    void* ptr = kmalloc(real_allocation_size.value());
-    if (ptr == nullptr)
-        return nullptr;
-    size_t max_addr = (size_t)ptr + alignment;
-    void* aligned_ptr = (void*)(max_addr - (max_addr % alignment));
-    ((ptrdiff_t*)aligned_ptr)[-1] = (ptrdiff_t)((u8*)aligned_ptr - (u8*)ptr);
-    ((size_t*)aligned_ptr)[-2] = real_allocation_size.value();
-    return aligned_ptr;
+    return kmalloc_impl(size, alignment, CallerWillInitializeMemory::No);
 }
 
 void* operator new(size_t size)
@@ -564,9 +565,9 @@ void operator delete(void* ptr, size_t size) noexcept
     return kfree_sized(ptr, size);
 }
 
-void operator delete(void* ptr, size_t, std::align_val_t) noexcept
+void operator delete(void* ptr, size_t size, std::align_val_t) noexcept
 {
-    return kfree_aligned(ptr);
+    return kfree_sized(ptr, size);
 }
 
 void operator delete[](void*) noexcept

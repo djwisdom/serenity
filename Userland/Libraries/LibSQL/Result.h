@@ -41,28 +41,30 @@ constexpr char const* command_tag(SQLCommand command)
     }
 }
 
-#define ENUMERATE_SQL_ERRORS(S)                                                          \
-    S(NoError, "No error")                                                               \
-    S(InternalError, "{}")                                                               \
-    S(NotYetImplemented, "{}")                                                           \
-    S(DatabaseUnavailable, "Database Unavailable")                                       \
-    S(StatementUnavailable, "Statement with id '{}' Unavailable")                        \
-    S(SyntaxError, "Syntax Error")                                                       \
-    S(DatabaseDoesNotExist, "Database '{}' does not exist")                              \
-    S(SchemaDoesNotExist, "Schema '{}' does not exist")                                  \
-    S(SchemaExists, "Schema '{}' already exist")                                         \
-    S(TableDoesNotExist, "Table '{}' does not exist")                                    \
-    S(ColumnDoesNotExist, "Column '{}' does not exist")                                  \
-    S(AmbiguousColumnName, "Column name '{}' is ambiguous")                              \
-    S(TableExists, "Table '{}' already exist")                                           \
-    S(InvalidType, "Invalid type '{}'")                                                  \
-    S(InvalidDatabaseName, "Invalid database name '{}'")                                 \
-    S(InvalidValueType, "Invalid type for attribute '{}'")                               \
-    S(InvalidNumberOfValues, "Number of values does not match number of columns")        \
-    S(BooleanOperatorTypeMismatch, "Cannot apply '{}' operator to non-boolean operands") \
-    S(NumericOperatorTypeMismatch, "Cannot apply '{}' operator to non-numeric operands") \
-    S(IntegerOperatorTypeMismatch, "Cannot apply '{}' operator to non-numeric operands") \
-    S(InvalidOperator, "Invalid operator '{}'")
+#define ENUMERATE_SQL_ERRORS(S)                                                                   \
+    S(AmbiguousColumnName, "Column name '{}' is ambiguous")                                       \
+    S(BooleanOperatorTypeMismatch, "Cannot apply '{}' operator to non-boolean operands")          \
+    S(ColumnDoesNotExist, "Column '{}' does not exist")                                           \
+    S(DatabaseDoesNotExist, "Database '{}' does not exist")                                       \
+    S(DatabaseUnavailable, "Database Unavailable")                                                \
+    S(IntegerOperatorTypeMismatch, "Cannot apply '{}' operator to non-numeric operands")          \
+    S(IntegerOverflow, "Operation would cause integer overflow")                                  \
+    S(InternalError, "{}")                                                                        \
+    S(InvalidDatabaseName, "Invalid database name '{}'")                                          \
+    S(InvalidNumberOfPlaceholderValues, "Number of values does not match number of placeholders") \
+    S(InvalidNumberOfValues, "Number of values does not match number of columns")                 \
+    S(InvalidOperator, "Invalid operator '{}'")                                                   \
+    S(InvalidType, "Invalid type '{}'")                                                           \
+    S(InvalidValueType, "Invalid type for attribute '{}'")                                        \
+    S(NoError, "No error")                                                                        \
+    S(NotYetImplemented, "{}")                                                                    \
+    S(NumericOperatorTypeMismatch, "Cannot apply '{}' operator to non-numeric operands")          \
+    S(SchemaDoesNotExist, "Schema '{}' does not exist")                                           \
+    S(SchemaExists, "Schema '{}' already exist")                                                  \
+    S(StatementUnavailable, "Statement with id '{}' Unavailable")                                 \
+    S(SyntaxError, "Syntax Error")                                                                \
+    S(TableDoesNotExist, "Table '{}' does not exist")                                             \
+    S(TableExists, "Table '{}' already exist")
 
 enum class SQLErrorCode {
 #undef __ENUMERATE_SQL_ERROR
@@ -84,7 +86,7 @@ public:
     {
     }
 
-    ALWAYS_INLINE Result(SQLCommand command, SQLErrorCode error, String error_message)
+    ALWAYS_INLINE Result(SQLCommand command, SQLErrorCode error, DeprecatedString error_message)
         : m_command(command)
         , m_error(error)
         , m_error_message(move(error_message))
@@ -102,7 +104,7 @@ public:
 
     SQLCommand command() const { return m_command; }
     SQLErrorCode error() const { return m_error; }
-    String error_string() const;
+    DeprecatedString error_string() const;
 
     // These are for compatibility with the TRY() macro in AK.
     [[nodiscard]] bool is_error() const { return m_error != SQLErrorCode::NoError; }
@@ -122,7 +124,7 @@ private:
     SQLCommand m_command { SQLCommand::Unknown };
 
     SQLErrorCode m_error { SQLErrorCode::NoError };
-    Optional<String> m_error_message {};
+    Optional<DeprecatedString> m_error_message {};
 };
 
 template<typename ValueType>

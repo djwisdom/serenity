@@ -16,7 +16,7 @@
 namespace JS {
 
 MathObject::MathObject(Realm& realm)
-    : Object(*realm.intrinsics().object_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
 {
 }
 
@@ -72,7 +72,7 @@ void MathObject::initialize(Realm& realm)
     define_direct_property(vm.names.SQRT2, Value(M_SQRT2), 0);
 
     // 21.3.1.9 Math [ @@toStringTag ], https://tc39.es/ecma262/#sec-math-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, vm.names.Math.as_string()), Attribute::Configurable);
+    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, vm.names.Math.as_string()), Attribute::Configurable);
 }
 
 // 21.3.2.1 Math.abs ( x ), https://tc39.es/ecma262/#sec-math.abs
@@ -297,25 +297,55 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::acos)
 // 21.3.2.3 Math.acosh ( x ), https://tc39.es/ecma262/#sec-math.acosh
 JS_DEFINE_NATIVE_FUNCTION(MathObject::acosh)
 {
-    auto value = TRY(vm.argument(0).to_number(vm)).as_double();
-    if (value < 1)
+    // 1. Let n be ? ToNumber(x).
+    auto number = TRY(vm.argument(0).to_number(vm));
+
+    // 2. If n is NaN or n is +∞𝔽, return n.
+    if (number.is_nan() || number.is_positive_infinity())
+        return number;
+
+    // 3. If n is 1𝔽, return +0𝔽.
+    if (number.as_double() == 1.0)
+        return Value(0.0);
+
+    // 4. If n < 1𝔽, return NaN.
+    if (number.as_double() < 1)
         return js_nan();
-    return Value(::acosh(value));
+
+    // 5. Return an implementation-approximated Number value representing the result of the inverse hyperbolic cosine of ℝ(n).
+    return Value(::acosh(number.as_double()));
 }
 
 // 21.3.2.4 Math.asin ( x ), https://tc39.es/ecma262/#sec-math.asin
 JS_DEFINE_NATIVE_FUNCTION(MathObject::asin)
 {
+    // 1. Let n be ? ToNumber(x).
     auto number = TRY(vm.argument(0).to_number(vm));
+
+    // 2. If n is NaN, n is +0𝔽, or n is -0𝔽, return n.
     if (number.is_nan() || number.is_positive_zero() || number.is_negative_zero())
         return number;
+
+    // 3. If n > 1𝔽 or n < -1𝔽, return NaN.
+    if (number.as_double() > 1 || number.as_double() < -1)
+        return js_nan();
+
+    // 4. Return an implementation-approximated Number value representing the result of the inverse sine of ℝ(n).
     return Value(::asin(number.as_double()));
 }
 
 // 21.3.2.5 Math.asinh ( x ), https://tc39.es/ecma262/#sec-math.asinh
 JS_DEFINE_NATIVE_FUNCTION(MathObject::asinh)
 {
-    return Value(::asinh(TRY(vm.argument(0).to_number(vm)).as_double()));
+    // 1. Let n be ? ToNumber(x).
+    auto number = TRY(vm.argument(0).to_number(vm));
+
+    // 2. If n is not finite or n is either +0𝔽 or -0𝔽, return n.
+    if (!number.is_finite_number() || number.is_positive_zero() || number.is_negative_zero())
+        return number;
+
+    // 3. Return an implementation-approximated Number value representing the result of the inverse hyperbolic sine of ℝ(n).
+    return Value(::asinh(number.as_double()));
 }
 
 // 21.3.2.6 Math.atan ( x ), https://tc39.es/ecma262/#sec-math.atan
@@ -334,19 +364,49 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::atan)
 // 21.3.2.7 Math.atanh ( x ), https://tc39.es/ecma262/#sec-math.atanh
 JS_DEFINE_NATIVE_FUNCTION(MathObject::atanh)
 {
-    auto value = TRY(vm.argument(0).to_number(vm)).as_double();
-    if (value > 1 || value < -1)
+    // 1. Let n be ? ToNumber(x).
+    auto number = TRY(vm.argument(0).to_number(vm));
+
+    // 2. If n is NaN, n is +0𝔽, or n is -0𝔽, return n.
+    if (number.is_nan() || number.is_positive_zero() || number.is_negative_zero())
+        return number;
+
+    // 3. If n > 1𝔽 or n < -1𝔽, return NaN.
+    if (number.as_double() > 1. || number.as_double() < -1.)
         return js_nan();
-    return Value(::atanh(value));
+
+    // 4. If n is 1𝔽, return +∞𝔽.
+    if (number.as_double() == 1.)
+        return js_infinity();
+
+    // 5. If n is -1𝔽, return -∞𝔽.
+    if (number.as_double() == -1.)
+        return js_negative_infinity();
+
+    // 6. Return an implementation-approximated Number value representing the result of the inverse hyperbolic tangent of ℝ(n).
+    return Value(::atanh(number.as_double()));
 }
 
 // 21.3.2.21 Math.log1p ( x ), https://tc39.es/ecma262/#sec-math.log1p
 JS_DEFINE_NATIVE_FUNCTION(MathObject::log1p)
 {
-    auto value = TRY(vm.argument(0).to_number(vm)).as_double();
-    if (value < -1)
+    // 1. Let n be ? ToNumber(x).
+    auto number = TRY(vm.argument(0).to_number(vm));
+
+    // 2. If n is NaN, n is +0𝔽, n is -0𝔽, or n is +∞𝔽, return n.
+    if (number.is_nan() || number.is_positive_zero() || number.is_negative_zero() || number.is_positive_infinity())
+        return number;
+
+    // 3. If n is -1𝔽, return -∞𝔽.
+    if (number.as_double() == -1.)
+        return js_negative_infinity();
+
+    // 4. If n < -1𝔽, return NaN.
+    if (number.as_double() < -1.)
         return js_nan();
-    return Value(::log1p(value));
+
+    // 5. Return an implementation-approximated Number value representing the result of the natural logarithm of 1 + ℝ(n).
+    return Value(::log1p(number.as_double()));
 }
 
 // 21.3.2.9 Math.cbrt ( x ), https://tc39.es/ecma262/#sec-math.cbrt
@@ -462,36 +522,92 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::imul)
 // 21.3.2.20 Math.log ( x ), https://tc39.es/ecma262/#sec-math.log
 JS_DEFINE_NATIVE_FUNCTION(MathObject::log)
 {
-    auto value = TRY(vm.argument(0).to_number(vm)).as_double();
-    if (value < 0)
+    // 1. Let n be ? ToNumber(x).
+    auto number = TRY(vm.argument(0).to_number(vm));
+
+    // 2. If n is NaN or n is +∞𝔽, return n.
+    if (number.is_nan() || number.is_positive_infinity())
+        return number;
+
+    // 3. If n is 1𝔽, return +0𝔽.
+    if (number.as_double() == 1.)
+        return Value(0);
+
+    // 4. If n is +0𝔽 or n is -0𝔽, return -∞𝔽.
+    if (number.is_positive_zero() || number.is_negative_zero())
+        return js_negative_infinity();
+
+    // 5. If n < -0𝔽, return NaN.
+    if (number.as_double() < -0.)
         return js_nan();
-    return Value(::log(value));
+
+    // 6. Return an implementation-approximated Number value representing the result of the natural logarithm of ℝ(n).
+    return Value(::log(number.as_double()));
 }
 
 // 21.3.2.23 Math.log2 ( x ), https://tc39.es/ecma262/#sec-math.log2
 JS_DEFINE_NATIVE_FUNCTION(MathObject::log2)
 {
-    auto value = TRY(vm.argument(0).to_number(vm)).as_double();
-    if (value < 0)
+    // 1. Let n be ? ToNumber(x).
+    auto number = TRY(vm.argument(0).to_number(vm));
+
+    // 2. If n is NaN or n is +∞𝔽, return n.
+    if (number.is_nan() || number.is_positive_infinity())
+        return number;
+
+    // 3. If n is 1𝔽, return +0𝔽.
+    if (number.as_double() == 1.)
+        return Value(0);
+
+    // 4. If n is +0𝔽 or n is -0𝔽, return -∞𝔽.
+    if (number.is_positive_zero() || number.is_negative_zero())
+        return js_negative_infinity();
+
+    // 5. If n < -0𝔽, return NaN.
+    if (number.as_double() < -0.)
         return js_nan();
-    return Value(::log2(value));
+
+    // 6. Return an implementation-approximated Number value representing the result of the base 2 logarithm of ℝ(n).
+    return Value(::log2(number.as_double()));
 }
 
 // 21.3.2.22 Math.log10 ( x ), https://tc39.es/ecma262/#sec-math.log10
 JS_DEFINE_NATIVE_FUNCTION(MathObject::log10)
 {
-    auto value = TRY(vm.argument(0).to_number(vm)).as_double();
-    if (value < 0)
+    // 1. Let n be ? ToNumber(x).
+    auto number = TRY(vm.argument(0).to_number(vm));
+
+    // 2. If n is NaN or n is +∞𝔽, return n.
+    if (number.is_nan() || number.is_positive_infinity())
+        return number;
+
+    // 3. If n is 1𝔽, return +0𝔽.
+    if (number.as_double() == 1.)
+        return Value(0);
+
+    // 4. If n is +0𝔽 or n is -0𝔽, return -∞𝔽.
+    if (number.is_positive_zero() || number.is_negative_zero())
+        return js_negative_infinity();
+
+    // 5. If n < -0𝔽, return NaN.
+    if (number.as_double() < -0.)
         return js_nan();
-    return Value(::log10(value));
+
+    // 6. Return an implementation-approximated Number value representing the result of the base 10 logarithm of ℝ(n).
+    return Value(::log10(number.as_double()));
 }
 
 // 21.3.2.31 Math.sinh ( x ), https://tc39.es/ecma262/#sec-math.sinh
 JS_DEFINE_NATIVE_FUNCTION(MathObject::sinh)
 {
+    // 1. Let n be ? ToNumber(x).
     auto number = TRY(vm.argument(0).to_number(vm));
-    if (number.is_nan())
-        return js_nan();
+
+    // 2. If n is not finite or n is either +0𝔽 or -0𝔽, return n.
+    if (!number.is_finite_number() || number.is_positive_zero() || number.is_negative_zero())
+        return number;
+
+    // 3. Return an implementation-approximated Number value representing the result of the hyperbolic sine of ℝ(n).
     return Value(::sinh(number.as_double()));
 }
 
@@ -520,13 +636,22 @@ JS_DEFINE_NATIVE_FUNCTION(MathObject::cosh)
 // 21.3.2.34 Math.tanh ( x ), https://tc39.es/ecma262/#sec-math.tanh
 JS_DEFINE_NATIVE_FUNCTION(MathObject::tanh)
 {
+    // 1. Let n be ? ToNumber(x).
     auto number = TRY(vm.argument(0).to_number(vm));
-    if (number.is_nan())
-        return js_nan();
+
+    // 2. If n is NaN, n is +0𝔽, or n is -0𝔽, return n.
+    if (number.is_nan() || number.is_positive_zero() || number.is_negative_zero())
+        return number;
+
+    // 3. If n is +∞𝔽, return 1𝔽.
     if (number.is_positive_infinity())
         return Value(1);
+
+    // 4. If n is -∞𝔽, return -1𝔽.
     if (number.is_negative_infinity())
         return Value(-1);
+
+    // 5. Return an implementation-approximated Number value representing the result of the hyperbolic tangent of ℝ(n).
     return Value(::tanh(number.as_double()));
 }
 

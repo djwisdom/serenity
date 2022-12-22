@@ -8,13 +8,14 @@
 #include <AK/Checked.h>
 #include <AK/PrintfImplementation.h>
 #include <AK/StdLibExtras.h>
+#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
 #include <AK/UnicodeUtils.h>
 #include <AK/Utf32View.h>
 
 #ifndef KERNEL
-#    include <AK/String.h>
+#    include <AK/DeprecatedString.h>
 #    include <AK/Utf16View.h>
 #endif
 
@@ -33,6 +34,13 @@ inline ErrorOr<void> StringBuilder::will_append(size_t size)
     VERIFY(!expanded_capacity.has_overflow());
     TRY(m_buffer.try_ensure_capacity(expanded_capacity.value()));
     return {};
+}
+
+ErrorOr<StringBuilder> StringBuilder::create(size_t initial_capacity)
+{
+    StringBuilder builder;
+    TRY(builder.m_buffer.try_ensure_capacity(initial_capacity));
+    return builder;
 }
 
 StringBuilder::StringBuilder(size_t initial_capacity)
@@ -104,16 +112,21 @@ ByteBuffer StringBuilder::to_byte_buffer() const
 }
 
 #ifndef KERNEL
-String StringBuilder::to_string() const
+DeprecatedString StringBuilder::to_deprecated_string() const
 {
     if (is_empty())
-        return String::empty();
-    return String((char const*)data(), length());
+        return DeprecatedString::empty();
+    return DeprecatedString((char const*)data(), length());
 }
 
-String StringBuilder::build() const
+DeprecatedString StringBuilder::build() const
 {
-    return to_string();
+    return to_deprecated_string();
+}
+
+ErrorOr<String> StringBuilder::to_string() const
+{
+    return String::from_utf8(string_view());
 }
 #endif
 

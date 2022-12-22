@@ -15,15 +15,14 @@ class Date final : public Object {
     JS_OBJECT(Date, Object);
 
 public:
-    static Date* create(Realm&, double date_value);
-    static Date* now(VM&);
+    static NonnullGCPtr<Date> create(Realm&, double date_value);
 
     virtual ~Date() override = default;
 
     double date_value() const { return m_date_value; }
     void set_date_value(double value) { m_date_value = value; }
 
-    String iso_date_string() const;
+    DeprecatedString iso_date_string() const;
 
 private:
     Date(double date_value, Object& prototype);

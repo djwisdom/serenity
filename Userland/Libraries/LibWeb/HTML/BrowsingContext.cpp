@@ -246,6 +246,7 @@ void BrowsingContext::visit_edges(Cell::Visitor& visitor)
         visitor.visit(entry.document);
     visitor.visit(m_container);
     visitor.visit(m_window_proxy);
+    visitor.visit(m_opener_browsing_context);
     visitor.visit(m_group);
     visitor.visit(m_parent);
     visitor.visit(m_first_child);
@@ -344,7 +345,7 @@ void BrowsingContext::set_viewport_rect(Gfx::IntRect const& rect)
     HTML::main_thread_event_loop().schedule();
 }
 
-void BrowsingContext::set_size(Gfx::IntSize const& size)
+void BrowsingContext::set_size(Gfx::IntSize size)
 {
     if (m_size == size)
         return;
@@ -374,7 +375,7 @@ void BrowsingContext::set_needs_display(Gfx::IntRect const& rect)
 
     if (is_top_level()) {
         if (m_page)
-            m_page->client().page_did_invalidate(to_top_level_rect(rect));
+            m_page->client().page_did_invalidate(to_top_level_rect(rect.to_type<CSSPixels>()));
         return;
     }
 
@@ -382,16 +383,16 @@ void BrowsingContext::set_needs_display(Gfx::IntRect const& rect)
         container()->layout_node()->set_needs_display();
 }
 
-void BrowsingContext::scroll_to(Gfx::IntPoint const& position)
+void BrowsingContext::scroll_to(Gfx::IntPoint position)
 {
     if (active_document())
         active_document()->force_layout();
 
     if (m_page)
-        m_page->client().page_did_request_scroll_to(position);
+        m_page->client().page_did_request_scroll_to(position.to_type<CSSPixels>());
 }
 
-void BrowsingContext::scroll_to_anchor(String const& fragment)
+void BrowsingContext::scroll_to_anchor(DeprecatedString const& fragment)
 {
     JS::GCPtr<DOM::Document> document = active_document();
     if (!document)
@@ -426,17 +427,17 @@ void BrowsingContext::scroll_to_anchor(String const& fragment)
     }
 
     if (m_page)
-        m_page->client().page_did_request_scroll_into_view(enclosing_int_rect(float_rect));
+        m_page->client().page_did_request_scroll_into_view(float_rect.to_type<CSSPixels>());
 }
 
-Gfx::IntRect BrowsingContext::to_top_level_rect(Gfx::IntRect const& a_rect)
+CSSPixelRect BrowsingContext::to_top_level_rect(CSSPixelRect const& a_rect)
 {
     auto rect = a_rect;
     rect.set_location(to_top_level_position(a_rect.location()));
     return rect;
 }
 
-Gfx::IntPoint BrowsingContext::to_top_level_position(Gfx::IntPoint const& a_position)
+CSSPixelPoint BrowsingContext::to_top_level_position(CSSPixelPoint a_position)
 {
     auto position = a_position;
     for (auto ancestor = parent(); ancestor; ancestor = ancestor->parent()) {
@@ -446,7 +447,7 @@ Gfx::IntPoint BrowsingContext::to_top_level_position(Gfx::IntPoint const& a_posi
             return {};
         if (!ancestor->container()->layout_node())
             return {};
-        position.translate_by(ancestor->container()->layout_node()->box_type_agnostic_position().to_type<int>());
+        position.translate_by(ancestor->container()->layout_node()->box_type_agnostic_position().to_type<CSSPixels>());
     }
     return position;
 }
@@ -467,7 +468,7 @@ void BrowsingContext::set_cursor_position(DOM::Position position)
     reset_cursor_blink_cycle();
 }
 
-String BrowsingContext::selected_text() const
+DeprecatedString BrowsingContext::selected_text() const
 {
     StringBuilder builder;
     if (!active_document())
@@ -511,7 +512,7 @@ String BrowsingContext::selected_text() const
         builder.append(text.substring(0, selection.end().index_in_node));
     }
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 void BrowsingContext::select_all()
@@ -650,118 +651,128 @@ JS::GCPtr<DOM::Node> BrowsingContext::currently_focused_area()
     return candidate;
 }
 
-BrowsingContext* BrowsingContext::choose_a_browsing_context(StringView name, bool)
+// https://html.spec.whatwg.org/#the-rules-for-choosing-a-browsing-context-given-a-browsing-context-name
+BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_context(StringView name, bool no_opener)
 {
-    // The rules for choosing a browsing context, given a browsing context name
-    // name, a browsing context current, and a boolean noopener are as follows:
+    // The rules for choosing a browsing context, given a browsing context name name, a browsing context current, and
+    // a boolean noopener are as follows:
 
     // 1. Let chosen be null.
     JS::GCPtr<BrowsingContext> chosen = nullptr;
 
-    // FIXME: 2. Let windowType be "existing or none".
+    // 2. Let windowType be "existing or none".
+    auto window_type = WindowType::ExistingOrNone;
 
-    // FIXME: 3. Let sandboxingFlagSet be current's active document's active
-    // sandboxing flag set.
+    // 3. Let sandboxingFlagSet be current's active document's active sandboxing flag set.
+    auto sandboxing_flag_set = active_document()->active_sandboxing_flag_set();
 
     // 4. If name is the empty string or an ASCII case-insensitive match for "_self", then set chosen to current.
-    if (name.is_empty() || name.equals_ignoring_case("_self"sv))
+    if (name.is_empty() || name.equals_ignoring_case("_self"sv)) {
         chosen = this;
+    }
 
-    // 5. Otherwise, if name is an ASCII case-insensitive match for "_parent",
-    // set chosen to current's parent browsing context, if any, and current
-    // otherwise.
-    if (name.equals_ignoring_case("_parent"sv)) {
+    // 5. Otherwise, if name is an ASCII case-insensitive match for "_parent", set chosen to current's parent browsing
+    //    context, if any, and current otherwise.
+    else if (name.equals_ignoring_case("_parent"sv)) {
         if (auto parent = this->parent())
             chosen = parent;
         else
             chosen = this;
     }
 
-    // 6. Otherwise, if name is an ASCII case-insensitive match for "_top", set
-    // chosen to current's top-level browsing context, if any, and current
-    // otherwise.
-    if (name.equals_ignoring_case("_top"sv)) {
+    // 6. Otherwise, if name is an ASCII case-insensitive match for "_top", set chosen to current's top-level browsing
+    //    context, if any, and current otherwise.
+    else if (name.equals_ignoring_case("_top"sv)) {
         chosen = &top_level_browsing_context();
     }
 
-    // FIXME: 7. Otherwise, if name is not an ASCII case-insensitive match for
-    // "_blank", there exists a browsing context whose name is the same as name,
-    // current is familiar with that browsing context, and the user agent
-    // determines that the two browsing contexts are related enough that it is
-    // ok if they reach each other, set chosen to that browsing context. If
-    // there are multiple matching browsing contexts, the user agent should set
-    // chosen to one in some arbitrary consistent manner, such as the most
-    // recently opened, most recently focused, or more closely related.
-    if (!name.equals_ignoring_case("_blank"sv)) {
+    // FIXME: 7. Otherwise, if name is not an ASCII case-insensitive match for "_blank", there exists a browsing context
+    //           whose name is the same as name, current is familiar with that browsing context, and the user agent
+    //           determines that the two browsing contexts are related enough that it is ok if they reach each other,
+    //           set chosen to that browsing context. If there are multiple matching browsing contexts, the user agent
+    //           should set chosen to one in some arbitrary consistent manner, such as the most recently opened, most
+    //           recently focused, or more closely related.
+    else if (!name.equals_ignoring_case("_blank"sv)) {
+        dbgln("FIXME: Find matching browser context for name {}", name);
         chosen = this;
     } else {
-        // 8. Otherwise, a new browsing context is being requested, and what
-        // happens depends on the user agent's configuration and abilities — it
-        // is determined by the rules given for the first applicable option from
-        // the following list:
-        dbgln("FIXME: Create a new browsing context!");
+        // 8. Otherwise, a new browsing context is being requested, and what happens depends on the user agent's
+        //    configuration and abilities — it is determined by the rules given for the first applicable option from
+        //    the following list:
 
-        // --> If current's active window does not have transient activation and
-        //     the user agent has been configured to not show popups (i.e., the
-        //     user agent has a "popup blocker" enabled)
-        //
-        //     The user agent may inform the user that a popup has been blocked.
+        // --> If current's active window does not have transient activation and the user agent has been configured to
+        //     not show popups (i.e., the user agent has a "popup blocker" enabled)
+        VERIFY(m_page);
+        if (!active_window()->has_transient_activation() && m_page->should_block_pop_ups()) {
+            // FIXME: The user agent may inform the user that a popup has been blocked.
+            dbgln("Pop-up blocked!");
+        }
 
-        // --> If sandboxingFlagSet has the sandboxed auxiliary navigation
-        //     browsing context flag set
-        //
-        //     The user agent may report to a developer console that a popup has
-        //     been blocked.
+        // --> If sandboxingFlagSet has the sandboxed auxiliary navigation browsing context flag set
+        else if (sandboxing_flag_set.flags & SandboxingFlagSet::SandboxedAuxiliaryNavigation) {
+            // FIXME: The user agent may report to a developer console that a popup has been blocked.
+            dbgln("Pop-up blocked!");
+        }
 
-        // --> If the user agent has been configured such that in this instance
-        //     it will create a new browsing context
-        //
-        //     1. Set windowType to "new and unrestricted".
+        // --> If the user agent has been configured such that in this instance it will create a new browsing context
+        else if (true) { // FIXME: When is this the case?
+            // 1. Set windowType to "new and unrestricted".
+            window_type = WindowType::NewAndUnrestricted;
 
-        //     2. If current's top-level browsing context's active document's
-        //     cross-origin opener policy's value is "same-origin" or
-        //     "same-origin-plus-COEP", then:
+            // 2. If current's top-level browsing context's active document's cross-origin opener policy's value is
+            //    "same-origin" or "same-origin-plus-COEP", then:
+            if (top_level_browsing_context().active_document()->cross_origin_opener_policy().value == CrossOriginOpenerPolicyValue::SameOrigin || top_level_browsing_context().active_document()->cross_origin_opener_policy().value == CrossOriginOpenerPolicyValue::SameOriginPlusCOEP) {
+                // 1. Let currentDocument be current's active document.
+                auto* current_document = top_level_browsing_context().active_document();
 
-        //         2.1. Let currentDocument be current's active document.
+                // 2. If currentDocument's origin is not same origin with currentDocument's relevant settings object's
+                //    top-level origin, then set noopener to true, name to "_blank", and windowType to "new with no opener".
+                if (!current_document->origin().is_same_origin(current_document->relevant_settings_object().top_level_origin)) {
+                    no_opener = true;
+                    name = "_blank"sv;
+                    window_type = WindowType::NewWithNoOpener;
+                }
+            }
 
-        //         2.2. If currentDocument's origin is not same origin with
-        //         currentDocument's relevant settings object's top-level
-        //         origin, then set noopener to true, name to "_blank", and
-        //         windowType to "new with no opener".
+            // 3. If noopener is true, then set chosen to the result of creating a new top-level browsing context.
+            if (no_opener) {
+                chosen = HTML::BrowsingContext::create_a_new_top_level_browsing_context(*m_page);
+            }
 
-        //     3. If noopener is true, then set chosen to the result of creating
-        //     a new top-level browsing context.
+            // 4. Otherwise:
+            else {
+                // 1. Set chosen to the result of creating a new auxiliary browsing context with current.
+                // FIXME: We have no concept of auxiliary browsing context
+                chosen = HTML::BrowsingContext::create_a_new_top_level_browsing_context(*m_page);
 
-        //     4. Otherwise:
+                // 2. If sandboxingFlagSet's sandboxed navigation browsing context flag is set, then current must be
+                //    set as chosen's one permitted sandboxed navigator.
+                // FIXME: We have no concept of one permitted sandboxed navigator
+            }
 
-        //         4.1. Set chosen to the result of creating a new auxiliary
-        //         browsing context with current.
+            // 5. If sandboxingFlagSet's sandbox propagates to auxiliary browsing contexts flag is set, then all the
+            //    flags that are set in sandboxingFlagSet must be set in chosen's popup sandboxing flag set.
+            // FIXME: Our BrowsingContexts do not have SandboxingFlagSets yet, only documents do
 
-        //         4.2. If sandboxingFlagSet's sandboxed navigation browsing
-        //         context flag is set, then current must be set as chosen's one
-        //         permitted sandboxed navigator.
+            // 6. If name is not an ASCII case-insensitive match for "_blank", then set chosen's name to name.
+            if (!name.equals_ignoring_case("_blank"sv))
+                chosen->set_name(name);
+        }
 
-        //     5. If sandboxingFlagSet's sandbox propagates to auxiliary
-        //     browsing contexts flag is set, then all the flags that are set in
-        //     sandboxingFlagSet must be set in chosen's popup sandboxing flag
-        //     set.
+        // --> If the user agent has been configured such that in this instance t will reuse current
+        else if (false) { // FIXME: When is this the case?
+            // Set chosen to current.
+            chosen = *this;
+        }
 
-        //     6. If name is not an ASCII case-insensitive match for "_blank",
-        //     then set chosen's name to name.
-
-        // --> If the user agent has been configured such that in this instance
-        //     it will reuse current
-        //
-        //     Set chosen to current.
-
-        // --> If the user agent has been configured such that in this instance
-        //     it will not find a browsing context
-        //
-        //     Do nothing.
+        // --> If the user agent has been configured such that in this instance it will not find a browsing context
+        else if (false) { // FIXME: When is this the case?
+            // Do nothing.
+        }
     }
 
     // 9. Return chosen and windowType.
-    return chosen;
+    return { chosen, window_type };
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#document-tree-child-browsing-context
@@ -890,8 +901,8 @@ WebIDL::ExceptionOr<void> BrowsingContext::navigate(
     bool exceptions_enabled,
     HistoryHandlingBehavior history_handling,
     Optional<PolicyContainer> history_policy_container,
-    String navigation_type,
-    Optional<String> navigation_id,
+    DeprecatedString navigation_type,
+    Optional<DeprecatedString> navigation_id,
     Function<void(JS::NonnullGCPtr<Fetch::Infrastructure::Response>)> process_response_end_of_body)
 {
     // 1. If resource is a URL, then set resource to a new request whose URL is resource.
@@ -1008,7 +1019,7 @@ WebIDL::ExceptionOr<void> BrowsingContext::navigate(
 }
 
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-fragid
-WebIDL::ExceptionOr<void> BrowsingContext::navigate_to_a_fragment(AK::URL const& url, HistoryHandlingBehavior history_handling, String navigation_id)
+WebIDL::ExceptionOr<void> BrowsingContext::navigate_to_a_fragment(AK::URL const& url, HistoryHandlingBehavior history_handling, DeprecatedString navigation_id)
 {
     // 1. If historyHandling is not "replace",
     if (history_handling != HistoryHandlingBehavior::Replace) {
@@ -1131,7 +1142,7 @@ WebIDL::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_ind
     if (new_document->ready_state() == "complete"sv) {
         // then queue a global task on the DOM manipulation task source given newDocument's relevant global object to run the following steps:
 
-        queue_global_task(Task::Source::DOMManipulation, relevant_global_object(*new_document), [new_document]() mutable {
+        queue_global_task(Task::Source::DOMManipulation, relevant_global_object(*new_document), [new_document] {
             // 1. If newDocument's page showing flag is true, then abort these steps.
             if (new_document->page_showing())
                 return;
@@ -1200,7 +1211,7 @@ WebIDL::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_ind
     // 20. If hashChanged is true,
     if (hash_changed) {
         // then queue a global task on the DOM manipulation task source given newDocument's relevant global object
-        queue_global_task(Task::Source::DOMManipulation, relevant_global_object(*new_document), [new_document]() mutable {
+        queue_global_task(Task::Source::DOMManipulation, relevant_global_object(*new_document), [new_document] {
             // to fire an event named hashchange at newDocument's relevant global object,
             // using HashChangeEvent, with the oldURL attribute initialized to oldURL
             // and the newURL attribute initialized to newURL.
@@ -1319,7 +1330,7 @@ void BrowsingContext::set_system_visibility_state(VisibilityState visibility_sta
     // has changed to newState, it must queue a task on the user interaction task source to update
     // the visibility state of all the Document objects in the top-level browsing context's document family with newState.
     auto document_family = top_level_browsing_context().document_family();
-    queue_global_task(Task::Source::UserInteraction, Bindings::main_thread_vm().current_realm()->global_object(), [visibility_state, document_family = move(document_family)]() mutable {
+    queue_global_task(Task::Source::UserInteraction, Bindings::main_thread_vm().current_realm()->global_object(), [visibility_state, document_family = move(document_family)] {
         for (auto& document : document_family) {
             document->update_the_visibility_state(visibility_state);
         }

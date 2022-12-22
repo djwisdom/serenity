@@ -16,7 +16,7 @@
 namespace Web::HTML {
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-classic-script
-JS::NonnullGCPtr<ClassicScript> ClassicScript::create(String filename, StringView source, EnvironmentSettingsObject& environment_settings_object, AK::URL base_url, size_t source_line_number, MutedErrors muted_errors)
+JS::NonnullGCPtr<ClassicScript> ClassicScript::create(DeprecatedString filename, StringView source, EnvironmentSettingsObject& environment_settings_object, AK::URL base_url, size_t source_line_number, MutedErrors muted_errors)
 {
     auto& vm = environment_settings_object.realm().vm();
 
@@ -53,25 +53,25 @@ JS::NonnullGCPtr<ClassicScript> ClassicScript::create(String filename, StringVie
     // 11. If result is a list of errors, then:
     if (result.is_error()) {
         auto& parse_error = result.error().first();
-        dbgln_if(HTML_SCRIPT_DEBUG, "ClassicScript: Failed to parse: {}", parse_error.to_string());
+        dbgln_if(HTML_SCRIPT_DEBUG, "ClassicScript: Failed to parse: {}", parse_error.to_deprecated_string());
 
         // FIXME: 1. Set script's parse error and its error to rethrow to result[0].
         //           We do not have parse error as it would currently go unused.
         script->m_error_to_rethrow = parse_error;
 
         // 2. Return script.
-        return JS::NonnullGCPtr(*script);
+        return script;
     }
 
     // 12. Set script's record to result.
     script->m_script_record = *result.release_value();
 
     // 13. Return script.
-    return JS::NonnullGCPtr(*script);
+    return script;
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#run-a-classic-script
-JS::Completion ClassicScript::run(RethrowErrors rethrow_errors)
+JS::Completion ClassicScript::run(RethrowErrors rethrow_errors, JS::GCPtr<JS::Environment> lexical_environment_override)
 {
     auto& vm = settings_object().realm().vm();
 
@@ -90,14 +90,14 @@ JS::Completion ClassicScript::run(RethrowErrors rethrow_errors)
 
     // 5. If script's error to rethrow is not null, then set evaluationStatus to Completion { [[Type]]: throw, [[Value]]: script's error to rethrow, [[Target]]: empty }.
     if (m_error_to_rethrow.has_value()) {
-        evaluation_status = vm.throw_completion<JS::SyntaxError>(m_error_to_rethrow.value().to_string());
+        evaluation_status = vm.throw_completion<JS::SyntaxError>(m_error_to_rethrow.value().to_deprecated_string());
     } else {
         auto timer = Core::ElapsedTimer::start_new();
 
         // 6. Otherwise, set evaluationStatus to ScriptEvaluation(script's record).
         auto interpreter = JS::Interpreter::create_with_existing_realm(m_script_record->realm());
 
-        evaluation_status = interpreter->run(*m_script_record);
+        evaluation_status = interpreter->run(*m_script_record, lexical_environment_override);
 
         // FIXME: If ScriptEvaluation does not complete because the user agent has aborted the running script, leave evaluationStatus as null.
 
@@ -111,7 +111,6 @@ JS::Completion ClassicScript::run(RethrowErrors rethrow_errors)
             // 1. Clean up after running script with settings.
             settings.clean_up_after_running_script();
 
-            dbgln("rethrow");
             // 2. Rethrow evaluationStatus.[[Value]].
             return JS::throw_completion(*evaluation_status.value());
         }
@@ -121,16 +120,12 @@ JS::Completion ClassicScript::run(RethrowErrors rethrow_errors)
             // 1. Clean up after running script with settings.
             settings.clean_up_after_running_script();
 
-            dbgln("network error");
-
             // 2. Throw a "NetworkError" DOMException.
             return throw_completion(WebIDL::NetworkError::create(settings.realm(), "Script error."));
         }
 
         // 3. Otherwise, rethrow errors is false. Perform the following steps:
         VERIFY(rethrow_errors == RethrowErrors::No);
-
-        dbgln("no rethrow, stat: {}", evaluation_status.value().value().to_string_without_side_effects());
 
         // 1. Report the exception given by evaluationStatus.[[Value]] for script.
         report_exception(evaluation_status, settings_object().realm());
@@ -153,7 +148,7 @@ JS::Completion ClassicScript::run(RethrowErrors rethrow_errors)
     //            Return Completion { [[Type]]: throw, [[Value]]: a new "QuotaExceededError" DOMException, [[Target]]: empty }.
 }
 
-ClassicScript::ClassicScript(AK::URL base_url, String filename, EnvironmentSettingsObject& environment_settings_object)
+ClassicScript::ClassicScript(AK::URL base_url, DeprecatedString filename, EnvironmentSettingsObject& environment_settings_object)
     : Script(move(base_url), move(filename), environment_settings_object)
 {
 }

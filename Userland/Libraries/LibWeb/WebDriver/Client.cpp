@@ -63,6 +63,7 @@ static constexpr auto s_webdriver_endpoints = Array {
     ROUTE(GET, "/session/:session_id/title"sv, get_title),
     ROUTE(GET, "/session/:session_id/window"sv, get_window_handle),
     ROUTE(DELETE, "/session/:session_id/window"sv, close_window),
+    ROUTE(POST, "/session/:session_id/window"sv, switch_to_window),
     ROUTE(GET, "/session/:session_id/window/handles"sv, get_window_handles),
     ROUTE(GET, "/session/:session_id/window/rect"sv, get_window_rect),
     ROUTE(POST, "/session/:session_id/window/rect"sv, set_window_rect),
@@ -73,6 +74,10 @@ static constexpr auto s_webdriver_endpoints = Array {
     ROUTE(POST, "/session/:session_id/elements"sv, find_elements),
     ROUTE(POST, "/session/:session_id/element/:element_id/element"sv, find_element_from_element),
     ROUTE(POST, "/session/:session_id/element/:element_id/elements"sv, find_elements_from_element),
+    ROUTE(POST, "/session/:session_id/shadow/:shadow_id/element"sv, find_element_from_shadow_root),
+    ROUTE(POST, "/session/:session_id/shadow/:shadow_id/elements"sv, find_elements_from_shadow_root),
+    ROUTE(GET, "/session/:session_id/element/active"sv, get_active_element),
+    ROUTE(GET, "/session/:session_id/element/:element_id/shadow"sv, get_element_shadow_root),
     ROUTE(GET, "/session/:session_id/element/:element_id/selected"sv, is_element_selected),
     ROUTE(GET, "/session/:session_id/element/:element_id/attribute/:name"sv, get_element_attribute),
     ROUTE(GET, "/session/:session_id/element/:element_id/property/:name"sv, get_element_property),
@@ -89,14 +94,19 @@ static constexpr auto s_webdriver_endpoints = Array {
     ROUTE(POST, "/session/:session_id/cookie"sv, add_cookie),
     ROUTE(DELETE, "/session/:session_id/cookie/:name"sv, delete_cookie),
     ROUTE(DELETE, "/session/:session_id/cookie"sv, delete_all_cookies),
+    ROUTE(POST, "/session/:session_id/alert/dismiss"sv, dismiss_alert),
+    ROUTE(POST, "/session/:session_id/alert/accept"sv, accept_alert),
+    ROUTE(GET, "/session/:session_id/alert/text"sv, get_alert_text),
+    ROUTE(POST, "/session/:session_id/alert/text"sv, send_alert_text),
     ROUTE(GET, "/session/:session_id/screenshot"sv, take_screenshot),
     ROUTE(GET, "/session/:session_id/element/:element_id/screenshot"sv, take_element_screenshot),
+    ROUTE(POST, "/session/:session_id/print"sv, print_page),
 };
 
 // https://w3c.github.io/webdriver/#dfn-match-a-request
 static ErrorOr<MatchedRoute, Error> match_route(HTTP::HttpRequest const& request)
 {
-    dbgln_if(WEBDRIVER_DEBUG, "match_route({}, {})", HTTP::to_string(request.method()), request.resource());
+    dbgln_if(WEBDRIVER_DEBUG, "match_route({}, {})", HTTP::to_deprecated_string(request.method()), request.resource());
 
     auto request_path = request.resource().view();
     Vector<StringView> parameters;
@@ -115,7 +125,7 @@ static ErrorOr<MatchedRoute, Error> match_route(HTTP::HttpRequest const& request
     };
 
     for (auto const& route : s_webdriver_endpoints) {
-        dbgln_if(WEBDRIVER_DEBUG, "- Checking {} {}", HTTP::to_string(route.method), route.path);
+        dbgln_if(WEBDRIVER_DEBUG, "- Checking {} {}", HTTP::to_deprecated_string(route.method), route.path);
         if (route.method != request.method())
             continue;
 
@@ -242,7 +252,7 @@ ErrorOr<void, Client::WrappedError> Client::handle_request(JsonValue body)
     if constexpr (WEBDRIVER_DEBUG) {
         dbgln("Got HTTP request: {} {}", m_request->method_name(), m_request->resource());
         if (!body.is_null())
-            dbgln("Body: {}", body.to_string());
+            dbgln("Body: {}", body.to_deprecated_string());
     }
 
     auto const& [handler, parameters] = TRY(match_route(*m_request));
@@ -315,7 +325,7 @@ ErrorOr<void, Client::WrappedError> Client::send_error_response(Error const& err
 
 void Client::log_response(unsigned code)
 {
-    outln("{} :: {:03d} :: {} {}", Core::DateTime::now().to_string(), code, m_request->method_name(), m_request->resource());
+    outln("{} :: {:03d} :: {} {}", Core::DateTime::now().to_deprecated_string(), code, m_request->method_name(), m_request->resource());
 }
 
 }

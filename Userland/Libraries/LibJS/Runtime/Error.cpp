@@ -14,22 +14,22 @@
 
 namespace JS {
 
-Error* Error::create(Realm& realm)
+NonnullGCPtr<Error> Error::create(Realm& realm)
 {
     return realm.heap().allocate<Error>(realm, *realm.intrinsics().error_prototype());
 }
 
-Error* Error::create(Realm& realm, String const& message)
+NonnullGCPtr<Error> Error::create(Realm& realm, DeprecatedString const& message)
 {
     auto& vm = realm.vm();
-    auto* error = Error::create(realm);
+    auto error = Error::create(realm);
     u8 attr = Attribute::Writable | Attribute::Configurable;
-    error->define_direct_property(vm.names.message, js_string(vm, message), attr);
+    error->define_direct_property(vm.names.message, PrimitiveString::create(vm, message), attr);
     return error;
 }
 
 Error::Error(Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
 {
     populate_stack();
 }
@@ -54,6 +54,8 @@ ThrowCompletionOr<void> Error::install_error_cause(Value options)
 
 void Error::populate_stack()
 {
+    static auto dummy_source_range = SourceRange { .code = SourceCode::create("", ""), .start = {}, .end = {} };
+
     auto& vm = this->vm();
     m_traceback.ensure_capacity(vm.execution_context_stack().size());
     for (ssize_t i = vm.execution_context_stack().size() - 1; i >= 0; i--) {
@@ -67,11 +69,11 @@ void Error::populate_stack()
             // reaction jobs (which aren't called anywhere from the source code).
             // They're not going to generate any _unhandled_ exceptions though, so a meaningless
             // source range is fine.
-            context->current_node ? context->current_node->source_range() : SourceRange {});
+            context->current_node ? context->current_node->source_range() : dummy_source_range);
     }
 }
 
-String Error::stack_string() const
+DeprecatedString Error::stack_string() const
 {
     StringBuilder stack_string_builder;
     // Note: We roughly follow V8's formatting
@@ -82,12 +84,12 @@ String Error::stack_string() const
         auto const& frame = m_traceback[i];
         auto function_name = frame.function_name;
         // Note: Since we don't know whether we have a valid SourceRange here we just check for some default values.
-        if (!frame.source_range.filename.is_null() || frame.source_range.start.offset != 0 || frame.source_range.end.offset != 0) {
+        if (!frame.source_range.filename().is_null() || frame.source_range.start.offset != 0 || frame.source_range.end.offset != 0) {
 
             if (function_name == "<unknown>"sv)
-                stack_string_builder.appendff("    at {}:{}:{}\n", frame.source_range.filename, frame.source_range.start.line, frame.source_range.start.column);
+                stack_string_builder.appendff("    at {}:{}:{}\n", frame.source_range.filename(), frame.source_range.start.line, frame.source_range.start.column);
             else
-                stack_string_builder.appendff("    at {} ({}:{}:{})\n", function_name, frame.source_range.filename, frame.source_range.start.line, frame.source_range.start.column);
+                stack_string_builder.appendff("    at {} ({}:{}:{})\n", function_name, frame.source_range.filename(), frame.source_range.start.line, frame.source_range.start.column);
         } else {
             stack_string_builder.appendff("    at {}\n", function_name.is_empty() ? "<unknown>"sv : function_name.view());
         }
@@ -97,17 +99,17 @@ String Error::stack_string() const
 }
 
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType)              \
-    ClassName* ClassName::create(Realm& realm)                                                        \
+    NonnullGCPtr<ClassName> ClassName::create(Realm& realm)                                           \
     {                                                                                                 \
         return realm.heap().allocate<ClassName>(realm, *realm.intrinsics().snake_name##_prototype()); \
     }                                                                                                 \
                                                                                                       \
-    ClassName* ClassName::create(Realm& realm, String const& message)                                 \
+    NonnullGCPtr<ClassName> ClassName::create(Realm& realm, DeprecatedString const& message)          \
     {                                                                                                 \
         auto& vm = realm.vm();                                                                        \
-        auto* error = ClassName::create(realm);                                                       \
+        auto error = ClassName::create(realm);                                                        \
         u8 attr = Attribute::Writable | Attribute::Configurable;                                      \
-        error->define_direct_property(vm.names.message, js_string(vm, message), attr);                \
+        error->define_direct_property(vm.names.message, PrimitiveString::create(vm, message), attr);  \
         return error;                                                                                 \
     }                                                                                                 \
                                                                                                       \

@@ -13,7 +13,7 @@ namespace Web::Selection {
 
 JS::NonnullGCPtr<Selection> Selection::create(JS::NonnullGCPtr<JS::Realm> realm, JS::NonnullGCPtr<DOM::Document> document)
 {
-    return *realm->heap().allocate<Selection>(realm, realm, document);
+    return realm->heap().allocate<Selection>(realm, realm, document);
 }
 
 Selection::Selection(JS::NonnullGCPtr<JS::Realm> realm, JS::NonnullGCPtr<DOM::Document> document)
@@ -99,7 +99,7 @@ unsigned Selection::range_count() const
     return 0;
 }
 
-String Selection::type() const
+DeprecatedString Selection::type() const
 {
     if (!m_range)
         return "None";
@@ -162,29 +162,80 @@ void Selection::empty()
 }
 
 // https://w3c.github.io/selection-api/#dom-selection-collapse
-void Selection::collapse(JS::GCPtr<DOM::Node>, unsigned offset)
+WebIDL::ExceptionOr<void> Selection::collapse(JS::GCPtr<DOM::Node> node, unsigned offset)
 {
-    (void)offset;
-    TODO();
+    // 1. If node is null, this method must behave identically as removeAllRanges() and abort these steps.
+    if (!node) {
+        remove_all_ranges();
+        return {};
+    }
+
+    // 2. The method must throw an IndexSizeError exception if offset is longer than node's length and abort these steps.
+    if (offset > node->length()) {
+        return WebIDL::IndexSizeError::create(realm(), "Selection.collapse() with offset longer than node's length"sv);
+    }
+
+    // 3. If node's root is not the document associated with this, abort these steps.
+    if (&node->root() != m_document.ptr())
+        return {};
+
+    // 4. Otherwise, let newRange be a new range.
+    auto new_range = DOM::Range::create(*m_document);
+
+    // 5. Set the start the start and the end of newRange to (node, offset).
+    TRY(new_range->set_start(*node, offset));
+
+    // 6. Set this's range to newRange.
+    m_range = new_range;
+
+    return {};
 }
 
 // https://w3c.github.io/selection-api/#dom-selection-setposition
-void Selection::set_position(JS::GCPtr<DOM::Node> node, unsigned offset)
+WebIDL::ExceptionOr<void> Selection::set_position(JS::GCPtr<DOM::Node> node, unsigned offset)
 {
     // The method must be an alias, and behave identically, to collapse().
-    collapse(node, offset);
+    return collapse(node, offset);
 }
 
 // https://w3c.github.io/selection-api/#dom-selection-collapsetostart
-void Selection::collapse_to_start()
+WebIDL::ExceptionOr<void> Selection::collapse_to_start()
 {
-    TODO();
+    // 1. The method must throw InvalidStateError exception if the this is empty.
+    if (!m_range) {
+        return WebIDL::InvalidStateError::create(realm(), "Selection.collapse_to_start() on empty range"sv);
+    }
+
+    // 2. Otherwise, it must create a new range
+    auto new_range = DOM::Range::create(*m_document);
+
+    // 3. Set the start both its start and end to the start of this's range
+    TRY(new_range->set_start(*anchor_node(), m_range->start_offset()));
+    TRY(new_range->set_end(*anchor_node(), m_range->start_offset()));
+
+    // 4. Then set this's range to the newly-created range.
+    m_range = new_range;
+    return {};
 }
 
 // https://w3c.github.io/selection-api/#dom-selection-collapsetoend
-void Selection::collapse_to_end()
+WebIDL::ExceptionOr<void> Selection::collapse_to_end()
 {
-    TODO();
+    // 1. The method must throw InvalidStateError exception if the this is empty.
+    if (!m_range) {
+        return WebIDL::InvalidStateError::create(realm(), "Selection.collapse_to_end() on empty range"sv);
+    }
+
+    // 2. Otherwise, it must create a new range
+    auto new_range = DOM::Range::create(*m_document);
+
+    // 3. Set the start both its start and end to the start of this's range
+    TRY(new_range->set_start(*anchor_node(), m_range->end_offset()));
+    TRY(new_range->set_end(*anchor_node(), m_range->end_offset()));
+
+    // 4. Then set this's range to the newly-created range.
+    m_range = new_range;
+    return {};
 }
 
 // https://w3c.github.io/selection-api/#dom-selection-extend
@@ -237,13 +288,48 @@ WebIDL::ExceptionOr<void> Selection::extend(JS::NonnullGCPtr<DOM::Node> node, un
 }
 
 // https://w3c.github.io/selection-api/#dom-selection-setbaseandextent
-void Selection::set_base_and_extent(JS::NonnullGCPtr<DOM::Node> anchor_node, unsigned anchor_offset, JS::NonnullGCPtr<DOM::Node> focus_node, unsigned focus_offset)
+WebIDL::ExceptionOr<void> Selection::set_base_and_extent(JS::NonnullGCPtr<DOM::Node> anchor_node, unsigned anchor_offset, JS::NonnullGCPtr<DOM::Node> focus_node, unsigned focus_offset)
 {
-    (void)anchor_node;
-    (void)anchor_offset;
-    (void)focus_node;
-    (void)focus_offset;
-    TODO();
+    // 1. If anchorOffset is longer than anchorNode's length or if focusOffset is longer than focusNode's length, throw an IndexSizeError exception and abort these steps.
+    if (anchor_offset > anchor_node->length())
+        return WebIDL::IndexSizeError::create(realm(), "Anchor offset points outside of the anchor node");
+
+    if (focus_offset > focus_node->length())
+        return WebIDL::IndexSizeError::create(realm(), "Focus offset points outside of the focus node");
+
+    // 2. If the roots of anchorNode or focusNode are not the document associated with this, abort these steps.
+    if (&anchor_node->root() != m_document.ptr())
+        return {};
+
+    if (&focus_node->root() != m_document.ptr())
+        return {};
+
+    // 3. Let anchor be the boundary point (anchorNode, anchorOffset) and let focus be the boundary point (focusNode, focusOffset).
+
+    // 4. Let newRange be a new range.
+    auto new_range = DOM::Range::create(*m_document);
+
+    // 5. If anchor is before focus, set the start the newRange's start to anchor and its end to focus. Otherwise, set the start them to focus and anchor respectively.
+    auto position_of_anchor_relative_to_focus = DOM::position_of_boundary_point_relative_to_other_boundary_point(anchor_node, anchor_offset, focus_node, focus_offset);
+    if (position_of_anchor_relative_to_focus == DOM::RelativeBoundaryPointPosition::Before) {
+        TRY(new_range->set_start(anchor_node, anchor_offset));
+        TRY(new_range->set_end(focus_node, focus_offset));
+    } else {
+        TRY(new_range->set_start(focus_node, focus_offset));
+        TRY(new_range->set_end(anchor_node, anchor_offset));
+    }
+
+    // 6. Set this's range to newRange.
+    m_range = new_range;
+
+    // 7. If focus is before anchor, set this's direction to backwards. Otherwise, set it to forwards
+    // NOTE: "Otherwise" can be seen as "focus is equal to or after anchor".
+    if (position_of_anchor_relative_to_focus == DOM::RelativeBoundaryPointPosition::After)
+        m_direction = Direction::Backwards;
+    else
+        m_direction = Direction::Forwards;
+
+    return {};
 }
 
 // https://w3c.github.io/selection-api/#dom-selection-selectallchildren
@@ -329,13 +415,13 @@ bool Selection::contains_node(JS::NonnullGCPtr<DOM::Node> node, bool allow_parti
         && (end_relative_position == DOM::RelativeBoundaryPointPosition::Equal || end_relative_position == DOM::RelativeBoundaryPointPosition::After);
 }
 
-String Selection::to_string() const
+DeprecatedString Selection::to_deprecated_string() const
 {
     // FIXME: This needs more work to be compatible with other engines.
     //        See https://www.w3.org/Bugs/Public/show_bug.cgi?id=10583
     if (!m_range)
-        return String::empty();
-    return m_range->to_string();
+        return DeprecatedString::empty();
+    return m_range->to_deprecated_string();
 }
 
 }

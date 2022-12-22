@@ -15,6 +15,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/PixelUnits.h>
 
 namespace Web::CSS {
 
@@ -28,6 +29,11 @@ Length::Length(float value, Type type)
     , m_value(value)
 {
 }
+Length::Length(CSSPixels value, Type type)
+    : m_type(type)
+    , m_value(value.value())
+{
+}
 Length::~Length() = default;
 
 Length Length::make_auto()
@@ -38,6 +44,11 @@ Length Length::make_auto()
 Length Length::make_px(float value)
 {
     return Length(value, Type::Px);
+}
+
+Length Length::make_px(CSSPixels value)
+{
+    return Length(value.value(), Type::Px);
 }
 
 Length Length::make_calculated(NonnullRefPtr<CalculatedStyleValue> calculated_style_value)
@@ -112,13 +123,13 @@ float Length::to_px(Layout::Node const& layout_node) const
     return to_px(viewport_rect, layout_node.font().pixel_metrics(), layout_node.computed_values().font_size(), root_element->layout_node()->computed_values().font_size());
 }
 
-String Length::to_string() const
+DeprecatedString Length::to_deprecated_string() const
 {
     if (is_calculated())
-        return m_calculated_style->to_string();
+        return m_calculated_style->to_deprecated_string();
     if (is_auto())
         return "auto";
-    return String::formatted("{}{}", m_value, unit_name());
+    return DeprecatedString::formatted("{}{}", m_value, unit_name());
 }
 
 char const* Length::unit_name() const

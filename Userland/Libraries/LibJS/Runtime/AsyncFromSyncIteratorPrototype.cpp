@@ -56,7 +56,7 @@ static Object* async_from_sync_iterator_continuation(VM& vm, Object& result, Pro
 
     // 9. Let onFulfilled be CreateBuiltinFunction(unwrap, 1, "", « »).
     // 10. NOTE: onFulfilled is used when processing the "value" property of an IteratorResult object in order to wait for its value if it is a promise and re-package the result in a new "unwrapped" IteratorResult object.
-    auto* on_fulfilled = NativeFunction::create(realm, move(unwrap), 1, "");
+    auto on_fulfilled = NativeFunction::create(realm, move(unwrap), 1, "");
 
     // 11. Perform PerformPromiseThen(valueWrapper, onFulfilled, undefined, promiseCapability).
     verify_cast<Promise>(value_wrapper)->perform_then(move(on_fulfilled), js_undefined(), &promise_capability);
@@ -135,7 +135,7 @@ JS_DEFINE_NATIVE_FUNCTION(AsyncFromSyncIteratorPrototype::return_)
 
     // 11. If Type(result) is not Object, then
     if (!result.is_object()) {
-        auto* error = TypeError::create(realm, String::formatted(ErrorType::NotAnObject.message(), "SyncIteratorReturnResult"));
+        auto error = TypeError::create(realm, DeprecatedString::formatted(ErrorType::NotAnObject.message(), "SyncIteratorReturnResult"));
         // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
         MUST(call(vm, *promise_capability->reject(), js_undefined(), error));
         // b. Return promiseCapability.[[Promise]].
@@ -183,7 +183,7 @@ JS_DEFINE_NATIVE_FUNCTION(AsyncFromSyncIteratorPrototype::throw_)
 
     // 11. If Type(result) is not Object, then
     if (!result.is_object()) {
-        auto* error = TypeError::create(realm, String::formatted(ErrorType::NotAnObject.message(), "SyncIteratorThrowResult"));
+        auto error = TypeError::create(realm, DeprecatedString::formatted(ErrorType::NotAnObject.message(), "SyncIteratorThrowResult"));
         // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
         MUST(call(vm, *promise_capability->reject(), js_undefined(), error));
 
@@ -202,7 +202,7 @@ Iterator create_async_from_sync_iterator(VM& vm, Iterator sync_iterator_record)
 
     // 1. Let asyncIterator be OrdinaryObjectCreate(%AsyncFromSyncIteratorPrototype%, « [[SyncIteratorRecord]] »).
     // 2. Set asyncIterator.[[SyncIteratorRecord]] to syncIteratorRecord.
-    auto* async_iterator = AsyncFromSyncIterator::create(realm, sync_iterator_record);
+    auto async_iterator = AsyncFromSyncIterator::create(realm, sync_iterator_record);
 
     // 3. Let nextMethod be ! Get(asyncIterator, "next").
     auto next_method = MUST(async_iterator->get(vm.names.next));

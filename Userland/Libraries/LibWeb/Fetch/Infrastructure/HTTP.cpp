@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/GenericLexer.h>
-#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP.h>
 
 namespace Web::Fetch::Infrastructure {
 
 // https://fetch.spec.whatwg.org/#collect-an-http-quoted-string
-String collect_an_http_quoted_string(GenericLexer& lexer, HttpQuotedStringExtractValue extract_value)
+DeprecatedString collect_an_http_quoted_string(GenericLexer& lexer, HttpQuotedStringExtractValue extract_value)
 {
     // To collect an HTTP quoted string from a string input, given a position variable position and optionally an extract-value flag, run these steps:
     // 1. Let positionStart be position.
@@ -69,7 +69,7 @@ String collect_an_http_quoted_string(GenericLexer& lexer, HttpQuotedStringExtrac
 
     // 6. If the extract-value flag is set, then return value.
     if (extract_value == HttpQuotedStringExtractValue::Yes)
-        return value.to_string();
+        return value.to_deprecated_string();
 
     // 7. Return the code points from positionStart to position, inclusive, within input.
     auto position = lexer.tell();

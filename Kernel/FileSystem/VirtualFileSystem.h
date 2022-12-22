@@ -34,6 +34,14 @@ struct UidAndGid {
     GroupID gid;
 };
 
+enum class AccessFlags {
+    None = 0,
+    EffectiveAccess = 1 << 0,
+    DoNotFollowSymlinks = 1 << 1,
+};
+
+AK_ENUM_BITWISE_OPERATORS(AccessFlags);
+
 class VirtualFileSystem {
 public:
     // Required to be at least 8 by POSIX
@@ -63,11 +71,11 @@ public:
     ErrorOr<void> chmod(Credentials const&, Custody&, mode_t);
     ErrorOr<void> chown(Credentials const&, StringView path, UserID, GroupID, Custody& base, int options);
     ErrorOr<void> chown(Credentials const&, Custody&, UserID, GroupID);
-    ErrorOr<void> access(Credentials const&, StringView path, int mode, Custody& base);
+    ErrorOr<void> access(Credentials const&, StringView path, int mode, Custody& base, AccessFlags);
     ErrorOr<InodeMetadata> lookup_metadata(Credentials const&, StringView path, Custody& base, int options = 0);
     ErrorOr<void> utime(Credentials const&, StringView path, Custody& base, time_t atime, time_t mtime);
     ErrorOr<void> utimensat(Credentials const&, StringView path, Custody& base, timespec const& atime, timespec const& mtime, int options = 0);
-    ErrorOr<void> rename(Credentials const&, StringView oldpath, StringView newpath, Custody& base);
+    ErrorOr<void> rename(Credentials const&, Custody& old_base, StringView oldpath, Custody& new_base, StringView newpath);
     ErrorOr<void> mknod(Credentials const&, StringView path, mode_t, dev_t, Custody& base);
     ErrorOr<NonnullRefPtr<Custody>> open_directory(Credentials const&, StringView path, Custody& base);
 
@@ -107,7 +115,7 @@ private:
 
     SpinlockProtected<RefPtr<Custody>> m_root_custody;
 
-    SpinlockProtected<Vector<NonnullOwnPtr<Mount>, 16>> m_mounts { LockRank::None };
+    SpinlockProtected<IntrusiveList<&Mount::m_vfs_list_node>> m_mounts { LockRank::None };
     SpinlockProtected<IntrusiveList<&FileBackedFileSystem::m_file_backed_file_system_node>> m_file_backed_file_systems_list { LockRank::None };
     SpinlockProtected<IntrusiveList<&FileSystem::m_file_system_node>> m_file_systems_list { LockRank::FileSystem };
 };

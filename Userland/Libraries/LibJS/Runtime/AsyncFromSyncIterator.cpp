@@ -11,13 +11,13 @@
 
 namespace JS {
 
-AsyncFromSyncIterator* AsyncFromSyncIterator::create(Realm& realm, Iterator sync_iterator_record)
+NonnullGCPtr<AsyncFromSyncIterator> AsyncFromSyncIterator::create(Realm& realm, Iterator sync_iterator_record)
 {
     return realm.heap().allocate<AsyncFromSyncIterator>(realm, realm, sync_iterator_record);
 }
 
 AsyncFromSyncIterator::AsyncFromSyncIterator(Realm& realm, Iterator sync_iterator_record)
-    : Object(*realm.intrinsics().async_from_sync_iterator_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().async_from_sync_iterator_prototype())
     , m_sync_iterator_record(sync_iterator_record)
 {
 }

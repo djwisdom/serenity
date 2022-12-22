@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Error.h>
+#include <AK/Forward.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/RefCounted.h>
 
@@ -14,7 +15,7 @@
 
 namespace AK {
 
-template<typename T>
+template<typename T, typename TDeleter>
 class [[nodiscard]] OwnPtr {
 public:
     OwnPtr() = default;
@@ -97,7 +98,7 @@ public:
 
     OwnPtr& operator=(T* ptr) = delete;
 
-    OwnPtr& operator=(std::nullptr_t)
+    OwnPtr& operator=(nullptr_t)
     {
         clear();
         return *this;
@@ -105,7 +106,7 @@ public:
 
     void clear()
     {
-        delete m_ptr;
+        TDeleter {}(m_ptr);
         m_ptr = nullptr;
     }
 
@@ -131,35 +132,21 @@ public:
         return NonnullOwnPtr<U>(NonnullOwnPtr<U>::Adopt, static_cast<U&>(*leak_ptr()));
     }
 
-    T* ptr() { return m_ptr; }
-    const T* ptr() const { return m_ptr; }
+    T* ptr() const { return m_ptr; }
 
-    T* operator->()
+    T* operator->() const
     {
         VERIFY(m_ptr);
         return m_ptr;
     }
 
-    const T* operator->() const
-    {
-        VERIFY(m_ptr);
-        return m_ptr;
-    }
-
-    T& operator*()
+    T& operator*() const
     {
         VERIFY(m_ptr);
         return *m_ptr;
     }
 
-    const T& operator*() const
-    {
-        VERIFY(m_ptr);
-        return *m_ptr;
-    }
-
-    operator const T*() const { return m_ptr; }
-    operator T*() { return m_ptr; }
+    operator T*() const { return m_ptr; }
 
     operator bool() { return !!m_ptr; }
 
@@ -231,14 +218,16 @@ inline ErrorOr<NonnullOwnPtr<T>> try_make(Args&&... args)
 template<typename T>
 struct Traits<OwnPtr<T>> : public GenericTraits<OwnPtr<T>> {
     using PeekType = T*;
-    using ConstPeekType = const T*;
+    using ConstPeekType = T const*;
     static unsigned hash(OwnPtr<T> const& p) { return ptr_hash(p.ptr()); }
     static bool equals(OwnPtr<T> const& a, OwnPtr<T> const& b) { return a.ptr() == b.ptr(); }
 };
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::adopt_nonnull_own_or_enomem;
 using AK::adopt_own_if_nonnull;
 using AK::OwnPtr;
 using AK::try_make;
+#endif

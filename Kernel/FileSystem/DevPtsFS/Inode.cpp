@@ -38,7 +38,7 @@ InodeMetadata DevPtsFSInode::metadata() const
 {
     if (auto pty = m_pty.strong_ref()) {
         auto metadata = m_metadata;
-        metadata.mtime = pty->time_of_last_write();
+        metadata.mtime = Time::from_timespec({ pty->time_of_last_write(), 0 });
         return metadata;
     }
     return m_metadata;
@@ -100,6 +100,11 @@ ErrorOr<NonnullLockRefPtr<Inode>> DevPtsFSInode::create_child(StringView, mode_t
 }
 
 ErrorOr<void> DevPtsFSInode::remove_child(StringView)
+{
+    return EROFS;
+}
+
+ErrorOr<void> DevPtsFSInode::replace_child(StringView, Inode&)
 {
     return EROFS;
 }

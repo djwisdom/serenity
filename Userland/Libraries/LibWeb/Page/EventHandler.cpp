@@ -102,12 +102,12 @@ static Gfx::StandardCursor cursor_css_to_gfx(Optional<CSS::Cursor> cursor)
     }
 }
 
-static Gfx::IntPoint compute_mouse_event_offset(Gfx::IntPoint const& position, Layout::Node const& layout_node)
+static CSSPixelPoint compute_mouse_event_offset(CSSPixelPoint position, Layout::Node const& layout_node)
 {
     auto top_left_of_layout_node = layout_node.box_type_agnostic_position();
     return {
-        position.x() - static_cast<int>(top_left_of_layout_node.x()),
-        position.y() - static_cast<int>(top_left_of_layout_node.y())
+        position.x() - top_left_of_layout_node.x(),
+        position.y() - top_left_of_layout_node.y()
     };
 }
 
@@ -147,7 +147,7 @@ Painting::PaintableBox const* EventHandler::paint_root() const
     return const_cast<Painting::PaintableBox*>(m_browsing_context.active_document()->paint_box());
 }
 
-bool EventHandler::handle_mousewheel(Gfx::IntPoint const& position, unsigned button, unsigned buttons, unsigned int modifiers, int wheel_delta_x, int wheel_delta_y)
+bool EventHandler::handle_mousewheel(CSSPixelPoint position, unsigned button, unsigned buttons, unsigned int modifiers, int wheel_delta_x, int wheel_delta_y)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -164,7 +164,7 @@ bool EventHandler::handle_mousewheel(Gfx::IntPoint const& position, unsigned but
     if (m_mouse_event_tracking_layout_node) {
         paintable = m_mouse_event_tracking_layout_node->paintable();
     } else {
-        if (auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::Exact); result.has_value())
+        if (auto result = paint_root()->hit_test(position, Painting::HitTestType::Exact); result.has_value())
             paintable = result->paintable;
     }
 
@@ -198,7 +198,7 @@ bool EventHandler::handle_mousewheel(Gfx::IntPoint const& position, unsigned but
     return handled_event;
 }
 
-bool EventHandler::handle_mouseup(Gfx::IntPoint const& position, unsigned button, unsigned buttons, unsigned modifiers)
+bool EventHandler::handle_mouseup(CSSPixelPoint position, unsigned button, unsigned buttons, unsigned modifiers)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -212,7 +212,7 @@ bool EventHandler::handle_mouseup(Gfx::IntPoint const& position, unsigned button
     if (m_mouse_event_tracking_layout_node) {
         paintable = m_mouse_event_tracking_layout_node->paintable();
     } else {
-        if (auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::Exact); result.has_value())
+        if (auto result = paint_root()->hit_test(position, Painting::HitTestType::Exact); result.has_value())
             paintable = result->paintable;
     }
 
@@ -223,7 +223,7 @@ bool EventHandler::handle_mouseup(Gfx::IntPoint const& position, unsigned button
         // Things may have changed as a consequence of Layout::Node::handle_mouseup(). Hit test again.
         if (!paint_root())
             return true;
-        if (auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::Exact); result.has_value())
+        if (auto result = paint_root()->hit_test(position, Painting::HitTestType::Exact); result.has_value())
             paintable = result->paintable;
     }
 
@@ -313,7 +313,7 @@ after_node_use:
     return handled_event;
 }
 
-bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned button, unsigned buttons, unsigned modifiers)
+bool EventHandler::handle_mousedown(CSSPixelPoint position, unsigned button, unsigned buttons, unsigned modifiers)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -329,7 +329,7 @@ bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned butt
         if (m_mouse_event_tracking_layout_node) {
             paintable = m_mouse_event_tracking_layout_node->paintable();
         } else {
-            auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::Exact);
+            auto result = paint_root()->hit_test(position, Painting::HitTestType::Exact);
             if (!result.has_value())
                 return false;
             paintable = result->paintable;
@@ -376,7 +376,7 @@ bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned butt
         return true;
 
     if (button == GUI::MouseButton::Primary) {
-        if (auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::TextCursor); result.has_value()) {
+        if (auto result = paint_root()->hit_test(position, Painting::HitTestType::TextCursor); result.has_value()) {
             auto paintable = result->paintable;
             if (paintable->dom_node()) {
                 // See if we want to focus something.
@@ -404,7 +404,7 @@ bool EventHandler::handle_mousedown(Gfx::IntPoint const& position, unsigned butt
     return true;
 }
 
-bool EventHandler::handle_mousemove(Gfx::IntPoint const& position, unsigned buttons, unsigned modifiers)
+bool EventHandler::handle_mousemove(CSSPixelPoint position, unsigned buttons, unsigned modifiers)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -423,7 +423,7 @@ bool EventHandler::handle_mousemove(Gfx::IntPoint const& position, unsigned butt
     if (m_mouse_event_tracking_layout_node) {
         paintable = m_mouse_event_tracking_layout_node->paintable();
     } else {
-        if (auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::Exact); result.has_value()) {
+        if (auto result = paint_root()->hit_test(position, Painting::HitTestType::Exact); result.has_value()) {
             paintable = result->paintable;
             start_index = result->index_in_node;
         }
@@ -486,7 +486,7 @@ bool EventHandler::handle_mousemove(Gfx::IntPoint const& position, unsigned butt
                 return true;
         }
         if (m_in_mouse_selection) {
-            auto hit = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::TextCursor);
+            auto hit = paint_root()->hit_test(position, Painting::HitTestType::TextCursor);
             if (start_index.has_value() && hit.has_value() && hit->dom_node()) {
                 m_browsing_context.set_cursor_position(DOM::Position(*hit->dom_node(), *start_index));
                 layout_root()->set_selection_end({ hit->paintable->layout_node(), hit->index_in_node });
@@ -516,7 +516,7 @@ bool EventHandler::handle_mousemove(Gfx::IntPoint const& position, unsigned butt
     return true;
 }
 
-bool EventHandler::handle_doubleclick(Gfx::IntPoint const& position, unsigned button, unsigned buttons, unsigned modifiers)
+bool EventHandler::handle_doubleclick(CSSPixelPoint position, unsigned button, unsigned buttons, unsigned modifiers)
 {
     if (m_browsing_context.active_document())
         m_browsing_context.active_document()->update_layout();
@@ -528,7 +528,7 @@ bool EventHandler::handle_doubleclick(Gfx::IntPoint const& position, unsigned bu
     if (m_mouse_event_tracking_layout_node) {
         paintable = m_mouse_event_tracking_layout_node->paintable();
     } else {
-        auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::Exact);
+        auto result = paint_root()->hit_test(position, Painting::HitTestType::Exact);
         if (!result.has_value())
             return false;
         paintable = result->paintable;
@@ -568,15 +568,15 @@ bool EventHandler::handle_doubleclick(Gfx::IntPoint const& position, unsigned bu
         return true;
 
     if (button == GUI::MouseButton::Primary) {
-        if (auto result = paint_root()->hit_test(position.to_type<float>(), Painting::HitTestType::TextCursor); result.has_value()) {
-            auto paintable = result->paintable;
-            if (!paintable->dom_node())
+        if (auto result = paint_root()->hit_test(position, Painting::HitTestType::TextCursor); result.has_value()) {
+            auto hit_paintable = result->paintable;
+            if (!hit_paintable->dom_node())
                 return true;
 
-            auto const& layout_node = paintable->layout_node();
-            if (!layout_node.is_text_node())
+            auto const& hit_layout_node = hit_paintable->layout_node();
+            if (!hit_layout_node.is_text_node())
                 return true;
-            auto const& text_for_rendering = verify_cast<Layout::TextNode>(layout_node).text_for_rendering();
+            auto const& text_for_rendering = verify_cast<Layout::TextNode>(hit_layout_node).text_for_rendering();
 
             int first_word_break_before = [&] {
                 // Start from one before the index position to prevent selecting only spaces between words, caused by the addition below.
@@ -649,6 +649,7 @@ bool EventHandler::focus_previous_element()
 constexpr bool should_ignore_keydown_event(u32 code_point)
 {
     // FIXME: There are probably also keys with non-zero code points that should be filtered out.
+    // FIXME: We should take the modifier keys into consideration somehow. This treats "Ctrl+C" as just "c".
     return code_point == 0 || code_point == 27;
 }
 
@@ -666,16 +667,16 @@ bool EventHandler::fire_keyboard_event(FlyString const& event_name, HTML::Browsi
         }
 
         auto event = UIEvents::KeyboardEvent::create_from_platform_event(document->realm(), event_name, key, modifiers, code_point);
-        return focused_element->dispatch_event(*event);
+        return !focused_element->dispatch_event(*event);
     }
 
     // FIXME: De-duplicate this. This is just to prevent wasting a KeyboardEvent allocation when recursing into an (i)frame.
     auto event = UIEvents::KeyboardEvent::create_from_platform_event(document->realm(), event_name, key, modifiers, code_point);
 
     if (JS::GCPtr<HTML::HTMLElement> body = document->body())
-        return body->dispatch_event(*event);
+        return !body->dispatch_event(*event);
 
-    return document->root().dispatch_event(*event);
+    return !document->root().dispatch_event(*event);
 }
 
 bool EventHandler::handle_keydown(KeyCode key, unsigned modifiers, u32 code_point)

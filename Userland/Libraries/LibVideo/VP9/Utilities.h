@@ -8,6 +8,9 @@
 #pragma once
 
 #include <AK/Types.h>
+#include <LibGfx/Size.h>
+
+#include "LookupTables.h"
 
 namespace Video::VP9 {
 
@@ -40,6 +43,80 @@ inline T brev(C bit_count, T value)
         result |= bit << (bit_count - 1 - i);
     }
     return result;
+}
+
+inline BlockSubsize get_subsampled_block_size(BlockSubsize size, bool subsampling_x, bool subsampling_y)
+{
+    return ss_size_lookup[size < Block_8x8 ? Block_8x8 : size][subsampling_x][subsampling_y];
+}
+
+inline Gfx::Size<u8> block_size_to_blocks(BlockSubsize size)
+{
+    return Gfx::Size<u8>(num_8x8_blocks_wide_lookup[size], num_8x8_blocks_high_lookup[size]);
+}
+
+inline Gfx::Size<u8> block_size_to_sub_blocks(BlockSubsize size)
+{
+    return Gfx::Size<u8>(num_4x4_blocks_wide_lookup[size], num_4x4_blocks_high_lookup[size]);
+}
+
+template<Integral T>
+inline T blocks_to_superblocks(T blocks)
+{
+    return blocks >> 3;
+}
+
+template<Integral T>
+inline T superblocks_to_blocks(T superblocks)
+{
+    return superblocks << 3;
+}
+
+template<Integral T>
+inline T blocks_ceiled_to_superblocks(T blocks)
+{
+    return blocks_to_superblocks(blocks + 7);
+}
+
+template<Integral T>
+inline T blocks_to_sub_blocks(T blocks)
+{
+    return blocks << 1;
+}
+
+template<Integral T>
+inline T sub_blocks_to_blocks(T sub_blocks)
+{
+    return sub_blocks >> 1;
+}
+
+template<Integral T>
+inline T sub_blocks_to_pixels(T sub_blocks)
+{
+    return sub_blocks << 2;
+}
+
+template<Integral T>
+inline T pixels_to_sub_blocks(T pixels)
+{
+    return pixels >> 2;
+}
+
+template<Integral T>
+inline T blocks_to_pixels(T blocks)
+{
+    return sub_blocks_to_pixels(blocks_to_sub_blocks(blocks));
+}
+
+template<Integral T>
+inline T pixels_to_blocks(T pixels)
+{
+    return sub_blocks_to_blocks(pixels_to_sub_blocks(pixels));
+}
+
+inline u8 transform_size_to_sub_blocks(TransformSize transform_size)
+{
+    return 1 << transform_size;
 }
 
 }

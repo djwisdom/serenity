@@ -127,7 +127,7 @@ MainWidget::MainWidget()
             m_editor->insert_at_cursor_or_replace_selection(substitute);
         } else {
             GUI::MessageBox::show(window(),
-                String::formatted("Not found: \"{}\"", needle),
+                DeprecatedString::formatted("Not found: \"{}\"", needle),
                 "Not found"sv,
                 GUI::MessageBox::Type::Information);
         }
@@ -152,7 +152,7 @@ MainWidget::MainWidget()
             }
         } else {
             GUI::MessageBox::show(window(),
-                String::formatted("Not found: \"{}\"", needle),
+                DeprecatedString::formatted("Not found: \"{}\"", needle),
                 "Not found"sv,
                 GUI::MessageBox::Type::Information);
         }
@@ -204,7 +204,7 @@ MainWidget::MainWidget()
     });
     m_vim_emulation_setting_action->set_checked(false);
 
-    m_find_replace_action = GUI::Action::create("&Find/Replace...", { Mod_Ctrl, Key_F }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/find.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+    m_find_replace_action = GUI::Action::create("&Find/Replace...", { Mod_Ctrl | Mod_Shift, Key_F }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/find.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
         m_find_replace_widget->set_visible(true);
         m_find_widget->set_visible(true);
         m_replace_widget->set_visible(true);
@@ -280,7 +280,11 @@ MainWidget::MainWidget()
     });
 
     m_save_as_action = GUI::CommonActions::make_save_as_action([&](auto&) {
-        auto response = FileSystemAccessClient::Client::the().try_save_file(window(), m_name, m_extension);
+        auto extension = m_extension;
+        if (extension.is_null() && m_editor->syntax_highlighter())
+            extension = Syntax::common_language_extension(m_editor->syntax_highlighter()->language());
+
+        auto response = FileSystemAccessClient::Client::the().try_save_file_deprecated(window(), m_name, extension);
         if (response.is_error())
             return;
 
@@ -331,7 +335,7 @@ WebView::OutOfProcessWebView& MainWidget::ensure_web_view()
         m_page_view = web_view_container.add<WebView::OutOfProcessWebView>();
         m_page_view->on_link_hover = [this](auto& url) {
             if (url.is_valid())
-                m_statusbar->set_text(url.to_string());
+                m_statusbar->set_text(url.to_deprecated_string());
             else
                 update_statusbar();
         };
@@ -339,7 +343,7 @@ WebView::OutOfProcessWebView& MainWidget::ensure_web_view()
             if (!Desktop::Launcher::open(url)) {
                 GUI::MessageBox::show(
                     window(),
-                    String::formatted("The link to '{}' could not be opened.", url),
+                    DeprecatedString::formatted("The link to '{}' could not be opened.", url),
                     "Failed to open link"sv,
                     GUI::MessageBox::Type::Error);
             }
@@ -558,6 +562,20 @@ void MainWidget::initialize_menubar(GUI::Window& window)
     m_editor->set_cursor_line_highlighting(m_cursor_line_highlighting_action->is_checked());
 
     view_menu.add_action(*m_cursor_line_highlighting_action);
+
+    m_relative_line_number_action = GUI::Action::create_checkable("R&elative Line Number", [&](auto& action) {
+        m_editor->set_relative_line_number(action.is_checked());
+        Config::write_bool("TextEditor"sv, "View"sv, "RelativeLineNumber"sv, action.is_checked());
+    });
+
+    auto show_relative_line_number = Config::read_bool("TextEditor"sv, "View"sv, "RelativeLineNumber"sv, false);
+    m_relative_line_number_action->set_checked(show_relative_line_number);
+    m_editor->set_relative_line_number(show_relative_line_number);
+
+    m_relative_line_number_action->set_status_tip("Set relative line number");
+
+    view_menu.add_action(*m_relative_line_number_action);
+
     view_menu.add_separator();
 
     m_auto_detect_preview_mode_action = GUI::Action::create_checkable("Enable Autodetect Preview", [&](auto&) {
@@ -755,7 +773,7 @@ void MainWidget::update_title()
     else
         builder.append(m_path);
     builder.append("[*] - Text Editor"sv);
-    window()->set_title(builder.to_string());
+    window()->set_title(builder.to_deprecated_string());
 }
 
 bool MainWidget::read_file(Core::File& file)
@@ -766,7 +784,7 @@ bool MainWidget::read_file(Core::File& file)
     return true;
 }
 
-void MainWidget::open_nonexistent_file(String const& path)
+void MainWidget::open_nonexistent_file(DeprecatedString const& path)
 {
     m_editor->set_text({});
     set_path(path);
@@ -891,21 +909,21 @@ void MainWidget::update_statusbar()
 
     StringBuilder builder;
     if (m_editor->has_selection()) {
-        String selected_text = m_editor->selected_text();
+        DeprecatedString selected_text = m_editor->selected_text();
         auto word_count = m_editor->number_of_selected_words();
         builder.appendff("{} {} ({} {}) selected", selected_text.length(), selected_text.length() == 1 ? "character" : "characters", word_count, word_count != 1 ? "words" : "word");
     } else {
-        String text = m_editor->text();
+        DeprecatedString text = m_editor->text();
         auto word_count = m_editor->number_of_words();
         builder.appendff("{} {} ({} {})", text.length(), text.length() == 1 ? "character" : "characters", word_count, word_count != 1 ? "words" : "word");
     }
-    m_statusbar->set_text(0, builder.to_string());
+    m_statusbar->set_text(0, builder.to_deprecated_string());
 
     if (m_editor && m_editor->syntax_highlighter()) {
         auto language = m_editor->syntax_highlighter()->language();
-        m_statusbar->set_text(1, m_editor->syntax_highlighter()->language_string(language));
+        m_statusbar->set_text(1, Syntax::language_to_string(language));
     }
-    m_statusbar->set_text(2, String::formatted("Ln {}, Col {}", m_editor->cursor().line() + 1, m_editor->cursor().column()));
+    m_statusbar->set_text(2, DeprecatedString::formatted("Ln {}, Col {}", m_editor->cursor().line() + 1, m_editor->cursor().column()));
 }
 
 void MainWidget::find_text(GUI::TextEditor::SearchDirection direction, ShowMessageIfNoResults show_message)
@@ -922,7 +940,7 @@ void MainWidget::find_text(GUI::TextEditor::SearchDirection direction, ShowMessa
 
     if (!result.is_valid() && show_message == ShowMessageIfNoResults::Yes) {
         GUI::MessageBox::show(window(),
-            String::formatted("Not found: \"{}\"", needle),
+            DeprecatedString::formatted("Not found: \"{}\"", needle),
             "Not found"sv,
             GUI::MessageBox::Type::Information);
     }
