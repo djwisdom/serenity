@@ -39,11 +39,11 @@ ThrowCompletionOr<Value> MapConstructor::call()
 }
 
 // 24.1.1.1 Map ( [ iterable ] ), https://tc39.es/ecma262/#sec-map-iterable
-ThrowCompletionOr<Object*> MapConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> MapConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
-    auto* map = TRY(ordinary_create_from_constructor<Map>(vm, new_target, &Intrinsics::map_prototype));
+    auto map = TRY(ordinary_create_from_constructor<Map>(vm, new_target, &Intrinsics::map_prototype));
 
     if (vm.argument(0).is_nullish())
         return map;
@@ -54,7 +54,7 @@ ThrowCompletionOr<Object*> MapConstructor::construct(FunctionObject& new_target)
 
     (void)TRY(get_iterator_values(vm, vm.argument(0), [&](Value iterator_value) -> Optional<Completion> {
         if (!iterator_value.is_object())
-            return vm.throw_completion<TypeError>(ErrorType::NotAnObject, String::formatted("Iterator value {}", iterator_value.to_string_without_side_effects()));
+            return vm.throw_completion<TypeError>(ErrorType::NotAnObject, DeprecatedString::formatted("Iterator value {}", iterator_value.to_string_without_side_effects()));
 
         auto key = TRY(iterator_value.as_object().get(0));
         auto value = TRY(iterator_value.as_object().get(1));

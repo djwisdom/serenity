@@ -20,7 +20,7 @@ namespace JS::Intl {
 
 // 1 DurationFormat Objects, https://tc39.es/proposal-intl-duration-format/#durationformat-objects
 DurationFormat::DurationFormat(Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
 {
 }
 
@@ -134,46 +134,82 @@ StringView DurationFormat::display_to_string(Display display)
 // 1.1.3 ToDurationRecord ( input ), https://tc39.es/proposal-intl-duration-format/#sec-todurationrecord
 ThrowCompletionOr<Temporal::DurationRecord> to_duration_record(VM& vm, Value input)
 {
-    // 1. If Type(input) is not Object, throw a TypeError exception.
-    if (!input.is_object())
+    // 1. If Type(input) is not Object, then
+    if (!input.is_object()) {
+        // a. If Type(input) is String, throw a RangeError exception.
+        if (input.is_string())
+            return vm.throw_completion<RangeError>(ErrorType::NotAnObject, input);
+
+        // b. Throw a TypeError exception.
         return vm.throw_completion<TypeError>(ErrorType::NotAnObject, input);
+    }
+
     auto& input_object = input.as_object();
 
     // 2. Let result be a new Duration Record with each field set to 0.
     Temporal::DurationRecord result = {};
+    bool any_defined = false;
 
-    // 3. Let any be false.
-    auto any = false;
+    auto set_duration_record_value = [&](auto const& name, auto& value_slot) -> ThrowCompletionOr<void> {
+        auto value = TRY(input_object.get(name));
 
-    // 4. For each row of Table 1, except the header row, in table order, do
-    for (auto const& duration_instances_component : duration_instances_components) {
-        // a. Let valueSlot be the Value Slot value of the current row.
-        auto value_slot = duration_instances_component.value_slot;
-
-        // b. Let unit be the Unit value of the current row.
-        auto unit = duration_instances_component.unit;
-
-        // c. Let value be ? Get(input, unit).
-        auto value = TRY(input_object.get(FlyString(unit)));
-
-        // d. If value is not undefined, then
         if (!value.is_undefined()) {
-            // i. Set any to true.
-            any = true;
-
-            // ii. Set value to ? ToIntegerWithoutRounding(value).
-            auto value_number = TRY(Temporal::to_integer_without_rounding(vm, value, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, unit, value));
-
-            // iii. Set result.[[<valueSlot>]] to value.
-            result.*value_slot = value_number;
+            value_slot = TRY(Temporal::to_integer_if_integral(vm, value, ErrorType::TemporalInvalidDurationPropertyValueNonIntegral, name, value));
+            any_defined = true;
         }
-    }
 
-    // 5. If any is false, throw a TypeError exception.
-    if (!any)
+        return {};
+    };
+
+    // 3. Let days be ? Get(input, "days").
+    // 4. If days is not undefined, set result.[[Days]] to ? ToIntegerIfIntegral(days).
+    TRY(set_duration_record_value(vm.names.days, result.days));
+
+    // 5. Let hours be ? Get(input, "hours").
+    // 6. If hours is not undefined, set result.[[Hours]] to ? ToIntegerIfIntegral(hours).
+    TRY(set_duration_record_value(vm.names.hours, result.hours));
+
+    // 7. Let microseconds be ? Get(input, "microseconds").
+    // 8. If microseconds is not undefined, set result.[[Microseconds]] to ? ToIntegerIfIntegral(microseconds).
+    TRY(set_duration_record_value(vm.names.microseconds, result.microseconds));
+
+    // 9. Let milliseconds be ? Get(input, "milliseconds").
+    // 10. If milliseconds is not undefined, set result.[[Milliseconds]] to ? ToIntegerIfIntegral(milliseconds).
+    TRY(set_duration_record_value(vm.names.milliseconds, result.milliseconds));
+
+    // 11. Let minutes be ? Get(input, "minutes").
+    // 12. If minutes is not undefined, set result.[[Minutes]] to ? ToIntegerIfIntegral(minutes).
+    TRY(set_duration_record_value(vm.names.minutes, result.minutes));
+
+    // 13. Let months be ? Get(input, "months").
+    // 14. If months is not undefined, set result.[[Months]] to ? ToIntegerIfIntegral(months).
+    TRY(set_duration_record_value(vm.names.months, result.months));
+
+    // 15. Let nanoseconds be ? Get(input, "nanoseconds").
+    // 16. If nanoseconds is not undefined, set result.[[Nanoseconds]] to ? ToIntegerIfIntegral(nanoseconds).
+    TRY(set_duration_record_value(vm.names.nanoseconds, result.nanoseconds));
+
+    // 17. Let seconds be ? Get(input, "seconds").
+    // 18. If seconds is not undefined, set result.[[Seconds]] to ? ToIntegerIfIntegral(seconds).
+    TRY(set_duration_record_value(vm.names.seconds, result.seconds));
+
+    // 19. Let weeks be ? Get(input, "weeks").
+    // 20. If weeks is not undefined, set result.[[Weeks]] to ? ToIntegerIfIntegral(weeks).
+    TRY(set_duration_record_value(vm.names.weeks, result.weeks));
+
+    // 21. Let years be ? Get(input, "years").
+    // 22. If years is not undefined, set result.[[Years]] to ? ToIntegerIfIntegral(years).
+    TRY(set_duration_record_value(vm.names.years, result.years));
+
+    // 23. If years, months, weeks, days, hours, minutes, seconds, milliseconds, microseconds, and nanoseconds are all undefined, throw a TypeError exception.
+    if (!any_defined)
         return vm.throw_completion<TypeError>(ErrorType::TemporalInvalidDurationLikeObject);
 
-    // 6. Return result.
+    // 24. If IsValidDurationRecord(result) is false, throw a RangeError exception.
+    if (!is_valid_duration_record(result))
+        return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidDurationLikeObject);
+
+    // 25. Return result.
     return result;
 }
 
@@ -204,7 +240,7 @@ i8 duration_record_sign(Temporal::DurationRecord const& record)
 // 1.1.5 IsValidDurationRecord ( record ), https://tc39.es/proposal-intl-duration-format/#sec-isvaliddurationrecord
 bool is_valid_duration_record(Temporal::DurationRecord const& record)
 {
-    // 1. Let sign be ! DurationRecordSign(record).
+    // 1. Let sign be DurationRecordSign(record).
     auto sign = duration_record_sign(record);
 
     // 2. For each row of Table 1, except the header row, in table order, do
@@ -232,7 +268,7 @@ bool is_valid_duration_record(Temporal::DurationRecord const& record)
 }
 
 // 1.1.6 GetDurationUnitOptions ( unit, options, baseStyle, stylesList, digitalBase, prevStyle ), https://tc39.es/proposal-intl-duration-format/#sec-getdurationunitoptions
-ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(VM& vm, String const& unit, Object const& options, StringView base_style, Span<StringView const> styles_list, StringView digital_base, StringView previous_style)
+ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(VM& vm, DeprecatedString const& unit, Object const& options, StringView base_style, Span<StringView const> styles_list, StringView digital_base, StringView previous_style)
 {
     // 1. Let style be ? GetOption(options, unit, "string", stylesList, undefined).
     auto style_value = TRY(get_option(vm, options, unit, OptionType::String, styles_list, Empty {}));
@@ -240,7 +276,7 @@ ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(VM& vm, String 
     // 2. Let displayDefault be "always".
     auto display_default = "always"sv;
 
-    String style;
+    DeprecatedString style;
 
     // 3. If style is undefined, then
     if (style_value.is_undefined()) {
@@ -272,11 +308,11 @@ ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(VM& vm, String 
             }
         }
     } else {
-        style = style_value.as_string().string();
+        style = style_value.as_string().deprecated_string();
     }
 
     // 4. Let displayField be the string-concatenation of unit and "Display".
-    auto display_field = String::formatted("{}Display", unit);
+    auto display_field = DeprecatedString::formatted("{}Display", unit);
 
     // 5. Let display be ? GetOption(options, displayField, "string", « "auto", "always" », displayDefault).
     auto display = TRY(get_option(vm, options, display_field, OptionType::String, { "auto"sv, "always"sv }, display_default));
@@ -296,7 +332,7 @@ ThrowCompletionOr<DurationUnitOptions> get_duration_unit_options(VM& vm, String 
     }
 
     // 7. Return the Record { [[Style]]: style, [[Display]]: display }.
-    return DurationUnitOptions { .style = move(style), .display = display.as_string().string() };
+    return DurationUnitOptions { .style = move(style), .display = display.as_string().deprecated_string() };
 }
 
 // 1.1.7 PartitionDurationFormatPattern ( durationFormat, duration ), https://tc39.es/proposal-intl-duration-format/#sec-partitiondurationformatpattern
@@ -338,8 +374,8 @@ Vector<PatternPartition> partition_duration_format_pattern(VM& vm, DurationForma
         // h. Let value be duration.[[<valueSlot>]].
         auto value = duration.*value_slot;
 
-        // i. Let nfOpts be ! OrdinaryObjectCreate(null).
-        auto* number_format_options = Object::create(realm, nullptr);
+        // i. Let nfOpts be OrdinaryObjectCreate(null).
+        auto number_format_options = Object::create(realm, nullptr);
 
         // j. If unit is "seconds", "milliseconds", or "microseconds", then
         if (unit.is_one_of("seconds"sv, "milliseconds"sv, "microseconds"sv)) {
@@ -401,7 +437,7 @@ Vector<PatternPartition> partition_duration_format_pattern(VM& vm, DurationForma
             // i. If style is "2-digit" or "numeric", then
             if (style == DurationFormat::ValueStyle::TwoDigit || style == DurationFormat::ValueStyle::Numeric) {
                 // 1. Let nf be ! Construct(%NumberFormat%, « durationFormat.[[Locale]], nfOpts »).
-                auto* number_format = static_cast<NumberFormat*>(MUST(construct(vm, *realm.intrinsics().intl_number_format_constructor(), js_string(vm, duration_format.locale()), number_format_options)));
+                auto* number_format = static_cast<NumberFormat*>(MUST(construct(vm, *realm.intrinsics().intl_number_format_constructor(), PrimitiveString::create(vm, duration_format.locale()), number_format_options)).ptr());
 
                 // 2. Let dataLocale be durationFormat.[[DataLocale]].
                 auto const& data_locale = duration_format.data_locale();
@@ -455,17 +491,17 @@ Vector<PatternPartition> partition_duration_format_pattern(VM& vm, DurationForma
             // ii. Else,
             else {
                 // 1. Perform ! CreateDataPropertyOrThrow(nfOpts, "style", "unit").
-                MUST(number_format_options->create_data_property_or_throw(vm.names.style, js_string(vm, "unit"sv)));
+                MUST(number_format_options->create_data_property_or_throw(vm.names.style, PrimitiveString::create(vm, "unit"sv)));
 
                 // 2. Perform ! CreateDataPropertyOrThrow(nfOpts, "unit", numberFormatUnit).
-                MUST(number_format_options->create_data_property_or_throw(vm.names.unit, js_string(vm, number_format_unit)));
+                MUST(number_format_options->create_data_property_or_throw(vm.names.unit, PrimitiveString::create(vm, number_format_unit)));
 
                 // 3. Perform ! CreateDataPropertyOrThrow(nfOpts, "unitDisplay", style).
                 auto unicode_style = ::Locale::style_to_string(static_cast<::Locale::Style>(style));
-                MUST(number_format_options->create_data_property_or_throw(vm.names.unitDisplay, js_string(vm, unicode_style)));
+                MUST(number_format_options->create_data_property_or_throw(vm.names.unitDisplay, PrimitiveString::create(vm, unicode_style)));
 
                 // 4. Let nf be ! Construct(%NumberFormat%, « durationFormat.[[Locale]], nfOpts »).
-                auto* number_format = static_cast<NumberFormat*>(MUST(construct(vm, *realm.intrinsics().intl_number_format_constructor(), js_string(vm, duration_format.locale()), number_format_options)));
+                auto* number_format = static_cast<NumberFormat*>(MUST(construct(vm, *realm.intrinsics().intl_number_format_constructor(), PrimitiveString::create(vm, duration_format.locale()), number_format_options)).ptr());
 
                 // 5. Let parts be ! PartitionNumberPattern(nf, 𝔽(value)).
                 auto parts = partition_number_pattern(vm, *number_format, MathematicalValue(value));
@@ -485,11 +521,11 @@ Vector<PatternPartition> partition_duration_format_pattern(VM& vm, DurationForma
         }
     }
 
-    // 4. Let lfOpts be ! OrdinaryObjectCreate(null).
-    auto* list_format_options = Object::create(realm, nullptr);
+    // 4. Let lfOpts be OrdinaryObjectCreate(null).
+    auto list_format_options = Object::create(realm, nullptr);
 
     // 5. Perform ! CreateDataPropertyOrThrow(lfOpts, "type", "unit").
-    MUST(list_format_options->create_data_property_or_throw(vm.names.type, js_string(vm, "unit"sv)));
+    MUST(list_format_options->create_data_property_or_throw(vm.names.type, PrimitiveString::create(vm, "unit"sv)));
 
     // 6. Let listStyle be durationFormat.[[Style]].
     auto list_style = duration_format.style();
@@ -503,24 +539,24 @@ Vector<PatternPartition> partition_duration_format_pattern(VM& vm, DurationForma
     auto unicode_list_style = ::Locale::style_to_string(static_cast<::Locale::Style>(list_style));
 
     // 8. Perform ! CreateDataPropertyOrThrow(lfOpts, "style", listStyle).
-    MUST(list_format_options->create_data_property_or_throw(vm.names.style, js_string(vm, unicode_list_style)));
+    MUST(list_format_options->create_data_property_or_throw(vm.names.style, PrimitiveString::create(vm, unicode_list_style)));
 
     // 9. Let lf be ! Construct(%ListFormat%, « durationFormat.[[Locale]], lfOpts »).
-    auto* list_format = static_cast<ListFormat*>(MUST(construct(vm, *realm.intrinsics().intl_list_format_constructor(), js_string(vm, duration_format.locale()), list_format_options)));
+    auto* list_format = static_cast<ListFormat*>(MUST(construct(vm, *realm.intrinsics().intl_list_format_constructor(), PrimitiveString::create(vm, duration_format.locale()), list_format_options)).ptr());
 
     // FIXME: CreatePartsFromList expects a list of strings and creates a list of Pattern Partition records, but we already created a list of Pattern Partition records
     //  so we try to hack something together from it that looks mostly right
-    Vector<String> string_result;
+    Vector<DeprecatedString> string_result;
     bool merge = false;
     for (size_t i = 0; i < result.size(); ++i) {
         auto const& part = result[i];
         if (part.type == "literal") {
-            string_result.last() = String::formatted("{}{}", string_result.last(), part.value);
+            string_result.last() = DeprecatedString::formatted("{}{}", string_result.last(), part.value);
             merge = true;
             continue;
         }
         if (merge) {
-            string_result.last() = String::formatted("{}{}", string_result.last(), part.value);
+            string_result.last() = DeprecatedString::formatted("{}{}", string_result.last(), part.value);
             merge = false;
             continue;
         }

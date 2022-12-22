@@ -61,7 +61,19 @@ private:
     ExecutingASTNodeChain m_chain_node;
 };
 
-String ASTNode::class_name() const
+ASTNode::ASTNode(SourceRange source_range)
+    : m_start_offset(source_range.start.offset)
+    , m_source_code(source_range.code)
+    , m_end_offset(source_range.end.offset)
+{
+}
+
+SourceRange ASTNode::source_range() const
+{
+    return m_source_code->range_from_offsets(m_start_offset, m_end_offset);
+}
+
+DeprecatedString ASTNode::class_name() const
 {
     // NOTE: We strip the "JS::" prefix.
     auto const* typename_ptr = typeid(*this).name();
@@ -70,7 +82,7 @@ String ASTNode::class_name() const
 
 static void print_indent(int indent)
 {
-    out("{}", String::repeated(' ', indent * 2));
+    out("{}", DeprecatedString::repeated(' ', indent * 2));
 }
 
 static void update_function_name(Value value, FlyString const& name)
@@ -82,10 +94,10 @@ static void update_function_name(Value value, FlyString const& name)
         static_cast<ECMAScriptFunctionObject&>(function).set_name(name);
 }
 
-static ThrowCompletionOr<String> get_function_property_name(PropertyKey key)
+static ThrowCompletionOr<DeprecatedString> get_function_property_name(PropertyKey key)
 {
     if (key.is_symbol())
-        return String::formatted("[{}]", key.as_symbol()->description());
+        return DeprecatedString::formatted("[{}]", key.as_symbol()->description());
     return key.to_string();
 }
 
@@ -230,7 +242,7 @@ Completion BlockStatement::execute(Interpreter& interpreter) const
     // Optimization: We only need a new lexical environment if there are any lexical declarations. :^)
     if (has_lexical_declarations()) {
         old_environment = vm.running_execution_context().lexical_environment;
-        auto* block_environment = new_declarative_environment(*old_environment);
+        auto block_environment = new_declarative_environment(*old_environment);
         block_declaration_instantiation(interpreter, block_environment);
         vm.running_execution_context().lexical_environment = block_environment;
     } else {
@@ -296,7 +308,7 @@ Value FunctionExpression::instantiate_ordinary_function_expression(Interpreter& 
     auto has_own_name = !name().is_empty();
 
     auto const& used_name = has_own_name ? name() : given_name;
-    auto* environment = interpreter.lexical_environment();
+    auto environment = NonnullGCPtr { *interpreter.lexical_environment() };
     if (has_own_name) {
         VERIFY(environment);
         environment = new_declarative_environment(*environment);
@@ -360,7 +372,7 @@ ThrowCompletionOr<CallExpression::ThisAndCallee> CallExpression::compute_this_an
 }
 
 // 13.3.8.1 Runtime Semantics: ArgumentListEvaluation, https://tc39.es/ecma262/#sec-runtime-semantics-argumentlistevaluation
-static ThrowCompletionOr<void> argument_list_evaluation(Interpreter& interpreter, Vector<CallExpression::Argument> const& arguments, MarkedVector<Value>& list)
+static ThrowCompletionOr<void> argument_list_evaluation(Interpreter& interpreter, Span<CallExpression::Argument const> const arguments, MarkedVector<Value>& list)
 {
     auto& vm = interpreter.vm();
     list.ensure_capacity(arguments.size());
@@ -394,7 +406,7 @@ Completion NewExpression::execute(Interpreter& interpreter) const
     // 4. Else,
     //    a. Let argList be ? ArgumentListEvaluation of arguments.
     MarkedVector<Value> arg_list(vm.heap());
-    TRY(argument_list_evaluation(interpreter, m_arguments, arg_list));
+    TRY(argument_list_evaluation(interpreter, arguments(), arg_list));
 
     // 5. If IsConstructor(constructor) is false, throw a TypeError exception.
     if (!constructor.is_constructor())
@@ -404,7 +416,7 @@ Completion NewExpression::execute(Interpreter& interpreter) const
     return Value { TRY(construct(vm, constructor.as_function(), move(arg_list))) };
 }
 
-Optional<String> CallExpression::expression_string() const
+Optional<DeprecatedString> CallExpression::expression_string() const
 {
     if (is<Identifier>(*m_callee))
         return static_cast<Identifier const&>(*m_callee).string();
@@ -439,7 +451,7 @@ Completion CallExpression::execute(Interpreter& interpreter) const
     VERIFY(!callee.is_empty());
 
     MarkedVector<Value> arg_list(vm.heap());
-    TRY(argument_list_evaluation(interpreter, m_arguments, arg_list));
+    TRY(argument_list_evaluation(interpreter, arguments(), arg_list));
 
     if (!callee.is_function())
         return throw_type_error_for_callee(interpreter, callee, "function"sv);
@@ -498,10 +510,10 @@ Completion SuperCall::execute(Interpreter& interpreter) const
         return vm.throw_completion<TypeError>(ErrorType::NotAConstructor, "Super constructor");
 
     // 6. Let result be ? Construct(func, argList, newTarget).
-    auto* result = TRY(construct(vm, static_cast<FunctionObject&>(*func), move(arg_list), &new_target.as_function()));
+    auto result = TRY(construct(vm, static_cast<FunctionObject&>(*func), move(arg_list), &new_target.as_function()));
 
     // 7. Let thisER be GetThisEnvironment().
-    auto& this_er = verify_cast<FunctionEnvironment>(get_this_environment(vm));
+    auto& this_er = verify_cast<FunctionEnvironment>(*get_this_environment(vm));
 
     // 8. Perform ? thisER.BindThisValue(result).
     TRY(this_er.bind_this_value(vm, result));
@@ -512,7 +524,7 @@ Completion SuperCall::execute(Interpreter& interpreter) const
     [[maybe_unused]] auto& f = this_er.function_object();
 
     // 11. Perform ? InitializeInstanceElements(result, F).
-    TRY(vm.initialize_instance_elements(*result, f));
+    TRY(result->initialize_instance_elements(f));
 
     // 12. Return result.
     return Value { result };
@@ -609,7 +621,7 @@ Completion WithStatement::execute(Interpreter& interpreter) const
     auto* old_environment = vm.running_execution_context().lexical_environment;
 
     // 4. Let newEnv be NewObjectEnvironment(obj, true, oldEnv).
-    auto* new_environment = new_object_environment(*object, true, old_environment);
+    auto new_environment = new_object_environment(*object, true, old_environment);
 
     // 5. Set the running execution context's LexicalEnvironment to newEnv.
     vm.running_execution_context().lexical_environment = new_environment;
@@ -756,7 +768,7 @@ Completion ForStatement::loop_evaluation(Interpreter& interpreter, Vector<FlyStr
 
     if (m_init) {
         if (is<VariableDeclaration>(*m_init) && static_cast<VariableDeclaration const&>(*m_init).declaration_kind() != DeclarationKind::Var) {
-            auto* loop_environment = new_declarative_environment(*old_environment);
+            auto loop_environment = new_declarative_environment(*old_environment);
             auto& declaration = static_cast<VariableDeclaration const&>(*m_init);
             declaration.for_each_bound_name([&](auto const& name) {
                 if (declaration.declaration_kind() == DeclarationKind::Const) {
@@ -888,7 +900,7 @@ struct ForInOfHeadState {
         auto& vm = interpreter.vm();
 
         Optional<Reference> lhs_reference;
-        Environment* iteration_environment = nullptr;
+        GCPtr<Environment> iteration_environment;
 
         // g. If lhsKind is either assignment or varBinding, then
         if (lhs_kind == Assignment || lhs_kind == VarBinding) {
@@ -909,12 +921,22 @@ struct ForInOfHeadState {
         else {
             VERIFY(expression_lhs && is<VariableDeclaration>(*expression_lhs));
             iteration_environment = new_declarative_environment(*interpreter.lexical_environment());
+
             auto& for_declaration = static_cast<VariableDeclaration const&>(*expression_lhs);
+
+            // 14.7.5.4 Runtime Semantics: ForDeclarationBindingInstantiation, https://tc39.es/ecma262/#sec-runtime-semantics-fordeclarationbindinginstantiation
+            // 1. For each element name of the BoundNames of ForBinding, do
             for_declaration.for_each_bound_name([&](auto const& name) {
-                if (for_declaration.declaration_kind() == DeclarationKind::Const)
-                    MUST(iteration_environment->create_immutable_binding(vm, name, false));
-                else
-                    MUST(iteration_environment->create_mutable_binding(vm, name, true));
+                // a. If IsConstantDeclaration of LetOrConst is true, then
+                if (for_declaration.is_constant_declaration()) {
+                    // i. Perform ! environment.CreateImmutableBinding(name, true).
+                    MUST(iteration_environment->create_immutable_binding(vm, name, true));
+                }
+                // b. Else,
+                else {
+                    // i. Perform ! environment.CreateMutableBinding(name, false).
+                    MUST(iteration_environment->create_mutable_binding(vm, name, false));
+                }
             });
             interpreter.vm().running_execution_context().lexical_environment = iteration_environment;
 
@@ -1375,13 +1397,13 @@ ThrowCompletionOr<Reference> Expression::to_reference(Interpreter&) const
 
 ThrowCompletionOr<Reference> Identifier::to_reference(Interpreter& interpreter) const
 {
-    if (m_cached_environment_coordinate.has_value()) {
+    if (m_cached_environment_coordinate.is_valid()) {
         Environment* environment = nullptr;
-        if (m_cached_environment_coordinate->index == EnvironmentCoordinate::global_marker) {
+        if (m_cached_environment_coordinate.index == EnvironmentCoordinate::global_marker) {
             environment = &interpreter.vm().current_realm()->global_environment();
         } else {
             environment = interpreter.vm().running_execution_context().lexical_environment;
-            for (size_t i = 0; i < m_cached_environment_coordinate->hops; ++i)
+            for (size_t i = 0; i < m_cached_environment_coordinate.hops; ++i)
                 environment = environment->outer_environment();
             VERIFY(environment);
             VERIFY(environment->is_declarative_environment());
@@ -1394,7 +1416,7 @@ ThrowCompletionOr<Reference> Identifier::to_reference(Interpreter& interpreter) 
 
     auto reference = TRY(interpreter.vm().resolve_binding(string()));
     if (reference.environment_coordinate().has_value())
-        m_cached_environment_coordinate = reference.environment_coordinate();
+        m_cached_environment_coordinate = reference.environment_coordinate().value();
     return reference;
 }
 
@@ -1408,10 +1430,10 @@ ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpr
     // https://tc39.es/ecma262/#sec-super-keyword-runtime-semantics-evaluation
     if (is<SuperExpression>(object())) {
         // 1. Let env be GetThisEnvironment().
-        auto& environment = get_this_environment(vm);
+        auto environment = get_this_environment(vm);
 
         // 2. Let actualThis be ? env.GetThisBinding().
-        auto actual_this = TRY(environment.get_this_binding(vm));
+        auto actual_this = TRY(environment->get_this_binding(vm));
 
         PropertyKey property_key;
 
@@ -1460,7 +1482,7 @@ ThrowCompletionOr<Reference> MemberExpression::to_reference(Interpreter& interpr
 
         TRY(require_object_coercible(vm, base_value));
 
-        property_key = TRY(PropertyKey::from_value(vm, value));
+        property_key = TRY(value.to_property_key(vm));
     } else if (is<PrivateIdentifier>(*m_property)) {
         auto& private_identifier = static_cast<PrivateIdentifier const&>(*m_property);
         return make_private_reference(interpreter.vm(), base_value, private_identifier.string());
@@ -1516,7 +1538,7 @@ Completion UnaryExpression::execute(Interpreter& interpreter) const
     case UnaryOp::Minus:
         return TRY(unary_minus(vm, lhs_result));
     case UnaryOp::Typeof:
-        return Value { js_string(vm, lhs_result.typeof()) };
+        return Value { PrimitiveString::create(vm, lhs_result.typeof()) };
     case UnaryOp::Void:
         return js_undefined();
     case UnaryOp::Delete:
@@ -1570,23 +1592,23 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassMethod::class_element_evaluatio
     auto& method_function = static_cast<ECMAScriptFunctionObject&>(method_value.as_function());
     method_function.make_method(target);
 
-    auto set_function_name = [&](String prefix = "") {
+    auto set_function_name = [&](DeprecatedString prefix = "") {
         auto name = property_key_or_private_name.visit(
-            [&](PropertyKey const& property_key) -> String {
+            [&](PropertyKey const& property_key) -> DeprecatedString {
                 if (property_key.is_symbol()) {
                     auto description = property_key.as_symbol()->description();
                     if (description.is_empty())
                         return "";
-                    return String::formatted("[{}]", description);
+                    return DeprecatedString::formatted("[{}]", description);
                 } else {
                     return property_key.to_string();
                 }
             },
-            [&](PrivateName const& private_name) -> String {
+            [&](PrivateName const& private_name) -> DeprecatedString {
                 return private_name.description;
             });
 
-        update_function_name(method_value, String::formatted("{}{}{}", prefix, prefix.is_empty() ? "" : " ", name));
+        update_function_name(method_value, DeprecatedString::formatted("{}{}{}", prefix, prefix.is_empty() ? "" : " ", name));
     };
 
     if (property_key_or_private_name.has<PropertyKey>()) {
@@ -1679,16 +1701,16 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation
     if (m_initializer) {
         auto copy_initializer = m_initializer;
         auto name = property_key_or_private_name.visit(
-            [&](PropertyKey const& property_key) -> String {
+            [&](PropertyKey const& property_key) -> DeprecatedString {
                 return property_key.is_number() ? property_key.to_string() : property_key.to_string_or_symbol().to_display_string();
             },
-            [&](PrivateName const& private_name) -> String {
+            [&](PrivateName const& private_name) -> DeprecatedString {
                 return private_name.description;
             });
 
         // FIXME: A potential optimization is not creating the functions here since these are never directly accessible.
         auto function_code = create_ast_node<ClassFieldInitializerStatement>(m_initializer->source_range(), copy_initializer.release_nonnull(), name);
-        initializer = make_handle(ECMAScriptFunctionObject::create(realm, String::empty(), String::empty(), *function_code, {}, 0, interpreter.lexical_environment(), interpreter.vm().running_execution_context().private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false, property_key_or_private_name));
+        initializer = make_handle(*ECMAScriptFunctionObject::create(realm, DeprecatedString::empty(), DeprecatedString::empty(), *function_code, {}, 0, interpreter.lexical_environment(), interpreter.vm().running_execution_context().private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false, property_key_or_private_name));
         initializer->make_method(target);
     }
 
@@ -1733,7 +1755,7 @@ ThrowCompletionOr<ClassElement::ClassValue> StaticInitializer::class_element_eva
     // 4. Let formalParameters be an instance of the production FormalParameters : [empty] .
     // 5. Let bodyFunction be OrdinaryFunctionCreate(%Function.prototype%, sourceText, formalParameters, ClassStaticBlockBody, non-lexical-this, lex, privateEnv).
     // Note: The function bodyFunction is never directly accessible to ECMAScript code.
-    auto* body_function = ECMAScriptFunctionObject::create(realm, String::empty(), String::empty(), *m_function_body, {}, 0, lexical_environment, private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false);
+    auto body_function = ECMAScriptFunctionObject::create(realm, DeprecatedString::empty(), DeprecatedString::empty(), *m_function_body, {}, 0, lexical_environment, private_environment, FunctionKind::Normal, true, false, m_contains_direct_call_to_eval, false);
 
     // 6. Perform MakeMethod(bodyFunction, homeObject).
     body_function->make_method(home_object);
@@ -1819,7 +1841,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
 
     auto* environment = vm.lexical_environment();
     VERIFY(environment);
-    auto* class_environment = new_declarative_environment(*environment);
+    auto class_environment = new_declarative_environment(*environment);
 
     // We might not set the lexical environment but we always want to restore it eventually.
     ArmedScopeGuard restore_environment = [&] {
@@ -1830,7 +1852,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
         MUST(class_environment->create_immutable_binding(vm, binding_name, true));
 
     auto* outer_private_environment = vm.running_execution_context().private_environment;
-    auto* class_private_environment = new_private_environment(vm, outer_private_environment);
+    auto class_private_environment = new_private_environment(vm, outer_private_environment);
 
     for (auto const& element : m_elements) {
         auto opt_private_name = element.private_bound_identifier();
@@ -1874,7 +1896,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::class_definition_e
         }
     }
 
-    auto* prototype = Object::create(realm, proto_parent);
+    auto prototype = Object::create(realm, proto_parent);
     VERIFY(prototype);
 
     vm.running_execution_context().lexical_environment = class_environment;
@@ -2161,7 +2183,7 @@ void CallExpression::dump(int indent) const
     else
         outln("CallExpression");
     m_callee->dump(indent + 1);
-    for (auto& argument : m_arguments)
+    for (auto& argument : arguments())
         argument.value->dump(indent + 1);
 }
 
@@ -2370,7 +2392,7 @@ void BindingPattern::dump(int indent) const
     }
 }
 
-void FunctionNode::dump(int indent, String const& class_name) const
+void FunctionNode::dump(int indent, DeprecatedString const& class_name) const
 {
     print_indent(indent);
     auto is_async = m_kind == FunctionKind::Async || m_kind == FunctionKind::AsyncGenerator;
@@ -2795,7 +2817,7 @@ Completion UpdateExpression::execute(Interpreter& interpreter) const
         else {
             // a. Assert: Type(oldValue) is BigInt.
             // b. Let newValue be BigInt::add(oldValue, 1ℤ).
-            new_value = js_bigint(interpreter.heap(), old_value.as_bigint().big_integer().plus(Crypto::SignedBigInteger { 1 }));
+            new_value = BigInt::create(vm, old_value.as_bigint().big_integer().plus(Crypto::SignedBigInteger { 1 }));
         }
         break;
     case UpdateOp::Decrement:
@@ -2808,7 +2830,7 @@ Completion UpdateExpression::execute(Interpreter& interpreter) const
         else {
             // a. Assert: Type(oldValue) is BigInt.
             // b. Let newValue be BigInt::subtract(oldValue, 1ℤ).
-            new_value = js_bigint(interpreter.heap(), old_value.as_bigint().big_integer().minus(Crypto::SignedBigInteger { 1 }));
+            new_value = BigInt::create(vm, old_value.as_bigint().big_integer().minus(Crypto::SignedBigInteger { 1 }));
         }
         break;
     default:
@@ -3045,7 +3067,7 @@ Completion ObjectExpression::execute(Interpreter& interpreter) const
     auto& realm = *vm.current_realm();
 
     // 1. Let obj be OrdinaryObjectCreate(%Object.prototype%).
-    auto* object = Object::create(realm, realm.intrinsics().object_prototype());
+    auto object = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 2. Perform ? PropertyDefinitionEvaluation of PropertyDefinitionList with argument obj.
     for (auto& property : m_properties) {
@@ -3073,18 +3095,21 @@ Completion ObjectExpression::execute(Interpreter& interpreter) const
             continue;
         }
 
-        if (value.is_function() && property.is_method())
+        auto property_key = TRY(PropertyKey::from_value(vm, key));
+
+        if (property.is_method()) {
+            VERIFY(value.is_function());
             static_cast<ECMAScriptFunctionObject&>(value.as_function()).set_home_object(object);
 
-        auto property_key = TRY(PropertyKey::from_value(vm, key));
-        auto name = TRY(get_function_property_name(property_key));
-        if (property.type() == ObjectProperty::Type::Getter) {
-            name = String::formatted("get {}", name);
-        } else if (property.type() == ObjectProperty::Type::Setter) {
-            name = String::formatted("set {}", name);
-        }
+            auto name = MUST(get_function_property_name(property_key));
+            if (property.type() == ObjectProperty::Type::Getter) {
+                name = DeprecatedString::formatted("get {}", name);
+            } else if (property.type() == ObjectProperty::Type::Setter) {
+                name = DeprecatedString::formatted("set {}", name);
+            }
 
-        update_function_name(value, name);
+            update_function_name(value, name);
+        }
 
         switch (property.type()) {
         case ObjectProperty::Type::Getter:
@@ -3116,14 +3141,14 @@ void MemberExpression::dump(int indent) const
     m_property->dump(indent + 1);
 }
 
-String MemberExpression::to_string_approximation() const
+DeprecatedString MemberExpression::to_string_approximation() const
 {
-    String object_string = "<object>";
+    DeprecatedString object_string = "<object>";
     if (is<Identifier>(*m_object))
         object_string = static_cast<Identifier const&>(*m_object).string();
     if (is_computed())
-        return String::formatted("{}[<computed>]", object_string);
-    return String::formatted("{}.{}", object_string, verify_cast<Identifier>(*m_property).string());
+        return DeprecatedString::formatted("{}[<computed>]", object_string);
+    return DeprecatedString::formatted("{}.{}", object_string, verify_cast<Identifier>(*m_property).string());
 }
 
 // 13.3.2.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-property-accessors-runtime-semantics-evaluation
@@ -3194,7 +3219,7 @@ ThrowCompletionOr<OptionalChain::ReferenceAndValue> OptionalChain::to_reference_
 
         auto expression = reference.visit(
             [&](Call const& call) -> NonnullRefPtr<Expression> {
-                return create_ast_node<CallExpression>(source_range(),
+                return CallExpression::create(source_range(),
                     create_ast_node<SyntheticReferenceExpression>(source_range(), base_reference, base),
                     call.arguments);
             },
@@ -3242,7 +3267,7 @@ ThrowCompletionOr<JS::Reference> OptionalChain::to_reference(Interpreter& interp
 
 void MetaProperty::dump(int indent) const
 {
-    String name;
+    DeprecatedString name;
     if (m_type == MetaProperty::Type::NewTarget)
         name = "new.target";
     else if (m_type == MetaProperty::Type::ImportMeta)
@@ -3369,7 +3394,7 @@ Completion ImportCall::execute(Interpreter& interpreter) const
     if (!options_value.is_undefined()) {
         // a. If Type(options) is not Object,
         if (!options_value.is_object()) {
-            auto* error = TypeError::create(realm, String::formatted(ErrorType::NotAnObject.message(), "ImportOptions"));
+            auto error = TypeError::create(realm, DeprecatedString::formatted(ErrorType::NotAnObject.message(), "ImportOptions"));
             // i. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
             MUST(call(vm, *promise_capability->reject(), js_undefined(), error));
 
@@ -3385,7 +3410,7 @@ Completion ImportCall::execute(Interpreter& interpreter) const
         if (!assertion_object.is_undefined()) {
             // i. If Type(assertionsObj) is not Object,
             if (!assertion_object.is_object()) {
-                auto* error = TypeError::create(realm, String::formatted(ErrorType::NotAnObject.message(), "ImportOptionsAssertions"));
+                auto error = TypeError::create(realm, DeprecatedString::formatted(ErrorType::NotAnObject.message(), "ImportOptionsAssertions"));
                 // 1. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
                 MUST(call(vm, *promise_capability->reject(), js_undefined(), error));
 
@@ -3410,7 +3435,7 @@ Completion ImportCall::execute(Interpreter& interpreter) const
 
                 // 3. If Type(value) is not String, then
                 if (!value.is_string()) {
-                    auto* error = TypeError::create(realm, String::formatted(ErrorType::NotAString.message(), "Import Assertion option value"));
+                    auto error = TypeError::create(realm, DeprecatedString::formatted(ErrorType::NotAString.message(), "Import Assertion option value"));
                     // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « a newly created TypeError object »).
                     MUST(call(vm, *promise_capability->reject(), js_undefined(), error));
 
@@ -3421,7 +3446,7 @@ Completion ImportCall::execute(Interpreter& interpreter) const
                 // 4. If supportedAssertions contains key, then
                 if (supported_assertions.contains_slow(property_key.to_string())) {
                     // a. Append { [[Key]]: key, [[Value]]: value } to assertions.
-                    assertions.empend(property_key.to_string(), value.as_string().string());
+                    assertions.empend(property_key.to_string(), value.as_string().deprecated_string());
                 }
             }
         }
@@ -3443,9 +3468,10 @@ Completion ImportCall::execute(Interpreter& interpreter) const
 Completion StringLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // 1. Return the SV of StringLiteral as defined in 12.8.4.2.
-    return Value { js_string(interpreter.heap(), m_value) };
+    return Value { PrimitiveString::create(vm, m_value) };
 }
 
 // 13.2.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-literals-runtime-semantics-evaluation
@@ -3461,19 +3487,20 @@ Completion NumericLiteral::execute(Interpreter& interpreter) const
 Completion BigIntLiteral::execute(Interpreter& interpreter) const
 {
     InterpreterNodeScope node_scope { interpreter, *this };
+    auto& vm = interpreter.vm();
 
     // 1. Return the NumericValue of NumericLiteral as defined in 12.8.3.
     Crypto::SignedBigInteger integer;
     if (m_value[0] == '0' && m_value.length() >= 3) {
         if (m_value[1] == 'x' || m_value[1] == 'X') {
-            return Value { js_bigint(interpreter.heap(), Crypto::SignedBigInteger::from_base(16, m_value.substring(2, m_value.length() - 3))) };
+            return Value { BigInt::create(vm, Crypto::SignedBigInteger::from_base(16, m_value.substring(2, m_value.length() - 3))) };
         } else if (m_value[1] == 'o' || m_value[1] == 'O') {
-            return Value { js_bigint(interpreter.heap(), Crypto::SignedBigInteger::from_base(8, m_value.substring(2, m_value.length() - 3))) };
+            return Value { BigInt::create(vm, Crypto::SignedBigInteger::from_base(8, m_value.substring(2, m_value.length() - 3))) };
         } else if (m_value[1] == 'b' || m_value[1] == 'B') {
-            return Value { js_bigint(interpreter.heap(), Crypto::SignedBigInteger::from_base(2, m_value.substring(2, m_value.length() - 3))) };
+            return Value { BigInt::create(vm, Crypto::SignedBigInteger::from_base(2, m_value.substring(2, m_value.length() - 3))) };
         }
     }
-    return Value { js_bigint(interpreter.heap(), Crypto::SignedBigInteger::from_base(10, m_value.substring(0, m_value.length() - 1))) };
+    return Value { BigInt::create(vm, Crypto::SignedBigInteger::from_base(10, m_value.substring(0, m_value.length() - 1))) };
 }
 
 // 13.2.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-literals-runtime-semantics-evaluation
@@ -3517,7 +3544,7 @@ Completion RegExpLiteral::execute(Interpreter& interpreter) const
     // 3. Return ! RegExpCreate(pattern, flags).
     Regex<ECMA262> regex(parsed_regex(), parsed_pattern(), parsed_flags());
     // NOTE: We bypass RegExpCreate and subsequently RegExpAlloc as an optimization to use the already parsed values.
-    auto* regexp_object = RegExpObject::create(realm, move(regex), move(pattern), move(flags));
+    auto regexp_object = RegExpObject::create(realm, move(regex), move(pattern), move(flags));
     // RegExpAlloc has these two steps from the 'Legacy RegExp features' proposal.
     regexp_object->set_realm(*vm.current_realm());
     // We don't need to check 'If SameValue(newTarget, thisRealm.[[Intrinsics]].[[%RegExp%]]) is true'
@@ -3547,7 +3574,7 @@ Completion ArrayExpression::execute(Interpreter& interpreter) const
     auto& realm = *vm.current_realm();
 
     // 1. Let array be ! ArrayCreate(0).
-    auto* array = MUST(Array::create(realm, 0));
+    auto array = MUST(Array::create(realm, 0));
 
     // 2. Perform ? ArrayAccumulation of ElementList with arguments array and 0.
 
@@ -3604,7 +3631,7 @@ Completion TemplateLiteral::execute(Interpreter& interpreter) const
     }
 
     // 7. Return the string-concatenation of head, middle, and tail.
-    return Value { js_string(interpreter.heap(), string_builder.build()) };
+    return Value { PrimitiveString::create(vm, string_builder.build()) };
 }
 
 void TaggedTemplateLiteral::dump(int indent) const
@@ -3627,13 +3654,32 @@ Completion TaggedTemplateLiteral::execute(Interpreter& interpreter) const
     // NOTE: This is both
     //  MemberExpression : MemberExpression TemplateLiteral
     //  CallExpression : CallExpression TemplateLiteral
-    // As the only difference is the first step.
 
     // 1. Let tagRef be ? Evaluation of MemberExpression.
     // 1. Let tagRef be ? Evaluation of CallExpression.
-
     // 2. Let tagFunc be ? GetValue(tagRef).
-    auto tag = TRY(m_tag->execute(interpreter)).release_value();
+    // NOTE: This is much more complicated than the spec because we have to
+    //       handle every type of reference. If we handle evaluation closer
+    //       to the spec this could be improved.
+    Value tag_this_value;
+    Value tag;
+    if (auto tag_reference = TRY(m_tag->to_reference(interpreter)); tag_reference.is_valid_reference()) {
+        tag = TRY(tag_reference.get_value(vm));
+        if (tag_reference.is_environment_reference()) {
+            auto& environment = tag_reference.base_environment();
+            if (environment.has_this_binding())
+                tag_this_value = TRY(environment.get_this_binding(vm));
+            else
+                tag_this_value = js_undefined();
+        } else {
+            tag_this_value = tag_reference.get_this_value();
+        }
+    } else {
+        auto result = TRY(m_tag->execute(interpreter));
+        VERIFY(result.has_value());
+        tag = result.release_value();
+        tag_this_value = js_undefined();
+    }
 
     // 3. Let thisCall be this CallExpression.
     // 3. Let thisCall be this MemberExpression.
@@ -3655,7 +3701,7 @@ Completion TaggedTemplateLiteral::execute(Interpreter& interpreter) const
         arguments.append(TRY(expressions[i].execute(interpreter)).release_value());
 
     // 5. Return ? EvaluateCall(tagFunc, tagRef, TemplateLiteral, tailCall).
-    return call(vm, tag, js_undefined(), move(arguments));
+    return call(vm, tag, tag_this_value, move(arguments));
 }
 
 // 13.2.8.3 GetTemplateObject ( templateLiteral ), https://tc39.es/ecma262/#sec-gettemplateobject
@@ -3693,10 +3739,10 @@ ThrowCompletionOr<Value> TaggedTemplateLiteral::get_template_object(Interpreter&
     // 8. Let template be ! ArrayCreate(count).
     // NOTE: We don't set count since we push the values using append which
     //       would then append after count. Same for 9.
-    auto* template_ = MUST(Array::create(realm, 0));
+    auto template_ = MUST(Array::create(realm, 0));
 
     // 9. Let rawObj be ! ArrayCreate(count).
-    auto* raw_obj = MUST(Array::create(realm, 0));
+    auto raw_obj = MUST(Array::create(realm, 0));
 
     // 10. Let index be 0.
     // 11. Repeat, while index < count,
@@ -3796,7 +3842,7 @@ Completion TryStatement::execute(Interpreter& interpreter) const
         auto* old_environment = vm.running_execution_context().lexical_environment;
 
         // 2. Let catchEnv be NewDeclarativeEnvironment(oldEnv).
-        auto* catch_environment = new_declarative_environment(*old_environment);
+        auto catch_environment = new_declarative_environment(*old_environment);
 
         m_handler->parameter().visit(
             [&](FlyString const& parameter) {
@@ -4114,7 +4160,7 @@ Completion SwitchStatement::execute_impl(Interpreter& interpreter) const
     // Optimization: Avoid creating a lexical environment if there are no lexical declarations.
     if (has_lexical_declarations()) {
         // 4. Let blockEnv be NewDeclarativeEnvironment(oldEnv).
-        auto* block_environment = new_declarative_environment(*old_environment);
+        auto block_environment = new_declarative_environment(*old_environment);
 
         // 5. Perform BlockDeclarationInstantiation(CaseBlock, blockEnv).
         block_declaration_instantiation(interpreter, block_environment);
@@ -4463,11 +4509,11 @@ void ExportStatement::dump(int indent) const
     print_indent(indent + 1);
     outln("(ExportEntries)");
 
-    auto string_or_null = [](String const& string) -> String {
+    auto string_or_null = [](DeprecatedString const& string) -> DeprecatedString {
         if (string.is_empty()) {
             return "null";
         }
-        return String::formatted("\"{}\"", string);
+        return DeprecatedString::formatted("\"{}\"", string);
     };
 
     for (auto& entry : m_entries) {
@@ -4551,7 +4597,7 @@ void ScopeNode::block_declaration_instantiation(Interpreter& interpreter, Enviro
 
         if (is<FunctionDeclaration>(declaration)) {
             auto& function_declaration = static_cast<FunctionDeclaration const&>(declaration);
-            auto* function = ECMAScriptFunctionObject::create(realm, function_declaration.name(), function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
+            auto function = ECMAScriptFunctionObject::create(realm, function_declaration.name(), function_declaration.source_text(), function_declaration.body(), function_declaration.parameters(), function_declaration.function_length(), environment, private_environment, function_declaration.kind(), function_declaration.is_strict_mode(), function_declaration.might_need_arguments_object(), function_declaration.contains_direct_call_to_eval());
             VERIFY(is<DeclarativeEnvironment>(*environment));
             static_cast<DeclarativeEnvironment&>(*environment).initialize_or_set_mutable_binding({}, vm, function_declaration.name(), function);
         }
@@ -4628,6 +4674,8 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& i
         // Note: Already done in step iv. above.
 
         // 4. Insert d as the first element of functionsToInitialize.
+        // NOTE: Since prepending is much slower, we just append
+        //       and iterate in reverse order in step 16 below.
         functions_to_initialize.append(function);
         return {};
     }));
@@ -4738,10 +4786,13 @@ ThrowCompletionOr<void> Program::global_declaration_instantiation(Interpreter& i
     }));
 
     // 16. For each Parse Node f of functionsToInitialize, do
-    for (auto& declaration : functions_to_initialize) {
+    // NOTE: We iterate in reverse order since we appended the functions
+    //       instead of prepending. We append because prepending is much slower
+    //       and we only use the created vector here.
+    for (auto& declaration : functions_to_initialize.in_reverse()) {
         // a. Let fn be the sole element of the BoundNames of f.
         // b. Let fo be InstantiateFunctionObject of f with arguments env and privateEnv.
-        auto* function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), &global_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object(), declaration.contains_direct_call_to_eval());
+        auto function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), &global_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object(), declaration.contains_direct_call_to_eval());
 
         // c. Perform ? env.CreateGlobalFunctionBinding(fn, fo, false).
         TRY(global_environment.create_global_function_binding(declaration.name(), function, false));
@@ -4768,6 +4819,21 @@ ModuleRequest::ModuleRequest(FlyString module_specifier_, Vector<Assertion> asse
     quick_sort(assertions, [](Assertion const& lhs, Assertion const& rhs) {
         return lhs.key < rhs.key;
     });
+}
+
+DeprecatedString const& SourceRange::filename() const
+{
+    return code->filename();
+}
+
+NonnullRefPtr<CallExpression> CallExpression::create(SourceRange source_range, NonnullRefPtr<Expression> callee, Span<Argument const> arguments)
+{
+    return ASTNodeWithTailArray::create<CallExpression>(arguments.size(), move(source_range), move(callee), arguments);
+}
+
+NonnullRefPtr<NewExpression> NewExpression::create(SourceRange source_range, NonnullRefPtr<Expression> callee, Span<Argument const> arguments)
+{
+    return ASTNodeWithTailArray::create<NewExpression>(arguments.size(), move(source_range), move(callee), arguments);
 }
 
 }

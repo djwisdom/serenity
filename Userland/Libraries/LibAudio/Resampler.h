@@ -52,18 +52,30 @@ public:
     }
 
     template<ArrayLike<SampleType> Samples>
-    Vector<SampleType> resample(Samples&& to_resample)
+    ErrorOr<Vector<SampleType>> try_resample(Samples&& to_resample)
     {
         Vector<SampleType> resampled;
-        resampled.ensure_capacity(to_resample.size() * ceil_div(m_source, m_target));
+        TRY(try_resample_into_end(resampled, forward<Samples>(to_resample)));
+        return resampled;
+    }
+
+    template<ArrayLike<SampleType> Samples, size_t vector_inline_capacity = 0>
+    ErrorOr<void> try_resample_into_end(Vector<SampleType, vector_inline_capacity>& destination, Samples&& to_resample)
+    {
+        TRY(destination.try_ensure_capacity(destination.size() + to_resample.size() * ceil_div(m_source, m_target)));
         for (auto sample : to_resample) {
             process_sample(sample, sample);
 
             while (read_sample(sample, sample))
-                resampled.unchecked_append(sample);
+                destination.unchecked_append(sample);
         }
+        return {};
+    }
 
-        return resampled;
+    template<ArrayLike<SampleType> Samples>
+    Vector<SampleType> resample(Samples&& to_resample)
+    {
+        return MUST(try_resample(forward<Samples>(to_resample)));
     }
 
     void reset()

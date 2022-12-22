@@ -7,6 +7,7 @@
 #include <AK/Find.h>
 #include <AK/IterationDecision.h>
 #include <AK/NumericLimits.h>
+#include <AK/Utf16View.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/Date.h>
@@ -25,7 +26,7 @@ static Crypto::SignedBigInteger const s_one_million_bigint { 1'000'000 };
 
 // 11 DateTimeFormat Objects, https://tc39.es/ecma402/#datetimeformat-objects
 DateTimeFormat::DateTimeFormat(Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
 {
 }
 
@@ -134,7 +135,7 @@ ThrowCompletionOr<Object*> to_date_time_options(VM& vm, Value options_value, Opt
         // a. For each property name prop of « "year", "month", "day" », do
         for (auto const& property : AK::Array { vm.names.year, vm.names.month, vm.names.day }) {
             // i. Perform ? CreateDataPropertyOrThrow(options, prop, "numeric").
-            TRY(options->create_data_property_or_throw(property, js_string(vm, "numeric"sv)));
+            TRY(options->create_data_property_or_throw(property, PrimitiveString::create(vm, "numeric"sv)));
         }
     }
 
@@ -143,7 +144,7 @@ ThrowCompletionOr<Object*> to_date_time_options(VM& vm, Value options_value, Opt
         // a. For each property name prop of « "hour", "minute", "second" », do
         for (auto const& property : AK::Array { vm.names.hour, vm.names.minute, vm.names.second }) {
             // i. Perform ? CreateDataPropertyOrThrow(options, prop, "numeric").
-            TRY(options->create_data_property_or_throw(property, js_string(vm, "numeric"sv)));
+            TRY(options->create_data_property_or_throw(property, PrimitiveString::create(vm, "numeric"sv)));
         }
     }
 
@@ -546,13 +547,13 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(VM& vm, Dat
     auto const& locale = date_time_format.locale();
     auto const& data_locale = date_time_format.data_locale();
 
-    auto construct_number_format = [&](auto* options) -> ThrowCompletionOr<NumberFormat*> {
-        auto* number_format = TRY(construct(vm, *realm.intrinsics().intl_number_format_constructor(), js_string(vm, locale), options));
-        return static_cast<NumberFormat*>(number_format);
+    auto construct_number_format = [&](auto& options) -> ThrowCompletionOr<NumberFormat*> {
+        auto number_format = TRY(construct(vm, *realm.intrinsics().intl_number_format_constructor(), PrimitiveString::create(vm, locale), options));
+        return static_cast<NumberFormat*>(number_format.ptr());
     };
 
     // 4. Let nfOptions be OrdinaryObjectCreate(null).
-    auto* number_format_options = Object::create(realm, nullptr);
+    auto number_format_options = Object::create(realm, nullptr);
 
     // 5. Perform ! CreateDataPropertyOrThrow(nfOptions, "useGrouping", false).
     MUST(number_format_options->create_data_property_or_throw(vm.names.useGrouping, Value(false)));
@@ -561,7 +562,7 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(VM& vm, Dat
     auto* number_format = TRY(construct_number_format(number_format_options));
 
     // 7. Let nf2Options be OrdinaryObjectCreate(null).
-    auto* number_format_options2 = Object::create(realm, nullptr);
+    auto number_format_options2 = Object::create(realm, nullptr);
 
     // 8. Perform ! CreateDataPropertyOrThrow(nf2Options, "minimumIntegerDigits", 2).
     MUST(number_format_options2->create_data_property_or_throw(vm.names.minimumIntegerDigits, Value(2)));
@@ -581,7 +582,7 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(VM& vm, Dat
         fractional_second_digits = date_time_format.fractional_second_digits();
 
         // a. Let nf3Options be OrdinaryObjectCreate(null).
-        auto* number_format_options3 = Object::create(realm, nullptr);
+        auto number_format_options3 = Object::create(realm, nullptr);
 
         // b. Perform ! CreateDataPropertyOrThrow(nf3Options, "minimumIntegerDigits", fractionalSecondDigits).
         MUST(number_format_options3->create_data_property_or_throw(vm.names.minimumIntegerDigits, Value(*fractional_second_digits)));
@@ -628,7 +629,7 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(VM& vm, Dat
 
         // d. Else if p is equal to "dayPeriod", then
         else if (part == "dayPeriod"sv) {
-            String formatted_value;
+            DeprecatedString formatted_value;
 
             // i. Let f be the value of dateTimeFormat's internal slot whose name is the Internal Slot column of the matching row.
             auto style = date_time_format.day_period();
@@ -661,7 +662,7 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(VM& vm, Dat
 
         // f. Else if p matches a Property column of the row in Table 6, then
         else if (auto style_and_value = find_calendar_field(part, date_time_format, range_format_options, local_time); style_and_value.has_value()) {
-            String formatted_value;
+            DeprecatedString formatted_value;
 
             // i. If rangeFormatOptions is not undefined, let f be the value of rangeFormatOptions's field whose name matches p.
             // ii. Else, let f be the value of dateTimeFormat's internal slot whose name is the Internal Slot column of the matching row.
@@ -740,7 +741,7 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(VM& vm, Dat
                 else if (part == "weekday"sv)
                     symbol = ::Locale::get_calendar_weekday_symbol(data_locale, date_time_format.calendar(), style, static_cast<::Locale::Weekday>(value));
 
-                formatted_value = symbol.value_or(String::number(value));
+                formatted_value = symbol.value_or(DeprecatedString::number(value));
                 break;
             }
 
@@ -754,7 +755,7 @@ ThrowCompletionOr<Vector<PatternPartition>> format_date_time_pattern(VM& vm, Dat
 
         // g. Else if p is equal to "ampm", then
         else if (part == "ampm"sv) {
-            String formatted_value;
+            DeprecatedString formatted_value;
 
             // i. Let v be tm.[[Hour]].
             auto value = local_time.hour;
@@ -829,7 +830,7 @@ ThrowCompletionOr<Vector<PatternPartition>> partition_date_time_pattern(VM& vm, 
 }
 
 // 11.5.8 FormatDateTime ( dateTimeFormat, x ), https://tc39.es/ecma402/#sec-formatdatetime
-ThrowCompletionOr<String> format_date_time(VM& vm, DateTimeFormat& date_time_format, double time)
+ThrowCompletionOr<DeprecatedString> format_date_time(VM& vm, DateTimeFormat& date_time_format, double time)
 {
     // 1. Let parts be ? PartitionDateTimePattern(dateTimeFormat, x).
     auto parts = TRY(partition_date_time_pattern(vm, date_time_format, time));
@@ -856,7 +857,7 @@ ThrowCompletionOr<Array*> format_date_time_to_parts(VM& vm, DateTimeFormat& date
     auto parts = TRY(partition_date_time_pattern(vm, date_time_format, time));
 
     // 2. Let result be ! ArrayCreate(0).
-    auto* result = MUST(Array::create(realm, 0));
+    auto result = MUST(Array::create(realm, 0));
 
     // 3. Let n be 0.
     size_t n = 0;
@@ -864,13 +865,13 @@ ThrowCompletionOr<Array*> format_date_time_to_parts(VM& vm, DateTimeFormat& date
     // 4. For each Record { [[Type]], [[Value]] } part in parts, do
     for (auto& part : parts) {
         // a. Let O be OrdinaryObjectCreate(%Object.prototype%).
-        auto* object = Object::create(realm, realm.intrinsics().object_prototype());
+        auto object = Object::create(realm, realm.intrinsics().object_prototype());
 
         // b. Perform ! CreateDataPropertyOrThrow(O, "type", part.[[Type]]).
-        MUST(object->create_data_property_or_throw(vm.names.type, js_string(vm, part.type)));
+        MUST(object->create_data_property_or_throw(vm.names.type, PrimitiveString::create(vm, part.type)));
 
         // c. Perform ! CreateDataPropertyOrThrow(O, "value", part.[[Value]]).
-        MUST(object->create_data_property_or_throw(vm.names.value, js_string(vm, move(part.value))));
+        MUST(object->create_data_property_or_throw(vm.names.value, PrimitiveString::create(vm, move(part.value))));
 
         // d. Perform ! CreateDataProperty(result, ! ToString(n), O).
         MUST(result->create_data_property_or_throw(n, object));
@@ -880,7 +881,7 @@ ThrowCompletionOr<Array*> format_date_time_to_parts(VM& vm, DateTimeFormat& date
     }
 
     // 5. Return result.
-    return result;
+    return result.ptr();
 }
 
 template<typename Callback>
@@ -1145,7 +1146,7 @@ ThrowCompletionOr<Vector<PatternPartitionWithSource>> partition_date_time_range_
 }
 
 // 11.5.11 FormatDateTimeRange ( dateTimeFormat, x, y ), https://tc39.es/ecma402/#sec-formatdatetimerange
-ThrowCompletionOr<String> format_date_time_range(VM& vm, DateTimeFormat& date_time_format, double start, double end)
+ThrowCompletionOr<DeprecatedString> format_date_time_range(VM& vm, DateTimeFormat& date_time_format, double start, double end)
 {
     // 1. Let parts be ? PartitionDateTimeRangePattern(dateTimeFormat, x, y).
     auto parts = TRY(partition_date_time_range_pattern(vm, date_time_format, start, end));
@@ -1172,7 +1173,7 @@ ThrowCompletionOr<Array*> format_date_time_range_to_parts(VM& vm, DateTimeFormat
     auto parts = TRY(partition_date_time_range_pattern(vm, date_time_format, start, end));
 
     // 2. Let result be ! ArrayCreate(0).
-    auto* result = MUST(Array::create(realm, 0));
+    auto result = MUST(Array::create(realm, 0));
 
     // 3. Let n be 0.
     size_t n = 0;
@@ -1180,16 +1181,16 @@ ThrowCompletionOr<Array*> format_date_time_range_to_parts(VM& vm, DateTimeFormat
     // 4. For each Record { [[Type]], [[Value]], [[Source]] } part in parts, do
     for (auto& part : parts) {
         // a. Let O be OrdinaryObjectCreate(%ObjectPrototype%).
-        auto* object = Object::create(realm, realm.intrinsics().object_prototype());
+        auto object = Object::create(realm, realm.intrinsics().object_prototype());
 
         // b. Perform ! CreateDataPropertyOrThrow(O, "type", part.[[Type]]).
-        MUST(object->create_data_property_or_throw(vm.names.type, js_string(vm, part.type)));
+        MUST(object->create_data_property_or_throw(vm.names.type, PrimitiveString::create(vm, part.type)));
 
         // c. Perform ! CreateDataPropertyOrThrow(O, "value", part.[[Value]]).
-        MUST(object->create_data_property_or_throw(vm.names.value, js_string(vm, move(part.value))));
+        MUST(object->create_data_property_or_throw(vm.names.value, PrimitiveString::create(vm, move(part.value))));
 
         // d. Perform ! CreateDataPropertyOrThrow(O, "source", part.[[Source]]).
-        MUST(object->create_data_property_or_throw(vm.names.source, js_string(vm, part.source)));
+        MUST(object->create_data_property_or_throw(vm.names.source, PrimitiveString::create(vm, part.source)));
 
         // e. Perform ! CreateDataProperty(result, ! ToString(n), O).
         MUST(result->create_data_property_or_throw(n, object));
@@ -1199,7 +1200,7 @@ ThrowCompletionOr<Array*> format_date_time_range_to_parts(VM& vm, DateTimeFormat
     }
 
     // 5. Return result.
-    return result;
+    return result.ptr();
 }
 
 // 11.5.13 ToLocalTime ( epochNs, calendar, timeZone ), https://tc39.es/ecma402/#sec-tolocaltime

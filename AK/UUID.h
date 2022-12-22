@@ -36,7 +36,7 @@ public:
 #ifdef KERNEL
     ErrorOr<NonnullOwnPtr<Kernel::KString>> to_string() const;
 #else
-    String to_string() const;
+    ErrorOr<String> to_string() const;
 #endif
     bool is_zero() const;
 
@@ -49,4 +49,6 @@ private:
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::UUID;
+#endif

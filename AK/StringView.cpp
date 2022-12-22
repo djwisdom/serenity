@@ -14,6 +14,7 @@
 #include <AK/Vector.h>
 
 #ifndef KERNEL
+#    include <AK/DeprecatedString.h>
 #    include <AK/FlyString.h>
 #    include <AK/String.h>
 #endif
@@ -22,6 +23,12 @@ namespace AK {
 
 #ifndef KERNEL
 StringView::StringView(String const& string)
+    : m_characters(reinterpret_cast<char const*>(string.bytes().data()))
+    , m_length(string.bytes().size())
+{
+}
+
+StringView::StringView(DeprecatedString const& string)
     : m_characters(string.characters())
     , m_length(string.length())
 {
@@ -163,17 +170,17 @@ bool StringView::equals_ignoring_case(StringView other) const
 }
 
 #ifndef KERNEL
-String StringView::to_lowercase_string() const
+DeprecatedString StringView::to_lowercase_string() const
 {
     return StringImpl::create_lowercased(characters_without_null_termination(), length());
 }
 
-String StringView::to_uppercase_string() const
+DeprecatedString StringView::to_uppercase_string() const
 {
     return StringImpl::create_uppercased(characters_without_null_termination(), length());
 }
 
-String StringView::to_titlecase_string() const
+DeprecatedString StringView::to_titlecase_string() const
 {
     return StringUtils::to_titlecase(*this);
 }
@@ -232,8 +239,6 @@ template Optional<u16> StringView::to_uint() const;
 template Optional<u32> StringView::to_uint() const;
 template Optional<unsigned long> StringView::to_uint() const;
 template Optional<unsigned long long> StringView::to_uint() const;
-template Optional<long> StringView::to_uint() const;
-template Optional<long long> StringView::to_uint() const;
 
 #ifndef KERNEL
 Optional<double> StringView::to_double(TrimWhitespace trim_whitespace) const
@@ -246,14 +251,14 @@ Optional<float> StringView::to_float(TrimWhitespace trim_whitespace) const
     return StringUtils::convert_to_floating_point<float>(*this, trim_whitespace);
 }
 
-bool StringView::operator==(String const& string) const
+bool StringView::operator==(DeprecatedString const& string) const
 {
     return *this == string.view();
 }
 
-String StringView::to_string() const { return String { *this }; }
+DeprecatedString StringView::to_deprecated_string() const { return DeprecatedString { *this }; }
 
-String StringView::replace(StringView needle, StringView replacement, ReplaceMode replace_mode) const
+DeprecatedString StringView::replace(StringView needle, StringView replacement, ReplaceMode replace_mode) const
 {
     return StringUtils::replace(*this, needle, replacement, replace_mode);
 }

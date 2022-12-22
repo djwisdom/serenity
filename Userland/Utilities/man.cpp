@@ -6,20 +6,23 @@
 
 #include <AK/Assertions.h>
 #include <AK/ByteBuffer.h>
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
+#include <AK/Utf8View.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
+#include <LibManual/Node.h>
+#include <LibManual/PageNode.h>
+#include <LibManual/SectionNode.h>
 #include <LibMarkdown/Document.h>
-#include <fcntl.h>
 #include <spawn.h>
-#include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-static ErrorOr<pid_t> pipe_to_pager(String const& command)
+static ErrorOr<pid_t> pipe_to_pager(DeprecatedString const& command)
 {
     char const* argv[] = { "sh", "-c", command.characters(), nullptr };
 
@@ -29,11 +32,7 @@ static ErrorOr<pid_t> pipe_to_pager(String const& command)
     posix_spawn_file_actions_init(&action);
     posix_spawn_file_actions_adddup2(&action, stdout_pipe[0], STDIN_FILENO);
 
-    pid_t pid;
-    if ((errno = posix_spawnp(&pid, argv[0], &action, nullptr, const_cast<char**>(argv), environ))) {
-        perror("posix_spawn");
-        exit(1);
-    }
+    pid_t pid = TRY(Core::System::posix_spawnp("sh"sv, &action, nullptr, const_cast<char**>(argv), environ));
     posix_spawn_file_actions_destroy(&action);
 
     TRY(Core::System::dup2(stdout_pipe[1], STDOUT_FILENO));
@@ -45,7 +44,7 @@ static ErrorOr<pid_t> pipe_to_pager(String const& command)
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     int view_width = 0;
-    if (isatty(STDOUT_FILENO)) {
+    if (isatty(STDOUT_FILENO) != 0) {
         struct winsize ws;
         if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0)
             view_width = ws.ws_col;
@@ -59,77 +58,50 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/bin", "x"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    StringView section {};
-    StringView name {};
-    StringView pager {};
+    DeprecatedString section_argument;
+    DeprecatedString name_argument;
+    DeprecatedString pager;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("Read manual pages. Try 'man man' to get started.");
-    args_parser.add_positional_argument(section, "Section of the man page", "section", Core::ArgsParser::Required::No);
-    args_parser.add_positional_argument(name, "Name of the man page", "name");
+    args_parser.add_positional_argument(section_argument, "Section of the man page", "section");
+    args_parser.add_positional_argument(name_argument, "Name of the man page", "name", Core::ArgsParser::Required::No);
     args_parser.add_option(pager, "Pager to pipe the man page to", "pager", 'P', "pager");
     args_parser.parse(arguments);
+    Vector<StringView, 2> query_parameters;
+    if (!section_argument.is_empty())
+        query_parameters.append(section_argument);
+    if (!name_argument.is_empty())
+        query_parameters.append(name_argument);
 
-    auto make_path = [name](StringView section) {
-        return String::formatted("/usr/share/man/man{}/{}.md", section, name);
-    };
-    if (section.is_empty()) {
-        constexpr StringView sections[] = {
-            "1"sv,
-            "2"sv,
-            "3"sv,
-            "4"sv,
-            "5"sv,
-            "6"sv,
-            "7"sv,
-            "8"sv
-        };
-        for (auto s : sections) {
-            String path = make_path(s);
-            if (access(path.characters(), R_OK) == 0) {
-                section = s;
-                break;
-            }
-        }
-    }
-    auto filename = make_path(section);
-    if (section == nullptr) {
-        warnln("No man page for {}", name);
-        exit(1);
-    } else if (access(filename.characters(), R_OK) != 0) {
-        warnln("No man page for {} in section {}", name, section);
-        exit(1);
-    }
+    auto page = TRY(Manual::Node::try_create_from_query(query_parameters));
+    auto page_name = TRY(page->name());
+    auto const* section = static_cast<Manual::SectionNode const*>(page->parent());
 
-    String pager_command;
-    if (!pager.is_empty())
-        pager_command = pager;
-    else
-        pager_command = String::formatted("less -P 'Manual Page {}({}) line %l?e (END):.'", StringView(name).replace("'"sv, "'\\''"sv, ReplaceMode::FirstOnly), StringView(section).replace("'"sv, "'\\''"sv, ReplaceMode::FirstOnly));
-    pid_t pager_pid = TRY(pipe_to_pager(pager_command));
+    if (pager.is_empty())
+        pager = TRY(String::formatted("less -P 'Manual Page {}({}) line %l?e (END):.'",
+                        TRY(page_name.replace("'"sv, "'\\''"sv, ReplaceMode::FirstOnly)),
+                        TRY(section->section_name().replace("'"sv, "'\\''"sv, ReplaceMode::FirstOnly))))
+                    .to_deprecated_string();
+    pid_t pager_pid = TRY(pipe_to_pager(pager));
 
-    auto file = TRY(Core::File::open(filename, Core::OpenMode::ReadOnly));
+    auto file = TRY(Core::Stream::File::open(TRY(page->path()), Core::Stream::OpenMode::Read));
 
     TRY(Core::System::pledge("stdio proc"));
 
-    dbgln("Loading man page from {}", file->filename());
-    auto buffer = file->read_all();
-    auto source = String::copy(buffer);
+    dbgln("Loading man page from {}", TRY(page->path()));
+    auto buffer = TRY(file->read_until_eof());
+    auto source = DeprecatedString::copy(buffer);
 
-    const String title("SerenityOS manual");
+    auto const title = TRY(String::from_utf8("SerenityOS manual"sv));
 
-    int spaces = view_width / 2 - String(name).length() - String(section).length() - title.length() / 2 - 4;
-    if (spaces < 0)
-        spaces = 0;
-    out("{}({})", name, section);
-    while (spaces--)
-        out(" ");
-    outln(title);
+    int spaces = max(view_width / 2 - page_name.code_points().length() - section->section_name().code_points().length() - title.code_points().length() / 2 - 4, 0);
+    outln("{}({}){}{}", page_name, section->section_name(), DeprecatedString::repeated(' ', spaces), title);
 
     auto document = Markdown::Document::parse(source);
     VERIFY(document);
 
-    String rendered = document->render_for_terminal(view_width);
+    DeprecatedString rendered = document->render_for_terminal(view_width);
     outln("{}", rendered);
 
     // FIXME: Remove this wait, it shouldn't be necessary but Shell does not

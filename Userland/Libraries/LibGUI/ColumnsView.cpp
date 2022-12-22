@@ -158,7 +158,7 @@ void ColumnsView::paint_event(PaintEvent& event)
                 icon_rect.right() + 1 + icon_spacing(), row * item_height(),
                 column.width - icon_spacing() - icon_size() - icon_spacing() - icon_spacing() - static_cast<int>(s_arrow_bitmap.width()) - icon_spacing(), item_height()
             };
-            draw_item_text(painter, index, is_selected_row, text_rect, index.data().to_string(), font_for_index(index), Gfx::TextAlignment::CenterLeft, Gfx::TextElision::None);
+            draw_item_text(painter, index, is_selected_row, text_rect, index.data().to_deprecated_string(), font_for_index(index), Gfx::TextAlignment::CenterLeft, Gfx::TextElision::None);
 
             if (is_focused() && index == cursor_index()) {
                 painter.draw_rect(row_rect, palette().color(background_role()));
@@ -227,7 +227,7 @@ void ColumnsView::update_column_sizes()
         for (int row = 0; row < row_count; row++) {
             ModelIndex index = model()->index(row, m_model_column, column.parent_index);
             VERIFY(index.is_valid());
-            auto text = index.data().to_string();
+            auto text = index.data().to_deprecated_string();
             int row_width = icon_spacing() + icon_size() + icon_spacing() + font().width(text) + icon_spacing() + s_arrow_bitmap.width() + icon_spacing();
             if (row_width > column.width)
                 column.width = row_width;
@@ -238,7 +238,7 @@ void ColumnsView::update_column_sizes()
     set_content_size({ total_width, total_height });
 }
 
-Optional<ColumnsView::Column> ColumnsView::column_at_event_position(Gfx::IntPoint const& a_position) const
+Optional<ColumnsView::Column> ColumnsView::column_at_event_position(Gfx::IntPoint a_position) const
 {
     if (!model())
         return {};
@@ -275,7 +275,7 @@ void ColumnsView::select_range(ModelIndex const& index)
     }
 }
 
-ModelIndex ColumnsView::index_at_event_position_in_column(Gfx::IntPoint const& position, Column const& column) const
+ModelIndex ColumnsView::index_at_event_position_in_column(Gfx::IntPoint position, Column const& column) const
 {
     int row = position.y() / item_height();
     int row_count = model()->row_count(column.parent_index);
@@ -285,7 +285,7 @@ ModelIndex ColumnsView::index_at_event_position_in_column(Gfx::IntPoint const& p
     return model()->index(row, m_model_column, column.parent_index);
 }
 
-ModelIndex ColumnsView::index_at_event_position(Gfx::IntPoint const& position) const
+ModelIndex ColumnsView::index_at_event_position(Gfx::IntPoint position) const
 {
     auto const& column = column_at_event_position(position);
     if (!column.has_value())

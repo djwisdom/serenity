@@ -7,6 +7,7 @@
 #pragma once
 
 #include "WidgetWithLabel.h"
+#include <AK/Concepts.h>
 #include <AK/Vector.h>
 #include <LibDSP/ProcessorParameter.h>
 #include <LibGUI/ComboBox.h>
@@ -14,17 +15,17 @@
 #include <LibGUI/Label.h>
 #include <LibGUI/ModelIndex.h>
 
-template<typename EnumT>
-requires(IsEnum<EnumT>) class ProcessorParameterDropdown : public GUI::ComboBox {
+template<Enum EnumT>
+class ProcessorParameterDropdown : public GUI::ComboBox {
     C_OBJECT(ProcessorParameterDropdown);
 
 public:
-    ProcessorParameterDropdown(DSP::ProcessorEnumParameter<EnumT>& parameter, Vector<String> modes)
+    ProcessorParameterDropdown(DSP::ProcessorEnumParameter<EnumT>& parameter, Vector<DeprecatedString> modes)
         : ComboBox()
         , m_parameter(parameter)
         , m_modes(move(modes))
     {
-        auto model = GUI::ItemListModel<EnumT, Vector<String>>::create(m_modes);
+        auto model = GUI::ItemListModel<EnumT, Vector<DeprecatedString>>::create(m_modes);
         set_model(model);
         set_only_allow_values_from_model(true);
         set_model_column(0);
@@ -54,5 +55,5 @@ public:
 
 private:
     DSP::ProcessorEnumParameter<EnumT>& m_parameter;
-    Vector<String> m_modes;
+    Vector<DeprecatedString> m_modes;
 };

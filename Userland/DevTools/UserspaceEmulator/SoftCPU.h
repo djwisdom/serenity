@@ -106,8 +106,9 @@ public:
             return m_gpr[X86::RegisterEDX].reference_to<&PartAddressableRegister::low_u8>();
         case X86::RegisterDH:
             return m_gpr[X86::RegisterEDX].reference_to<&PartAddressableRegister::high_u8>();
+        default:
+            VERIFY_NOT_REACHED();
         }
-        VERIFY_NOT_REACHED();
     }
 
     ValueWithShadow<u8> const_gpr8(X86::RegisterIndex8 reg) const
@@ -129,8 +130,9 @@ public:
             return m_gpr[X86::RegisterEDX].slice<&PartAddressableRegister::low_u8>();
         case X86::RegisterDH:
             return m_gpr[X86::RegisterEDX].slice<&PartAddressableRegister::high_u8>();
+        default:
+            VERIFY_NOT_REACHED();
         }
-        VERIFY_NOT_REACHED();
     }
 
     ValueWithShadow<u16> const_gpr16(X86::RegisterIndex16 reg) const
@@ -175,64 +177,84 @@ public:
             return gpr32((X86::RegisterIndex32)register_index);
     }
 
-    ValueWithShadow<u32> source_index(bool a32) const
+    ValueWithShadow<u32> source_index(X86::AddressSize address_size) const
     {
-        if (a32)
+        if (address_size == X86::AddressSize::Size32)
             return esi();
-        return { si().value(), (u32)si().shadow_as_value() & 0xffff };
+        if (address_size == X86::AddressSize::Size16)
+            return { si().value(), (u32)si().shadow_as_value() & 0xffff };
+        VERIFY_NOT_REACHED();
     }
 
-    ValueWithShadow<u32> destination_index(bool a32) const
+    ValueWithShadow<u32> destination_index(X86::AddressSize address_size) const
     {
-        if (a32)
+        if (address_size == X86::AddressSize::Size32)
             return edi();
-        return { di().value(), (u32)di().shadow_as_value() & 0xffff };
+        if (address_size == X86::AddressSize::Size16)
+            return { di().value(), (u32)di().shadow_as_value() & 0xffff };
+        VERIFY_NOT_REACHED();
     }
 
-    ValueWithShadow<u32> loop_index(bool a32) const
+    ValueWithShadow<u32> loop_index(X86::AddressSize address_size) const
     {
-        if (a32)
+        if (address_size == X86::AddressSize::Size32)
             return ecx();
-        return { cx().value(), (u32)cx().shadow_as_value() & 0xffff };
+        if (address_size == X86::AddressSize::Size16)
+            return { cx().value(), (u32)cx().shadow_as_value() & 0xffff };
+        VERIFY_NOT_REACHED();
     }
 
-    bool decrement_loop_index(bool a32)
+    bool decrement_loop_index(X86::AddressSize address_size)
     {
-        if (a32) {
+        switch (address_size) {
+        case X86::AddressSize::Size32:
             set_ecx({ ecx().value() - 1, ecx().shadow() });
             return ecx().value() == 0;
+        case X86::AddressSize::Size16:
+            set_cx(ValueWithShadow<u16>(cx().value() - 1, cx().shadow()));
+            return cx().value() == 0;
+        default:
+            VERIFY_NOT_REACHED();
         }
-        set_cx(ValueWithShadow<u16>(cx().value() - 1, cx().shadow()));
-        return cx().value() == 0;
     }
 
-    ALWAYS_INLINE void step_source_index(bool a32, u32 step)
+    ALWAYS_INLINE void step_source_index(X86::AddressSize address_size, u32 step)
     {
-        if (a32) {
+        switch (address_size) {
+        case X86::AddressSize::Size32:
             if (df())
                 set_esi({ esi().value() - step, esi().shadow() });
             else
                 set_esi({ esi().value() + step, esi().shadow() });
-        } else {
+            break;
+        case X86::AddressSize::Size16:
             if (df())
                 set_si(ValueWithShadow<u16>(si().value() - step, si().shadow()));
             else
                 set_si(ValueWithShadow<u16>(si().value() + step, si().shadow()));
+            break;
+        default:
+            VERIFY_NOT_REACHED();
         }
     }
 
-    ALWAYS_INLINE void step_destination_index(bool a32, u32 step)
+    ALWAYS_INLINE void step_destination_index(X86::AddressSize address_size, u32 step)
     {
-        if (a32) {
+        switch (address_size) {
+        case X86::AddressSize::Size32:
             if (df())
                 set_edi({ edi().value() - step, edi().shadow() });
             else
                 set_edi({ edi().value() + step, edi().shadow() });
-        } else {
+            break;
+        case X86::AddressSize::Size16:
             if (df())
                 set_di(ValueWithShadow<u16>(di().value() - step, di().shadow()));
             else
                 set_di(ValueWithShadow<u16>(di().value() + step, di().shadow()));
+            break;
+        default:
+            VERIFY_NOT_REACHED();
         }
     }
 
@@ -359,6 +381,8 @@ public:
     u16 ds() const { return m_segment[(int)X86::SegmentRegister::DS]; }
     u16 es() const { return m_segment[(int)X86::SegmentRegister::ES]; }
     u16 ss() const { return m_segment[(int)X86::SegmentRegister::SS]; }
+    u16 fs() const { return m_segment[(int)X86::SegmentRegister::FS]; }
+    u16 gs() const { return m_segment[(int)X86::SegmentRegister::GS]; }
 
     ValueWithShadow<u8> read_memory8(X86::LogicalAddress);
     ValueWithShadow<u16> read_memory16(X86::LogicalAddress);
@@ -447,19 +471,19 @@ public:
     void do_once_or_repeat(const X86::Instruction& insn, Callback);
 
     template<typename A>
-    void taint_flags_from(const A& a)
+    void taint_flags_from(A const& a)
     {
         m_flags_tainted = a.is_uninitialized();
     }
 
     template<typename A, typename B>
-    void taint_flags_from(const A& a, const B& b)
+    void taint_flags_from(A const& a, B const& b)
     {
         m_flags_tainted = a.is_uninitialized() || b.is_uninitialized();
     }
 
     template<typename A, typename B, typename C>
-    void taint_flags_from(const A& a, const B& b, const C& c)
+    void taint_flags_from(A const& a, B const& b, C const& c)
     {
         m_flags_tainted = a.is_uninitialized() || b.is_uninitialized() || c.is_uninitialized();
     }
@@ -1323,6 +1347,8 @@ private:
     void generic_RM32_CL(Op, const X86::Instruction&);
 
     void update_code_cache();
+
+    void write_segment_register(X86::SegmentRegister, ValueWithShadow<u16>);
 
     Emulator& m_emulator;
     SoftFPU m_fpu;

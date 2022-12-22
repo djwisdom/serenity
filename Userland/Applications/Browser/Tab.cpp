@@ -42,12 +42,17 @@
 
 namespace Browser {
 
-URL url_from_user_input(String const& input)
+Tab::~Tab()
+{
+    close_sub_widgets();
+}
+
+URL url_from_user_input(DeprecatedString const& input)
 {
     if (input.starts_with('?') && !g_search_engine.is_empty())
         return URL(g_search_engine.replace("{}"sv, URL::percent_encode(input.substring_view(1)), ReplaceMode::FirstOnly));
 
-    URL url_with_http_schema = URL(String::formatted("http://{}", input));
+    URL url_with_http_schema = URL(DeprecatedString::formatted("http://{}", input));
     if (url_with_http_schema.is_valid() && url_with_http_schema.port().has_value())
         return url_with_http_schema;
 
@@ -62,13 +67,13 @@ void Tab::start_download(const URL& url)
 {
     auto window = GUI::Window::construct(&this->window());
     window->resize(300, 170);
-    window->set_title(String::formatted("0% of {}", url.basename()));
+    window->set_title(DeprecatedString::formatted("0% of {}", url.basename()));
     window->set_resizable(false);
     window->set_main_widget<DownloadWidget>(url);
     window->show();
 }
 
-void Tab::view_source(const URL& url, String const& source)
+void Tab::view_source(const URL& url, DeprecatedString const& source)
 {
     auto window = GUI::Window::construct(&this->window());
     auto& editor = window->set_main_widget<GUI::TextEditor>();
@@ -77,13 +82,13 @@ void Tab::view_source(const URL& url, String const& source)
     editor.set_syntax_highlighter(make<Web::HTML::SyntaxHighlighter>());
     editor.set_ruler_visible(true);
     window->resize(640, 480);
-    window->set_title(url.to_string());
+    window->set_title(url.to_deprecated_string());
     window->set_icon(g_icon_bag.filetype_text);
     window->set_window_mode(GUI::WindowMode::Modeless);
     window->show();
 }
 
-void Tab::update_status(Optional<String> text_override, i32 count_waiting)
+void Tab::update_status(Optional<DeprecatedString> text_override, i32 count_waiting)
 {
     if (text_override.has_value()) {
         m_statusbar->set_text(*text_override);
@@ -99,10 +104,10 @@ void Tab::update_status(Optional<String> text_override, i32 count_waiting)
 
     if (count_waiting == 0) {
         // ex: "Loading google.com"
-        m_statusbar->set_text(String::formatted("Loading {}", m_navigating_url->host()));
+        m_statusbar->set_text(DeprecatedString::formatted("Loading {}", m_navigating_url->host()));
     } else {
         // ex: "google.com is waiting on 5 resources"
-        m_statusbar->set_text(String::formatted("{} is waiting on {} resource{}", m_navigating_url->host(), count_waiting, count_waiting == 1 ? ""sv : "s"sv));
+        m_statusbar->set_text(DeprecatedString::formatted("{} is waiting on {} resource{}", m_navigating_url->host(), count_waiting, count_waiting == 1 ? ""sv : "s"sv));
     }
 }
 
@@ -137,7 +142,7 @@ Tab::Tab(BrowserWindow& window)
         m_go_back_context_menu = GUI::Menu::construct();
         for (auto& url : m_history.get_back_title_history()) {
             i++;
-            m_go_back_context_menu->add_action(GUI::Action::create(url.to_string(), g_icon_bag.filetype_html, [this, i](auto&) { go_back(i); }));
+            m_go_back_context_menu->add_action(GUI::Action::create(url.to_deprecated_string(), g_icon_bag.filetype_html, [this, i](auto&) { go_back(i); }));
         }
         m_go_back_context_menu->popup(go_back_button.screen_relative_rect().bottom_left());
     };
@@ -150,7 +155,7 @@ Tab::Tab(BrowserWindow& window)
         m_go_forward_context_menu = GUI::Menu::construct();
         for (auto& url : m_history.get_forward_title_history()) {
             i++;
-            m_go_forward_context_menu->add_action(GUI::Action::create(url.to_string(), g_icon_bag.filetype_html, [this, i](auto&) { go_forward(i); }));
+            m_go_forward_context_menu->add_action(GUI::Action::create(url.to_deprecated_string(), g_icon_bag.filetype_html, [this, i](auto&) { go_forward(i); }));
         }
         m_go_forward_context_menu->popup(go_forward_button.screen_relative_rect().bottom_left());
     };
@@ -202,14 +207,20 @@ Tab::Tab(BrowserWindow& window)
     m_bookmark_button->set_icon(g_icon_bag.bookmark_contour);
     m_bookmark_button->set_fixed_size(22, 22);
 
-    view().on_load_start = [this](auto& url) {
+    view().on_load_start = [this](auto& url, bool is_redirect) {
         m_navigating_url = url;
         m_loaded = false;
+
+        // If we are loading due to a redirect, we replace the current history entry
+        // with the loaded URL
+        if (is_redirect) {
+            m_history.replace_current(url, title());
+        }
 
         update_status();
 
         m_location_box->set_icon(nullptr);
-        m_location_box->set_text(url.to_string());
+        m_location_box->set_text(url.to_deprecated_string());
 
         // don't add to history if back or forward is pressed
         if (!m_is_history_navigation)
@@ -217,7 +228,7 @@ Tab::Tab(BrowserWindow& window)
         m_is_history_navigation = false;
 
         update_actions();
-        update_bookmark_button(url.to_string());
+        update_bookmark_button(url.to_deprecated_string());
 
         if (m_dom_inspector_widget)
             m_dom_inspector_widget->clear_dom_json();
@@ -266,12 +277,12 @@ Tab::Tab(BrowserWindow& window)
         m_web_content_view->set_system_visibility_state(true);
     };
 
-    view().on_reposition_window = [this](Gfx::IntPoint const& position) {
+    view().on_reposition_window = [this](Gfx::IntPoint position) {
         this->window().move_to(position);
         return this->window().position();
     };
 
-    view().on_resize_window = [this](Gfx::IntSize const& size) {
+    view().on_resize_window = [this](Gfx::IntSize size) {
         this->window().resize(size);
         return this->window().size();
     };
@@ -303,7 +314,7 @@ Tab::Tab(BrowserWindow& window)
     }));
     m_link_context_menu->add_separator();
     m_link_context_menu->add_action(GUI::Action::create("&Copy URL", g_icon_bag.copy, [this](auto&) {
-        GUI::Clipboard::the().set_plain_text(m_link_context_menu_url.to_string());
+        GUI::Clipboard::the().set_plain_text(m_link_context_menu_url.to_deprecated_string());
     }));
     m_link_context_menu->add_separator();
     m_link_context_menu->add_action(GUI::Action::create("&Download", g_icon_bag.download, [this](auto&) {
@@ -312,7 +323,7 @@ Tab::Tab(BrowserWindow& window)
     m_link_context_menu->add_separator();
     m_link_context_menu->add_action(window.inspect_dom_node_action());
 
-    view().on_link_context_menu_request = [this](auto& url, auto& screen_position) {
+    view().on_link_context_menu_request = [this](auto& url, auto screen_position) {
         m_link_context_menu_url = url;
         m_link_context_menu->popup(screen_position, m_link_context_menu_default_action);
     };
@@ -330,7 +341,7 @@ Tab::Tab(BrowserWindow& window)
             GUI::Clipboard::the().set_bitmap(*m_image_context_menu_bitmap.bitmap());
     }));
     m_image_context_menu->add_action(GUI::Action::create("Copy Image &URL", g_icon_bag.copy, [this](auto&) {
-        GUI::Clipboard::the().set_plain_text(m_image_context_menu_url.to_string());
+        GUI::Clipboard::the().set_plain_text(m_image_context_menu_url.to_deprecated_string());
     }));
     m_image_context_menu->add_separator();
     m_image_context_menu->add_action(GUI::Action::create("&Download", g_icon_bag.download, [this](auto&) {
@@ -339,7 +350,7 @@ Tab::Tab(BrowserWindow& window)
     m_image_context_menu->add_separator();
     m_image_context_menu->add_action(window.inspect_dom_node_action());
 
-    view().on_image_context_menu_request = [this](auto& image_url, auto& screen_position, Gfx::ShareableBitmap const& shareable_bitmap) {
+    view().on_image_context_menu_request = [this](auto& image_url, auto screen_position, Gfx::ShareableBitmap const& shareable_bitmap) {
         m_image_context_menu_url = image_url;
         m_image_context_menu_bitmap = shareable_bitmap;
         m_image_context_menu->popup(screen_position);
@@ -351,8 +362,8 @@ Tab::Tab(BrowserWindow& window)
 
     view().on_title_change = [this](auto& title) {
         if (title.is_null()) {
-            m_history.update_title(url().to_string());
-            m_title = url().to_string();
+            m_history.update_title(url().to_deprecated_string());
+            m_title = url().to_deprecated_string();
         } else {
             m_history.update_title(title);
             m_title = title;
@@ -380,7 +391,7 @@ Tab::Tab(BrowserWindow& window)
         return {};
     };
 
-    view().on_get_cookie = [this](auto& url, auto source) -> String {
+    view().on_get_cookie = [this](auto& url, auto source) -> DeprecatedString {
         if (on_get_cookie)
             return on_get_cookie(url, source);
         return {};
@@ -391,9 +402,9 @@ Tab::Tab(BrowserWindow& window)
             on_set_cookie(url, cookie, source);
     };
 
-    view().on_update_cookie = [this](auto& url, auto& cookie) {
+    view().on_update_cookie = [this](auto& cookie) {
         if (on_update_cookie)
-            on_update_cookie(url, cookie);
+            on_update_cookie(cookie);
     };
 
     view().on_get_source = [this](auto& url, auto& source) {
@@ -430,13 +441,23 @@ Tab::Tab(BrowserWindow& window)
 
     view().on_link_hover = [this](auto& url) {
         if (url.is_valid())
-            update_status(url.to_string());
+            update_status(url.to_deprecated_string());
         else
             update_status();
     };
 
     view().on_url_drop = [this](auto& url) {
         load(url);
+    };
+
+    view().on_back_button = [this] {
+        if (m_history.can_go_back())
+            go_back();
+    };
+
+    view().on_forward_button = [this] {
+        if (m_history.can_go_forward())
+            go_forward();
     };
 
     m_tab_context_menu = GUI::Menu::construct();
@@ -467,7 +488,7 @@ Tab::Tab(BrowserWindow& window)
     m_page_context_menu->add_separator();
     m_page_context_menu->add_action(window.take_visible_screenshot_action());
     m_page_context_menu->add_action(window.take_full_screenshot_action());
-    view().on_context_menu_request = [&](auto& screen_position) {
+    view().on_context_menu_request = [&](auto screen_position) {
         m_page_context_menu->popup(screen_position);
     };
 }
@@ -479,7 +500,7 @@ Optional<URL> Tab::url_from_location_bar(MayAppendTLD may_append_tld)
         return {};
     }
 
-    String text = m_location_box->text();
+    DeprecatedString text = m_location_box->text();
 
     StringBuilder builder;
     builder.append(text);
@@ -489,7 +510,7 @@ Optional<URL> Tab::url_from_location_bar(MayAppendTLD may_append_tld)
             builder.append(".com"sv);
         }
     }
-    String final_text = builder.to_string();
+    DeprecatedString final_text = builder.to_deprecated_string();
 
     auto url = url_from_user_input(final_text);
     return url;
@@ -537,7 +558,7 @@ void Tab::update_actions()
 
 void Tab::bookmark_current_url()
 {
-    auto url = this->url().to_string();
+    auto url = this->url().to_deprecated_string();
     if (BookmarksBarWidget::the().contains_bookmark(url)) {
         BookmarksBarWidget::the().remove_bookmark(url);
     } else {
@@ -546,7 +567,7 @@ void Tab::bookmark_current_url()
     update_bookmark_button(url);
 }
 
-void Tab::update_bookmark_button(String const& url)
+void Tab::update_bookmark_button(DeprecatedString const& url)
 {
     if (BookmarksBarWidget::the().contains_bookmark(url)) {
         m_bookmark_button->set_icon(g_icon_bag.bookmark_filled);
@@ -559,9 +580,11 @@ void Tab::update_bookmark_button(String const& url)
 
 void Tab::did_become_active()
 {
-    BookmarksBarWidget::the().on_bookmark_click = [this](auto& url, auto open_in_new_tab) {
-        if (open_in_new_tab == BookmarksBarWidget::OpenInNewTab::Yes)
+    BookmarksBarWidget::the().on_bookmark_click = [this](auto& url, auto open) {
+        if (open == BookmarksBarWidget::Open::InNewTab)
             on_tab_open_request(url);
+        else if (open == BookmarksBarWidget::Open::InNewWindow)
+            on_window_open_request(url);
         else
             load(url);
     };
@@ -580,7 +603,7 @@ void Tab::did_become_active()
     update_actions();
 }
 
-void Tab::context_menu_requested(Gfx::IntPoint const& screen_position)
+void Tab::context_menu_requested(Gfx::IntPoint screen_position)
 {
     m_tab_context_menu->popup(screen_position);
 }
@@ -608,12 +631,12 @@ void Tab::action_left(GUI::Action&)
     m_statusbar->set_override_text({});
 }
 
-void Tab::window_position_changed(Gfx::IntPoint const& position)
+void Tab::window_position_changed(Gfx::IntPoint position)
 {
     m_web_content_view->set_window_position(position);
 }
 
-void Tab::window_size_changed(Gfx::IntSize const& size)
+void Tab::window_size_changed(Gfx::IntSize size)
 {
     m_web_content_view->set_window_size(size);
 }
@@ -658,6 +681,19 @@ void Tab::show_inspector_window(Browser::Tab::InspectorTarget inspector_target)
     window->move_to_front();
 }
 
+void Tab::close_sub_widgets()
+{
+    auto close_widget_window = [](auto& widget) {
+        if (widget) {
+            auto* window = widget->window();
+            window->close();
+        }
+    };
+    close_widget_window(m_dom_inspector_widget);
+    close_widget_window(m_console_widget);
+    close_widget_window(m_storage_widget);
+}
+
 void Tab::show_console_window()
 {
     if (!m_console_widget) {
@@ -666,7 +702,7 @@ void Tab::show_console_window()
         console_window->set_title("JS Console");
         console_window->set_icon(g_icon_bag.filetype_javascript);
         m_console_widget = console_window->set_main_widget<ConsoleWidget>();
-        m_console_widget->on_js_input = [this](String const& js_source) {
+        m_console_widget->on_js_input = [this](DeprecatedString const& js_source) {
             m_web_content_view->js_console_input(js_source);
         };
         m_console_widget->on_request_messages = [this](i32 start_index) {
@@ -689,7 +725,7 @@ void Tab::show_storage_inspector()
         m_storage_widget = storage_window->set_main_widget<StorageWidget>();
         m_storage_widget->on_update_cookie = [this](Web::Cookie::Cookie cookie) {
             if (on_update_cookie)
-                on_update_cookie(url(), move(cookie));
+                on_update_cookie(move(cookie));
         };
     }
 

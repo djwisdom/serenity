@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
 
@@ -60,7 +60,7 @@ public:
 
     Utf8View() = default;
 
-    explicit Utf8View(String& string)
+    explicit Utf8View(DeprecatedString& string)
         : m_string(string.view())
     {
     }
@@ -72,13 +72,15 @@ public:
 
     ~Utf8View() = default;
 
-    explicit Utf8View(String&&) = delete;
+    explicit Utf8View(DeprecatedString&&) = delete;
 
     StringView as_string() const { return m_string; }
 
     Utf8CodePointIterator begin() const { return { begin_ptr(), m_string.length() }; }
     Utf8CodePointIterator end() const { return { end_ptr(), 0 }; }
     Utf8CodePointIterator iterator_at_byte_offset(size_t) const;
+
+    Utf8CodePointIterator iterator_at_byte_offset_without_validation(size_t) const;
 
     unsigned char const* bytes() const { return begin_ptr(); }
     size_t byte_length() const { return m_string.length(); }
@@ -130,5 +132,7 @@ private:
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::Utf8CodePointIterator;
 using AK::Utf8View;
+#endif

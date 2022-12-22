@@ -21,20 +21,14 @@ public:
         Move
     };
 
-    enum Direction {
-        Clockwise,
-        Counterclockwise
-    };
-
     virtual ~GlyphEditorWidget() override = default;
 
     int glyph() const { return m_glyph; }
     void set_glyph(int);
     bool is_glyph_empty();
 
-    void rotate_90(Direction);
-    void flip_vertically();
-    void flip_horizontally();
+    void rotate_90(Gfx::RotationDirection);
+    void flip(Gfx::Orientation);
 
     int preferred_width() const;
     int preferred_height() const;

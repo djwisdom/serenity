@@ -81,11 +81,11 @@ Widget::Widget()
     register_property(
         "font_type", [this] { return m_font->is_fixed_width() ? "FixedWidth" : "Normal"; },
         [this](auto& value) {
-            if (value.to_string() == "FixedWidth") {
+            if (value.to_deprecated_string() == "FixedWidth") {
                 set_font_fixed_width(true);
                 return true;
             }
-            if (value.to_string() == "Normal") {
+            if (value.to_deprecated_string() == "Normal") {
                 set_font_fixed_width(false);
                 return true;
             }
@@ -127,9 +127,9 @@ Widget::Widget()
         });
 
     register_property(
-        "foreground_color", [this]() -> JsonValue { return palette().color(foreground_role()).to_string(); },
+        "foreground_color", [this]() -> JsonValue { return palette().color(foreground_role()).to_deprecated_string(); },
         [this](auto& value) {
-            auto c = Color::from_string(value.to_string());
+            auto c = Color::from_string(value.to_deprecated_string());
             if (c.has_value()) {
                 auto _palette = palette();
                 _palette.set_color(foreground_role(), c.value());
@@ -140,9 +140,9 @@ Widget::Widget()
         });
 
     register_property(
-        "background_color", [this]() -> JsonValue { return palette().color(background_role()).to_string(); },
+        "background_color", [this]() -> JsonValue { return palette().color(background_role()).to_deprecated_string(); },
         [this](auto& value) {
-            auto c = Color::from_string(value.to_string());
+            auto c = Color::from_string(value.to_deprecated_string());
             if (c.has_value()) {
                 auto _palette = palette();
                 _palette.set_color(background_role(), c.value());
@@ -199,10 +199,10 @@ Widget::Widget()
 
 Widget::~Widget() = default;
 
-void Widget::layout_relevant_change_occured()
+void Widget::layout_relevant_change_occurred()
 {
     if (auto* parent = parent_widget())
-        parent->layout_relevant_change_occured();
+        parent->layout_relevant_change_occurred();
     else if (window())
         window()->schedule_relayout();
 }
@@ -215,7 +215,7 @@ void Widget::child_event(Core::ChildEvent& event)
                 layout()->insert_widget_before(verify_cast<Widget>(*event.child()), verify_cast<Widget>(*event.insertion_before_child()));
             else
                 layout()->add_widget(verify_cast<Widget>(*event.child()));
-            layout_relevant_change_occured();
+            layout_relevant_change_occurred();
         }
         if (window() && event.child() && is<Widget>(*event.child()))
             window()->did_add_widget({}, verify_cast<Widget>(*event.child()));
@@ -229,7 +229,7 @@ void Widget::child_event(Core::ChildEvent& event)
         if (layout()) {
             if (event.child() && is<Widget>(*event.child()))
                 layout()->remove_widget(verify_cast<Widget>(*event.child()));
-            layout_relevant_change_occured();
+            layout_relevant_change_occurred();
         }
         if (window() && event.child() && is<Widget>(*event.child()))
             window()->did_remove_widget({}, verify_cast<Widget>(*event.child()));
@@ -426,7 +426,7 @@ void Widget::set_layout(NonnullRefPtr<Layout> layout)
     } else {
         update();
     }
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
 }
 
 void Widget::do_layout()
@@ -633,6 +633,11 @@ void Widget::update()
     if (rect().is_empty())
         return;
     update(rect());
+
+    for (auto& it : m_focus_delegators) {
+        if (!it.is_null() && !it->rect().is_empty())
+            it->update(it->rect());
+    }
 }
 
 void Widget::update(Gfx::IntRect const& rect)
@@ -692,7 +697,7 @@ Gfx::IntRect Widget::screen_relative_rect() const
     return window_relative_rect().translated(window_position);
 }
 
-Widget* Widget::child_at(Gfx::IntPoint const& point) const
+Widget* Widget::child_at(Gfx::IntPoint point) const
 {
     for (int i = children().size() - 1; i >= 0; --i) {
         if (!is<Widget>(children()[i]))
@@ -706,7 +711,7 @@ Widget* Widget::child_at(Gfx::IntPoint const& point) const
     return nullptr;
 }
 
-Widget::HitTestResult Widget::hit_test(Gfx::IntPoint const& position, ShouldRespectGreediness should_respect_greediness)
+Widget::HitTestResult Widget::hit_test(Gfx::IntPoint position, ShouldRespectGreediness should_respect_greediness)
 {
     if (should_respect_greediness == ShouldRespectGreediness::Yes && is_greedy_for_hits())
         return { this, position };
@@ -726,8 +731,26 @@ void Widget::set_focus_proxy(Widget* proxy)
 {
     if (m_focus_proxy == proxy)
         return;
-
+    if (proxy)
+        proxy->add_focus_delegator(this);
+    else if (m_focus_proxy)
+        m_focus_proxy->remove_focus_delegator(this);
     m_focus_proxy = proxy;
+}
+
+void Widget::add_focus_delegator(Widget* delegator)
+{
+    m_focus_delegators.remove_all_matching([&](auto& entry) {
+        return entry.is_null() || entry == delegator;
+    });
+    m_focus_delegators.append(delegator);
+}
+
+void Widget::remove_focus_delegator(Widget* delegator)
+{
+    m_focus_delegators.remove_first_matching([&](auto& entry) {
+        return entry == delegator;
+    });
 }
 
 FocusPolicy Widget::focus_policy() const
@@ -752,10 +775,7 @@ bool Widget::is_focused() const
     auto* win = window();
     if (!win)
         return false;
-    // Capturing modals are not active despite being the active
-    // input window. So we can have focus if either we're the active
-    // input window or we're the active window
-    if (win->is_active_input() || win->is_active())
+    if (win->is_focusable())
         return win->focused_widget() == this;
     return false;
 }
@@ -793,7 +813,7 @@ void Widget::set_font(Gfx::Font const* font)
     update();
 }
 
-void Widget::set_font_family(String const& family)
+void Widget::set_font_family(DeprecatedString const& family)
 {
     set_font(Gfx::FontDatabase::the().get(family, m_font->presentation_size(), m_font->weight(), m_font->slope()));
 }
@@ -822,7 +842,7 @@ void Widget::set_min_size(UISize const& size)
     if (m_min_size == size)
         return;
     m_min_size = size;
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
 }
 
 void Widget::set_max_size(UISize const& size)
@@ -831,7 +851,7 @@ void Widget::set_max_size(UISize const& size)
     if (m_max_size == size)
         return;
     m_max_size = size;
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
 }
 
 void Widget::set_preferred_size(UISize const& size)
@@ -839,7 +859,7 @@ void Widget::set_preferred_size(UISize const& size)
     if (m_preferred_size == size)
         return;
     m_preferred_size = size;
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
 }
 
 Optional<UISize> Widget::calculated_preferred_size() const
@@ -871,7 +891,7 @@ void Widget::set_visible(bool visible)
     if (visible == m_visible)
         return;
     m_visible = visible;
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
     if (m_visible)
         update();
     if (!m_visible && is_focused())
@@ -1028,16 +1048,16 @@ void Widget::set_palette(Palette const& palette)
     update();
 }
 
-void Widget::set_title(String title)
+void Widget::set_title(DeprecatedString title)
 {
     m_title = move(title);
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
     // For tab widget children, our change in title also affects the parent.
     if (parent_widget())
         parent_widget()->update();
 }
 
-String Widget::title() const
+DeprecatedString Widget::title() const
 {
     return m_title;
 }
@@ -1074,7 +1094,7 @@ void Widget::set_grabbable_margins(Margins const& margins)
     if (m_grabbable_margins == margins)
         return;
     m_grabbable_margins = margins;
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
 }
 
 Gfx::IntRect Widget::relative_non_grabbable_rect() const
@@ -1086,7 +1106,7 @@ Gfx::IntRect Widget::relative_non_grabbable_rect() const
     return rect;
 }
 
-void Widget::set_tooltip(String tooltip)
+void Widget::set_tooltip(DeprecatedString tooltip)
 {
     m_tooltip = move(tooltip);
     if (Application::the()->tooltip_source_widget() == this)
@@ -1127,13 +1147,13 @@ void Widget::set_override_cursor(AK::Variant<Gfx::StandardCursor, NonnullRefPtr<
 
 bool Widget::load_from_gml(StringView gml_string)
 {
-    return load_from_gml(gml_string, [](String const& class_name) -> RefPtr<Core::Object> {
+    return load_from_gml(gml_string, [](DeprecatedString const& class_name) -> RefPtr<Core::Object> {
         dbgln("Class '{}' not registered", class_name);
         return nullptr;
     });
 }
 
-bool Widget::load_from_gml(StringView gml_string, RefPtr<Core::Object> (*unregistered_child_handler)(String const&))
+bool Widget::load_from_gml(StringView gml_string, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&))
 {
     auto value = GML::parse_gml(gml_string);
     if (value.is_error()) {
@@ -1144,7 +1164,7 @@ bool Widget::load_from_gml(StringView gml_string, RefPtr<Core::Object> (*unregis
     return load_from_gml_ast(value.release_value(), unregistered_child_handler);
 }
 
-bool Widget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::Object> (*unregistered_child_handler)(String const&))
+bool Widget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&))
 {
     if (is<GUI::GML::GMLFile>(ast.ptr()))
         return load_from_gml_ast(static_ptr_cast<GUI::GML::GMLFile>(ast)->main_class(), unregistered_child_handler);
@@ -1168,12 +1188,12 @@ bool Widget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::O
         if (auto* registration = Core::ObjectClassRegistration::find(class_name)) {
             auto layout = registration->construct();
             if (!layout || !registration->is_derived_from(layout_class)) {
-                dbgln("Invalid layout class: '{}'", class_name.to_string());
+                dbgln("Invalid layout class: '{}'", class_name.to_deprecated_string());
                 return false;
             }
             set_layout(static_ptr_cast<Layout>(layout).release_nonnull());
         } else {
-            dbgln("Unknown layout class: '{}'", class_name.to_string());
+            dbgln("Unknown layout class: '{}'", class_name.to_deprecated_string());
             return false;
         }
 

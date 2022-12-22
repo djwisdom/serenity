@@ -12,7 +12,7 @@
 
 namespace DNS {
 
-Answer::Answer(Name const& name, RecordType type, RecordClass class_code, u32 ttl, String const& record_data, bool mdns_cache_flush)
+Answer::Answer(Name const& name, RecordType type, RecordClass class_code, u32 ttl, DeprecatedString const& record_data, bool mdns_cache_flush)
     : m_name(name)
     , m_type(type)
     , m_class_code(class_code)
@@ -100,22 +100,24 @@ ErrorOr<void> AK::Formatter<DNS::RecordClass>::format(AK::FormatBuilder& builder
 
 namespace IPC {
 
+template<>
 bool encode(Encoder& encoder, DNS::Answer const& answer)
 {
     encoder << answer.name().as_string() << (u16)answer.type() << (u16)answer.class_code() << answer.ttl() << answer.record_data() << answer.mdns_cache_flush();
     return true;
 }
 
+template<>
 ErrorOr<void> decode(Decoder& decoder, DNS::Answer& answer)
 {
-    String name;
+    DeprecatedString name;
     TRY(decoder.decode(name));
     u16 record_type, class_code;
     TRY(decoder.decode(record_type));
     TRY(decoder.decode(class_code));
     u32 ttl;
     TRY(decoder.decode(ttl));
-    String record_data;
+    DeprecatedString record_data;
     TRY(decoder.decode(record_data));
     bool cache_flush;
     TRY(decoder.decode(cache_flush));

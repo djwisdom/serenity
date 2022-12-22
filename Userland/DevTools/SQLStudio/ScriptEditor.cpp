@@ -21,7 +21,7 @@ ScriptEditor::ScriptEditor()
     set_ruler_visible(true);
 }
 
-void ScriptEditor::new_script_with_temp_name(String name)
+void ScriptEditor::new_script_with_temp_name(DeprecatedString name)
 {
     set_name(name);
 }
@@ -29,7 +29,7 @@ void ScriptEditor::new_script_with_temp_name(String name)
 ErrorOr<void> ScriptEditor::open_script_from_file(LexicalPath const& file_path)
 {
     auto file = TRY(Core::Stream::File::open(file_path.string(), Core::Stream::OpenMode::Read));
-    auto buffer = TRY(file->read_all());
+    auto buffer = TRY(file->read_until_eof());
 
     set_text({ buffer.bytes() });
     m_path = file_path.string();
@@ -44,8 +44,7 @@ ErrorOr<bool> ScriptEditor::save()
 
     auto file = TRY(Core::Stream::File::open(m_path, Core::Stream::OpenMode::Write));
     auto editor_text = text();
-    if (editor_text.length() && !file->write_or_error(editor_text.bytes()))
-        return Error::from_string_literal("Failed to write to file");
+    TRY(file->write_entire_buffer(editor_text.bytes()));
 
     document().set_unmodified();
     return true;
@@ -60,8 +59,7 @@ ErrorOr<bool> ScriptEditor::save_as()
 
     auto file = TRY(Core::Stream::File::open(save_path, Core::Stream::OpenMode::Write));
     auto editor_text = text();
-    if (editor_text.length() && !file->write_or_error(editor_text.bytes()))
-        return Error::from_string_literal("Failed to write to file");
+    TRY(file->write_entire_buffer(editor_text.bytes()));
 
     m_path = save_path;
 

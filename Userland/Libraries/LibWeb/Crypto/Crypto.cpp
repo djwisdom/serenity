@@ -16,7 +16,7 @@ namespace Web::Crypto {
 
 JS::NonnullGCPtr<Crypto> Crypto::create(JS::Realm& realm)
 {
-    return *realm.heap().allocate<Crypto>(realm, realm);
+    return realm.heap().allocate<Crypto>(realm, realm);
 }
 
 Crypto::Crypto(JS::Realm& realm)
@@ -63,7 +63,7 @@ WebIDL::ExceptionOr<JS::Value> Crypto::get_random_values(JS::Value array) const
 }
 
 // https://w3c.github.io/webcrypto/#dfn-Crypto-method-randomUUID
-String Crypto::random_uuid() const
+DeprecatedString Crypto::random_uuid() const
 {
     // 1. Let bytes be a byte sequence of length 16.
     u8 bytes[16];
@@ -111,7 +111,7 @@ String Crypto::random_uuid() const
     builder.appendff("{:02x}{:02x}-", bytes[6], bytes[7]);
     builder.appendff("{:02x}{:02x}-", bytes[8], bytes[9]);
     builder.appendff("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}", bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 void Crypto::visit_edges(Cell::Visitor& visitor)

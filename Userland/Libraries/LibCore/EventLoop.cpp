@@ -211,7 +211,7 @@ private:
 public:
     void send_response(JsonObject const& response)
     {
-        auto serialized = response.to_string();
+        auto serialized = response.to_deprecated_string();
         auto bytes_to_send = serialized.bytes();
         u32 length = bytes_to_send.size();
         // FIXME: Propagate errors
@@ -280,7 +280,7 @@ public:
             auto address = request.get("address"sv).to_number<FlatPtr>();
             for (auto& object : Object::all_objects()) {
                 if ((FlatPtr)&object == address) {
-                    bool success = object.set_property(request.get("name"sv).to_string(), request.get("value"sv));
+                    bool success = object.set_property(request.get("name"sv).to_deprecated_string(), request.get("value"sv));
                     JsonObject response;
                     response.set("type", "SetProperty");
                     response.set("success", success);
@@ -368,7 +368,7 @@ bool connect_to_inspector_server()
         return false;
     }
     auto inspector_server_path = maybe_path.value();
-    auto maybe_socket = Stream::LocalSocket::connect(inspector_server_path);
+    auto maybe_socket = Stream::LocalSocket::connect(inspector_server_path, Stream::PreventSIGPIPE::Yes);
     if (maybe_socket.is_error()) {
         dbgln("connect_to_inspector_server: Failed to connect: {}", maybe_socket.error());
         return false;

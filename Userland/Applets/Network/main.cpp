@@ -103,7 +103,7 @@ private:
         m_connected = connected;
     }
 
-    String get_adapter_info()
+    DeprecatedString get_adapter_info()
     {
         StringBuilder adapter_info;
 
@@ -113,7 +113,7 @@ private:
             return "";
         }
 
-        auto file_contents_or_error = file_or_error.value()->read_all();
+        auto file_contents_or_error = file_or_error.value()->read_until_eof();
         if (file_contents_or_error.is_error()) {
             dbgln("Error: Could not read /sys/kernel/net/adapters: {}", file_contents_or_error.error());
             return "";
@@ -122,13 +122,13 @@ private:
         auto json = JsonValue::from_string(file_contents_or_error.value());
 
         if (json.is_error())
-            return adapter_info.to_string();
+            return adapter_info.to_deprecated_string();
 
         int connected_adapters = 0;
         json.value().as_array().for_each([&adapter_info, &connected_adapters](auto& value) {
             auto& if_object = value.as_object();
             auto ip_address = if_object.get("ipv4_address"sv).as_string_or("no IP");
-            auto ifname = if_object.get("name"sv).to_string();
+            auto ifname = if_object.get("name"sv).to_deprecated_string();
             auto link_up = if_object.get("link_up"sv).as_bool();
             auto link_speed = if_object.get("link_speed"sv).to_i32();
 
@@ -151,10 +151,10 @@ private:
         // show connected icon so long as at least one adapter is connected
         connected_adapters ? set_connected(true) : set_connected(false);
 
-        return adapter_info.to_string();
+        return adapter_info.to_deprecated_string();
     }
 
-    String m_adapter_info;
+    DeprecatedString m_adapter_info;
     bool m_connected = false;
     bool m_notifications = true;
     NonnullRefPtr<Gfx::Bitmap> m_connected_icon;

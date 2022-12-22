@@ -196,8 +196,10 @@ set(KERNEL_SOURCES
     FileSystem/SysFS/Subsystems/Kernel/Network/UDP.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/BooleanVariable.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/CapsLockRemap.cpp
+    FileSystem/SysFS/Subsystems/Kernel/Variables/CoredumpDirectory.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/Directory.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/DumpKmallocStack.cpp
+    FileSystem/SysFS/Subsystems/Kernel/Variables/StringVariable.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/UBSANDeadly.cpp
     FileSystem/TmpFS/FileSystem.cpp
     FileSystem/TmpFS/Inode.cpp
@@ -262,7 +264,6 @@ set(KERNEL_SOURCES
     Scheduler.cpp
     StdLib.cpp
     Syscalls/anon_create.cpp
-    Syscalls/access.cpp
     Syscalls/alarm.cpp
     Syscalls/beep.cpp
     Syscalls/chdir.cpp
@@ -274,6 +275,7 @@ set(KERNEL_SOURCES
     Syscalls/dup2.cpp
     Syscalls/emuctl.cpp
     Syscalls/exit.cpp
+    Syscalls/faccessat.cpp
     Syscalls/fallocate.cpp
     Syscalls/fcntl.cpp
     Syscalls/fsync.cpp
@@ -669,6 +671,10 @@ endif()
 
 if ("${SERENITY_ARCH}" STREQUAL "aarch64")
     add_compile_options(-fno-threadsafe-statics)
+
+    # Unaligned memory access will cause a trap, so to make sure the compiler doesn't generate
+    # those unaligned accesses, this flag is added.
+    add_compile_options(-mstrict-align -Wno-cast-align)
 endif()
 
 add_compile_definitions(KERNEL)

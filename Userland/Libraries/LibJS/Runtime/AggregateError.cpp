@@ -10,7 +10,7 @@
 
 namespace JS {
 
-AggregateError* AggregateError::create(Realm& realm)
+NonnullGCPtr<AggregateError> AggregateError::create(Realm& realm)
 {
     return realm.heap().allocate<AggregateError>(realm, *realm.intrinsics().aggregate_error_prototype());
 }

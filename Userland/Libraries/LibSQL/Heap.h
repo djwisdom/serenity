@@ -8,8 +8,8 @@
 
 #include <AK/Array.h>
 #include <AK/Debug.h>
+#include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/Object.h>
 #include <LibCore/Stream.h>
@@ -33,13 +33,14 @@ class Heap : public Core::Object {
     C_OBJECT(Heap);
 
 public:
+    static constexpr inline u32 current_version = 3;
+
     virtual ~Heap() override;
 
     ErrorOr<void> open();
     u32 size() const { return m_end_of_file; }
     ErrorOr<ByteBuffer> read_block(u32);
     [[nodiscard]] u32 new_record_pointer();
-    [[nodiscard]] bool has_block(u32 block) const { return block < size(); }
     [[nodiscard]] bool valid() const { return static_cast<bool>(m_file); }
 
     u32 schemas_root() const { return m_schemas_root; }
@@ -90,7 +91,7 @@ public:
     ErrorOr<void> flush();
 
 private:
-    explicit Heap(String);
+    explicit Heap(DeprecatedString);
 
     ErrorOr<void> write_block(u32, ByteBuffer&);
     ErrorOr<void> seek_block(u32);
@@ -105,7 +106,7 @@ private:
     u32 m_schemas_root { 0 };
     u32 m_tables_root { 0 };
     u32 m_table_columns_root { 0 };
-    u32 m_version { 0x00000001 };
+    u32 m_version { current_version };
     Array<u32, 16> m_user_values { 0 };
     HashMap<u32, ByteBuffer> m_write_ahead_log;
 };

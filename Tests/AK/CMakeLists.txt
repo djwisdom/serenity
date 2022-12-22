@@ -1,5 +1,4 @@
 set(AK_TEST_SOURCES
-    TestFixedPoint.cpp
     TestAllOf.cpp
     TestAnyOf.cpp
     TestArbitrarySizedEnum.cpp
@@ -19,6 +18,7 @@ set(AK_TEST_SOURCES
     TestCircularDuplexStream.cpp
     TestCircularQueue.cpp
     TestComplex.cpp
+    TestDeprecatedString.cpp
     TestDisjointChunks.cpp
     TestDistinctNumeric.cpp
     TestDoublyLinkedList.cpp
@@ -26,6 +26,7 @@ set(AK_TEST_SOURCES
     TestEnumBits.cpp
     TestFind.cpp
     TestFixedArray.cpp
+    TestFixedPoint.cpp
     TestFloatingPoint.cpp
     TestFloatingPointParsing.cpp
     TestFormat.cpp
@@ -37,6 +38,7 @@ set(AK_TEST_SOURCES
     TestIPv4Address.cpp
     TestIPv6Address.cpp
     TestIndexSequence.cpp
+    TestInsertionSort.cpp
     TestIntegerMath.cpp
     TestIntrusiveList.cpp
     TestIntrusiveRedBlackTree.cpp
@@ -50,6 +52,7 @@ set(AK_TEST_SOURCES
     TestNonnullRefPtr.cpp
     TestNumberFormat.cpp
     TestOptional.cpp
+    TestOwnPtr.cpp
     TestPrint.cpp
     TestQueue.cpp
     TestQuickSort.cpp

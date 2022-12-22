@@ -1,340 +1,135 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
+#include <AK/Concepts.h>
 #include <AK/Format.h>
 #include <AK/Forward.h>
-#include <AK/RefPtr.h>
-#include <AK/Stream.h>
-#include <AK/StringBuilder.h>
-#include <AK/StringImpl.h>
-#include <AK/StringUtils.h>
+#include <AK/RefCounted.h>
+#include <AK/Span.h>
+#include <AK/StringView.h>
 #include <AK/Traits.h>
+#include <AK/Types.h>
 
 namespace AK {
 
-// String is a convenience wrapper around StringImpl, suitable for passing
-// around as a value type. It's basically the same as passing around a
-// RefPtr<StringImpl>, with a bit of syntactic sugar.
-//
-// Note that StringImpl is an immutable object that cannot shrink or grow.
-// Its allocation size is snugly tailored to the specific string it contains.
-// Copying a String is very efficient, since the internal StringImpl is
-// retainable and so copying only requires modifying the ref count.
-//
-// There are three main ways to construct a new String:
-//
-//     s = String("some literal");
-//
-//     s = String::formatted("{} little piggies", m_piggies);
-//
-//     StringBuilder builder;
-//     builder.append("abc");
-//     builder.append("123");
-//     s = builder.to_string();
+namespace Detail {
+class StringData;
+}
 
+// String is a strongly owned sequence of Unicode code points encoded as UTF-8.
+// The data may or may not be heap-allocated, and may or may not be reference counted.
+// There is no guarantee that the underlying bytes are null-terminated.
 class String {
 public:
-    ~String() = default;
+    // NOTE: For short strings, we avoid heap allocations by storing them in the data pointer slot.
+    static constexpr size_t MAX_SHORT_STRING_BYTE_COUNT = sizeof(Detail::StringData*) - 1;
 
-    String() = default;
+    String(String const&);
+    String(String&&);
 
-    String(StringView view)
-        : m_impl(StringImpl::create(view.characters_without_null_termination(), view.length()))
+    String& operator=(String&&);
+    String& operator=(String const&);
+
+    ~String();
+
+    // Creates an empty (zero-length) String.
+    String();
+
+    // Creates a new String from a sequence of UTF-8 encoded code points.
+    static ErrorOr<String> from_utf8(StringView);
+
+    // Creates a substring with a deep copy of the specified data window.
+    ErrorOr<String> substring_from_byte_offset(size_t start, size_t byte_count) const;
+
+    // Creates a substring that strongly references the origin superstring instead of making a deep copy of the data.
+    ErrorOr<String> substring_from_byte_offset_with_shared_superstring(size_t start, size_t byte_count) const;
+
+    // Returns an iterable view over the Unicode code points.
+    [[nodiscard]] Utf8View code_points() const;
+
+    // Returns the underlying UTF-8 encoded bytes.
+    // NOTE: There is no guarantee about null-termination.
+    [[nodiscard]] ReadonlyBytes bytes() const;
+
+    // Returns true if the String is zero-length.
+    [[nodiscard]] bool is_empty() const;
+
+    // Returns a StringView covering the full length of the string. Note that iterating this will go byte-at-a-time, not code-point-at-a-time.
+    [[nodiscard]] StringView bytes_as_string_view() const;
+
+    ErrorOr<String> replace(StringView needle, StringView replacement, ReplaceMode replace_mode) const;
+
+    [[nodiscard]] bool operator==(String const&) const;
+    [[nodiscard]] bool operator!=(String const& other) const { return !(*this == other); }
+
+    [[nodiscard]] bool operator==(StringView) const;
+    [[nodiscard]] bool operator!=(StringView other) const { return !(*this == other); }
+
+    [[nodiscard]] bool operator==(char const* cstring) const;
+    [[nodiscard]] bool operator!=(char const* cstring) const { return !(*this == cstring); }
+
+    // NOTE: UTF-8 is defined in a way that lexicographic ordering of code points is equivalent to lexicographic ordering of bytes.
+    [[nodiscard]] int operator<=>(String const& other) const { return this->bytes_as_string_view().compare(other.bytes_as_string_view()); }
+
+    [[nodiscard]] u32 hash() const;
+
+    template<Arithmetic T>
+    static ErrorOr<String> number(T value)
     {
+        return formatted("{}", value);
     }
 
-    String(String const& other)
-        : m_impl(const_cast<String&>(other).m_impl)
-    {
-    }
-
-    String(String&& other)
-        : m_impl(move(other.m_impl))
-    {
-    }
-
-    String(char const* cstring, ShouldChomp shouldChomp = NoChomp)
-        : m_impl(StringImpl::create(cstring, shouldChomp))
-    {
-    }
-
-    String(char const* cstring, size_t length, ShouldChomp shouldChomp = NoChomp)
-        : m_impl(StringImpl::create(cstring, length, shouldChomp))
-    {
-    }
-
-    explicit String(ReadonlyBytes bytes, ShouldChomp shouldChomp = NoChomp)
-        : m_impl(StringImpl::create(bytes, shouldChomp))
-    {
-    }
-
-    String(StringImpl const& impl)
-        : m_impl(const_cast<StringImpl&>(impl))
-    {
-    }
-
-    String(StringImpl const* impl)
-        : m_impl(const_cast<StringImpl*>(impl))
-    {
-    }
-
-    String(RefPtr<StringImpl>&& impl)
-        : m_impl(move(impl))
-    {
-    }
-
-    String(NonnullRefPtr<StringImpl>&& impl)
-        : m_impl(move(impl))
-    {
-    }
-
-    String(FlyString const&);
-
-    [[nodiscard]] static String repeated(char, size_t count);
-    [[nodiscard]] static String repeated(StringView, size_t count);
-
-    [[nodiscard]] static String bijective_base_from(size_t value, unsigned base = 26, StringView map = {});
-    [[nodiscard]] static String roman_number_from(size_t value);
-
-    template<class SeparatorType, class CollectionType>
-    [[nodiscard]] static String join(SeparatorType const& separator, CollectionType const& collection, StringView fmtstr = "{}"sv)
-    {
-        StringBuilder builder;
-        builder.join(separator, collection, fmtstr);
-        return builder.build();
-    }
-
-    [[nodiscard]] bool matches(StringView mask, CaseSensitivity = CaseSensitivity::CaseInsensitive) const;
-    [[nodiscard]] bool matches(StringView mask, Vector<MaskSpan>&, CaseSensitivity = CaseSensitivity::CaseInsensitive) const;
-
-    template<typename T = int>
-    [[nodiscard]] Optional<T> to_int(TrimWhitespace = TrimWhitespace::Yes) const;
-    template<typename T = unsigned>
-    [[nodiscard]] Optional<T> to_uint(TrimWhitespace = TrimWhitespace::Yes) const;
-#ifndef KERNEL
-    [[nodiscard]] Optional<double> to_double(TrimWhitespace = TrimWhitespace::Yes) const;
-    [[nodiscard]] Optional<float> to_float(TrimWhitespace = TrimWhitespace::Yes) const;
-#endif
-
-    [[nodiscard]] String to_lowercase() const;
-    [[nodiscard]] String to_uppercase() const;
-    [[nodiscard]] String to_snakecase() const;
-    [[nodiscard]] String to_titlecase() const;
-    [[nodiscard]] String invert_case() const;
-
-    [[nodiscard]] bool is_whitespace() const { return StringUtils::is_whitespace(*this); }
-
-    [[nodiscard]] String trim(StringView characters, TrimMode mode = TrimMode::Both) const
-    {
-        auto trimmed_view = StringUtils::trim(view(), characters, mode);
-        if (view() == trimmed_view)
-            return *this;
-        return trimmed_view;
-    }
-
-    [[nodiscard]] String trim_whitespace(TrimMode mode = TrimMode::Both) const
-    {
-        auto trimmed_view = StringUtils::trim_whitespace(view(), mode);
-        if (view() == trimmed_view)
-            return *this;
-        return trimmed_view;
-    }
-
-    [[nodiscard]] bool equals_ignoring_case(StringView) const;
-
-    [[nodiscard]] bool contains(StringView, CaseSensitivity = CaseSensitivity::CaseSensitive) const;
-    [[nodiscard]] bool contains(char, CaseSensitivity = CaseSensitivity::CaseSensitive) const;
-
-    [[nodiscard]] Vector<String> split_limit(char separator, size_t limit, SplitBehavior = SplitBehavior::Nothing) const;
-    [[nodiscard]] Vector<String> split(char separator, SplitBehavior = SplitBehavior::Nothing) const;
-    [[nodiscard]] Vector<StringView> split_view(char separator, SplitBehavior = SplitBehavior::Nothing) const;
-    [[nodiscard]] Vector<StringView> split_view(Function<bool(char)> separator, SplitBehavior = SplitBehavior::Nothing) const;
-
-    [[nodiscard]] Optional<size_t> find(char needle, size_t start = 0) const { return StringUtils::find(*this, needle, start); }
-    [[nodiscard]] Optional<size_t> find(StringView needle, size_t start = 0) const { return StringUtils::find(*this, needle, start); }
-    [[nodiscard]] Optional<size_t> find_last(char needle) const { return StringUtils::find_last(*this, needle); }
-    // FIXME: Implement find_last(StringView) for API symmetry.
-    Vector<size_t> find_all(StringView needle) const;
-    using SearchDirection = StringUtils::SearchDirection;
-    [[nodiscard]] Optional<size_t> find_any_of(StringView needles, SearchDirection direction) const { return StringUtils::find_any_of(*this, needles, direction); }
-
-    [[nodiscard]] StringView find_last_split_view(char separator) const { return view().find_last_split_view(separator); }
-
-    [[nodiscard]] String substring(size_t start, size_t length) const;
-    [[nodiscard]] String substring(size_t start) const;
-    [[nodiscard]] StringView substring_view(size_t start, size_t length) const;
-    [[nodiscard]] StringView substring_view(size_t start) const;
-
-    [[nodiscard]] bool is_null() const { return !m_impl; }
-    [[nodiscard]] ALWAYS_INLINE bool is_empty() const { return length() == 0; }
-    [[nodiscard]] ALWAYS_INLINE size_t length() const { return m_impl ? m_impl->length() : 0; }
-    // Includes NUL-terminator, if non-nullptr.
-    [[nodiscard]] ALWAYS_INLINE char const* characters() const { return m_impl ? m_impl->characters() : nullptr; }
-
-    [[nodiscard]] bool copy_characters_to_buffer(char* buffer, size_t buffer_size) const;
-
-    [[nodiscard]] ALWAYS_INLINE ReadonlyBytes bytes() const
-    {
-        if (m_impl) {
-            return m_impl->bytes();
-        }
-        return {};
-    }
-
-    [[nodiscard]] ALWAYS_INLINE char const& operator[](size_t i) const
-    {
-        VERIFY(!is_null());
-        return (*m_impl)[i];
-    }
-
-    using ConstIterator = SimpleIterator<const String, char const>;
-
-    [[nodiscard]] constexpr ConstIterator begin() const { return ConstIterator::begin(*this); }
-    [[nodiscard]] constexpr ConstIterator end() const { return ConstIterator::end(*this); }
-
-    [[nodiscard]] bool starts_with(StringView, CaseSensitivity = CaseSensitivity::CaseSensitive) const;
-    [[nodiscard]] bool ends_with(StringView, CaseSensitivity = CaseSensitivity::CaseSensitive) const;
-    [[nodiscard]] bool starts_with(char) const;
-    [[nodiscard]] bool ends_with(char) const;
-
-    bool operator==(String const&) const;
-
-    bool operator==(StringView) const;
-
-    bool operator==(FlyString const&) const;
-
-    bool operator<(String const&) const;
-    bool operator<(char const*) const;
-    bool operator>=(String const& other) const { return !(*this < other); }
-    bool operator>=(char const* other) const { return !(*this < other); }
-
-    bool operator>(String const&) const;
-    bool operator>(char const*) const;
-    bool operator<=(String const& other) const { return !(*this > other); }
-    bool operator<=(char const* other) const { return !(*this > other); }
-
-    bool operator==(char const* cstring) const;
-
-    [[nodiscard]] String isolated_copy() const;
-
-    [[nodiscard]] static String empty()
-    {
-        return StringImpl::the_empty_stringimpl();
-    }
-
-    [[nodiscard]] StringImpl* impl() { return m_impl.ptr(); }
-    [[nodiscard]] StringImpl const* impl() const { return m_impl.ptr(); }
-
-    String& operator=(String&& other)
-    {
-        if (this != &other)
-            m_impl = move(other.m_impl);
-        return *this;
-    }
-
-    String& operator=(String const& other)
-    {
-        if (this != &other)
-            m_impl = const_cast<String&>(other).m_impl;
-        return *this;
-    }
-
-    String& operator=(std::nullptr_t)
-    {
-        m_impl = nullptr;
-        return *this;
-    }
-
-    String& operator=(ReadonlyBytes bytes)
-    {
-        m_impl = StringImpl::create(bytes);
-        return *this;
-    }
-
-    [[nodiscard]] u32 hash() const
-    {
-        if (!m_impl)
-            return 0;
-        return m_impl->hash();
-    }
-
-    [[nodiscard]] ByteBuffer to_byte_buffer() const;
-
-    template<typename BufferType>
-    [[nodiscard]] static String copy(BufferType const& buffer, ShouldChomp should_chomp = NoChomp)
-    {
-        if (buffer.is_empty())
-            return empty();
-        return String((char const*)buffer.data(), buffer.size(), should_chomp);
-    }
-
-    [[nodiscard]] static String vformatted(StringView fmtstr, TypeErasedFormatParams&);
+    static ErrorOr<String> vformatted(StringView fmtstr, TypeErasedFormatParams&);
 
     template<typename... Parameters>
-    [[nodiscard]] static String formatted(CheckedFormatString<Parameters...>&& fmtstr, Parameters const&... parameters)
+    static ErrorOr<String> formatted(CheckedFormatString<Parameters...>&& fmtstr, Parameters const&... parameters)
     {
         VariadicFormatParams variadic_format_parameters { parameters... };
         return vformatted(fmtstr.view(), variadic_format_parameters);
     }
 
-    template<typename T>
-    [[nodiscard]] static String number(T value) requires IsArithmetic<T>
-    {
-        return formatted("{}", value);
-    }
+    // NOTE: This is primarily interesting to unit tests.
+    [[nodiscard]] bool is_short_string() const;
 
-    [[nodiscard]] StringView view() const
-    {
-        return { characters(), length() };
-    }
-
-    [[nodiscard]] String replace(StringView needle, StringView replacement, ReplaceMode replace_mode) const { return StringUtils::replace(*this, needle, replacement, replace_mode); }
-    [[nodiscard]] size_t count(StringView needle) const { return StringUtils::count(*this, needle); }
-    [[nodiscard]] String reverse() const;
-
-    template<typename... Ts>
-    [[nodiscard]] ALWAYS_INLINE constexpr bool is_one_of(Ts&&... strings) const
-    {
-        return (... || this->operator==(forward<Ts>(strings)));
-    }
-
-    template<typename... Ts>
-    [[nodiscard]] ALWAYS_INLINE constexpr bool is_one_of_ignoring_case(Ts&&... strings) const
-    {
-        return (... ||
-                [this, &strings]() -> bool {
-            if constexpr (requires(Ts a) { a.view()->StringView; })
-                return this->equals_ignoring_case(forward<Ts>(strings.view()));
-            else
-                return this->equals_ignoring_case(forward<Ts>(strings));
-        }());
-    }
+    // FIXME: Remove these once all code has been ported to String
+    [[nodiscard]] DeprecatedString to_deprecated_string() const;
+    static ErrorOr<String> from_deprecated_string(DeprecatedString const&);
 
 private:
-    RefPtr<StringImpl> m_impl;
+    // NOTE: If the least significant bit of the pointer is set, this is a short string.
+    static constexpr uintptr_t SHORT_STRING_FLAG = 1;
+
+    struct ShortString {
+        ReadonlyBytes bytes() const;
+        size_t byte_count() const;
+
+        // NOTE: This is the byte count shifted left 1 step and or'ed with a 1 (the SHORT_STRING_FLAG)
+        u8 byte_count_and_short_string_flag { 0 };
+        u8 storage[MAX_SHORT_STRING_BYTE_COUNT] = { 0 };
+    };
+
+    explicit String(NonnullRefPtr<Detail::StringData>);
+    explicit String(ShortString);
+
+    union {
+        ShortString m_short_string;
+        Detail::StringData* m_data { nullptr };
+    };
 };
 
 template<>
 struct Traits<String> : public GenericTraits<String> {
-    static unsigned hash(String const& s) { return s.impl() ? s.impl()->hash() : 0; }
+    static unsigned hash(String const&);
 };
 
-struct CaseInsensitiveStringTraits : public Traits<String> {
-    static unsigned hash(String const& s) { return s.impl() ? s.impl()->case_insensitive_hash() : 0; }
-    static bool equals(String const& a, String const& b) { return a.equals_ignoring_case(b); }
+template<>
+struct Formatter<String> : Formatter<StringView> {
+    ErrorOr<void> format(FormatBuilder&, String const&);
 };
-
-String escape_html_entities(StringView html);
-
-InputStream& operator>>(InputStream& stream, String& string);
 
 }
-
-using AK::CaseInsensitiveStringTraits;
-using AK::escape_html_entities;
-using AK::String;

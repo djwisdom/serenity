@@ -6,15 +6,15 @@
 
 #include <LibTest/TestCase.h>
 
+#include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
 #include <AK/JsonObject.h>
 #include <AK/JsonValue.h>
-#include <AK/String.h>
 #include <AK/StringBuilder.h>
 
 TEST_CASE(load_form)
 {
-    String raw_form_json = R"(
+    DeprecatedString raw_form_json = R"(
     {
         "name": "Form1",
         "widgets": [
@@ -40,7 +40,7 @@ TEST_CASE(load_form)
 
     EXPECT(form_json.is_object());
 
-    auto name = form_json.as_object().get("name"sv).to_string();
+    auto name = form_json.as_object().get("name"sv).to_deprecated_string();
 
     EXPECT_EQ(name, "Form1");
 
@@ -111,13 +111,13 @@ TEST_CASE(json_duplicate_keys)
     json.set("test", "foo");
     json.set("test", "bar");
     json.set("test", "baz");
-    EXPECT_EQ(json.to_string(), "{\"test\":\"baz\"}");
+    EXPECT_EQ(json.to_deprecated_string(), "{\"test\":\"baz\"}");
 }
 
 TEST_CASE(json_u64_roundtrip)
 {
     auto big_value = 0xffffffffffffffffull;
-    auto json = JsonValue(big_value).to_string();
+    auto json = JsonValue(big_value).to_deprecated_string();
     auto value = JsonValue::from_string(json);
     EXPECT_EQ_FORCE(value.is_error(), false);
     EXPECT_EQ(value.value().as_u64(), big_value);
@@ -266,4 +266,108 @@ TEST_CASE(json_parse_fails_on_invalid_number)
     EXPECT_JSON_PARSE_TO_FAIL(",10e1");
 
 #undef EXPECT_JSON_PARSE_TO_FAIL
+}
+
+struct CustomError {
+};
+
+template<typename T>
+class CustomErrorOr {
+public:
+    CustomErrorOr(T)
+        : m_is_error(false)
+    {
+    }
+
+    CustomErrorOr(CustomError)
+        : m_is_error(true)
+    {
+    }
+
+    bool is_error() const { return m_is_error; }
+    CustomError release_error() { return CustomError {}; }
+    T release_value() { return T {}; }
+
+private:
+    bool m_is_error { false };
+};
+
+TEST_CASE(fallible_json_object_for_each)
+{
+    DeprecatedString raw_json = R"(
+    {
+        "name": "anon",
+        "home": "/home/anon",
+        "default_browser": "Ladybird"
+    })";
+
+    auto json = JsonValue::from_string(raw_json).value();
+    auto const& object = json.as_object();
+
+    MUST(object.try_for_each_member([](auto const&, auto const&) -> ErrorOr<void> {
+        return {};
+    }));
+
+    auto result1 = object.try_for_each_member([](auto const&, auto const&) -> ErrorOr<void> {
+        return Error::from_string_view("nanananana"sv);
+    });
+    EXPECT(result1.is_error());
+    EXPECT_EQ(result1.error().string_literal(), "nanananana"sv);
+
+    auto result2 = object.try_for_each_member([](auto const&, auto const&) -> ErrorOr<void, CustomError> {
+        return CustomError {};
+    });
+    EXPECT(result2.is_error());
+    EXPECT((IsSame<decltype(result2.release_error()), CustomError>));
+
+    auto result3 = object.try_for_each_member([](auto const&, auto const&) -> CustomErrorOr<int> {
+        return 42;
+    });
+    EXPECT(!result3.is_error());
+
+    auto result4 = object.try_for_each_member([](auto const&, auto const&) -> CustomErrorOr<int> {
+        return CustomError {};
+    });
+    EXPECT(result4.is_error());
+    EXPECT((IsSame<decltype(result4.release_error()), CustomError>));
+}
+
+TEST_CASE(fallible_json_array_for_each)
+{
+    DeprecatedString raw_json = R"(
+    [
+        "anon",
+        "/home/anon",
+        "Ladybird"
+    ])";
+
+    auto json = JsonValue::from_string(raw_json).value();
+    auto const& array = json.as_array();
+
+    MUST(array.try_for_each([](auto const&) -> ErrorOr<void> {
+        return {};
+    }));
+
+    auto result1 = array.try_for_each([](auto const&) -> ErrorOr<void> {
+        return Error::from_string_view("nanananana"sv);
+    });
+    EXPECT(result1.is_error());
+    EXPECT_EQ(result1.error().string_literal(), "nanananana"sv);
+
+    auto result2 = array.try_for_each([](auto const&) -> ErrorOr<void, CustomError> {
+        return CustomError {};
+    });
+    EXPECT(result2.is_error());
+    EXPECT((IsSame<decltype(result2.release_error()), CustomError>));
+
+    auto result3 = array.try_for_each([](auto const&) -> CustomErrorOr<int> {
+        return 42;
+    });
+    EXPECT(!result3.is_error());
+
+    auto result4 = array.try_for_each([](auto const&) -> CustomErrorOr<int> {
+        return CustomError {};
+    });
+    EXPECT(result4.is_error());
+    EXPECT((IsSame<decltype(result4.release_error()), CustomError>));
 }

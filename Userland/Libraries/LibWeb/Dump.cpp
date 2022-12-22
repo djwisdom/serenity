@@ -100,7 +100,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
     else
         tag_name = layout_node.dom_node()->node_name();
 
-    String identifier = "";
+    DeprecatedString identifier = "";
     if (layout_node.dom_node() && is<DOM::Element>(*layout_node.dom_node())) {
         auto& element = verify_cast<DOM::Element>(*layout_node.dom_node());
         StringBuilder builder;
@@ -113,7 +113,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
             builder.append('.');
             builder.append(class_name);
         }
-        identifier = builder.to_string();
+        identifier = builder.to_deprecated_string();
     }
 
     StringView nonbox_color_on = ""sv;
@@ -264,7 +264,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
                 builder.appendff("start: {}, length: {}, rect: {}\n",
                     fragment.start(),
                     fragment.length(),
-                    fragment.absolute_rect().to_string());
+                    fragment.absolute_rect());
                 if (is<Layout::TextNode>(fragment.layout_node())) {
                     for (size_t i = 0; i < indent; ++i)
                         builder.append("  "sv);
@@ -278,12 +278,12 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
 
     if (show_specified_style && layout_node.dom_node() && layout_node.dom_node()->is_element() && verify_cast<DOM::Element>(layout_node.dom_node())->computed_css_values()) {
         struct NameAndValue {
-            String name;
-            String value;
+            DeprecatedString name;
+            DeprecatedString value;
         };
         Vector<NameAndValue> properties;
         verify_cast<DOM::Element>(*layout_node.dom_node()).computed_css_values()->for_each_property([&](auto property_id, auto& value) {
-            properties.append({ CSS::string_from_property_id(property_id), value.to_string() });
+            properties.append({ CSS::string_from_property_id(property_id), value.to_deprecated_string() });
         });
         quick_sort(properties, [](auto& a, auto& b) { return a.name < b.name; });
 
@@ -508,6 +508,9 @@ void dump_selector(StringBuilder& builder, CSS::Selector const& selector)
                 case CSS::Selector::PseudoElement::Placeholder:
                     pseudo_element_description = "placeholder";
                     break;
+                case CSS::Selector::PseudoElement::PseudoElementCount:
+                    VERIFY_NOT_REACHED();
+                    break;
                 }
 
                 builder.appendff(" pseudo_element={}", pseudo_element_description);
@@ -599,7 +602,7 @@ void dump_font_face_rule(StringBuilder& builder, CSS::CSSFontFaceRule const& rul
     builder.append("unicode-ranges:\n"sv);
     for (auto const& unicode_range : font_face.unicode_ranges()) {
         indent(builder, indent_levels + 2);
-        builder.appendff("{}\n", unicode_range.to_string());
+        builder.appendff("{}\n", unicode_range.to_deprecated_string());
     }
 }
 
@@ -639,14 +642,14 @@ void dump_style_rule(StringBuilder& builder, CSS::CSSStyleRule const& rule, int 
     auto& style_declaration = verify_cast<CSS::PropertyOwningCSSStyleDeclaration>(rule.declaration());
     for (auto& property : style_declaration.properties()) {
         indent(builder, indent_levels);
-        builder.appendff("    {}: '{}'", CSS::string_from_property_id(property.property_id), property.value->to_string());
+        builder.appendff("    {}: '{}'", CSS::string_from_property_id(property.property_id), property.value->to_deprecated_string());
         if (property.important == CSS::Important::Yes)
             builder.append(" \033[31;1m!important\033[0m"sv);
         builder.append('\n');
     }
     for (auto& property : style_declaration.custom_properties()) {
         indent(builder, indent_levels);
-        builder.appendff("    {}: '{}'", property.key, property.value.value->to_string());
+        builder.appendff("    {}: '{}'", property.key, property.value.value->to_deprecated_string());
         if (property.value.important == CSS::Important::Yes)
             builder.append(" \033[31;1m!important\033[0m"sv);
         builder.append('\n');

@@ -39,6 +39,7 @@ private:
             set_focus(true);
         if (on_mousewheel)
             on_mousewheel(event.wheel_delta_y());
+        event.accept();
     }
 
     virtual void keydown_event(KeyEvent& event) override
@@ -93,7 +94,7 @@ ComboBox::ComboBox()
     m_editor->on_keypress = [this](KeyEvent& event) {
         if (!m_only_allow_values_from_model)
             return;
-        if (!m_list_window->is_visible() && event.key() <= Key_Z && event.key() >= Key_A) {
+        if (!m_list_window->is_visible() && event.key() <= Key_Z && event.key() >= Key_A && event.modifiers() == Mod_None) {
             open();
             m_list_window->event(event);
         }
@@ -114,16 +115,6 @@ ComboBox::ComboBox()
 
     m_list_window = add<Window>(window());
     m_list_window->set_window_type(GUI::WindowType::Popup);
-    m_list_window->set_frameless(true);
-    m_list_window->set_window_mode(WindowMode::CaptureInput);
-    m_list_window->on_active_input_change = [this](bool is_active_input) {
-        if (!is_active_input) {
-            m_open_button->set_enabled(false);
-            close();
-        }
-        m_open_button->set_enabled(true);
-    };
-    m_list_window->on_input_preemption = [this](auto) { close(); };
 
     m_list_view = m_list_window->set_main_widget<ListView>();
     m_list_view->set_should_hide_unnecessary_scrollbars(true);
@@ -160,7 +151,7 @@ void ComboBox::set_editor_placeholder(StringView placeholder)
     m_editor->set_placeholder(placeholder);
 }
 
-String const& ComboBox::editor_placeholder() const
+DeprecatedString const& ComboBox::editor_placeholder() const
 {
     return m_editor->placeholder();
 }
@@ -191,7 +182,7 @@ void ComboBox::selection_updated(ModelIndex const& index)
         m_selected_index = index;
     else
         m_selected_index.clear();
-    auto new_value = index.data().to_string();
+    auto new_value = index.data().to_deprecated_string();
     m_editor->set_text(new_value);
     if (!m_only_allow_values_from_model)
         m_editor->select_all();
@@ -278,12 +269,12 @@ void ComboBox::close()
     m_list_window->hide();
 }
 
-String ComboBox::text() const
+DeprecatedString ComboBox::text() const
 {
     return m_editor->text();
 }
 
-void ComboBox::set_text(String const& text, AllowCallback allow_callback)
+void ComboBox::set_text(DeprecatedString const& text, AllowCallback allow_callback)
 {
     m_editor->set_text(text, allow_callback);
 }

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGUI/Dialog.h>
+#include <LibGfx/Color.h>
 
 namespace PixelPaint {
 
@@ -14,14 +15,16 @@ class CreateNewImageDialog final : public GUI::Dialog {
     C_OBJECT(CreateNewImageDialog)
 
 public:
-    Gfx::IntSize const& image_size() const { return m_image_size; }
-    String const& image_name() const { return m_image_name; }
+    Gfx::IntSize image_size() const { return m_image_size; }
+    DeprecatedString const& image_name() const { return m_image_name; }
+    Gfx::Color background_color() const { return m_background_color; }
 
 private:
     CreateNewImageDialog(GUI::Window* parent_window);
 
-    String m_image_name;
+    DeprecatedString m_image_name;
     Gfx::IntSize m_image_size;
+    Gfx::Color m_background_color {};
 
     RefPtr<GUI::TextBox> m_name_textbox;
 };

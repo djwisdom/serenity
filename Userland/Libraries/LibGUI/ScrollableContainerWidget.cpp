@@ -73,7 +73,7 @@ void ScrollableContainerWidget::resize_event(GUI::ResizeEvent& event)
     update_widget_position();
 }
 
-void ScrollableContainerWidget::layout_relevant_change_occured()
+void ScrollableContainerWidget::layout_relevant_change_occurred()
 {
     update_widget_min_size();
     update_scrollbar_visibility();
@@ -102,7 +102,7 @@ void ScrollableContainerWidget::set_widget(GUI::Widget* widget)
     update_widget_position();
 }
 
-bool ScrollableContainerWidget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::Object> (*unregistered_child_handler)(String const&))
+bool ScrollableContainerWidget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&))
 {
     if (is<GUI::GML::GMLFile>(ast.ptr()))
         return load_from_gml_ast(static_ptr_cast<GUI::GML::GMLFile>(ast)->main_class(), unregistered_child_handler);

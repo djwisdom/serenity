@@ -1,13 +1,15 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/LexicalPath.h>
+#include <AK/Platform.h>
 #include <AK/ScopeGuard.h>
 #include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
+#include <LibCore/System.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>
@@ -28,7 +30,7 @@
 
 namespace Core {
 
-ErrorOr<NonnullRefPtr<File>> File::open(String filename, OpenMode mode, mode_t permissions)
+ErrorOr<NonnullRefPtr<File>> File::open(DeprecatedString filename, OpenMode mode, mode_t permissions)
 {
     auto file = File::construct(move(filename));
     if (!file->open_impl(mode, permissions))
@@ -36,7 +38,7 @@ ErrorOr<NonnullRefPtr<File>> File::open(String filename, OpenMode mode, mode_t p
     return file;
 }
 
-File::File(String filename, Object* parent)
+File::File(DeprecatedString filename, Object* parent)
     : IODevice(parent)
     , m_filename(move(filename))
 {
@@ -102,16 +104,21 @@ int File::leak_fd()
 
 bool File::is_device() const
 {
-    struct stat stat;
-    if (fstat(fd(), &stat) < 0)
-        return false;
-    return S_ISBLK(stat.st_mode) || S_ISCHR(stat.st_mode);
+    return is_device(fd());
 }
 
-bool File::is_device(String const& filename)
+bool File::is_device(DeprecatedString const& filename)
 {
     struct stat st;
     if (stat(filename.characters(), &st) < 0)
+        return false;
+    return S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode);
+}
+
+bool File::is_device(int fd)
+{
+    struct stat st;
+    if (fstat(fd, &st) < 0)
         return false;
     return S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode);
 }
@@ -124,7 +131,7 @@ bool File::is_block_device() const
     return S_ISBLK(stat.st_mode);
 }
 
-bool File::is_block_device(String const& filename)
+bool File::is_block_device(DeprecatedString const& filename)
 {
     struct stat st;
     if (stat(filename.characters(), &st) < 0)
@@ -140,7 +147,7 @@ bool File::is_char_device() const
     return S_ISCHR(stat.st_mode);
 }
 
-bool File::is_char_device(String const& filename)
+bool File::is_char_device(DeprecatedString const& filename)
 {
     struct stat st;
     if (stat(filename.characters(), &st) < 0)
@@ -150,16 +157,21 @@ bool File::is_char_device(String const& filename)
 
 bool File::is_directory() const
 {
-    struct stat stat;
-    if (fstat(fd(), &stat) < 0)
-        return false;
-    return S_ISDIR(stat.st_mode);
+    return is_directory(fd());
 }
 
-bool File::is_directory(String const& filename)
+bool File::is_directory(DeprecatedString const& filename)
 {
     struct stat st;
     if (stat(filename.characters(), &st) < 0)
+        return false;
+    return S_ISDIR(st.st_mode);
+}
+
+bool File::is_directory(int fd)
+{
+    struct stat st;
+    if (fstat(fd, &st) < 0)
         return false;
     return S_ISDIR(st.st_mode);
 }
@@ -172,7 +184,7 @@ bool File::is_link() const
     return S_ISLNK(stat.st_mode);
 }
 
-bool File::is_link(String const& filename)
+bool File::is_link(DeprecatedString const& filename)
 {
     struct stat st;
     if (lstat(filename.characters(), &st) < 0)
@@ -185,18 +197,17 @@ bool File::looks_like_shared_library() const
     return File::looks_like_shared_library(m_filename);
 }
 
-bool File::looks_like_shared_library(String const& filename)
+bool File::looks_like_shared_library(DeprecatedString const& filename)
 {
     return filename.ends_with(".so"sv) || filename.contains(".so."sv);
 }
 
-bool File::exists(String const& filename)
+bool File::exists(StringView filename)
 {
-    struct stat st;
-    return stat(filename.characters(), &st) == 0;
+    return !Core::System::stat(filename).is_error();
 }
 
-ErrorOr<size_t> File::size(String const& filename)
+ErrorOr<size_t> File::size(DeprecatedString const& filename)
 {
     struct stat st;
     if (stat(filename.characters(), &st) < 0)
@@ -204,17 +215,17 @@ ErrorOr<size_t> File::size(String const& filename)
     return st.st_size;
 }
 
-String File::real_path_for(String const& filename)
+DeprecatedString File::real_path_for(DeprecatedString const& filename)
 {
     if (filename.is_null())
         return {};
     auto* path = realpath(filename.characters(), nullptr);
-    String real_path(path);
+    DeprecatedString real_path(path);
     free(path);
     return real_path;
 }
 
-String File::current_working_directory()
+DeprecatedString File::current_working_directory()
 {
     char* cwd = getcwd(nullptr, 0);
     if (!cwd) {
@@ -222,13 +233,13 @@ String File::current_working_directory()
         return {};
     }
 
-    auto cwd_as_string = String(cwd);
+    auto cwd_as_string = DeprecatedString(cwd);
     free(cwd);
 
     return cwd_as_string;
 }
 
-String File::absolute_path(String const& path)
+DeprecatedString File::absolute_path(DeprecatedString const& path)
 {
     if (File::exists(path))
         return File::real_path_for(path);
@@ -244,7 +255,7 @@ String File::absolute_path(String const& path)
 
 #ifdef AK_OS_SERENITY
 
-ErrorOr<String> File::read_link(String const& link_path)
+ErrorOr<DeprecatedString> File::read_link(DeprecatedString const& link_path)
 {
     // First, try using a 64-byte buffer, that ought to be enough for anybody.
     char small_buffer[64];
@@ -258,7 +269,7 @@ ErrorOr<String> File::read_link(String const& link_path)
     // returns the full size of the link. Let's see if our small buffer
     // was enough to read the whole link.
     if (size <= sizeof(small_buffer))
-        return String { small_buffer, size };
+        return DeprecatedString { small_buffer, size };
     // Nope, but at least now we know the right size.
     char* large_buffer_ptr;
     auto large_buffer = StringImpl::create_uninitialized(size, large_buffer_ptr);
@@ -274,7 +285,7 @@ ErrorOr<String> File::read_link(String const& link_path)
     // If we're here, the symlink has changed while we were looking at it.
     // If it became shorter, our buffer is valid, we just have to trim it a bit.
     if (new_size < size)
-        return String { large_buffer_ptr, new_size };
+        return DeprecatedString { large_buffer_ptr, new_size };
     // Otherwise, here's not much we can do, unless we want to loop endlessly
     // in this case. Let's leave it up to the caller whether to loop.
     errno = EAGAIN;
@@ -285,7 +296,7 @@ ErrorOr<String> File::read_link(String const& link_path)
 
 // This is a sad version for other systems. It has to always make a copy of the
 // link path, and to always make two syscalls to get the right size first.
-ErrorOr<String> File::read_link(String const& link_path)
+ErrorOr<DeprecatedString> File::read_link(DeprecatedString const& link_path)
 {
     struct stat statbuf = {};
     int rc = lstat(link_path.characters(), &statbuf);
@@ -298,7 +309,7 @@ ErrorOr<String> File::read_link(String const& link_path)
     // (See above.)
     if (rc == statbuf.st_size)
         return { *buffer };
-    return String { buffer_ptr, (size_t)rc };
+    return DeprecatedString { buffer_ptr, (size_t)rc };
 }
 
 #endif
@@ -334,7 +345,7 @@ NonnullRefPtr<File> File::standard_error()
     return *stderr_file;
 }
 
-static String get_duplicate_name(String const& path, int duplicate_count)
+static DeprecatedString get_duplicate_name(DeprecatedString const& path, int duplicate_count)
 {
     if (duplicate_count == 0) {
         return path;
@@ -346,7 +357,7 @@ static String get_duplicate_name(String const& path, int duplicate_count)
     for (size_t i = 0; i < parts.size() - 1; ++i) {
         duplicated_name.appendff("{}/", parts[i]);
     }
-    auto prev_duplicate_tag = String::formatted("({})", duplicate_count);
+    auto prev_duplicate_tag = DeprecatedString::formatted("({})", duplicate_count);
     auto title = lexical_path.title();
     if (title.ends_with(prev_duplicate_tag)) {
         // remove the previous duplicate tag "(n)" so we can add a new tag.
@@ -359,7 +370,7 @@ static String get_duplicate_name(String const& path, int duplicate_count)
     return duplicated_name.build();
 }
 
-ErrorOr<void, File::CopyError> File::copy_file_or_directory(String const& dst_path, String const& src_path, RecursionMode recursion_mode, LinkMode link_mode, AddDuplicateFileMarker add_duplicate_file_marker, PreserveMode preserve_mode)
+ErrorOr<void, File::CopyError> File::copy_file_or_directory(DeprecatedString const& dst_path, DeprecatedString const& src_path, RecursionMode recursion_mode, LinkMode link_mode, AddDuplicateFileMarker add_duplicate_file_marker, PreserveMode preserve_mode)
 {
     if (add_duplicate_file_marker == AddDuplicateFileMarker::Yes) {
         int duplicate_count = 0;
@@ -397,14 +408,14 @@ ErrorOr<void, File::CopyError> File::copy_file_or_directory(String const& dst_pa
     return copy_file(dst_path, src_stat, source, preserve_mode);
 }
 
-ErrorOr<void, File::CopyError> File::copy_file(String const& dst_path, struct stat const& src_stat, File& source, PreserveMode preserve_mode)
+ErrorOr<void, File::CopyError> File::copy_file(DeprecatedString const& dst_path, struct stat const& src_stat, File& source, PreserveMode preserve_mode)
 {
     int dst_fd = creat(dst_path.characters(), 0666);
     if (dst_fd < 0) {
         if (errno != EISDIR)
             return CopyError { errno, false };
 
-        auto dst_dir_path = String::formatted("{}/{}", dst_path, LexicalPath::basename(source.filename()));
+        auto dst_dir_path = DeprecatedString::formatted("{}/{}", dst_path, LexicalPath::basename(source.filename()));
         dst_fd = creat(dst_dir_path.characters(), 0666);
         if (dst_fd < 0)
             return CopyError { errno, false };
@@ -453,26 +464,31 @@ ErrorOr<void, File::CopyError> File::copy_file(String const& dst_path, struct st
     }
 
     if (has_flag(preserve_mode, PreserveMode::Timestamps)) {
-        // FIXME: Implement utimens() and use it here.
-        struct utimbuf timbuf;
-        timbuf.actime = src_stat.st_atime;
-        timbuf.modtime = src_stat.st_mtime;
-        if (utime(dst_path.characters(), &timbuf) < 0)
+        struct timespec times[2] = {
+#ifdef AK_OS_MACOS
+            src_stat.st_atimespec,
+            src_stat.st_mtimespec,
+#else
+            src_stat.st_atim,
+            src_stat.st_mtim,
+#endif
+        };
+        if (utimensat(AT_FDCWD, dst_path.characters(), times, 0) < 0)
             return CopyError { errno, false };
     }
 
     return {};
 }
 
-ErrorOr<void, File::CopyError> File::copy_directory(String const& dst_path, String const& src_path, struct stat const& src_stat, LinkMode link, PreserveMode preserve_mode)
+ErrorOr<void, File::CopyError> File::copy_directory(DeprecatedString const& dst_path, DeprecatedString const& src_path, struct stat const& src_stat, LinkMode link, PreserveMode preserve_mode)
 {
     if (mkdir(dst_path.characters(), 0755) < 0)
         return CopyError { errno, false };
 
-    String src_rp = File::real_path_for(src_path);
-    src_rp = String::formatted("{}/", src_rp);
-    String dst_rp = File::real_path_for(dst_path);
-    dst_rp = String::formatted("{}/", dst_rp);
+    DeprecatedString src_rp = File::real_path_for(src_path);
+    src_rp = DeprecatedString::formatted("{}/", src_rp);
+    DeprecatedString dst_rp = File::real_path_for(dst_path);
+    dst_rp = DeprecatedString::formatted("{}/", dst_rp);
 
     if (!dst_rp.is_empty() && dst_rp.starts_with(src_rp))
         return CopyError { errno, false };
@@ -482,10 +498,10 @@ ErrorOr<void, File::CopyError> File::copy_directory(String const& dst_path, Stri
         return CopyError { errno, false };
 
     while (di.has_next()) {
-        String filename = di.next_path();
+        DeprecatedString filename = di.next_path();
         auto result = copy_file_or_directory(
-            String::formatted("{}/{}", dst_path, filename),
-            String::formatted("{}/{}", src_path, filename),
+            DeprecatedString::formatted("{}/{}", dst_path, filename),
+            DeprecatedString::formatted("{}/{}", src_path, filename),
             RecursionMode::Allowed, link, AddDuplicateFileMarker::Yes, preserve_mode);
         if (result.is_error())
             return result.error();
@@ -503,18 +519,23 @@ ErrorOr<void, File::CopyError> File::copy_directory(String const& dst_path, Stri
     }
 
     if (has_flag(preserve_mode, PreserveMode::Timestamps)) {
-        // FIXME: Implement utimens() and use it here.
-        struct utimbuf timbuf;
-        timbuf.actime = src_stat.st_atime;
-        timbuf.modtime = src_stat.st_atime;
-        if (utime(dst_path.characters(), &timbuf) < 0)
+        struct timespec times[2] = {
+#ifdef AK_OS_MACOS
+            src_stat.st_atimespec,
+            src_stat.st_mtimespec,
+#else
+            src_stat.st_atim,
+            src_stat.st_mtim,
+#endif
+        };
+        if (utimensat(AT_FDCWD, dst_path.characters(), times, 0) < 0)
             return CopyError { errno, false };
     }
 
     return {};
 }
 
-ErrorOr<void> File::link_file(String const& dst_path, String const& src_path)
+ErrorOr<void> File::link_file(DeprecatedString const& dst_path, DeprecatedString const& src_path)
 {
     int duplicate_count = 0;
     while (access(get_duplicate_name(dst_path, duplicate_count).characters(), F_OK) == 0) {
@@ -528,7 +549,7 @@ ErrorOr<void> File::link_file(String const& dst_path, String const& src_path)
     return {};
 }
 
-ErrorOr<void, File::RemoveError> File::remove(String const& path, RecursionMode mode, bool force)
+ErrorOr<void, File::RemoveError> File::remove(DeprecatedString const& path, RecursionMode mode, bool force)
 {
     struct stat path_stat;
     if (lstat(path.characters(), &path_stat) < 0) {
@@ -558,14 +579,14 @@ ErrorOr<void, File::RemoveError> File::remove(String const& path, RecursionMode 
     return {};
 }
 
-Optional<String> File::resolve_executable_from_environment(StringView filename)
+Optional<DeprecatedString> File::resolve_executable_from_environment(StringView filename)
 {
     if (filename.is_empty())
         return {};
 
     // Paths that aren't just a file name generally count as already resolved.
     if (filename.contains('/')) {
-        if (access(String { filename }.characters(), X_OK) != 0)
+        if (access(DeprecatedString { filename }.characters(), X_OK) != 0)
             return {};
 
         return filename;
@@ -581,7 +602,7 @@ Optional<String> File::resolve_executable_from_environment(StringView filename)
     auto directories = path.split_view(':');
 
     for (auto directory : directories) {
-        auto file = String::formatted("{}/{}", directory, filename);
+        auto file = DeprecatedString::formatted("{}/{}", directory, filename);
 
         if (access(file.characters(), X_OK) == 0)
             return file;

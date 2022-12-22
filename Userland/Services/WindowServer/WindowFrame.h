@@ -31,7 +31,7 @@ public:
     public:
         void paint(WindowFrame&, Gfx::Painter&, Gfx::IntRect const&);
         void render(WindowFrame&, Screen&);
-        Optional<HitTestResult> hit_test(WindowFrame&, Gfx::IntPoint const&, Gfx::IntPoint const&);
+        Optional<HitTestResult> hit_test(WindowFrame&, Gfx::IntPoint, Gfx::IntPoint);
 
     private:
         RefPtr<Gfx::Bitmap> m_top_bottom;
@@ -115,7 +115,7 @@ public:
 
     void theme_changed();
 
-    Optional<HitTestResult> hit_test(Gfx::IntPoint const&);
+    Optional<HitTestResult> hit_test(Gfx::IntPoint);
 
     void open_menubar_menu(Menu&);
 
@@ -130,7 +130,7 @@ private:
     void handle_menu_mouse_event(Menu&, MouseEvent const&);
 
     Gfx::WindowTheme::WindowState window_state_for_theme() const;
-    String computed_title() const;
+    DeprecatedString computed_title() const;
 
     Gfx::IntRect constrained_render_rect_to_screen(Gfx::IntRect const&) const;
     Gfx::IntRect leftmost_titlebar_button_rect() const;

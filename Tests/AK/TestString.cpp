@@ -1,315 +1,109 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <LibTest/TestCase.h>
 
-#include <AK/FlyString.h>
 #include <AK/String.h>
 #include <AK/StringBuilder.h>
+#include <AK/Try.h>
+#include <AK/Utf8View.h>
 #include <AK/Vector.h>
-#include <cstring>
 
 TEST_CASE(construct_empty)
 {
-    EXPECT(String().is_null());
-    EXPECT(String().is_empty());
-    EXPECT(!String().characters());
+    String empty;
+    EXPECT(empty.is_empty());
+    EXPECT_EQ(empty.bytes().size(), 0u);
 
-    EXPECT(!String("").is_null());
-    EXPECT(String("").is_empty());
-    EXPECT(String("").characters() != nullptr);
-
-    EXPECT(String("").impl() == String::empty().impl());
+    auto empty2 = MUST(String::from_utf8(""sv));
+    EXPECT(empty2.is_empty());
+    EXPECT_EQ(empty, empty2);
+    EXPECT_EQ(empty, ""sv);
 }
 
-TEST_CASE(construct_contents)
+TEST_CASE(move_assignment)
 {
-    String test_string = "ABCDEF";
-    EXPECT(!test_string.is_empty());
-    EXPECT(!test_string.is_null());
-    EXPECT_EQ(test_string.length(), 6u);
-    EXPECT_EQ(test_string.length(), strlen(test_string.characters()));
-    EXPECT(test_string.characters() != nullptr);
-    EXPECT(!strcmp(test_string.characters(), "ABCDEF"));
-
-    EXPECT(test_string == "ABCDEF");
-    EXPECT(test_string != "ABCDE");
-    EXPECT(test_string != "ABCDEFG");
+    String string1 = MUST(String::from_utf8("hello"sv));
+    string1 = MUST(String::from_utf8("friends!"sv));
+    EXPECT_EQ(string1, "friends!"sv);
 }
 
-TEST_CASE(equal)
+TEST_CASE(short_strings)
 {
-    EXPECT_NE(String::empty(), String {});
+#ifdef AK_ARCH_64_BIT
+    auto string = MUST(String::from_utf8("abcdefg"sv));
+    EXPECT_EQ(string.is_short_string(), true);
+    EXPECT_EQ(string.bytes().size(), 7u);
+    EXPECT_EQ(string.bytes_as_string_view(), "abcdefg"sv);
+#else
+    auto string = MUST(String::from_utf8("abc"sv));
+    EXPECT_EQ(string.is_short_string(), true);
+    EXPECT_EQ(string.bytes().size(), 3u);
+    EXPECT_EQ(string.bytes_as_string_view(), "abc"sv);
+#endif
 }
 
-TEST_CASE(compare)
+TEST_CASE(long_strings)
 {
-    EXPECT("a"sv < String("b"));
-    EXPECT(!("a"sv > String("b")));
-    EXPECT("b"sv > String("a"));
-    EXPECT(!("b"sv < String("b")));
-    EXPECT("a"sv >= String("a"));
-    EXPECT(!("a"sv >= String("b")));
-    EXPECT("a"sv <= String("a"));
-    EXPECT(!("b"sv <= String("a")));
-
-    EXPECT(String("a") > String());
-    EXPECT(!(String() > String("a")));
-    EXPECT(String() < String("a"));
-    EXPECT(!(String("a") < String()));
-    EXPECT(String("a") >= String());
-    EXPECT(!(String() >= String("a")));
-    EXPECT(String() <= String("a"));
-    EXPECT(!(String("a") <= String()));
-
-    EXPECT(!(String() > String()));
-    EXPECT(!(String() < String()));
-    EXPECT(String() >= String());
-    EXPECT(String() <= String());
-}
-
-TEST_CASE(index_access)
-{
-    String test_string = "ABCDEF";
-    EXPECT_EQ(test_string[0], 'A');
-    EXPECT_EQ(test_string[1], 'B');
-}
-
-TEST_CASE(starts_with)
-{
-    String test_string = "ABCDEF";
-    EXPECT(test_string.starts_with("AB"sv));
-    EXPECT(test_string.starts_with('A'));
-    EXPECT(!test_string.starts_with('B'));
-    EXPECT(test_string.starts_with("ABCDEF"sv));
-    EXPECT(!test_string.starts_with("DEF"sv));
-    EXPECT(test_string.starts_with("abc"sv, CaseSensitivity::CaseInsensitive));
-    EXPECT(!test_string.starts_with("abc"sv, CaseSensitivity::CaseSensitive));
-}
-
-TEST_CASE(ends_with)
-{
-    String test_string = "ABCDEF";
-    EXPECT(test_string.ends_with("EF"sv));
-    EXPECT(test_string.ends_with('F'));
-    EXPECT(!test_string.ends_with('E'));
-    EXPECT(test_string.ends_with("ABCDEF"sv));
-    EXPECT(!test_string.ends_with("ABC"sv));
-    EXPECT(test_string.ends_with("def"sv, CaseSensitivity::CaseInsensitive));
-    EXPECT(!test_string.ends_with("def"sv, CaseSensitivity::CaseSensitive));
-}
-
-TEST_CASE(copy_string)
-{
-    String test_string = "ABCDEF";
-    auto test_string_copy = test_string;
-    EXPECT_EQ(test_string, test_string_copy);
-    EXPECT_EQ(test_string.characters(), test_string_copy.characters());
-}
-
-TEST_CASE(move_string)
-{
-    String test_string = "ABCDEF";
-    auto test_string_copy = test_string;
-    auto test_string_move = move(test_string_copy);
-    EXPECT_EQ(test_string, test_string_move);
-    EXPECT(test_string_copy.is_null());
-}
-
-TEST_CASE(repeated)
-{
-    EXPECT_EQ(String::repeated('x', 0), "");
-    EXPECT_EQ(String::repeated('x', 1), "x");
-    EXPECT_EQ(String::repeated('x', 2), "xx");
-}
-
-TEST_CASE(to_int)
-{
-    EXPECT_EQ(String("123").to_int().value(), 123);
-    EXPECT_EQ(String("-123").to_int().value(), -123);
-}
-
-TEST_CASE(to_lowercase)
-{
-    EXPECT(String("ABC").to_lowercase() == "abc");
-}
-
-TEST_CASE(to_uppercase)
-{
-    EXPECT(String("AbC").to_uppercase() == "ABC");
-}
-
-TEST_CASE(flystring)
-{
-    {
-        FlyString a("foo");
-        FlyString b("foo");
-        EXPECT_EQ(a.impl(), b.impl());
-    }
-
-    {
-        String a = "foo";
-        FlyString b = a;
-        StringBuilder builder;
-        builder.append('f');
-        builder.append("oo"sv);
-        FlyString c = builder.to_string();
-        EXPECT_EQ(a.impl(), b.impl());
-        EXPECT_EQ(a.impl(), c.impl());
-    }
-}
-
-TEST_CASE(replace)
-{
-    String test_string = "Well, hello Friends!";
-
-    test_string = test_string.replace("Friends"sv, "Testers"sv, ReplaceMode::FirstOnly);
-    EXPECT(test_string == "Well, hello Testers!");
-
-    test_string = test_string.replace("ell"sv, "e're"sv, ReplaceMode::All);
-    EXPECT(test_string == "We're, he'reo Testers!");
-
-    test_string = test_string.replace("!"sv, " :^)"sv, ReplaceMode::FirstOnly);
-    EXPECT(test_string == "We're, he'reo Testers :^)");
-
-    test_string = String("111._.111._.111");
-    test_string = test_string.replace("111"sv, "|||"sv, ReplaceMode::All);
-    EXPECT(test_string == "|||._.|||._.|||");
-
-    test_string = test_string.replace("|||"sv, "111"sv, ReplaceMode::FirstOnly);
-    EXPECT(test_string == "111._.|||._.|||");
-}
-
-TEST_CASE(count)
-{
-    String test_string = "Well, hello Friends!";
-    u32 count = test_string.count("Friends"sv);
-    EXPECT(count == 1);
-
-    count = test_string.count("ell"sv);
-    EXPECT(count == 2);
-
-    count = test_string.count("!"sv);
-    EXPECT(count == 1);
-
-    test_string = String("111._.111._.111");
-    count = test_string.count("111"sv);
-    EXPECT(count == 3);
-
-    count = test_string.count("._."sv);
-    EXPECT(count == 2);
+    auto string = MUST(String::from_utf8("abcdefgh"sv));
+    EXPECT_EQ(string.is_short_string(), false);
+    EXPECT_EQ(string.bytes().size(), 8u);
+    EXPECT_EQ(string.bytes_as_string_view(), "abcdefgh"sv);
 }
 
 TEST_CASE(substring)
 {
-    String test = "abcdef";
-    EXPECT_EQ(test.substring(0, 6), test);
-    EXPECT_EQ(test.substring(0, 3), "abc");
-    EXPECT_EQ(test.substring(3, 3), "def");
-    EXPECT_EQ(test.substring(3, 0), "");
-    EXPECT_EQ(test.substring(6, 0), "");
+    auto superstring = MUST(String::from_utf8("Hello I am a long string"sv));
+    auto short_substring = MUST(superstring.substring_from_byte_offset(0, 5));
+    EXPECT_EQ(short_substring, "Hello"sv);
+
+    auto long_substring = MUST(superstring.substring_from_byte_offset(0, 10));
+    EXPECT_EQ(long_substring, "Hello I am"sv);
 }
 
-TEST_CASE(split)
+TEST_CASE(code_points)
 {
-    String test = "foo bar baz";
-    auto parts = test.split(' ');
-    EXPECT_EQ(parts.size(), 3u);
-    EXPECT_EQ(parts[0], "foo");
-    EXPECT_EQ(parts[1], "bar");
-    EXPECT_EQ(parts[2], "baz");
+    auto string = MUST(String::from_utf8("🦬🪒"sv));
 
-    EXPECT_EQ(parts[0].characters()[3], '\0');
-    EXPECT_EQ(parts[1].characters()[3], '\0');
-    EXPECT_EQ(parts[2].characters()[3], '\0');
+    Vector<u32> code_points;
+    for (auto code_point : string.code_points())
+        code_points.append(code_point);
 
-    test = "a    b";
-
-    parts = test.split(' ');
-    EXPECT_EQ(parts.size(), 2u);
-    EXPECT_EQ(parts[0], "a");
-    EXPECT_EQ(parts[1], "b");
-
-    parts = test.split(' ', SplitBehavior::KeepEmpty);
-    EXPECT_EQ(parts.size(), 5u);
-    EXPECT_EQ(parts[0], "a");
-    EXPECT_EQ(parts[1], "");
-    EXPECT_EQ(parts[2], "");
-    EXPECT_EQ(parts[3], "");
-    EXPECT_EQ(parts[4], "b");
-
-    test = "axxbx";
-    EXPECT_EQ(test.split('x').size(), 2u);
-    EXPECT_EQ(test.split('x', SplitBehavior::KeepEmpty).size(), 4u);
-    EXPECT_EQ(test.split_view('x').size(), 2u);
-    EXPECT_EQ(test.split_view('x', SplitBehavior::KeepEmpty).size(), 4u);
+    EXPECT_EQ(code_points[0], 0x1f9acu);
+    EXPECT_EQ(code_points[1], 0x1fa92u);
 }
 
-TEST_CASE(builder_zero_initial_capacity)
+TEST_CASE(string_builder)
 {
-    StringBuilder builder(0);
-    builder.append(""sv);
-    auto built = builder.build();
-    EXPECT_EQ(built.is_null(), false);
-    EXPECT_EQ(built.length(), 0u);
+    StringBuilder builder;
+    builder.append_code_point(0x1f9acu);
+    builder.append_code_point(0x1fa92u);
+
+    auto string = MUST(builder.to_string());
+    EXPECT_EQ(string, "🦬🪒"sv);
+    EXPECT_EQ(string.bytes().size(), 8u);
 }
 
-TEST_CASE(find)
+TEST_CASE(ak_format)
 {
-    String a = "foobarbar";
-    EXPECT_EQ(a.find("bar"sv), Optional<size_t> { 3 });
-    EXPECT_EQ(a.find("baz"sv), Optional<size_t> {});
-    EXPECT_EQ(a.find("bar"sv, 4), Optional<size_t> { 6 });
-    EXPECT_EQ(a.find("bar"sv, 9), Optional<size_t> {});
-
-    EXPECT_EQ(a.find('f'), Optional<size_t> { 0 });
-    EXPECT_EQ(a.find('x'), Optional<size_t> {});
-    EXPECT_EQ(a.find('f', 1), Optional<size_t> {});
-    EXPECT_EQ(a.find('b'), Optional<size_t> { 3 });
-    EXPECT_EQ(a.find('b', 4), Optional<size_t> { 6 });
-    EXPECT_EQ(a.find('b', 9), Optional<size_t> {});
+    auto foo = MUST(String::formatted("Hello {}", MUST(String::from_utf8("friends"sv))));
+    EXPECT_EQ(foo, "Hello friends"sv);
 }
 
-TEST_CASE(find_with_empty_needle)
+TEST_CASE(replace)
 {
-    String string = "";
-    EXPECT_EQ(string.find(""sv), 0u);
-    EXPECT_EQ(string.find_all(""sv), (Vector<size_t> { 0u }));
+    {
+        auto haystack = MUST(String::from_utf8("Hello enemies"sv));
+        auto result = MUST(haystack.replace("enemies"sv, "friends"sv, ReplaceMode::All));
+        EXPECT_EQ(result, "Hello friends"sv);
+    }
 
-    string = "abc";
-    EXPECT_EQ(string.find(""sv), 0u);
-    EXPECT_EQ(string.find_all(""sv), (Vector<size_t> { 0u, 1u, 2u, 3u }));
-}
-
-TEST_CASE(bijective_base)
-{
-    EXPECT_EQ(String::bijective_base_from(0), "A");
-    EXPECT_EQ(String::bijective_base_from(25), "Z");
-    EXPECT_EQ(String::bijective_base_from(26), "AA");
-    EXPECT_EQ(String::bijective_base_from(52), "BA");
-    EXPECT_EQ(String::bijective_base_from(704), "ABC");
-}
-
-TEST_CASE(roman_numerals)
-{
-    auto zero = String::roman_number_from(0);
-    EXPECT_EQ(zero, "");
-
-    auto one = String::roman_number_from(1);
-    EXPECT_EQ(one, "I");
-
-    auto nine = String::roman_number_from(9);
-    EXPECT_EQ(nine, "IX");
-
-    auto fourty_eight = String::roman_number_from(48);
-    EXPECT_EQ(fourty_eight, "XLVIII");
-
-    auto one_thousand_nine_hundred_ninety_eight = String::roman_number_from(1998);
-    EXPECT_EQ(one_thousand_nine_hundred_ninety_eight, "MCMXCVIII");
-
-    auto four_thousand = String::roman_number_from(4000);
-    EXPECT_EQ(four_thousand, "4000");
+    {
+        auto base_title = MUST(String::from_utf8("anon@courage:~"sv));
+        auto result = MUST(base_title.replace("[*]"sv, "(*)"sv, ReplaceMode::FirstOnly));
+        EXPECT_EQ(result, "anon@courage:~"sv);
+    }
 }

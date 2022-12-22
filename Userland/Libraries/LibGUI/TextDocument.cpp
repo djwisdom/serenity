@@ -148,11 +148,11 @@ size_t TextDocumentLine::leading_spaces() const
     return count;
 }
 
-String TextDocumentLine::to_utf8() const
+DeprecatedString TextDocumentLine::to_utf8() const
 {
     StringBuilder builder;
     builder.append(view());
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 TextDocumentLine::TextDocumentLine(TextDocument& document)
@@ -246,6 +246,19 @@ void TextDocumentLine::remove_range(TextDocument& document, size_t start, size_t
     document.update_views({});
 }
 
+void TextDocumentLine::keep_range(TextDocument& document, size_t start_index, size_t length)
+{
+    VERIFY(start_index + length < m_text.size());
+
+    Vector<u32> new_data;
+    new_data.ensure_capacity(m_text.size());
+    for (size_t i = start_index; i <= (start_index + length); i++)
+        new_data.append(m_text[i]);
+
+    m_text = move(new_data);
+    document.update_views({});
+}
+
 void TextDocumentLine::truncate(TextDocument& document, size_t length)
 {
     m_text.resize(length);
@@ -331,7 +344,7 @@ void TextDocument::set_all_cursors(TextPosition const& position)
     }
 }
 
-String TextDocument::text() const
+DeprecatedString TextDocument::text() const
 {
     StringBuilder builder;
     for (size_t i = 0; i < line_count(); ++i) {
@@ -340,14 +353,14 @@ String TextDocument::text() const
         if (i != line_count() - 1)
             builder.append('\n');
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-String TextDocument::text_in_range(TextRange const& a_range) const
+DeprecatedString TextDocument::text_in_range(TextRange const& a_range) const
 {
     auto range = a_range.normalized();
     if (is_empty() || line_count() < range.end().line() - range.start().line())
-        return String("");
+        return DeprecatedString("");
 
     StringBuilder builder;
     for (size_t i = range.start().line(); i <= range.end().line(); ++i) {
@@ -366,7 +379,7 @@ String TextDocument::text_in_range(TextRange const& a_range) const
             builder.append('\n');
     }
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 u32 TextDocument::code_point_at(TextPosition const& position) const
@@ -420,7 +433,7 @@ void TextDocument::update_regex_matches(StringView needle)
         }
         re.search(views, m_regex_result);
         m_regex_needs_update = false;
-        m_regex_needle = String { needle };
+        m_regex_needle = DeprecatedString { needle };
         m_regex_result_match_index = -1;
         m_regex_result_match_capture_group_index = -1;
     }
@@ -758,14 +771,14 @@ TextDocumentUndoCommand::TextDocumentUndoCommand(TextDocument& document)
 {
 }
 
-InsertTextCommand::InsertTextCommand(TextDocument& document, String const& text, TextPosition const& position)
+InsertTextCommand::InsertTextCommand(TextDocument& document, DeprecatedString const& text, TextPosition const& position)
     : TextDocumentUndoCommand(document)
     , m_text(text)
     , m_range({ position, position })
 {
 }
 
-String InsertTextCommand::action_text() const
+DeprecatedString InsertTextCommand::action_text() const
 {
     return "Insert Text";
 }
@@ -787,7 +800,7 @@ bool InsertTextCommand::merge_with(GUI::Command const& other)
     StringBuilder builder(m_text.length() + typed_other.m_text.length());
     builder.append(m_text);
     builder.append(typed_other.m_text);
-    m_text = builder.to_string();
+    m_text = builder.to_deprecated_string();
     m_range.set_end(typed_other.m_range.end());
 
     m_timestamp = Time::now_monotonic();
@@ -859,14 +872,14 @@ void InsertTextCommand::undo()
     m_document.set_all_cursors(m_range.start());
 }
 
-RemoveTextCommand::RemoveTextCommand(TextDocument& document, String const& text, TextRange const& range)
+RemoveTextCommand::RemoveTextCommand(TextDocument& document, DeprecatedString const& text, TextRange const& range)
     : TextDocumentUndoCommand(document)
     , m_text(text)
     , m_range(range)
 {
 }
 
-String RemoveTextCommand::action_text() const
+DeprecatedString RemoveTextCommand::action_text() const
 {
     return "Remove Text";
 }
@@ -887,7 +900,7 @@ bool RemoveTextCommand::merge_with(GUI::Command const& other)
     StringBuilder builder(m_text.length() + typed_other.m_text.length());
     builder.append(typed_other.m_text);
     builder.append(m_text);
-    m_text = builder.to_string();
+    m_text = builder.to_deprecated_string();
     m_range.set_start(typed_other.m_range.start());
 
     m_timestamp = Time::now_monotonic();
@@ -906,7 +919,56 @@ void RemoveTextCommand::undo()
     m_document.set_all_cursors(new_cursor);
 }
 
-ReplaceAllTextCommand::ReplaceAllTextCommand(GUI::TextDocument& document, String const& text, GUI::TextRange const& range, String const& action_text)
+InsertLineCommand::InsertLineCommand(TextDocument& document, TextPosition cursor, DeprecatedString&& text, InsertPosition pos)
+    : TextDocumentUndoCommand(document)
+    , m_cursor(cursor)
+    , m_text(move(text))
+    , m_pos(pos)
+{
+}
+
+void InsertLineCommand::redo()
+{
+    size_t line_number = compute_line_number();
+    m_document.insert_line(line_number, make<TextDocumentLine>(m_document, m_text));
+    m_document.set_all_cursors(TextPosition { line_number, m_document.line(line_number).length() });
+}
+
+void InsertLineCommand::undo()
+{
+    size_t line_number = compute_line_number();
+    m_document.remove_line(line_number);
+    m_document.set_all_cursors(m_cursor);
+}
+
+size_t InsertLineCommand::compute_line_number() const
+{
+    if (m_pos == InsertPosition::Above)
+        return m_cursor.line();
+
+    if (m_pos == InsertPosition::Below)
+        return m_cursor.line() + 1;
+
+    VERIFY_NOT_REACHED();
+}
+
+DeprecatedString InsertLineCommand::action_text() const
+{
+    StringBuilder action_text_builder;
+    action_text_builder.append("Insert Line"sv);
+
+    if (m_pos == InsertPosition::Above) {
+        action_text_builder.append(" (Above)"sv);
+    } else if (m_pos == InsertPosition::Below) {
+        action_text_builder.append(" (Below)"sv);
+    } else {
+        VERIFY_NOT_REACHED();
+    }
+
+    return action_text_builder.to_deprecated_string();
+}
+
+ReplaceAllTextCommand::ReplaceAllTextCommand(GUI::TextDocument& document, DeprecatedString const& text, GUI::TextRange const& range, DeprecatedString const& action_text)
     : TextDocumentUndoCommand(document)
     , m_text(text)
     , m_range(range)
@@ -937,7 +999,7 @@ bool ReplaceAllTextCommand::merge_with(GUI::Command const&)
     return false;
 }
 
-String ReplaceAllTextCommand::action_text() const
+DeprecatedString ReplaceAllTextCommand::action_text() const
 {
     return m_action_text;
 }
@@ -951,7 +1013,7 @@ IndentSelection::IndentSelection(TextDocument& document, size_t tab_width, TextR
 
 void IndentSelection::redo()
 {
-    auto const tab = String::repeated(' ', m_tab_width);
+    auto const tab = DeprecatedString::repeated(' ', m_tab_width);
 
     for (size_t i = m_range.start().line(); i <= m_range.end().line(); i++) {
         m_document.insert_at({ i, 0 }, tab, m_client);
@@ -990,11 +1052,83 @@ void UnindentSelection::redo()
 
 void UnindentSelection::undo()
 {
-    auto const tab = String::repeated(' ', m_tab_width);
+    auto const tab = DeprecatedString::repeated(' ', m_tab_width);
 
     for (size_t i = m_range.start().line(); i <= m_range.end().line(); i++)
         m_document.insert_at({ i, 0 }, tab, m_client);
 
+    m_document.set_all_cursors(m_range.start());
+}
+
+CommentSelection::CommentSelection(TextDocument& document, StringView prefix, StringView suffix, TextRange const& range)
+    : TextDocumentUndoCommand(document)
+    , m_prefix(prefix)
+    , m_suffix(suffix)
+    , m_range(range)
+{
+}
+
+void CommentSelection::undo()
+{
+    for (size_t i = m_range.start().line(); i <= m_range.end().line(); i++) {
+        if (m_document.line(i).is_empty())
+            continue;
+        auto line = m_document.line(i).to_utf8();
+        auto prefix_start = line.find(m_prefix).value_or(0);
+        m_document.line(i).keep_range(
+            m_document,
+            prefix_start + m_prefix.length(),
+            m_document.line(i).last_non_whitespace_column().value_or(line.length()) - prefix_start - m_prefix.length() - m_suffix.length());
+    }
+    m_document.set_all_cursors(m_range.start());
+}
+
+void CommentSelection::redo()
+{
+    for (size_t i = m_range.start().line(); i <= m_range.end().line(); i++) {
+        if (m_document.line(i).is_empty())
+            continue;
+        m_document.insert_at({ i, 0 }, m_prefix, m_client);
+        for (auto const& b : m_suffix.bytes()) {
+            m_document.line(i).append(m_document, b);
+        }
+    }
+    m_document.set_all_cursors(m_range.start());
+}
+
+UncommentSelection::UncommentSelection(TextDocument& document, StringView prefix, StringView suffix, TextRange const& range)
+    : TextDocumentUndoCommand(document)
+    , m_prefix(prefix)
+    , m_suffix(suffix)
+    , m_range(range)
+{
+}
+
+void UncommentSelection::undo()
+{
+    for (size_t i = m_range.start().line(); i <= m_range.end().line(); i++) {
+        if (m_document.line(i).is_empty())
+            continue;
+        m_document.insert_at({ i, 0 }, m_prefix, m_client);
+        for (auto const& b : m_suffix.bytes()) {
+            m_document.line(i).append(m_document, b);
+        }
+    }
+    m_document.set_all_cursors(m_range.start());
+}
+
+void UncommentSelection::redo()
+{
+    for (size_t i = m_range.start().line(); i <= m_range.end().line(); i++) {
+        if (m_document.line(i).is_empty())
+            continue;
+        auto line = m_document.line(i).to_utf8();
+        auto prefix_start = line.find(m_prefix).value_or(0);
+        m_document.line(i).keep_range(
+            m_document,
+            prefix_start + m_prefix.length(),
+            m_document.line(i).last_non_whitespace_column().value_or(line.length()) - prefix_start - m_prefix.length() - m_suffix.length());
+    }
     m_document.set_all_cursors(m_range.start());
 }
 

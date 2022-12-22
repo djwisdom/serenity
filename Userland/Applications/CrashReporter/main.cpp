@@ -43,8 +43,8 @@
 #include <unistd.h>
 
 struct TitleAndText {
-    String title;
-    String text;
+    DeprecatedString title;
+    DeprecatedString text;
 };
 
 struct ThreadBacktracesAndCpuRegisters {
@@ -90,16 +90,16 @@ static TitleAndText build_backtrace(Coredump::Reader const& coredump, ELF::Core:
             first_entry = false;
         else
             builder.append('\n');
-        builder.append(entry.to_string());
+        builder.append(entry.to_deprecated_string());
     }
 
     dbgln("--- Backtrace for thread #{} (TID {}) ---", thread_index, thread_info.tid);
     for (auto& entry : backtrace.entries()) {
-        dbgln("{}", entry.to_string(true));
+        dbgln("{}", entry.to_deprecated_string(true));
     }
 
     return {
-        String::formatted("Thread #{} (TID {})", thread_index, thread_info.tid),
+        DeprecatedString::formatted("Thread #{} (TID {})", thread_index, thread_info.tid),
         builder.build()
     };
 }
@@ -128,7 +128,7 @@ static TitleAndText build_cpu_registers(const ELF::Core::ThreadInfo& thread_info
 #endif
 
     return {
-        String::formatted("Thread #{} (TID {})", thread_index, thread_info.tid),
+        DeprecatedString::formatted("Thread #{} (TID {})", thread_index, thread_info.tid),
         builder.build()
     };
 }
@@ -145,7 +145,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto app = TRY(GUI::Application::try_create(arguments));
 
-    String coredump_path {};
+    DeprecatedString coredump_path {};
     bool unlink_on_exit = false;
     StringBuilder full_backtrace;
 
@@ -161,9 +161,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    Vector<String> memory_regions;
+    Vector<DeprecatedString> memory_regions;
     coredump->for_each_memory_region_info([&](auto& memory_region_info) {
-        memory_regions.append(String::formatted("{:p} - {:p}: {}", memory_region_info.region_start, memory_region_info.region_end, memory_region_info.region_name));
+        memory_regions.append(DeprecatedString::formatted("{:p} - {:p}: {}", memory_region_info.region_start, memory_region_info.region_end, memory_region_info.region_name));
         return IterationDecision::Continue;
     });
 
@@ -197,7 +197,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         app_name = af->name();
 
     auto& description_label = *widget->find_descendant_of_type_named<GUI::Label>("description");
-    description_label.set_text(String::formatted("\"{}\" (PID {}) has crashed - {} (signal {})", app_name, pid, strsignal(termination_signal), termination_signal));
+    description_label.set_text(DeprecatedString::formatted("\"{}\" (PID {}) has crashed - {} (signal {})", app_name, pid, strsignal(termination_signal), termination_signal));
 
     auto& executable_link_label = *widget->find_descendant_of_type_named<GUI::LinkLabel>("executable_link");
     executable_link_label.set_text(LexicalPath::canonicalized_path(executable_path));
@@ -214,7 +214,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     };
 
     auto& arguments_label = *widget->find_descendant_of_type_named<GUI::Label>("arguments_label");
-    arguments_label.set_text(String::join(' ', crashed_process_arguments));
+    arguments_label.set_text(DeprecatedString::join(' ', crashed_process_arguments));
 
     auto& progressbar = *widget->find_descendant_of_type_named<GUI::Progressbar>("progressbar");
     auto& tab_widget = *widget->find_descendant_of_type_named<GUI::TabWidget>("tab_widget");
@@ -246,7 +246,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     environment_tab->layout()->set_margins(4);
 
     auto environment_text_editor = TRY(environment_tab->try_add<GUI::TextEditor>());
-    environment_text_editor->set_text(String::join('\n', environment));
+    environment_text_editor->set_text(DeprecatedString::join('\n', environment));
     environment_text_editor->set_mode(GUI::TextEditor::Mode::ReadOnly);
     environment_text_editor->set_wrapping_mode(GUI::TextEditor::WrappingMode::NoWrap);
     environment_text_editor->set_should_hide_unnecessary_scrollbars(true);
@@ -256,7 +256,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     memory_regions_tab->layout()->set_margins(4);
 
     auto memory_regions_text_editor = TRY(memory_regions_tab->try_add<GUI::TextEditor>());
-    memory_regions_text_editor->set_text(String::join('\n', memory_regions));
+    memory_regions_text_editor->set_text(DeprecatedString::join('\n', memory_regions));
     memory_regions_text_editor->set_mode(GUI::TextEditor::Mode::ReadOnly);
     memory_regions_text_editor->set_wrapping_mode(GUI::TextEditor::WrappingMode::NoWrap);
     memory_regions_text_editor->set_should_hide_unnecessary_scrollbars(true);
@@ -264,9 +264,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto& close_button = *widget->find_descendant_of_type_named<GUI::Button>("close_button");
     close_button.on_click = [&](auto) {
-        if (unlink_on_exit)
-            unlink_coredump(coredump_path);
-        app->quit();
+        window->close();
     };
     close_button.set_focus(true);
 
@@ -279,20 +277,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto& save_backtrace_button = *widget->find_descendant_of_type_named<GUI::Button>("save_backtrace_button");
     save_backtrace_button.set_icon(TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/save.png"sv)));
     save_backtrace_button.on_click = [&](auto) {
-        if (full_backtrace.is_empty()) {
-            GUI::MessageBox::show(window, "Backtrace has not been generated yet. Please wait..."sv, "Empty Backtrace"sv, GUI::MessageBox::Type::Error);
+        LexicalPath lexical_path(DeprecatedString::formatted("{}_{}_backtrace.txt", pid, app_name));
+        auto file_or_error = FileSystemAccessClient::Client::the().save_file(window, lexical_path.title(), lexical_path.extension());
+        if (file_or_error.is_error()) {
+            GUI::MessageBox::show(window, DeprecatedString::formatted("Communication failed with FileSystemAccessServer: {}.", file_or_error.release_error()), "Saving backtrace failed"sv, GUI::MessageBox::Type::Error);
             return;
         }
 
-        LexicalPath lexical_path(String::formatted("{}_{}_backtrace.txt", pid, app_name));
-        auto file_or_error = FileSystemAccessClient::Client::the().try_save_file(window, lexical_path.title(), lexical_path.extension());
-        if (file_or_error.is_error())
-            return;
-
-        auto file = file_or_error.value();
-        if (!file->write(full_backtrace.to_string()))
-            GUI::MessageBox::show(window, String::formatted("Couldn't save file: {}.", file_or_error.error()), "Saving backtrace failed"sv, GUI::MessageBox::Type::Error);
+        auto file = file_or_error.release_value();
+        if (auto result = file->write(full_backtrace.to_byte_buffer()); result.is_error())
+            GUI::MessageBox::show(window, DeprecatedString::formatted("Couldn't save file: {}.", result.release_error()), "Saving backtrace failed"sv, GUI::MessageBox::Type::Error);
     };
+    save_backtrace_button.set_enabled(false);
 
     (void)Threading::BackgroundAction<ThreadBacktracesAndCpuRegisters>::construct(
         [&, coredump = move(coredump)](auto&) {
@@ -312,26 +308,24 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             });
             return results;
         },
-        [&](auto results) {
-            // FIXME: Make BackgroundAction propagate ErrorOr values so we can replace these MUSTs with TRYs.
-
+        [&](auto results) -> ErrorOr<void> {
             for (auto& backtrace : results.thread_backtraces) {
-                auto container = MUST(backtrace_tab_widget->try_add_tab<GUI::Widget>(backtrace.title));
-                (void)MUST(container->template try_set_layout<GUI::VerticalBoxLayout>());
+                auto container = TRY(backtrace_tab_widget->try_add_tab<GUI::Widget>(backtrace.title));
+                (void)TRY(container->template try_set_layout<GUI::VerticalBoxLayout>());
                 container->layout()->set_margins(4);
-                auto backtrace_text_editor = MUST(container->template try_add<GUI::TextEditor>());
+                auto backtrace_text_editor = TRY(container->template try_add<GUI::TextEditor>());
                 backtrace_text_editor->set_text(backtrace.text);
                 backtrace_text_editor->set_mode(GUI::TextEditor::Mode::ReadOnly);
                 backtrace_text_editor->set_wrapping_mode(GUI::TextEditor::WrappingMode::NoWrap);
                 backtrace_text_editor->set_should_hide_unnecessary_scrollbars(true);
-                full_backtrace.appendff("==== {} ====\n{}\n", backtrace.title, backtrace.text);
+                TRY(full_backtrace.try_appendff("==== {} ====\n{}\n", backtrace.title, backtrace.text));
             }
 
             for (auto& cpu_registers : results.thread_cpu_registers) {
-                auto container = MUST(cpu_registers_tab_widget->try_add_tab<GUI::Widget>(cpu_registers.title));
-                (void)MUST(container->template try_set_layout<GUI::VerticalBoxLayout>());
+                auto container = TRY(cpu_registers_tab_widget->try_add_tab<GUI::Widget>(cpu_registers.title));
+                (void)TRY(container->template try_set_layout<GUI::VerticalBoxLayout>());
                 container->layout()->set_margins(4);
-                auto cpu_registers_text_editor = MUST(container->template try_add<GUI::TextEditor>());
+                auto cpu_registers_text_editor = TRY(container->template try_add<GUI::TextEditor>());
                 cpu_registers_text_editor->set_text(cpu_registers.text);
                 cpu_registers_text_editor->set_mode(GUI::TextEditor::Mode::ReadOnly);
                 cpu_registers_text_editor->set_wrapping_mode(GUI::TextEditor::WrappingMode::NoWrap);
@@ -340,8 +334,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
             progressbar.set_visible(false);
             tab_widget.set_visible(true);
+            save_backtrace_button.set_enabled(true);
             window->resize(window->width(), max(340, window->height()));
             window->set_progress(0);
+            return {};
+        },
+        [window](Error error) {
+            dbgln("Error while parsing the coredump: {}", error);
+            window->close();
         });
 
     window->show();

@@ -11,10 +11,15 @@
 
 namespace SQL::AST {
 
-ResultOr<ResultSet> Statement::execute(AK::NonnullRefPtr<Database> database) const
+ResultOr<ResultSet> Statement::execute(AK::NonnullRefPtr<Database> database, Span<Value const> placeholder_values) const
 {
-    ExecutionContext context { move(database), this, nullptr };
-    return execute(context);
+    ExecutionContext context { move(database), this, placeholder_values, nullptr };
+    auto result = TRY(execute(context));
+
+    // FIXME: When transactional sessions are supported, don't auto-commit modifications.
+    TRY(context.database->commit());
+
+    return result;
 }
 
 }

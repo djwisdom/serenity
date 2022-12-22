@@ -57,7 +57,7 @@ public:
         grow(sizeof(OpType));
         new (slot) OpType(forward<Args>(args)...);
         if constexpr (OpType::IsTerminator)
-            m_current_basic_block->terminate({});
+            m_current_basic_block->terminate({}, static_cast<Instruction const*>(slot));
         return *static_cast<OpType*>(slot);
     }
 
@@ -76,7 +76,7 @@ public:
         grow(size_to_allocate);
         new (slot) OpType(forward<Args>(args)...);
         if constexpr (OpType::IsTerminator)
-            m_current_basic_block->terminate({});
+            m_current_basic_block->terminate({}, static_cast<Instruction const*>(slot));
         return *static_cast<OpType*>(slot);
     }
 
@@ -99,10 +99,10 @@ public:
 
     [[nodiscard]] BasicBlock& current_block() { return *m_current_basic_block; }
 
-    BasicBlock& make_block(String name = {})
+    BasicBlock& make_block(DeprecatedString name = {})
     {
         if (name.is_empty())
-            name = String::number(m_next_block++);
+            name = DeprecatedString::number(m_next_block++);
         m_root_basic_blocks.append(BasicBlock::create(name));
         return m_root_basic_blocks.last();
     }
@@ -112,7 +112,7 @@ public:
         return m_current_basic_block->is_terminated();
     }
 
-    StringTableIndex intern_string(String string)
+    StringTableIndex intern_string(DeprecatedString string)
     {
         return m_string_table->insert(move(string));
     }
@@ -169,11 +169,13 @@ public:
         Break,
         Continue,
         Unwind,
+        ReturnToFinally,
         LeaveLexicalEnvironment,
         LeaveVariableEnvironment,
     };
     template<typename OpType>
-    void perform_needed_unwinds(bool is_break_node = false) requires(OpType::IsTerminator)
+    void perform_needed_unwinds(bool is_break_node = false)
+    requires(OpType::IsTerminator)
     {
         Optional<BlockBoundaryType> boundary_to_stop_at;
         if constexpr (IsSame<OpType, Bytecode::Op::Return> || IsSame<OpType, Bytecode::Op::Yield>)
@@ -187,12 +189,27 @@ public:
             auto boundary = m_boundaries[i - 1];
             if (boundary_to_stop_at.has_value() && boundary == *boundary_to_stop_at)
                 break;
-            if (boundary == BlockBoundaryType::Unwind)
+            using enum BlockBoundaryType;
+            switch (boundary) {
+            case Unwind:
                 emit<Bytecode::Op::LeaveUnwindContext>();
-            else if (boundary == BlockBoundaryType::LeaveLexicalEnvironment)
+                break;
+            case LeaveLexicalEnvironment:
                 emit<Bytecode::Op::LeaveEnvironment>(Bytecode::Op::EnvironmentMode::Lexical);
-            else if (boundary == BlockBoundaryType::LeaveVariableEnvironment)
+                break;
+            case LeaveVariableEnvironment:
                 emit<Bytecode::Op::LeaveEnvironment>(Bytecode::Op::EnvironmentMode::Var);
+                break;
+            case Break:
+            case Continue:
+                break;
+            case ReturnToFinally:
+                // FIXME: In the case of breaks/continues we need to tell the `finally` to break/continue
+                //        For now let's ignore the finally to avoid a crash
+                if (IsSame<OpType, Bytecode::Op::Jump>)
+                    break;
+                return;
+            };
         }
     }
 

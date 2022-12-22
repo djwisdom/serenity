@@ -27,14 +27,17 @@
 
 namespace Core {
 
-static String get_salt()
+static DeprecatedString get_salt()
 {
     char random_data[12];
     fill_with_random(random_data, sizeof(random_data));
 
     StringBuilder builder;
     builder.append("$5$"sv);
-    builder.append(encode_base64(ReadonlyBytes(random_data, sizeof(random_data))));
+
+    // FIXME: change to TRY() and make method fallible
+    auto salt_string = MUST(encode_base64({ random_data, sizeof(random_data) }));
+    builder.append(salt_string);
 
     return builder.build();
 }
@@ -128,39 +131,30 @@ ErrorOr<Account> Account::from_uid(uid_t uid, [[maybe_unused]] Read options)
 ErrorOr<Vector<Account>> Account::all([[maybe_unused]] Read options)
 {
     Vector<Account> accounts;
-
-#ifndef AK_OS_MACOS
-    struct passwd pwd;
-    struct passwd* ptr = nullptr;
     char buffer[1024] = { 0 };
-#endif
 
     ScopeGuard pwent_guard([] { endpwent(); });
     setpwent();
-    errno = 0;
 
-#ifndef AK_OS_MACOS
-    while (getpwent_r(&pwd, buffer, sizeof(buffer), &ptr) == 0 && ptr) {
-#else
-    while (auto const* ptr = getpwent()) {
-#endif
+    while (true) {
+        auto pwd = TRY(Core::System::getpwent({ buffer, sizeof(buffer) }));
+        if (!pwd.has_value())
+            break;
+
         spwd spwd = {};
 
 #ifndef AK_OS_BSD_GENERIC
         ScopeGuard spent_guard([] { endspent(); });
         if (options != Read::PasswdOnly) {
-            auto maybe_spwd = TRY(Core::System::getspnam({ ptr->pw_name, strlen(ptr->pw_name) }));
+            auto maybe_spwd = TRY(Core::System::getspnam({ pwd->pw_name, strlen(pwd->pw_name) }));
             if (!maybe_spwd.has_value())
                 return Error::from_string_literal("No shadow entry for user");
             spwd = maybe_spwd.release_value();
         }
 #endif
 
-        accounts.append({ *ptr, spwd, get_extra_gids(*ptr) });
+        accounts.append({ *pwd, spwd, get_extra_gids(*pwd) });
     }
-
-    if (errno)
-        return Error::from_errno(errno);
 
     return accounts;
 }
@@ -223,16 +217,20 @@ Account::Account(passwd const& pwd, spwd const& spwd, Vector<gid_t> extra_gids)
 {
 }
 
-ErrorOr<String> Account::generate_passwd_file() const
+ErrorOr<DeprecatedString> Account::generate_passwd_file() const
 {
     StringBuilder builder;
+    char buffer[1024] = { 0 };
 
+    ScopeGuard pwent_guard([] { endpwent(); });
     setpwent();
 
-    struct passwd* p;
-    errno = 0;
-    while ((p = getpwent())) {
-        if (p->pw_name == m_username) {
+    while (true) {
+        auto pwd = TRY(Core::System::getpwent({ buffer, sizeof(buffer) }));
+        if (!pwd.has_value())
+            break;
+
+        if (pwd->pw_name == m_username) {
             builder.appendff("{}:!:{}:{}:{}:{}:{}\n",
                 m_username,
                 m_uid, m_gid,
@@ -242,21 +240,17 @@ ErrorOr<String> Account::generate_passwd_file() const
 
         } else {
             builder.appendff("{}:!:{}:{}:{}:{}:{}\n",
-                p->pw_name, p->pw_uid,
-                p->pw_gid, p->pw_gecos, p->pw_dir,
-                p->pw_shell);
+                pwd->pw_name, pwd->pw_uid,
+                pwd->pw_gid, pwd->pw_gecos, pwd->pw_dir,
+                pwd->pw_shell);
         }
     }
-    endpwent();
 
-    if (errno)
-        return Error::from_errno(errno);
-
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 #ifndef AK_OS_BSD_GENERIC
-ErrorOr<String> Account::generate_shadow_file() const
+ErrorOr<DeprecatedString> Account::generate_shadow_file() const
 {
     StringBuilder builder;
 
@@ -268,24 +262,24 @@ ErrorOr<String> Account::generate_shadow_file() const
         if (p->sp_namp == m_username) {
             builder.appendff("{}:{}:{}:{}:{}:{}:{}:{}:{}\n",
                 m_username, m_password_hash,
-                (p->sp_lstchg == -1) ? "" : String::formatted("{}", p->sp_lstchg),
-                (p->sp_min == -1) ? "" : String::formatted("{}", p->sp_min),
-                (p->sp_max == -1) ? "" : String::formatted("{}", p->sp_max),
-                (p->sp_warn == -1) ? "" : String::formatted("{}", p->sp_warn),
-                (p->sp_inact == -1) ? "" : String::formatted("{}", p->sp_inact),
-                (p->sp_expire == -1) ? "" : String::formatted("{}", p->sp_expire),
-                (p->sp_flag == 0) ? "" : String::formatted("{}", p->sp_flag));
+                (p->sp_lstchg == -1) ? "" : DeprecatedString::formatted("{}", p->sp_lstchg),
+                (p->sp_min == -1) ? "" : DeprecatedString::formatted("{}", p->sp_min),
+                (p->sp_max == -1) ? "" : DeprecatedString::formatted("{}", p->sp_max),
+                (p->sp_warn == -1) ? "" : DeprecatedString::formatted("{}", p->sp_warn),
+                (p->sp_inact == -1) ? "" : DeprecatedString::formatted("{}", p->sp_inact),
+                (p->sp_expire == -1) ? "" : DeprecatedString::formatted("{}", p->sp_expire),
+                (p->sp_flag == 0) ? "" : DeprecatedString::formatted("{}", p->sp_flag));
 
         } else {
             builder.appendff("{}:{}:{}:{}:{}:{}:{}:{}:{}\n",
                 p->sp_namp, p->sp_pwdp,
-                (p->sp_lstchg == -1) ? "" : String::formatted("{}", p->sp_lstchg),
-                (p->sp_min == -1) ? "" : String::formatted("{}", p->sp_min),
-                (p->sp_max == -1) ? "" : String::formatted("{}", p->sp_max),
-                (p->sp_warn == -1) ? "" : String::formatted("{}", p->sp_warn),
-                (p->sp_inact == -1) ? "" : String::formatted("{}", p->sp_inact),
-                (p->sp_expire == -1) ? "" : String::formatted("{}", p->sp_expire),
-                (p->sp_flag == 0) ? "" : String::formatted("{}", p->sp_flag));
+                (p->sp_lstchg == -1) ? "" : DeprecatedString::formatted("{}", p->sp_lstchg),
+                (p->sp_min == -1) ? "" : DeprecatedString::formatted("{}", p->sp_min),
+                (p->sp_max == -1) ? "" : DeprecatedString::formatted("{}", p->sp_max),
+                (p->sp_warn == -1) ? "" : DeprecatedString::formatted("{}", p->sp_warn),
+                (p->sp_inact == -1) ? "" : DeprecatedString::formatted("{}", p->sp_inact),
+                (p->sp_expire == -1) ? "" : DeprecatedString::formatted("{}", p->sp_expire),
+                (p->sp_flag == 0) ? "" : DeprecatedString::formatted("{}", p->sp_flag));
         }
     }
     endspent();
@@ -293,7 +287,7 @@ ErrorOr<String> Account::generate_shadow_file() const
     if (errno)
         return Error::from_errno(errno);
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 #endif
 

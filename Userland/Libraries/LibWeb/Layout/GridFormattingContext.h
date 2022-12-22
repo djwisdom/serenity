@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibWeb/CSS/Length.h>
 #include <LibWeb/Layout/BlockFormattingContext.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/FormattingContext.h>
@@ -47,10 +48,10 @@ private:
         {
         }
 
-        TemporaryTrack(float size, bool is_gap)
-            : min_track_sizing_function(CSS::GridSize(size))
-            , max_track_sizing_function(CSS::GridSize(size))
-            , base_size(size)
+        TemporaryTrack(float size_in_px, bool is_gap)
+            : min_track_sizing_function(CSS::GridSize(CSS::Length(size_in_px, CSS::Length::Type::Px)))
+            , max_track_sizing_function(CSS::GridSize(CSS::Length(size_in_px, CSS::Length::Type::Px)))
+            , base_size(size_in_px)
             , is_gap(is_gap)
         {
         }
@@ -68,7 +69,7 @@ private:
     float get_free_space_x(AvailableSpace const& available_space);
     float get_free_space_y(Box const&);
 
-    int get_line_index_by_line_name(String const& line_name, CSS::GridTrackSizeList);
+    int get_line_index_by_line_name(DeprecatedString const& line_name, CSS::GridTrackSizeList);
 };
 
 class OccupationGrid {

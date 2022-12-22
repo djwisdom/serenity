@@ -36,8 +36,9 @@ void NestedBrowsingContextPaintable::paint(PaintContext& context, PaintPhase pha
     PaintableBox::paint(context, phase);
 
     if (phase == PaintPhase::Foreground) {
-        auto clip_rect = absolute_rect().to_rounded<int>();
-        ScopedCornerRadiusClip corner_clip { context.painter(), clip_rect, normalized_border_radii_data(ShrinkRadiiForBorders::Yes) };
+        auto absolute_rect = this->absolute_rect();
+        auto clip_rect = context.rounded_device_rect(absolute_rect);
+        ScopedCornerRadiusClip corner_clip { context, context.painter(), clip_rect, normalized_border_radii_data(ShrinkRadiiForBorders::Yes) };
 
         auto* hosted_document = layout_box().dom_node().content_document_without_origin_check();
         if (!hosted_document)
@@ -47,20 +48,20 @@ void NestedBrowsingContextPaintable::paint(PaintContext& context, PaintPhase pha
             return;
 
         context.painter().save();
-        auto old_viewport_rect = context.viewport_rect();
+        auto old_viewport_rect = context.device_viewport_rect();
 
-        context.painter().add_clip_rect(clip_rect);
-        context.painter().translate(absolute_x(), absolute_y());
+        context.painter().add_clip_rect(clip_rect.to_type<int>());
+        context.painter().translate(absolute_rect.x().value(), absolute_rect.y().value());
 
-        context.set_viewport_rect({ {}, layout_box().dom_node().nested_browsing_context()->size() });
+        context.set_device_viewport_rect({ {}, layout_box().dom_node().nested_browsing_context()->size() });
         const_cast<Layout::InitialContainingBlock*>(hosted_layout_tree)->paint_all_phases(context);
 
-        context.set_viewport_rect(old_viewport_rect);
+        context.set_device_viewport_rect(old_viewport_rect);
         context.painter().restore();
 
         if constexpr (HIGHLIGHT_FOCUSED_FRAME_DEBUG) {
             if (layout_box().dom_node().nested_browsing_context()->is_focused_context()) {
-                context.painter().draw_rect(absolute_rect().to_type<int>(), Color::Cyan);
+                context.painter().draw_rect(clip_rect.to_type<int>(), Color::Cyan);
             }
         }
     }

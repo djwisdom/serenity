@@ -15,10 +15,10 @@
 namespace JS {
 
 // 9.3.1 CreateRealm ( ), https://tc39.es/ecma262/#sec-createrealm
-Realm* Realm::create(VM& vm)
+NonnullGCPtr<Realm> Realm::create(VM& vm)
 {
     // 1. Let realmRec be a new Realm Record.
-    auto* realm = vm.heap().allocate_without_realm<Realm>();
+    auto realm = vm.heap().allocate_without_realm<Realm>();
 
     // 2. Perform CreateIntrinsics(realmRec).
     Intrinsics::create(*realm);
@@ -37,7 +37,7 @@ ThrowCompletionOr<NonnullOwnPtr<ExecutionContext>> Realm::initialize_host_define
     DeferGC defer_gc(vm.heap());
 
     // 1. Let realm be CreateRealm().
-    auto* realm = Realm::create(vm);
+    auto realm = Realm::create(vm);
 
     // 2. Let newContext be a new execution context.
     auto new_context = make<ExecutionContext>(vm.heap());

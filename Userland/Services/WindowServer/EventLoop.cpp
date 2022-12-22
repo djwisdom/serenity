@@ -70,9 +70,14 @@ void EventLoop::drain_mouse()
             state.x = packet.x;
             state.y = packet.y;
         }
-        state.z += packet.z;
         state.w += packet.w;
         state_is_sent = false;
+
+        // Invert scroll direction if checked in the settings.
+        if (WindowManager::the().is_natural_scroll())
+            state.z -= packet.z;
+        else
+            state.z += packet.z;
 
         if (packet.buttons != state.buttons) {
             state.buttons = packet.buttons;
@@ -80,7 +85,7 @@ void EventLoop::drain_mouse()
 
             // Swap primary (1) and secondary (2) buttons if checked in Settings.
             // Doing the swap here avoids all emulator and hardware issues.
-            if (WindowManager::the().get_buttons_switched()) {
+            if (WindowManager::the().are_mouse_buttons_switched()) {
                 bool has_primary = state.buttons & MousePacket::Button::LeftButton;
                 bool has_secondary = state.buttons & MousePacket::Button::RightButton;
                 state.buttons = state.buttons & ~(MousePacket::Button::LeftButton | MousePacket::Button::RightButton);

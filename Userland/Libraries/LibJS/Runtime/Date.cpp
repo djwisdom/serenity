@@ -21,18 +21,18 @@ static Crypto::SignedBigInteger const s_one_billion_bigint { 1'000'000'000 };
 static Crypto::SignedBigInteger const s_one_million_bigint { 1'000'000 };
 static Crypto::SignedBigInteger const s_one_thousand_bigint { 1'000 };
 
-Date* Date::create(Realm& realm, double date_value)
+NonnullGCPtr<Date> Date::create(Realm& realm, double date_value)
 {
     return realm.heap().allocate<Date>(realm, date_value, *realm.intrinsics().date_prototype());
 }
 
 Date::Date(double date_value, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_date_value(date_value)
 {
 }
 
-String Date::iso_date_string() const
+DeprecatedString Date::iso_date_string() const
 {
     int year = year_from_time(m_date_value);
 
@@ -616,7 +616,7 @@ double parse_time_zone_offset_string(StringView offset_string)
         auto parsed_fraction = *parse_result->time_zone_utc_offset_fraction;
 
         // b. Let fraction be the string-concatenation of CodePointsToString(parsedFraction) and "000000000".
-        auto fraction = String::formatted("{}000000000", parsed_fraction);
+        auto fraction = DeprecatedString::formatted("{}000000000", parsed_fraction);
 
         // c. Let nanosecondsString be the substring of fraction from 1 to 10.
         auto nanoseconds_string = fraction.substring_view(1, 9);

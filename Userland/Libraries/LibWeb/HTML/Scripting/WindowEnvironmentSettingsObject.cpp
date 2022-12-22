@@ -38,7 +38,7 @@ void WindowEnvironmentSettingsObject::setup(AK::URL const& creation_url, Nonnull
 
     // 3. Let settings object be a new environment settings object whose algorithms are defined as follows:
     // NOTE: See the functions defined for this class.
-    auto* settings_object = realm->heap().allocate<WindowEnvironmentSettingsObject>(*realm, window, move(execution_context));
+    auto settings_object = realm->heap().allocate<WindowEnvironmentSettingsObject>(*realm, window, move(execution_context));
 
     // 4. If reservedEnvironment is non-null, then:
     if (reserved_environment.has_value()) {
@@ -49,7 +49,7 @@ void WindowEnvironmentSettingsObject::setup(AK::URL const& creation_url, Nonnull
         settings_object->target_browsing_context = reserved_environment->target_browsing_context;
 
         // 2. Set reservedEnvironment's id to the empty string.
-        reserved_environment->id = String::empty();
+        reserved_environment->id = DeprecatedString::empty();
     }
 
     // 5. Otherwise, ...
@@ -58,7 +58,7 @@ void WindowEnvironmentSettingsObject::setup(AK::URL const& creation_url, Nonnull
         //        settings object's target browsing context to null,
         //        and settings object's active service worker to null.
         static i64 next_id = 1;
-        settings_object->id = String::number(next_id++);
+        settings_object->id = DeprecatedString::number(next_id++);
         settings_object->target_browsing_context = nullptr;
     }
 
@@ -71,8 +71,8 @@ void WindowEnvironmentSettingsObject::setup(AK::URL const& creation_url, Nonnull
 
     // 7. Set realm's [[HostDefined]] field to settings object.
     // Non-Standard: We store the ESO next to the web intrinsics in a custom HostDefined object
-    auto* intrinsics = realm->heap().allocate<Bindings::Intrinsics>(*realm, *realm);
-    auto host_defined = make<Bindings::HostDefined>(*settings_object, *intrinsics);
+    auto intrinsics = realm->heap().allocate<Bindings::Intrinsics>(*realm, *realm);
+    auto host_defined = make<Bindings::HostDefined>(settings_object, intrinsics);
     realm->set_host_defined(move(host_defined));
 
     // Non-Standard: We cannot fully initialize window object until *after* the we set up
@@ -88,7 +88,7 @@ JS::GCPtr<DOM::Document> WindowEnvironmentSettingsObject::responsible_document()
 }
 
 // https://html.spec.whatwg.org/multipage/window-object.html#script-settings-for-window-objects:api-url-character-encoding
-String WindowEnvironmentSettingsObject::api_url_character_encoding()
+DeprecatedString WindowEnvironmentSettingsObject::api_url_character_encoding()
 {
     // Return the current character encoding of window's associated Document.
     return m_window->associated_document().encoding_or_default();

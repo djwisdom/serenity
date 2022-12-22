@@ -18,22 +18,36 @@ namespace Audio {
 
 static constexpr size_t const maximum_wav_size = 1 * GiB; // FIXME: is there a more appropriate size limit?
 
-WavLoaderPlugin::WavLoaderPlugin(StringView path)
-    : LoaderPlugin(path)
+WavLoaderPlugin::WavLoaderPlugin(NonnullOwnPtr<Core::Stream::SeekableStream> stream)
+    : LoaderPlugin(move(stream))
 {
+}
+
+Result<NonnullOwnPtr<WavLoaderPlugin>, LoaderError> WavLoaderPlugin::try_create(StringView path)
+{
+    auto stream = LOADER_TRY(Core::Stream::BufferedFile::create(LOADER_TRY(Core::Stream::File::open(path, Core::Stream::OpenMode::Read))));
+    auto loader = make<WavLoaderPlugin>(move(stream));
+
+    LOADER_TRY(loader->initialize());
+
+    return loader;
+}
+
+Result<NonnullOwnPtr<WavLoaderPlugin>, LoaderError> WavLoaderPlugin::try_create(Bytes buffer)
+{
+    auto stream = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(buffer));
+    auto loader = make<WavLoaderPlugin>(move(stream));
+
+    LOADER_TRY(loader->initialize());
+
+    return loader;
 }
 
 MaybeLoaderError WavLoaderPlugin::initialize()
 {
-    LOADER_TRY(LoaderPlugin::initialize());
+    LOADER_TRY(parse_header());
 
-    TRY(parse_header());
     return {};
-}
-
-WavLoaderPlugin::WavLoaderPlugin(Bytes buffer)
-    : LoaderPlugin(buffer)
-{
 }
 
 template<typename SampleReader>
@@ -101,7 +115,7 @@ static ErrorOr<double> read_sample(Core::Stream::Stream& stream)
 LoaderSamples WavLoaderPlugin::samples_from_pcm_data(Bytes const& data, size_t samples_to_read) const
 {
     FixedArray<Sample> samples = LOADER_TRY(FixedArray<Sample>::try_create(samples_to_read));
-    auto stream = LOADER_TRY(Core::Stream::MemoryStream::construct(move(data)));
+    auto stream = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(move(data)));
 
     switch (m_sample_format) {
     case PcmSampleFormat::Uint8:
@@ -128,9 +142,6 @@ LoaderSamples WavLoaderPlugin::samples_from_pcm_data(Bytes const& data, size_t s
 
 LoaderSamples WavLoaderPlugin::get_more_samples(size_t max_samples_to_read_from_input)
 {
-    if (!m_stream)
-        return LoaderError { LoaderError::Category::Internal, static_cast<size_t>(m_loaded_samples), "No stream; initialization failed" };
-
     auto remaining_samples = m_total_samples - m_loaded_samples;
     if (remaining_samples <= 0)
         return FixedArray<Sample> {};
@@ -175,9 +186,6 @@ MaybeLoaderError WavLoaderPlugin::seek(int sample_index)
 // Specification reference: http://www-mmsp.ece.mcgill.ca/Documents/AudioFormats/WAVE/WAVE.html
 MaybeLoaderError WavLoaderPlugin::parse_header()
 {
-    if (!m_stream)
-        return LoaderError { LoaderError::Category::Internal, 0, "No stream" };
-
     bool ok = true;
     size_t bytes_read = 0;
 
@@ -202,10 +210,10 @@ MaybeLoaderError WavLoaderPlugin::parse_header()
         return value;
     };
 
-#define CHECK_OK(category, msg)                                                            \
-    do {                                                                                   \
-        if (!ok)                                                                           \
-            return LoaderError { category, String::formatted("Parsing failed: {}", msg) }; \
+#define CHECK_OK(category, msg)                                                                      \
+    do {                                                                                             \
+        if (!ok)                                                                                     \
+            return LoaderError { category, DeprecatedString::formatted("Parsing failed: {}", msg) }; \
     } while (0)
 
     u32 riff = TRY(read_u32());

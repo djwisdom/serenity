@@ -29,6 +29,8 @@ CodeGenerationErrorOr<NonnullOwnPtr<Executable>> Generator::generate(ASTNode con
         auto& start_block = generator.make_block();
         generator.emit<Bytecode::Op::Yield>(Label { start_block });
         generator.switch_to_basic_block(start_block);
+        // NOTE: This doesn't have to handle received throw/return completions, as GeneratorObject::resume_abrupt
+        //       will not enter the generator from the SuspendedStart state and immediately completes the generator.
     }
     TRY(node.generate_bytecode(generator));
     if (generator.is_in_generator_or_async_function()) {
@@ -266,12 +268,17 @@ Label Generator::perform_needed_unwinds_for_labelled_break_and_return_target_blo
     for (auto& breakable_scope : m_breakable_scopes.in_reverse()) {
         for (; current_boundary > 0; --current_boundary) {
             auto boundary = m_boundaries[current_boundary - 1];
+            // FIXME: Handle ReturnToFinally in a graceful manner
+            //        We need to execute the finally block, but tell it to resume
+            //        execution at the designated label
             if (boundary == BlockBoundaryType::Unwind) {
                 emit<Bytecode::Op::LeaveUnwindContext>();
             } else if (boundary == BlockBoundaryType::LeaveLexicalEnvironment) {
                 emit<Bytecode::Op::LeaveEnvironment>(Bytecode::Op::EnvironmentMode::Lexical);
             } else if (boundary == BlockBoundaryType::LeaveVariableEnvironment) {
                 emit<Bytecode::Op::LeaveEnvironment>(Bytecode::Op::EnvironmentMode::Var);
+            } else if (boundary == BlockBoundaryType::ReturnToFinally) {
+                // FIXME: We need to enter the `finally`, while still scheduling the break to happen
             } else if (boundary == BlockBoundaryType::Break) {
                 // Make sure we don't process this boundary twice if the current breakable scope doesn't contain the target label.
                 --current_boundary;
@@ -293,12 +300,17 @@ Label Generator::perform_needed_unwinds_for_labelled_continue_and_return_target_
     for (auto& continuable_scope : m_continuable_scopes.in_reverse()) {
         for (; current_boundary > 0; --current_boundary) {
             auto boundary = m_boundaries[current_boundary - 1];
+            // FIXME: Handle ReturnToFinally in a graceful manner
+            //        We need to execute the finally block, but tell it to resume
+            //        execution at the designated label
             if (boundary == BlockBoundaryType::Unwind) {
                 emit<Bytecode::Op::LeaveUnwindContext>();
             } else if (boundary == BlockBoundaryType::LeaveLexicalEnvironment) {
                 emit<Bytecode::Op::LeaveEnvironment>(Bytecode::Op::EnvironmentMode::Lexical);
             } else if (boundary == BlockBoundaryType::LeaveVariableEnvironment) {
                 emit<Bytecode::Op::LeaveEnvironment>(Bytecode::Op::EnvironmentMode::Var);
+            } else if (boundary == BlockBoundaryType::ReturnToFinally) {
+                // FIXME: We need to enter the `finally`, while still scheduling the continue to happen
             } else if (boundary == BlockBoundaryType::Continue) {
                 // Make sure we don't process this boundary twice if the current continuable scope doesn't contain the target label.
                 --current_boundary;
@@ -314,9 +326,9 @@ Label Generator::perform_needed_unwinds_for_labelled_continue_and_return_target_
     VERIFY_NOT_REACHED();
 }
 
-String CodeGenerationError::to_string()
+DeprecatedString CodeGenerationError::to_deprecated_string()
 {
-    return String::formatted("CodeGenerationError in {}: {}", failing_node ? failing_node->class_name() : "<unknown node>", reason_literal);
+    return DeprecatedString::formatted("CodeGenerationError in {}: {}", failing_node ? failing_node->class_name() : "<unknown node>", reason_literal);
 }
 
 }

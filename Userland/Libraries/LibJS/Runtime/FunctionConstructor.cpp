@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibJS/AST.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
@@ -114,13 +113,13 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     auto arg_count = args.size();
 
     // 9. Let P be the empty String.
-    String parameters_string = "";
+    DeprecatedString parameters_string = "";
 
     Optional<Value> body_arg;
 
     // 10. If argCount = 0, let bodyArg be the empty String.
     if (arg_count == 0) {
-        // Optimization: Instead of creating a js_string() here, we just check if body_arg is empty in step 16.
+        // Optimization: Instead of creating a PrimitiveString here, we just check if body_arg is empty in step 16.
     }
     // 11. Else if argCount = 1, let bodyArg be args[0].
     else if (arg_count == 1) {
@@ -139,7 +138,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
         size_t k = 0;
 
         // e. Repeat, while k < argCount - 1,
-        Vector<String> parameters;
+        Vector<DeprecatedString> parameters;
         for (; k < arg_count - 1; ++k) {
             // i. Let nextArg be args[k].
             auto next_arg = args[k];
@@ -150,18 +149,18 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
 
             // iv. Set k to k + 1.
         }
-        parameters_string = String::join(',', parameters);
+        parameters_string = DeprecatedString::join(',', parameters);
 
         // f. Let bodyArg be args[k].
         body_arg = args[k];
     }
 
     // 13. Let bodyString be the string-concatenation of 0x000A (LINE FEED), ? ToString(bodyArg), and 0x000A (LINE FEED).
-    auto body_string = String::formatted("\n{}\n", body_arg.has_value() ? TRY(body_arg->to_string(vm)) : "");
+    auto body_string = DeprecatedString::formatted("\n{}\n", body_arg.has_value() ? TRY(body_arg->to_string(vm)) : "");
 
     // 14. Let sourceString be the string-concatenation of prefix, " anonymous(", P, 0x000A (LINE FEED), ") {", bodyString, and "}".
     // 15. Let sourceText be StringToCodePoints(sourceString).
-    auto source_text = String::formatted("{} anonymous({}\n) {{{}}}", prefix, parameters_string, body_string);
+    auto source_text = DeprecatedString::formatted("{} anonymous({}\n) {{{}}}", prefix, parameters_string, body_string);
 
     u8 parse_options = FunctionNodeParseOptions::CheckForFunctionAndName;
     if (kind == FunctionKind::Async || kind == FunctionKind::AsyncGenerator)
@@ -177,7 +176,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     // 17. If parameters is a List of errors, throw a SyntaxError exception.
     if (parameters_parser.has_errors()) {
         auto error = parameters_parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_string());
+        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
     }
 
     // 18. Let body be ParseText(StringToCodePoints(bodyString), bodySym).
@@ -194,7 +193,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     // 19. If body is a List of errors, throw a SyntaxError exception.
     if (body_parser.has_errors()) {
         auto error = body_parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_string());
+        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
     }
 
     // 20. NOTE: The parameters and body are parsed separately to ensure that each is valid alone. For example, new Function("/*", "*/ ) {") is not legal.
@@ -208,7 +207,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     // 23. If expr is a List of errors, throw a SyntaxError exception.
     if (source_parser.has_errors()) {
         auto error = source_parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_string());
+        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
     }
 
     // 24. Let proto be ? GetPrototypeFromConstructor(newTarget, fallbackProto).
@@ -224,7 +223,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     PrivateEnvironment* private_environment = nullptr;
 
     // 28. Let F be OrdinaryFunctionCreate(proto, sourceText, parameters, body, non-lexical-this, env, privateEnv).
-    auto* function = ECMAScriptFunctionObject::create(realm, "anonymous", *prototype, move(source_text), expr->body(), expr->parameters(), expr->function_length(), &environment, private_environment, expr->kind(), expr->is_strict_mode(), expr->might_need_arguments_object(), contains_direct_call_to_eval);
+    auto function = ECMAScriptFunctionObject::create(realm, "anonymous", *prototype, move(source_text), expr->body(), expr->parameters(), expr->function_length(), &environment, private_environment, expr->kind(), expr->is_strict_mode(), expr->might_need_arguments_object(), contains_direct_call_to_eval);
 
     // FIXME: Remove the name argument from create() and do this instead.
     // 29. Perform SetFunctionName(F, "anonymous").
@@ -256,7 +255,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     // 33. NOTE: Functions whose kind is async are not constructible and do not have a [[Construct]] internal method or a "prototype" property.
 
     // 34. Return F.
-    return function;
+    return function.ptr();
 }
 
 // 20.2.1.1 Function ( p1, p2, … , pn, body ), https://tc39.es/ecma262/#sec-function-p1-p2-pn-body
@@ -266,7 +265,7 @@ ThrowCompletionOr<Value> FunctionConstructor::call()
 }
 
 // 20.2.1.1 Function ( p1, p2, … , pn, body ), https://tc39.es/ecma262/#sec-function-p1-p2-pn-body
-ThrowCompletionOr<Object*> FunctionConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> FunctionConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -277,7 +276,7 @@ ThrowCompletionOr<Object*> FunctionConstructor::construct(FunctionObject& new_ta
     auto& args = vm.running_execution_context().arguments;
 
     // 3. Return ? CreateDynamicFunction(C, NewTarget, normal, args).
-    return TRY(create_dynamic_function(vm, *constructor, &new_target, FunctionKind::Normal, args));
+    return *TRY(create_dynamic_function(vm, *constructor, &new_target, FunctionKind::Normal, args));
 }
 
 }

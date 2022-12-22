@@ -55,7 +55,7 @@ bool VirtualFileSystem::mount_point_exists_at_inode(InodeIdentifier inode_identi
 {
     return m_mounts.with([&](auto& mounts) -> bool {
         return any_of(mounts, [&inode_identifier](auto const& existing_mount) {
-            return existing_mount->host() && existing_mount->host()->identifier() == inode_identifier;
+            return existing_mount.host() && existing_mount.host()->identifier() == inode_identifier;
         });
     });
 }
@@ -78,7 +78,10 @@ ErrorOr<void> VirtualFileSystem::mount(FileSystem& fs, Custody& mount_point, int
         new_mount->guest_fs().mounted_count({}).with([&](auto& mounted_count) {
             mounted_count++;
         });
-        mounts.append(move(new_mount));
+
+        // NOTE: Leak the mount pointer so it can be added to the mount list, but it won't be
+        // deleted after being added.
+        mounts.append(*new_mount.leak_ptr());
         return {};
     });
 }
@@ -94,7 +97,10 @@ ErrorOr<void> VirtualFileSystem::bind_mount(Custody& source, Custody& mount_poin
                 mount_point.inode().identifier());
             return EBUSY;
         }
-        mounts.append(move(new_mount));
+
+        // NOTE: Leak the mount pointer so it can be added to the mount list, but it won't be
+        // deleted after being added.
+        mounts.append(*new_mount.leak_ptr());
         return {};
     });
 }
@@ -142,14 +148,13 @@ ErrorOr<void> VirtualFileSystem::unmount(Custody& mountpoint_custody)
     dbgln("VirtualFileSystem: unmount called with inode {} on mountpoint {}", guest_inode.identifier(), custody_path->view());
 
     return m_mounts.with([&](auto& mounts) -> ErrorOr<void> {
-        for (size_t i = 0; i < mounts.size(); ++i) {
-            auto& mount = mounts[i];
-            if (&mount->guest() != &guest_inode)
+        for (auto& mount : mounts) {
+            if (&mount.guest() != &guest_inode)
                 continue;
-            auto mountpoint_path = TRY(mount->absolute_path());
+            auto mountpoint_path = TRY(mount.absolute_path());
             if (custody_path->view() != mountpoint_path->view())
                 continue;
-            NonnullRefPtr<FileSystem> fs = mount->guest_fs();
+            NonnullRefPtr<FileSystem> fs = mount.guest_fs();
             TRY(fs->prepare_to_unmount());
             fs->mounted_count({}).with([&](auto& mounted_count) {
                 VERIFY(mounted_count > 0);
@@ -170,7 +175,9 @@ ErrorOr<void> VirtualFileSystem::unmount(Custody& mountpoint_custody)
                 }
             });
             dbgln("VirtualFileSystem: Unmounting file system {}...", fs->fsid());
-            (void)mounts.unstable_take(i);
+            mount.m_vfs_list_node.remove();
+            // Note: This is balanced by a `new` statement that is happening in various places before inserting the Mount object to the list.
+            delete &mount;
             return {};
         }
         dbgln("VirtualFileSystem: Nothing mounted on inode {}", guest_inode.identifier());
@@ -186,7 +193,6 @@ ErrorOr<void> VirtualFileSystem::mount_root(FileSystem& fs)
     }
 
     auto new_mount = TRY(adopt_nonnull_own_or_enomem(new (nothrow) Mount(fs, nullptr, root_mount_flags)));
-
     auto& root_inode = fs.root_inode();
     if (!root_inode.is_directory()) {
         dmesgln("VirtualFileSystem: root inode ({}) for / is not a directory :(", root_inode.identifier());
@@ -208,12 +214,15 @@ ErrorOr<void> VirtualFileSystem::mount_root(FileSystem& fs)
         fs_list.append(fs);
     });
 
+    fs.mounted_count({}).with([&](auto& mounted_count) {
+        mounted_count++;
+    });
+
     // Note: Actually add a mount for the filesystem and increment the filesystem mounted count
     m_mounts.with([&](auto& mounts) {
-        new_mount->guest_fs().mounted_count({}).with([&](auto& mounted_count) {
-            mounted_count++;
-        });
-        mounts.append(move(new_mount));
+        // NOTE: Leak the mount pointer so it can be added to the mount list, but it won't be
+        // deleted after being added.
+        mounts.append(*new_mount.leak_ptr());
     });
 
     RefPtr<Custody> new_root_custody = TRY(Custody::try_create(nullptr, ""sv, *m_root_inode, root_mount_flags));
@@ -227,8 +236,8 @@ auto VirtualFileSystem::find_mount_for_host(InodeIdentifier id) -> Mount*
 {
     return m_mounts.with([&](auto& mounts) -> Mount* {
         for (auto& mount : mounts) {
-            if (mount->host() && mount->host()->identifier() == id)
-                return mount.ptr();
+            if (mount.host() && mount.host()->identifier() == id)
+                return &mount;
         }
         return nullptr;
     });
@@ -238,8 +247,8 @@ auto VirtualFileSystem::find_mount_for_guest(InodeIdentifier id) -> Mount*
 {
     return m_mounts.with([&](auto& mounts) -> Mount* {
         for (auto& mount : mounts) {
-            if (mount->guest().identifier() == id)
-                return mount.ptr();
+            if (mount.guest().identifier() == id)
+                return &mount;
         }
         return nullptr;
     });
@@ -281,7 +290,7 @@ ErrorOr<void> VirtualFileSystem::utime(Credentials const& credentials, StringVie
     if (custody->is_readonly())
         return EROFS;
 
-    TRY(inode.update_timestamps(atime, {}, mtime));
+    TRY(inode.update_timestamps(Time::from_timespec({ atime, 0 }), {}, Time::from_timespec({ mtime, 0 })));
     return {};
 }
 
@@ -296,9 +305,9 @@ ErrorOr<void> VirtualFileSystem::utimensat(Credentials const& credentials, Strin
 
     // NOTE: A standard ext2 inode cannot store nanosecond timestamps.
     TRY(inode.update_timestamps(
-        (atime.tv_nsec != UTIME_OMIT) ? atime.tv_sec : Optional<time_t> {},
+        (atime.tv_nsec != UTIME_OMIT) ? Time::from_timespec(atime) : Optional<Time> {},
         {},
-        (mtime.tv_nsec != UTIME_OMIT) ? mtime.tv_sec : Optional<time_t> {}));
+        (mtime.tv_nsec != UTIME_OMIT) ? Time::from_timespec(mtime) : Optional<Time> {}));
 
     return {};
 }
@@ -412,7 +421,7 @@ ErrorOr<NonnullLockRefPtr<OpenFileDescription>> VirtualFileSystem::open(Credenti
 
     if (should_truncate_file) {
         TRY(inode.truncate(0));
-        TRY(inode.update_timestamps({}, {}, kgettimeofday().to_truncated_seconds()));
+        TRY(inode.update_timestamps({}, {}, kgettimeofday()));
     }
     auto description = TRY(OpenFileDescription::try_create(custody));
     description->set_rw_mode(options);
@@ -514,24 +523,26 @@ ErrorOr<void> VirtualFileSystem::mkdir(Credentials const& credentials, StringVie
     return {};
 }
 
-ErrorOr<void> VirtualFileSystem::access(Credentials const& credentials, StringView path, int mode, Custody& base)
+ErrorOr<void> VirtualFileSystem::access(Credentials const& credentials, StringView path, int mode, Custody& base, AccessFlags access_flags)
 {
-    auto custody = TRY(resolve_path(credentials, path, base));
+    auto should_follow_symlinks = !has_flag(access_flags, AccessFlags::DoNotFollowSymlinks);
+    auto custody = TRY(resolve_path(credentials, path, base, nullptr, should_follow_symlinks ? 0 : O_NOFOLLOW_NOERROR));
 
     auto& inode = custody->inode();
     auto metadata = inode.metadata();
+    auto use_effective_ids = has_flag(access_flags, AccessFlags::EffectiveAccess) ? UseEffectiveIDs::Yes : UseEffectiveIDs::No;
     if (mode & R_OK) {
-        if (!metadata.may_read(credentials))
+        if (!metadata.may_read(credentials, use_effective_ids))
             return EACCES;
     }
     if (mode & W_OK) {
-        if (!metadata.may_write(credentials))
+        if (!metadata.may_write(credentials, use_effective_ids))
             return EACCES;
         if (custody->is_readonly())
             return EROFS;
     }
     if (mode & X_OK) {
-        if (!metadata.may_execute(credentials))
+        if (!metadata.may_execute(credentials, use_effective_ids))
             return EACCES;
     }
     return {};
@@ -568,14 +579,14 @@ ErrorOr<void> VirtualFileSystem::chmod(Credentials const& credentials, StringVie
     return chmod(credentials, custody, mode);
 }
 
-ErrorOr<void> VirtualFileSystem::rename(Credentials const& credentials, StringView old_path, StringView new_path, Custody& base)
+ErrorOr<void> VirtualFileSystem::rename(Credentials const& credentials, Custody& old_base, StringView old_path, Custody& new_base, StringView new_path)
 {
     RefPtr<Custody> old_parent_custody;
-    auto old_custody = TRY(resolve_path(credentials, old_path, base, &old_parent_custody, O_NOFOLLOW_NOERROR));
+    auto old_custody = TRY(resolve_path(credentials, old_path, old_base, &old_parent_custody, O_NOFOLLOW_NOERROR));
     auto& old_inode = old_custody->inode();
 
     RefPtr<Custody> new_parent_custody;
-    auto new_custody_or_error = resolve_path(credentials, new_path, base, &new_parent_custody);
+    auto new_custody_or_error = resolve_path(credentials, new_path, new_base, &new_parent_custody);
     if (new_custody_or_error.is_error()) {
         if (new_custody_or_error.error().code() != ENOENT || !new_parent_custody)
             return new_custody_or_error.release_error();
@@ -652,6 +663,14 @@ ErrorOr<void> VirtualFileSystem::rename(Credentials const& credentials, StringVi
 
     TRY(new_parent_inode.add_child(old_inode, new_basename, old_inode.mode()));
     TRY(old_parent_inode.remove_child(old_basename));
+
+    // If the inode that we moved is a directory and we changed parent
+    // directories, then we also have to make .. point to the new parent inode,
+    // because .. is its own inode.
+    if (old_inode.is_directory() && old_parent_inode.index() != new_parent_inode.index()) {
+        TRY(old_inode.replace_child(".."sv, new_parent_inode));
+    }
+
     return {};
 }
 
@@ -715,7 +734,9 @@ static bool hard_link_allowed(Credentials const& credentials, Inode const& inode
 
 ErrorOr<void> VirtualFileSystem::link(Credentials const& credentials, StringView old_path, StringView new_path, Custody& base)
 {
-    auto old_custody = TRY(resolve_path(credentials, old_path, base));
+    // NOTE: To prevent unveil bypass by creating an hardlink after unveiling a path as read-only,
+    // check that if write permission is allowed by the veil info on the old_path.
+    auto old_custody = TRY(resolve_path(credentials, old_path, base, nullptr, O_RDWR));
     auto& old_inode = old_custody->inode();
 
     RefPtr<Custody> parent_custody;
@@ -777,12 +798,25 @@ ErrorOr<void> VirtualFileSystem::unlink(Credentials const& credentials, StringVi
 
 ErrorOr<void> VirtualFileSystem::symlink(Credentials const& credentials, StringView target, StringView linkpath, Custody& base)
 {
+    // NOTE: Check that the actual target (if it exists right now) is unveiled and prevent creating symlinks on veiled paths!
+    if (auto target_custody_or_error = resolve_path_without_veil(credentials, target, base, nullptr, O_RDWR, 0); !target_custody_or_error.is_error()) {
+        auto target_custody = target_custody_or_error.release_value();
+        TRY(validate_path_against_process_veil(*target_custody, O_RDWR));
+    }
+
     RefPtr<Custody> parent_custody;
-    auto existing_custody_or_error = resolve_path(credentials, linkpath, base, &parent_custody);
+    auto existing_custody_or_error = resolve_path(credentials, linkpath, base, &parent_custody, O_RDWR);
     if (!existing_custody_or_error.is_error())
         return EEXIST;
     if (!parent_custody)
         return ENOENT;
+
+    // NOTE: VERY IMPORTANT! We prevent creating symlinks in case the program didn't unveil the parent_custody
+    // path! For example, say the program wanted to create a symlink in /tmp/symlink to /tmp/test/pointee_symlink
+    // and unveiled the /tmp/test/ directory path beforehand, but not the /tmp directory path - the symlink syscall will
+    // fail here because we can't create the symlink in a parent directory path we didn't unveil beforehand.
+    TRY(validate_path_against_process_veil(*parent_custody, O_RDWR));
+
     if (existing_custody_or_error.is_error() && existing_custody_or_error.error().code() != ENOENT)
         return existing_custody_or_error.release_error();
     auto& parent_inode = parent_custody->inode();
@@ -849,7 +883,7 @@ ErrorOr<void> VirtualFileSystem::for_each_mount(Function<ErrorOr<void>(Mount con
 {
     return m_mounts.with([&](auto& mounts) -> ErrorOr<void> {
         for (auto& mount : mounts)
-            TRY(callback(*mount));
+            TRY(callback(mount));
         return {};
     });
 }

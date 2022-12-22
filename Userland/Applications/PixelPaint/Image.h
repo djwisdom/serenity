@@ -46,7 +46,7 @@ protected:
 
 class Image : public RefCounted<Image> {
 public:
-    static ErrorOr<NonnullRefPtr<Image>> try_create_with_size(Gfx::IntSize const&);
+    static ErrorOr<NonnullRefPtr<Image>> try_create_with_size(Gfx::IntSize);
     static ErrorOr<NonnullRefPtr<Image>> try_create_from_pixel_paint_json(JsonObject const&);
     static ErrorOr<NonnullRefPtr<Image>> try_create_from_bitmap(NonnullRefPtr<Gfx::Bitmap>);
 
@@ -63,7 +63,7 @@ public:
     Layer const& layer(size_t index) const { return m_layers.at(index); }
     Layer& layer(size_t index) { return m_layers.at(index); }
 
-    Gfx::IntSize const& size() const { return m_size; }
+    Gfx::IntSize size() const { return m_size; }
     Gfx::IntRect rect() const { return { {}, m_size }; }
 
     void add_layer(NonnullRefPtr<Layer>);
@@ -72,7 +72,7 @@ public:
 
     void paint_into(GUI::Painter&, Gfx::IntRect const& dest_rect) const;
 
-    void serialize_as_json(JsonObjectSerializer<StringBuilder>& json) const;
+    ErrorOr<void> serialize_as_json(JsonObjectSerializer<StringBuilder>& json) const;
     ErrorOr<void> export_bmp_to_file(Core::File&, bool preserve_alpha_channel);
     ErrorOr<void> export_png_to_file(Core::File&, bool preserve_alpha_channel);
     ErrorOr<void> export_qoi_to_file(Core::File&) const;
@@ -100,14 +100,14 @@ public:
     void flip(Gfx::Orientation orientation);
     void rotate(Gfx::RotationDirection direction);
     void crop(Gfx::IntRect const& rect);
-    void resize(Gfx::IntSize const& new_size, Gfx::Painter::ScalingMode scaling_mode);
+    void resize(Gfx::IntSize new_size, Gfx::Painter::ScalingMode scaling_mode);
 
     Optional<Gfx::IntRect> nonempty_content_bounding_rect() const;
 
-    Color color_at(Gfx::IntPoint const& point) const;
+    Color color_at(Gfx::IntPoint point) const;
 
 private:
-    explicit Image(Gfx::IntSize const&);
+    explicit Image(Gfx::IntSize);
 
     void did_change(Gfx::IntRect const& modified_rect = {});
     void did_change_rect(Gfx::IntRect const& modified_rect = {});
@@ -123,16 +123,16 @@ private:
 
 class ImageUndoCommand : public GUI::Command {
 public:
-    ImageUndoCommand(Image&, String action_text);
+    ImageUndoCommand(Image&, DeprecatedString action_text);
 
     virtual void undo() override;
     virtual void redo() override;
-    virtual String action_text() const override { return m_action_text; }
+    virtual DeprecatedString action_text() const override { return m_action_text; }
 
 private:
     RefPtr<Image> m_snapshot;
     Image& m_image;
-    String m_action_text;
+    DeprecatedString m_action_text;
 };
 
 }

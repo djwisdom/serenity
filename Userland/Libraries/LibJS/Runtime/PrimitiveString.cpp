@@ -1,11 +1,13 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/CharacterTypes.h>
 #include <AK/Utf16View.h>
+#include <AK/Utf8View.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/PrimitiveString.h>
@@ -22,7 +24,7 @@ PrimitiveString::PrimitiveString(PrimitiveString& lhs, PrimitiveString& rhs)
 {
 }
 
-PrimitiveString::PrimitiveString(String string)
+PrimitiveString::PrimitiveString(DeprecatedString string)
     : m_has_utf8_string(true)
     , m_utf8_string(move(string))
 {
@@ -62,7 +64,7 @@ bool PrimitiveString::is_empty() const
     VERIFY_NOT_REACHED();
 }
 
-String const& PrimitiveString::string() const
+DeprecatedString const& PrimitiveString::deprecated_string() const
 {
     resolve_rope_if_needed();
     if (!m_has_utf8_string) {
@@ -104,65 +106,50 @@ Optional<Value> PrimitiveString::get(VM& vm, PropertyKey const& property_key) co
     auto length = str.length_in_code_units();
     if (length <= index.as_index())
         return {};
-    return js_string(vm, str.substring_view(index.as_index(), 1));
+    return create(vm, str.substring_view(index.as_index(), 1));
 }
 
-PrimitiveString* js_string(Heap& heap, Utf16View const& view)
+NonnullGCPtr<PrimitiveString> PrimitiveString::create(VM& vm, Utf16View const& view)
 {
-    return js_string(heap, Utf16String(view));
+    return create(vm, Utf16String(view));
 }
 
-PrimitiveString* js_string(VM& vm, Utf16View const& view)
-{
-    return js_string(vm.heap(), view);
-}
-
-PrimitiveString* js_string(Heap& heap, Utf16String string)
+NonnullGCPtr<PrimitiveString> PrimitiveString::create(VM& vm, Utf16String string)
 {
     if (string.is_empty())
-        return &heap.vm().empty_string();
+        return vm.empty_string();
 
     if (string.length_in_code_units() == 1) {
         u16 code_unit = string.code_unit_at(0);
         if (is_ascii(code_unit))
-            return &heap.vm().single_ascii_character_string(static_cast<u8>(code_unit));
+            return vm.single_ascii_character_string(static_cast<u8>(code_unit));
     }
 
-    return heap.allocate_without_realm<PrimitiveString>(move(string));
+    return vm.heap().allocate_without_realm<PrimitiveString>(move(string));
 }
 
-PrimitiveString* js_string(VM& vm, Utf16String string)
-{
-    return js_string(vm.heap(), move(string));
-}
-
-PrimitiveString* js_string(Heap& heap, String string)
+NonnullGCPtr<PrimitiveString> PrimitiveString::create(VM& vm, DeprecatedString string)
 {
     if (string.is_empty())
-        return &heap.vm().empty_string();
+        return vm.empty_string();
 
     if (string.length() == 1) {
         auto ch = static_cast<u8>(string.characters()[0]);
         if (is_ascii(ch))
-            return &heap.vm().single_ascii_character_string(ch);
+            return vm.single_ascii_character_string(ch);
     }
 
-    auto& string_cache = heap.vm().string_cache();
+    auto& string_cache = vm.string_cache();
     auto it = string_cache.find(string);
     if (it == string_cache.end()) {
-        auto* new_string = heap.allocate_without_realm<PrimitiveString>(string);
+        auto new_string = vm.heap().allocate_without_realm<PrimitiveString>(string);
         string_cache.set(move(string), new_string);
-        return new_string;
+        return *new_string;
     }
-    return it->value;
+    return *it->value;
 }
 
-PrimitiveString* js_string(VM& vm, String string)
-{
-    return js_string(vm.heap(), move(string));
-}
-
-PrimitiveString* js_rope_string(VM& vm, PrimitiveString& lhs, PrimitiveString& rhs)
+NonnullGCPtr<PrimitiveString> PrimitiveString::create(VM& vm, PrimitiveString& lhs, PrimitiveString& rhs)
 {
     // We're here to concatenate two strings into a new rope string.
     // However, if any of them are empty, no rope is required.
@@ -171,13 +158,13 @@ PrimitiveString* js_rope_string(VM& vm, PrimitiveString& lhs, PrimitiveString& r
     bool rhs_empty = rhs.is_empty();
 
     if (lhs_empty && rhs_empty)
-        return &vm.empty_string();
+        return vm.empty_string();
 
     if (lhs_empty)
-        return &rhs;
+        return rhs;
 
     if (rhs_empty)
-        return &lhs;
+        return lhs;
 
     return vm.heap().allocate_without_realm<PrimitiveString>(lhs, rhs);
 }
@@ -233,21 +220,21 @@ void PrimitiveString::resolve_rope_if_needed() const
     for (auto const* current : pieces) {
         if (!previous) {
             // This is the very first piece, just append it and continue.
-            builder.append(current->string());
+            builder.append(current->deprecated_string());
             previous = current;
             continue;
         }
 
         // Get the UTF-8 representations for both strings.
-        auto const& previous_string_as_utf8 = previous->string();
-        auto const& current_string_as_utf8 = current->string();
+        auto const& previous_string_as_utf8 = previous->deprecated_string();
+        auto const& current_string_as_utf8 = current->deprecated_string();
 
         // NOTE: Now we need to look at the end of the previous string and the start
         //       of the current string, to see if they should be combined into a surrogate.
 
         // Surrogates encoded as UTF-8 are 3 bytes.
         if ((previous_string_as_utf8.length() < 3) || (current_string_as_utf8.length() < 3)) {
-            builder.append(current->string());
+            builder.append(current->deprecated_string());
             previous = current;
             continue;
         }
@@ -255,7 +242,7 @@ void PrimitiveString::resolve_rope_if_needed() const
         // Might the previous string end with a UTF-8 encoded surrogate?
         if ((static_cast<u8>(previous_string_as_utf8[previous_string_as_utf8.length() - 3]) & 0xf0) != 0xe0) {
             // If not, just append the current string and continue.
-            builder.append(current->string());
+            builder.append(current->deprecated_string());
             previous = current;
             continue;
         }
@@ -263,7 +250,7 @@ void PrimitiveString::resolve_rope_if_needed() const
         // Might the current string begin with a UTF-8 encoded surrogate?
         if ((static_cast<u8>(current_string_as_utf8[0]) & 0xf0) != 0xe0) {
             // If not, just append the current string and continue.
-            builder.append(current->string());
+            builder.append(current->deprecated_string());
             previous = current;
             continue;
         }
@@ -272,7 +259,7 @@ void PrimitiveString::resolve_rope_if_needed() const
         auto low_surrogate = *Utf8View(current_string_as_utf8).begin();
 
         if (!Utf16View::is_high_surrogate(high_surrogate) || !Utf16View::is_low_surrogate(low_surrogate)) {
-            builder.append(current->string());
+            builder.append(current->deprecated_string());
             previous = current;
             continue;
         }
@@ -286,7 +273,7 @@ void PrimitiveString::resolve_rope_if_needed() const
         previous = current;
     }
 
-    m_utf8_string = builder.to_string();
+    m_utf8_string = builder.to_deprecated_string();
     m_has_utf8_string = true;
     m_is_rope = false;
     m_lhs = nullptr;

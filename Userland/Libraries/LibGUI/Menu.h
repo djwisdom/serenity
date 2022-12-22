@@ -10,11 +10,18 @@
 #include <AK/WeakPtr.h>
 #include <LibCore/Object.h>
 #include <LibGUI/Action.h>
+#include <LibGUI/ColorFilterer.h>
 #include <LibGUI/Event.h>
 #include <LibGUI/Forward.h>
 #include <LibGfx/Forward.h>
 
 namespace GUI {
+
+namespace CommonMenus {
+
+ErrorOr<NonnullRefPtr<Menu>> make_accessibility_menu(GUI::ColorFilterer&);
+
+};
 
 class Menu final : public Core::Object {
     C_OBJECT(Menu)
@@ -26,7 +33,7 @@ public:
     static Menu* from_menu_id(int);
     int menu_id() const { return m_menu_id; }
 
-    String const& name() const { return m_name; }
+    DeprecatedString const& name() const { return m_name; }
     Gfx::Bitmap const* icon() const { return m_icon.ptr(); }
     void set_icon(Gfx::Bitmap const*);
 
@@ -34,14 +41,14 @@ public:
 
     ErrorOr<void> try_add_action(NonnullRefPtr<Action>);
     ErrorOr<void> try_add_separator();
-    ErrorOr<NonnullRefPtr<Menu>> try_add_submenu(String name);
+    ErrorOr<NonnullRefPtr<Menu>> try_add_submenu(DeprecatedString name);
 
     void add_action(NonnullRefPtr<Action>);
     void add_separator();
-    Menu& add_submenu(String name);
+    Menu& add_submenu(DeprecatedString name);
     void remove_all_actions();
 
-    void popup(Gfx::IntPoint const& screen_position, RefPtr<Action> const& default_action = nullptr, Gfx::IntRect const& button_rect = {});
+    void popup(Gfx::IntPoint screen_position, RefPtr<Action> const& default_action = nullptr, Gfx::IntRect const& button_rect = {});
     void dismiss();
 
     void visibility_did_change(Badge<ConnectionToWindowServer>, bool visible);
@@ -57,7 +64,7 @@ public:
 private:
     friend class Menubar;
 
-    explicit Menu(String name = "");
+    explicit Menu(DeprecatedString name = "");
 
     int realize_menu(RefPtr<Action> default_action = nullptr);
     void unrealize_menu();
@@ -66,7 +73,7 @@ private:
     void realize_menu_item(MenuItem&, int item_id);
 
     int m_menu_id { -1 };
-    String m_name;
+    DeprecatedString m_name;
     RefPtr<Gfx::Bitmap> m_icon;
     NonnullOwnPtrVector<MenuItem> m_items;
     WeakPtr<Action> m_current_default_action;

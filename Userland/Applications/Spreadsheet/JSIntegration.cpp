@@ -178,7 +178,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::get_name)
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "SheetGlobalObject");
 
     auto sheet_object = static_cast<SheetGlobalObject*>(this_object);
-    return JS::js_string(vm, sheet_object->m_sheet.name());
+    return JS::PrimitiveString::create(vm, sheet_object->m_sheet.name());
 }
 
 JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::get_real_cell_contents)
@@ -196,7 +196,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::get_real_cell_contents)
     auto name_value = vm.argument(0);
     if (!name_value.is_string())
         return vm.throw_completion<JS::TypeError>("Expected a String argument to get_real_cell_contents()");
-    auto position = sheet_object->m_sheet.parse_cell_name(name_value.as_string().string());
+    auto position = sheet_object->m_sheet.parse_cell_name(name_value.as_string().deprecated_string());
     if (!position.has_value())
         return vm.throw_completion<JS::TypeError>("Invalid cell name");
 
@@ -205,9 +205,9 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::get_real_cell_contents)
         return JS::js_undefined();
 
     if (cell->kind() == Spreadsheet::Cell::Kind::Formula)
-        return JS::js_string(vm, String::formatted("={}", cell->data()));
+        return JS::PrimitiveString::create(vm, DeprecatedString::formatted("={}", cell->data()));
 
-    return JS::js_string(vm, cell->data());
+    return JS::PrimitiveString::create(vm, cell->data());
 }
 
 JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::set_real_cell_contents)
@@ -225,7 +225,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::set_real_cell_contents)
     auto name_value = vm.argument(0);
     if (!name_value.is_string())
         return vm.throw_completion<JS::TypeError>("Expected the first argument of set_real_cell_contents() to be a String");
-    auto position = sheet_object->m_sheet.parse_cell_name(name_value.as_string().string());
+    auto position = sheet_object->m_sheet.parse_cell_name(name_value.as_string().deprecated_string());
     if (!position.has_value())
         return vm.throw_completion<JS::TypeError>("Invalid cell name");
 
@@ -234,7 +234,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::set_real_cell_contents)
         return vm.throw_completion<JS::TypeError>("Expected the second argument of set_real_cell_contents() to be a String");
 
     auto& cell = sheet_object->m_sheet.ensure(position.value());
-    auto& new_contents = new_contents_value.as_string().string();
+    auto& new_contents = new_contents_value.as_string().deprecated_string();
     cell.set_data(new_contents);
     return JS::js_null();
 }
@@ -255,12 +255,12 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::parse_cell_name)
     auto name_value = vm.argument(0);
     if (!name_value.is_string())
         return vm.throw_completion<JS::TypeError>("Expected a String argument to parse_cell_name()");
-    auto position = sheet_object->m_sheet.parse_cell_name(name_value.as_string().string());
+    auto position = sheet_object->m_sheet.parse_cell_name(name_value.as_string().deprecated_string());
     if (!position.has_value())
         return JS::js_undefined();
 
     auto object = JS::Object::create(realm, realm.intrinsics().object_prototype());
-    object->define_direct_property("column", JS::js_string(vm, sheet_object->m_sheet.column(position.value().column)), JS::default_attributes);
+    object->define_direct_property("column", JS::PrimitiveString::create(vm, sheet_object->m_sheet.column(position.value().column)), JS::default_attributes);
     object->define_direct_property("row", JS::Value((unsigned)position.value().row), JS::default_attributes);
 
     return object;
@@ -286,7 +286,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::current_cell_position)
     auto position = current_cell->position();
 
     auto object = JS::Object::create(realm, realm.intrinsics().object_prototype());
-    object->define_direct_property("column", JS::js_string(vm, sheet_object->m_sheet.column(position.column)), JS::default_attributes);
+    object->define_direct_property("column", JS::PrimitiveString::create(vm, sheet_object->m_sheet.column(position.column)), JS::default_attributes);
     object->define_direct_property("row", JS::Value((unsigned)position.row), JS::default_attributes);
 
     return object;
@@ -301,7 +301,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::column_index)
     if (!column_name.is_string())
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "String");
 
-    auto& column_name_str = column_name.as_string().string();
+    auto& column_name_str = column_name.as_string().deprecated_string();
 
     auto* this_object = TRY(vm.this_value().to_object(vm));
 
@@ -312,7 +312,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::column_index)
     auto& sheet = sheet_object->m_sheet;
     auto column_index = sheet.column_index(column_name_str);
     if (!column_index.has_value())
-        return vm.throw_completion<JS::TypeError>(String::formatted("'{}' is not a valid column", column_name_str));
+        return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("'{}' is not a valid column", column_name_str));
 
     return JS::Value((i32)column_index.value());
 }
@@ -326,7 +326,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::column_arithmetic)
     if (!column_name.is_string())
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "String");
 
-    auto& column_name_str = column_name.as_string().string();
+    auto& column_name_str = column_name.as_string().deprecated_string();
 
     auto offset = TRY(vm.argument(1).to_number(vm));
     auto offset_number = static_cast<i32>(offset.as_double());
@@ -340,9 +340,9 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::column_arithmetic)
     auto& sheet = sheet_object->m_sheet;
     auto new_column = sheet.column_arithmetic(column_name_str, offset_number);
     if (!new_column.has_value())
-        return vm.throw_completion<JS::TypeError>(String::formatted("'{}' is not a valid column", column_name_str));
+        return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("'{}' is not a valid column", column_name_str));
 
-    return JS::js_string(vm, new_column.release_value());
+    return JS::PrimitiveString::create(vm, new_column.release_value());
 }
 
 JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::get_column_bound)
@@ -354,7 +354,7 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::get_column_bound)
     if (!column_name.is_string())
         return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "String");
 
-    auto& column_name_str = column_name.as_string().string();
+    auto& column_name_str = column_name.as_string().deprecated_string();
     auto* this_object = TRY(vm.this_value().to_object(vm));
 
     if (!is<SheetGlobalObject>(this_object))
@@ -364,14 +364,14 @@ JS_DEFINE_NATIVE_FUNCTION(SheetGlobalObject::get_column_bound)
     auto& sheet = sheet_object->m_sheet;
     auto maybe_column_index = sheet.column_index(column_name_str);
     if (!maybe_column_index.has_value())
-        return vm.throw_completion<JS::TypeError>(String::formatted("'{}' is not a valid column", column_name_str));
+        return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("'{}' is not a valid column", column_name_str));
 
     auto bounds = sheet.written_data_bounds(*maybe_column_index);
     return JS::Value(bounds.row);
 }
 
 WorkbookObject::WorkbookObject(JS::Realm& realm, Workbook& workbook)
-    : JS::Object(*realm.intrinsics().object_prototype())
+    : JS::Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
     , m_workbook(workbook)
 {
 }
@@ -405,7 +405,7 @@ JS_DEFINE_NATIVE_FUNCTION(WorkbookObject::sheet)
     auto& workbook = static_cast<WorkbookObject*>(this_object)->m_workbook;
 
     if (name_value.is_string()) {
-        auto& name = name_value.as_string().string();
+        auto& name = name_value.as_string().deprecated_string();
         for (auto& sheet : workbook.sheets()) {
             if (sheet.name() == name)
                 return JS::Value(&sheet.global_object());

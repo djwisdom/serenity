@@ -28,7 +28,7 @@
 
 namespace JS {
 
-ECMAScriptFunctionObject* ECMAScriptFunctionObject::create(Realm& realm, FlyString name, String source_text, Statement const& ecmascript_code, Vector<FunctionNode::Parameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind kind, bool is_strict, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name)
+NonnullGCPtr<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create(Realm& realm, FlyString name, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind kind, bool is_strict, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name)
 {
     Object* prototype = nullptr;
     switch (kind) {
@@ -48,12 +48,12 @@ ECMAScriptFunctionObject* ECMAScriptFunctionObject::create(Realm& realm, FlyStri
     return realm.heap().allocate<ECMAScriptFunctionObject>(realm, move(name), move(source_text), ecmascript_code, move(parameters), m_function_length, parent_environment, private_environment, *prototype, kind, is_strict, might_need_arguments_object, contains_direct_call_to_eval, is_arrow_function, move(class_field_initializer_name));
 }
 
-ECMAScriptFunctionObject* ECMAScriptFunctionObject::create(Realm& realm, FlyString name, Object& prototype, String source_text, Statement const& ecmascript_code, Vector<FunctionNode::Parameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind kind, bool is_strict, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name)
+NonnullGCPtr<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create(Realm& realm, FlyString name, Object& prototype, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind kind, bool is_strict, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name)
 {
     return realm.heap().allocate<ECMAScriptFunctionObject>(realm, move(name), move(source_text), ecmascript_code, move(parameters), m_function_length, parent_environment, private_environment, prototype, kind, is_strict, might_need_arguments_object, contains_direct_call_to_eval, is_arrow_function, move(class_field_initializer_name));
 }
 
-ECMAScriptFunctionObject::ECMAScriptFunctionObject(FlyString name, String source_text, Statement const& ecmascript_code, Vector<FunctionNode::Parameter> formal_parameters, i32 function_length, Environment* parent_environment, PrivateEnvironment* private_environment, Object& prototype, FunctionKind kind, bool strict, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name)
+ECMAScriptFunctionObject::ECMAScriptFunctionObject(FlyString name, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> formal_parameters, i32 function_length, Environment* parent_environment, PrivateEnvironment* private_environment, Object& prototype, FunctionKind kind, bool strict, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name)
     : FunctionObject(prototype)
     , m_name(move(name))
     , m_function_length(function_length)
@@ -108,7 +108,7 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
     //       are defined in the spec.
 
     MUST(define_property_or_throw(vm.names.length, { .value = Value(m_function_length), .writable = false, .enumerable = false, .configurable = true }));
-    MUST(define_property_or_throw(vm.names.name, { .value = js_string(vm, m_name.is_null() ? "" : m_name), .writable = false, .enumerable = false, .configurable = true }));
+    MUST(define_property_or_throw(vm.names.name, { .value = PrimitiveString::create(vm, m_name.is_null() ? "" : m_name), .writable = false, .enumerable = false, .configurable = true }));
 
     if (!m_is_arrow_function) {
         Object* prototype = nullptr;
@@ -193,7 +193,7 @@ ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Value this_argu
 }
 
 // 10.2.2 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-ecmascript-function-objects-construct-argumentslist-newtarget
-ThrowCompletionOr<Object*> ECMAScriptFunctionObject::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> ECMAScriptFunctionObject::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -203,12 +203,12 @@ ThrowCompletionOr<Object*> ECMAScriptFunctionObject::internal_construct(MarkedVe
     // 2. Let kind be F.[[ConstructorKind]].
     auto kind = m_constructor_kind;
 
-    Object* this_argument = nullptr;
+    GCPtr<Object> this_argument;
 
     // 3. If kind is base, then
     if (kind == ConstructorKind::Base) {
         // a. Let thisArgument be ? OrdinaryCreateFromConstructor(newTarget, "%Object.prototype%").
-        this_argument = TRY(ordinary_create_from_constructor<Object>(vm, new_target, &Intrinsics::object_prototype));
+        this_argument = TRY(ordinary_create_from_constructor<Object>(vm, new_target, &Intrinsics::object_prototype, ConstructWithPrototypeTag::Tag));
     }
 
     ExecutionContext callee_context(heap());
@@ -231,7 +231,7 @@ ThrowCompletionOr<Object*> ECMAScriptFunctionObject::internal_construct(MarkedVe
         ordinary_call_bind_this(callee_context, this_argument);
 
         // b. Let initializeResult be Completion(InitializeInstanceElements(thisArgument, F)).
-        auto initialize_result = vm.initialize_instance_elements(*this_argument, *this);
+        auto initialize_result = this_argument->initialize_instance_elements(*this);
 
         // c. If initializeResult is an abrupt completion, then
         if (initialize_result.is_throw_completion()) {
@@ -265,11 +265,11 @@ ThrowCompletionOr<Object*> ECMAScriptFunctionObject::internal_construct(MarkedVe
 
         // a. If Type(result.[[Value]]) is Object, return result.[[Value]].
         if (result.value()->is_object())
-            return &result.value()->as_object();
+            return result.value()->as_object();
 
         // b. If kind is base, return thisArgument.
         if (kind == ConstructorKind::Base)
-            return this_argument;
+            return *this_argument;
 
         // c. If result.[[Value]] is not undefined, throw a TypeError exception.
         if (!result.value()->is_undefined())
@@ -288,7 +288,7 @@ ThrowCompletionOr<Object*> ECMAScriptFunctionObject::internal_construct(MarkedVe
     VERIFY(this_binding.is_object());
 
     // 14. Return thisBinding.
-    return &this_binding.as_object();
+    return this_binding.as_object();
 }
 
 void ECMAScriptFunctionObject::visit_edges(Visitor& visitor)
@@ -391,7 +391,7 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
         arguments_object_needed = false;
     }
 
-    Environment* environment;
+    GCPtr<Environment> environment;
 
     if (is_strict_mode() || !has_parameter_expressions) {
         environment = callee_context.lexical_environment;
@@ -441,7 +441,7 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
             [&](auto const& param) -> ThrowCompletionOr<void> {
                 Value argument_value;
                 if (parameter.is_rest) {
-                    auto* array = MUST(Array::create(realm, 0));
+                    auto array = MUST(Array::create(realm, 0));
                     for (size_t rest_index = i; rest_index < execution_context_arguments.size(); ++rest_index)
                         array->indexed_properties().append(execution_context_arguments[rest_index]);
                     argument_value = array;
@@ -477,7 +477,7 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
             }));
     }
 
-    Environment* var_environment;
+    GCPtr<Environment> var_environment;
 
     HashTable<FlyString> instantiated_var_names;
     if (scope_body)
@@ -531,7 +531,7 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
         });
     }
 
-    Environment* lex_environment;
+    GCPtr<Environment> lex_environment;
 
     // 30. If strict is false, then
     if (!is_strict_mode()) {
@@ -573,9 +573,14 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::function_declaration_instantia
 
     auto* private_environment = callee_context.private_environment;
     for (auto& declaration : functions_to_initialize) {
-        auto* function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), lex_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object(), declaration.contains_direct_call_to_eval());
+        auto function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), lex_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object(), declaration.contains_direct_call_to_eval());
         MUST(var_environment->set_mutable_binding(vm, declaration.name(), function, false));
     }
+
+    if (is<DeclarativeEnvironment>(*lex_environment))
+        static_cast<DeclarativeEnvironment*>(lex_environment.ptr())->shrink_to_fit();
+    if (is<DeclarativeEnvironment>(*var_environment))
+        static_cast<DeclarativeEnvironment*>(var_environment.ptr())->shrink_to_fit();
 
     return {};
 }
@@ -617,7 +622,7 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::prepare_for_ordinary_call(Exec
     callee_context.script_or_module = m_script_or_module;
 
     // 7. Let localEnv be NewFunctionEnvironment(F, newTarget).
-    auto* local_environment = new_function_environment(*this, new_target);
+    auto local_environment = new_function_environment(*this, new_target);
 
     // 8. Set the LexicalEnvironment of calleeContext to localEnv.
     callee_context.lexical_environment = local_environment;
@@ -731,7 +736,7 @@ void async_block_start(VM& vm, NonnullRefPtr<Statement> const& async_body, Promi
     auto& running_context = vm.running_execution_context();
 
     // 3. Set the code evaluation state of asyncContext such that when evaluation is resumed for that execution context the following steps will be performed:
-    auto* execution_steps = NativeFunction::create(realm, "", [&async_body, &promise_capability](auto& vm) -> ThrowCompletionOr<Value> {
+    auto execution_steps = NativeFunction::create(realm, "", [&async_body, &promise_capability](auto& vm) -> ThrowCompletionOr<Value> {
         // a. Let result be the result of evaluating asyncBody.
         auto result = async_body->execute(vm.interpreter());
 
@@ -786,17 +791,31 @@ Completion ECMAScriptFunctionObject::ordinary_call_evaluate_body()
 {
     auto& vm = this->vm();
     auto& realm = *vm.current_realm();
-    auto* bytecode_interpreter = Bytecode::Interpreter::current();
 
     if (m_kind == FunctionKind::AsyncGenerator)
         return vm.throw_completion<InternalError>(ErrorType::NotImplemented, "Async Generator function execution");
+
+    auto* bytecode_interpreter = Bytecode::Interpreter::current();
+
+    // The bytecode interpreter can execute generator functions while the AST interpreter cannot.
+    // This simply makes it create a new bytecode interpreter when one doesn't exist when executing a generator function.
+    // Doing so makes it automatically switch to the bytecode interpreter to execute any future code until it exits the generator. See below.
+    // This allows us to keep all of the existing functionality that works in AST while adding generator support on top of it.
+    // However, this does cause an awkward situation with features not supported in bytecode, where features that work outside of generators with AST
+    // suddenly stop working inside of generators.
+    // This is a stop gap until bytecode mode becomes the default.
+    OwnPtr<Bytecode::Interpreter> temp_bc_interpreter;
+    if (m_kind == FunctionKind::Generator && !bytecode_interpreter) {
+        temp_bc_interpreter = make<Bytecode::Interpreter>(realm);
+        bytecode_interpreter = temp_bc_interpreter.ptr();
+    }
 
     if (bytecode_interpreter) {
         if (!m_bytecode_executable) {
             auto compile = [&](auto& node, auto kind, auto name) -> ThrowCompletionOr<NonnullOwnPtr<Bytecode::Executable>> {
                 auto executable_result = Bytecode::Generator::generate(node, kind);
                 if (executable_result.is_error())
-                    return vm.throw_completion<InternalError>(ErrorType::NotImplemented, executable_result.error().to_string());
+                    return vm.throw_completion<InternalError>(ErrorType::NotImplemented, executable_result.error().to_deprecated_string());
 
                 auto bytecode_executable = executable_result.release_value();
                 bytecode_executable->name = name;
@@ -818,7 +837,7 @@ Completion ECMAScriptFunctionObject::ordinary_call_evaluate_body()
             for (auto& parameter : m_formal_parameters) {
                 if (!parameter.default_value)
                     continue;
-                auto executable = TRY(compile(*parameter.default_value, FunctionKind::Normal, String::formatted("default parameter #{} for {}", default_parameter_index, m_name)));
+                auto executable = TRY(compile(*parameter.default_value, FunctionKind::Normal, DeprecatedString::formatted("default parameter #{} for {}", default_parameter_index, m_name)));
                 m_default_parameter_bytecode_executables.append(move(executable));
             }
         }
@@ -897,7 +916,7 @@ void ECMAScriptFunctionObject::set_name(FlyString const& name)
     VERIFY(!name.is_null());
     auto& vm = this->vm();
     m_name = name;
-    MUST(define_property_or_throw(vm.names.name, { .value = js_string(vm, m_name), .writable = false, .enumerable = false, .configurable = true }));
+    MUST(define_property_or_throw(vm.names.name, { .value = PrimitiveString::create(vm, m_name), .writable = false, .enumerable = false, .configurable = true }));
 }
 
 }

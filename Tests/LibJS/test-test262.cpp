@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/HashMap.h>
 #include <AK/JsonObject.h>
 #include <AK/JsonParser.h>
 #include <AK/LexicalPath.h>
 #include <AK/QuickSort.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
@@ -147,7 +147,7 @@ public:
     {
     }
 
-    bool write_lines(Span<String> lines)
+    bool write_lines(Span<DeprecatedString> lines)
     {
         // It's possible the process dies before we can write all the tests
         // to the stdin. So make sure that we don't crash but just stop writing.
@@ -160,8 +160,8 @@ public:
             return false;
         }
 
-        for (String const& line : lines) {
-            if (!m_output->write_or_error(String::formatted("{}\n", line).bytes()))
+        for (DeprecatedString const& line : lines) {
+            if (m_output->write_entire_buffer(DeprecatedString::formatted("{}\n", line).bytes()).is_error())
                 break;
         }
 
@@ -175,14 +175,14 @@ public:
         return true;
     }
 
-    String read_all()
+    DeprecatedString read_all()
     {
-        auto all_output_or_error = m_input->read_all();
+        auto all_output_or_error = m_input->read_until_eof();
         if (all_output_or_error.is_error()) {
             warnln("Got error: {} while reading runner output", all_output_or_error.error());
             return ""sv;
         }
-        return String(all_output_or_error.value().bytes(), Chomp);
+        return DeprecatedString(all_output_or_error.value().bytes(), Chomp);
     }
 
     enum class ProcessResult {
@@ -222,10 +222,10 @@ public:
     NonnullOwnPtr<Core::Stream::File> m_output;
 };
 
-static HashMap<size_t, TestResult> run_test_files(Span<String> files, size_t offset, StringView command, char const* const arguments[])
+static ErrorOr<HashMap<size_t, TestResult>> run_test_files(Span<DeprecatedString> files, size_t offset, StringView command, char const* const arguments[])
 {
     HashMap<size_t, TestResult> results {};
-    results.ensure_capacity(files.size());
+    TRY(results.try_ensure_capacity(files.size()));
     size_t test_index = 0;
 
     auto fail_all_after = [&] {
@@ -246,7 +246,7 @@ static HashMap<size_t, TestResult> run_test_files(Span<String> files, size_t off
             return results;
         }
 
-        String output = runner_process->read_all();
+        DeprecatedString output = runner_process->read_all();
         auto status_or_error = runner_process->status();
         bool failed = false;
         if (!status_or_error.is_error()) {
@@ -297,7 +297,7 @@ static HashMap<size_t, TestResult> run_test_files(Span<String> files, size_t off
     return results;
 }
 
-void write_per_file(HashMap<size_t, TestResult> const& result_map, Vector<String> const& paths, StringView per_file_name, double time_taken_in_ms);
+void write_per_file(HashMap<size_t, TestResult> const& result_map, Vector<DeprecatedString> const& paths, StringView per_file_name, double time_taken_in_ms);
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
@@ -320,12 +320,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     // Normalize the path to ensure filenames are consistent
-    Vector<String> paths;
+    Vector<DeprecatedString> paths;
 
     if (!Core::File::is_directory(test_directory)) {
         paths.append(test_directory);
     } else {
-        Test::iterate_directory_recursively(LexicalPath::canonicalized_path(test_directory), [&](String const& file_path) {
+        Test::iterate_directory_recursively(LexicalPath::canonicalized_path(test_directory), [&](DeprecatedString const& file_path) {
             if (file_path.contains("_FIXTURE"sv))
                 return;
             // FIXME: Add ignored file set
@@ -337,7 +337,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     outln("Found {} tests", paths.size());
 
     auto parameters = pass_through_parameters.split_view(' ');
-    Vector<String> args;
+    Vector<DeprecatedString> args;
     args.ensure_capacity(parameters.size() + 2);
     args.append(runner_command);
     if (!dont_disable_core_dump)
@@ -378,9 +378,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     while (index < paths.size()) {
         print_progress();
         auto this_batch_size = min(batch_size, paths.size() - index);
-        auto batch_results = run_test_files(paths.span().slice(index, this_batch_size), index, args[0], raw_args.data());
+        auto batch_results = TRY(run_test_files(paths.span().slice(index, this_batch_size), index, args[0], raw_args.data()));
 
-        results.ensure_capacity(results.size() + batch_results.size());
+        TRY(results.try_ensure_capacity(results.size() + batch_results.size()));
         for (auto& [key, value] : batch_results) {
             results.set(key, value);
             ++result_counts[static_cast<size_t>(value)];
@@ -408,7 +408,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     return 0;
 }
 
-void write_per_file(HashMap<size_t, TestResult> const& result_map, Vector<String> const& paths, StringView per_file_name, double time_taken_in_ms)
+void write_per_file(HashMap<size_t, TestResult> const& result_map, Vector<DeprecatedString> const& paths, StringView per_file_name, double time_taken_in_ms)
 {
 
     auto file_or_error = Core::Stream::File::open(per_file_name, Core::Stream::OpenMode::Write);
@@ -427,7 +427,7 @@ void write_per_file(HashMap<size_t, TestResult> const& result_map, Vector<String
     complete_results.set("duration", time_taken_in_ms / 1000.);
     complete_results.set("results", result_object);
 
-    if (!file->write_or_error(complete_results.to_string().bytes()))
+    if (file->write_entire_buffer(complete_results.to_deprecated_string().bytes()).is_error())
         warnln("Failed to write per-file");
     file->close();
 }

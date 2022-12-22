@@ -6,11 +6,11 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/EnumBits.h>
 #include <AK/JsonObject.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
-#include <AK/String.h>
 #include <AK/Variant.h>
 #include <LibCore/Object.h>
 #include <LibCore/Timer.h>
@@ -172,8 +172,8 @@ public:
     virtual bool is_visible_for_timer_purposes() const override;
 
     bool has_tooltip() const { return !m_tooltip.is_empty(); }
-    String tooltip() const { return m_tooltip; }
-    void set_tooltip(String);
+    DeprecatedString tooltip() const { return m_tooltip; }
+    void set_tooltip(DeprecatedString);
 
     bool is_auto_focusable() const { return m_auto_focusable; }
     void set_auto_focusable(bool auto_focusable) { m_auto_focusable = auto_focusable; }
@@ -214,6 +214,9 @@ public:
     bool is_focused() const;
     void set_focus(bool, FocusSource = FocusSource::Programmatic);
 
+    bool focus_preempted() const { return m_focus_preempted; }
+    void set_focus_preempted(bool b) { m_focus_preempted = b; }
+
     Function<void(bool const, const FocusSource)> on_focus_change;
 
     // Returns true if this widget or one of its descendants is focused.
@@ -222,6 +225,9 @@ public:
     Widget* focus_proxy() { return m_focus_proxy; }
     Widget const* focus_proxy() const { return m_focus_proxy; }
     void set_focus_proxy(Widget*);
+
+    Vector<WeakPtr<Widget>>& focus_delegators() { return m_focus_delegators; }
+    Vector<WeakPtr<Widget>> const& focus_delegators() const { return m_focus_delegators; }
 
     void set_focus_policy(FocusPolicy policy);
     FocusPolicy focus_policy() const;
@@ -234,8 +240,8 @@ public:
         WeakPtr<Widget> widget;
         Gfx::IntPoint local_position;
     };
-    HitTestResult hit_test(Gfx::IntPoint const&, ShouldRespectGreediness = ShouldRespectGreediness::Yes);
-    Widget* child_at(Gfx::IntPoint const&) const;
+    HitTestResult hit_test(Gfx::IntPoint, ShouldRespectGreediness = ShouldRespectGreediness::Yes);
+    Widget* child_at(Gfx::IntPoint) const;
 
     void set_relative_rect(Gfx::IntRect const&);
     void set_relative_rect(int x, int y, int width, int height) { set_relative_rect({ x, y, width, height }); }
@@ -245,13 +251,13 @@ public:
     void set_width(int width) { set_relative_rect(x(), y(), width, height()); }
     void set_height(int height) { set_relative_rect(x(), y(), width(), height); }
 
-    void move_to(Gfx::IntPoint const& point) { set_relative_rect({ point, relative_rect().size() }); }
+    void move_to(Gfx::IntPoint point) { set_relative_rect({ point, relative_rect().size() }); }
     void move_to(int x, int y) { move_to({ x, y }); }
-    void resize(Gfx::IntSize const& size) { set_relative_rect({ relative_rect().location(), size }); }
+    void resize(Gfx::IntSize size) { set_relative_rect({ relative_rect().location(), size }); }
     void resize(int width, int height) { resize({ width, height }); }
 
     void move_by(int x, int y) { move_by({ x, y }); }
-    void move_by(Gfx::IntPoint const& delta) { set_relative_rect({ relative_position().translated(delta), size() }); }
+    void move_by(Gfx::IntPoint delta) { set_relative_rect({ relative_position().translated(delta), size() }); }
 
     Gfx::ColorRole background_role() const { return m_background_role; }
     void set_background_role(Gfx::ColorRole);
@@ -288,7 +294,7 @@ public:
     void set_font(Gfx::Font const*);
     void set_font(Gfx::Font const& font) { set_font(&font); }
 
-    void set_font_family(String const&);
+    void set_font_family(DeprecatedString const&);
     void set_font_size(unsigned);
     void set_font_weight(unsigned);
     void set_font_fixed_width(bool);
@@ -329,8 +335,8 @@ public:
     Gfx::Palette palette() const;
     void set_palette(Gfx::Palette const&);
 
-    String title() const;
-    void set_title(String);
+    DeprecatedString title() const;
+    void set_title(DeprecatedString);
 
     Margins const& grabbable_margins() const { return m_grabbable_margins; }
     void set_grabbable_margins(Margins const&);
@@ -348,7 +354,7 @@ public:
     void set_override_cursor(AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>>);
 
     bool load_from_gml(StringView);
-    bool load_from_gml(StringView, RefPtr<Core::Object> (*unregistered_child_handler)(String const&));
+    bool load_from_gml(StringView, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&));
 
     // FIXME: remove this when all uses of shrink_to_fit are eliminated
     void set_shrink_to_fit(bool);
@@ -357,7 +363,7 @@ public:
     bool has_pending_drop() const;
 
     // In order for others to be able to call this, it needs to be public.
-    virtual bool load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::Object> (*unregistered_child_handler)(String const&));
+    virtual bool load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&));
 
 protected:
     Widget();
@@ -367,7 +373,7 @@ protected:
     // This is called after children have been painted.
     virtual void second_paint_event(PaintEvent&);
 
-    virtual void layout_relevant_change_occured();
+    virtual void layout_relevant_change_occurred();
     virtual void custom_layout() { }
     virtual void did_change_font() { }
     virtual void did_layout() { }
@@ -403,6 +409,9 @@ protected:
 
     void show_or_hide_tooltip();
 
+    void add_focus_delegator(Widget*);
+    void remove_focus_delegator(Widget*);
+
 private:
     virtual bool is_widget() const final { return true; }
 
@@ -429,7 +438,7 @@ private:
     Gfx::ColorRole m_background_role;
     Gfx::ColorRole m_foreground_role;
     NonnullRefPtr<Gfx::Font> m_font;
-    String m_tooltip;
+    DeprecatedString m_tooltip;
 
     UISize m_min_size { SpecialDimension::Shrink };
     UISize m_max_size { SpecialDimension::Grow };
@@ -440,15 +449,17 @@ private:
     bool m_visible { true };
     bool m_greedy_for_hits { false };
     bool m_auto_focusable { true };
+    bool m_focus_preempted { false };
     bool m_enabled { true };
     bool m_updates_enabled { true };
     bool m_accepts_command_palette { true };
     bool m_default_font { true };
 
     NonnullRefPtr<Gfx::PaletteImpl> m_palette;
-    String m_title { String::empty() };
+    DeprecatedString m_title { DeprecatedString::empty() };
 
     WeakPtr<Widget> m_focus_proxy;
+    Vector<WeakPtr<Widget>> m_focus_delegators;
     FocusPolicy m_focus_policy { FocusPolicy::NoFocus };
 
     AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_override_cursor { Gfx::StandardCursor::None };
@@ -463,7 +474,7 @@ inline Widget* Widget::parent_widget()
 inline Widget const* Widget::parent_widget() const
 {
     if (parent() && is<Widget>(*parent()))
-        return &verify_cast<const Widget>(*parent());
+        return &verify_cast<Widget const>(*parent());
     return nullptr;
 }
 }

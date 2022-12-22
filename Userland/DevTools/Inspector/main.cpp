@@ -56,7 +56,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return 0;
         pid = process_chooser->pid();
     } else {
-        auto pid_opt = String(arguments.strings[1]).to_int();
+        auto pid_opt = DeprecatedString(arguments.strings[1]).to_int();
         if (!pid_opt.has_value())
             print_usage_and_exit();
         pid = pid_opt.value();
@@ -74,7 +74,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     RemoteProcess remote_process(pid);
     if (!remote_process.is_inspectable()) {
-        GUI::MessageBox::show(window, String::formatted("Process pid={} is not inspectable", remote_process.pid()), "Error"sv, GUI::MessageBox::Type::Error);
+        GUI::MessageBox::show(window, DeprecatedString::formatted("Process pid={} is not inspectable", remote_process.pid()), "Error"sv, GUI::MessageBox::Type::Error);
         if (gui_mode) {
             goto choose_pid;
         } else {
@@ -107,7 +107,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     remote_process.on_update = [&] {
         if (!remote_process.process_name().is_null())
-            window->set_title(String::formatted("{} ({}) - Inspector", remote_process.process_name(), remote_process.pid()));
+            window->set_title(DeprecatedString::formatted("{} ({}) - Inspector", remote_process.process_name(), remote_process.pid()));
     };
 
     auto& tree_view = splitter.add<GUI::TreeView>();
@@ -132,10 +132,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto copy_bitmap = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-copy.png"sv).release_value_but_fixme_should_propagate_errors();
     auto copy_property_name_action = GUI::Action::create("Copy Property Name", copy_bitmap, [&](auto&) {
-        GUI::Clipboard::the().set_plain_text(properties_tree_view.selection().first().data().to_string());
+        GUI::Clipboard::the().set_plain_text(properties_tree_view.selection().first().data().to_deprecated_string());
     });
     auto copy_property_value_action = GUI::Action::create("Copy Property Value", copy_bitmap, [&](auto&) {
-        GUI::Clipboard::the().set_plain_text(properties_tree_view.selection().first().sibling_at_column(1).data().to_string());
+        GUI::Clipboard::the().set_plain_text(properties_tree_view.selection().first().sibling_at_column(1).data().to_deprecated_string());
     });
 
     properties_tree_view_context_menu->add_action(copy_property_name_action);

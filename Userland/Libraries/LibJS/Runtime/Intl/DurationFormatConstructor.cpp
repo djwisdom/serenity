@@ -42,7 +42,7 @@ ThrowCompletionOr<Value> DurationFormatConstructor::call()
 }
 
 // 1.2.1 Intl.DurationFormat ( [ locales [ , options ] ] ), https://tc39.es/proposal-intl-duration-format/#sec-Intl.DurationFormat
-ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> DurationFormatConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -50,7 +50,7 @@ ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& 
     auto options_value = vm.argument(1);
 
     // 2. Let durationFormat be ? OrdinaryCreateFromConstructor(NewTarget, "%DurationFormatPrototype%", « [[InitializedDurationFormat]], [[Locale]], [[DataLocale]], [[NumberingSystem]], [[Style]], [[YearsStyle]], [[YearsDisplay]], [[MonthsStyle]], [[MonthsDisplay]] , [[WeeksStyle]], [[WeeksDisplay]] , [[DaysStyle]], [[DaysDisplay]] , [[HoursStyle]], [[HoursDisplay]] , [[MinutesStyle]], [[MinutesDisplay]] , [[SecondsStyle]], [[SecondsDisplay]] , [[MillisecondsStyle]], [[MillisecondsDisplay]] , [[MicrosecondsStyle]], [[MicrosecondsDisplay]] , [[NanosecondsStyle]], [[NanosecondsDisplay]], [[FractionalDigits]] »).
-    auto* duration_format = TRY(ordinary_create_from_constructor<DurationFormat>(vm, new_target, &Intrinsics::intl_duration_format_prototype));
+    auto duration_format = TRY(ordinary_create_from_constructor<DurationFormat>(vm, new_target, &Intrinsics::intl_duration_format_prototype));
 
     // 3. Let requestedLocales be ? CanonicalizeLocaleList(locales).
     auto requested_locales = TRY(canonicalize_locale_list(vm, locales));
@@ -67,14 +67,14 @@ ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& 
     // 7. If numberingSystem is not undefined, then
     if (!numbering_system.is_undefined()) {
         // a. If numberingSystem does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
-        if (!::Locale::is_type_identifier(numbering_system.as_string().string()))
+        if (!::Locale::is_type_identifier(numbering_system.as_string().deprecated_string()))
             return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, numbering_system, "numberingSystem"sv);
     }
 
     // 8. Let opt be the Record { [[localeMatcher]]: matcher, [[nu]]: numberingSystem }.
     LocaleOptions opt {};
     opt.locale_matcher = matcher;
-    opt.nu = numbering_system.is_undefined() ? Optional<String>() : numbering_system.as_string().string();
+    opt.nu = numbering_system.is_undefined() ? Optional<DeprecatedString>() : numbering_system.as_string().deprecated_string();
 
     // 9. Let r be ResolveLocale(%DurationFormat%.[[AvailableLocales]], requestedLocales, opt, %DurationFormat%.[[RelevantExtensionKeys]], %DurationFormat%.[[LocaleData]]).
     auto result = resolve_locale(requested_locales, opt, DurationFormat::relevant_extension_keys());
@@ -93,13 +93,13 @@ ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& 
     auto style = TRY(get_option(vm, *options, vm.names.style, OptionType::String, { "long"sv, "short"sv, "narrow"sv, "digital"sv }, "short"sv));
 
     // 14. Set durationFormat.[[Style]] to style.
-    duration_format->set_style(style.as_string().string());
+    duration_format->set_style(style.as_string().deprecated_string());
 
     // 15. Set durationFormat.[[DataLocale]] to r.[[dataLocale]].
     duration_format->set_data_locale(move(result.data_locale));
 
     // 16. Let prevStyle be the empty String.
-    auto previous_style = String::empty();
+    auto previous_style = DeprecatedString::empty();
 
     // 17. For each row of Table 1, except the header row, in table order, do
     for (auto const& duration_instances_component : duration_instances_components) {
@@ -119,7 +119,7 @@ ThrowCompletionOr<Object*> DurationFormatConstructor::construct(FunctionObject& 
         auto digital_base = duration_instances_component.digital_default;
 
         // f. Let unitOptions be ? GetDurationUnitOptions(unit, options, style, valueList, digitalBase, prevStyle).
-        auto unit_options = TRY(get_duration_unit_options(vm, unit, *options, style.as_string().string(), value_list, digital_base, previous_style));
+        auto unit_options = TRY(get_duration_unit_options(vm, unit, *options, style.as_string().deprecated_string(), value_list, digital_base, previous_style));
 
         // g. Set the value of the styleSlot slot of durationFormat to unitOptions.[[Style]].
         (duration_format->*style_slot)(unit_options.style);

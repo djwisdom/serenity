@@ -18,7 +18,7 @@ WebIDL::ExceptionOr<JS::Value> parse_json_string_to_javascript_value(JS::VM& vm,
     auto& realm = *vm.current_realm();
 
     // 1. Return ? Call(%JSON.parse%, undefined, « string »).
-    return TRY(JS::call(vm, realm.intrinsics().json_parse_function(), JS::js_undefined(), JS::js_string(vm, string)));
+    return TRY(JS::call(vm, realm.intrinsics().json_parse_function(), JS::js_undefined(), JS::PrimitiveString::create(vm, string)));
 }
 
 // https://infra.spec.whatwg.org/#parse-json-bytes-to-a-javascript-value
@@ -33,7 +33,7 @@ WebIDL::ExceptionOr<JS::Value> parse_json_bytes_to_javascript_value(JS::VM& vm, 
 }
 
 // https://infra.spec.whatwg.org/#serialize-a-javascript-value-to-a-json-string
-WebIDL::ExceptionOr<String> serialize_javascript_value_to_json_string(JS::VM& vm, JS::Value value)
+WebIDL::ExceptionOr<DeprecatedString> serialize_javascript_value_to_json_string(JS::VM& vm, JS::Value value)
 {
     auto& realm = *vm.current_realm();
 
@@ -48,7 +48,7 @@ WebIDL::ExceptionOr<String> serialize_javascript_value_to_json_string(JS::VM& vm
     VERIFY(result.is_string());
 
     // 4. Return result.
-    return result.as_string().string();
+    return result.as_string().deprecated_string();
 }
 
 // https://infra.spec.whatwg.org/#serialize-a-javascript-value-to-json-bytes

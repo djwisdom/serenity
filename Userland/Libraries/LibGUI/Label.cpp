@@ -17,7 +17,7 @@ REGISTER_WIDGET(GUI, Label)
 
 namespace GUI {
 
-Label::Label(String text)
+Label::Label(DeprecatedString text)
     : m_text(move(text))
 {
     REGISTER_TEXT_ALIGNMENT_PROPERTY("text_alignment", text_alignment, set_text_alignment);
@@ -34,7 +34,7 @@ Label::Label(String text)
 
     REGISTER_STRING_PROPERTY("text", text, set_text);
     REGISTER_BOOL_PROPERTY("autosize", is_autosize, set_autosize);
-    REGISTER_STRING_PROPERTY("icon", icon, set_icon_from_path);
+    REGISTER_WRITE_ONLY_STRING_PROPERTY("icon", set_icon_from_path);
 }
 
 void Label::set_autosize(bool autosize, size_t padding)
@@ -55,7 +55,7 @@ void Label::set_icon(Gfx::Bitmap const* icon)
     update();
 }
 
-void Label::set_icon_from_path(String const& path)
+void Label::set_icon_from_path(DeprecatedString const& path)
 {
     auto maybe_bitmap = Gfx::Bitmap::try_load_from_file(path);
     if (maybe_bitmap.is_error()) {
@@ -65,7 +65,7 @@ void Label::set_icon_from_path(String const& path)
     set_icon(maybe_bitmap.release_value());
 }
 
-void Label::set_text(String text)
+void Label::set_text(DeprecatedString text)
 {
     if (text == m_text)
         return;
@@ -117,9 +117,7 @@ void Label::size_to_fit()
 
 int Label::text_calculated_preferred_height() const
 {
-    // FIXME: The 4 is taken from Gfx::Painter and should be available as
-    //        a constant instead.
-    return Gfx::TextLayout(&font(), Utf8View { m_text }, text_rect()).bounding_rect(Gfx::TextWrapping::Wrap, 4).height();
+    return Gfx::TextLayout(&font(), Utf8View { m_text }, text_rect()).bounding_rect(Gfx::TextWrapping::Wrap, Gfx::Painter::LINE_SPACING).height();
 }
 
 Optional<UISize> Label::calculated_preferred_size() const

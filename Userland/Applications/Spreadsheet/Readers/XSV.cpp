@@ -25,9 +25,9 @@ void XSV::set_error(ReadError error)
         m_error = error;
 }
 
-Vector<String> XSV::headers() const
+Vector<DeprecatedString> XSV::headers() const
 {
-    Vector<String> headers;
+    Vector<DeprecatedString> headers;
     if (has_explicit_headers()) {
         for (auto& field : m_names)
             headers.append(field.is_string_view ? field.as_string_view : field.as_string.view());
@@ -37,7 +37,7 @@ Vector<String> XSV::headers() const
             return headers;
 
         for ([[maybe_unused]] auto& field : m_rows.first())
-            headers.append(String::empty());
+            headers.append(DeprecatedString::empty());
     }
 
     return headers;
@@ -240,7 +240,7 @@ XSV::Field XSV::read_one_quoted_field()
         set_error(ReadError::QuoteFailure);
 
     if (is_copy)
-        return { {}, builder.to_string(), false };
+        return { {}, builder.to_deprecated_string(), false };
 
     return { m_source.substring_view(start, end - start), {}, true };
 }

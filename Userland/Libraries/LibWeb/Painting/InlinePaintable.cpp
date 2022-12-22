@@ -41,7 +41,7 @@ void InlinePaintable::paint(PaintContext& context, Painting::PaintPhase phase) c
         auto containing_block_position_in_absolute_coordinates = containing_block()->paint_box()->absolute_position();
 
         for_each_fragment([&](auto const& fragment, bool is_first_fragment, bool is_last_fragment) {
-            Gfx::FloatRect absolute_fragment_rect { containing_block_position_in_absolute_coordinates.translated(fragment.offset()), fragment.size() };
+            CSSPixelRect absolute_fragment_rect { containing_block_position_in_absolute_coordinates.translated(fragment.offset()), fragment.size() };
 
             if (is_first_fragment) {
                 float extra_start_width = box_model().padding.left;
@@ -63,13 +63,13 @@ void InlinePaintable::paint(PaintContext& context, Painting::PaintPhase phase) c
                 for (auto const& layer : computed_box_shadow) {
                     resolved_box_shadow_data.empend(
                         layer.color,
-                        static_cast<int>(layer.offset_x.to_px(layout_node())),
-                        static_cast<int>(layer.offset_y.to_px(layout_node())),
-                        static_cast<int>(layer.blur_radius.to_px(layout_node())),
-                        static_cast<int>(layer.spread_distance.to_px(layout_node())),
+                        layer.offset_x.to_px(layout_node()),
+                        layer.offset_y.to_px(layout_node()),
+                        layer.blur_radius.to_px(layout_node()),
+                        layer.spread_distance.to_px(layout_node()),
                         layer.placement == CSS::ShadowPlacement::Outer ? Painting::ShadowPlacement::Outer : Painting::ShadowPlacement::Inner);
                 }
-                Painting::paint_box_shadow(context, enclosing_int_rect(absolute_fragment_rect), border_radii_data, resolved_box_shadow_data);
+                Painting::paint_box_shadow(context, absolute_fragment_rect, border_radii_data, resolved_box_shadow_data);
             }
 
             return IterationDecision::Continue;
@@ -92,7 +92,7 @@ void InlinePaintable::paint(PaintContext& context, Painting::PaintPhase phase) c
         auto containing_block_position_in_absolute_coordinates = containing_block()->paint_box()->absolute_position();
 
         for_each_fragment([&](auto const& fragment, bool is_first_fragment, bool is_last_fragment) {
-            Gfx::FloatRect absolute_fragment_rect { containing_block_position_in_absolute_coordinates.translated(fragment.offset()), fragment.size() };
+            CSSPixelRect absolute_fragment_rect { containing_block_position_in_absolute_coordinates.translated(fragment.offset()), fragment.size() };
 
             if (is_first_fragment) {
                 float extra_start_width = box_model().padding.left;
@@ -121,7 +121,7 @@ void InlinePaintable::paint(PaintContext& context, Painting::PaintPhase phase) c
         //        would be none. Once we implement non-rectangular outlines for the `outline` CSS
         //        property, we can use that here instead.
         for_each_fragment([&](auto const& fragment, bool, bool) {
-            painter.draw_rect(enclosing_int_rect(fragment.absolute_rect()), Color::Magenta);
+            painter.draw_rect(context.enclosing_device_rect(fragment.absolute_rect()).template to_type<int>(), Color::Magenta);
             return IterationDecision::Continue;
         });
     }

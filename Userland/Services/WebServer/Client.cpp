@@ -81,7 +81,7 @@ void Client::start()
         }
 
         auto request = builder.to_byte_buffer();
-        dbgln_if(WEBSERVER_DEBUG, "Got raw request: '{}'", String::copy(request));
+        dbgln_if(WEBSERVER_DEBUG, "Got raw request: '{}'", DeprecatedString::copy(request));
 
         auto maybe_did_handle = handle_request(request);
         if (maybe_did_handle.is_error()) {
@@ -127,7 +127,7 @@ ErrorOr<bool> Client::handle_request(ReadonlyBytes raw_request)
     StringBuilder path_builder;
     path_builder.append(Configuration::the().root_path());
     path_builder.append(requested_path);
-    auto real_path = path_builder.to_string();
+    auto real_path = path_builder.to_deprecated_string();
 
     if (Core::File::is_directory(real_path)) {
 
@@ -137,14 +137,14 @@ ErrorOr<bool> Client::handle_request(ReadonlyBytes raw_request)
             red.append(requested_path);
             red.append("/"sv);
 
-            TRY(send_redirect(red.to_string(), request));
+            TRY(send_redirect(red.to_deprecated_string(), request));
             return true;
         }
 
         StringBuilder index_html_path_builder;
         index_html_path_builder.append(real_path);
         index_html_path_builder.append("/index.html"sv);
-        auto index_html_path = index_html_path_builder.to_string();
+        auto index_html_path = index_html_path_builder.to_deprecated_string();
         if (!Core::File::exists(index_html_path)) {
             TRY(handle_directory_listing(requested_path, real_path, request));
             return true;
@@ -233,27 +233,29 @@ ErrorOr<void> Client::send_redirect(StringView redirect_path, HTTP::HttpRequest 
     return {};
 }
 
-static String folder_image_data()
+static DeprecatedString folder_image_data()
 {
-    static String cache;
+    static DeprecatedString cache;
     if (cache.is_empty()) {
         auto file = Core::MappedFile::map("/res/icons/16x16/filetype-folder.png"sv).release_value_but_fixme_should_propagate_errors();
-        cache = encode_base64(file->bytes());
+        // FIXME: change to TRY() and make method fallible
+        cache = MUST(encode_base64(file->bytes())).to_deprecated_string();
     }
     return cache;
 }
 
-static String file_image_data()
+static DeprecatedString file_image_data()
 {
-    static String cache;
+    static DeprecatedString cache;
     if (cache.is_empty()) {
         auto file = Core::MappedFile::map("/res/icons/16x16/filetype-unknown.png"sv).release_value_but_fixme_should_propagate_errors();
-        cache = encode_base64(file->bytes());
+        // FIXME: change to TRY() and make method fallible
+        cache = MUST(encode_base64(file->bytes())).to_deprecated_string();
     }
     return cache;
 }
 
-ErrorOr<void> Client::handle_directory_listing(String const& requested_path, String const& real_path, HTTP::HttpRequest const& request)
+ErrorOr<void> Client::handle_directory_listing(DeprecatedString const& requested_path, DeprecatedString const& real_path, HTTP::HttpRequest const& request)
 {
     StringBuilder builder;
 
@@ -277,7 +279,7 @@ ErrorOr<void> Client::handle_directory_listing(String const& requested_path, Str
     builder.append("<code><table>\n"sv);
 
     Core::DirIterator dt(real_path);
-    Vector<String> names;
+    Vector<DeprecatedString> names;
     while (dt.has_next())
         names.append(dt.next_path());
     quick_sort(names);
@@ -295,7 +297,7 @@ ErrorOr<void> Client::handle_directory_listing(String const& requested_path, Str
 
         struct stat st;
         memset(&st, 0, sizeof(st));
-        int rc = stat(path_builder.to_string().characters(), &st);
+        int rc = stat(path_builder.to_deprecated_string().characters(), &st);
         if (rc < 0) {
             perror("stat");
         }
@@ -316,7 +318,7 @@ ErrorOr<void> Client::handle_directory_listing(String const& requested_path, Str
 
         builder.appendff("<td>{:10}</td><td>&nbsp;</td>", st.st_size);
         builder.append("<td>"sv);
-        builder.append(Core::DateTime::from_timestamp(st.st_mtime).to_string());
+        builder.append(Core::DateTime::from_timestamp(st.st_mtime).to_deprecated_string());
         builder.append("</td>"sv);
         builder.append("</tr>\n"sv);
     }
@@ -327,12 +329,12 @@ ErrorOr<void> Client::handle_directory_listing(String const& requested_path, Str
     builder.append("</body>\n"sv);
     builder.append("</html>\n"sv);
 
-    auto response = builder.to_string();
+    auto response = builder.to_deprecated_string();
     InputMemoryStream stream { response.bytes() };
     return send_response(stream, request, { .type = "text/html", .length = response.length() });
 }
 
-ErrorOr<void> Client::send_error_response(unsigned code, HTTP::HttpRequest const& request, Vector<String> const& headers)
+ErrorOr<void> Client::send_error_response(unsigned code, HTTP::HttpRequest const& request, Vector<DeprecatedString> const& headers)
 {
     auto reason_phrase = HTTP::HttpResponse::reason_phrase_for_code(code);
 
@@ -363,7 +365,7 @@ ErrorOr<void> Client::send_error_response(unsigned code, HTTP::HttpRequest const
 
 void Client::log_response(unsigned code, HTTP::HttpRequest const& request)
 {
-    outln("{} :: {:03d} :: {} {}", Core::DateTime::now().to_string(), code, request.method_name(), request.url().serialize().substring(1));
+    outln("{} :: {:03d} :: {} {}", Core::DateTime::now().to_deprecated_string(), code, request.method_name(), request.url().serialize().substring(1));
 }
 
 bool Client::verify_credentials(Vector<HTTP::HttpRequest::Header> const& headers)

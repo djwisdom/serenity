@@ -24,6 +24,7 @@
 #include <Kernel/CommandLine.h>
 #include <Kernel/Devices/DeviceManagement.h>
 #include <Kernel/Graphics/Console/BootFramebufferConsole.h>
+#include <Kernel/JailManagement.h>
 #include <Kernel/KSyms.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Panic.h>
@@ -50,6 +51,9 @@ extern "C" void exception_common(Kernel::TrapFrame const* const trap_frame)
 
         auto esr_el1 = Kernel::Aarch64::ESR_EL1::read();
         dbgln("esr_el1: EC({:#b}) IL({:#b}) ISS({:#b}) ISS2({:#b})", esr_el1.EC, esr_el1.IL, esr_el1.ISS, esr_el1.ISS2);
+        dbgln("Exception Class: {}", Aarch64::exception_class_to_string(esr_el1.EC));
+        if (Aarch64::exception_class_has_set_far(esr_el1.EC))
+            dbgln("Faulting Virtual Address: 0x{:x}", Aarch64::FAR_EL1::read().virtual_address);
 
         dump_backtrace_from_base_pointer(regs->x[29]);
     }
@@ -64,8 +68,8 @@ extern ctor_func_t start_ctors[];
 extern ctor_func_t end_ctors[];
 
 // FIXME: Share this with the Intel Prekernel.
-extern size_t __stack_chk_guard;
-size_t __stack_chk_guard;
+extern uintptr_t __stack_chk_guard;
+uintptr_t __stack_chk_guard;
 
 READONLY_AFTER_INIT bool g_in_early_boot;
 
@@ -129,7 +133,8 @@ extern "C" [[noreturn]] void init()
     dmesgln("Initialize MMU");
     Memory::MemoryManager::initialize(0);
     DeviceManagement::initialize();
-    JailManagement::the();
+    SysFSComponentRegistry::initialize();
+    DeviceManagement::the().attach_null_device(*NullDevice::must_initialize());
 
     // Invoke all static global constructors in the kernel.
     // Note that we want to do this as early as possible.
@@ -147,6 +152,9 @@ extern "C" [[noreturn]] void init()
     Processor::enable_interrupts();
 
     TimeManagement::initialize(0);
+
+    ProcFSComponentRegistry::initialize();
+    JailManagement::the();
 
     auto firmware_version = query_firmware_version();
     dmesgln("Firmware version: {}", firmware_version);

@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/Function.h>
-#include <AK/String.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Accessor.h>
 #include <LibJS/Runtime/BooleanObject.h>
@@ -70,11 +70,11 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::to_string)
 
     // 1. If the this value is undefined, return "[object Undefined]".
     if (this_value.is_undefined())
-        return js_string(vm, "[object Undefined]");
+        return PrimitiveString::create(vm, "[object Undefined]");
 
     // 2. If the this value is null, return "[object Null]".
     if (this_value.is_null())
-        return js_string(vm, "[object Null]");
+        return PrimitiveString::create(vm, "[object Null]");
 
     // 3. Let O be ! ToObject(this value).
     auto* object = MUST(this_value.to_object(vm));
@@ -82,7 +82,7 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::to_string)
     // 4. Let isArray be ? IsArray(O).
     auto is_array = TRY(Value(object).is_array(vm));
 
-    String builtin_tag;
+    DeprecatedString builtin_tag;
 
     // 5. If isArray is true, let builtinTag be "Array".
     if (is_array)
@@ -119,16 +119,16 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::to_string)
     auto to_string_tag = TRY(object->get(*vm.well_known_symbol_to_string_tag()));
 
     // Optimization: Instead of creating another PrimitiveString from builtin_tag, we separate tag and to_string_tag and add an additional branch to step 16.
-    String tag;
+    DeprecatedString tag;
 
     // 16. If Type(tag) is not String, set tag to builtinTag.
     if (!to_string_tag.is_string())
         tag = move(builtin_tag);
     else
-        tag = to_string_tag.as_string().string();
+        tag = to_string_tag.as_string().deprecated_string();
 
     // 17. Return the string-concatenation of "[object ", tag, and "]".
-    return js_string(vm, String::formatted("[object {}]", tag));
+    return PrimitiveString::create(vm, DeprecatedString::formatted("[object {}]", tag));
 }
 
 // 20.1.3.5 Object.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] ), https://tc39.es/ecma262/#sec-object.prototype.tolocalestring

@@ -23,7 +23,7 @@ public:
     virtual void on_mousemove(Layer*, MouseEvent&) override;
     virtual void on_mouseup(Layer*, MouseEvent&) override;
     virtual void on_second_paint(Layer const*, GUI::PaintEvent&) override;
-    virtual bool on_keydown(GUI::KeyEvent const&) override;
+    virtual bool on_keydown(GUI::KeyEvent&) override;
     virtual GUI::Widget* get_properties_widget() override;
     virtual Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> cursor() override { return Gfx::StandardCursor::Crosshair; }
 
@@ -42,7 +42,7 @@ private:
         FromCorner,
     };
 
-    void draw_using(GUI::Painter&, Gfx::IntPoint const& start_position, Gfx::IntPoint const& end_position, int thickness, int corner_radius);
+    void draw_using(GUI::Painter&, Gfx::IntPoint start_position, Gfx::IntPoint end_position, int thickness, int corner_radius);
 
     RefPtr<GUI::Widget> m_properties_widget;
     RefPtr<GUI::TextBox> m_aspect_w_textbox;

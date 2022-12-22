@@ -9,8 +9,8 @@
 
 #include <AK/Array.h>
 #include <AK/DateConstants.h>
+#include <AK/DeprecatedString.h>
 #include <AK/Function.h>
-#include <AK/String.h>
 #include <AK/TypeCasts.h>
 #include <LibCore/DateTime.h>
 #include <LibCrypto/BigInt/UnsignedBigInteger.h>
@@ -951,11 +951,11 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_date_string)
 
     // 3. If tv is NaN, return "Invalid Date".
     if (isnan(time))
-        return js_string(vm, "Invalid Date"sv);
+        return PrimitiveString::create(vm, "Invalid Date"sv);
 
     // 4. Let t be LocalTime(tv).
     // 5. Return DateString(t).
-    return js_string(vm, date_string(local_time(time)));
+    return PrimitiveString::create(vm, date_string(local_time(time)));
 }
 
 // 21.4.4.36 Date.prototype.toISOString ( ), https://tc39.es/ecma262/#sec-date.prototype.toisostring
@@ -967,7 +967,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_iso_string)
         return vm.throw_completion<RangeError>(ErrorType::InvalidTimeValue);
 
     auto string = this_object->iso_date_string();
-    return js_string(vm, move(string));
+    return PrimitiveString::create(vm, move(string));
 }
 
 // 21.4.4.37 Date.prototype.toJSON ( key ), https://tc39.es/ecma262/#sec-date.prototype.tojson
@@ -986,8 +986,8 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_json)
 static ThrowCompletionOr<Intl::DateTimeFormat*> construct_date_time_format(VM& vm, Value locales, Value options)
 {
     auto& realm = *vm.current_realm();
-    auto* date_time_format = TRY(construct(vm, *realm.intrinsics().intl_date_time_format_constructor(), locales, options));
-    return static_cast<Intl::DateTimeFormat*>(date_time_format);
+    auto date_time_format = TRY(construct(vm, *realm.intrinsics().intl_date_time_format_constructor(), locales, options));
+    return static_cast<Intl::DateTimeFormat*>(date_time_format.ptr());
 }
 
 // 21.4.4.38 Date.prototype.toLocaleDateString ( [ reserved1 [ , reserved2 ] ] ), https://tc39.es/ecma262/#sec-date.prototype.tolocaledatestring
@@ -1002,7 +1002,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_locale_date_string)
 
     // 2. If x is NaN, return "Invalid Date".
     if (isnan(time))
-        return js_string(vm, "Invalid Date"sv);
+        return PrimitiveString::create(vm, "Invalid Date"sv);
 
     // 3. Let options be ? ToDateTimeOptions(options, "date", "date").
     options = Value(TRY(Intl::to_date_time_options(vm, options, Intl::OptionRequired::Date, Intl::OptionDefaults::Date)));
@@ -1012,7 +1012,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_locale_date_string)
 
     // 5. Return ? FormatDateTime(dateFormat, x).
     auto formatted = TRY(Intl::format_date_time(vm, *date_format, time));
-    return js_string(vm, move(formatted));
+    return PrimitiveString::create(vm, move(formatted));
 }
 
 // 21.4.4.39 Date.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] ), https://tc39.es/ecma262/#sec-date.prototype.tolocalestring
@@ -1027,7 +1027,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_locale_string)
 
     // 2. If x is NaN, return "Invalid Date".
     if (isnan(time))
-        return js_string(vm, "Invalid Date"sv);
+        return PrimitiveString::create(vm, "Invalid Date"sv);
 
     // 3. Let options be ? ToDateTimeOptions(options, "any", "all").
     options = Value(TRY(Intl::to_date_time_options(vm, options, Intl::OptionRequired::Any, Intl::OptionDefaults::All)));
@@ -1037,7 +1037,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_locale_string)
 
     // 5. Return ? FormatDateTime(dateFormat, x).
     auto formatted = TRY(Intl::format_date_time(vm, *date_format, time));
-    return js_string(vm, move(formatted));
+    return PrimitiveString::create(vm, move(formatted));
 }
 
 // 21.4.4.40 Date.prototype.toLocaleTimeString ( [ reserved1 [ , reserved2 ] ] ), https://tc39.es/ecma262/#sec-date.prototype.tolocaletimestring
@@ -1052,7 +1052,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_locale_time_string)
 
     // 2. If x is NaN, return "Invalid Date".
     if (isnan(time))
-        return js_string(vm, "Invalid Date"sv);
+        return PrimitiveString::create(vm, "Invalid Date"sv);
 
     // 3. Let options be ? ToDateTimeOptions(options, "time", "time").
     options = Value(TRY(Intl::to_date_time_options(vm, options, Intl::OptionRequired::Time, Intl::OptionDefaults::Time)));
@@ -1062,7 +1062,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_locale_time_string)
 
     // 5. Return ? FormatDateTime(dateFormat, x).
     auto formatted = TRY(Intl::format_date_time(vm, *time_format, time));
-    return js_string(vm, move(formatted));
+    return PrimitiveString::create(vm, move(formatted));
 }
 
 // 21.4.4.41 Date.prototype.toString ( ), https://tc39.es/ecma262/#sec-date.prototype.tostring
@@ -1072,11 +1072,11 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_string)
     auto time = TRY(this_time_value(vm, vm.this_value()));
 
     // 2. Return ToDateString(tv).
-    return js_string(vm, JS::to_date_string(time));
+    return PrimitiveString::create(vm, JS::to_date_string(time));
 }
 
 // 21.4.4.41.1 TimeString ( tv ), https://tc39.es/ecma262/#sec-timestring
-String time_string(double time)
+DeprecatedString time_string(double time)
 {
     // 1. Let hour be ToZeroPaddedDecimalString(ℝ(HourFromTime(tv)), 2).
     auto hour = hour_from_time(time);
@@ -1088,11 +1088,11 @@ String time_string(double time)
     auto second = sec_from_time(time);
 
     // 4. Return the string-concatenation of hour, ":", minute, ":", second, the code unit 0x0020 (SPACE), and "GMT".
-    return String::formatted("{:02}:{:02}:{:02} GMT", hour, minute, second);
+    return DeprecatedString::formatted("{:02}:{:02}:{:02} GMT", hour, minute, second);
 }
 
 // 21.4.4.41.2 DateString ( tv ), https://tc39.es/ecma262/#sec-datestring
-String date_string(double time)
+DeprecatedString date_string(double time)
 {
     // 1. Let weekday be the Name of the entry in Table 62 with the Number WeekDay(tv).
     auto weekday = short_day_names[week_day(time)];
@@ -1111,11 +1111,11 @@ String date_string(double time)
 
     // 6. Let paddedYear be ToZeroPaddedDecimalString(abs(ℝ(yv)), 4).
     // 7. Return the string-concatenation of weekday, the code unit 0x0020 (SPACE), month, the code unit 0x0020 (SPACE), day, the code unit 0x0020 (SPACE), yearSign, and paddedYear.
-    return String::formatted("{} {} {:02} {}{:04}", weekday, month, day, year_sign, abs(year));
+    return DeprecatedString::formatted("{} {} {:02} {}{:04}", weekday, month, day, year_sign, abs(year));
 }
 
 // 21.4.4.41.3 TimeZoneString ( tv ), https://tc39.es/ecma262/#sec-timezoneestring
-String time_zone_string(double time)
+DeprecatedString time_zone_string(double time)
 {
     // 1. Let localTimeZone be DefaultTimeZone().
     auto local_time_zone = default_time_zone();
@@ -1169,11 +1169,11 @@ String time_zone_string(double time)
     }
 
     // 10. Return the string-concatenation of offsetSign, offsetHour, offsetMin, and tzName.
-    return String::formatted("{}{:02}{:02} ({})", offset_sign, offset_hour, offset_min, tz_name);
+    return DeprecatedString::formatted("{}{:02}{:02} ({})", offset_sign, offset_hour, offset_min, tz_name);
 }
 
 // 21.4.4.41.4 ToDateString ( tv ), https://tc39.es/ecma262/#sec-todatestring
-String to_date_string(double time)
+DeprecatedString to_date_string(double time)
 {
     // 1. If tv is NaN, return "Invalid Date".
     if (Value(time).is_nan())
@@ -1183,7 +1183,7 @@ String to_date_string(double time)
     time = local_time(time);
 
     // 3. Return the string-concatenation of DateString(t), the code unit 0x0020 (SPACE), TimeString(t), and TimeZoneString(tv).
-    return String::formatted("{} {}{}", date_string(time), time_string(time), time_zone_string(time));
+    return DeprecatedString::formatted("{} {}{}", date_string(time), time_string(time), time_zone_string(time));
 }
 
 // 14.1.1 Date.prototype.toTemporalInstant ( ), https://tc39.es/proposal-temporal/#sec-date.prototype.totemporalinstant
@@ -1194,7 +1194,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_temporal_instant)
 
     // 2. Let ns be ? NumberToBigInt(t) × ℤ(10^6).
     auto* ns = TRY(number_to_bigint(vm, Value(t)));
-    ns = js_bigint(vm, ns->big_integer().multiplied_by(Crypto::UnsignedBigInteger { 1'000'000 }));
+    ns = BigInt::create(vm, ns->big_integer().multiplied_by(Crypto::UnsignedBigInteger { 1'000'000 }));
 
     // 3. Return ! CreateTemporalInstant(ns).
     return MUST(Temporal::create_temporal_instant(vm, *ns));
@@ -1209,12 +1209,12 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_time_string)
 
     // 3. If tv is NaN, return "Invalid Date".
     if (isnan(time))
-        return js_string(vm, "Invalid Date"sv);
+        return PrimitiveString::create(vm, "Invalid Date"sv);
 
     // 4. Let t be LocalTime(tv).
     // 5. Return the string-concatenation of TimeString(t) and TimeZoneString(tv).
-    auto string = String::formatted("{}{}", time_string(local_time(time)), time_zone_string(time));
-    return js_string(vm, move(string));
+    auto string = DeprecatedString::formatted("{}{}", time_string(local_time(time)), time_zone_string(time));
+    return PrimitiveString::create(vm, move(string));
 }
 
 // 21.4.4.43 Date.prototype.toUTCString ( ), https://tc39.es/ecma262/#sec-date.prototype.toutcstring
@@ -1226,7 +1226,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_utc_string)
 
     // 3. If tv is NaN, return "Invalid Date".
     if (isnan(time))
-        return js_string(vm, "Invalid Date"sv);
+        return PrimitiveString::create(vm, "Invalid Date"sv);
 
     // 4. Let weekday be the Name of the entry in Table 62 with the Number WeekDay(tv).
     auto weekday = short_day_names[week_day(time)];
@@ -1245,8 +1245,8 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::to_utc_string)
 
     // 9. Let paddedYear be ToZeroPaddedDecimalString(abs(ℝ(yv)), 4).
     // 10. Return the string-concatenation of weekday, ",", the code unit 0x0020 (SPACE), day, the code unit 0x0020 (SPACE), month, the code unit 0x0020 (SPACE), yearSign, paddedYear, the code unit 0x0020 (SPACE), and TimeString(tv).
-    auto string = String::formatted("{}, {:02} {} {}{:04} {}", weekday, day, month, year_sign, abs(year), time_string(time));
-    return js_string(vm, move(string));
+    auto string = DeprecatedString::formatted("{}, {:02} {} {}{:04} {}", weekday, day, month, year_sign, abs(year), time_string(time));
+    return PrimitiveString::create(vm, move(string));
 }
 
 // 21.4.4.45 Date.prototype [ @@toPrimitive ] ( hint ), https://tc39.es/ecma262/#sec-date.prototype-@@toprimitive
@@ -1258,7 +1258,7 @@ JS_DEFINE_NATIVE_FUNCTION(DatePrototype::symbol_to_primitive)
     auto hint_value = vm.argument(0);
     if (!hint_value.is_string())
         return vm.throw_completion<TypeError>(ErrorType::InvalidHint, hint_value.to_string_without_side_effects());
-    auto& hint = hint_value.as_string().string();
+    auto& hint = hint_value.as_string().deprecated_string();
     Value::PreferredType try_first;
     if (hint == "string" || hint == "default")
         try_first = Value::PreferredType::String;

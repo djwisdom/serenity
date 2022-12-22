@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "LibGUI/ModelIndex.h"
+#include "LibPDF/Document.h"
 #include "OutlineModel.h"
 #include <LibGUI/TreeView.h>
 #include <LibGUI/Widget.h>
@@ -16,15 +18,18 @@ class SidebarWidget final : public GUI::Widget {
 public:
     ~SidebarWidget() override = default;
 
-    void set_outline(RefPtr<PDF::OutlineDict> outline)
+    Function<void(PDF::Destination const&)> on_destination_selected;
+
+    ErrorOr<void> set_outline(RefPtr<PDF::OutlineDict> outline)
     {
         if (outline) {
-            m_model = OutlineModel::create(outline.release_nonnull());
+            m_model = TRY(OutlineModel::create(outline.release_nonnull()));
             m_outline_tree_view->set_model(m_model);
         } else {
             m_model = RefPtr<OutlineModel> {};
             m_outline_tree_view->set_model({});
         }
+        return {};
     }
 
 private:

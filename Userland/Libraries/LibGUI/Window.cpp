@@ -80,7 +80,7 @@ Window::Window(Core::Object* parent)
         "title",
         [this] { return title(); },
         [this](auto& value) {
-            set_title(value.to_string());
+            set_title(value.to_deprecated_string());
             return true;
         });
 
@@ -235,7 +235,7 @@ void Window::hide()
     }
 }
 
-void Window::set_title(String title)
+void Window::set_title(DeprecatedString title)
 {
     m_title_when_windowless = move(title);
     if (!is_visible())
@@ -243,7 +243,7 @@ void Window::set_title(String title)
     ConnectionToWindowServer::the().async_set_window_title(m_window_id, m_title_when_windowless);
 }
 
-String Window::title() const
+DeprecatedString Window::title() const
 {
     if (!is_visible())
         return m_title_when_windowless;
@@ -292,7 +292,7 @@ Gfx::IntSize Window::minimum_size() const
     return ConnectionToWindowServer::the().get_window_minimum_size(m_window_id);
 }
 
-void Window::set_minimum_size(Gfx::IntSize const& size)
+void Window::set_minimum_size(Gfx::IntSize size)
 {
     VERIFY(size.width() >= 0 && size.height() >= 0);
     VERIFY(!is_obeying_widget_min_size());
@@ -503,6 +503,9 @@ void Window::handle_key_event(KeyEvent& event)
     if (event.is_accepted())
         return;
 
+    if (is_blocking() || is_popup())
+        return;
+
     // Only process shortcuts if this is a keydown event.
     if (event.type() == Event::KeyDown)
         propagate_shortcuts_up_to_application(event, nullptr);
@@ -522,15 +525,14 @@ void Window::handle_resize_event(ResizeEvent& event)
         m_main_widget->set_relative_rect({ {}, new_size });
 }
 
-void Window::handle_input_entered_or_left_event(Core::Event& event)
+void Window::handle_input_preemption_event(Core::Event& event)
 {
-    m_is_active_input = event.type() == Event::WindowInputEntered;
-    if (on_active_input_change)
-        on_active_input_change(m_is_active_input);
-    if (m_main_widget)
-        m_main_widget->dispatch_event(event, this);
-    if (m_focused_widget)
-        m_focused_widget->update();
+    if (on_input_preemption_change)
+        on_input_preemption_change(event.type() == Event::WindowInputPreempted);
+    if (!m_focused_widget)
+        return;
+    m_focused_widget->set_focus_preempted(event.type() == Event::WindowInputPreempted);
+    m_focused_widget->update();
 }
 
 void Window::handle_became_active_or_inactive_event(Core::Event& event)
@@ -543,8 +545,11 @@ void Window::handle_became_active_or_inactive_event(Core::Event& event)
         on_active_window_change(event.type() == Event::WindowBecameActive);
     if (m_main_widget)
         m_main_widget->dispatch_event(event, this);
-    if (m_focused_widget)
+    if (m_focused_widget) {
+        if (event.type() == Event::WindowBecameActive)
+            m_focused_widget->set_focus_preempted(false);
         m_focused_widget->update();
+    }
 }
 
 void Window::handle_close_request()
@@ -678,8 +683,8 @@ void Window::event(Core::Event& event)
     if (event.type() == Event::WindowBecameActive || event.type() == Event::WindowBecameInactive)
         return handle_became_active_or_inactive_event(event);
 
-    if (event.type() == Event::WindowInputEntered || event.type() == Event::WindowInputLeft)
-        return handle_input_entered_or_left_event(event);
+    if (event.type() == Event::WindowInputPreempted || event.type() == Event::WindowInputRestored)
+        return handle_input_preemption_event(event);
 
     if (event.type() == Event::WindowCloseRequest)
         return handle_close_request();
@@ -913,7 +918,7 @@ void Window::flip(Vector<Gfx::IntRect, 32> const& dirty_rects)
     m_back_store->bitmap().set_volatile();
 }
 
-OwnPtr<WindowBackingStore> Window::create_backing_store(Gfx::IntSize const& size)
+OwnPtr<WindowBackingStore> Window::create_backing_store(Gfx::IntSize size)
 {
     auto format = m_has_alpha_channel ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888;
 
@@ -1161,18 +1166,12 @@ void Window::notify_state_changed(Badge<ConnectionToWindowServer>, bool minimize
     }
 }
 
-void Window::notify_input_preempted(Badge<ConnectionToWindowServer>, InputPreemptor preemptor)
-{
-    if (on_input_preemption)
-        on_input_preemption(preemptor);
-}
-
 Action* Window::action_for_shortcut(Shortcut const& shortcut)
 {
     return Action::find_action_for_shortcut(*this, shortcut);
 }
 
-void Window::set_base_size(Gfx::IntSize const& base_size)
+void Window::set_base_size(Gfx::IntSize base_size)
 {
     if (m_base_size == base_size)
         return;
@@ -1181,7 +1180,7 @@ void Window::set_base_size(Gfx::IntSize const& base_size)
         ConnectionToWindowServer::the().async_set_window_base_size_and_size_increment(m_window_id, m_base_size, m_size_increment);
 }
 
-void Window::set_size_increment(Gfx::IntSize const& size_increment)
+void Window::set_size_increment(Gfx::IntSize size_increment)
 {
     if (m_size_increment == size_increment)
         return;
@@ -1272,7 +1271,17 @@ Gfx::Bitmap* Window::back_bitmap()
     return m_back_store ? &m_back_store->bitmap() : nullptr;
 }
 
-ErrorOr<NonnullRefPtr<Menu>> Window::try_add_menu(String name)
+ErrorOr<void> Window::try_add_menu(NonnullRefPtr<Menu> menu)
+{
+    TRY(m_menubar->try_add_menu({}, move(menu)));
+    if (m_window_id) {
+        menu->realize_menu_if_needed();
+        ConnectionToWindowServer::the().async_add_menu(m_window_id, menu->menu_id());
+    }
+    return {};
+}
+
+ErrorOr<NonnullRefPtr<Menu>> Window::try_add_menu(DeprecatedString name)
 {
     auto menu = TRY(m_menubar->try_add_menu({}, move(name)));
     if (m_window_id) {
@@ -1282,7 +1291,7 @@ ErrorOr<NonnullRefPtr<Menu>> Window::try_add_menu(String name)
     return menu;
 }
 
-Menu& Window::add_menu(String name)
+Menu& Window::add_menu(DeprecatedString name)
 {
     auto menu = MUST(try_add_menu(move(name)));
     return *menu;

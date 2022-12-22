@@ -8,8 +8,8 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
-#include <AK/String.h>
 #include <AK/StringView.h>
 
 namespace SQL::AST {
@@ -171,6 +171,7 @@ namespace SQL::AST {
     __ENUMERATE_SQL_TOKEN("_blob_", BlobLiteral, Blob)                    \
     __ENUMERATE_SQL_TOKEN("_eof_", Eof, Invalid)                          \
     __ENUMERATE_SQL_TOKEN("_invalid_", Invalid, Invalid)                  \
+    __ENUMERATE_SQL_TOKEN("?", Placeholder, Operator)                     \
     __ENUMERATE_SQL_TOKEN("&", Ampersand, Operator)                       \
     __ENUMERATE_SQL_TOKEN("*", Asterisk, Operator)                        \
     __ENUMERATE_SQL_TOKEN(",", Comma, Punctuation)                        \
@@ -221,7 +222,7 @@ struct SourcePosition {
 
 class Token {
 public:
-    Token(TokenType type, String value, SourcePosition start_position, SourcePosition end_position)
+    Token(TokenType type, DeprecatedString value, SourcePosition start_position, SourcePosition end_position)
         : m_type(type)
         , m_value(move(value))
         , m_start_position(start_position)
@@ -236,7 +237,7 @@ public:
     TokenType type() const { return m_type; }
     TokenCategory category() const { return category(m_type); }
 
-    String const& value() const { return m_value; }
+    DeprecatedString const& value() const { return m_value; }
     double double_value() const;
 
     SourcePosition const& start_position() const { return m_start_position; }
@@ -244,7 +245,7 @@ public:
 
 private:
     TokenType m_type;
-    String m_value;
+    DeprecatedString m_value;
     SourcePosition m_start_position;
     SourcePosition m_end_position;
 };

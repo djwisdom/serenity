@@ -1,12 +1,13 @@
 /*
  * Copyright (c) 2020, Matthew Olsson <mattco@serenityos.org>
+ * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/StringView.h>
 #include <LibJS/Heap/Cell.h>
 
@@ -14,25 +15,22 @@ namespace JS {
 
 class Symbol final : public Cell {
     JS_CELL(Symbol, Cell);
-    AK_MAKE_NONCOPYABLE(Symbol);
-    AK_MAKE_NONMOVABLE(Symbol);
 
 public:
+    [[nodiscard]] static NonnullGCPtr<Symbol> create(VM&, Optional<DeprecatedString> description, bool is_global);
+
     virtual ~Symbol() = default;
 
-    String description() const { return m_description.value_or(""); }
-    Optional<String> const& raw_description() const { return m_description; }
+    DeprecatedString description() const { return m_description.value_or(""); }
+    Optional<DeprecatedString> const& raw_description() const { return m_description; }
     bool is_global() const { return m_is_global; }
-    String to_string() const { return String::formatted("Symbol({})", description()); }
+    DeprecatedString to_deprecated_string() const { return DeprecatedString::formatted("Symbol({})", description()); }
 
 private:
-    Symbol(Optional<String>, bool);
+    Symbol(Optional<DeprecatedString>, bool);
 
-    Optional<String> m_description;
+    Optional<DeprecatedString> m_description;
     bool m_is_global;
 };
-
-Symbol* js_symbol(Heap&, Optional<String> description, bool is_global);
-Symbol* js_symbol(VM&, Optional<String> description, bool is_global);
 
 }

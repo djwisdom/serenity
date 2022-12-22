@@ -1,11 +1,13 @@
 /*
  * Copyright (c) 2021, the SerenityOS developers.
+ * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <string.h>
@@ -20,7 +22,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     TRY(Core::System::pledge("stdio rpath"));
 
-    String file1_path, file2_path;
+    DeprecatedString file1_path;
+    DeprecatedString file2_path;
     bool suppress_col1 { false };
     bool suppress_col2 { false };
     bool suppress_col3 { false };
@@ -47,7 +50,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    bool print_color = isatty(STDOUT_FILENO);
+    bool print_color = TRY(Core::System::isatty(STDOUT_FILENO));
     if (color)
         print_color = true;
     else if (no_color)
@@ -58,52 +61,49 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    auto process_file = [](String const& path, auto& file, int file_number) {
-        if (path == "-") {
-            file = Core::File::standard_input();
-        } else {
-            auto file_or_error = Core::File::open(path, Core::OpenMode::ReadOnly);
-            if (file_or_error.is_error()) {
-                warnln("Failed to open file{} '{}': {}", file_number, path, file_or_error.error());
-                return false;
-            }
-            if (Core::File::is_directory(path)) {
-                warnln("Failed to open file{} '{}': is a directory", file_number, path);
-                return false;
-            }
-            file = file_or_error.value();
+    auto open_file = [](DeprecatedString const& path, auto& file, int file_number) {
+        auto file_or_error = Core::Stream::File::open_file_or_standard_stream(path, Core::Stream::OpenMode::Read);
+        if (file_or_error.is_error()) {
+            warnln("Failed to open file{} '{}': {}", file_number, path, file_or_error.error());
+            return false;
         }
+
+        if (path != "-" && Core::File::is_directory(path)) {
+            warnln("Failed to open file{} '{}': is a directory", file_number, path);
+            return false;
+        }
+
+        auto buffered_file_or_error = Core::Stream::BufferedFile::create(file_or_error.release_value());
+        if (buffered_file_or_error.is_error()) {
+            warnln("Failed to create buffer for file{} '{}': {}", file_number, path, buffered_file_or_error.error());
+            return false;
+        }
+
+        file = buffered_file_or_error.release_value();
         return true;
     };
 
-    RefPtr<Core::File> file1, file2;
-    if (!(process_file(file1_path, file1, 1) && process_file(file2_path, file2, 2)))
+    OwnPtr<Core::Stream::BufferedFile> file1;
+    OwnPtr<Core::Stream::BufferedFile> file2;
+    if (!(open_file(file1_path, file1, 1) && open_file(file2_path, file2, 2)))
         return 1;
 
     char tab { '\t' };
     size_t tab_count { 0 };
-    String col1_fmt, col2_fmt, col3_fmt;
+    DeprecatedString col1_fmt;
+    DeprecatedString col2_fmt;
+    DeprecatedString col3_fmt;
     if (!suppress_col1)
-        col1_fmt = String::formatted("{}{}", String::repeated(tab, tab_count++), print_color ? COL1_COLOR : "{}");
+        col1_fmt = DeprecatedString::formatted("{}{}", DeprecatedString::repeated(tab, tab_count++), print_color ? COL1_COLOR : "{}");
     if (!suppress_col2)
-        col2_fmt = String::formatted("{}{}", String::repeated(tab, tab_count++), print_color ? COL2_COLOR : "{}");
+        col2_fmt = DeprecatedString::formatted("{}{}", DeprecatedString::repeated(tab, tab_count++), print_color ? COL2_COLOR : "{}");
     if (!suppress_col3)
-        col3_fmt = String::formatted("{}{}", String::repeated(tab, tab_count++), print_color ? COL3_COLOR : "{}");
+        col3_fmt = DeprecatedString::formatted("{}{}", DeprecatedString::repeated(tab, tab_count++), print_color ? COL3_COLOR : "{}");
 
-    auto cmp = [&](String const& str1, String const& str2) {
+    auto cmp = [&](DeprecatedString const& str1, DeprecatedString const& str2) {
         if (case_insensitive)
             return strcasecmp(str1.characters(), str2.characters());
-        else
-            return strcmp(str1.characters(), str2.characters());
-    };
-
-    auto process_remaining = [](String const& fmt, auto& file, int& count, bool print) {
-        while (file->can_read_line()) {
-            ++count;
-            auto line = file->read_line();
-            if (print)
-                outln(fmt, line);
-        }
+        return strcmp(str1.characters(), str2.characters());
     };
 
     bool read_file1 { true };
@@ -111,17 +111,33 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     int col1_count { 0 };
     int col2_count { 0 };
     int col3_count { 0 };
-    String file1_line, file2_line;
+    DeprecatedString file1_line;
+    DeprecatedString file2_line;
+    Array<u8, PAGE_SIZE> buffer;
 
-    while (file1->can_read_line() && file2->can_read_line()) {
+    auto should_continue_comparing_files = [&]() {
+        if (read_file1) {
+            auto can_read_file1_line = file1->can_read_line();
+            if (can_read_file1_line.is_error() || !can_read_file1_line.value())
+                return false;
+        }
+        if (read_file2) {
+            auto can_read_file2_line = file2->can_read_line();
+            if (can_read_file2_line.is_error() || !can_read_file2_line.value())
+                return false;
+        }
+        return true;
+    };
+
+    while (should_continue_comparing_files()) {
         if (read_file1)
-            file1_line = file1->read_line();
+            file1_line = TRY(file1->read_line(buffer));
         if (read_file2)
-            file2_line = file2->read_line();
+            file2_line = TRY(file2->read_line(buffer));
 
         int cmp_result = cmp(file1_line, file2_line);
 
-        if (!cmp_result) {
+        if (cmp_result == 0) {
             ++col3_count;
             read_file1 = read_file2 = true;
             if (!suppress_col3)
@@ -141,6 +157,29 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
     }
 
+    // If the most recent line read was not a match, then the last line read from one of the files has not yet been output.
+    // So let's output it!
+    if (!read_file1 && !suppress_col1) {
+        ++col1_count;
+        outln(col1_fmt, file1_line);
+    } else if (!read_file2 && !suppress_col2) {
+        ++col2_count;
+        outln(col2_fmt, file2_line);
+    }
+
+    auto process_remaining = [&](DeprecatedString const& fmt, auto& file, int& count, bool print) {
+        while (true) {
+            auto can_read_result = file->can_read_line();
+            if (can_read_result.is_error() || !can_read_result.value())
+                break;
+            ++count;
+            auto line = file->read_line(buffer);
+            if (line.is_error())
+                break;
+            if (print)
+                outln(fmt, line.value());
+        }
+    };
     process_remaining(col1_fmt, file1, col1_count, !suppress_col1);
     process_remaining(col2_fmt, file2, col2_count, !suppress_col2);
 

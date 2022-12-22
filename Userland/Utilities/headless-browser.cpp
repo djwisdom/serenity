@@ -16,10 +16,10 @@
 #include <LibCore/ConfigFile.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/File.h>
-#include <LibCore/IODevice.h>
 #include <LibCore/MemoryStream.h>
 #include <LibCore/Stream.h>
 #include <LibCore/System.h>
+#include <LibCore/SystemServerTakeover.h>
 #include <LibCore/Timer.h>
 #include <LibGemini/GeminiRequest.h>
 #include <LibGemini/GeminiResponse.h>
@@ -48,6 +48,7 @@
 #include <LibWebSocket/ConnectionInfo.h>
 #include <LibWebSocket/Message.h>
 #include <LibWebSocket/WebSocket.h>
+#include <WebContent/WebDriverConnection.h>
 
 class HeadlessBrowserPageClient final : public Web::PageClient {
 public:
@@ -56,8 +57,8 @@ public:
         return adopt_own(*new HeadlessBrowserPageClient());
     }
 
-    Web::Page& page() { return *m_page; }
-    Web::Page const& page() const { return *m_page; }
+    virtual Web::Page& page() override { return *m_page; }
+    virtual Web::Page const& page() const override { return *m_page; }
 
     Web::Layout::InitialContainingBlock* layout_root()
     {
@@ -72,23 +73,23 @@ public:
         page().load(url);
     }
 
-    void paint(Gfx::IntRect const& content_rect, Gfx::Bitmap& target)
+    virtual void paint(Web::DevicePixelRect const& content_rect, Gfx::Bitmap& target) override
     {
         Gfx::Painter painter(target);
 
         if (auto* document = page().top_level_browsing_context().active_document())
             document->update_layout();
 
-        painter.fill_rect({ {}, content_rect.size() }, palette().base());
+        painter.fill_rect({ {}, content_rect.size().to_type<int>() }, palette().base());
 
         auto* layout_root = this->layout_root();
         if (!layout_root) {
             return;
         }
 
-        Web::PaintContext context(painter, palette(), content_rect.top_left());
+        Web::PaintContext context(painter, palette(), device_pixels_per_css_pixel());
         context.set_should_show_line_box_borders(false);
-        context.set_viewport_rect(content_rect);
+        context.set_device_viewport_rect(content_rect);
         context.set_has_focus(true);
         layout_root->paint_all_phases(context);
     }
@@ -103,20 +104,39 @@ public:
         page().top_level_browsing_context().set_viewport_rect(viewport_rect);
     }
 
-    void set_screen_rect(Gfx::IntRect screen_rect)
+    void set_screen_rect(Web::DevicePixelRect screen_rect)
     {
         m_screen_rect = screen_rect;
     }
 
+    ErrorOr<void> connect_to_webdriver(StringView webdriver_ipc_path)
+    {
+        VERIFY(!m_webdriver);
+        m_webdriver = TRY(WebContent::WebDriverConnection::connect(*this, webdriver_ipc_path));
+        return {};
+    }
+
     // ^Web::PageClient
+    virtual bool is_connection_open() const override
+    {
+        if (m_webdriver)
+            return m_webdriver->is_open();
+        return true;
+    }
+
     virtual Gfx::Palette palette() const override
     {
         return Gfx::Palette(*m_palette_impl);
     }
 
-    virtual Gfx::IntRect screen_rect() const override
+    virtual Web::DevicePixelRect screen_rect() const override
     {
         return m_screen_rect;
+    }
+
+    virtual float device_pixels_per_css_pixel() const override
+    {
+        return 1.0f;
     }
 
     virtual Web::CSS::PreferredColorScheme preferred_color_scheme() const override
@@ -124,11 +144,11 @@ public:
         return m_preferred_color_scheme;
     }
 
-    virtual void page_did_change_title(String const&) override
+    virtual void page_did_change_title(DeprecatedString const&) override
     {
     }
 
-    virtual void page_did_start_loading(AK::URL const&) override
+    virtual void page_did_start_loading(AK::URL const&, bool) override
     {
     }
 
@@ -144,27 +164,27 @@ public:
     {
     }
 
-    virtual void page_did_request_context_menu(Gfx::IntPoint const&) override
+    virtual void page_did_request_context_menu(Web::CSSPixelPoint) override
     {
     }
 
-    virtual void page_did_request_link_context_menu(Gfx::IntPoint const&, AK::URL const&, String const&, unsigned) override
+    virtual void page_did_request_link_context_menu(Web::CSSPixelPoint, AK::URL const&, DeprecatedString const&, unsigned) override
     {
     }
 
-    virtual void page_did_request_image_context_menu(Gfx::IntPoint const&, AK::URL const&, String const&, unsigned, Gfx::Bitmap const*) override
+    virtual void page_did_request_image_context_menu(Web::CSSPixelPoint, AK::URL const&, DeprecatedString const&, unsigned, Gfx::Bitmap const*) override
     {
     }
 
-    virtual void page_did_click_link(AK::URL const&, String const&, unsigned) override
+    virtual void page_did_click_link(AK::URL const&, DeprecatedString const&, unsigned) override
     {
     }
 
-    virtual void page_did_middle_click_link(AK::URL const&, String const&, unsigned) override
+    virtual void page_did_middle_click_link(AK::URL const&, DeprecatedString const&, unsigned) override
     {
     }
 
-    virtual void page_did_enter_tooltip_area(Gfx::IntPoint const&, String const&) override
+    virtual void page_did_enter_tooltip_area(Web::CSSPixelPoint, DeprecatedString const&) override
     {
     }
 
@@ -180,7 +200,7 @@ public:
     {
     }
 
-    virtual void page_did_invalidate(Gfx::IntRect const&) override
+    virtual void page_did_invalidate(Web::CSSPixelRect const&) override
     {
     }
 
@@ -192,27 +212,25 @@ public:
     {
     }
 
-    virtual void page_did_request_scroll_into_view(Gfx::IntRect const&) override
+    virtual void page_did_request_scroll_into_view(Web::CSSPixelRect const&) override
     {
     }
 
-    virtual void page_did_request_alert(String const&) override
+    virtual void page_did_request_alert(DeprecatedString const&) override
     {
     }
 
-    virtual bool page_did_request_confirm(String const&) override
+    virtual void page_did_request_confirm(DeprecatedString const&) override
     {
-        return false;
     }
 
-    virtual String page_did_request_prompt(String const&, String const&) override
+    virtual void page_did_request_prompt(DeprecatedString const&, DeprecatedString const&) override
     {
-        return String::empty();
     }
 
-    virtual String page_did_request_cookie(AK::URL const&, Web::Cookie::Source) override
+    virtual DeprecatedString page_did_request_cookie(AK::URL const&, Web::Cookie::Source) override
     {
-        return String::empty();
+        return DeprecatedString::empty();
     }
 
     virtual void page_did_set_cookie(AK::URL const&, Web::Cookie::ParsedCookie const&, Web::Cookie::Source) override
@@ -234,8 +252,10 @@ private:
     NonnullOwnPtr<Web::Page> m_page;
 
     RefPtr<Gfx::PaletteImpl> m_palette_impl;
-    Gfx::IntRect m_screen_rect { 0, 0, 800, 600 };
+    Web::DevicePixelRect m_screen_rect { 0, 0, 800, 600 };
     Web::CSS::PreferredColorScheme m_preferred_color_scheme { Web::CSS::PreferredColorScheme::Auto };
+
+    RefPtr<WebContent::WebDriverConnection> m_webdriver;
 };
 
 class ImageCodecPluginHeadless : public Web::Platform::ImageCodecPlugin {
@@ -280,7 +300,7 @@ public:
         : public Web::ResourceLoaderConnectorRequest
         , public Weakable<HTTPHeadlessRequest> {
     public:
-        static ErrorOr<NonnullRefPtr<HTTPHeadlessRequest>> create(String const& method, AK::URL const& url, HashMap<String, String> const& request_headers, ReadonlyBytes request_body, Core::ProxyData const&)
+        static ErrorOr<NonnullRefPtr<HTTPHeadlessRequest>> create(DeprecatedString const& method, AK::URL const& url, HashMap<DeprecatedString, DeprecatedString> const& request_headers, ReadonlyBytes request_body, Core::ProxyData const&)
         {
             auto stream_backing_buffer = TRY(ByteBuffer::create_uninitialized(1 * MiB));
             auto underlying_socket = TRY(Core::Stream::TCPSocket::connect(url.host(), url.port().value_or(80)));
@@ -323,11 +343,11 @@ public:
     private:
         HTTPHeadlessRequest(HTTP::HttpRequest&& request, NonnullOwnPtr<Core::Stream::BufferedSocketBase> socket, ByteBuffer&& stream_backing_buffer)
             : m_stream_backing_buffer(move(stream_backing_buffer))
-            , m_output_stream(Core::Stream::MemoryStream::construct(m_stream_backing_buffer.bytes()).release_value_but_fixme_should_propagate_errors())
+            , m_output_stream(Core::Stream::FixedMemoryStream::construct(m_stream_backing_buffer.bytes()).release_value_but_fixme_should_propagate_errors())
             , m_socket(move(socket))
             , m_job(HTTP::Job::construct(move(request), *m_output_stream))
         {
-            m_job->on_headers_received = [weak_this = make_weak_ptr()](auto& response_headers, auto response_code) mutable {
+            m_job->on_headers_received = [weak_this = make_weak_ptr()](auto& response_headers, auto response_code) {
                 if (auto strong_this = weak_this.strong_ref()) {
                     strong_this->m_response_code = response_code;
                     for (auto& header : response_headers) {
@@ -335,8 +355,8 @@ public:
                     }
                 }
             };
-            m_job->on_finish = [weak_this = make_weak_ptr()](bool success) mutable {
-                Core::deferred_invoke([weak_this, success]() mutable {
+            m_job->on_finish = [weak_this = make_weak_ptr()](bool success) {
+                Core::deferred_invoke([weak_this, success] {
                     if (auto strong_this = weak_this.strong_ref()) {
                         ReadonlyBytes response_bytes { strong_this->m_output_stream->bytes().data(), strong_this->m_output_stream->offset() };
                         auto response_buffer = ByteBuffer::copy(response_bytes).release_value_but_fixme_should_propagate_errors();
@@ -349,17 +369,17 @@ public:
 
         Optional<u32> m_response_code;
         ByteBuffer m_stream_backing_buffer;
-        NonnullOwnPtr<Core::Stream::MemoryStream> m_output_stream;
+        NonnullOwnPtr<Core::Stream::FixedMemoryStream> m_output_stream;
         NonnullOwnPtr<Core::Stream::BufferedSocketBase> m_socket;
         NonnullRefPtr<HTTP::Job> m_job;
-        HashMap<String, String, CaseInsensitiveStringTraits> m_response_headers;
+        HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> m_response_headers;
     };
 
     class HTTPSHeadlessRequest
         : public Web::ResourceLoaderConnectorRequest
         , public Weakable<HTTPSHeadlessRequest> {
     public:
-        static ErrorOr<NonnullRefPtr<HTTPSHeadlessRequest>> create(String const& method, AK::URL const& url, HashMap<String, String> const& request_headers, ReadonlyBytes request_body, Core::ProxyData const&)
+        static ErrorOr<NonnullRefPtr<HTTPSHeadlessRequest>> create(DeprecatedString const& method, AK::URL const& url, HashMap<DeprecatedString, DeprecatedString> const& request_headers, ReadonlyBytes request_body, Core::ProxyData const&)
         {
             auto stream_backing_buffer = TRY(ByteBuffer::create_uninitialized(1 * MiB));
             auto underlying_socket = TRY(TLS::TLSv12::connect(url.host(), url.port().value_or(443)));
@@ -402,11 +422,11 @@ public:
     private:
         HTTPSHeadlessRequest(HTTP::HttpRequest&& request, NonnullOwnPtr<Core::Stream::BufferedSocketBase> socket, ByteBuffer&& stream_backing_buffer)
             : m_stream_backing_buffer(move(stream_backing_buffer))
-            , m_output_stream(Core::Stream::MemoryStream::construct(m_stream_backing_buffer.bytes()).release_value_but_fixme_should_propagate_errors())
+            , m_output_stream(Core::Stream::FixedMemoryStream::construct(m_stream_backing_buffer.bytes()).release_value_but_fixme_should_propagate_errors())
             , m_socket(move(socket))
             , m_job(HTTP::HttpsJob::construct(move(request), *m_output_stream))
         {
-            m_job->on_headers_received = [weak_this = make_weak_ptr()](auto& response_headers, auto response_code) mutable {
+            m_job->on_headers_received = [weak_this = make_weak_ptr()](auto& response_headers, auto response_code) {
                 if (auto strong_this = weak_this.strong_ref()) {
                     strong_this->m_response_code = response_code;
                     for (auto& header : response_headers) {
@@ -414,8 +434,8 @@ public:
                     }
                 }
             };
-            m_job->on_finish = [weak_this = make_weak_ptr()](bool success) mutable {
-                Core::deferred_invoke([weak_this, success]() mutable {
+            m_job->on_finish = [weak_this = make_weak_ptr()](bool success) {
+                Core::deferred_invoke([weak_this, success] {
                     if (auto strong_this = weak_this.strong_ref()) {
                         ReadonlyBytes response_bytes { strong_this->m_output_stream->bytes().data(), strong_this->m_output_stream->offset() };
                         auto response_buffer = ByteBuffer::copy(response_bytes).release_value_but_fixme_should_propagate_errors();
@@ -428,17 +448,17 @@ public:
 
         Optional<u32> m_response_code;
         ByteBuffer m_stream_backing_buffer;
-        NonnullOwnPtr<Core::Stream::MemoryStream> m_output_stream;
+        NonnullOwnPtr<Core::Stream::FixedMemoryStream> m_output_stream;
         NonnullOwnPtr<Core::Stream::BufferedSocketBase> m_socket;
         NonnullRefPtr<HTTP::HttpsJob> m_job;
-        HashMap<String, String, CaseInsensitiveStringTraits> m_response_headers;
+        HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> m_response_headers;
     };
 
     class GeminiHeadlessRequest
         : public Web::ResourceLoaderConnectorRequest
         , public Weakable<GeminiHeadlessRequest> {
     public:
-        static ErrorOr<NonnullRefPtr<GeminiHeadlessRequest>> create(String const&, AK::URL const& url, HashMap<String, String> const&, ReadonlyBytes, Core::ProxyData const&)
+        static ErrorOr<NonnullRefPtr<GeminiHeadlessRequest>> create(DeprecatedString const&, AK::URL const& url, HashMap<DeprecatedString, DeprecatedString> const&, ReadonlyBytes, Core::ProxyData const&)
         {
             auto stream_backing_buffer = TRY(ByteBuffer::create_uninitialized(1 * MiB));
             auto underlying_socket = TRY(Core::Stream::TCPSocket::connect(url.host(), url.port().value_or(80)));
@@ -471,11 +491,11 @@ public:
     private:
         GeminiHeadlessRequest(Gemini::GeminiRequest&& request, NonnullOwnPtr<Core::Stream::BufferedSocketBase> socket, ByteBuffer&& stream_backing_buffer)
             : m_stream_backing_buffer(move(stream_backing_buffer))
-            , m_output_stream(Core::Stream::MemoryStream::construct(m_stream_backing_buffer.bytes()).release_value_but_fixme_should_propagate_errors())
+            , m_output_stream(Core::Stream::FixedMemoryStream::construct(m_stream_backing_buffer.bytes()).release_value_but_fixme_should_propagate_errors())
             , m_socket(move(socket))
             , m_job(Gemini::Job::construct(move(request), *m_output_stream))
         {
-            m_job->on_headers_received = [weak_this = make_weak_ptr()](auto& response_headers, auto response_code) mutable {
+            m_job->on_headers_received = [weak_this = make_weak_ptr()](auto& response_headers, auto response_code) {
                 if (auto strong_this = weak_this.strong_ref()) {
                     strong_this->m_response_code = response_code;
                     for (auto& header : response_headers) {
@@ -483,8 +503,8 @@ public:
                     }
                 }
             };
-            m_job->on_finish = [weak_this = make_weak_ptr()](bool success) mutable {
-                Core::deferred_invoke([weak_this, success]() mutable {
+            m_job->on_finish = [weak_this = make_weak_ptr()](bool success) {
+                Core::deferred_invoke([weak_this, success] {
                     if (auto strong_this = weak_this.strong_ref()) {
                         ReadonlyBytes response_bytes { strong_this->m_output_stream->bytes().data(), strong_this->m_output_stream->offset() };
                         auto response_buffer = ByteBuffer::copy(response_bytes).release_value_but_fixme_should_propagate_errors();
@@ -497,10 +517,10 @@ public:
 
         Optional<u32> m_response_code;
         ByteBuffer m_stream_backing_buffer;
-        NonnullOwnPtr<Core::Stream::MemoryStream> m_output_stream;
+        NonnullOwnPtr<Core::Stream::FixedMemoryStream> m_output_stream;
         NonnullOwnPtr<Core::Stream::BufferedSocketBase> m_socket;
         NonnullRefPtr<Gemini::Job> m_job;
-        HashMap<String, String, CaseInsensitiveStringTraits> m_response_headers;
+        HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> m_response_headers;
     };
 
     static NonnullRefPtr<HeadlessRequestServer> create()
@@ -513,7 +533,7 @@ public:
     virtual void prefetch_dns(AK::URL const&) override { }
     virtual void preconnect(AK::URL const&) override { }
 
-    virtual RefPtr<Web::ResourceLoaderConnectorRequest> start_request(String const& method, AK::URL const& url, HashMap<String, String> const& request_headers, ReadonlyBytes request_body, Core::ProxyData const& proxy) override
+    virtual RefPtr<Web::ResourceLoaderConnectorRequest> start_request(DeprecatedString const& method, AK::URL const& url, HashMap<DeprecatedString, DeprecatedString> const& request_headers, ReadonlyBytes request_body, Core::ProxyData const& proxy) override
     {
         RefPtr<Web::ResourceLoaderConnectorRequest> request;
         if (url.scheme().equals_ignoring_case("http"sv)) {
@@ -583,7 +603,7 @@ public:
             m_websocket->send(WebSocket::Message(message));
         }
 
-        virtual void close(u16 code, String reason) override
+        virtual void close(u16 code, DeprecatedString reason) override
         {
             m_websocket->close(code, reason);
         }
@@ -625,7 +645,7 @@ public:
                     }
                 }
             };
-            m_websocket->on_close = [weak_this = make_weak_ptr()](u16 code, String reason, bool was_clean) {
+            m_websocket->on_close = [weak_this = make_weak_ptr()](u16 code, DeprecatedString reason, bool was_clean) {
                 if (auto strong_this = weak_this.strong_ref())
                     if (strong_this->on_close)
                         strong_this->on_close(code, move(reason), was_clean);
@@ -642,7 +662,7 @@ public:
 
     virtual ~HeadlessWebSocketClientManager() override { }
 
-    virtual RefPtr<Web::WebSockets::WebSocketClientSocket> connect(AK::URL const& url, String const& origin) override
+    virtual RefPtr<Web::WebSockets::WebSocketClientSocket> connect(AK::URL const& url, DeprecatedString const& origin) override
     {
         WebSocket::ConnectionInfo connection_info(url);
         connection_info.set_origin(origin);
@@ -655,6 +675,36 @@ private:
     HeadlessWebSocketClientManager() { }
 };
 
+static void load_page_for_screenshot_and_exit(HeadlessBrowserPageClient& page_client, int take_screenshot_after)
+{
+    dbgln("Taking screenshot after {} seconds", take_screenshot_after);
+
+    auto timer = Core::Timer::create_single_shot(
+        take_screenshot_after * 1000,
+        [&]() {
+            // FIXME: Allow passing the output path as argument
+            DeprecatedString output_file_path = "output.png";
+            dbgln("Saving to {}", output_file_path);
+
+            if (Core::File::exists(output_file_path))
+                MUST(Core::File::remove(output_file_path, Core::File::RecursionMode::Disallowed, true));
+
+            auto output_file = MUST(Core::Stream::File::open(output_file_path, Core::Stream::OpenMode::Write));
+
+            auto output_rect = page_client.screen_rect();
+            auto output_bitmap = MUST(Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, output_rect.size().to_type<int>()));
+
+            page_client.paint(output_rect, output_bitmap);
+
+            auto image_buffer = MUST(Gfx::PNGWriter::encode(output_bitmap));
+            MUST(output_file->write(image_buffer.bytes()));
+
+            exit(0);
+        });
+
+    timer->start();
+}
+
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     int take_screenshot_after = 1;
@@ -662,6 +712,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     StringView resources_folder;
     StringView error_page_url;
     StringView ca_certs_path;
+    StringView webdriver_ipc_path;
 
     Core::EventLoop event_loop;
     Core::ArgsParser args_parser;
@@ -670,6 +721,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_option(resources_folder, "Path of the base resources folder (defaults to /res)", "resources", 'r', "resources-root-path");
     args_parser.add_option(error_page_url, "URL for the error page (defaults to file:///res/html/error.html)", "error-page", 'e', "error-page-url");
     args_parser.add_option(ca_certs_path, "The bundled ca certificates file", "certs", 'c', "ca-certs-path");
+    args_parser.add_option(webdriver_ipc_path, "Path to the WebDriver IPC socket", "webdriver-ipc-path", 0, "path");
     args_parser.add_positional_argument(url, "URL to open", "url", Core::ArgsParser::Required::Yes);
     args_parser.parse(arguments);
 
@@ -702,10 +754,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto page_client = HeadlessBrowserPageClient::create();
 
-    if (!resources_folder.is_empty())
-        page_client->setup_palette(Gfx::load_system_theme(LexicalPath::join(resources_folder, "themes/Default.ini"sv).string()));
-    else
-        page_client->setup_palette(Gfx::load_system_theme("/res/themes/Default.ini"));
+    if (!resources_folder.is_empty()) {
+        auto system_theme = TRY(Gfx::load_system_theme(LexicalPath::join(resources_folder, "themes/Default.ini"sv).string()));
+        page_client->setup_palette(system_theme);
+    } else {
+        auto system_theme = TRY(Gfx::load_system_theme("/res/themes/Default.ini"));
+        page_client->setup_palette(system_theme);
+    }
 
     dbgln("Loading {}", url);
     page_client->load(AK::URL(url));
@@ -714,30 +769,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     page_client->set_viewport_rect({ 0, 0, 800, 600 });
     page_client->set_screen_rect({ 0, 0, 800, 600 });
 
-    dbgln("Taking screenshot after {} seconds !", take_screenshot_after);
-    auto timer = Core::Timer::create_single_shot(
-        take_screenshot_after * 1000,
-        [page_client = move(page_client)]() mutable {
-            // FIXME: Allow passing the output path as argument
-            String output_file_path = "output.png";
-            dbgln("Saving to {}", output_file_path);
-
-            if (Core::File::exists(output_file_path))
-                [[maybe_unused]]
-                auto ignored = Core::File::remove(output_file_path, Core::File::RecursionMode::Disallowed, true);
-            auto output_file = MUST(Core::File::open(output_file_path, Core::OpenMode::WriteOnly));
-
-            auto output_rect = page_client->screen_rect();
-            auto output_bitmap = MUST(Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, output_rect.size()));
-
-            page_client->paint(output_rect, output_bitmap);
-
-            auto image_buffer = Gfx::PNGWriter::encode(output_bitmap);
-            output_file->write(image_buffer.data(), image_buffer.size());
-
-            exit(0);
-        });
-    timer->start();
+    if (!webdriver_ipc_path.is_empty())
+        TRY(page_client->connect_to_webdriver(webdriver_ipc_path));
+    else
+        load_page_for_screenshot_and_exit(*page_client, take_screenshot_after);
 
     return event_loop.exec();
 }

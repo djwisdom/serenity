@@ -34,7 +34,7 @@ DownloadWidget::DownloadWidget(const URL& url)
         builder.append(Core::StandardPaths::downloads_directory());
         builder.append('/');
         builder.append(m_url.basename());
-        m_destination_path = builder.to_string();
+        m_destination_path = builder.to_deprecated_string();
     }
 
     auto close_on_finish = Config::read_bool("Browser"sv, "Preferences"sv, "CloseDownloadWidgetOnFinish"sv, false);
@@ -49,7 +49,7 @@ DownloadWidget::DownloadWidget(const URL& url)
     {
         auto file_or_error = Core::Stream::File::open(m_destination_path, Core::Stream::OpenMode::Write);
         if (file_or_error.is_error()) {
-            GUI::MessageBox::show(window(), String::formatted("Cannot open {} for writing", m_destination_path), "Download failed"sv, GUI::MessageBox::Type::Error);
+            GUI::MessageBox::show(window(), DeprecatedString::formatted("Cannot open {} for writing", m_destination_path), "Download failed"sv, GUI::MessageBox::Type::Error);
             window()->close();
             return;
         }
@@ -71,7 +71,7 @@ DownloadWidget::DownloadWidget(const URL& url)
     m_browser_image->load_from_file("/res/graphics/download-animation.gif"sv);
     animation_layout.add_spacer();
 
-    auto& source_label = add<GUI::Label>(String::formatted("From: {}", url));
+    auto& source_label = add<GUI::Label>(DeprecatedString::formatted("From: {}", url));
     source_label.set_text_alignment(Gfx::TextAlignment::CenterLeft);
     source_label.set_fixed_height(16);
 
@@ -82,7 +82,7 @@ DownloadWidget::DownloadWidget(const URL& url)
     m_progress_label->set_text_alignment(Gfx::TextAlignment::CenterLeft);
     m_progress_label->set_fixed_height(16);
 
-    auto& destination_label = add<GUI::Label>(String::formatted("To: {}", m_destination_path));
+    auto& destination_label = add<GUI::Label>(DeprecatedString::formatted("To: {}", m_destination_path));
     destination_label.set_text_alignment(Gfx::TextAlignment::CenterLeft);
     destination_label.set_fixed_height(16);
 
@@ -129,7 +129,7 @@ void DownloadWidget::did_progress(Optional<u32> total_size, u32 downloaded_size)
         builder.append("Downloaded "sv);
         builder.append(human_readable_size(downloaded_size));
         builder.appendff(" in {} sec", m_elapsed_timer.elapsed() / 1000);
-        m_progress_label->set_text(builder.to_string());
+        m_progress_label->set_text(builder.to_deprecated_string());
     }
 
     {
@@ -142,7 +142,7 @@ void DownloadWidget::did_progress(Optional<u32> total_size, u32 downloaded_size)
         }
         builder.append(" of "sv);
         builder.append(m_url.basename());
-        window()->set_title(builder.to_string());
+        window()->set_title(builder.to_deprecated_string());
     }
 }
 
@@ -161,7 +161,7 @@ void DownloadWidget::did_finish(bool success)
     m_cancel_button->update();
 
     if (!success) {
-        GUI::MessageBox::show(window(), String::formatted("Download failed for some reason"), "Download failed"sv, GUI::MessageBox::Type::Error);
+        GUI::MessageBox::show(window(), DeprecatedString::formatted("Download failed for some reason"), "Download failed"sv, GUI::MessageBox::Type::Error);
         window()->close();
         return;
     }

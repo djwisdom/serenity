@@ -47,8 +47,8 @@ void fill_path(Painter& painter, Path const& path, Color color, Gfx::Painter::Wi
     using GridCoordinateType = Conditional<fill_path_mode == FillPathMode::PlaceOnIntGrid, int, float>;
     using PointType = Point<GridCoordinateType>;
     auto draw_line = [&](auto... args) {
-        if constexpr (requires { painter.draw_aliased_line(args...); })
-            painter.draw_aliased_line(args...);
+        if constexpr (requires { painter.draw_line_for_fill_path(args...); })
+            painter.draw_line_for_fill_path(args...);
         else
             painter.draw_line(args...);
     };
@@ -111,7 +111,7 @@ void fill_path(Painter& painter, Path const& path, Color color, Gfx::Painter::Wi
             });
             if constexpr (fill_path_mode == FillPathMode::PlaceOnIntGrid && FILL_PATH_DEBUG) {
                 if ((int)scanline % 10 == 0) {
-                    painter.draw_text(Gfx::Rect<GridCoordinateType>(active_list.last().x - 20, scanline, 20, 10), String::number((int)scanline));
+                    painter.draw_text(Gfx::Rect<GridCoordinateType>(active_list.last().x - 20, scanline, 20, 10), DeprecatedString::number((int)scanline));
                 }
             }
 

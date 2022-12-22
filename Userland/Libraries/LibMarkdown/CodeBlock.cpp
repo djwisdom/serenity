@@ -13,7 +13,7 @@
 
 namespace Markdown {
 
-String CodeBlock::render_to_html(bool) const
+DeprecatedString CodeBlock::render_to_html(bool) const
 {
     StringBuilder builder;
 
@@ -29,10 +29,17 @@ String CodeBlock::render_to_html(bool) const
     else
         builder.appendff("<code class=\"language-{}\">", escape_html_entities(m_language));
 
-    if (m_language == "js")
-        builder.append(JS::MarkupGenerator::html_from_source(m_code));
-    else
+    if (m_language == "js") {
+        auto html_or_error = JS::MarkupGenerator::html_from_source(m_code);
+        if (html_or_error.is_error()) {
+            warnln("Could not render js code to html: {}", html_or_error.error());
+            builder.append(escape_html_entities(m_code));
+        } else {
+            builder.append(html_or_error.release_value());
+        }
+    } else {
         builder.append(escape_html_entities(m_code));
+    }
 
     builder.append("</code>"sv);
 
@@ -46,7 +53,7 @@ String CodeBlock::render_to_html(bool) const
     return builder.build();
 }
 
-String CodeBlock::render_for_terminal(size_t) const
+DeprecatedString CodeBlock::render_for_terminal(size_t) const
 {
     StringBuilder builder;
 

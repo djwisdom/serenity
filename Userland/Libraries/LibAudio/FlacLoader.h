@@ -47,11 +47,11 @@ ALWAYS_INLINE ErrorOr<i32> decode_unsigned_exp_golomb(u8 order, BigEndianInputBi
 //      https://datatracker.ietf.org/doc/html/draft-ietf-cellar-flac-03 (newer IETF draft that uses incompatible numberings and names)
 class FlacLoaderPlugin : public LoaderPlugin {
 public:
-    explicit FlacLoaderPlugin(StringView path);
-    explicit FlacLoaderPlugin(Bytes buffer);
+    explicit FlacLoaderPlugin(NonnullOwnPtr<Core::Stream::SeekableStream> stream);
     virtual ~FlacLoaderPlugin() override = default;
 
-    virtual MaybeLoaderError initialize() override;
+    static Result<NonnullOwnPtr<FlacLoaderPlugin>, LoaderError> try_create(StringView path);
+    static Result<NonnullOwnPtr<FlacLoaderPlugin>, LoaderError> try_create(Bytes buffer);
 
     virtual LoaderSamples get_more_samples(size_t max_bytes_to_read_from_input = 128 * KiB) override;
 
@@ -62,13 +62,14 @@ public:
     virtual int total_samples() override { return static_cast<int>(m_total_samples); }
     virtual u32 sample_rate() override { return m_sample_rate; }
     virtual u16 num_channels() override { return m_num_channels; }
-    virtual String format_name() override { return "FLAC (.flac)"; }
+    virtual DeprecatedString format_name() override { return "FLAC (.flac)"; }
     virtual PcmSampleFormat pcm_format() override { return m_sample_format; }
 
     bool is_fixed_blocksize_stream() const { return m_min_block_size == m_max_block_size; }
     bool sample_count_unknown() const { return m_total_samples == 0; }
 
 private:
+    MaybeLoaderError initialize();
     MaybeLoaderError parse_header();
     // Either returns the metadata block or sets error message.
     // Additionally, increments m_data_start_location past the read meta block.

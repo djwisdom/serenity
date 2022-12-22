@@ -54,7 +54,7 @@ public:
     {
     }
 
-    virtual void config_bool_did_change(String const& domain, String const& group, String const& key, bool value) override
+    virtual void config_bool_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, bool value) override
     {
         VERIFY(domain == "Terminal");
 
@@ -68,7 +68,7 @@ public:
         }
     }
 
-    virtual void config_string_did_change(String const& domain, String const& group, String const& key, String const& value) override
+    virtual void config_string_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, DeprecatedString const& value) override
     {
         VERIFY(domain == "Terminal");
 
@@ -98,7 +98,7 @@ public:
         }
     }
 
-    virtual void config_i32_did_change(String const& domain, String const& group, String const& key, i32 value) override
+    virtual void config_i32_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, i32 value) override
     {
         VERIFY(domain == "Terminal");
 
@@ -115,7 +115,7 @@ private:
     VT::TerminalWidget& m_parent_terminal;
 };
 
-static void utmp_update(String const& tty, pid_t pid, bool create)
+static void utmp_update(DeprecatedString const& tty, pid_t pid, bool create)
 {
     int utmpupdate_pid = fork();
     if (utmpupdate_pid < 0) {
@@ -146,9 +146,9 @@ static void utmp_update(String const& tty, pid_t pid, bool create)
     }
 }
 
-static ErrorOr<void> run_command(String command, bool keep_open)
+static ErrorOr<void> run_command(DeprecatedString command, bool keep_open)
 {
-    String shell = "/bin/Shell";
+    DeprecatedString shell = "/bin/Shell";
     auto* pw = getpwuid(getuid());
     if (pw && pw->pw_shell) {
         shell = pw->pw_shell;
@@ -199,18 +199,18 @@ static ErrorOr<NonnullRefPtr<GUI::Window>> create_find_window(VT::TerminalWidget
     find_forwards->set_fixed_width(25);
     find_forwards->set_icon(TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/downward-triangle.png"sv)));
 
-    find_textbox->on_return_pressed = [find_backwards]() mutable {
+    find_textbox->on_return_pressed = [find_backwards] {
         find_backwards->click();
     };
 
-    find_textbox->on_shift_return_pressed = [find_forwards]() mutable {
+    find_textbox->on_shift_return_pressed = [find_forwards] {
         find_forwards->click();
     };
 
     auto match_case = TRY(main_widget->try_add<GUI::CheckBox>("Case sensitive"));
     auto wrap_around = TRY(main_widget->try_add<GUI::CheckBox>("Wrap around"));
 
-    find_backwards->on_click = [&terminal, find_textbox, match_case, wrap_around](auto) mutable {
+    find_backwards->on_click = [&terminal, find_textbox, match_case, wrap_around](auto) {
         auto needle = find_textbox->text();
         if (needle.is_empty()) {
             return;
@@ -302,7 +302,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     terminal->on_title_change = [&](auto title) {
         window->set_title(title);
     };
-    terminal->on_terminal_size_change = [&](auto& size) {
+    terminal->on_terminal_size_change = [&](auto size) {
         window->resize(size);
     };
     terminal->apply_size_increments_to_window(*window);
@@ -361,7 +361,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     };
 
     auto shell_child_process_count = [&] {
-        Core::DirIterator iterator(String::formatted("/proc/{}/children", shell_pid), Core::DirIterator::Flags::SkipParentAndBaseDir);
+        Core::DirIterator iterator(DeprecatedString::formatted("/proc/{}/children", shell_pid), Core::DirIterator::Flags::SkipParentAndBaseDir);
         int background_process_count = 0;
         while (iterator.has_next()) {
             ++background_process_count;
@@ -373,13 +373,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto check_terminal_quit = [&]() -> GUI::Dialog::ExecResult {
         if (!should_confirm_close)
             return GUI::MessageBox::ExecResult::OK;
-        Optional<String> close_message;
+        Optional<DeprecatedString> close_message;
         if (tty_has_foreground_process()) {
             close_message = "There is still a process running in this terminal. Closing the terminal will kill it.";
         } else {
             auto child_process_count = shell_child_process_count();
             if (child_process_count > 1)
-                close_message = String::formatted("There are {} background processes running in this terminal. Closing the terminal may kill them.", child_process_count);
+                close_message = DeprecatedString::formatted("There are {} background processes running in this terminal. Closing the terminal may kill them.", child_process_count);
             else if (child_process_count == 1)
                 close_message = "There is a background process running in this terminal. Closing the terminal may kill it.";
         }
@@ -421,6 +421,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         if (check_terminal_quit() == GUI::MessageBox::ExecResult::OK)
             return GUI::Window::CloseRequestDecision::Close;
         return GUI::Window::CloseRequestDecision::StayOpen;
+    };
+
+    window->on_input_preemption_change = [&](bool is_preempted) {
+        terminal->set_logical_focus(!is_preempted);
     };
 
     TRY(Core::System::unveil("/sys/kernel/processes", "r"));

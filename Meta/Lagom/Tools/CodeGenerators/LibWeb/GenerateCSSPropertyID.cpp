@@ -58,8 +58,8 @@ enum class PropertyID {
     Custom,
 )~~~");
 
-    Vector<String> shorthand_property_ids;
-    Vector<String> longhand_property_ids;
+    Vector<DeprecatedString> shorthand_property_ids;
+    Vector<DeprecatedString> longhand_property_ids;
 
     properties.for_each_member([&](auto& name, auto& value) {
         VERIFY(value.is_object());
@@ -585,7 +585,7 @@ size_t property_maximum_value_count(PropertyID property_id)
             VERIFY(max_values.is_number() && !max_values.is_double());
             auto property_generator = generator.fork();
             property_generator.set("name:titlecase", title_casify(name));
-            property_generator.set("max_values", max_values.to_string());
+            property_generator.set("max_values", max_values.to_deprecated_string());
             property_generator.append(R"~~~(
     case PropertyID::@name:titlecase@:
         return @max_values@;

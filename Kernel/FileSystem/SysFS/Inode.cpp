@@ -90,6 +90,11 @@ ErrorOr<void> SysFSInode::remove_child(StringView)
     return EROFS;
 }
 
+ErrorOr<void> SysFSInode::replace_child(StringView, Inode&)
+{
+    return EROFS;
+}
+
 ErrorOr<void> SysFSInode::chmod(mode_t)
 {
     return EPERM;
@@ -105,7 +110,7 @@ ErrorOr<void> SysFSInode::truncate(u64 size)
     return m_associated_component->truncate(size);
 }
 
-ErrorOr<void> SysFSInode::update_timestamps(Optional<time_t>, Optional<time_t>, Optional<time_t>)
+ErrorOr<void> SysFSInode::update_timestamps(Optional<Time>, Optional<Time>, Optional<Time>)
 {
     return {};
 }

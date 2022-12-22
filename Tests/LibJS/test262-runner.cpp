@@ -5,11 +5,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/JsonObject.h>
 #include <AK/Result.h>
 #include <AK/ScopeGuard.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/Stream.h>
@@ -19,21 +19,23 @@
 #include <LibJS/Bytecode/PassManager.h>
 #include <LibJS/Contrib/Test262/GlobalObject.h>
 #include <LibJS/Interpreter.h>
+#include <LibJS/Parser.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Script.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
 
-#ifndef AK_OS_MACOS
+#if !defined(AK_OS_MACOS) && !defined(AK_OS_EMSCRIPTEN)
 // Only used to disable core dumps
 #    include <sys/prctl.h>
 #endif
 
-static String s_current_test = "";
+static DeprecatedString s_current_test = "";
 static bool s_use_bytecode = false;
+static bool s_enable_bytecode_optimizations = false;
 static bool s_parse_only = false;
-static String s_harness_file_directory;
+static DeprecatedString s_harness_file_directory;
 static bool s_automatic_harness_detection_mode = false;
 
 enum class NegativePhase {
@@ -45,9 +47,9 @@ enum class NegativePhase {
 
 struct TestError {
     NegativePhase phase { NegativePhase::ParseOrEarly };
-    String type;
-    String details;
-    String harness_file;
+    DeprecatedString type;
+    DeprecatedString details;
+    DeprecatedString harness_file;
 };
 
 using ScriptOrModuleProgram = Variant<JS::NonnullGCPtr<JS::Script>, JS::NonnullGCPtr<JS::SourceTextModule>>;
@@ -60,7 +62,7 @@ static Result<ScriptOrModuleProgram, TestError> parse_program(JS::Realm& realm, 
         return TestError {
             NegativePhase::ParseOrEarly,
             "SyntaxError",
-            script_or_error.error()[0].to_string(),
+            script_or_error.error()[0].to_deprecated_string(),
             ""
         };
     }
@@ -91,10 +93,11 @@ static Result<void, TestError> run_program(InterpreterT& interpreter, ScriptOrMo
 
         auto unit_result = JS::Bytecode::Generator::generate(program_node);
         if (unit_result.is_error()) {
-            result = JS::throw_completion(JS::InternalError::create(interpreter.realm(), String::formatted("TODO({})", unit_result.error().to_string())));
+            result = JS::throw_completion(JS::InternalError::create(interpreter.realm(), DeprecatedString::formatted("TODO({})", unit_result.error().to_deprecated_string())));
         } else {
             auto unit = unit_result.release_value();
-            auto& passes = JS::Bytecode::Interpreter::optimization_pipeline();
+            auto optimization_level = s_enable_bytecode_optimizations ? JS::Bytecode::Interpreter::OptimizationLevel::Optimize : JS::Bytecode::Interpreter::OptimizationLevel::Default;
+            auto& passes = JS::Bytecode::Interpreter::optimization_pipeline(optimization_level);
             passes.perform(*unit);
             result = interpreter.run(*unit);
         }
@@ -130,34 +133,34 @@ static Result<void, TestError> run_program(InterpreterT& interpreter, ScriptOrMo
     return {};
 }
 
-static HashMap<String, String> s_cached_harness_files;
+static HashMap<DeprecatedString, DeprecatedString> s_cached_harness_files;
 
 static Result<StringView, TestError> read_harness_file(StringView harness_file)
 {
     auto cache = s_cached_harness_files.find(harness_file);
     if (cache == s_cached_harness_files.end()) {
-        auto file_or_error = Core::Stream::File::open(String::formatted("{}{}", s_harness_file_directory, harness_file), Core::Stream::OpenMode::Read);
+        auto file_or_error = Core::Stream::File::open(DeprecatedString::formatted("{}{}", s_harness_file_directory, harness_file), Core::Stream::OpenMode::Read);
         if (file_or_error.is_error()) {
             return TestError {
                 NegativePhase::Harness,
                 "filesystem",
-                String::formatted("Could not open file: {}", harness_file),
+                DeprecatedString::formatted("Could not open file: {}", harness_file),
                 harness_file
             };
         }
 
-        auto contents_or_error = file_or_error.value()->read_all();
+        auto contents_or_error = file_or_error.value()->read_until_eof();
         if (contents_or_error.is_error()) {
             return TestError {
                 NegativePhase::Harness,
                 "filesystem",
-                String::formatted("Could not read file: {}", harness_file),
+                DeprecatedString::formatted("Could not read file: {}", harness_file),
                 harness_file
             };
         }
 
         StringView contents_view = contents_or_error.value();
-        s_cached_harness_files.set(harness_file, contents_view.to_string());
+        s_cached_harness_files.set(harness_file, contents_view.to_deprecated_string());
         cache = s_cached_harness_files.find(harness_file);
         VERIFY(cache != s_cached_harness_files.end());
     }
@@ -216,7 +219,7 @@ static Result<void, TestError> run_test(StringView source, StringView filepath, 
             return TestError {
                 NegativePhase::ParseOrEarly,
                 "SyntaxError",
-                parser.errors()[0].to_string(),
+                parser.errors()[0].to_deprecated_string(),
                 ""
             };
         }
@@ -261,14 +264,14 @@ static Result<void, TestError> run_test(StringView source, StringView filepath, 
     return run_with_interpreter(program_or_error.value());
 }
 
-static Result<TestMetadata, String> extract_metadata(StringView source)
+static Result<TestMetadata, DeprecatedString> extract_metadata(StringView source)
 {
     auto lines = source.lines();
 
     TestMetadata metadata;
 
     bool parsing_negative = false;
-    String failed_message;
+    DeprecatedString failed_message;
 
     auto parse_list = [&](StringView line) {
         auto start = line.find('[');
@@ -279,7 +282,7 @@ static Result<TestMetadata, String> extract_metadata(StringView source)
 
         auto end = line.find_last(']');
         if (!end.has_value() || end.value() <= start.value()) {
-            failed_message = String::formatted("Can't parse list in '{}'", line);
+            failed_message = DeprecatedString::formatted("Can't parse list in '{}'", line);
             return items;
         }
 
@@ -292,7 +295,7 @@ static Result<TestMetadata, String> extract_metadata(StringView source)
     auto second_word = [&](StringView line) {
         auto separator = line.find(' ');
         if (!separator.has_value() || separator.value() >= (line.length() - 1u)) {
-            failed_message = String::formatted("Can't parse value after space in '{}'", line);
+            failed_message = DeprecatedString::formatted("Can't parse value after space in '{}'", line);
             return ""sv;
         }
         return line.substring_view(separator.value() + 1);
@@ -346,7 +349,7 @@ static Result<TestMetadata, String> extract_metadata(StringView source)
                     metadata.phase = NegativePhase::Runtime;
                 } else {
                     has_phase = false;
-                    failed_message = String::formatted("Unknown negative phase: {}", phase);
+                    failed_message = DeprecatedString::formatted("Unknown negative phase: {}", phase);
                     break;
                 }
             } else if (line.starts_with("type:"sv)) {
@@ -369,7 +372,7 @@ static Result<TestMetadata, String> extract_metadata(StringView source)
             auto flags = parse_list(line);
 
             if (flags.is_empty()) {
-                failed_message = String::formatted("Failed to find flags in '{}'", line);
+                failed_message = DeprecatedString::formatted("Failed to find flags in '{}'", line);
                 break;
             }
 
@@ -405,7 +408,7 @@ static Result<TestMetadata, String> extract_metadata(StringView source)
     }
 
     if (failed_message.is_empty())
-        failed_message = String::formatted("Never reached end of comment '---*/'");
+        failed_message = DeprecatedString::formatted("Never reached end of comment '---*/'");
 
     return failed_message;
 }
@@ -480,7 +483,7 @@ static bool verify_test(Result<void, TestError>& result, TestMetadata const& met
 
     JsonObject expected_error_object;
     expected_error_object.set("phase", phase_to_string(metadata.phase));
-    expected_error_object.set("type", metadata.type.to_string());
+    expected_error_object.set("type", metadata.type.to_deprecated_string());
 
     expected_error = expected_error_object;
 
@@ -519,7 +522,7 @@ static bool verify_test(Result<void, TestError>& result, TestMetadata const& met
     return error.phase == metadata.phase && error.type == metadata.type;
 }
 
-static bool extract_harness_directory(String const& test_file_path)
+static bool extract_harness_directory(DeprecatedString const& test_file_path)
 {
     auto test_directory_index = test_file_path.find("test/"sv);
     if (!test_directory_index.has_value()) {
@@ -527,7 +530,7 @@ static bool extract_harness_directory(String const& test_file_path)
         return false;
     }
 
-    s_harness_file_directory = String::formatted("{}harness/", test_file_path.substring_view(0, test_directory_index.value()));
+    s_harness_file_directory = DeprecatedString::formatted("{}harness/", test_file_path.substring_view(0, test_directory_index.value()));
     return true;
 }
 
@@ -545,7 +548,7 @@ static bool g_in_assert = false;
         assert_fail_result.set("assert_fail", true);
         assert_fail_result.set("result", "assert_fail");
         assert_fail_result.set("output", assert_failed_message);
-        outln(saved_stdout_fd, "RESULT {}{}", assert_fail_result.to_string(), '\0');
+        outln(saved_stdout_fd, "RESULT {}{}", assert_fail_result.to_deprecated_string(), '\0');
         // (Attempt to) Ensure that messages are written before quitting.
         fflush(saved_stdout_fd);
         fflush(stderr);
@@ -553,15 +556,22 @@ static bool g_in_assert = false;
     exit(12);
 }
 
+// FIXME: Use a SIGABRT handler here instead of overriding internal libc assertion handlers.
+//        Fixing this will likely require updating the test driver as well to pull the assertion failure
+//        message out of stderr rather than from the json object printed to stdout.
 #ifdef AK_OS_SERENITY
 void __assertion_failed(char const* assertion)
 {
     handle_failed_assert(assertion);
 }
 #else
+#    ifdef ASSERT_FAIL_HAS_INT /* Set by CMake */
+extern "C" __attribute__((__noreturn__)) void __assert_fail(char const* assertion, char const* file, int line, char const* function)
+#    else
 extern "C" __attribute__((__noreturn__)) void __assert_fail(char const* assertion, char const* file, unsigned int line, char const* function)
+#    endif
 {
-    auto full_message = String::formatted("{}:{}: {}: Assertion `{}' failed.", file, line, function, assertion);
+    auto full_message = DeprecatedString::formatted("{}:{}: {}: Assertion `{}' failed.", file, line, function, assertion);
     handle_failed_assert(full_message.characters());
 }
 #endif
@@ -581,13 +591,14 @@ int main(int argc, char** argv)
     args_parser.set_general_help("LibJS test262 runner for streaming tests");
     args_parser.add_option(s_harness_file_directory, "Directory containing the harness files", "harness-location", 'l', "harness-files");
     args_parser.add_option(s_use_bytecode, "Use the bytecode interpreter", "use-bytecode", 'b');
+    args_parser.add_option(s_enable_bytecode_optimizations, "Enable the bytecode optimization passes", "enable-bytecode-optimizations", 'e');
     args_parser.add_option(s_parse_only, "Only parse the files", "parse-only", 'p');
     args_parser.add_option(timeout, "Seconds before test should timeout", "timeout", 't', "seconds");
     args_parser.add_option(enable_debug_printing, "Enable debug printing", "debug", 'd');
     args_parser.add_option(disable_core_dumping, "Disable core dumping", "disable-core-dump", 0);
     args_parser.parse(argc, argv);
 
-#ifndef AK_OS_MACOS
+#if !defined(AK_OS_MACOS) && !defined(AK_OS_EMSCRIPTEN)
     if (disable_core_dumping && prctl(PR_SET_DUMPABLE, 0, 0) < 0) {
         perror("prctl(PR_SET_DUMPABLE)");
         return exit_wrong_arguments;
@@ -597,7 +608,7 @@ int main(int argc, char** argv)
     if (s_harness_file_directory.is_empty()) {
         s_automatic_harness_detection_mode = true;
     } else if (!s_harness_file_directory.ends_with('/')) {
-        s_harness_file_directory = String::formatted("{}/", s_harness_file_directory);
+        s_harness_file_directory = DeprecatedString::formatted("{}/", s_harness_file_directory);
     }
 
     if (timeout <= 0) {
@@ -650,10 +661,10 @@ int main(int argc, char** argv)
     auto collect_output = [&] {
         fflush(stdout);
         auto nread = read(stdout_pipe[0], buffer, BUFFER_SIZE);
-        String value;
+        DeprecatedString value;
 
         if (nread > 0) {
-            value = String { buffer, static_cast<size_t>(nread) };
+            value = DeprecatedString { buffer, static_cast<size_t>(nread) };
             while (nread > 0) {
                 nread = read(stdout_pipe[0], buffer, BUFFER_SIZE);
             }
@@ -706,12 +717,12 @@ int main(int argc, char** argv)
 
         count++;
 
-        String source_with_strict;
+        DeprecatedString source_with_strict;
         static StringView use_strict = "'use strict';\n"sv;
         static size_t strict_length = use_strict.length();
 
         {
-            auto contents_or_error = file->read_all();
+            auto contents_or_error = file->read_until_eof();
             if (contents_or_error.is_error()) {
                 warnln("Could not read contents of file: {}", path);
                 return exit_read_file_failure;
@@ -720,7 +731,7 @@ int main(int argc, char** argv)
             StringBuilder builder { contents.size() + strict_length };
             builder.append(use_strict);
             builder.append(contents);
-            source_with_strict = builder.to_string();
+            source_with_strict = builder.to_deprecated_string();
         }
 
         StringView with_strict = source_with_strict.view();
@@ -730,7 +741,7 @@ int main(int argc, char** argv)
         result_object.set("test", path);
 
         ScopeGuard output_guard = [&] {
-            outln(saved_stdout_fd, "RESULT {}{}", result_object.to_string(), '\0');
+            outln(saved_stdout_fd, "RESULT {}{}", result_object.to_deprecated_string(), '\0');
             fflush(saved_stdout_fd);
         };
 
@@ -753,7 +764,7 @@ int main(int argc, char** argv)
             auto result = run_test(original_contents, path, metadata);
             DISARM_TIMER();
 
-            String first_output = collect_output();
+            DeprecatedString first_output = collect_output();
             if (!first_output.is_null())
                 result_object.set("output", first_output);
 
@@ -776,7 +787,7 @@ int main(int argc, char** argv)
             auto result = run_test(with_strict, path, metadata);
             DISARM_TIMER();
 
-            String first_output = collect_output();
+            DeprecatedString first_output = collect_output();
             if (!first_output.is_null())
                 result_object.set("strict_output", first_output);
 

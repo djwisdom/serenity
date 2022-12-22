@@ -46,20 +46,20 @@
 
 namespace Browser {
 
-static String bookmarks_file_path()
+static DeprecatedString bookmarks_file_path()
 {
     StringBuilder builder;
     builder.append(Core::StandardPaths::config_directory());
     builder.append("/bookmarks.json"sv);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-static String search_engines_file_path()
+static DeprecatedString search_engines_file_path()
 {
     StringBuilder builder;
     builder.append(Core::StandardPaths::config_directory());
     builder.append("/SearchEngines.json"sv);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 BrowserWindow::BrowserWindow(CookieJar& cookie_jar, URL url)
@@ -109,7 +109,7 @@ BrowserWindow::BrowserWindow(CookieJar& cookie_jar, URL url)
     };
 
     m_window_actions.on_create_new_window = [this] {
-        GUI::Process::spawn_or_show_error(this, "/bin/Browser"sv);
+        create_new_window(g_home_url);
     };
 
     m_window_actions.on_next_tab = [this] {
@@ -247,7 +247,7 @@ void BrowserWindow::build_menus()
     m_take_visible_screenshot_action = GUI::Action::create(
         "Take &Visible Screenshot"sv, g_icon_bag.filetype_image, [this](auto&) {
             if (auto result = take_screenshot(ScreenshotType::Visible); result.is_error())
-                GUI::MessageBox::show_error(this, String::formatted("{}", result.error()));
+                GUI::MessageBox::show_error(this, DeprecatedString::formatted("{}", result.error()));
         },
         this);
     m_take_visible_screenshot_action->set_status_tip("Save a screenshot of the visible portion of the current tab to the Downloads directory"sv);
@@ -255,7 +255,7 @@ void BrowserWindow::build_menus()
     m_take_full_screenshot_action = GUI::Action::create(
         "Take &Full Screenshot"sv, g_icon_bag.filetype_image, [this](auto&) {
             if (auto result = take_screenshot(ScreenshotType::Full); result.is_error())
-                GUI::MessageBox::show_error(this, String::formatted("{}", result.error()));
+                GUI::MessageBox::show_error(this, DeprecatedString::formatted("{}", result.error()));
         },
         this);
     m_take_full_screenshot_action->set_status_tip("Save a screenshot of the entirety of the current tab to the Downloads directory"sv);
@@ -410,7 +410,7 @@ void BrowserWindow::build_menus()
     add_user_agent("Safari iOS Mobile", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_4_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1");
 
     auto custom_user_agent = GUI::Action::create_checkable("Custom...", [this](auto& action) {
-        String user_agent;
+        DeprecatedString user_agent;
         if (GUI::InputBox::show(this, user_agent, "Enter User Agent:"sv, "Custom User Agent"sv) != GUI::InputBox::ExecResult::OK || user_agent.is_empty() || user_agent.is_null()) {
             m_disable_user_agent_spoofing->activate();
             return;
@@ -429,6 +429,14 @@ void BrowserWindow::build_menus()
         this);
     scripting_enabled_action->set_checked(true);
     debug_menu.add_action(scripting_enabled_action);
+
+    auto block_pop_ups_action = GUI::Action::create_checkable(
+        "Block Pop-ups", [this](auto& action) {
+            active_tab().view().debug_request("block-pop-ups", action.is_checked() ? "on" : "off");
+        },
+        this);
+    block_pop_ups_action->set_checked(true);
+    debug_menu.add_action(block_pop_ups_action);
 
     auto same_origin_policy_action = GUI::Action::create_checkable(
         "Enable Same Origin &Policy", [this](auto& action) {
@@ -463,7 +471,7 @@ ErrorOr<void> BrowserWindow::load_search_engines(GUI::Menu& settings_menu)
     auto search_engines_file = TRY(Core::Stream::File::open(Browser::search_engines_file_path(), Core::Stream::OpenMode::Read));
     auto file_size = TRY(search_engines_file->size());
     auto buffer = TRY(ByteBuffer::create_uninitialized(file_size));
-    if (search_engines_file->read_or_error(buffer)) {
+    if (!search_engines_file->read_entire_buffer(buffer).is_error()) {
         StringView buffer_contents { buffer.bytes() };
         if (auto json = TRY(JsonValue::from_string(buffer_contents)); json.is_array()) {
             auto json_array = json.as_array();
@@ -471,8 +479,8 @@ ErrorOr<void> BrowserWindow::load_search_engines(GUI::Menu& settings_menu)
                 if (!json_item.is_object())
                     continue;
                 auto search_engine = json_item.as_object();
-                auto name = search_engine.get("title"sv).to_string();
-                auto url_format = search_engine.get("url_format"sv).to_string();
+                auto name = search_engine.get("title"sv).to_deprecated_string();
+                auto url_format = search_engine.get("url_format"sv).to_deprecated_string();
 
                 auto action = GUI::Action::create_checkable(
                     name, [&, url_format](auto&) {
@@ -493,7 +501,7 @@ ErrorOr<void> BrowserWindow::load_search_engines(GUI::Menu& settings_menu)
     }
 
     auto custom_search_engine_action = GUI::Action::create_checkable("Custom...", [&](auto& action) {
-        String search_engine;
+        DeprecatedString search_engine;
         if (GUI::InputBox::show(this, search_engine, "Enter URL template:"sv, "Custom Search Engine"sv, "https://host/search?q={}"sv) != GUI::InputBox::ExecResult::OK || search_engine.is_empty()) {
             m_disable_search_engine_action->activate();
             return;
@@ -535,7 +543,7 @@ void BrowserWindow::set_window_title_for_tab(Tab const& tab)
 {
     auto& title = tab.title();
     auto url = tab.url();
-    set_title(String::formatted("{} - Browser", title.is_empty() ? url.to_string() : title));
+    set_title(DeprecatedString::formatted("{} - Browser", title.is_empty() ? url.to_deprecated_string() : title));
 }
 
 void BrowserWindow::create_new_tab(URL url, bool activate)
@@ -575,6 +583,10 @@ void BrowserWindow::create_new_tab(URL url, bool activate)
         });
     };
 
+    new_tab.on_window_open_request = [this](auto& url) {
+        create_new_window(url);
+    };
+
     new_tab.on_get_all_cookies = [this](auto& url) {
         return m_cookie_jar.get_all_cookies(url);
     };
@@ -583,7 +595,7 @@ void BrowserWindow::create_new_tab(URL url, bool activate)
         return m_cookie_jar.get_named_cookie(url, name);
     };
 
-    new_tab.on_get_cookie = [this](auto& url, auto source) -> String {
+    new_tab.on_get_cookie = [this](auto& url, auto source) -> DeprecatedString {
         return m_cookie_jar.get_cookie(url, source);
     };
 
@@ -595,8 +607,8 @@ void BrowserWindow::create_new_tab(URL url, bool activate)
         m_cookie_jar.dump_cookies();
     };
 
-    new_tab.on_update_cookie = [this](auto const& url, auto cookie) {
-        m_cookie_jar.update_cookie(url, move(cookie));
+    new_tab.on_update_cookie = [this](auto cookie) {
+        m_cookie_jar.update_cookie(move(cookie));
     };
 
     new_tab.on_get_cookies_entries = [this]() {
@@ -623,6 +635,11 @@ void BrowserWindow::create_new_tab(URL url, bool activate)
         m_tab_widget->set_active_widget(&new_tab);
 }
 
+void BrowserWindow::create_new_window(URL url)
+{
+    GUI::Process::spawn_or_show_error(this, "/bin/Browser"sv, Array { url.to_deprecated_string() });
+}
+
 void BrowserWindow::content_filters_changed()
 {
     tab_widget().for_each_child_of_type<Browser::Tab>([](auto& tab) {
@@ -639,7 +656,7 @@ void BrowserWindow::proxy_mappings_changed()
     });
 }
 
-void BrowserWindow::config_string_did_change(String const& domain, String const& group, String const& key, String const& value)
+void BrowserWindow::config_string_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, DeprecatedString const& value)
 {
     if (domain != "Browser")
         return;
@@ -665,7 +682,7 @@ void BrowserWindow::config_string_did_change(String const& domain, String const&
     // TODO: ColorScheme
 }
 
-void BrowserWindow::config_bool_did_change(String const& domain, String const& group, String const& key, bool value)
+void BrowserWindow::config_bool_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, bool value)
 {
     dbgln("{} {} {} {}", domain, group, key, value);
     if (domain != "Browser" || group != "Preferences")
@@ -682,7 +699,7 @@ void BrowserWindow::config_bool_did_change(String const& domain, String const& g
     // NOTE: CloseDownloadWidgetOnFinish is read each time in DownloadWindow
 }
 
-void BrowserWindow::broadcast_window_position(Gfx::IntPoint const& position)
+void BrowserWindow::broadcast_window_position(Gfx::IntPoint position)
 {
     tab_widget().for_each_child_of_type<Browser::Tab>([&](auto& tab) {
         tab.window_position_changed(position);
@@ -690,7 +707,7 @@ void BrowserWindow::broadcast_window_position(Gfx::IntPoint const& position)
     });
 }
 
-void BrowserWindow::broadcast_window_size(Gfx::IntSize const& size)
+void BrowserWindow::broadcast_window_size(Gfx::IntSize size)
 {
     tab_widget().for_each_child_of_type<Browser::Tab>([&](auto& tab) {
         tab.window_size_changed(size);
@@ -734,9 +751,9 @@ ErrorOr<void> BrowserWindow::take_screenshot(ScreenshotType type)
         return Error::from_string_view("Failed to take a screenshot of the current tab"sv);
 
     LexicalPath path { Core::StandardPaths::downloads_directory() };
-    path = path.append(Core::DateTime::now().to_string("screenshot-%Y-%m-%d-%H-%M-%S.png"sv));
+    path = path.append(Core::DateTime::now().to_deprecated_string("screenshot-%Y-%m-%d-%H-%M-%S.png"sv));
 
-    auto encoded = Gfx::PNGWriter::encode(*bitmap.bitmap());
+    auto encoded = TRY(Gfx::PNGWriter::encode(*bitmap.bitmap()));
 
     auto screenshot_file = TRY(Core::Stream::File::open(path.string(), Core::Stream::OpenMode::Write));
     TRY(screenshot_file->write(encoded));

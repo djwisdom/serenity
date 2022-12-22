@@ -14,11 +14,12 @@
 #include <LibWeb/WebAssembly/WebAssemblyInstanceObject.h>
 #include <LibWeb/WebAssembly/WebAssemblyMemoryPrototype.h>
 #include <LibWeb/WebAssembly/WebAssemblyObject.h>
+#include <LibWeb/WebAssembly/WebAssemblyTableObject.h>
 
 namespace Web::Bindings {
 
 WebAssemblyInstanceObject::WebAssemblyInstanceObject(JS::Realm& realm, size_t index)
-    : Object(Bindings::ensure_web_prototype<WebAssemblyInstancePrototype>(realm, "WebAssemblyInstancePrototype"))
+    : Object(ConstructWithPrototypeTag::Tag, Bindings::ensure_web_prototype<WebAssemblyInstancePrototype>(realm, "WebAssemblyInstancePrototype"))
     , m_index(index)
 {
 }
@@ -48,6 +49,14 @@ void WebAssemblyInstanceObject::initialize(JS::Realm& realm)
                 if (!object.has_value()) {
                     object = heap().allocate<Web::Bindings::WebAssemblyMemoryObject>(realm, realm, address);
                     cache.memory_instances.set(address, *object);
+                }
+                m_exports_object->define_direct_property(export_.name(), *object, JS::default_attributes);
+            },
+            [&](Wasm::TableAddress const& address) {
+                Optional<WebAssemblyTableObject*> object = cache.table_instances.get(address);
+                if (!object.has_value()) {
+                    object = heap().allocate<Web::Bindings::WebAssemblyTableObject>(realm, realm, address);
+                    cache.table_instances.set(address, *object);
                 }
                 m_exports_object->define_direct_property(export_.name(), *object, JS::default_attributes);
             },

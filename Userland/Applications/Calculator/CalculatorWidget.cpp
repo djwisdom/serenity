@@ -31,7 +31,7 @@ CalculatorWidget::CalculatorWidget()
     m_label->set_frame_thickness(2);
 
     for (int i = 0; i < 10; i++) {
-        m_digit_button[i] = *find_descendant_of_type_named<GUI::Button>(String::formatted("{}_button", i));
+        m_digit_button[i] = *find_descendant_of_type_named<GUI::Button>(DeprecatedString::formatted("{}_button", i));
         add_digit_button(*m_digit_button[i], i);
     }
 
@@ -128,7 +128,7 @@ void CalculatorWidget::add_digit_button(GUI::Button& button, int digit)
     };
 }
 
-String CalculatorWidget::get_entry()
+DeprecatedString CalculatorWidget::get_entry()
 {
     return m_entry->text();
 }
@@ -146,7 +146,7 @@ void CalculatorWidget::mimic_pressed_button(RefPtr<GUI::Button> button)
 
 void CalculatorWidget::update_display()
 {
-    m_entry->set_text(m_keypad.to_string());
+    m_entry->set_text(m_keypad.to_deprecated_string());
     if (m_calculator.has_error())
         m_label->set_text("E");
     else

@@ -37,7 +37,7 @@ ThrowCompletionOr<Value> FinalizationRegistryConstructor::call()
 }
 
 // 26.2.1.1 FinalizationRegistry ( cleanupCallback ), https://tc39.es/ecma262/#sec-finalization-registry-cleanup-callback
-ThrowCompletionOr<Object*> FinalizationRegistryConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> FinalizationRegistryConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 

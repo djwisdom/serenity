@@ -17,29 +17,24 @@ TarFileStream::TarFileStream(TarInputStream& tar_stream)
 {
 }
 
-size_t TarFileStream::read(Bytes bytes)
+ErrorOr<Bytes> TarFileStream::read(Bytes bytes)
 {
-    // verify that the stream has not advanced
+    // Verify that the stream has not advanced.
     VERIFY(m_tar_stream.m_generation == m_generation);
 
-    if (has_any_error())
-        return 0;
-
-    auto header_size_or_error = m_tar_stream.header().size();
-    if (header_size_or_error.is_error())
-        return 0;
-    auto header_size = header_size_or_error.release_value();
+    auto header_size = TRY(m_tar_stream.header().size());
 
     auto to_read = min(bytes.size(), header_size - m_tar_stream.m_file_offset);
 
-    auto nread = m_tar_stream.m_stream.read(bytes.trim(to_read));
-    m_tar_stream.m_file_offset += nread;
-    return nread;
+    auto slice = TRY(m_tar_stream.m_stream->read(bytes.trim(to_read)));
+    m_tar_stream.m_file_offset += slice.size();
+
+    return slice;
 }
 
-bool TarFileStream::unreliable_eof() const
+bool TarFileStream::is_eof() const
 {
-    // verify that the stream has not advanced
+    // Verify that the stream has not advanced.
     VERIFY(m_tar_stream.m_generation == m_generation);
 
     auto header_size_or_error = m_tar_stream.header().size();
@@ -47,49 +42,28 @@ bool TarFileStream::unreliable_eof() const
         return true;
     auto header_size = header_size_or_error.release_value();
 
-    return m_tar_stream.m_stream.unreliable_eof()
+    return m_tar_stream.m_stream->is_eof()
         || m_tar_stream.m_file_offset >= header_size;
 }
 
-bool TarFileStream::read_or_error(Bytes bytes)
+ErrorOr<size_t> TarFileStream::write(ReadonlyBytes)
 {
-    // verify that the stream has not advanced
-    VERIFY(m_tar_stream.m_generation == m_generation);
-
-    if (read(bytes) < bytes.size()) {
-        set_fatal_error();
-        return false;
-    }
-
-    return true;
+    // This is purely for wrapping and representing file contents in an archive.
+    VERIFY_NOT_REACHED();
 }
 
-bool TarFileStream::discard_or_error(size_t count)
+ErrorOr<NonnullOwnPtr<TarInputStream>> TarInputStream::construct(NonnullOwnPtr<Core::Stream::Stream> stream)
 {
-    // verify that the stream has not advanced
-    VERIFY(m_tar_stream.m_generation == m_generation);
+    auto tar_stream = TRY(adopt_nonnull_own_or_enomem(new (nothrow) TarInputStream(move(stream))));
 
-    auto header_size_or_error = m_tar_stream.header().size();
-    if (header_size_or_error.is_error())
-        return false;
-    auto header_size = header_size_or_error.release_value();
+    TRY(tar_stream->load_next_header());
 
-    if (count > header_size - m_tar_stream.m_file_offset) {
-        return false;
-    }
-    m_tar_stream.m_file_offset += count;
-    return m_tar_stream.m_stream.discard_or_error(count);
+    return tar_stream;
 }
 
-TarInputStream::TarInputStream(InputStream& stream)
-    : m_stream(stream)
+TarInputStream::TarInputStream(NonnullOwnPtr<Core::Stream::Stream> stream)
+    : m_stream(move(stream))
 {
-    if (!m_stream.read_or_error(Bytes(&m_header, sizeof(m_header)))) {
-        m_finished = true;
-        m_stream.handle_any_error(); // clear out errors so we don't assert
-        return;
-    }
-    VERIFY(m_stream.discard_or_error(block_size - sizeof(TarFileHeader)));
 }
 
 static constexpr unsigned long block_ceiling(unsigned long offset)
@@ -99,34 +73,51 @@ static constexpr unsigned long block_ceiling(unsigned long offset)
 
 ErrorOr<void> TarInputStream::advance()
 {
-    if (m_finished)
-        return Error::from_string_literal("Attempted to read a finished stream");
+    if (finished())
+        return Error::from_string_literal("Attempted to advance a finished stream");
 
     m_generation++;
 
-    auto header_size_or_error = m_header.size();
-    if (header_size_or_error.is_error())
-        return header_size_or_error.release_error();
-    auto header_size = header_size_or_error.release_value();
-
-    VERIFY(m_stream.discard_or_error(block_ceiling(header_size) - m_file_offset));
+    // Discard the pending bytes of the current entry.
+    auto file_size = TRY(m_header.size());
+    TRY(m_stream->discard(block_ceiling(file_size) - m_file_offset));
     m_file_offset = 0;
 
-    if (!m_stream.read_or_error(Bytes(&m_header, sizeof(m_header)))) {
-        m_finished = true;
-        m_stream.handle_any_error(); // clear out errors so we don't assert
-        return Error::from_string_literal("Failed to read the header");
-    }
-    if (!valid()) {
-        m_finished = true;
-        return {};
-    }
+    TRY(load_next_header());
 
-    VERIFY(m_stream.discard_or_error(block_size - sizeof(TarFileHeader)));
     return {};
 }
 
-bool TarInputStream::valid() const
+ErrorOr<void> TarInputStream::load_next_header()
+{
+    size_t number_of_consecutive_zero_blocks = 0;
+    while (true) {
+        auto header_span = TRY(m_stream->read(Bytes(&m_header, sizeof(m_header))));
+        if (header_span.size() != sizeof(m_header))
+            return Error::from_string_literal("Failed to read the entire header");
+
+        // Discard the rest of the header block.
+        TRY(m_stream->discard(block_size - sizeof(TarFileHeader)));
+
+        if (!header().is_zero_block())
+            break;
+
+        number_of_consecutive_zero_blocks++;
+
+        // Two zero blocks in a row marks the end of the archive.
+        if (number_of_consecutive_zero_blocks >= 2) {
+            m_found_end_of_archive = true;
+            return {};
+        }
+    }
+
+    if (!TRY(valid()))
+        return Error::from_string_literal("Header has an invalid magic or checksum");
+
+    return {};
+}
+
+ErrorOr<bool> TarInputStream::valid() const
 {
     auto const header_magic = header().magic();
     auto const header_version = header().version();
@@ -137,40 +128,38 @@ bool TarInputStream::valid() const
         return false;
 
     // POSIX.1-1988 tar does not have magic numbers, so we also need to verify the header checksum.
-    if (header().checksum().is_error())
-        return false;
-
-    return header().checksum().release_value() == header().expected_checksum();
+    return TRY(header().checksum()) == header().expected_checksum();
 }
 
 TarFileStream TarInputStream::file_contents()
 {
-    VERIFY(!m_finished);
+    VERIFY(!finished());
     return TarFileStream(*this);
 }
 
-TarOutputStream::TarOutputStream(OutputStream& stream)
-    : m_stream(stream)
+TarOutputStream::TarOutputStream(Core::Stream::Handle<Core::Stream::Stream> stream)
+    : m_stream(move(stream))
 {
 }
 
-void TarOutputStream::add_directory(String const& path, mode_t mode)
+ErrorOr<void> TarOutputStream::add_directory(DeprecatedString const& path, mode_t mode)
 {
     VERIFY(!m_finished);
     TarFileHeader header {};
     header.set_size(0);
-    header.set_filename_and_prefix(String::formatted("{}/", path)); // Old tar implementations assume directory names end with a /
+    header.set_filename_and_prefix(DeprecatedString::formatted("{}/", path)); // Old tar implementations assume directory names end with a /
     header.set_type_flag(TarFileType::Directory);
     header.set_mode(mode);
     header.set_magic(gnu_magic);
     header.set_version(gnu_version);
     header.calculate_checksum();
-    VERIFY(m_stream.write_or_error(Bytes { &header, sizeof(header) }));
+    TRY(m_stream->write_entire_buffer(Bytes { &header, sizeof(header) }));
     u8 padding[block_size] = { 0 };
-    VERIFY(m_stream.write_or_error(Bytes { &padding, block_size - sizeof(header) }));
+    TRY(m_stream->write_entire_buffer(Bytes { &padding, block_size - sizeof(header) }));
+    return {};
 }
 
-void TarOutputStream::add_file(String const& path, mode_t mode, ReadonlyBytes bytes)
+ErrorOr<void> TarOutputStream::add_file(DeprecatedString const& path, mode_t mode, ReadonlyBytes bytes)
 {
     VERIFY(!m_finished);
     TarFileHeader header {};
@@ -181,17 +170,18 @@ void TarOutputStream::add_file(String const& path, mode_t mode, ReadonlyBytes by
     header.set_magic(gnu_magic);
     header.set_version(gnu_version);
     header.calculate_checksum();
-    VERIFY(m_stream.write_or_error(ReadonlyBytes { &header, sizeof(header) }));
+    TRY(m_stream->write_entire_buffer(ReadonlyBytes { &header, sizeof(header) }));
     constexpr Array<u8, block_size> padding { 0 };
-    VERIFY(m_stream.write_or_error(ReadonlyBytes { &padding, block_size - sizeof(header) }));
+    TRY(m_stream->write_entire_buffer(ReadonlyBytes { &padding, block_size - sizeof(header) }));
     size_t n_written = 0;
     while (n_written < bytes.size()) {
-        n_written += m_stream.write(bytes.slice(n_written, min(bytes.size() - n_written, block_size)));
+        n_written += MUST(m_stream->write(bytes.slice(n_written, min(bytes.size() - n_written, block_size))));
     }
-    VERIFY(m_stream.write_or_error(ReadonlyBytes { &padding, block_size - (n_written % block_size) }));
+    TRY(m_stream->write_entire_buffer(ReadonlyBytes { &padding, block_size - (n_written % block_size) }));
+    return {};
 }
 
-void TarOutputStream::add_link(String const& path, mode_t mode, StringView link_name)
+ErrorOr<void> TarOutputStream::add_link(DeprecatedString const& path, mode_t mode, StringView link_name)
 {
     VERIFY(!m_finished);
     TarFileHeader header {};
@@ -203,18 +193,21 @@ void TarOutputStream::add_link(String const& path, mode_t mode, StringView link_
     header.set_version(gnu_version);
     header.set_link_name(link_name);
     header.calculate_checksum();
-    VERIFY(m_stream.write_or_error(Bytes { &header, sizeof(header) }));
+    TRY(m_stream->write_entire_buffer(Bytes { &header, sizeof(header) }));
     u8 padding[block_size] = { 0 };
-    VERIFY(m_stream.write_or_error(Bytes { &padding, block_size - sizeof(header) }));
+    TRY(m_stream->write_entire_buffer(Bytes { &padding, block_size - sizeof(header) }));
+    return {};
 }
 
-void TarOutputStream::finish()
+ErrorOr<void> TarOutputStream::finish()
 {
     VERIFY(!m_finished);
     constexpr Array<u8, block_size> padding { 0 };
-    m_stream.write_or_error(ReadonlyBytes { &padding, block_size }); // 2 empty records that are used to signify the end of the archive
-    m_stream.write_or_error(ReadonlyBytes { &padding, block_size });
+    // 2 empty records that are used to signify the end of the archive.
+    TRY(m_stream->write_entire_buffer(ReadonlyBytes { &padding, block_size }));
+    TRY(m_stream->write_entire_buffer(ReadonlyBytes { &padding, block_size }));
     m_finished = true;
+    return {};
 }
 
 }

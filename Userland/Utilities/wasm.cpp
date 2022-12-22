@@ -53,14 +53,14 @@ static bool pre_interpret_hook(Wasm::Configuration& config, Wasm::InstructionPoi
     if (always_print_stack)
         config.dump_stack();
     if (always_print_instruction) {
-        g_stdout.write(String::formatted("{:0>4} ", ip.value()).bytes());
+        g_stdout.write(DeprecatedString::formatted("{:0>4} ", ip.value()).bytes());
         g_printer.print(instr);
     }
     if (g_continue)
         return true;
-    g_stdout.write(String::formatted("{:0>4} ", ip.value()).bytes());
+    g_stdout.write(DeprecatedString::formatted("{:0>4} ", ip.value()).bytes());
     g_printer.print(instr);
-    String last_command = "";
+    DeprecatedString last_command = "";
     for (;;) {
         auto result = g_line_editor->get_line("> ");
         if (result.is_error()) {
@@ -256,7 +256,7 @@ static Optional<Wasm::Module> parse(StringView filename)
     auto parse_result = Wasm::Module::parse(stream);
     if (parse_result.is_error()) {
         warnln("Something went wrong, either the file is invalid, or there's a bug with LibWasm!");
-        warnln("The parse error was {}", Wasm::parse_error_to_string(parse_result.error()));
+        warnln("The parse error was {}", Wasm::parse_error_to_deprecated_string(parse_result.error()));
         return {};
     }
     return parse_result.release_value();
@@ -276,9 +276,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     bool debug = false;
     bool export_all_imports = false;
     bool shell_mode = false;
-    String exported_function_to_execute;
+    DeprecatedString exported_function_to_execute;
     Vector<u64> values_to_push;
-    Vector<String> modules_to_link_in;
+    Vector<DeprecatedString> modules_to_link_in;
 
     Core::ArgsParser parser;
     parser.add_positional_argument(filename, "File name to parse", "file");
@@ -405,7 +405,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                             ByteBuffer buffer = stream.copy_into_contiguous_buffer();
                             argument_builder.append(StringView(buffer).trim_whitespace());
                         }
-                        dbgln("[wasm runtime] Stub function {} was called with the following arguments: {}", name, argument_builder.to_string());
+                        dbgln("[wasm runtime] Stub function {} was called with the following arguments: {}", name, argument_builder.to_deprecated_string());
                         Vector<Wasm::Value> result;
                         result.ensure_capacity(type.results().size());
                         for (auto& result_type : type.results())
@@ -450,9 +450,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         auto stream = Core::OutputFileStream::standard_output();
         auto print_func = [&](auto const& address) {
             Wasm::FunctionInstance* fn = machine.store().get(address);
-            stream.write(String::formatted("- Function with address {}, ptr = {}\n", address.value(), fn).bytes());
+            stream.write(DeprecatedString::formatted("- Function with address {}, ptr = {}\n", address.value(), fn).bytes());
             if (fn) {
-                stream.write(String::formatted("    wasm function? {}\n", fn->has<Wasm::WasmFunction>()).bytes());
+                stream.write(DeprecatedString::formatted("    wasm function? {}\n", fn->has<Wasm::WasmFunction>()).bytes());
                 fn->visit(
                     [&](Wasm::WasmFunction const& func) {
                         Wasm::Printer printer { stream, 3 };

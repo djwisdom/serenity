@@ -646,7 +646,11 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
             // column span, overflow the number of columns in the implicit grid, as determined earlier in this
             // algorithm.
             auto column_start = 0;
-            auto column_span = child_box.computed_values().grid_column_start().is_span() ? child_box.computed_values().grid_column_start().raw_value() : 1;
+            auto column_span = 1;
+            if (child_box.computed_values().grid_column_start().is_span())
+                column_span = child_box.computed_values().grid_column_start().raw_value();
+            else if (child_box.computed_values().grid_column_end().is_span())
+                column_span = child_box.computed_values().grid_column_end().raw_value();
             // https://drafts.csswg.org/css-grid/#auto-placement-algo
             // 8.5. Grid Item Placement Algorithm
             // 3.3. If the largest column span among all the items without a definite column position is larger
@@ -654,7 +658,11 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
             // that column span.
             occupation_grid.maybe_add_column(column_span);
             auto row_start = 0;
-            auto row_span = child_box.computed_values().grid_row_start().is_span() ? child_box.computed_values().grid_row_start().raw_value() : 1;
+            auto row_span = 1;
+            if (child_box.computed_values().grid_row_start().is_span())
+                row_span = child_box.computed_values().grid_row_start().raw_value();
+            else if (child_box.computed_values().grid_row_end().is_span())
+                row_span = child_box.computed_values().grid_row_end().raw_value();
             auto found_unoccupied_area = false;
             for (int row_index = auto_placement_cursor_y; row_index < occupation_grid.row_count(); row_index++) {
                 for (int column_index = auto_placement_cursor_x; column_index < occupation_grid.column_count(); column_index++) {
@@ -972,15 +980,19 @@ void GridFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const
     if (grid_template_columns.track_list().size() == 1
         && grid_template_columns.track_list().first().is_repeat()
         && grid_template_columns.track_list().first().repeat().is_auto_fit()) {
-        auto idx = 0;
-        for (auto& grid_column : m_grid_columns) {
-            // A collapsed track is treated as having a fixed track sizing function of 0px, and the gutters on
-            // either side of it—including any space allotted through distributed alignment—collapse.
-            if (!occupation_grid.is_occupied(idx, 0)) {
-                grid_column.base_size = 0;
-                grid_column.growth_limit = 0;
-            }
-            idx++;
+        for (size_t idx = 0; idx < m_grid_columns.size(); idx++) {
+            auto column_to_check = box.computed_values().column_gap().is_auto() ? idx : idx / 2;
+            if (occupation_grid.is_occupied(column_to_check, 0))
+                continue;
+            if (!box.computed_values().column_gap().is_auto() && idx % 2 != 0)
+                continue;
+
+            // A collapsed track is treated as having a fixed track sizing function of 0px
+            m_grid_columns[idx].base_size = 0;
+            m_grid_columns[idx].growth_limit = 0;
+
+            // FIXME: And the gutters on either side of it—including any space allotted through distributed
+            // alignment—collapse.
         }
     }
 
@@ -1823,7 +1835,7 @@ float GridFormattingContext::get_free_space_y(Box const& box)
     return -1;
 }
 
-int GridFormattingContext::get_line_index_by_line_name(String const& needle, CSS::GridTrackSizeList grid_track_size_list)
+int GridFormattingContext::get_line_index_by_line_name(DeprecatedString const& needle, CSS::GridTrackSizeList grid_track_size_list)
 {
     if (grid_track_size_list.track_list().size() == 0)
         return -1;

@@ -6,20 +6,162 @@
  */
 
 #include "PDFViewerWidget.h"
+#include "AK/Assertions.h"
+#include "AK/DeprecatedString.h"
+#include "AK/Format.h"
+#include "LibGUI/Forward.h"
+#include "LibPDF/Document.h"
+#include <AK/HashMap.h>
+#include <AK/HashTable.h>
+#include <AK/Variant.h>
 #include <LibCore/File.h>
 #include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/FilePicker.h>
+#include <LibGUI/InputBox.h>
 #include <LibGUI/Label.h>
 #include <LibGUI/Menu.h>
 #include <LibGUI/Menubar.h>
 #include <LibGUI/MessageBox.h>
+#include <LibGUI/Model.h>
+#include <LibGUI/SortingProxyModel.h>
 #include <LibGUI/Splitter.h>
+#include <LibGUI/TableView.h>
 #include <LibGUI/Toolbar.h>
 #include <LibGUI/ToolbarContainer.h>
 
+class PagedErrorsModel : public GUI::Model {
+
+    enum Columns {
+        Page = 0,
+        Message,
+        _Count
+    };
+
+    using PageErrors = AK::OrderedHashTable<DeprecatedString>;
+    using PagedErrors = HashMap<u32, PageErrors>;
+
+public:
+    int row_count(GUI::ModelIndex const& index) const override
+    {
+        // There are two levels: number of pages and number of errors in page
+        if (!index.is_valid()) {
+            return static_cast<int>(m_paged_errors.size());
+        }
+        if (!index.parent().is_valid()) {
+            return static_cast<int>(error_count_in_page(index));
+        }
+        return 0;
+    }
+
+    int column_count(GUI::ModelIndex const&) const override
+    {
+        return Columns::_Count;
+    }
+
+    int tree_column() const override
+    {
+        return Columns::Page;
+    }
+
+    DeprecatedString column_name(int index) const override
+    {
+        switch (index) {
+        case 0:
+            return "Page";
+        case 1:
+            return "Message";
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+
+    GUI::ModelIndex index(int row, int column, GUI::ModelIndex const& parent) const override
+    {
+        if (!parent.is_valid()) {
+            return create_index(row, column);
+        }
+        auto const& page = m_pages_with_errors[parent.row()];
+        return create_index(row, column, &page);
+    }
+
+    GUI::ModelIndex parent_index(GUI::ModelIndex const& index) const override
+    {
+        auto* const internal_data = index.internal_data();
+        if (internal_data == nullptr)
+            return {};
+        auto page = *static_cast<u32 const*>(internal_data);
+        auto page_idx = static_cast<int>(m_pages_with_errors.find_first_index(page).release_value());
+        return create_index(page_idx, index.column());
+    }
+
+    virtual GUI::Variant data(GUI::ModelIndex const& index, GUI::ModelRole) const override
+    {
+        if (!index.parent().is_valid()) {
+            switch (index.column()) {
+            case Columns::Page:
+                return m_pages_with_errors[index.row()] + 1;
+            case Columns::Message:
+                return DeprecatedString::formatted("{} errors", error_count_in_page(index));
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+
+        auto page = *static_cast<u32 const*>(index.internal_data());
+        switch (index.column()) {
+        case Columns::Page:
+            return "";
+        case Columns::Message: {
+            auto page_errors = m_paged_errors.get(page).release_value();
+            // dbgln("Errors on page {}: {}. Requesting data for index {},{}", page, page_errors.size(), index.row(), index.column());
+            auto it = page_errors.begin();
+            auto row = index.row();
+            for (int i = 0; i < row; ++i, ++it)
+                ;
+            return *it;
+        }
+        }
+        VERIFY_NOT_REACHED();
+    }
+
+    void add_errors(u32 page, PDF::Errors const& errors)
+    {
+        auto old_size = total_error_count();
+        if (!m_pages_with_errors.contains_slow(page)) {
+            m_pages_with_errors.append(page);
+        }
+        auto& page_errors = m_paged_errors.ensure(page);
+        for (auto const& error : errors.errors())
+            page_errors.set(error.message());
+        auto new_size = total_error_count();
+        if (old_size != new_size)
+            invalidate();
+    }
+
+private:
+    size_t total_error_count() const
+    {
+        size_t count = 0;
+        for (auto const& entry : m_paged_errors)
+            count += entry.value.size();
+        return count;
+    }
+
+    size_t error_count_in_page(GUI::ModelIndex const& index) const
+    {
+        VERIFY(!index.parent().is_valid());
+        auto page = m_pages_with_errors[index.row()];
+        return m_paged_errors.get(page).release_value().size();
+    }
+
+    Vector<u32> m_pages_with_errors;
+    PagedErrors m_paged_errors;
+};
+
 PDFViewerWidget::PDFViewerWidget()
+    : m_paged_errors_model(adopt_ref(*new PagedErrorsModel()))
 {
     set_fill_with_background_color(true);
     set_layout<GUI::VerticalBoxLayout>();
@@ -27,17 +169,40 @@ PDFViewerWidget::PDFViewerWidget()
     auto& toolbar_container = add<GUI::ToolbarContainer>();
     auto& toolbar = toolbar_container.add<GUI::Toolbar>();
 
-    auto& splitter = add<GUI::HorizontalSplitter>();
-    splitter.layout()->set_spacing(4);
+    auto& h_splitter = add<GUI::HorizontalSplitter>();
+    h_splitter.layout()->set_spacing(4);
 
-    m_sidebar = splitter.add<SidebarWidget>();
+    m_sidebar = h_splitter.add<SidebarWidget>();
     m_sidebar->set_preferred_width(200);
     m_sidebar->set_visible(false);
+    m_sidebar->on_destination_selected = [&](PDF::Destination const& destination) {
+        auto maybe_page = destination.page;
+        if (!maybe_page.has_value())
+            return;
+        auto page = maybe_page.release_value();
+        m_viewer->set_current_page(page);
+    };
 
-    m_viewer = splitter.add<PDFViewer>();
+    auto& v_splitter = h_splitter.add<GUI::VerticalSplitter>();
+    v_splitter.layout()->set_spacing(4);
+
+    m_viewer = v_splitter.add<PDFViewer>();
     m_viewer->on_page_change = [&](auto new_page) {
         m_page_text_box->set_current_number(new_page + 1, GUI::AllowCallback::No);
+        m_go_to_prev_page_action->set_enabled(new_page > 0);
+        m_go_to_next_page_action->set_enabled(new_page < m_viewer->document()->get_page_count() - 1);
     };
+    m_viewer->on_render_errors = [&](u32 page, PDF::Errors const& errors) {
+        verify_cast<PagedErrorsModel>(m_paged_errors_model.ptr())->add_errors(page, errors);
+    };
+
+    m_errors_tree_view = v_splitter.add<GUI::TreeView>();
+    m_errors_tree_view->set_preferred_height(10);
+    m_errors_tree_view->column_header().set_visible(true);
+    m_errors_tree_view->set_should_fill_selected_rows(true);
+    m_errors_tree_view->set_selection_behavior(GUI::AbstractView::SelectionBehavior::SelectRows);
+    m_errors_tree_view->set_model(MUST(GUI::SortingProxyModel::create(m_paged_errors_model)));
+    m_errors_tree_view->set_key_column(0);
 
     initialize_toolbar(toolbar);
 }
@@ -76,7 +241,7 @@ void PDFViewerWidget::initialize_toolbar(GUI::Toolbar& toolbar)
     auto open_outline_action = GUI::Action::create(
         "Toggle &Sidebar", { Mod_Ctrl, Key_S }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/sidebar.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
             m_sidebar_open = !m_sidebar_open;
-            m_sidebar->set_visible(m_sidebar_open ? true : false);
+            m_sidebar->set_visible(m_sidebar_open);
         },
         nullptr);
     open_outline_action->set_enabled(false);
@@ -147,10 +312,12 @@ void PDFViewerWidget::initialize_toolbar(GUI::Toolbar& toolbar)
     m_page_view_mode_single = GUI::Action::create_checkable("Single", [&](auto&) {
         m_viewer->set_page_view_mode(PDFViewer::PageViewMode::Single);
     });
+    m_page_view_mode_single->set_status_tip("Show single page at a time");
 
     m_page_view_mode_multiple = GUI::Action::create_checkable("Multiple", [&](auto&) {
         m_viewer->set_page_view_mode(PDFViewer::PageViewMode::Multiple);
     });
+    m_page_view_mode_multiple->set_status_tip("Show multiple pages at a time");
 
     if (m_viewer->page_view_mode() == PDFViewer::PageViewMode::Single) {
         m_page_view_mode_single->set_checked(true);
@@ -161,46 +328,60 @@ void PDFViewerWidget::initialize_toolbar(GUI::Toolbar& toolbar)
     m_page_view_action_group.add_action(*m_page_view_mode_single);
     m_page_view_action_group.add_action(*m_page_view_mode_multiple);
     m_page_view_action_group.set_exclusive(true);
+    toolbar.add_action(*m_page_view_mode_single);
+    toolbar.add_action(*m_page_view_mode_multiple);
+    toolbar.add_separator();
 
     toolbar.add_action(*m_zoom_in_action);
     toolbar.add_action(*m_zoom_out_action);
     toolbar.add_action(*m_reset_zoom_action);
     toolbar.add_action(*m_rotate_counterclockwise_action);
     toolbar.add_action(*m_rotate_clockwise_action);
+    toolbar.add_separator();
+
+    m_show_clipping_paths = toolbar.add<GUI::CheckBox>();
+    m_show_clipping_paths->set_text("Show clipping paths");
+    m_show_clipping_paths->set_checked(m_viewer->show_clipping_paths(), GUI::AllowCallback::No);
+    m_show_clipping_paths->on_checked = [&](auto checked) { m_viewer->set_show_clipping_paths(checked); };
+    m_show_images = toolbar.add<GUI::CheckBox>();
+    m_show_images->set_text("Show images");
+    m_show_images->set_checked(m_viewer->show_images(), GUI::AllowCallback::No);
+    m_show_images->on_checked = [&](auto checked) { m_viewer->set_show_images(checked); };
 }
 
 void PDFViewerWidget::open_file(Core::File& file)
 {
-    window()->set_title(String::formatted("{} - PDF Viewer", file.filename()));
+    auto maybe_error = try_open_file(file);
+    if (maybe_error.is_error()) {
+        auto error = maybe_error.release_error();
+        warnln("{}", error.message());
+        GUI::MessageBox::show_error(nullptr, "Failed to load the document."sv);
+    }
+}
 
-    auto handle_error = [&]<typename T>(PDF::PDFErrorOr<T> maybe_error) {
-        if (maybe_error.is_error()) {
-            auto error = maybe_error.release_error();
-            GUI::MessageBox::show_error(nullptr, String::formatted("Couldn't load PDF {}:\n{}", file.filename(), error.message()));
-            return true;
-        }
-        return false;
-    };
+PDF::PDFErrorOr<void> PDFViewerWidget::try_open_file(Core::File& file)
+{
+    window()->set_title(DeprecatedString::formatted("{} - PDF Viewer", file.filename()));
 
     m_buffer = file.read_all();
-    auto maybe_document = PDF::Document::create(m_buffer);
-    if (handle_error(maybe_document))
-        return;
-
-    auto document = maybe_document.release_value();
+    auto document = TRY(PDF::Document::create(m_buffer));
 
     if (auto sh = document->security_handler(); sh && !sh->has_user_password()) {
-        // FIXME: Prompt the user for a password
-        VERIFY_NOT_REACHED();
+        DeprecatedString password;
+        while (true) {
+            auto result = GUI::InputBox::show(window(), password, "Password"sv, "Password required"sv, {}, GUI::InputType::Password);
+            if (result == GUI::Dialog::ExecResult::OK
+                && document->security_handler()->try_provide_user_password(password))
+                break;
+            if (result == GUI::Dialog::ExecResult::Cancel)
+                return {};
+        }
     }
 
-    if (handle_error(document->initialize()))
-        return;
+    TRY(document->initialize());
+    TRY(m_viewer->set_document(document));
 
-    if (handle_error(m_viewer->set_document(document)))
-        return;
-
-    m_total_page_label->set_text(String::formatted("of {}", document->get_page_count()));
+    m_total_page_label->set_text(DeprecatedString::formatted("of {}", document->get_page_count()));
 
     m_page_text_box->set_enabled(true);
     m_page_text_box->set_current_number(1, GUI::AllowCallback::No);
@@ -213,15 +394,18 @@ void PDFViewerWidget::open_file(Core::File& file)
     m_reset_zoom_action->set_enabled(true);
     m_rotate_counterclockwise_action->set_enabled(true);
     m_rotate_clockwise_action->set_enabled(true);
+    m_show_clipping_paths->set_checked(m_viewer->show_clipping_paths(), GUI::AllowCallback::No);
 
     if (document->outline()) {
         auto outline = document->outline();
-        m_sidebar->set_outline(outline.release_nonnull());
+        TRY(m_sidebar->set_outline(outline.release_nonnull()));
         m_sidebar->set_visible(true);
         m_sidebar_open = true;
     } else {
-        m_sidebar->set_outline({});
+        TRY(m_sidebar->set_outline({}));
         m_sidebar->set_visible(false);
         m_sidebar_open = false;
     }
+
+    return {};
 }

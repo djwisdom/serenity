@@ -6,12 +6,67 @@
 
 #include <AK/CharacterTypes.h>
 #include <AK/ScopeGuard.h>
+#include <AK/StringBuilder.h>
 #include <LibCore/File.h>
 #include <LibCore/Group.h>
 #include <LibCore/System.h>
+#include <LibCore/UmaskScope.h>
 #include <errno.h>
+#include <unistd.h>
 
 namespace Core {
+
+ErrorOr<DeprecatedString> Group::generate_group_file() const
+{
+    StringBuilder builder;
+    char buffer[1024] = { 0 };
+
+    ScopeGuard grent_guard([] { endgrent(); });
+    setgrent();
+
+    while (true) {
+        auto group = TRY(Core::System::getgrent({ buffer, sizeof(buffer) }));
+        if (!group.has_value())
+            break;
+
+        if (group->gr_name == m_name)
+            builder.appendff("{}:x:{}:{}\n", m_name, m_id, DeprecatedString::join(',', m_members));
+        else {
+            Vector<DeprecatedString> members;
+            if (group->gr_mem) {
+                for (size_t i = 0; group->gr_mem[i]; ++i)
+                    members.append(group->gr_mem[i]);
+            }
+
+            builder.appendff("{}:x:{}:{}\n", group->gr_name, group->gr_gid, DeprecatedString::join(',', members));
+        }
+    }
+
+    return builder.to_deprecated_string();
+}
+
+ErrorOr<void> Group::sync()
+{
+    Core::UmaskScope umask_scope(0777);
+
+    auto new_group_file_content = TRY(generate_group_file());
+
+    char new_group_name[] = "/etc/group.XXXXXX";
+    size_t new_group_name_length = strlen(new_group_name);
+
+    {
+        auto new_group_fd = TRY(Core::System::mkstemp({ new_group_name, new_group_name_length }));
+        ScopeGuard new_group_fd_guard([new_group_fd] { close(new_group_fd); });
+        TRY(Core::System::fchmod(new_group_fd, 0664));
+
+        auto nwritten = TRY(Core::System::write(new_group_fd, new_group_file_content.bytes()));
+        VERIFY(static_cast<size_t>(nwritten) == new_group_file_content.length());
+    }
+
+    TRY(Core::System::rename({ new_group_name, new_group_name_length }, "/etc/group"sv));
+
+    return {};
+}
 
 #if !defined(AK_OS_BSD_GENERIC) && !defined(AK_OS_ANDROID)
 ErrorOr<void> Group::add_group(Group& group)
@@ -65,25 +120,29 @@ ErrorOr<void> Group::add_group(Group& group)
 ErrorOr<Vector<Group>> Group::all()
 {
     Vector<Group> groups;
+    char buffer[1024] = { 0 };
 
     ScopeGuard grent_guard([] { endgrent(); });
     setgrent();
-    errno = 0;
-    for (auto const* gr = getgrent(); gr; gr = getgrent()) {
-        Vector<String> members;
-        for (size_t i = 0; gr->gr_mem[i]; ++i)
-            members.append(*gr->gr_mem);
 
-        groups.append({ gr->gr_name, gr->gr_gid, members });
+    while (true) {
+        auto group = TRY(Core::System::getgrent({ buffer, sizeof(buffer) }));
+        if (!group.has_value())
+            break;
+
+        Vector<DeprecatedString> members;
+        if (group->gr_mem) {
+            for (size_t i = 0; group->gr_mem[i]; ++i)
+                members.append(group->gr_mem[i]);
+        }
+
+        groups.append({ group->gr_name, group->gr_gid, move(members) });
     }
-
-    if (errno)
-        return Error::from_errno(errno);
 
     return groups;
 }
 
-Group::Group(String name, gid_t id, Vector<String> members)
+Group::Group(DeprecatedString name, gid_t id, Vector<DeprecatedString> members)
     : m_name(move(name))
     , m_id(id)
     , m_members(move(members))

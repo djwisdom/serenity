@@ -68,7 +68,7 @@ public:
     }
 
 #ifndef KERNEL
-    ErrorOr<void> add(String const& value)
+    ErrorOr<void> add(DeprecatedString const& value)
     {
         TRY(begin_item());
         if constexpr (IsLegacyBuilder<Builder>) {
@@ -225,4 +225,6 @@ struct JsonArraySerializer<void> {
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::JsonArraySerializer;
+#endif

@@ -256,7 +256,7 @@ ErrorOr<void> FormatBuilder::put_u64(
 
     size_t used_by_prefix = 0;
     if (align == Align::Right && zero_pad) {
-        // We want String::formatted("{:#08x}", 32) to produce '0x00000020' instead of '0x000020'. This
+        // We want DeprecatedString::formatted("{:#08x}", 32) to produce '0x00000020' instead of '0x000020'. This
         // behavior differs from both fmtlib and printf, but is more intuitive.
         used_by_prefix = 0;
     } else {
@@ -669,8 +669,6 @@ ErrorOr<void> Formatter<StringView>::format(FormatBuilder& builder, StringView v
 {
     if (m_sign_mode != FormatBuilder::SignMode::Default)
         VERIFY_NOT_REACHED();
-    if (m_alternative_form)
-        VERIFY_NOT_REACHED();
     if (m_zero_pad)
         VERIFY_NOT_REACHED();
     if (m_mode != Mode::Default && m_mode != Mode::String && m_mode != Mode::Character && m_mode != Mode::HexDump)
@@ -697,7 +695,7 @@ ErrorOr<void> Formatter<T>::format(FormatBuilder& builder, T value)
 {
     if (m_mode == Mode::Character) {
         // FIXME: We just support ASCII for now, in the future maybe unicode?
-        VERIFY(value >= 0 && value <= 127);
+        //        VERIFY(value >= 0 && value <= 127);
 
         m_mode = Mode::String;
 

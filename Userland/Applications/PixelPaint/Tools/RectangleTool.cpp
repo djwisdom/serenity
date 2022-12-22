@@ -24,7 +24,7 @@
 
 namespace PixelPaint {
 
-void RectangleTool::draw_using(GUI::Painter& painter, Gfx::IntPoint const& start_position, Gfx::IntPoint const& end_position, int thickness, int corner_radius)
+void RectangleTool::draw_using(GUI::Painter& painter, Gfx::IntPoint start_position, Gfx::IntPoint end_position, int thickness, int corner_radius)
 {
     Gfx::IntRect rect;
     if (m_draw_mode == DrawMode::FromCenter) {
@@ -130,7 +130,7 @@ void RectangleTool::on_second_paint(Layer const* layer, GUI::PaintEvent& event)
     draw_using(painter, start_position, end_position, AK::max(m_thickness * m_editor->scale(), 1), m_corner_radius * m_editor->scale());
 }
 
-bool RectangleTool::on_keydown(GUI::KeyEvent const& event)
+bool RectangleTool::on_keydown(GUI::KeyEvent& event)
 {
     if (event.key() == Key_Escape && m_drawing_button != GUI::MouseButton::None) {
         m_drawing_button = GUI::MouseButton::None;
@@ -219,6 +219,7 @@ GUI::Widget* RectangleTool::get_properties_widget()
         aa_enable_checkbox.on_checked = [&](bool checked) {
             m_antialias_enabled = checked;
         };
+        aa_enable_checkbox.set_checked(true);
 
         auto& aspect_container = mode_extras_container.add<GUI::Widget>();
         aspect_container.set_layout<GUI::VerticalBoxLayout>();

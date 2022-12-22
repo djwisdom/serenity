@@ -23,7 +23,7 @@
 namespace JS {
 
 // 21.4.3.2 Date.parse ( string ), https://tc39.es/ecma262/#sec-date.parse
-static double parse_simplified_iso8601(String const& iso_8601)
+static double parse_simplified_iso8601(DeprecatedString const& iso_8601)
 {
     // 21.4.1.15 Date Time String Format, https://tc39.es/ecma262/#sec-date-time-string-format
     GenericLexer lexer(iso_8601);
@@ -147,12 +147,13 @@ static double parse_simplified_iso8601(String const& iso_8601)
     return time_clip(time_ms);
 }
 
-static constexpr AK::Array<StringView, 2> extra_formats = {
+static constexpr AK::Array<StringView, 3> extra_formats = {
     "%a %b %e %T %z %Y"sv,
-    "%m/%e/%Y"sv
+    "%m/%e/%Y"sv,
+    "%m/%e/%Y %R %z"sv,
 };
 
-static double parse_date_string(String const& date_string)
+static double parse_date_string(DeprecatedString const& date_string)
 {
     auto value = parse_simplified_iso8601(date_string);
     if (isfinite(value))
@@ -161,6 +162,7 @@ static double parse_date_string(String const& date_string)
     // Date.parse() is allowed to accept an arbitrary number of implementation-defined formats.
     // Parse formats of this type: "Wed Apr 17 23:08:53 +0000 2019"
     // And: "4/17/2019"
+    // And: "12/05/2022 10:00 -0800"
     // FIXME: Exactly what timezone and which additional formats we should support is unclear.
     //        Both Chrome and Firefox seem to support "4/17/2019 11:08 PM +0000" with most parts
     //        being optional, however this is not clearly documented anywhere.
@@ -202,11 +204,11 @@ ThrowCompletionOr<Value> DateConstructor::call()
     auto now = AK::Time::now_realtime().to_milliseconds();
 
     //     b. Return ToDateString(now).
-    return js_string(vm(), to_date_string(now));
+    return PrimitiveString::create(vm(), to_date_string(now));
 }
 
 // 21.4.2.1 Date ( ...values ), https://tc39.es/ecma262/#sec-date
-ThrowCompletionOr<Object*> DateConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> DateConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -239,7 +241,7 @@ ThrowCompletionOr<Object*> DateConstructor::construct(FunctionObject& new_target
             if (primitive.is_string()) {
                 // 1. Assert: The next step never returns an abrupt completion because Type(v) is String.
                 // 2. Let tv be the result of parsing v as a date, in exactly the same manner as for the parse method (21.4.3.2).
-                time_value = parse_date_string(primitive.as_string().string());
+                time_value = parse_date_string(primitive.as_string().deprecated_string());
             }
             // iii. Else,
             else {

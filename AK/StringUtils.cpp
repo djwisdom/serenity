@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <awesomekling@gmail.com>
+ * Copyright (c) 2018-2022, Andreas Kling <awesomekling@gmail.com>
  * Copyright (c) 2020, Fei Wu <f.eiwu@yahoo.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -9,14 +9,15 @@
 #include <AK/MemMem.h>
 #include <AK/Memory.h>
 #include <AK/Optional.h>
+#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringUtils.h>
 #include <AK/StringView.h>
 #include <AK/Vector.h>
 
 #ifndef KERNEL
+#    include <AK/DeprecatedString.h>
 #    include <AK/FloatingPointStringConversions.h>
-#    include <AK/String.h>
 #endif
 
 namespace AK {
@@ -156,8 +157,6 @@ template Optional<u16> convert_to_uint(StringView str, TrimWhitespace);
 template Optional<u32> convert_to_uint(StringView str, TrimWhitespace);
 template Optional<unsigned long> convert_to_uint(StringView str, TrimWhitespace);
 template Optional<unsigned long long> convert_to_uint(StringView str, TrimWhitespace);
-template Optional<long> convert_to_uint(StringView str, TrimWhitespace);
-template Optional<long long> convert_to_uint(StringView str, TrimWhitespace);
 
 template<typename T>
 Optional<T> convert_to_uint_from_hex(StringView str, TrimWhitespace trim_whitespace)
@@ -406,6 +405,17 @@ Optional<size_t> find_last(StringView haystack, char needle)
     return {};
 }
 
+Optional<size_t> find_last(StringView haystack, StringView needle)
+{
+    for (size_t i = haystack.length(); i > 0; --i) {
+        auto value = StringUtils::find(haystack, needle, i - 1);
+        if (value.has_value())
+            return value;
+    }
+
+    return {};
+}
+
 Optional<size_t> find_last_not(StringView haystack, char needle)
 {
     for (size_t i = haystack.length(); i > 0; --i) {
@@ -450,7 +460,7 @@ Optional<size_t> find_any_of(StringView haystack, StringView needles, SearchDire
 }
 
 #ifndef KERNEL
-String to_snakecase(StringView str)
+DeprecatedString to_snakecase(StringView str)
 {
     auto should_insert_underscore = [&](auto i, auto current_char) {
         if (i == 0)
@@ -473,10 +483,10 @@ String to_snakecase(StringView str)
             builder.append('_');
         builder.append_as_lowercase(ch);
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-String to_titlecase(StringView str)
+DeprecatedString to_titlecase(StringView str)
 {
     StringBuilder builder;
     bool next_is_upper = true;
@@ -489,10 +499,10 @@ String to_titlecase(StringView str)
         next_is_upper = ch == ' ';
     }
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-String invert_case(StringView str)
+DeprecatedString invert_case(StringView str)
 {
     StringBuilder builder(str.length());
 
@@ -503,10 +513,10 @@ String invert_case(StringView str)
             builder.append(to_ascii_lowercase(ch));
     }
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-String replace(StringView str, StringView needle, StringView replacement, ReplaceMode replace_mode)
+DeprecatedString replace(StringView str, StringView needle, StringView replacement, ReplaceMode replace_mode)
 {
     if (str.is_empty())
         return str;
@@ -532,6 +542,35 @@ String replace(StringView str, StringView needle, StringView replacement, Replac
     }
     replaced_string.append(str.substring_view(last_position, str.length() - last_position));
     return replaced_string.build();
+}
+
+ErrorOr<String> replace(String const& haystack, StringView needle, StringView replacement, ReplaceMode replace_mode)
+{
+    if (haystack.is_empty())
+        return haystack;
+
+    // FIXME: Propagate Vector allocation failures (or do this without putting positions in a vector)
+    Vector<size_t> positions;
+    if (replace_mode == ReplaceMode::All) {
+        positions = haystack.bytes_as_string_view().find_all(needle);
+        if (!positions.size())
+            return haystack;
+    } else {
+        auto pos = haystack.bytes_as_string_view().find(needle);
+        if (!pos.has_value())
+            return haystack;
+        positions.append(pos.value());
+    }
+
+    StringBuilder replaced_string;
+    size_t last_position = 0;
+    for (auto& position : positions) {
+        replaced_string.append(haystack.bytes_as_string_view().substring_view(last_position, position - last_position));
+        replaced_string.append(replacement);
+        last_position = position + needle.length();
+    }
+    replaced_string.append(haystack.bytes_as_string_view().substring_view(last_position, haystack.bytes_as_string_view().length() - last_position));
+    return replaced_string.to_string();
 }
 #endif
 

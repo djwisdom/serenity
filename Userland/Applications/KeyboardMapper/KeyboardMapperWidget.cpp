@@ -57,7 +57,7 @@ void KeyboardMapperWidget::create_frame()
         tmp_button.set_enabled(keys[i].enabled);
 
         tmp_button.on_click = [this, &tmp_button]() {
-            String value;
+            DeprecatedString value;
             if (GUI::InputBox::show(window(), value, "New Character:"sv, "Select Character"sv) == GUI::InputBox::ExecResult::OK) {
                 int i = m_keys.find_first_index(&tmp_button).value_or(0);
                 VERIFY(i > 0);
@@ -127,7 +127,7 @@ u32* KeyboardMapperWidget::map_from_name(const StringView map_name)
     return map;
 }
 
-ErrorOr<void> KeyboardMapperWidget::load_map_from_file(String const& filename)
+ErrorOr<void> KeyboardMapperWidget::load_map_from_file(DeprecatedString const& filename)
 {
     auto character_map = TRY(Keyboard::CharacterMapFile::load_from_file(filename));
 
@@ -149,7 +149,7 @@ ErrorOr<void> KeyboardMapperWidget::load_map_from_system()
 {
     auto character_map = TRY(Keyboard::CharacterMap::fetch_system_map());
 
-    m_filename = String::formatted("/res/keymaps/{}.json", character_map.character_map_name());
+    m_filename = DeprecatedString::formatted("/res/keymaps/{}.json", character_map.character_map_name());
     m_character_map = character_map.character_map_data();
     set_current_map("map");
 
@@ -171,14 +171,14 @@ ErrorOr<void> KeyboardMapperWidget::save_to_file(StringView filename)
 {
     JsonObject map_json;
 
-    auto add_array = [&](String name, u32* values) {
+    auto add_array = [&](DeprecatedString name, u32* values) {
         JsonArray items;
         for (int i = 0; i < 90; i++) {
             StringBuilder sb;
             if (values[i])
                 sb.append_code_point(values[i]);
 
-            JsonValue val(sb.to_string());
+            JsonValue val(sb.to_deprecated_string());
             items.append(move(val));
         }
         map_json.set(name, move(items));
@@ -191,7 +191,7 @@ ErrorOr<void> KeyboardMapperWidget::save_to_file(StringView filename)
     add_array("shift_altgr_map", m_character_map.shift_altgr_map);
 
     // Write to file.
-    String file_content = map_json.to_string();
+    DeprecatedString file_content = map_json.to_deprecated_string();
     auto file = TRY(Core::Stream::File::open(filename, Core::Stream::OpenMode::Write));
     TRY(file->write(file_content.bytes()));
     file->close();
@@ -236,7 +236,7 @@ void KeyboardMapperWidget::keyup_event(GUI::KeyEvent& event)
     }
 }
 
-void KeyboardMapperWidget::set_current_map(const String current_map)
+void KeyboardMapperWidget::set_current_map(const DeprecatedString current_map)
 {
     m_current_map_name = current_map;
     u32* map = map_from_name(m_current_map_name);
@@ -249,7 +249,7 @@ void KeyboardMapperWidget::set_current_map(const String current_map)
         StringBuilder sb;
         sb.append_code_point(map[index]);
 
-        m_keys.at(k)->set_text(sb.to_string());
+        m_keys.at(k)->set_text(sb.to_deprecated_string());
     }
 
     this->update();
@@ -261,7 +261,7 @@ void KeyboardMapperWidget::update_window_title()
     sb.append(m_filename);
     sb.append("[*] - Keyboard Mapper"sv);
 
-    window()->set_title(sb.to_string());
+    window()->set_title(sb.to_deprecated_string());
 }
 
 void KeyboardMapperWidget::show_error_to_user(Error error)

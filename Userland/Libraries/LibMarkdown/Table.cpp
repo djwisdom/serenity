@@ -11,7 +11,7 @@
 
 namespace Markdown {
 
-String Table::render_for_terminal(size_t view_width) const
+DeprecatedString Table::render_for_terminal(size_t view_width) const
 {
     auto unit_width_length = view_width == 0 ? 4 : ((float)(view_width - m_columns.size()) / (float)m_total_width);
     StringBuilder builder;
@@ -65,10 +65,10 @@ String Table::render_for_terminal(size_t view_width) const
 
     builder.append('\n');
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-String Table::render_to_html(bool) const
+DeprecatedString Table::render_to_html(bool) const
 {
     auto alignment_string = [](Alignment alignment) {
         switch (alignment) {
@@ -108,7 +108,7 @@ String Table::render_to_html(bool) const
     builder.append("</tbody>"sv);
     builder.append("</table>"sv);
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 RecursionDecision Table::walk(Visitor& visitor) const

@@ -6,9 +6,9 @@
 
 #include "NetworkSettingsWidget.h"
 
+#include <AK/DeprecatedString.h>
 #include <AK/IPv4Address.h>
 #include <AK/JsonParser.h>
-#include <AK/String.h>
 #include <Applications/NetworkSettings/NetworkSettingsGML.h>
 #include <LibCore/Command.h>
 #include <LibCore/File.h>
@@ -64,7 +64,7 @@ NetworkSettingsWidget::NetworkSettingsWidget()
     auto config_file = Core::ConfigFile::open_for_system("Network").release_value_but_fixme_should_propagate_errors();
 
     auto proc_net_adapters_file = Core::Stream::File::open("/sys/kernel/net/adapters"sv, Core::Stream::OpenMode::Read).release_value_but_fixme_should_propagate_errors();
-    auto data = proc_net_adapters_file->read_all().release_value_but_fixme_should_propagate_errors();
+    auto data = proc_net_adapters_file->read_until_eof().release_value_but_fixme_should_propagate_errors();
     JsonParser parser(data);
     JsonValue proc_net_adapters_json = parser.parse().release_value_but_fixme_should_propagate_errors();
 
@@ -78,7 +78,7 @@ NetworkSettingsWidget::NetworkSettingsWidget()
     size_t index = 0;
     proc_net_adapters_json.as_array().for_each([&](auto& value) {
         auto& if_object = value.as_object();
-        auto adapter_name = if_object.get("name"sv).to_string();
+        auto adapter_name = if_object.get("name"sv).to_deprecated_string();
         if (adapter_name == "loop")
             return;
 
@@ -100,8 +100,8 @@ NetworkSettingsWidget::NetworkSettingsWidget()
         index++;
     });
 
-    m_adapters_combobox->set_model(GUI::ItemListModel<String>::create(m_adapter_names));
-    m_adapters_combobox->on_change = [this](String const& text, GUI::ModelIndex const&) {
+    m_adapters_combobox->set_model(GUI::ItemListModel<DeprecatedString>::create(m_adapter_names));
+    m_adapters_combobox->on_change = [this](DeprecatedString const& text, GUI::ModelIndex const&) {
         on_switch_adapter(text);
     };
     auto const& selected_adapter = selected_adapter_index;
@@ -110,7 +110,7 @@ NetworkSettingsWidget::NetworkSettingsWidget()
     on_switch_adapter(m_adapter_names[selected_adapter_index]);
 }
 
-void NetworkSettingsWidget::on_switch_adapter(String const& adapter)
+void NetworkSettingsWidget::on_switch_adapter(DeprecatedString const& adapter)
 {
     auto& adapter_data = m_network_adapters.get(adapter).value();
     m_current_adapter_data = &adapter_data;
@@ -137,16 +137,16 @@ void NetworkSettingsWidget::apply_settings()
 {
     auto config_file = Core::ConfigFile::open_for_system("Network", Core::ConfigFile::AllowWriting::Yes).release_value_but_fixme_should_propagate_errors();
     for (auto const& adapter_data : m_network_adapters) {
-        auto netmask = IPv4Address::netmask_from_cidr(adapter_data.value.cidr).to_string();
+        auto netmask = IPv4Address::netmask_from_cidr(adapter_data.value.cidr).to_deprecated_string();
         config_file->write_bool_entry(adapter_data.key, "Enabled", adapter_data.value.enabled);
         config_file->write_bool_entry(adapter_data.key, "DHCP", adapter_data.value.dhcp);
         if (adapter_data.value.enabled && !adapter_data.value.dhcp) {
             if (!IPv4Address::from_string(adapter_data.value.ip_address).has_value()) {
-                GUI::MessageBox::show_error(window(), String::formatted("Invalid IPv4 address for adapter {}", adapter_data.key));
+                GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Invalid IPv4 address for adapter {}", adapter_data.key));
                 return;
             }
             if (!IPv4Address::from_string(adapter_data.value.default_gateway).has_value()) {
-                GUI::MessageBox::show_error(window(), String::formatted("Invalid IPv4 gateway for adapter {}", adapter_data.key));
+                GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Invalid IPv4 gateway for adapter {}", adapter_data.key));
                 return;
             }
         }
@@ -158,7 +158,7 @@ void NetworkSettingsWidget::apply_settings()
     GUI::Process::spawn_or_show_error(window(), "/bin/NetworkServer"sv);
 }
 
-void NetworkSettingsWidget::switch_adapter(String const& adapter)
+void NetworkSettingsWidget::switch_adapter(DeprecatedString const& adapter)
 {
     m_adapters_combobox->set_text(adapter, GUI::AllowCallback::No);
     on_switch_adapter(adapter);

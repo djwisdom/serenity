@@ -10,14 +10,20 @@
 
 namespace GUI {
 
-ErrorOr<NonnullRefPtr<Menu>> Menubar::try_add_menu(Badge<Window>, String name)
+ErrorOr<void> Menubar::try_add_menu(Badge<Window>, NonnullRefPtr<Menu> menu)
+{
+    TRY(m_menus.try_append(menu));
+    return {};
+}
+
+ErrorOr<NonnullRefPtr<Menu>> Menubar::try_add_menu(Badge<Window>, DeprecatedString name)
 {
     auto menu = TRY(try_add<Menu>(move(name)));
     TRY(m_menus.try_append(menu));
     return menu;
 }
 
-Menu& Menubar::add_menu(Badge<Window>, String name)
+Menu& Menubar::add_menu(Badge<Window>, DeprecatedString name)
 {
     auto& menu = add<Menu>(move(name));
     m_menus.append(menu);

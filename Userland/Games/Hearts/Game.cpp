@@ -149,7 +149,7 @@ void Game::show_score_card(bool game_over)
     title_builder.append("Score Card"sv);
     if (game_over)
         title_builder.append(" - Game Over"sv);
-    score_dialog->set_title(title_builder.to_string());
+    score_dialog->set_title(title_builder.to_deprecated_string());
 
     RefPtr<Core::Timer> close_timer;
     if (!m_players[0].is_human) {
@@ -162,7 +162,7 @@ void Game::show_score_card(bool game_over)
     score_dialog->exec();
 }
 
-void Game::setup(String player_name, int hand_number)
+void Game::setup(DeprecatedString player_name, int hand_number)
 {
     m_players[0].name = move(player_name);
 
@@ -222,7 +222,7 @@ void Game::setup(String player_name, int hand_number)
     continue_game_after_delay();
 }
 
-void Game::start_animation(NonnullRefPtrVector<Card> cards, Gfx::IntPoint const& end, Function<void()> did_finish_callback, int initial_delay_ms, int steps)
+void Game::start_animation(NonnullRefPtrVector<Card> cards, Gfx::IntPoint end, Function<void()> did_finish_callback, int initial_delay_ms, int steps)
 {
     stop_animation();
 
@@ -409,7 +409,7 @@ void Game::let_player_play_card()
     if (&player == &m_players[0])
         on_status_change("Select a card to play.");
     else
-        on_status_change(String::formatted("Waiting for {} to play a card...", player));
+        on_status_change(DeprecatedString::formatted("Waiting for {} to play a card...", player));
 
     if (player.is_human) {
         m_human_can_play = true;
@@ -580,8 +580,11 @@ void Game::keydown_event(GUI::KeyEvent& event)
     } else if (event.key() == KeyCode::Key_Space) {
         if (m_human_can_play && m_state == State::Play)
             play_card(m_players[0], pick_first_card_ltr(m_players[0]));
-    } else if (event.shift() && event.key() == KeyCode::Key_F11)
+    } else if (event.shift() && event.key() == KeyCode::Key_F11) {
         dump_state();
+    } else {
+        event.ignore();
+    }
 }
 
 void Game::play_card(Player& player, size_t card_index)
@@ -618,7 +621,7 @@ void Game::play_card(Player& player, size_t card_index)
         0);
 }
 
-bool Game::is_valid_play(Player& player, Card& card, String* explanation) const
+bool Game::is_valid_play(Player& player, Card& card, DeprecatedString* explanation) const
 {
     // First card must be 2 of Clubs.
     if (m_trick_number == 0 && m_trick.is_empty()) {
@@ -691,14 +694,14 @@ void Game::card_clicked_during_passing(size_t, Card& card)
 
 void Game::card_clicked_during_play(size_t card_index, Card& card)
 {
-    String explanation;
+    DeprecatedString explanation;
     if (!is_valid_play(m_players[0], card, &explanation)) {
         if (m_inverted_card)
             m_inverted_card->set_inverted(false);
         card.set_inverted(true);
         update(card.rect());
         m_inverted_card = card;
-        on_status_change(String::formatted("You can't play this card: {}", explanation));
+        on_status_change(DeprecatedString::formatted("You can't play this card: {}", explanation));
         continue_game_after_delay();
         return;
     }

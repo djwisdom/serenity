@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibCore/DateTime.h>
 #include <LibIPC/Forward.h>
 
@@ -25,14 +25,14 @@ enum class Source {
 };
 
 struct Cookie {
-    String name;
-    String value;
+    DeprecatedString name;
+    DeprecatedString value;
     SameSite same_site;
     Core::DateTime creation_time {};
     Core::DateTime last_access_time {};
     Core::DateTime expiry_time {};
-    String domain {};
-    String path {};
+    DeprecatedString domain {};
+    DeprecatedString path {};
     bool secure { false };
     bool http_only { false };
     bool host_only { false };
@@ -46,7 +46,10 @@ SameSite same_site_from_string(StringView same_site_mode);
 
 namespace IPC {
 
+template<>
 bool encode(Encoder&, Web::Cookie::Cookie const&);
+
+template<>
 ErrorOr<void> decode(Decoder&, Web::Cookie::Cookie&);
 
 }

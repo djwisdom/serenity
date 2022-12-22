@@ -12,6 +12,7 @@
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/Environment.h>
 #include <LibJS/Runtime/FinalizationRegistry.h>
+#include <LibJS/Runtime/ModuleRequest.h>
 #include <LibJS/Runtime/NativeFunction.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/Bindings/Intrinsics.h>
@@ -128,7 +129,7 @@ JS::VM& main_thread_vm()
 
                 // 5. Queue a global task on the DOM manipulation task source given global to fire an event named rejectionhandled at global, using PromiseRejectionEvent,
                 //    with the promise attribute initialized to promise, and the reason attribute initialized to the value of promise's [[PromiseResult]] internal slot.
-                HTML::queue_global_task(HTML::Task::Source::DOMManipulation, global, [&global, &promise]() mutable {
+                HTML::queue_global_task(HTML::Task::Source::DOMManipulation, global, [&global, &promise] {
                     // FIXME: This currently assumes that global is a WindowObject.
                     auto& window = verify_cast<HTML::Window>(global);
 
@@ -178,12 +179,12 @@ JS::VM& main_thread_vm()
         };
 
         // 8.1.5.4.2 HostEnqueueFinalizationRegistryCleanupJob(finalizationRegistry), https://html.spec.whatwg.org/multipage/webappapis.html#hostenqueuefinalizationregistrycleanupjob
-        vm->host_enqueue_finalization_registry_cleanup_job = [](JS::FinalizationRegistry& finalization_registry) mutable {
+        vm->host_enqueue_finalization_registry_cleanup_job = [](JS::FinalizationRegistry& finalization_registry) {
             // 1. Let global be finalizationRegistry.[[Realm]]'s global object.
             auto& global = finalization_registry.realm().global_object();
 
             // 2. Queue a global task on the JavaScript engine task source given global to perform the following steps:
-            HTML::queue_global_task(HTML::Task::Source::JavaScriptEngine, global, [&finalization_registry]() mutable {
+            HTML::queue_global_task(HTML::Task::Source::JavaScriptEngine, global, [&finalization_registry] {
                 // 1. Let entry be finalizationRegistry.[[CleanupCallback]].[[Callback]].[[Realm]]'s environment settings object.
                 auto& entry = host_defined_environment_settings_object(*finalization_registry.cleanup_callback().callback.cell()->realm());
 
@@ -224,7 +225,7 @@ JS::VM& main_thread_vm()
             auto* script = active_script();
 
             // NOTE: This keeps job_settings alive by keeping realm alive, which is holding onto job_settings.
-            HTML::queue_a_microtask(script ? script->settings_object().responsible_document().ptr() : nullptr, [job_settings, job = move(job), script_or_module = move(script_or_module)]() mutable {
+            HTML::queue_a_microtask(script ? script->settings_object().responsible_document().ptr() : nullptr, [job_settings, job = move(job), script_or_module = move(script_or_module)] {
                 // The dummy execution context has to be kept up here to keep it alive for the duration of the function.
                 Optional<JS::ExecutionContext> dummy_execution_context;
 
@@ -317,7 +318,7 @@ JS::VM& main_thread_vm()
         // FIXME: Implement 8.1.5.5.3 HostResolveImportedModule(referencingScriptOrModule, moduleRequest), https://html.spec.whatwg.org/multipage/webappapis.html#hostresolveimportedmodule(referencingscriptormodule,-modulerequest)
 
         // 8.1.5.5.4 HostGetSupportedImportAssertions(), https://html.spec.whatwg.org/multipage/webappapis.html#hostgetsupportedimportassertions
-        vm->host_get_supported_import_assertions = []() -> Vector<String> {
+        vm->host_get_supported_import_assertions = []() -> Vector<DeprecatedString> {
             // 1. Return « "type" ».
             return { "type"sv };
         };
@@ -374,8 +375,8 @@ JS::VM& main_thread_vm()
         custom_data.root_execution_context = MUST(JS::Realm::initialize_host_defined_realm(*vm, nullptr, nullptr));
 
         auto* root_realm = custom_data.root_execution_context->realm;
-        auto* intrinsics = root_realm->heap().allocate<Intrinsics>(*root_realm, *root_realm);
-        auto host_defined = make<HostDefined>(nullptr, *intrinsics);
+        auto intrinsics = root_realm->heap().allocate<Intrinsics>(*root_realm, *root_realm);
+        auto host_defined = make<HostDefined>(nullptr, intrinsics);
         root_realm->set_host_defined(move(host_defined));
         custom_data.internal_realm = root_realm;
 
@@ -384,7 +385,7 @@ JS::VM& main_thread_vm()
         //       and ensure_web_constructor() invocations.
         // FIXME: Find a nicer way to do this.
         JS::DeferGC defer_gc(root_realm->heap());
-        auto* object = JS::Object::create(*root_realm, nullptr);
+        auto object = JS::Object::create(*root_realm, nullptr);
         root_realm->set_global_object(object, object);
         add_window_exposed_interfaces(*object, *root_realm);
 
@@ -442,7 +443,7 @@ void queue_mutation_observer_microtask(DOM::Document& document)
                 auto& callback = mutation_observer->callback();
                 auto& realm = callback.callback_context.realm();
 
-                auto* wrapped_records = MUST(JS::Array::create(realm, 0));
+                auto wrapped_records = MUST(JS::Array::create(realm, 0));
                 for (size_t i = 0; i < records.size(); ++i) {
                     auto& record = records.at(i);
                     auto property_index = JS::PropertyKey { i };

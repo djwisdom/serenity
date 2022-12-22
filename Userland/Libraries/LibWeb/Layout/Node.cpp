@@ -158,7 +158,7 @@ void Node::set_needs_display()
         return;
     containing_block->paint_box()->for_each_fragment([&](auto& fragment) {
         if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
-            browsing_context().set_needs_display(enclosing_int_rect(fragment.absolute_rect()));
+            browsing_context().set_needs_display(fragment.absolute_rect().template to_type<float>().template to_type<int>());
         }
         return IterationDecision::Continue;
     });
@@ -167,13 +167,13 @@ void Node::set_needs_display()
 Gfx::FloatPoint Node::box_type_agnostic_position() const
 {
     if (is<Box>(*this))
-        return verify_cast<Box>(*this).paint_box()->absolute_position();
+        return verify_cast<Box>(*this).paint_box()->absolute_position().to_type<float>();
     VERIFY(is_inline());
     Gfx::FloatPoint position;
     if (auto* block = containing_block()) {
         block->paint_box()->for_each_fragment([&](auto& fragment) {
             if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
-                position = fragment.absolute_rect().location();
+                position = fragment.absolute_rect().location().template to_type<float>();
                 return IterationDecision::Break;
             }
             return IterationDecision::Continue;
@@ -543,10 +543,33 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
         //        specified first, so it's far from ideal.
         border.color = computed_style.color_or_fallback(color_property, *this, computed_values.color());
         border.line_style = computed_style.line_style(style_property).value_or(CSS::LineStyle::None);
-        if (border.line_style == CSS::LineStyle::None)
+        if (border.line_style == CSS::LineStyle::None) {
             border.width = 0;
-        else
-            border.width = computed_style.length_or_fallback(width_property, CSS::Length::make_px(0)).to_px(*this);
+        } else {
+            auto resolve_border_width = [&]() {
+                auto value = computed_style.property(width_property);
+                if (value->is_calculated())
+                    return CSS::Length::make_calculated(value->as_calculated()).to_px(*this);
+                if (value->has_length())
+                    return value->to_length().to_px(*this);
+                if (value->is_identifier()) {
+                    // FIXME: These values should depend on something, e.g. a font size.
+                    switch (value->to_identifier()) {
+                    case CSS::ValueID::Thin:
+                        return 1.0f;
+                    case CSS::ValueID::Medium:
+                        return 3.0f;
+                    case CSS::ValueID::Thick:
+                        return 5.0f;
+                    default:
+                        VERIFY_NOT_REACHED();
+                    }
+                }
+                VERIFY_NOT_REACHED();
+            };
+
+            border.width = resolve_border_width();
+        }
     };
 
     do_border_style(computed_values.border_left(), CSS::PropertyID::BorderLeftWidth, CSS::PropertyID::BorderLeftColor, CSS::PropertyID::BorderLeftStyle);
@@ -585,7 +608,7 @@ bool Node::is_root_element() const
     return is<HTML::HTMLHtmlElement>(*dom_node());
 }
 
-String Node::debug_description() const
+DeprecatedString Node::debug_description() const
 {
     StringBuilder builder;
     builder.append(class_name());
@@ -601,7 +624,7 @@ String Node::debug_description() const
     } else {
         builder.append("(anonymous)"sv);
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 CSS::Display Node::display() const

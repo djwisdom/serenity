@@ -20,19 +20,19 @@ class NativeFunction : public FunctionObject {
     JS_OBJECT(NativeFunction, FunctionObject);
 
 public:
-    static NativeFunction* create(Realm&, SafeFunction<ThrowCompletionOr<Value>(VM&)> behaviour, i32 length, PropertyKey const& name, Optional<Realm*> = {}, Optional<Object*> prototype = {}, Optional<StringView> const& prefix = {});
-    static NativeFunction* create(Realm&, FlyString const& name, SafeFunction<ThrowCompletionOr<Value>(VM&)>);
+    static NonnullGCPtr<NativeFunction> create(Realm&, SafeFunction<ThrowCompletionOr<Value>(VM&)> behaviour, i32 length, PropertyKey const& name, Optional<Realm*> = {}, Optional<Object*> prototype = {}, Optional<StringView> const& prefix = {});
+    static NonnullGCPtr<NativeFunction> create(Realm&, FlyString const& name, SafeFunction<ThrowCompletionOr<Value>(VM&)>);
 
     virtual void initialize(Realm&) override { }
     virtual ~NativeFunction() override = default;
 
     virtual ThrowCompletionOr<Value> internal_call(Value this_argument, MarkedVector<Value> arguments_list) override;
-    virtual ThrowCompletionOr<Object*> internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target) override;
+    virtual ThrowCompletionOr<NonnullGCPtr<Object>> internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target) override;
 
     // Used for [[Call]] / [[Construct]]'s "...result of evaluating F in a manner that conforms to the specification of F".
     // Needs to be overridden by all NativeFunctions without an m_native_function.
     virtual ThrowCompletionOr<Value> call();
-    virtual ThrowCompletionOr<Object*> construct(FunctionObject& new_target);
+    virtual ThrowCompletionOr<NonnullGCPtr<Object>> construct(FunctionObject& new_target);
 
     virtual FlyString const& name() const override { return m_name; };
     virtual bool is_strict_mode() const override;

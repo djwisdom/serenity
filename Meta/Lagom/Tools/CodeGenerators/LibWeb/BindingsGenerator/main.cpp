@@ -7,29 +7,34 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include "Namespaces.h"
 #include <AK/Debug.h>
 #include <AK/LexicalPath.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibIDL/IDLParser.h>
 #include <LibIDL/Types.h>
 
 extern Vector<StringView> s_header_search_paths;
 
 namespace IDL {
-void generate_constructor_header(IDL::Interface const&);
-void generate_constructor_implementation(IDL::Interface const&);
-void generate_prototype_header(IDL::Interface const&);
-void generate_prototype_implementation(IDL::Interface const&);
-void generate_iterator_prototype_header(IDL::Interface const&);
-void generate_iterator_prototype_implementation(IDL::Interface const&);
+void generate_constructor_header(IDL::Interface const&, StringBuilder&);
+void generate_constructor_implementation(IDL::Interface const&, StringBuilder&);
+void generate_prototype_header(IDL::Interface const&, StringBuilder&);
+void generate_prototype_implementation(IDL::Interface const&, StringBuilder&);
+void generate_iterator_prototype_header(IDL::Interface const&, StringBuilder&);
+void generate_iterator_prototype_implementation(IDL::Interface const&, StringBuilder&);
 }
 
-int main(int argc, char** argv)
+ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     Core::ArgsParser args_parser;
     StringView path;
     StringView import_base_path;
+    StringView output_path = "-"sv;
+    StringView depfile_path;
+    StringView depfile_target;
     bool constructor_header_mode = false;
     bool constructor_implementation_mode = false;
     bool prototype_header_mode = false;
@@ -53,58 +58,34 @@ int main(int argc, char** argv)
             return true;
         },
     });
+    args_parser.add_option(output_path, "Path to output generated file into", "output-path", 'o', "output-path");
+    args_parser.add_option(depfile_path, "Path to write dependency file to", "depfile", 'd', "depfile-path");
+    args_parser.add_option(depfile_target, "Name of target in the depfile (default: output path)", "depfile-target", 't', "target");
     args_parser.add_positional_argument(path, "IDL file", "idl-file");
     args_parser.add_positional_argument(import_base_path, "Import base path", "import-base-path", Core::ArgsParser::Required::No);
-    args_parser.parse(argc, argv);
+    args_parser.parse(arguments);
 
-    auto file_or_error = Core::File::open(path, Core::OpenMode::ReadOnly);
-    if (file_or_error.is_error()) {
-        warnln("Failed to open {}: {}", path, file_or_error.error());
-        return 1;
-    }
+    auto file = TRY(Core::Stream::File::open(path, Core::Stream::OpenMode::Read));
 
     LexicalPath lexical_path(path);
     auto& namespace_ = lexical_path.parts_view().at(lexical_path.parts_view().size() - 2);
 
-    auto data = file_or_error.value()->read_all();
+    auto data = TRY(file->read_until_eof());
 
     if (import_base_path.is_null())
         import_base_path = lexical_path.dirname();
 
+    auto output_file = TRY(Core::Stream::File::open_file_or_standard_stream(output_path, Core::Stream::OpenMode::Write));
+
     IDL::Parser parser(path, data, import_base_path);
     auto& interface = parser.parse();
 
-    static constexpr Array libweb_interface_namespaces = {
-        "CSS"sv,
-        "Crypto"sv,
-        "DOM"sv,
-        "DOMParsing"sv,
-        "Encoding"sv,
-        "Fetch"sv,
-        "FileAPI"sv,
-        "Geometry"sv,
-        "HTML"sv,
-        "HighResolutionTime"sv,
-        "IntersectionObserver"sv,
-        "NavigationTiming"sv,
-        "RequestIdleCallback"sv,
-        "ResizeObserver"sv,
-        "SVG"sv,
-        "Selection"sv,
-        "UIEvents"sv,
-        "URL"sv,
-        "WebGL"sv,
-        "WebIDL"sv,
-        "WebSockets"sv,
-        "XHR"sv,
-    };
-
-    if (libweb_interface_namespaces.span().contains_slow(namespace_)) {
+    if (IDL::libweb_interface_namespaces.span().contains_slow(namespace_)) {
         StringBuilder builder;
         builder.append(namespace_);
         builder.append("::"sv);
         builder.append(interface.name);
-        interface.fully_qualified_name = builder.to_string();
+        interface.fully_qualified_name = builder.to_deprecated_string();
     } else {
         interface.fully_qualified_name = interface.name;
     }
@@ -149,23 +130,39 @@ int main(int argc, char** argv)
         }
     }
 
+    StringBuilder output_builder;
     if (constructor_header_mode)
-        IDL::generate_constructor_header(interface);
+        IDL::generate_constructor_header(interface, output_builder);
 
     if (constructor_implementation_mode)
-        IDL::generate_constructor_implementation(interface);
+        IDL::generate_constructor_implementation(interface, output_builder);
 
     if (prototype_header_mode)
-        IDL::generate_prototype_header(interface);
+        IDL::generate_prototype_header(interface, output_builder);
 
     if (prototype_implementation_mode)
-        IDL::generate_prototype_implementation(interface);
+        IDL::generate_prototype_implementation(interface, output_builder);
 
     if (iterator_prototype_header_mode)
-        IDL::generate_iterator_prototype_header(interface);
+        IDL::generate_iterator_prototype_header(interface, output_builder);
 
     if (iterator_prototype_implementation_mode)
-        IDL::generate_iterator_prototype_implementation(interface);
+        IDL::generate_iterator_prototype_implementation(interface, output_builder);
 
+    TRY(output_file->write(output_builder.string_view().bytes()));
+
+    if (!depfile_path.is_null()) {
+        auto depfile = TRY(Core::Stream::File::open_file_or_standard_stream(depfile_path, Core::Stream::OpenMode::Write));
+
+        StringBuilder depfile_builder;
+        depfile_builder.append(depfile_target.is_null() ? output_path : depfile_target);
+        depfile_builder.append(':');
+        for (auto const& path : parser.imported_files()) {
+            depfile_builder.append(" \\\n "sv);
+            depfile_builder.append(path);
+        }
+        depfile_builder.append('\n');
+        TRY(depfile->write(depfile_builder.string_view().bytes()));
+    }
     return 0;
 }

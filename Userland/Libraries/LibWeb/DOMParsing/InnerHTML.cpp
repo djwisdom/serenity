@@ -14,7 +14,7 @@
 namespace Web::DOMParsing {
 
 // https://w3c.github.io/DOM-Parsing/#dfn-fragment-parsing-algorithm
-WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::DocumentFragment>> parse_fragment(String const& markup, DOM::Element& context_element)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::DocumentFragment>> parse_fragment(DeprecatedString const& markup, DOM::Element& context_element)
 {
     // FIXME: Handle XML documents.
 
@@ -28,11 +28,11 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::DocumentFragment>> parse_fragment(Stri
         (void)TRY(fragment->append_child(*child));
     }
 
-    return JS::NonnullGCPtr(*fragment);
+    return fragment;
 }
 
 // https://w3c.github.io/DOM-Parsing/#dom-innerhtml-innerhtml
-WebIDL::ExceptionOr<void> inner_html_setter(JS::NonnullGCPtr<DOM::Node> context_object, String const& value)
+WebIDL::ExceptionOr<void> inner_html_setter(JS::NonnullGCPtr<DOM::Node> context_object, DeprecatedString const& value)
 {
     // 1. Let context element be the context object's host if the context object is a ShadowRoot object, or the context object otherwise.
     //    (This is handled in Element and ShadowRoot)

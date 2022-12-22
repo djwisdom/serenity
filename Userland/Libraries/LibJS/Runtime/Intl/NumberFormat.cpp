@@ -21,7 +21,7 @@
 namespace JS::Intl {
 
 NumberFormatBase::NumberFormatBase(Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
 {
 }
 
@@ -246,11 +246,11 @@ Value NumberFormat::use_grouping_to_value(VM& vm) const
 {
     switch (m_use_grouping) {
     case UseGrouping::Always:
-        return js_string(vm, "always"sv);
+        return PrimitiveString::create(vm, "always"sv);
     case UseGrouping::Auto:
-        return js_string(vm, "auto"sv);
+        return PrimitiveString::create(vm, "auto"sv);
     case UseGrouping::Min2:
-        return js_string(vm, "min2"sv);
+        return PrimitiveString::create(vm, "min2"sv);
     case UseGrouping::False:
         return Value(false);
     default:
@@ -494,10 +494,10 @@ FormatResult format_numeric_to_string(NumberFormatBase const& intl_object, Mathe
     // 14. If int < minInteger, then
     if (digits < min_integer) {
         // a. Let forwardZeros be the String consisting of minInteger–int occurrences of the character "0".
-        auto forward_zeros = String::repeated('0', min_integer - digits);
+        auto forward_zeros = DeprecatedString::repeated('0', min_integer - digits);
 
         // b. Set string to the string-concatenation of forwardZeros and string.
-        string = String::formatted("{}{}", forward_zeros, string);
+        string = DeprecatedString::formatted("{}{}", forward_zeros, string);
     }
 
     // 15. If isNegative and x is 0, then
@@ -522,7 +522,7 @@ Vector<PatternPartition> partition_number_pattern(VM& vm, NumberFormat& number_f
     // 1. Let exponent be 0.
     int exponent = 0;
 
-    String formatted_string;
+    DeprecatedString formatted_string;
 
     // 2. If x is not-a-number, then
     if (number.is_nan()) {
@@ -714,7 +714,7 @@ static Vector<StringView> separate_integer_into_groups(::Locale::NumberGroupings
 
 // 15.5.5 PartitionNotationSubPattern ( numberFormat, x, n, exponent ), https://tc39.es/ecma402/#sec-partitionnotationsubpattern
 // 1.1.7 PartitionNotationSubPattern ( numberFormat, x, n, exponent ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-partitionnotationsubpattern
-Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_format, MathematicalValue const& number, String formatted_string, int exponent)
+Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_format, MathematicalValue const& number, DeprecatedString formatted_string, int exponent)
 {
     // 1. Let result be a new empty List.
     Vector<PatternPartition> result;
@@ -756,8 +756,20 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
             // iii. Else if p is equal to "number", then
             else if (part == "number"sv) {
                 // 1. If the numberFormat.[[NumberingSystem]] matches one of the values in the "Numbering System" column of Table 12 below, then
-                //     a. Let digits be a List whose 10 String valued elements are the UTF-16 string representations of the 10 digits specified in the "Digits" column of the matching row in Table 12.
-                //     b. Replace each digit in n with the value of digits[digit].
+                //     a. Let digits be a List whose elements are the code points specified in the "Digits" column of the matching row in Table 13.
+                //     b. Assert: The length of digits is 10.
+                //     c. Let transliterated be the empty String.
+                //     d. Let len be the length of n.
+                //     e. Let position be 0.
+                //     f. Repeat, while position < len,
+                //         i. Let c be the code unit at index position within n.
+                //         ii. If 0x0030 ≤ c ≤ 0x0039, then
+                //             i. NOTE: c is an ASCII digit.
+                //             ii. Let i be c - 0x0030.
+                //             iii. Set c to CodePointsToString(« digits[i] »).
+                //         iii. Set transliterated to the string-concatenation of transliterated and c.
+                //         iv. Set position to position + 1.
+                //     g. Set n to transliterated.
                 // 2. Else use an implementation dependent algorithm to map n to the appropriate representation of n in the given numbering system.
                 formatted_string = ::Locale::replace_digits_for_number_system(number_format.numbering_system(), formatted_string);
 
@@ -885,7 +897,7 @@ Vector<PatternPartition> partition_notation_sub_pattern(NumberFormat& number_for
 }
 
 // 15.5.6 FormatNumeric ( numberFormat, x ), https://tc39.es/ecma402/#sec-formatnumber
-String format_numeric(VM& vm, NumberFormat& number_format, MathematicalValue number)
+DeprecatedString format_numeric(VM& vm, NumberFormat& number_format, MathematicalValue number)
 {
     // 1. Let parts be ? PartitionNumberPattern(numberFormat, x).
     // Note: Our implementation of PartitionNumberPattern does not throw.
@@ -914,7 +926,7 @@ Array* format_numeric_to_parts(VM& vm, NumberFormat& number_format, Mathematical
     auto parts = partition_number_pattern(vm, number_format, move(number));
 
     // 2. Let result be ! ArrayCreate(0).
-    auto* result = MUST(Array::create(realm, 0));
+    auto result = MUST(Array::create(realm, 0));
 
     // 3. Let n be 0.
     size_t n = 0;
@@ -922,13 +934,13 @@ Array* format_numeric_to_parts(VM& vm, NumberFormat& number_format, Mathematical
     // 4. For each Record { [[Type]], [[Value]] } part in parts, do
     for (auto& part : parts) {
         // a. Let O be OrdinaryObjectCreate(%Object.prototype%).
-        auto* object = Object::create(realm, realm.intrinsics().object_prototype());
+        auto object = Object::create(realm, realm.intrinsics().object_prototype());
 
         // b. Perform ! CreateDataPropertyOrThrow(O, "type", part.[[Type]]).
-        MUST(object->create_data_property_or_throw(vm.names.type, js_string(vm, part.type)));
+        MUST(object->create_data_property_or_throw(vm.names.type, PrimitiveString::create(vm, part.type)));
 
         // c. Perform ! CreateDataPropertyOrThrow(O, "value", part.[[Value]]).
-        MUST(object->create_data_property_or_throw(vm.names.value, js_string(vm, move(part.value))));
+        MUST(object->create_data_property_or_throw(vm.names.value, PrimitiveString::create(vm, move(part.value))));
 
         // d. Perform ! CreateDataPropertyOrThrow(result, ! ToString(n), O).
         MUST(result->create_data_property_or_throw(n, object));
@@ -941,7 +953,7 @@ Array* format_numeric_to_parts(VM& vm, NumberFormat& number_format, Mathematical
     return result;
 }
 
-static String cut_trailing_zeroes(StringView string, int cut)
+static DeprecatedString cut_trailing_zeroes(StringView string, int cut)
 {
     // These steps are exactly the same between ToRawPrecision and ToRawFixed.
 
@@ -960,7 +972,7 @@ static String cut_trailing_zeroes(StringView string, int cut)
         string = string.substring_view(0, string.length() - 1);
     }
 
-    return string.to_string();
+    return string.to_deprecated_string();
 }
 
 enum class PreferredResult {
@@ -996,7 +1008,7 @@ static auto to_raw_precision_function(MathematicalValue const& number, int preci
         result.number = number.divided_by_power(result.exponent - precision);
 
         // FIXME: Can we do this without string conversion?
-        auto digits = result.number.to_string();
+        auto digits = result.number.to_deprecated_string();
         auto digit = digits.substring_view(digits.length() - 1);
 
         result.number = result.number.divided_by(10);
@@ -1022,7 +1034,7 @@ RawFormatResult to_raw_precision(MathematicalValue const& number, int min_precis
     // 2. If x = 0, then
     if (number.is_zero()) {
         // a. Let m be the String consisting of p occurrences of the character "0".
-        result.formatted_string = String::repeated('0', precision);
+        result.formatted_string = DeprecatedString::repeated('0', precision);
 
         // b. Let e be 0.
         exponent = 0;
@@ -1067,16 +1079,16 @@ RawFormatResult to_raw_precision(MathematicalValue const& number, int min_precis
         }
 
         // f. Let m be the String consisting of the digits of the decimal representation of n (in order, with no leading zeroes).
-        result.formatted_string = n.to_string();
+        result.formatted_string = n.to_deprecated_string();
     }
 
     // 4. If e ≥ p–1, then
     if (exponent >= (precision - 1)) {
         // a. Let m be the string-concatenation of m and e–p+1 occurrences of the character "0".
-        result.formatted_string = String::formatted(
+        result.formatted_string = DeprecatedString::formatted(
             "{}{}",
             result.formatted_string,
-            String::repeated('0', exponent - precision + 1));
+            DeprecatedString::repeated('0', exponent - precision + 1));
 
         // b. Let int be e+1.
         result.digits = exponent + 1;
@@ -1084,7 +1096,7 @@ RawFormatResult to_raw_precision(MathematicalValue const& number, int min_precis
     // 5. Else if e ≥ 0, then
     else if (exponent >= 0) {
         // a. Let m be the string-concatenation of the first e+1 characters of m, the character ".", and the remaining p–(e+1) characters of m.
-        result.formatted_string = String::formatted(
+        result.formatted_string = DeprecatedString::formatted(
             "{}.{}",
             result.formatted_string.substring_view(0, exponent + 1),
             result.formatted_string.substring_view(exponent + 1));
@@ -1096,9 +1108,9 @@ RawFormatResult to_raw_precision(MathematicalValue const& number, int min_precis
     else {
         // a. Assert: e < 0.
         // b. Let m be the string-concatenation of "0.", –(e+1) occurrences of the character "0", and m.
-        result.formatted_string = String::formatted(
+        result.formatted_string = DeprecatedString::formatted(
             "0.{}{}",
-            String::repeated('0', -1 * (exponent + 1)),
+            DeprecatedString::repeated('0', -1 * (exponent + 1)),
             result.formatted_string);
 
         // c. Let int be 1.
@@ -1144,7 +1156,7 @@ static auto to_raw_fixed_function(MathematicalValue const& number, int fraction,
         result.number = number.multiplied_by_power(fraction - 1);
 
         // FIXME: Can we do this without string conversion?
-        auto digits = result.number.to_string();
+        auto digits = result.number.to_deprecated_string();
         auto digit = digits.substring_view(digits.length() - 1);
 
         result.number = result.number.multiplied_by(10);
@@ -1206,7 +1218,7 @@ RawFormatResult to_raw_fixed(MathematicalValue const& number, int min_fraction, 
     }
 
     // 7. If n = 0, let m be "0". Otherwise, let m be the String consisting of the digits of the decimal representation of n (in order, with no leading zeroes).
-    result.formatted_string = n.is_zero() ? String("0"sv) : n.to_string();
+    result.formatted_string = n.is_zero() ? DeprecatedString("0"sv) : n.to_deprecated_string();
 
     // 8. If f ≠ 0, then
     if (fraction != 0) {
@@ -1216,10 +1228,10 @@ RawFormatResult to_raw_fixed(MathematicalValue const& number, int min_fraction, 
         // b. If k ≤ f, then
         if (decimals <= static_cast<size_t>(fraction)) {
             // i. Let z be the String value consisting of f+1–k occurrences of the character "0".
-            auto zeroes = String::repeated('0', fraction + 1 - decimals);
+            auto zeroes = DeprecatedString::repeated('0', fraction + 1 - decimals);
 
             // ii. Let m be the string-concatenation of z and m.
-            result.formatted_string = String::formatted("{}{}", zeroes, result.formatted_string);
+            result.formatted_string = DeprecatedString::formatted("{}{}", zeroes, result.formatted_string);
 
             // iii. Let k be f+1.
             decimals = fraction + 1;
@@ -1230,7 +1242,7 @@ RawFormatResult to_raw_fixed(MathematicalValue const& number, int min_fraction, 
         auto b = result.formatted_string.substring_view(decimals - fraction, fraction);
 
         // d. Let m be the string-concatenation of a, ".", and b.
-        result.formatted_string = String::formatted("{}.{}", a, b);
+        result.formatted_string = DeprecatedString::formatted("{}.{}", a, b);
 
         // e. Let int be the number of characters in a.
         result.digits = a.length();
@@ -1253,7 +1265,7 @@ RawFormatResult to_raw_fixed(MathematicalValue const& number, int min_fraction, 
 
 // 15.5.11 GetNumberFormatPattern ( numberFormat, x ), https://tc39.es/ecma402/#sec-getnumberformatpattern
 // 1.1.14 GetNumberFormatPattern ( numberFormat, x ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-getnumberformatpattern
-Optional<Variant<StringView, String>> get_number_format_pattern(VM& vm, NumberFormat& number_format, MathematicalValue const& number, ::Locale::NumberFormat& found_pattern)
+Optional<Variant<StringView, DeprecatedString>> get_number_format_pattern(VM& vm, NumberFormat& number_format, MathematicalValue const& number, ::Locale::NumberFormat& found_pattern)
 {
     // 1. Let localeData be %NumberFormat%.[[LocaleData]].
     // 2. Let dataLocale be numberFormat.[[DataLocale]].
@@ -1592,7 +1604,7 @@ ThrowCompletionOr<MathematicalValue> to_intl_mathematical_value(VM& vm, Value va
 
     // 3. If Type(primValue) is String,
     // a.     Let str be primValue.
-    auto const& string = primitive_value.as_string().string();
+    auto const& string = primitive_value.as_string().deprecated_string();
 
     // Step 4 handled separately by the FIXME above.
 
@@ -1797,7 +1809,7 @@ Vector<PatternPartitionWithSource> collapse_number_range(Vector<PatternPartition
 }
 
 // 1.1.24 FormatNumericRange( numberFormat, x, y ), https://tc39.es/proposal-intl-numberformat-v3/out/numberformat/proposed.html#sec-formatnumericrange
-ThrowCompletionOr<String> format_numeric_range(VM& vm, NumberFormat& number_format, MathematicalValue start, MathematicalValue end)
+ThrowCompletionOr<DeprecatedString> format_numeric_range(VM& vm, NumberFormat& number_format, MathematicalValue start, MathematicalValue end)
 {
     // 1. Let parts be ? PartitionNumberRangePattern(numberFormat, x, y).
     auto parts = TRY(partition_number_range_pattern(vm, number_format, move(start), move(end)));
@@ -1824,7 +1836,7 @@ ThrowCompletionOr<Array*> format_numeric_range_to_parts(VM& vm, NumberFormat& nu
     auto parts = TRY(partition_number_range_pattern(vm, number_format, move(start), move(end)));
 
     // 2. Let result be ! ArrayCreate(0).
-    auto* result = MUST(Array::create(realm, 0));
+    auto result = MUST(Array::create(realm, 0));
 
     // 3. Let n be 0.
     size_t n = 0;
@@ -1832,16 +1844,16 @@ ThrowCompletionOr<Array*> format_numeric_range_to_parts(VM& vm, NumberFormat& nu
     // 4. For each Record { [[Type]], [[Value]] } part in parts, do
     for (auto& part : parts) {
         // a. Let O be OrdinaryObjectCreate(%Object.prototype%).
-        auto* object = Object::create(realm, realm.intrinsics().object_prototype());
+        auto object = Object::create(realm, realm.intrinsics().object_prototype());
 
         // b. Perform ! CreateDataPropertyOrThrow(O, "type", part.[[Type]]).
-        MUST(object->create_data_property_or_throw(vm.names.type, js_string(vm, part.type)));
+        MUST(object->create_data_property_or_throw(vm.names.type, PrimitiveString::create(vm, part.type)));
 
         // c. Perform ! CreateDataPropertyOrThrow(O, "value", part.[[Value]]).
-        MUST(object->create_data_property_or_throw(vm.names.value, js_string(vm, move(part.value))));
+        MUST(object->create_data_property_or_throw(vm.names.value, PrimitiveString::create(vm, move(part.value))));
 
         // d. Perform ! CreateDataPropertyOrThrow(O, "source", part.[[Source]]).
-        MUST(object->create_data_property_or_throw(vm.names.source, js_string(vm, part.source)));
+        MUST(object->create_data_property_or_throw(vm.names.source, PrimitiveString::create(vm, part.source)));
 
         // e. Perform ! CreateDataPropertyOrThrow(result, ! ToString(n), O).
         MUST(result->create_data_property_or_throw(n, object));
@@ -1851,7 +1863,7 @@ ThrowCompletionOr<Array*> format_numeric_range_to_parts(VM& vm, NumberFormat& nu
     }
 
     // 5. Return result.
-    return result;
+    return result.ptr();
 }
 
 }

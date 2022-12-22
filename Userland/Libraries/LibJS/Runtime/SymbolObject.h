@@ -15,14 +15,14 @@ class SymbolObject : public Object {
     JS_OBJECT(SymbolObject, Object);
 
 public:
-    static SymbolObject* create(Realm&, Symbol&);
+    static NonnullGCPtr<SymbolObject> create(Realm&, Symbol&);
 
     virtual ~SymbolObject() override = default;
 
     Symbol& primitive_symbol() { return m_symbol; }
     Symbol const& primitive_symbol() const { return m_symbol; }
 
-    String description() const { return m_symbol.description(); }
+    DeprecatedString description() const { return m_symbol.description(); }
     bool is_global() const { return m_symbol.is_global(); }
 
 private:

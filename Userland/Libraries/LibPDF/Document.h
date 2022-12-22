@@ -50,14 +50,14 @@ struct Destination {
     };
 
     Type type;
-    Value page;
+    Optional<u32> page;
     Vector<float> parameters;
 };
 
 struct OutlineItem final : public RefCounted<OutlineItem> {
     RefPtr<OutlineItem> parent;
     NonnullRefPtrVector<OutlineItem> children;
-    String title;
+    DeprecatedString title;
     i32 count { 0 };
     Destination dest;
     Gfx::Color color { Color::NamedColor::Black }; // 'C' in the PDF spec
@@ -66,7 +66,7 @@ struct OutlineItem final : public RefCounted<OutlineItem> {
 
     OutlineItem() = default;
 
-    String to_string(int indent) const;
+    DeprecatedString to_deprecated_string(int indent) const;
 };
 
 struct OutlineDict final : public RefCounted<OutlineDict> {
@@ -145,10 +145,10 @@ private:
     PDFErrorOr<void> add_page_tree_node_to_page_tree(NonnullRefPtr<DictObject> const& page_tree);
 
     PDFErrorOr<void> build_outline();
-    PDFErrorOr<NonnullRefPtr<OutlineItem>> build_outline_item(NonnullRefPtr<DictObject> const& outline_item_dict);
-    PDFErrorOr<NonnullRefPtrVector<OutlineItem>> build_outline_item_chain(Value const& first_ref, Value const& last_ref);
+    PDFErrorOr<NonnullRefPtr<OutlineItem>> build_outline_item(NonnullRefPtr<DictObject> const& outline_item_dict, HashMap<u32, u32> const&);
+    PDFErrorOr<NonnullRefPtrVector<OutlineItem>> build_outline_item_chain(Value const& first_ref, HashMap<u32, u32> const&);
 
-    PDFErrorOr<Destination> create_destination_from_parameters(NonnullRefPtr<ArrayObject>);
+    PDFErrorOr<Destination> create_destination_from_parameters(NonnullRefPtr<ArrayObject>, HashMap<u32, u32> const&);
 
     PDFErrorOr<NonnullRefPtr<Object>> get_inheritable_object(FlyString const& name, NonnullRefPtr<DictObject>);
 
@@ -185,8 +185,8 @@ struct Formatter<PDF::Page> : Formatter<FormatString> {
     {
         return Formatter<FormatString>::format(builder,
             "Page {{\n  resources={}\n  contents={}\n  media_box={}\n  crop_box={}\n  user_unit={}\n  rotate={}\n}}"sv,
-            page.resources->to_string(1),
-            page.contents->to_string(1),
+            page.resources->to_deprecated_string(1),
+            page.contents->to_deprecated_string(1),
             page.media_box,
             page.crop_box,
             page.user_unit,
@@ -227,10 +227,16 @@ struct Formatter<PDF::Destination> : Formatter<FormatString> {
         }
 
         StringBuilder param_builder;
-        for (auto& param : destination.parameters)
-            param_builder.appendff("{} ", param);
-
-        return Formatter<FormatString>::format(builder, "{{ type={} page={} params={} }}"sv, type_str, destination.page, param_builder.to_string());
+        TRY(Formatter<FormatString>::format(builder, "{{ type={} page="sv, type_str));
+        if (destination.page.has_value())
+            TRY(builder.put_literal("{}"sv));
+        else
+            TRY(builder.put_u64(destination.page.value()));
+        for (auto& param : destination.parameters) {
+            TRY(builder.put_f64(double(param)));
+            TRY(builder.put_literal(" "sv));
+        }
+        return builder.put_literal("}}"sv);
     }
 };
 
@@ -238,7 +244,7 @@ template<>
 struct Formatter<PDF::OutlineItem> : Formatter<FormatString> {
     ErrorOr<void> format(FormatBuilder& builder, PDF::OutlineItem const& item)
     {
-        return builder.put_string(item.to_string(0));
+        return builder.put_string(item.to_deprecated_string(0));
     }
 };
 
@@ -249,11 +255,11 @@ struct Formatter<PDF::OutlineDict> : Formatter<FormatString> {
         StringBuilder child_builder;
         child_builder.append('[');
         for (auto& child : dict.children)
-            child_builder.appendff("{}\n", child.to_string(2));
+            child_builder.appendff("{}\n", child.to_deprecated_string(2));
         child_builder.append("  ]"sv);
 
         return Formatter<FormatString>::format(builder,
-            "OutlineDict {{\n  count={}\n  children={}\n}}"sv, dict.count, child_builder.to_string());
+            "OutlineDict {{\n  count={}\n  children={}\n}}"sv, dict.count, child_builder.to_deprecated_string());
     }
 };
 

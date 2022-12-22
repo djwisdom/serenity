@@ -13,7 +13,6 @@
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Handle.h>
 #include <LibWeb/CSS/PreferredColorScheme.h>
-#include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Loader/FileRequest.h>
 #include <LibWeb/Platform/Timer.h>
@@ -48,42 +47,46 @@ private:
     Web::Page& page();
     Web::Page const& page() const;
 
-    virtual void connect_to_webdriver(String const& webdriver_ipc_path) override;
+    virtual void connect_to_webdriver(DeprecatedString const& webdriver_ipc_path) override;
     virtual void update_system_theme(Core::AnonymousBuffer const&) override;
-    virtual void update_system_fonts(String const&, String const&, String const&) override;
+    virtual void update_system_fonts(DeprecatedString const&, DeprecatedString const&, DeprecatedString const&) override;
     virtual void update_screen_rects(Vector<Gfx::IntRect> const&, u32) override;
     virtual void load_url(URL const&) override;
-    virtual void load_html(String const&, URL const&) override;
+    virtual void load_html(DeprecatedString const&, URL const&) override;
     virtual void paint(Gfx::IntRect const&, i32) override;
     virtual void set_viewport_rect(Gfx::IntRect const&) override;
-    virtual void mouse_down(Gfx::IntPoint const&, unsigned, unsigned, unsigned) override;
-    virtual void mouse_move(Gfx::IntPoint const&, unsigned, unsigned, unsigned) override;
-    virtual void mouse_up(Gfx::IntPoint const&, unsigned, unsigned, unsigned) override;
-    virtual void mouse_wheel(Gfx::IntPoint const&, unsigned, unsigned, unsigned, i32, i32) override;
-    virtual void doubleclick(Gfx::IntPoint const&, unsigned, unsigned, unsigned) override;
+    virtual void mouse_down(Gfx::IntPoint, unsigned, unsigned, unsigned) override;
+    virtual void mouse_move(Gfx::IntPoint, unsigned, unsigned, unsigned) override;
+    virtual void mouse_up(Gfx::IntPoint, unsigned, unsigned, unsigned) override;
+    virtual void mouse_wheel(Gfx::IntPoint, unsigned, unsigned, unsigned, i32, i32) override;
+    virtual void doubleclick(Gfx::IntPoint, unsigned, unsigned, unsigned) override;
     virtual void key_down(i32, unsigned, u32) override;
     virtual void key_up(i32, unsigned, u32) override;
     virtual void add_backing_store(i32, Gfx::ShareableBitmap const&) override;
     virtual void remove_backing_store(i32) override;
-    virtual void debug_request(String const&, String const&) override;
+    virtual void debug_request(DeprecatedString const&, DeprecatedString const&) override;
     virtual void get_source() override;
     virtual void inspect_dom_tree() override;
     virtual Messages::WebContentServer::InspectDomNodeResponse inspect_dom_node(i32 node_id, Optional<Web::CSS::Selector::PseudoElement> const& pseudo_element) override;
     virtual Messages::WebContentServer::GetHoveredNodeIdResponse get_hovered_node_id() override;
     virtual Messages::WebContentServer::DumpLayoutTreeResponse dump_layout_tree() override;
-    virtual void set_content_filters(Vector<String> const&) override;
-    virtual void set_proxy_mappings(Vector<String> const&, HashMap<String, size_t> const&) override;
+    virtual void set_content_filters(Vector<DeprecatedString> const&) override;
+    virtual void set_proxy_mappings(Vector<DeprecatedString> const&, HashMap<DeprecatedString, size_t> const&) override;
     virtual void set_preferred_color_scheme(Web::CSS::PreferredColorScheme const&) override;
     virtual void set_has_focus(bool) override;
     virtual void set_is_scripting_enabled(bool) override;
-    virtual void set_window_position(Gfx::IntPoint const&) override;
-    virtual void set_window_size(Gfx::IntSize const&) override;
+    virtual void set_window_position(Gfx::IntPoint) override;
+    virtual void set_window_size(Gfx::IntSize) override;
     virtual void handle_file_return(i32 error, Optional<IPC::File> const& file, i32 request_id) override;
     virtual void set_system_visibility_state(bool visible) override;
 
-    virtual void js_console_input(String const&) override;
-    virtual void run_javascript(String const&) override;
+    virtual void js_console_input(DeprecatedString const&) override;
+    virtual void run_javascript(DeprecatedString const&) override;
     virtual void js_console_request_messages(i32) override;
+
+    virtual void alert_closed() override;
+    virtual void confirm_closed(bool accepted) override;
+    virtual void prompt_closed(DeprecatedString const& response) override;
 
     virtual Messages::WebContentServer::TakeDocumentScreenshotResponse take_document_screenshot() override;
 
@@ -94,6 +97,8 @@ private:
     virtual void select_all() override;
 
     void flush_pending_paint_requests();
+
+    void report_finished_handling_input_event(bool event_was_handled);
 
     NonnullOwnPtr<PageHost> m_page_host;
     struct PaintRequest {

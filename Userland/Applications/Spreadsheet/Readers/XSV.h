@@ -6,8 +6,8 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/GenericLexer.h>
-#include <AK/String.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
 #include <AK/Vector.h>
@@ -31,8 +31,8 @@ ParserBehavior operator&(ParserBehavior left, ParserBehavior right);
 ParserBehavior operator|(ParserBehavior left, ParserBehavior right);
 
 struct ParserTraits {
-    String separator;
-    String quote { "\"" };
+    DeprecatedString separator;
+    DeprecatedString quote { "\"" };
     enum QuoteEscape {
         Repeat,
         Backslash,
@@ -73,7 +73,7 @@ public:
     void parse();
     bool has_error() const { return m_error != ReadError::None; }
     ReadError error() const { return m_error; }
-    String error_string() const
+    DeprecatedString error_string() const
     {
         switch (m_error) {
 #define E(x, y)        \
@@ -87,7 +87,7 @@ public:
     }
 
     size_t size() const { return m_rows.size(); }
-    Vector<String> headers() const;
+    Vector<DeprecatedString> headers() const;
     [[nodiscard]] bool has_explicit_headers() const { return (static_cast<u32>(m_behaviors) & static_cast<u32>(ParserBehavior::ReadHeaders)) != 0; }
 
     class Row {
@@ -107,7 +107,7 @@ public:
         size_t index() const { return m_index; }
         size_t size() const { return m_xsv.headers().size(); }
 
-        using ConstIterator = AK::SimpleIterator<const Row, const StringView>;
+        using ConstIterator = AK::SimpleIterator<const Row, StringView const>;
         using Iterator = AK::SimpleIterator<Row, StringView>;
 
         constexpr ConstIterator begin() const { return ConstIterator::begin(*this); }
@@ -124,20 +124,26 @@ public:
     template<bool const_>
     class RowIterator {
     public:
-        explicit RowIterator(const XSV& xsv, size_t init_index = 0) requires(const_)
+        explicit RowIterator(const XSV& xsv, size_t init_index = 0)
+        requires(const_)
             : m_xsv(const_cast<XSV&>(xsv))
             , m_index(init_index)
         {
         }
 
-        explicit RowIterator(XSV& xsv, size_t init_index = 0) requires(!const_)
+        explicit RowIterator(XSV& xsv, size_t init_index = 0)
+        requires(!const_)
             : m_xsv(xsv)
             , m_index(init_index)
         {
         }
 
         Row operator*() const { return Row { m_xsv, m_index }; }
-        Row operator*() requires(!const_) { return Row { m_xsv, m_index }; }
+        Row operator*()
+        requires(!const_)
+        {
+            return Row { m_xsv, m_index };
+        }
 
         RowIterator& operator++()
         {
@@ -179,7 +185,7 @@ public:
 private:
     struct Field {
         StringView as_string_view;
-        String as_string; // This member only used if the parser couldn't use the original source verbatim.
+        DeprecatedString as_string; // This member only used if the parser couldn't use the original source verbatim.
         bool is_string_view { true };
 
         bool operator==(StringView other) const

@@ -42,7 +42,7 @@ TabWidget::TabWidget()
         "text_alignment",
         [this] { return Gfx::to_string(text_alignment()); },
         [this](auto& value) {
-            auto alignment = Gfx::text_alignment_from_string(value.to_string());
+            auto alignment = Gfx::text_alignment_from_string(value.to_deprecated_string());
             if (alignment.has_value()) {
                 set_text_alignment(alignment.value());
                 return true;
@@ -53,12 +53,12 @@ TabWidget::TabWidget()
 
 ErrorOr<void> TabWidget::try_add_widget(Widget& widget)
 {
-    m_tabs.append({ widget.title(), nullptr, &widget });
-    add_child(widget);
+    TRY(m_tabs.try_append({ widget.title(), nullptr, &widget, false }));
+    TRY(try_add_child(widget));
     update_focus_policy();
     if (on_tab_count_change)
         on_tab_count_change(m_tabs.size());
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
     return {};
 }
 
@@ -85,7 +85,7 @@ void TabWidget::remove_widget(Widget& widget)
     if (on_tab_count_change)
         on_tab_count_change(m_tabs.size());
 
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
 }
 
 void TabWidget::remove_all_tabs_except(Widget& widget)
@@ -103,7 +103,7 @@ void TabWidget::remove_all_tabs_except(Widget& widget)
     if (on_tab_count_change)
         on_tab_count_change(1);
 
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
 }
 
 void TabWidget::update_focus_policy()
@@ -137,7 +137,7 @@ void TabWidget::set_active_widget(Widget* widget)
         });
     }
 
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
 
     update_bar();
 }
@@ -158,7 +158,7 @@ void TabWidget::resize_event(ResizeEvent& event)
     m_active_widget->set_relative_rect(child_rect_for_size(event.size()));
 }
 
-Gfx::IntRect TabWidget::child_rect_for_size(Gfx::IntSize const& size) const
+Gfx::IntRect TabWidget::child_rect_for_size(Gfx::IntSize size) const
 {
     Gfx::IntRect rect;
     switch (m_tab_position) {
@@ -287,8 +287,14 @@ void TabWidget::paint_event(PaintEvent& event)
                 Gfx::StylePainter::paint_frame(painter, close_button_rect, palette(), Gfx::FrameShape::Box, pressed_close_button ? Gfx::FrameShadow::Sunken : Gfx::FrameShadow::Raised, 1);
 
             Gfx::IntRect icon_rect { close_button_rect.x() + 3, close_button_rect.y() + 3, 6, 6 };
-            painter.draw_line(icon_rect.top_left(), icon_rect.bottom_right(), palette().button_text());
-            painter.draw_line(icon_rect.top_right(), icon_rect.bottom_left(), palette().button_text());
+            if (!m_tabs[i].modified) {
+                painter.draw_line(icon_rect.top_left(), icon_rect.bottom_right(), palette().button_text());
+                painter.draw_line(icon_rect.top_right(), icon_rect.bottom_left(), palette().button_text());
+            } else {
+                painter.draw_line(icon_rect.top_left().moved_right(1), icon_rect.bottom_right().translated(-1, -1), palette().button_text());
+                painter.draw_line(icon_rect.top_right().moved_left(1), icon_rect.bottom_left().translated(1, -1), palette().button_text());
+                painter.draw_line(icon_rect.bottom_left().moved_down(1), icon_rect.bottom_right().moved_down(1), palette().button_text(), 1, Painter::LineStyle::Dotted);
+            }
         }
     }
 
@@ -355,8 +361,14 @@ void TabWidget::paint_event(PaintEvent& event)
             Gfx::StylePainter::paint_frame(painter, close_button_rect, palette(), Gfx::FrameShape::Box, pressed_close_button ? Gfx::FrameShadow::Sunken : Gfx::FrameShadow::Raised, 1);
 
         Gfx::IntRect icon_rect { close_button_rect.x() + 3, close_button_rect.y() + 3, 6, 6 };
-        painter.draw_line(icon_rect.top_left(), icon_rect.bottom_right(), palette().button_text());
-        painter.draw_line(icon_rect.top_right(), icon_rect.bottom_left(), palette().button_text());
+        if (!m_tabs[i].modified) {
+            painter.draw_line(icon_rect.top_left(), icon_rect.bottom_right(), palette().button_text());
+            painter.draw_line(icon_rect.top_right(), icon_rect.bottom_left(), palette().button_text());
+        } else {
+            painter.draw_line(icon_rect.top_left().moved_right(1), icon_rect.bottom_right().translated(-1, -1), palette().button_text());
+            painter.draw_line(icon_rect.top_right().moved_left(1), icon_rect.bottom_left().translated(1, -1), palette().button_text());
+            painter.draw_line(icon_rect.bottom_left().moved_down(1), icon_rect.bottom_right().moved_down(1), palette().button_text(), 1, Painter::LineStyle::Dotted);
+        }
     }
 }
 
@@ -603,6 +615,32 @@ void TabWidget::set_tab_icon(Widget& tab, Gfx::Bitmap const* icon)
     }
 }
 
+bool TabWidget::is_tab_modified(Widget& tab_input)
+{
+    auto it = m_tabs.find_if([&](auto t) { return t.widget == &tab_input; });
+    if (it.is_end())
+        return false;
+    auto& tab = *it;
+    return tab.modified;
+}
+
+void TabWidget::set_tab_modified(Widget& tab_input, bool modified)
+{
+    auto it = m_tabs.find_if([&](auto t) { return t.widget == &tab_input; });
+    if (it.is_end())
+        return;
+    auto& tab = *it;
+    if (tab.modified != modified) {
+        tab.modified = modified;
+        update();
+    }
+}
+
+bool TabWidget::is_any_tab_modified()
+{
+    return any_of(m_tabs, [](auto& t) { return t.modified; });
+}
+
 void TabWidget::activate_next_tab()
 {
     if (m_tabs.size() <= 1)
@@ -698,7 +736,7 @@ void TabWidget::doubleclick_event(MouseEvent& mouse_event)
 void TabWidget::set_container_margins(GUI::Margins const& margins)
 {
     m_container_margins = margins;
-    layout_relevant_change_occured();
+    layout_relevant_change_occurred();
     update();
 }
 

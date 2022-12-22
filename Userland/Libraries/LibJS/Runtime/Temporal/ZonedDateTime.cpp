@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/GlobalObject.h>
@@ -21,7 +22,7 @@ namespace JS::Temporal {
 
 // 6 Temporal.ZonedDateTime Objects, https://tc39.es/proposal-temporal/#sec-temporal-zoneddatetime-objects
 ZonedDateTime::ZonedDateTime(BigInt const& nanoseconds, Object& time_zone, Object& calendar, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_nanoseconds(nanoseconds)
     , m_time_zone(time_zone)
     , m_calendar(calendar)
@@ -68,7 +69,7 @@ ThrowCompletionOr<BigInt const*> interpret_iso_date_time_offset(VM& vm, i32 year
             return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidEpochNanoseconds);
 
         // d. Return epochNanoseconds.
-        return js_bigint(vm, move(epoch_nanoseconds));
+        return BigInt::create(vm, move(epoch_nanoseconds)).ptr();
     }
 
     // 5. Assert: offsetBehaviour is option.
@@ -129,7 +130,7 @@ ThrowCompletionOr<ZonedDateTime*> to_temporal_zoned_date_time(VM& vm, Value item
 
     Object* calendar = nullptr;
     Object* time_zone = nullptr;
-    Optional<String> offset_string;
+    Optional<DeprecatedString> offset_string;
     ISODateTime result;
 
     // 5. If Type(item) is Object, then
@@ -226,7 +227,7 @@ ThrowCompletionOr<ZonedDateTime*> to_temporal_zoned_date_time(VM& vm, Value item
 
         // k. Let calendar be ? ToTemporalCalendarWithISODefault(result.[[Calendar]]).
         auto temporal_calendar_like = result.calendar.has_value()
-            ? js_string(vm, result.calendar.value())
+            ? PrimitiveString::create(vm, result.calendar.value())
             : js_undefined();
         calendar = TRY(to_temporal_calendar_with_iso_default(vm, temporal_calendar_like));
 
@@ -276,14 +277,14 @@ ThrowCompletionOr<ZonedDateTime*> create_temporal_zoned_date_time(VM& vm, BigInt
     // 4. Set object.[[Nanoseconds]] to epochNanoseconds.
     // 5. Set object.[[TimeZone]] to timeZone.
     // 6. Set object.[[Calendar]] to calendar.
-    auto* object = TRY(ordinary_create_from_constructor<ZonedDateTime>(vm, *new_target, &Intrinsics::temporal_time_zone_prototype, epoch_nanoseconds, time_zone, calendar));
+    auto object = TRY(ordinary_create_from_constructor<ZonedDateTime>(vm, *new_target, &Intrinsics::temporal_time_zone_prototype, epoch_nanoseconds, time_zone, calendar));
 
     // 7. Return object.
-    return object;
+    return object.ptr();
 }
 
 // 6.5.4 TemporalZonedDateTimeToString ( zonedDateTime, precision, showCalendar, showTimeZone, showOffset [ , increment, unit, roundingMode ] ), https://tc39.es/proposal-temporal/#sec-temporal-temporalzoneddatetimetostring
-ThrowCompletionOr<String> temporal_zoned_date_time_to_string(VM& vm, ZonedDateTime& zoned_date_time, Variant<StringView, u8> const& precision, StringView show_calendar, StringView show_time_zone, StringView show_offset, Optional<u64> increment, Optional<StringView> unit, Optional<StringView> rounding_mode)
+ThrowCompletionOr<DeprecatedString> temporal_zoned_date_time_to_string(VM& vm, ZonedDateTime& zoned_date_time, Variant<StringView, u8> const& precision, StringView show_calendar, StringView show_time_zone, StringView show_offset, Optional<u64> increment, Optional<StringView> unit, Optional<StringView> rounding_mode)
 {
     // 1. If increment is not present, set increment to 1.
     if (!increment.has_value())
@@ -315,12 +316,12 @@ ThrowCompletionOr<String> temporal_zoned_date_time_to_string(VM& vm, ZonedDateTi
     // 9. Let dateTimeString be ? TemporalDateTimeToString(temporalDateTime.[[ISOYear]], temporalDateTime.[[ISOMonth]], temporalDateTime.[[ISODay]], temporalDateTime.[[ISOHour]], temporalDateTime.[[ISOMinute]], temporalDateTime.[[ISOSecond]], temporalDateTime.[[ISOMillisecond]], temporalDateTime.[[ISOMicrosecond]], temporalDateTime.[[ISONanosecond]], isoCalendar, precision, "never").
     auto date_time_string = TRY(temporal_date_time_to_string(vm, temporal_date_time->iso_year(), temporal_date_time->iso_month(), temporal_date_time->iso_day(), temporal_date_time->iso_hour(), temporal_date_time->iso_minute(), temporal_date_time->iso_second(), temporal_date_time->iso_millisecond(), temporal_date_time->iso_microsecond(), temporal_date_time->iso_nanosecond(), iso_calendar, precision, "never"sv));
 
-    String offset_string;
+    DeprecatedString offset_string;
 
     // 10. If showOffset is "never", then
     if (show_offset == "never"sv) {
         // a. Let offsetString be the empty String.
-        offset_string = String::empty();
+        offset_string = DeprecatedString::empty();
     }
     // 11. Else,
     else {
@@ -331,12 +332,12 @@ ThrowCompletionOr<String> temporal_zoned_date_time_to_string(VM& vm, ZonedDateTi
         offset_string = format_iso_time_zone_offset_string(offset_ns);
     }
 
-    String time_zone_string;
+    DeprecatedString time_zone_string;
 
     // 12. If showTimeZone is "never", then
     if (show_time_zone == "never"sv) {
         // a. Let timeZoneString be the empty String.
-        time_zone_string = String::empty();
+        time_zone_string = DeprecatedString::empty();
     }
     // 13. Else,
     else {
@@ -347,14 +348,14 @@ ThrowCompletionOr<String> temporal_zoned_date_time_to_string(VM& vm, ZonedDateTi
         auto flag = show_time_zone == "critical"sv ? "!"sv : ""sv;
 
         // c. Let timeZoneString be the string-concatenation of the code unit 0x005B (LEFT SQUARE BRACKET), flag, timeZoneID, and the code unit 0x005D (RIGHT SQUARE BRACKET).
-        time_zone_string = String::formatted("[{}{}]", flag, time_zone_id);
+        time_zone_string = DeprecatedString::formatted("[{}{}]", flag, time_zone_id);
     }
 
     // 14. Let calendarString be ? MaybeFormatCalendarAnnotation(zonedDateTime.[[Calendar]], showCalendar).
     auto calendar_string = TRY(maybe_format_calendar_annotation(vm, &zoned_date_time.calendar(), show_calendar));
 
     // 15. Return the string-concatenation of dateTimeString, offsetString, timeZoneString, and calendarString.
-    return String::formatted("{}{}{}{}", date_time_string, offset_string, time_zone_string, calendar_string);
+    return DeprecatedString::formatted("{}{}{}{}", date_time_string, offset_string, time_zone_string, calendar_string);
 }
 
 // 6.5.5 AddZonedDateTime ( epochNanoseconds, timeZone, calendar, years, months, weeks, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds [ , options ] ), https://tc39.es/proposal-temporal/#sec-temporal-addzoneddatetime
@@ -470,7 +471,7 @@ ThrowCompletionOr<NanosecondsToDaysResult> nanoseconds_to_days(VM& vm, Crypto::S
     auto& start_ns = relative_to.nanoseconds().big_integer();
 
     // 6. Let startInstant be ! CreateTemporalInstant(ℤ(startNs)).
-    auto* start_instant = MUST(create_temporal_instant(vm, *js_bigint(vm, start_ns)));
+    auto* start_instant = MUST(create_temporal_instant(vm, BigInt::create(vm, start_ns)));
 
     // 7. Let startDateTime be ? BuiltinTimeZoneGetPlainDateTimeFor(relativeTo.[[TimeZone]], startInstant, relativeTo.[[Calendar]]).
     auto* start_date_time = TRY(builtin_time_zone_get_plain_date_time_for(vm, &relative_to.time_zone(), *start_instant, relative_to.calendar()));
@@ -478,14 +479,14 @@ ThrowCompletionOr<NanosecondsToDaysResult> nanoseconds_to_days(VM& vm, Crypto::S
     // 8. Let endNs be startNs + nanoseconds.
     auto end_ns = start_ns.plus(nanoseconds);
 
-    auto* end_ns_bigint = js_bigint(vm, end_ns);
+    auto end_ns_bigint = BigInt::create(vm, end_ns);
 
     // 9. If ! IsValidEpochNanoseconds(ℤ(endNs)) is false, throw a RangeError exception.
-    if (!is_valid_epoch_nanoseconds(*end_ns_bigint))
+    if (!is_valid_epoch_nanoseconds(end_ns_bigint))
         return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidEpochNanoseconds);
 
     // 10. Let endInstant be ! CreateTemporalInstant(ℤ(endNs)).
-    auto* end_instant = MUST(create_temporal_instant(vm, *end_ns_bigint));
+    auto* end_instant = MUST(create_temporal_instant(vm, end_ns_bigint));
 
     // 11. Let endDateTime be ? BuiltinTimeZoneGetPlainDateTimeFor(relativeTo.[[TimeZone]], endInstant, relativeTo.[[Calendar]]).
     auto* end_date_time = TRY(builtin_time_zone_get_plain_date_time_for(vm, &relative_to.time_zone(), *end_instant, relative_to.calendar()));
@@ -497,7 +498,7 @@ ThrowCompletionOr<NanosecondsToDaysResult> nanoseconds_to_days(VM& vm, Crypto::S
     auto days = date_difference.days;
 
     // 14. Let intermediateNs be ℝ(? AddZonedDateTime(ℤ(startNs), relativeTo.[[TimeZone]], relativeTo.[[Calendar]], 0, 0, 0, days, 0, 0, 0, 0, 0, 0)).
-    auto intermediate_ns = TRY(add_zoned_date_time(vm, *js_bigint(vm, start_ns), &relative_to.time_zone(), relative_to.calendar(), 0, 0, 0, days, 0, 0, 0, 0, 0, 0))->big_integer();
+    auto intermediate_ns = TRY(add_zoned_date_time(vm, BigInt::create(vm, start_ns), &relative_to.time_zone(), relative_to.calendar(), 0, 0, 0, days, 0, 0, 0, 0, 0, 0))->big_integer();
 
     // 15. If sign is 1, then
     if (sign == 1) {
@@ -507,7 +508,7 @@ ThrowCompletionOr<NanosecondsToDaysResult> nanoseconds_to_days(VM& vm, Crypto::S
             days--;
 
             // ii. Set intermediateNs to ℝ(? AddZonedDateTime(ℤ(startNs), relativeTo.[[TimeZone]], relativeTo.[[Calendar]], 0, 0, 0, days, 0, 0, 0, 0, 0, 0)).
-            intermediate_ns = TRY(add_zoned_date_time(vm, *js_bigint(vm, start_ns), &relative_to.time_zone(), relative_to.calendar(), 0, 0, 0, days, 0, 0, 0, 0, 0, 0))->big_integer();
+            intermediate_ns = TRY(add_zoned_date_time(vm, BigInt::create(vm, start_ns), &relative_to.time_zone(), relative_to.calendar(), 0, 0, 0, days, 0, 0, 0, 0, 0, 0))->big_integer();
         }
     }
 
@@ -518,7 +519,7 @@ ThrowCompletionOr<NanosecondsToDaysResult> nanoseconds_to_days(VM& vm, Crypto::S
     // 18. Repeat, while done is false,
     while (true) {
         // a. Let oneDayFartherNs be ℝ(? AddZonedDateTime(ℤ(intermediateNs), relativeTo.[[TimeZone]], relativeTo.[[Calendar]], 0, 0, 0, sign, 0, 0, 0, 0, 0, 0)).
-        auto one_day_farther_ns = TRY(add_zoned_date_time(vm, *js_bigint(vm, intermediate_ns), &relative_to.time_zone(), relative_to.calendar(), 0, 0, 0, sign, 0, 0, 0, 0, 0, 0))->big_integer();
+        auto one_day_farther_ns = TRY(add_zoned_date_time(vm, BigInt::create(vm, intermediate_ns), &relative_to.time_zone(), relative_to.calendar(), 0, 0, 0, sign, 0, 0, 0, 0, 0, 0))->big_integer();
 
         // b. Set dayLengthNs to oneDayFartherNs - intermediateNs.
         day_length_ns = one_day_farther_ns.minus(intermediate_ns);

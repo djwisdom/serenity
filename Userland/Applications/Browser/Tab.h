@@ -14,8 +14,6 @@
 #include <LibGUI/Widget.h>
 #include <LibGfx/ShareableBitmap.h>
 #include <LibHTTP/Job.h>
-#include <LibWeb/Cookie/Cookie.h>
-#include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/Forward.h>
 
 namespace WebView {
@@ -36,7 +34,7 @@ class Tab final : public GUI::Widget {
     friend class BrowserWindow;
 
 public:
-    virtual ~Tab() override = default;
+    virtual ~Tab() override;
 
     URL url() const;
 
@@ -51,30 +49,31 @@ public:
     void go_forward(int steps = 1);
 
     void did_become_active();
-    void context_menu_requested(Gfx::IntPoint const& screen_position);
+    void context_menu_requested(Gfx::IntPoint screen_position);
     void content_filters_changed();
     void proxy_mappings_changed();
 
     void action_entered(GUI::Action&);
     void action_left(GUI::Action&);
 
-    void window_position_changed(Gfx::IntPoint const&);
-    void window_size_changed(Gfx::IntSize const&);
+    void window_position_changed(Gfx::IntPoint);
+    void window_size_changed(Gfx::IntSize);
 
-    Function<void(String const&)> on_title_change;
+    Function<void(DeprecatedString const&)> on_title_change;
     Function<void(const URL&)> on_tab_open_request;
     Function<void(Tab&)> on_tab_close_request;
     Function<void(Tab&)> on_tab_close_other_request;
+    Function<void(const URL&)> on_window_open_request;
     Function<void(Gfx::Bitmap const&)> on_favicon_change;
     Function<Vector<Web::Cookie::Cookie>(AK::URL const& url)> on_get_all_cookies;
-    Function<Optional<Web::Cookie::Cookie>(AK::URL const& url, String const& name)> on_get_named_cookie;
-    Function<String(const URL&, Web::Cookie::Source source)> on_get_cookie;
+    Function<Optional<Web::Cookie::Cookie>(AK::URL const& url, DeprecatedString const& name)> on_get_named_cookie;
+    Function<DeprecatedString(const URL&, Web::Cookie::Source source)> on_get_cookie;
     Function<void(const URL&, Web::Cookie::ParsedCookie const& cookie, Web::Cookie::Source source)> on_set_cookie;
     Function<void()> on_dump_cookies;
-    Function<void(URL const&, Web::Cookie::Cookie)> on_update_cookie;
+    Function<void(Web::Cookie::Cookie)> on_update_cookie;
     Function<Vector<Web::Cookie::Cookie>()> on_get_cookies_entries;
-    Function<OrderedHashMap<String, String>()> on_get_local_storage_entries;
-    Function<OrderedHashMap<String, String>()> on_get_session_storage_entries;
+    Function<OrderedHashMap<DeprecatedString, DeprecatedString>()> on_get_local_storage_entries;
+    Function<OrderedHashMap<DeprecatedString, DeprecatedString>()> on_get_session_storage_entries;
     Function<Gfx::ShareableBitmap()> on_take_screenshot;
 
     void enable_webdriver_mode();
@@ -88,7 +87,7 @@ public:
     void show_console_window();
     void show_storage_inspector();
 
-    String const& title() const { return m_title; }
+    DeprecatedString const& title() const { return m_title; }
     Gfx::Bitmap const* icon() const { return m_icon; }
 
     WebView::OutOfProcessWebView& view() { return *m_web_content_view; }
@@ -104,10 +103,11 @@ private:
 
     void update_actions();
     void bookmark_current_url();
-    void update_bookmark_button(String const& url);
+    void update_bookmark_button(DeprecatedString const& url);
     void start_download(const URL& url);
-    void view_source(const URL& url, String const& source);
-    void update_status(Optional<String> text_override = {}, i32 count_waiting = 0);
+    void view_source(const URL& url, DeprecatedString const& source);
+    void update_status(Optional<DeprecatedString> text_override = {}, i32 count_waiting = 0);
+    void close_sub_widgets();
 
     enum class MayAppendTLD {
         No,
@@ -140,7 +140,7 @@ private:
     RefPtr<GUI::Menu> m_page_context_menu;
     RefPtr<GUI::Menu> m_go_back_context_menu;
     RefPtr<GUI::Menu> m_go_forward_context_menu;
-    String m_title;
+    DeprecatedString m_title;
     RefPtr<const Gfx::Bitmap> m_icon;
 
     Optional<URL> m_navigating_url;
@@ -149,6 +149,6 @@ private:
     bool m_is_history_navigation { false };
 };
 
-URL url_from_user_input(String const& input);
+URL url_from_user_input(DeprecatedString const& input);
 
 }

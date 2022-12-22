@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/Function.h>
 #include <AK/GenericShorthands.h>
 #include <AK/NonnullOwnPtr.h>
@@ -15,7 +16,6 @@
 #include <AK/NonnullRefPtrVector.h>
 #include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
-#include <AK/String.h>
 #include <AK/StringView.h>
 #include <AK/URL.h>
 #include <AK/Variant.h>
@@ -241,6 +241,7 @@ public:
         Overflow,
         Percentage,
         Position,
+        RadialGradient,
         Rect,
         Resolution,
         Shadow,
@@ -255,7 +256,7 @@ public:
 
     Type type() const { return m_type; }
 
-    bool is_abstract_image() const { return AK::first_is_one_of(type(), Type::Image, Type::LinearGradient, Type::ConicGradient); }
+    bool is_abstract_image() const { return AK::first_is_one_of(type(), Type::Image, Type::LinearGradient, Type::ConicGradient, Type::RadialGradient); }
     bool is_angle() const { return type() == Type::Angle; }
     bool is_background() const { return type() == Type::Background; }
     bool is_background_repeat() const { return type() == Type::BackgroundRepeat; }
@@ -286,6 +287,7 @@ public:
     bool is_overflow() const { return type() == Type::Overflow; }
     bool is_percentage() const { return type() == Type::Percentage; }
     bool is_position() const { return type() == Type::Position; }
+    bool is_radial_gradient() const { return type() == Type::RadialGradient; }
     bool is_rect() const { return type() == Type::Rect; }
     bool is_resolution() const { return type() == Type::Resolution; }
     bool is_shadow() const { return type() == Type::Shadow; }
@@ -330,6 +332,7 @@ public:
     OverflowStyleValue const& as_overflow() const;
     PercentageStyleValue const& as_percentage() const;
     PositionStyleValue const& as_position() const;
+    RadialGradientStyleValue const& as_radial_gradient() const;
     RectStyleValue const& as_rect() const;
     ResolutionStyleValue const& as_resolution() const;
     ShadowStyleValue const& as_shadow() const;
@@ -372,6 +375,7 @@ public:
     OverflowStyleValue& as_overflow() { return const_cast<OverflowStyleValue&>(const_cast<StyleValue const&>(*this).as_overflow()); }
     PercentageStyleValue& as_percentage() { return const_cast<PercentageStyleValue&>(const_cast<StyleValue const&>(*this).as_percentage()); }
     PositionStyleValue& as_position() { return const_cast<PositionStyleValue&>(const_cast<StyleValue const&>(*this).as_position()); }
+    RadialGradientStyleValue& as_radial_gradient() { return const_cast<RadialGradientStyleValue&>(const_cast<StyleValue const&>(*this).as_radial_gradient()); }
     RectStyleValue& as_rect() { return const_cast<RectStyleValue&>(const_cast<StyleValue const&>(*this).as_rect()); }
     ResolutionStyleValue& as_resolution() { return const_cast<ResolutionStyleValue&>(const_cast<StyleValue const&>(*this).as_resolution()); }
     ShadowStyleValue& as_shadow() { return const_cast<ShadowStyleValue&>(const_cast<StyleValue const&>(*this).as_shadow()); }
@@ -399,7 +403,7 @@ public:
     virtual Length to_length() const { VERIFY_NOT_REACHED(); }
     virtual float to_number() const { return 0; }
     virtual float to_integer() const { return 0; }
-    virtual String to_string() const = 0;
+    virtual DeprecatedString to_deprecated_string() const = 0;
 
     bool operator==(StyleValue const& other) const { return equals(other); }
 
@@ -422,7 +426,7 @@ public:
 
     Angle const& angle() const { return m_angle; }
 
-    virtual String to_string() const override { return m_angle.to_string(); }
+    virtual DeprecatedString to_deprecated_string() const override { return m_angle.to_deprecated_string(); }
 
     virtual bool equals(StyleValue const& other) const override
     {
@@ -468,7 +472,7 @@ public:
     NonnullRefPtr<StyleValue> repeat() const { return m_repeat; }
     NonnullRefPtr<StyleValue> size() const { return m_size; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -505,7 +509,7 @@ public:
     Repeat repeat_x() const { return m_repeat_x; }
     Repeat repeat_y() const { return m_repeat_y; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -532,7 +536,7 @@ public:
     LengthPercentage size_x() const { return m_size_x; }
     LengthPercentage size_y() const { return m_size_y; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -562,7 +566,7 @@ public:
     NonnullRefPtr<StyleValue> border_style() const { return m_border_style; }
     NonnullRefPtr<StyleValue> border_color() const { return m_border_color; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -594,7 +598,7 @@ public:
     LengthPercentage const& vertical_radius() const { return m_vertical_radius; }
     bool is_elliptical() const { return m_is_elliptical; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -626,7 +630,7 @@ public:
     NonnullRefPtr<BorderRadiusStyleValue> bottom_right() const { return m_bottom_right; }
     NonnullRefPtr<BorderRadiusStyleValue> bottom_left() const { return m_bottom_left; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -698,14 +702,14 @@ public:
 
     struct CalcNumberValue {
         Variant<Number, NonnullOwnPtr<CalcNumberSum>> value;
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
     };
 
     struct CalcValue {
         Variant<Number, Angle, Frequency, Length, Percentage, Time, NonnullOwnPtr<CalcSum>> value;
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
         bool contains_percentage() const;
@@ -720,7 +724,7 @@ public:
         NonnullOwnPtr<CalcProduct> first_calc_product;
         NonnullOwnPtrVector<CalcSumPartWithOperator> zero_or_more_additional_calc_products;
 
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
 
@@ -735,7 +739,7 @@ public:
         NonnullOwnPtr<CalcNumberProduct> first_calc_number_product;
         NonnullOwnPtrVector<CalcNumberSumPartWithOperator> zero_or_more_additional_calc_number_products;
 
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
     };
@@ -744,7 +748,7 @@ public:
         CalcValue first_calc_value;
         NonnullOwnPtrVector<CalcProductPartWithOperator> zero_or_more_additional_calc_values;
 
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
         bool contains_percentage() const;
@@ -758,7 +762,7 @@ public:
         SumOperation op;
         NonnullOwnPtr<CalcProduct> value;
 
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
         bool contains_percentage() const;
@@ -768,7 +772,7 @@ public:
         ProductOperation op;
         Variant<CalcValue, CalcNumberValue> value;
 
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
 
@@ -779,7 +783,7 @@ public:
         CalcNumberValue first_calc_number_value;
         NonnullOwnPtrVector<CalcNumberProductPartWithOperator> zero_or_more_additional_calc_number_values;
 
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
     };
@@ -788,7 +792,7 @@ public:
         ProductOperation op;
         CalcNumberValue value;
 
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
     };
@@ -801,7 +805,7 @@ public:
         SumOperation op;
         NonnullOwnPtr<CalcNumberProduct> value;
 
-        String to_string() const;
+        DeprecatedString to_deprecated_string() const;
         Optional<ResolvedType> resolved_type() const;
         CalculationResult resolve(Layout::Node const*, PercentageBasis const& percentage_basis) const;
     };
@@ -811,7 +815,7 @@ public:
         return adopt_ref(*new CalculatedStyleValue(move(calc_sum), resolved_type));
     }
 
-    String to_string() const override;
+    DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
     ResolvedType resolved_type() const { return m_resolved_type; }
     NonnullOwnPtr<CalcSum> const& expression() const { return m_expression; }
@@ -860,7 +864,7 @@ public:
     virtual ~ColorStyleValue() override = default;
 
     Color color() const { return m_color; }
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool has_color() const override { return true; }
     virtual Color to_color(Layout::NodeWithStyle const&) const override { return m_color; }
 
@@ -887,7 +891,7 @@ public:
     bool has_alt_text() const { return !m_alt_text.is_null(); }
     StyleValueList const* alt_text() const { return m_alt_text; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -913,7 +917,7 @@ public:
 
     Vector<FilterFunction> const& filter_value_list() const { return m_filter_value_list; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
     virtual ~FilterValueListStyleValue() override = default;
@@ -944,7 +948,7 @@ public:
     NonnullRefPtr<StyleValue> shrink() const { return m_shrink; }
     NonnullRefPtr<StyleValue> basis() const { return m_basis; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -975,7 +979,7 @@ public:
     NonnullRefPtr<StyleValue> flex_direction() const { return m_flex_direction; }
     NonnullRefPtr<StyleValue> flex_wrap() const { return m_flex_wrap; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1001,7 +1005,7 @@ public:
     NonnullRefPtr<StyleValue> line_height() const { return m_line_height; }
     NonnullRefPtr<StyleValue> font_families() const { return m_font_families; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1033,7 +1037,7 @@ public:
 
     Frequency const& frequency() const { return m_frequency; }
 
-    virtual String to_string() const override { return m_frequency.to_string(); }
+    virtual DeprecatedString to_deprecated_string() const override { return m_frequency.to_deprecated_string(); }
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1052,7 +1056,7 @@ public:
     virtual ~GridTrackPlacementStyleValue() override = default;
 
     CSS::GridTrackPlacement const& grid_track_placement() const { return m_grid_track_placement; }
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1080,7 +1084,7 @@ public:
     NonnullRefPtr<GridTrackPlacementStyleValue> start() const { return m_start; }
     NonnullRefPtr<GridTrackPlacementStyleValue> end() const { return m_end; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1104,7 +1108,7 @@ public:
 
     CSS::GridTrackSizeList grid_track_size_list() const { return m_grid_track_size_list; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1132,7 +1136,7 @@ public:
     virtual CSS::ValueID to_identifier() const override { return m_id; }
     virtual bool has_color() const override;
     virtual Color to_color(Layout::NodeWithStyle const& node) const override;
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1153,7 +1157,7 @@ public:
     virtual Optional<int> natural_height() const { return {}; }
 
     virtual void load_any_resources(DOM::Document&) {};
-    virtual void resolve_for_size(Layout::Node const&, Gfx::FloatSize const&) const {};
+    virtual void resolve_for_size(Layout::Node const&, Gfx::FloatSize) const {};
 
     virtual bool is_paintable() const = 0;
     virtual void paint(PaintContext& context, Gfx::IntRect const& dest_rect, CSS::ImageRendering image_rendering) const = 0;
@@ -1166,7 +1170,7 @@ public:
     static NonnullRefPtr<ImageStyleValue> create(AK::URL const& url) { return adopt_ref(*new ImageStyleValue(url)); }
     virtual ~ImageStyleValue() override = default;
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
     virtual void load_any_resources(DOM::Document&) override;
@@ -1201,6 +1205,86 @@ enum class GradientRepeating {
     No
 };
 
+class RadialGradientStyleValue final : public AbstractImageStyleValue {
+public:
+    enum class EndingShape {
+        Circle,
+        Ellipse
+    };
+
+    enum class Extent {
+        ClosestCorner,
+        ClosestSide,
+        FarthestCorner,
+        FarthestSide
+    };
+
+    struct CircleSize {
+        Length radius;
+        bool operator==(CircleSize const&) const = default;
+    };
+
+    struct EllipseSize {
+        LengthPercentage radius_a;
+        LengthPercentage radius_b;
+        bool operator==(EllipseSize const&) const = default;
+    };
+
+    using Size = Variant<Extent, CircleSize, EllipseSize>;
+
+    static NonnullRefPtr<RadialGradientStyleValue> create(EndingShape ending_shape, Size size, PositionValue position, Vector<LinearColorStopListElement> color_stop_list, GradientRepeating repeating)
+    {
+        VERIFY(color_stop_list.size() >= 2);
+        return adopt_ref(*new RadialGradientStyleValue(ending_shape, size, position, move(color_stop_list), repeating));
+    }
+
+    virtual DeprecatedString to_deprecated_string() const override;
+
+    void paint(PaintContext&, Gfx::IntRect const& dest_rect, CSS::ImageRendering) const override;
+
+    virtual bool equals(StyleValue const& other) const override;
+
+    Vector<LinearColorStopListElement> const& color_stop_list() const
+    {
+        return m_color_stop_list;
+    }
+
+    bool is_paintable() const override { return true; }
+
+    void resolve_for_size(Layout::Node const&, Gfx::FloatSize) const override;
+
+    Gfx::FloatSize resolve_size(Layout::Node const&, Gfx::FloatPoint, Gfx::FloatRect const&) const;
+
+    bool is_repeating() const { return m_repeating == GradientRepeating::Yes; }
+
+    virtual ~RadialGradientStyleValue() override = default;
+
+private:
+    RadialGradientStyleValue(EndingShape ending_shape, Size size, PositionValue position, Vector<LinearColorStopListElement> color_stop_list, GradientRepeating repeating)
+        : AbstractImageStyleValue(Type::RadialGradient)
+        , m_ending_shape(ending_shape)
+        , m_size(size)
+        , m_position(position)
+        , m_color_stop_list(move(color_stop_list))
+        , m_repeating(repeating)
+    {
+    }
+
+    EndingShape m_ending_shape;
+    Size m_size;
+    PositionValue m_position;
+    Vector<LinearColorStopListElement> m_color_stop_list;
+    GradientRepeating m_repeating;
+
+    struct ResolvedData {
+        Painting::RadialGradientData data;
+        Gfx::FloatSize gradient_size;
+        Gfx::FloatPoint center;
+    };
+
+    mutable Optional<ResolvedData> m_resolved;
+};
+
 class ConicGradientStyleValue final : public AbstractImageStyleValue {
 public:
     static NonnullRefPtr<ConicGradientStyleValue> create(Angle from_angle, PositionValue position, Vector<AngularColorStopListElement> color_stop_list, GradientRepeating repeating)
@@ -1209,7 +1293,7 @@ public:
         return adopt_ref(*new ConicGradientStyleValue(from_angle, position, move(color_stop_list), repeating));
     }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
 
     void paint(PaintContext&, Gfx::IntRect const& dest_rect, CSS::ImageRendering) const override;
 
@@ -1224,7 +1308,7 @@ public:
 
     bool is_paintable() const override { return true; }
 
-    void resolve_for_size(Layout::Node const&, Gfx::FloatSize const&) const override;
+    void resolve_for_size(Layout::Node const&, Gfx::FloatSize) const override;
 
     virtual ~ConicGradientStyleValue() override = default;
 
@@ -1271,7 +1355,7 @@ public:
         return adopt_ref(*new LinearGradientStyleValue(direction, move(color_stop_list), type, repeating));
     }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual ~LinearGradientStyleValue() override = default;
     virtual bool equals(StyleValue const& other) const override;
 
@@ -1282,9 +1366,9 @@ public:
 
     bool is_repeating() const { return m_repeating == GradientRepeating::Yes; }
 
-    float angle_degrees(Gfx::FloatSize const& gradient_size) const;
+    float angle_degrees(Gfx::FloatSize gradient_size) const;
 
-    void resolve_for_size(Layout::Node const&, Gfx::FloatSize const&) const override;
+    void resolve_for_size(Layout::Node const&, Gfx::FloatSize) const override;
 
     bool is_paintable() const override { return true; }
     void paint(PaintContext& context, Gfx::IntRect const& dest_rect, CSS::ImageRendering image_rendering) const override;
@@ -1321,7 +1405,7 @@ public:
     }
     virtual ~InheritStyleValue() override = default;
 
-    String to_string() const override { return "inherit"; }
+    DeprecatedString to_deprecated_string() const override { return "inherit"; }
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1340,7 +1424,7 @@ public:
     }
     virtual ~InitialStyleValue() override = default;
 
-    String to_string() const override { return "initial"; }
+    DeprecatedString to_deprecated_string() const override { return "initial"; }
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1360,7 +1444,7 @@ public:
     virtual bool has_auto() const override { return m_length.is_auto(); }
     virtual bool has_length() const override { return true; }
     virtual bool has_identifier() const override { return has_auto(); }
-    virtual String to_string() const override { return m_length.to_string(); }
+    virtual DeprecatedString to_deprecated_string() const override { return m_length.to_deprecated_string(); }
     virtual Length to_length() const override { return m_length; }
     virtual ValueID to_identifier() const override { return has_auto() ? ValueID::Auto : ValueID::Invalid; }
     virtual NonnullRefPtr<StyleValue> absolutized(Gfx::IntRect const& viewport_rect, Gfx::FontPixelMetrics const& font_metrics, float font_size, float root_font_size) const override;
@@ -1391,7 +1475,7 @@ public:
     NonnullRefPtr<StyleValue> image() const { return m_image; }
     NonnullRefPtr<StyleValue> style_type() const { return m_style_type; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1437,7 +1521,7 @@ public:
     virtual bool has_integer() const override { return m_value.has<i64>(); }
     virtual float to_integer() const override { return m_value.get<i64>(); }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1461,7 +1545,7 @@ public:
     NonnullRefPtr<StyleValue> overflow_x() const { return m_overflow_x; }
     NonnullRefPtr<StyleValue> overflow_y() const { return m_overflow_y; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1487,7 +1571,7 @@ public:
     Percentage const& percentage() const { return m_percentage; }
     Percentage& percentage() { return m_percentage; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1513,7 +1597,7 @@ public:
     PositionEdge edge_y() const { return m_edge_y; }
     LengthPercentage const& offset_y() const { return m_offset_y; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1542,7 +1626,7 @@ public:
 
     Resolution const& resolution() const { return m_resolution; }
 
-    virtual String to_string() const override { return m_resolution.to_string(); }
+    virtual DeprecatedString to_deprecated_string() const override { return m_resolution.to_deprecated_string(); }
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1558,24 +1642,24 @@ private:
 class ShadowStyleValue final : public StyleValue {
 public:
     static NonnullRefPtr<ShadowStyleValue>
-    create(Color const& color, Length const& offset_x, Length const& offset_y, Length const& blur_radius, Length const& spread_distance, ShadowPlacement placement)
+    create(Color color, Length const& offset_x, Length const& offset_y, Length const& blur_radius, Length const& spread_distance, ShadowPlacement placement)
     {
         return adopt_ref(*new ShadowStyleValue(color, offset_x, offset_y, blur_radius, spread_distance, placement));
     }
     virtual ~ShadowStyleValue() override = default;
 
-    Color const& color() const { return m_color; }
+    Color color() const { return m_color; }
     Length const& offset_x() const { return m_offset_x; }
     Length const& offset_y() const { return m_offset_y; }
     Length const& blur_radius() const { return m_blur_radius; }
     Length const& spread_distance() const { return m_spread_distance; }
     ShadowPlacement placement() const { return m_placement; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
-    explicit ShadowStyleValue(Color const& color, Length const& offset_x, Length const& offset_y, Length const& blur_radius, Length const& spread_distance, ShadowPlacement placement)
+    explicit ShadowStyleValue(Color color, Length const& offset_x, Length const& offset_y, Length const& blur_radius, Length const& spread_distance, ShadowPlacement placement)
         : StyleValue(Type::Shadow)
         , m_color(color)
         , m_offset_x(offset_x)
@@ -1598,23 +1682,23 @@ private:
 
 class StringStyleValue : public StyleValue {
 public:
-    static NonnullRefPtr<StringStyleValue> create(String const& string)
+    static NonnullRefPtr<StringStyleValue> create(DeprecatedString const& string)
     {
         return adopt_ref(*new StringStyleValue(string));
     }
     virtual ~StringStyleValue() override = default;
 
-    String to_string() const override { return m_string; }
+    DeprecatedString to_deprecated_string() const override { return m_string; }
     virtual bool equals(StyleValue const& other) const override;
 
 private:
-    explicit StringStyleValue(String const& string)
+    explicit StringStyleValue(DeprecatedString const& string)
         : StyleValue(Type::String)
         , m_string(string)
     {
     }
 
-    String m_string;
+    DeprecatedString m_string;
 };
 
 class TextDecorationStyleValue final : public StyleValue {
@@ -1634,7 +1718,7 @@ public:
     NonnullRefPtr<StyleValue> style() const { return m_style; }
     NonnullRefPtr<StyleValue> color() const { return m_color; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1667,7 +1751,7 @@ public:
 
     Time const& time() const { return m_time; }
 
-    virtual String to_string() const override { return m_time.to_string(); }
+    virtual DeprecatedString to_deprecated_string() const override { return m_time.to_deprecated_string(); }
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1691,7 +1775,7 @@ public:
     CSS::TransformFunction transform_function() const { return m_transform_function; }
     NonnullRefPtrVector<StyleValue> values() const { return m_values; }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1714,7 +1798,7 @@ public:
     }
     virtual ~UnresolvedStyleValue() override = default;
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
     Vector<Parser::ComponentValue> const& values() const { return m_values; }
@@ -1741,7 +1825,7 @@ public:
     }
     virtual ~UnsetStyleValue() override = default;
 
-    String to_string() const override { return "unset"; }
+    DeprecatedString to_deprecated_string() const override { return "unset"; }
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1768,7 +1852,7 @@ public:
         return m_values[i];
     }
 
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool equals(StyleValue const& other) const override;
 
 private:
@@ -1789,7 +1873,7 @@ public:
     virtual ~RectStyleValue() override = default;
 
     EdgeRect rect() const { return m_rect; }
-    virtual String to_string() const override;
+    virtual DeprecatedString to_deprecated_string() const override;
     virtual bool has_rect() const override { return true; }
     virtual EdgeRect to_rect() const override { return m_rect; }
     virtual bool equals(StyleValue const& other) const override;
@@ -1810,6 +1894,6 @@ template<>
 struct AK::Formatter<Web::CSS::StyleValue> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Web::CSS::StyleValue const& style_value)
     {
-        return Formatter<StringView>::format(builder, style_value.to_string());
+        return Formatter<StringView>::format(builder, style_value.to_deprecated_string());
     }
 };

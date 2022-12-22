@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2020-2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/JsonObject.h>
 #include <AK/QuickSort.h>
-#include <AK/String.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 
@@ -26,7 +26,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_positional_argument(pid, "PID", "PID", Core::ArgsParser::Required::Yes);
     args_parser.parse(arguments);
 
-    auto file = TRY(Core::File::open(String::formatted("/proc/{}/vm", pid), Core::OpenMode::ReadOnly));
+    auto file = TRY(Core::Stream::File::open(DeprecatedString::formatted("/proc/{}/vm", pid), Core::Stream::OpenMode::Read));
 
     outln("{}:", pid);
 
@@ -42,7 +42,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         outln("Address{}           Size Access  Name", padding);
     }
 
-    auto file_contents = file->read_all();
+    auto file_contents = TRY(file->read_until_eof());
     auto json = TRY(JsonValue::from_string(file_contents));
 
     Vector<JsonValue> sorted_regions = json.as_array().values();
@@ -53,9 +53,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     for (auto& value : sorted_regions) {
         auto& map = value.as_object();
         auto address = map.get("address"sv).to_addr();
-        auto size = map.get("size"sv).to_string();
+        auto size = map.get("size"sv).to_deprecated_string();
 
-        auto access = String::formatted("{}{}{}{}{}",
+        auto access = DeprecatedString::formatted("{}{}{}{}{}",
             (map.get("readable"sv).to_bool() ? "r" : "-"),
             (map.get("writable"sv).to_bool() ? "w" : "-"),
             (map.get("executable"sv).to_bool() ? "x" : "-"),
@@ -65,13 +65,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         out("{:p}  ", address);
         out("{:>10} ", size);
         if (extended) {
-            auto resident = map.get("amount_resident"sv).to_string();
-            auto dirty = map.get("amount_dirty"sv).to_string();
-            auto vmobject = map.get("vmobject"sv).to_string();
+            auto resident = map.get("amount_resident"sv).to_deprecated_string();
+            auto dirty = map.get("amount_dirty"sv).to_deprecated_string();
+            auto vmobject = map.get("vmobject"sv).to_deprecated_string();
             if (vmobject.ends_with("VMObject"sv))
                 vmobject = vmobject.substring(0, vmobject.length() - 8);
-            auto purgeable = map.get("purgeable"sv).to_string();
-            auto cow_pages = map.get("cow_pages"sv).to_string();
+            auto purgeable = map.get("purgeable"sv).to_deprecated_string();
+            auto cow_pages = map.get("cow_pages"sv).to_deprecated_string();
             out("{:>10} ", resident);
             out("{:>10} ", dirty);
             out("{:6} ", access);
@@ -81,7 +81,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         } else {
             out("{:6} ", access);
         }
-        auto name = map.get("name"sv).to_string();
+        auto name = map.get("name"sv).to_deprecated_string();
         out("{:20}", name);
         outln();
     }

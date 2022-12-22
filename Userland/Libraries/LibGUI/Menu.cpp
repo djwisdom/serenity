@@ -32,7 +32,7 @@ Menu* Menu::from_menu_id(int menu_id)
     return (*it).value;
 }
 
-Menu::Menu(String name)
+Menu::Menu(DeprecatedString name)
     : m_name(move(name))
 {
 }
@@ -72,7 +72,7 @@ void Menu::remove_all_actions()
     m_items.clear();
 }
 
-ErrorOr<NonnullRefPtr<Menu>> Menu::try_add_submenu(String name)
+ErrorOr<NonnullRefPtr<Menu>> Menu::try_add_submenu(DeprecatedString name)
 {
     // NOTE: We grow the vector first, to get allocation failure handled immediately.
     TRY(m_items.try_ensure_capacity(m_items.size() + 1));
@@ -87,7 +87,7 @@ ErrorOr<NonnullRefPtr<Menu>> Menu::try_add_submenu(String name)
     return submenu;
 }
 
-Menu& Menu::add_submenu(String name)
+Menu& Menu::add_submenu(DeprecatedString name)
 {
     auto menu = MUST(try_add_submenu(move(name)));
     return menu;
@@ -116,7 +116,7 @@ void Menu::realize_if_needed(RefPtr<Action> const& default_action)
         realize_menu(default_action);
 }
 
-void Menu::popup(Gfx::IntPoint const& screen_position, RefPtr<Action> const& default_action, Gfx::IntRect const& button_rect)
+void Menu::popup(Gfx::IntPoint screen_position, RefPtr<Action> const& default_action, Gfx::IntRect const& button_rect)
 {
     realize_if_needed(default_action);
     ConnectionToWindowServer::the().async_popup_menu(m_menu_id, screen_position, button_rect);
@@ -197,18 +197,18 @@ void Menu::realize_menu_item(MenuItem& item, int item_id)
         break;
     case MenuItem::Type::Action: {
         auto& action = *item.action();
-        auto shortcut_text = action.shortcut().is_valid() ? action.shortcut().to_string() : String();
+        auto shortcut_text = action.shortcut().is_valid() ? action.shortcut().to_deprecated_string() : DeprecatedString();
         bool exclusive = action.group() && action.group()->is_exclusive() && action.is_checkable();
         bool is_default = (m_current_default_action.ptr() == &action);
         auto icon = action.icon() ? action.icon()->to_shareable_bitmap() : Gfx::ShareableBitmap();
-        ConnectionToWindowServer::the().async_add_menu_item(m_menu_id, item_id, -1, action.text(), action.is_enabled(), action.is_checkable(), action.is_checkable() ? action.is_checked() : false, is_default, shortcut_text, icon, exclusive);
+        ConnectionToWindowServer::the().async_add_menu_item(m_menu_id, item_id, -1, action.text(), action.is_enabled(), action.is_visible(), action.is_checkable(), action.is_checkable() ? action.is_checked() : false, is_default, shortcut_text, icon, exclusive);
         break;
     }
     case MenuItem::Type::Submenu: {
         auto& submenu = *item.submenu();
         submenu.realize_if_needed(m_current_default_action.strong_ref());
         auto icon = submenu.icon() ? submenu.icon()->to_shareable_bitmap() : Gfx::ShareableBitmap();
-        ConnectionToWindowServer::the().async_add_menu_item(m_menu_id, item_id, submenu.menu_id(), submenu.name(), true, false, false, false, "", icon, false);
+        ConnectionToWindowServer::the().async_add_menu_item(m_menu_id, item_id, submenu.menu_id(), submenu.name(), true, true, false, false, false, "", icon, false);
         break;
     }
     case MenuItem::Type::Invalid:

@@ -16,7 +16,9 @@ namespace AK {
 
 class StringBuilder {
 public:
-    using OutputType = String;
+    using OutputType = DeprecatedString;
+
+    static ErrorOr<StringBuilder> create(size_t initial_capacity = inline_capacity);
 
     explicit StringBuilder(size_t initial_capacity = inline_capacity);
     ~StringBuilder() = default;
@@ -60,9 +62,11 @@ public:
     }
 
 #ifndef KERNEL
-    [[nodiscard]] String build() const;
-    [[nodiscard]] String to_string() const;
+    [[nodiscard]] DeprecatedString build() const;
+    [[nodiscard]] DeprecatedString to_deprecated_string() const;
+    ErrorOr<String> to_string() const;
 #endif
+
     [[nodiscard]] ByteBuffer to_byte_buffer() const;
 
     [[nodiscard]] StringView string_view() const;
@@ -91,9 +95,11 @@ private:
     u8 const* data() const { return m_buffer.data(); }
 
     static constexpr size_t inline_capacity = 256;
-    AK::Detail::ByteBuffer<inline_capacity> m_buffer;
+    Detail::ByteBuffer<inline_capacity> m_buffer;
 };
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::StringBuilder;
+#endif

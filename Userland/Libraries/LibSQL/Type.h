@@ -6,23 +6,26 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
-#include <AK/String.h>
 #include <AK/StringView.h>
 
 namespace SQL {
 
-#define ENUMERATE_SQL_TYPES(S)                   \
-    S("null", 1, Null, int, sizeof(int))         \
-    S("text", 2, Text, String, 65 + sizeof(u32)) \
-    S("int", 4, Integer, int, sizeof(int))       \
-    S("float", 8, Float, double, sizeof(double)) \
-    S("bool", 16, Boolean, bool, sizeof(bool))   \
-    S("tuple", 32, Tuple, int, sizeof(int))
+// Adding to this list is fine, but changing the order of any value here will result in LibSQL
+// becoming unable to read existing .db files. If the order must absolutely be changed, be sure
+// to bump Heap::current_version.
+#define ENUMERATE_SQL_TYPES(S) \
+    S("null", Null)            \
+    S("text", Text)            \
+    S("int", Integer)          \
+    S("float", Float)          \
+    S("bool", Boolean)         \
+    S("tuple", Tuple)
 
 enum class SQLType {
 #undef __ENUMERATE_SQL_TYPE
-#define __ENUMERATE_SQL_TYPE(name, cardinal, type, impl, size) type = cardinal,
+#define __ENUMERATE_SQL_TYPE(name, type) type,
     ENUMERATE_SQL_TYPES(__ENUMERATE_SQL_TYPE)
 #undef __ENUMERATE_SQL_TYPE
 };
@@ -31,23 +34,9 @@ constexpr StringView SQLType_name(SQLType t)
 {
     switch (t) {
 #undef __ENUMERATE_SQL_TYPE
-#define __ENUMERATE_SQL_TYPE(name, cardinal, type, impl, size) \
-    case SQLType::type:                                        \
+#define __ENUMERATE_SQL_TYPE(name, type) \
+    case SQLType::type:                  \
         return name##sv;
-        ENUMERATE_SQL_TYPES(__ENUMERATE_SQL_TYPE)
-#undef __ENUMERATE_SQL_TYPE
-    default:
-        VERIFY_NOT_REACHED();
-    }
-}
-
-constexpr size_t size_of(SQLType t)
-{
-    switch (t) {
-#undef __ENUMERATE_SQL_TYPE
-#define __ENUMERATE_SQL_TYPE(name, cardinal, type, impl, size) \
-    case SQLType::type:                                        \
-        return size;
         ENUMERATE_SQL_TYPES(__ENUMERATE_SQL_TYPE)
 #undef __ENUMERATE_SQL_TYPE
     default:
@@ -84,5 +73,9 @@ enum class Nulls {
     First,
     Last,
 };
+
+using ConnectionID = u64;
+using StatementID = u64;
+using ExecutionID = u64;
 
 }
