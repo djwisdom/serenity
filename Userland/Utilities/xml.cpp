@@ -10,6 +10,7 @@
 #include <AK/URLParser.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibMain/Main.h>
 #include <LibXML/DOM/Document.h>
 #include <LibXML/DOM/Node.h>
@@ -288,7 +289,7 @@ static void dump(XML::Document& document)
                                     color(ColorRole::Tag);
                                     out("{} ", declaration.name);
                                     declaration.definition.visit(
-                                        [](String const& value) {
+                                        [](DeprecatedString const& value) {
                                             color(ColorRole::AttributeValue);
                                             out("\"{}\"", value);
                                         },
@@ -319,7 +320,7 @@ static void dump(XML::Document& document)
                                     color(ColorRole::Tag);
                                     out("{} ", declaration.name);
                                     declaration.definition.visit(
-                                        [](String const& value) {
+                                        [](DeprecatedString const& value) {
                                             color(ColorRole::AttributeValue);
                                             out("\"{}\"", value);
                                         },
@@ -354,14 +355,14 @@ static void dump(XML::Document& document)
     dump(document.root());
 }
 
-static String s_path;
+static DeprecatedString s_path;
 static auto parse(StringView contents)
 {
     return XML::Parser {
         contents,
         {
             .preserve_comments = true,
-            .resolve_external_resource = [&](XML::SystemID const& system_id, Optional<XML::PublicID> const&) -> ErrorOr<String> {
+            .resolve_external_resource = [&](XML::SystemID const& system_id, Optional<XML::PublicID> const&) -> ErrorOr<DeprecatedString> {
                 auto base = URL::create_with_file_scheme(s_path);
                 auto url = URLParser::parse(system_id.system_literal, &base);
                 if (!url.is_valid())
@@ -370,8 +371,8 @@ static auto parse(StringView contents)
                 if (url.scheme() != "file")
                     return Error::from_string_literal("NYI: Nonlocal entity");
 
-                auto file = TRY(Core::File::open(url.path(), Core::OpenMode::ReadOnly));
-                return String::copy(file->read_all());
+                auto file = TRY(Core::Stream::File::open(url.path(), Core::Stream::OpenMode::Read));
+                return DeprecatedString::copy(TRY(file->read_until_eof()));
             },
         },
     };
@@ -382,7 +383,7 @@ enum class TestResult {
     Failed,
     RunnerFailed,
 };
-static HashMap<String, TestResult> s_test_results {};
+static HashMap<DeprecatedString, TestResult> s_test_results {};
 static void do_run_tests(XML::Document& document)
 {
     auto& root = document.root().content.get<XML::Node::Element>();
@@ -429,7 +430,7 @@ static void do_run_tests(XML::Document& document)
                 path_builder.append(entry);
                 path_builder.append('/');
             }
-            auto test_base_path = path_builder.to_string();
+            auto test_base_path = path_builder.to_deprecated_string();
 
             path_builder.append(suite.attributes.find("URI")->value);
             auto url = URL::create_with_file_scheme(path_builder.string_view());
@@ -439,7 +440,7 @@ static void do_run_tests(XML::Document& document)
                 continue;
             }
 
-            auto file_result = Core::File::open(url.path(), Core::OpenMode::ReadOnly);
+            auto file_result = Core::Stream::File::open(url.path(), Core::Stream::OpenMode::Read);
             if (file_result.is_error()) {
                 warnln("Read error for {}: {}", url.path(), file_result.error());
                 s_test_results.set(url.path(), TestResult::RunnerFailed);
@@ -448,8 +449,13 @@ static void do_run_tests(XML::Document& document)
 
             warnln("Running test {}", url.path());
 
-            auto contents = file_result.value()->read_all();
-            auto parser = parse(contents);
+            auto contents = file_result.value()->read_until_eof();
+            if (contents.is_error()) {
+                warnln("Read error for {}: {}", url.path(), contents.error());
+                s_test_results.set(url.path(), TestResult::RunnerFailed);
+                continue;
+            }
+            auto parser = parse(contents.value());
             auto doc_or_error = parser.parse();
             if (doc_or_error.is_error()) {
                 if (type == "invalid" || type == "error" || type == "not-wf")
@@ -462,14 +468,19 @@ static void do_run_tests(XML::Document& document)
             auto out = suite.attributes.find("OUTPUT");
             if (out != suite.attributes.end()) {
                 auto out_path = LexicalPath::join(test_base_path, out->value).string();
-                auto file_result = Core::File::open(out_path, Core::OpenMode::ReadOnly);
+                auto file_result = Core::Stream::File::open(out_path, Core::Stream::OpenMode::Read);
                 if (file_result.is_error()) {
                     warnln("Read error for {}: {}", out_path, file_result.error());
                     s_test_results.set(url.path(), TestResult::RunnerFailed);
                     continue;
                 }
-                auto contents = file_result.value()->read_all();
-                auto parser = parse(contents);
+                auto contents = file_result.value()->read_until_eof();
+                if (contents.is_error()) {
+                    warnln("Read error for {}: {}", out_path, contents.error());
+                    s_test_results.set(url.path(), TestResult::RunnerFailed);
+                    continue;
+                }
+                auto parser = parse(contents.value());
                 auto out_doc_or_error = parser.parse();
                 if (out_doc_or_error.is_error()) {
                     warnln("Parse error for {}: {}", out_path, out_doc_or_error.error());
@@ -505,8 +516,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     parser.parse(arguments);
 
     s_path = Core::File::real_path_for(filename);
-    auto file = TRY(Core::File::open(s_path, Core::OpenMode::ReadOnly));
-    auto contents = file->read_all();
+    auto file = TRY(Core::Stream::File::open(s_path, Core::Stream::OpenMode::Read));
+    auto contents = TRY(file->read_until_eof());
 
     auto xml_parser = parse(contents);
     auto result = xml_parser.parse();

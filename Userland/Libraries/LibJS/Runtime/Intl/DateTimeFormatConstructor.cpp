@@ -46,7 +46,7 @@ ThrowCompletionOr<Value> DateTimeFormatConstructor::call()
 }
 
 // 11.1.1 Intl.DateTimeFormat ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-intl.datetimeformat
-ThrowCompletionOr<Object*> DateTimeFormatConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> DateTimeFormatConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -54,10 +54,10 @@ ThrowCompletionOr<Object*> DateTimeFormatConstructor::construct(FunctionObject& 
     auto options = vm.argument(1);
 
     // 2. Let dateTimeFormat be ? OrdinaryCreateFromConstructor(newTarget, "%DateTimeFormat.prototype%", « [[InitializedDateTimeFormat]], [[Locale]], [[Calendar]], [[NumberingSystem]], [[TimeZone]], [[Weekday]], [[Era]], [[Year]], [[Month]], [[Day]], [[DayPeriod]], [[Hour]], [[Minute]], [[Second]], [[FractionalSecondDigits]], [[TimeZoneName]], [[HourCycle]], [[Pattern]], [[BoundFormat]] »).
-    auto* date_time_format = TRY(ordinary_create_from_constructor<DateTimeFormat>(vm, new_target, &Intrinsics::intl_date_time_format_prototype));
+    auto date_time_format = TRY(ordinary_create_from_constructor<DateTimeFormat>(vm, new_target, &Intrinsics::intl_date_time_format_prototype));
 
     // 3. Perform ? InitializeDateTimeFormat(dateTimeFormat, locales, options).
-    TRY(initialize_date_time_format(vm, *date_time_format, locales, options));
+    TRY(initialize_date_time_format(vm, date_time_format, locales, options));
 
     // 4. If the implementation supports the normative optional constructor mode of 4.3 Note 1, then
     //     a. Let this be the this value.
@@ -106,11 +106,11 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
     // 7. If calendar is not undefined, then
     if (!calendar.is_undefined()) {
         // a. If calendar does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
-        if (!::Locale::is_type_identifier(calendar.as_string().string()))
+        if (!::Locale::is_type_identifier(calendar.as_string().deprecated_string()))
             return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, calendar, "calendar"sv);
 
         // 8. Set opt.[[ca]] to calendar.
-        opt.ca = calendar.as_string().string();
+        opt.ca = calendar.as_string().deprecated_string();
     }
 
     // 9. Let numberingSystem be ? GetOption(options, "numberingSystem", "string", undefined, undefined).
@@ -119,11 +119,11 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
     // 10. If numberingSystem is not undefined, then
     if (!numbering_system.is_undefined()) {
         // a. If numberingSystem does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
-        if (!::Locale::is_type_identifier(numbering_system.as_string().string()))
+        if (!::Locale::is_type_identifier(numbering_system.as_string().deprecated_string()))
             return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, numbering_system, "numberingSystem"sv);
 
         // 11. Set opt.[[nu]] to numberingSystem.
-        opt.nu = numbering_system.as_string().string();
+        opt.nu = numbering_system.as_string().deprecated_string();
     }
 
     // 12. Let hour12 be ? GetOption(options, "hour12", "boolean", undefined, undefined).
@@ -140,7 +140,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
 
     // 15. Set opt.[[hc]] to hourCycle.
     if (!hour_cycle.is_nullish())
-        opt.hc = hour_cycle.as_string().string();
+        opt.hc = hour_cycle.as_string().deprecated_string();
 
     // 16. Let localeData be %DateTimeFormat%.[[LocaleData]].
     // 17. Let r be ResolveLocale(%DateTimeFormat%.[[AvailableLocales]], requestedLocales, opt, %DateTimeFormat%.[[RelevantExtensionKeys]], localeData).
@@ -169,8 +169,10 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
     auto default_hour_cycle = ::Locale::get_default_regional_hour_cycle(data_locale);
 
     // Non-standard, default_hour_cycle will be empty if Unicode data generation is disabled.
-    if (!default_hour_cycle.has_value())
+    if (!default_hour_cycle.has_value()) {
+        date_time_format.set_time_zone(default_time_zone());
         return &date_time_format;
+    }
 
     Optional<::Locale::HourCycle> hour_cycle_value;
 
@@ -212,7 +214,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
 
     // 29. Let timeZone be ? Get(options, "timeZone").
     auto time_zone_value = TRY(options->get(vm.names.timeZone));
-    String time_zone;
+    DeprecatedString time_zone;
 
     // 30. If timeZone is undefined, then
     if (time_zone_value.is_undefined()) {
@@ -275,7 +277,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
 
             // d. Set formatOptions.[[<prop>]] to value.
             if (!value.is_undefined()) {
-                option = ::Locale::calendar_pattern_style_from_string(value.as_string().string());
+                option = ::Locale::calendar_pattern_style_from_string(value.as_string().deprecated_string());
 
                 // e. If value is not undefined, then
                 //     i. Set hasExplicitFormatComponents to true.
@@ -294,14 +296,14 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
 
     // 39. Set dateTimeFormat.[[DateStyle]] to dateStyle.
     if (!date_style.is_undefined())
-        date_time_format.set_date_style(date_style.as_string().string());
+        date_time_format.set_date_style(date_style.as_string().deprecated_string());
 
     // 40. Let timeStyle be ? GetOption(options, "timeStyle", "string", « "full", "long", "medium", "short" », undefined).
     auto time_style = TRY(get_option(vm, *options, vm.names.timeStyle, OptionType::String, AK::Array { "full"sv, "long"sv, "medium"sv, "short"sv }, Empty {}));
 
     // 41. Set dateTimeFormat.[[TimeStyle]] to timeStyle.
     if (!time_style.is_undefined())
-        date_time_format.set_time_style(time_style.as_string().string());
+        date_time_format.set_time_style(time_style.as_string().deprecated_string());
 
     Optional<::Locale::CalendarPattern> best_format {};
 
@@ -323,7 +325,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
         auto formats = ::Locale::get_calendar_available_formats(data_locale, date_time_format.calendar());
 
         // b. If matcher is "basic", then
-        if (matcher.as_string().string() == "basic"sv) {
+        if (matcher.as_string().deprecated_string() == "basic"sv) {
             // i. Let bestFormat be BasicFormatMatcher(formatOptions, formats).
             best_format = basic_format_matcher(format_options, move(formats));
         }
@@ -345,7 +347,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
         }
     });
 
-    String pattern;
+    DeprecatedString pattern;
     Vector<::Locale::CalendarRangePattern> range_patterns;
 
     // 45. If dateTimeFormat.[[Hour]] is undefined, then
@@ -354,7 +356,7 @@ ThrowCompletionOr<DateTimeFormat*> initialize_date_time_format(VM& vm, DateTimeF
         date_time_format.clear_hour_cycle();
     }
 
-    // 46. If dateTimeformat.[[HourCycle]] is "h11" or "h12", then
+    // 46. If dateTimeFormat.[[HourCycle]] is "h11" or "h12", then
     if ((hour_cycle_value == ::Locale::HourCycle::H11) || (hour_cycle_value == ::Locale::HourCycle::H12)) {
         // a. Let pattern be bestFormat.[[pattern12]].
         if (best_format->pattern12.has_value()) {

@@ -37,20 +37,23 @@ void Parser::set_document(WeakPtr<Document> const& document)
     m_document = document;
 }
 
-String Parser::parse_comment()
+DeprecatedString Parser::parse_comment()
 {
-    if (!m_reader.matches('%'))
-        return {};
+    StringBuilder comment;
+    while (true) {
+        if (!m_reader.matches('%'))
+            break;
 
-    m_reader.consume();
-    auto comment_start_offset = m_reader.offset();
-    m_reader.move_until([&](auto) {
-        return m_reader.matches_eol();
-    });
-    String str = StringView(m_reader.bytes().slice(comment_start_offset, m_reader.offset() - comment_start_offset));
-    m_reader.consume_eol();
-    m_reader.consume_whitespace();
-    return str;
+        m_reader.consume();
+        auto comment_start_offset = m_reader.offset();
+        m_reader.move_until([&](auto) {
+            return m_reader.matches_eol();
+        });
+        comment.append(m_reader.bytes().slice(comment_start_offset, m_reader.offset() - comment_start_offset));
+        m_reader.consume_eol();
+        m_reader.consume_whitespace();
+    }
+    return comment.to_deprecated_string();
 }
 
 PDFErrorOr<Value> Parser::parse_value(CanBeIndirectValue can_be_indirect_value)
@@ -98,7 +101,7 @@ PDFErrorOr<Value> Parser::parse_value(CanBeIndirectValue can_be_indirect_value)
     if (m_reader.matches('['))
         return TRY(parse_array());
 
-    return error(String::formatted("Unexpected char \"{}\"", m_reader.peek()));
+    return error(DeprecatedString::formatted("Unexpected char \"{}\"", m_reader.peek()));
 }
 
 PDFErrorOr<Value> Parser::parse_possible_indirect_value_or_ref()
@@ -193,13 +196,11 @@ PDFErrorOr<Value> Parser::parse_number()
 
     m_reader.consume_whitespace();
 
-    auto string = String(m_reader.bytes().slice(start_offset, m_reader.offset() - start_offset));
-    float f = strtof(string.characters(), nullptr);
+    auto string = DeprecatedString(m_reader.bytes().slice(start_offset, m_reader.offset() - start_offset));
     if (is_float)
-        return Value(f);
+        return Value(strtof(string.characters(), nullptr));
 
-    VERIFY(floorf(f) == f);
-    return Value(static_cast<int>(f));
+    return Value(atoi(string.characters()));
 }
 
 PDFErrorOr<NonnullRefPtr<NameObject>> Parser::parse_name()
@@ -214,6 +215,7 @@ PDFErrorOr<NonnullRefPtr<NameObject>> Parser::parse_name()
             break;
 
         if (m_reader.matches('#')) {
+            m_reader.consume();
             int hex_value = 0;
             for (int i = 0; i < 2; i++) {
                 auto ch = m_reader.consume();
@@ -234,14 +236,14 @@ PDFErrorOr<NonnullRefPtr<NameObject>> Parser::parse_name()
 
     m_reader.consume_whitespace();
 
-    return make_object<NameObject>(builder.to_string());
+    return make_object<NameObject>(builder.to_deprecated_string());
 }
 
 NonnullRefPtr<StringObject> Parser::parse_string()
 {
     ScopeGuard guard([&] { m_reader.consume_whitespace(); });
 
-    String string;
+    DeprecatedString string;
     bool is_binary_string;
 
     if (m_reader.matches('(')) {
@@ -273,7 +275,7 @@ NonnullRefPtr<StringObject> Parser::parse_string()
     return string_object;
 }
 
-String Parser::parse_literal_string()
+DeprecatedString Parser::parse_literal_string()
 {
     VERIFY(m_reader.consume('('));
     StringBuilder builder;
@@ -348,10 +350,10 @@ String Parser::parse_literal_string()
         }
     }
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-String Parser::parse_hex_string()
+DeprecatedString Parser::parse_hex_string()
 {
     VERIFY(m_reader.consume('<'));
 
@@ -360,11 +362,12 @@ String Parser::parse_hex_string()
     while (true) {
         if (m_reader.matches('>')) {
             m_reader.consume();
-            return builder.to_string();
+            return builder.to_deprecated_string();
         } else {
             int hex_value = 0;
 
             for (int i = 0; i < 2; i++) {
+                m_reader.consume_whitespace();
                 auto ch = m_reader.consume();
                 if (ch == '>') {
                     // The hex string contains an odd number of characters, and the last character
@@ -372,9 +375,8 @@ String Parser::parse_hex_string()
                     m_reader.consume();
                     hex_value *= 16;
                     builder.append(static_cast<char>(hex_value));
-                    return builder.to_string();
+                    return builder.to_deprecated_string();
                 }
-
                 VERIFY(isxdigit(ch));
 
                 hex_value *= 16;
@@ -475,13 +477,44 @@ PDFErrorOr<NonnullRefPtr<StreamObject>> Parser::parse_stream(NonnullRefPtr<DictO
         m_document->security_handler()->decrypt(stream_object, m_current_reference_stack.last());
 
     if (dict->contains(CommonNames::Filter)) {
-        auto filter_type = MUST(dict->get_name(m_document, CommonNames::Filter))->name();
-        auto maybe_bytes = Filter::decode(stream_object->bytes(), filter_type);
-        if (maybe_bytes.is_error()) {
-            warnln("Failed to decode filter: {}", maybe_bytes.error().string_literal());
-            return error(String::formatted("Failed to decode filter {}", maybe_bytes.error().string_literal()));
+        Vector<FlyString> filters;
+
+        // We may either get a single filter or an array of cascading filters
+        auto filter_object = TRY(dict->get_object(m_document, CommonNames::Filter));
+        if (filter_object->is<ArrayObject>()) {
+            auto filter_array = filter_object->cast<ArrayObject>();
+            for (size_t i = 0; i < filter_array->size(); ++i)
+                filters.append(TRY(filter_array->get_name_at(m_document, i))->name());
+        } else {
+            filters.append(filter_object->cast<NameObject>()->name());
         }
-        stream_object->buffer() = maybe_bytes.release_value();
+
+        // Every filter may get its own parameter dictionary
+        Vector<RefPtr<DictObject>> decode_parms_vector;
+        RefPtr<Object> decode_parms_object;
+        if (dict->contains(CommonNames::DecodeParms)) {
+            decode_parms_object = TRY(dict->get_object(m_document, CommonNames::DecodeParms));
+            if (decode_parms_object->is<ArrayObject>()) {
+                auto decode_parms_array = decode_parms_object->cast<ArrayObject>();
+                for (size_t i = 0; i < decode_parms_array->size(); ++i) {
+                    // FIXME: This entry may be the null object instead
+                    RefPtr<DictObject> decode_parms = decode_parms_array->at(i).get<NonnullRefPtr<Object>>()->cast<DictObject>();
+                    decode_parms_vector.append(decode_parms);
+                }
+            } else {
+                decode_parms_vector.append(decode_parms_object->cast<DictObject>());
+            }
+        }
+
+        VERIFY(decode_parms_vector.is_empty() || decode_parms_vector.size() == filters.size());
+
+        for (size_t i = 0; i < filters.size(); ++i) {
+            RefPtr<DictObject> decode_parms;
+            if (!decode_parms_vector.is_empty())
+                decode_parms = decode_parms_vector.at(i);
+
+            stream_object->buffer() = TRY(Filter::decode(stream_object->bytes(), filters.at(i), decode_parms));
+        }
     }
 
     return stream_object;
@@ -528,7 +561,7 @@ PDFErrorOr<Vector<Operator>> Parser::parse_operators()
 }
 
 Error Parser::error(
-    String const& message
+    DeprecatedString const& message
 #ifdef PDF_DEBUG
     ,
     SourceLocation loc

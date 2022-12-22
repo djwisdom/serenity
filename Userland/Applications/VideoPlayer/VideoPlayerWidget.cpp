@@ -38,6 +38,17 @@ VideoPlayerWidget::VideoPlayerWidget(GUI::Window& window)
     m_seek_slider = player_controls_widget.add<GUI::HorizontalSlider>();
     m_seek_slider->set_fixed_height(20);
     m_seek_slider->set_enabled(false);
+    m_seek_slider->on_change = [&](int value) {
+        if (!m_playback_manager)
+            return;
+        update_seek_slider_max();
+        auto progress = value / static_cast<double>(m_seek_slider->max());
+        auto duration = m_playback_manager->duration().to_milliseconds();
+        Time timestamp = Time::from_milliseconds(static_cast<i64>(round(progress * static_cast<double>(duration))));
+        set_current_timestamp(timestamp);
+        m_playback_manager->seek_to_timestamp(timestamp);
+    };
+    m_seek_slider->set_jump_to_cursor(true);
 
     auto& toolbar_container = player_controls_widget.add<GUI::ToolbarContainer>();
     m_toolbar = toolbar_container.add<GUI::Toolbar>();
@@ -56,7 +67,7 @@ VideoPlayerWidget::VideoPlayerWidget(GUI::Window& window)
     m_toolbar->add_action(*m_play_pause_action);
     m_toolbar->add<GUI::VerticalSeparator>();
     m_timestamp_label = m_toolbar->add<GUI::Label>();
-    m_timestamp_label->set_fixed_width(50);
+    m_timestamp_label->set_autosize(true);
 
     m_toolbar->add<GUI::Widget>(); // Filler widget
 
@@ -89,6 +100,8 @@ void VideoPlayerWidget::open_file(StringView filename)
 
     close_file();
     m_playback_manager = load_file_result.release_value();
+    update_seek_slider_max();
+    update_seek_mode();
     resume_playback();
 }
 
@@ -97,15 +110,19 @@ void VideoPlayerWidget::update_play_pause_icon()
     if (!m_playback_manager) {
         m_play_pause_action->set_enabled(false);
         m_play_pause_action->set_icon(m_play_icon);
+        m_play_pause_action->set_text("Play"sv);
         return;
     }
 
     m_play_pause_action->set_enabled(true);
 
-    if (m_playback_manager->is_playing() || m_playback_manager->is_buffering())
+    if (m_playback_manager->is_playing()) {
         m_play_pause_action->set_icon(m_pause_icon);
-    else
+        m_play_pause_action->set_text("Pause"sv);
+    } else {
         m_play_pause_action->set_icon(m_play_icon);
+        m_play_pause_action->set_text("Play"sv);
+    }
 }
 
 void VideoPlayerWidget::resume_playback()
@@ -128,7 +145,7 @@ void VideoPlayerWidget::toggle_pause()
 {
     if (!m_playback_manager)
         return;
-    if (m_playback_manager->is_playing() || m_playback_manager->is_buffering())
+    if (m_playback_manager->is_playing())
         pause_playback();
     else
         resume_playback();
@@ -159,7 +176,47 @@ void VideoPlayerWidget::on_decoding_error(Video::DecoderError const& error)
         break;
     }
 
-    GUI::MessageBox::show(&m_window, String::formatted(text_format, error.string_literal()), "Video Player encountered an error"sv);
+    GUI::MessageBox::show(&m_window, DeprecatedString::formatted(text_format, error.string_literal()), "Video Player encountered an error"sv);
+}
+
+void VideoPlayerWidget::update_seek_slider_max()
+{
+    if (!m_playback_manager) {
+        m_seek_slider->set_enabled(false);
+        return;
+    }
+
+    m_seek_slider->set_max(static_cast<int>(min(m_playback_manager->duration().to_milliseconds(), NumericLimits<int>::max())));
+    m_seek_slider->set_enabled(true);
+}
+
+void VideoPlayerWidget::set_current_timestamp(Time timestamp)
+{
+    set_time_label(timestamp);
+    if (!m_playback_manager)
+        return;
+    auto progress = static_cast<double>(timestamp.to_milliseconds()) / static_cast<double>(m_playback_manager->duration().to_milliseconds());
+    m_seek_slider->set_value(static_cast<int>(round(progress * m_seek_slider->max())), GUI::AllowCallback::No);
+}
+
+void VideoPlayerWidget::set_time_label(Time timestamp)
+{
+    StringBuilder string_builder;
+    auto append_time = [&](Time time) {
+        auto seconds = time.to_seconds();
+        string_builder.appendff("{:02}:{:02}:{:02}", seconds / 3600, seconds / 60, seconds % 60);
+    };
+
+    append_time(timestamp);
+
+    if (m_playback_manager) {
+        string_builder.append(" / "sv);
+        append_time(m_playback_manager->duration());
+    } else {
+        string_builder.append(" / --:--:--.---"sv);
+    }
+
+    m_timestamp_label->set_text(string_builder.string_view());
 }
 
 void VideoPlayerWidget::event(Core::Event& event)
@@ -174,9 +231,8 @@ void VideoPlayerWidget::event(Core::Event& event)
         m_video_display->set_bitmap(frame_event.frame());
         m_video_display->repaint();
 
-        m_seek_slider->set_max(m_playback_manager->duration().to_milliseconds());
-        m_seek_slider->set_value(m_playback_manager->current_playback_time().to_milliseconds());
-        m_seek_slider->set_enabled(true);
+        update_seek_slider_max();
+        set_current_timestamp(m_playback_manager->current_playback_time());
 
         frame_event.accept();
     } else if (event.type() == Video::EventType::PlaybackStatusChange) {
@@ -205,14 +261,36 @@ void VideoPlayerWidget::update_title()
     }
 
     string_builder.append("[*] - Video Player"sv);
-    window()->set_title(string_builder.to_string());
+    window()->set_title(string_builder.to_deprecated_string());
+}
+
+Video::PlaybackManager::SeekMode VideoPlayerWidget::seek_mode()
+{
+    if (m_use_fast_seeking->is_checked())
+        return Video::PlaybackManager::SeekMode::Fast;
+    return Video::PlaybackManager::SeekMode::Accurate;
+}
+
+void VideoPlayerWidget::set_seek_mode(Video::PlaybackManager::SeekMode seek_mode)
+{
+    m_use_fast_seeking->set_checked(seek_mode == Video::PlaybackManager::SeekMode::Fast);
+}
+
+void VideoPlayerWidget::update_seek_mode()
+{
+    if (!m_playback_manager)
+        return;
+    m_playback_manager->set_seek_mode(seek_mode());
 }
 
 void VideoPlayerWidget::initialize_menubar(GUI::Window& window)
 {
+    // FIXME: This should return ErrorOr and use try_... functions.
+
+    // File menu
     auto& file_menu = window.add_menu("&File");
     file_menu.add_action(GUI::CommonActions::make_open_action([&](auto&) {
-        Optional<String> path = GUI::FilePicker::get_open_filepath(&window, "Open video file...");
+        Optional<DeprecatedString> path = GUI::FilePicker::get_open_filepath(&window, "Open video file...");
         if (path.has_value())
             open_file(path.value());
     }));
@@ -221,6 +299,18 @@ void VideoPlayerWidget::initialize_menubar(GUI::Window& window)
         window.close();
     }));
 
+    // Playback menu
+    auto& playback_menu = window.add_menu("&Playback");
+
+    // FIXME: Maybe seek mode should be in an options dialog instead. The playback menu may get crowded.
+    //        For now, leave it here for convenience.
+    m_use_fast_seeking = GUI::Action::create_checkable("&Fast Seeking", [&](auto&) {
+        update_seek_mode();
+    });
+    playback_menu.add_action(*m_use_fast_seeking);
+    set_seek_mode(Video::PlaybackManager::DEFAULT_SEEK_MODE);
+
+    // Help menu
     auto& help_menu = window.add_menu("&Help");
     help_menu.add_action(GUI::CommonActions::make_about_action("Video Player", GUI::Icon::default_icon("app-video-player"sv), &window));
 }

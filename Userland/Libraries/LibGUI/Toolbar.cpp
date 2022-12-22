@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/StringBuilder.h>
 #include <LibCore/EventLoop.h>
 #include <LibGUI/Action.h>
@@ -51,12 +51,35 @@ private:
         if (action.group() && action.group()->is_exclusive())
             set_exclusive(true);
         set_action(action);
+        set_tooltip(tooltip(action));
         set_focus_policy(FocusPolicy::NoFocus);
         if (action.icon())
             set_icon(action.icon());
         else
             set_text(action.text());
         set_button_style(Gfx::ButtonStyle::Coolbar);
+    }
+
+    virtual void set_text(DeprecatedString text) override
+    {
+        auto const* action = this->action();
+        VERIFY(action);
+
+        set_tooltip(tooltip(*action));
+        if (!action->icon())
+            Button::set_text(move(text));
+    }
+
+    DeprecatedString tooltip(Action const& action) const
+    {
+        StringBuilder builder;
+        builder.append(action.text());
+        if (action.shortcut().is_valid()) {
+            builder.append(" ("sv);
+            builder.append(action.shortcut().to_deprecated_string());
+            builder.append(')');
+        }
+        return builder.to_deprecated_string();
     }
 
     virtual void enter_event(Core::Event& event) override

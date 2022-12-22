@@ -33,7 +33,7 @@ LocalServer::~LocalServer()
         ::close(m_fd);
 }
 
-ErrorOr<void> LocalServer::take_over_from_system_server(String const& socket_path)
+ErrorOr<void> LocalServer::take_over_from_system_server(DeprecatedString const& socket_path)
 {
     if (m_listening)
         return Error::from_string_literal("Core::LocalServer: Can't perform socket takeover when already listening");
@@ -65,7 +65,7 @@ void LocalServer::setup_notifier()
     };
 }
 
-bool LocalServer::listen(String const& address)
+bool LocalServer::listen(DeprecatedString const& address)
 {
     if (m_listening)
         return false;
@@ -133,7 +133,7 @@ ErrorOr<NonnullOwnPtr<Stream::LocalSocket>> LocalServer::accept()
     (void)fcntl(accepted_fd, F_SETFD, FD_CLOEXEC);
 #endif
 
-    return Stream::LocalSocket::adopt_fd(accepted_fd);
+    return Stream::LocalSocket::adopt_fd(accepted_fd, Stream::PreventSIGPIPE::Yes);
 }
 
 }

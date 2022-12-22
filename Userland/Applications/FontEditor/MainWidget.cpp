@@ -50,7 +50,7 @@ static constexpr Array pangrams = {
     "pack my box with five dozen liquor jugs"sv,
     "quick brown fox jumps over the lazy dog"sv,
     "waxy and quivering jocks fumble the pizza"sv,
-    "~#:[@_1%]*{$2.3}/4^(5'6\"sv)-&|7+8!=<9,0\\>?;"sv,
+    "~#:[@_1%]*{$2.3}/4^(5'6\")-&|7+8!=<9,0\\>?;"sv,
     "byxfjärmat föl gick på duvshowen"sv,
     "         "sv,
     "float Fox.quick(h){ is_brown && it_jumps_over(doges.lazy) }"sv,
@@ -73,7 +73,7 @@ ErrorOr<RefPtr<GUI::Window>> MainWidget::create_preview_window()
 
     m_preview_textbox = find_descendant_of_type_named<GUI::TextBox>("preview_textbox");
     m_preview_textbox->on_change = [&] {
-        auto preview = String::formatted("{}\n{}", m_preview_textbox->text(), Unicode::to_unicode_uppercase_full(m_preview_textbox->text()));
+        auto preview = DeprecatedString::formatted("{}\n{}", m_preview_textbox->text(), Unicode::to_unicode_uppercase_full(m_preview_textbox->text()));
         m_preview_label->set_text(preview);
     };
     m_preview_textbox->set_text(pangrams[0]);
@@ -101,46 +101,46 @@ ErrorOr<void> MainWidget::create_actions()
         new_font_wizard->hide();
         auto maybe_font = new_font_wizard->create_font();
         if (maybe_font.is_error())
-            return show_error("Failed to create new font"sv, maybe_font.error());
+            return show_error(maybe_font.error(), "Creating new font failed"sv);
         if (auto result = initialize({}, move(maybe_font.value())); result.is_error())
-            show_error("Failed to initialize font"sv, result.error());
+            show_error(result.error(), "Initializing new font failed"sv);
     });
     m_new_action->set_status_tip("Create a new font");
 
     m_open_action = GUI::CommonActions::make_open_action([&](auto&) {
         if (!request_close())
             return;
-        Optional<String> open_path = GUI::FilePicker::get_open_filepath(window(), {}, "/res/fonts/"sv);
+        Optional<DeprecatedString> open_path = GUI::FilePicker::get_open_filepath(window(), {}, "/res/fonts/"sv);
         if (!open_path.has_value())
             return;
         if (auto result = open_file(open_path.value()); result.is_error())
-            show_error("Failed to open font"sv, result.error());
+            show_error(result.error(), "Opening"sv, LexicalPath { open_path.value() }.basename());
     });
 
     m_save_action = GUI::CommonActions::make_save_action([&](auto&) {
         if (m_path.is_empty())
             return m_save_as_action->activate();
         if (auto result = save_file(m_path); result.is_error())
-            show_error("Failed to save font"sv, result.error());
+            show_error(result.error(), "Saving"sv, LexicalPath { m_path }.basename());
     });
 
     m_save_as_action = GUI::CommonActions::make_save_as_action([&](auto&) {
         LexicalPath lexical_path(m_path.is_empty() ? "Untitled.font" : m_path);
-        Optional<String> save_path = GUI::FilePicker::get_save_filepath(window(), lexical_path.title(), lexical_path.extension());
+        Optional<DeprecatedString> save_path = GUI::FilePicker::get_save_filepath(window(), lexical_path.title(), lexical_path.extension());
         if (!save_path.has_value())
             return;
         if (auto result = save_file(save_path.value()); result.is_error())
-            show_error("Failed to save font"sv, result.error());
+            show_error(result.error(), "Saving"sv, lexical_path.basename());
     });
 
     m_cut_action = GUI::CommonActions::make_cut_action([&](auto&) {
         if (auto result = cut_selected_glyphs(); result.is_error())
-            show_error("Failed to cut selection"sv, result.error());
+            show_error(result.error(), "Cutting selection failed"sv);
     });
 
     m_copy_action = GUI::CommonActions::make_copy_action([&](auto&) {
         if (auto result = copy_selected_glyphs(); result.is_error())
-            show_error("Failed to copy selection"sv, result.error());
+            show_error(result.error(), "Copying selection failed"sv);
     });
 
     m_paste_action = GUI::CommonActions::make_paste_action([&](auto&) {
@@ -148,7 +148,7 @@ ErrorOr<void> MainWidget::create_actions()
     });
     m_paste_action->set_enabled(GUI::Clipboard::the().fetch_mime_type() == "glyph/x-fonteditor");
 
-    GUI::Clipboard::the().on_change = [&](String const& data_type) {
+    GUI::Clipboard::the().on_change = [&](DeprecatedString const& data_type) {
         m_paste_action->set_enabled(data_type == "glyph/x-fonteditor");
     };
 
@@ -172,12 +172,13 @@ ErrorOr<void> MainWidget::create_actions()
         auto selection = m_glyph_map_widget->selection().normalized();
         m_undo_selection->set_start(selection.start());
         m_undo_selection->set_size(selection.size());
+        update_statusbar();
     });
 
     m_open_preview_action = GUI::Action::create("&Preview Font", { Mod_Ctrl, Key_P }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/find.png"sv)), [&](auto&) {
         if (!m_font_preview_window) {
             if (auto maybe_window = create_preview_window(); maybe_window.is_error())
-                show_error("Failed to create preview window"sv, maybe_window.error());
+                show_error(maybe_window.error(), "Creating preview window failed"sv);
             else
                 m_font_preview_window = maybe_window.release_value();
         }
@@ -204,17 +205,44 @@ ErrorOr<void> MainWidget::create_actions()
     m_show_unicode_blocks_action->set_checked(show_unicode_blocks);
     m_show_unicode_blocks_action->set_status_tip("Show or hide the Unicode block list");
 
-    bool highlight_modifications = Config::read_bool("FontEditor"sv, "Display"sv, "HighlightModifications"sv, true);
+    bool show_toolbar = Config::read_bool("FontEditor"sv, "Layout"sv, "ShowToolbar"sv, true);
+    set_show_toolbar(show_toolbar);
+    m_show_toolbar_action = GUI::Action::create_checkable("&Toolbar", [&](auto& action) {
+        set_show_toolbar(action.is_checked());
+        Config::write_bool("FontEditor"sv, "Layout"sv, "ShowToolbar"sv, action.is_checked());
+    });
+    m_show_toolbar_action->set_checked(show_toolbar);
+    m_show_toolbar_action->set_status_tip("Show or hide the toolbar");
+
+    bool show_statusbar = Config::read_bool("FontEditor"sv, "Layout"sv, "ShowStatusbar"sv, true);
+    set_show_statusbar(show_statusbar);
+    m_show_statusbar_action = GUI::Action::create_checkable("&Status Bar", [&](auto& action) {
+        set_show_statusbar(action.is_checked());
+        Config::write_bool("FontEditor"sv, "Layout"sv, "ShowStatusbar"sv, action.is_checked());
+    });
+    m_show_statusbar_action->set_checked(show_statusbar);
+    m_show_statusbar_action->set_status_tip("Show or hide the status bar");
+
+    bool highlight_modifications = Config::read_bool("FontEditor"sv, "GlyphMap"sv, "HighlightModifications"sv, true);
     set_highlight_modifications(highlight_modifications);
     m_highlight_modifications_action = GUI::Action::create_checkable("&Highlight Modifications", { Mod_Ctrl, Key_H }, [&](auto& action) {
         set_highlight_modifications(action.is_checked());
-        Config::write_bool("FontEditor"sv, "Display"sv, "HighlightModifications"sv, action.is_checked());
+        Config::write_bool("FontEditor"sv, "GlyphMap"sv, "HighlightModifications"sv, action.is_checked());
     });
     m_highlight_modifications_action->set_checked(highlight_modifications);
     m_highlight_modifications_action->set_status_tip("Show or hide highlights on modified glyphs. (Green = New, Blue = Modified, Red = Deleted)");
 
+    bool show_system_emoji = Config::read_bool("FontEditor"sv, "GlyphMap"sv, "ShowSystemEmoji"sv, true);
+    set_show_system_emoji(show_system_emoji);
+    m_show_system_emoji_action = GUI::Action::create_checkable("System &Emoji", { Mod_Ctrl, Key_E }, [&](auto& action) {
+        set_show_system_emoji(action.is_checked());
+        Config::write_bool("FontEditor"sv, "GlyphMap"sv, "ShowSystemEmoji"sv, action.is_checked());
+    });
+    m_show_system_emoji_action->set_checked(show_system_emoji);
+    m_show_system_emoji_action->set_status_tip("Show or hide system emoji");
+
     m_go_to_glyph_action = GUI::Action::create("&Go to Glyph...", { Mod_Ctrl, Key_G }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-to.png"sv)), [&](auto&) {
-        String input;
+        DeprecatedString input;
         if (GUI::InputBox::show(window(), input, "Hexadecimal:"sv, "Go to glyph"sv) == GUI::InputBox::ExecResult::OK && !input.is_empty()) {
             auto maybe_code_point = AK::StringUtils::convert_to_uint_from_hex(input);
             if (!maybe_code_point.has_value())
@@ -239,7 +267,7 @@ ErrorOr<void> MainWidget::create_actions()
     m_next_glyph_action->set_status_tip("Seek the next visible glyph");
 
     i32 scale = Config::read_i32("FontEditor"sv, "GlyphEditor"sv, "Scale"sv, 10);
-    set_scale(scale);
+    m_glyph_editor_widget->set_scale(scale);
     m_scale_five_action = GUI::Action::create_checkable("500%", { Mod_Ctrl, Key_1 }, [this](auto&) {
         set_scale_and_save(5);
     });
@@ -275,19 +303,19 @@ ErrorOr<void> MainWidget::create_actions()
     m_glyph_tool_actions.set_exclusive(true);
 
     m_rotate_counterclockwise_action = GUI::CommonActions::make_rotate_counterclockwise_action([&](auto&) {
-        m_glyph_editor_widget->rotate_90(GlyphEditorWidget::Counterclockwise);
+        m_glyph_editor_widget->rotate_90(Gfx::RotationDirection::CounterClockwise);
     });
 
     m_rotate_clockwise_action = GUI::CommonActions::make_rotate_clockwise_action([&](auto&) {
-        m_glyph_editor_widget->rotate_90(GlyphEditorWidget::Clockwise);
+        m_glyph_editor_widget->rotate_90(Gfx::RotationDirection::Clockwise);
     });
 
     m_flip_horizontal_action = GUI::Action::create("Flip Horizontally", { Mod_Ctrl | Mod_Shift, Key_Q }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-flip-horizontal.png"sv)), [&](auto&) {
-        m_glyph_editor_widget->flip_horizontally();
+        m_glyph_editor_widget->flip(Gfx::Orientation::Horizontal);
     });
 
     m_flip_vertical_action = GUI::Action::create("Flip Vertically", { Mod_Ctrl | Mod_Shift, Key_W }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-flip-vertical.png"sv)), [&](auto&) {
-        m_glyph_editor_widget->flip_vertically();
+        m_glyph_editor_widget->flip(Gfx::Orientation::Vertical);
     });
 
     m_copy_text_action = GUI::Action::create("Copy as Te&xt", { Mod_Ctrl, Key_T }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-copy.png"sv)), [&](auto&) {
@@ -298,7 +326,7 @@ ErrorOr<void> MainWidget::create_actions()
                 continue;
             builder.append_code_point(code_point);
         }
-        GUI::Clipboard::the().set_plain_text(builder.to_string());
+        GUI::Clipboard::the().set_plain_text(builder.to_deprecated_string());
     });
     m_copy_text_action->set_status_tip("Copy to clipboard as text");
 
@@ -343,18 +371,18 @@ ErrorOr<void> MainWidget::create_models()
 {
     for (auto& it : Gfx::font_slope_names)
         TRY(m_font_slope_list.try_append(it.name));
-    m_slope_combobox->set_model(GUI::ItemListModel<String>::create(m_font_slope_list));
+    m_slope_combobox->set_model(GUI::ItemListModel<DeprecatedString>::create(m_font_slope_list));
 
     for (auto& it : Gfx::font_weight_names)
         TRY(m_font_weight_list.try_append(it.name));
-    m_weight_combobox->set_model(GUI::ItemListModel<String>::create(m_font_weight_list));
+    m_weight_combobox->set_model(GUI::ItemListModel<DeprecatedString>::create(m_font_weight_list));
 
     auto unicode_blocks = Unicode::block_display_names();
     TRY(m_unicode_block_list.try_append("Show All"));
     for (auto& block : unicode_blocks)
         TRY(m_unicode_block_list.try_append(block.display_name));
 
-    m_unicode_block_model = GUI::ItemListModel<String>::create(m_unicode_block_list);
+    m_unicode_block_model = GUI::ItemListModel<DeprecatedString>::create(m_unicode_block_list);
     m_filter_model = TRY(GUI::FilteringProxyModel::create(*m_unicode_block_model));
     m_filter_model->set_filter_term(""sv);
 
@@ -372,6 +400,7 @@ ErrorOr<void> MainWidget::create_models()
     m_unicode_block_listview->set_activates_on_selection(true);
     m_unicode_block_listview->horizontal_scrollbar().set_visible(false);
     m_unicode_block_listview->set_cursor(m_unicode_block_model->index(0, 0), GUI::AbstractView::SelectionUpdate::Set);
+    m_unicode_block_listview->set_focus_proxy(m_search_textbox);
 
     return {};
 }
@@ -395,6 +424,7 @@ MainWidget::MainWidget()
 
     m_font_metadata_groupbox = find_descendant_of_type_named<GUI::GroupBox>("font_metadata_groupbox");
     m_unicode_block_container = find_descendant_of_type_named<GUI::Widget>("unicode_block_container");
+    m_toolbar_container = find_descendant_of_type_named<GUI::ToolbarContainer>("toolbar_container");
 
     m_glyph_map_widget = find_descendant_of_type_named<GUI::GlyphMapWidget>("glyph_map_widget");
     m_glyph_editor_widget = find_descendant_of_type_named<GlyphEditorWidget>("glyph_editor_widget");
@@ -428,6 +458,10 @@ MainWidget::MainWidget()
 
     m_glyph_map_widget->on_context_menu_request = [this](auto& event) {
         m_context_menu->popup(event.screen_position());
+    };
+
+    m_glyph_map_widget->on_escape_pressed = [this]() {
+        update_statusbar();
     };
 
     m_name_textbox = find_descendant_of_type_named<GUI::TextBox>("name_textbox");
@@ -538,6 +572,12 @@ MainWidget::MainWidget()
     };
 
     m_statusbar = find_descendant_of_type_named<GUI::Statusbar>("statusbar");
+    m_statusbar->segment(1).set_mode(GUI::Statusbar::Segment::Mode::Auto);
+    m_statusbar->segment(1).set_clickable(true);
+    m_statusbar->segment(1).on_click = [&](auto) {
+        m_show_unicode_blocks_action->activate();
+    };
+
     GUI::Application::the()->on_action_enter = [this](GUI::Action& action) {
         auto text = action.status_tip();
         if (text.is_empty())
@@ -550,10 +590,12 @@ MainWidget::MainWidget()
     };
 }
 
-ErrorOr<void> MainWidget::initialize(String const& path, RefPtr<Gfx::BitmapFont>&& edited_font)
+ErrorOr<void> MainWidget::initialize(DeprecatedString const& path, RefPtr<Gfx::BitmapFont>&& edited_font)
 {
     if (m_edited_font == edited_font)
         return {};
+
+    TRY(m_glyph_map_widget->set_font(*edited_font));
 
     auto selection = m_glyph_map_widget->selection().normalized();
     m_undo_selection = TRY(try_make_ref_counted<UndoSelection>(selection.start(), selection.size(), m_glyph_map_widget->active_glyph(), *edited_font, *m_glyph_map_widget));
@@ -565,7 +607,6 @@ ErrorOr<void> MainWidget::initialize(String const& path, RefPtr<Gfx::BitmapFont>
     if (m_preview_label)
         m_preview_label->set_font(*m_edited_font);
 
-    m_glyph_map_widget->set_font(*m_edited_font);
     m_glyph_editor_widget->set_font(*m_edited_font);
     m_glyph_editor_widget->set_fixed_size(m_glyph_editor_widget->preferred_width(), m_glyph_editor_widget->preferred_height());
 
@@ -656,12 +697,16 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
     TRY(go_menu->try_add_action(*m_go_to_glyph_action));
 
     auto view_menu = TRY(window.try_add_menu("&View"));
+    auto layout_menu = TRY(view_menu->try_add_submenu("&Layout"));
+    TRY(layout_menu->try_add_action(*m_show_toolbar_action));
+    TRY(layout_menu->try_add_action(*m_show_statusbar_action));
+    TRY(layout_menu->try_add_action(*m_show_metadata_action));
+    TRY(layout_menu->try_add_action(*m_show_unicode_blocks_action));
+    TRY(view_menu->try_add_separator());
     TRY(view_menu->try_add_action(*m_open_preview_action));
     TRY(view_menu->try_add_separator());
-    TRY(view_menu->try_add_action(*m_show_metadata_action));
-    TRY(view_menu->try_add_action(*m_show_unicode_blocks_action));
-    TRY(view_menu->try_add_separator());
     TRY(view_menu->try_add_action(*m_highlight_modifications_action));
+    TRY(view_menu->try_add_action(*m_show_system_emoji_action));
     TRY(view_menu->try_add_separator());
     auto scale_menu = TRY(view_menu->try_add_submenu("&Scale"));
     TRY(scale_menu->try_add_action(*m_scale_five_action));
@@ -678,7 +723,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
     return {};
 }
 
-ErrorOr<void> MainWidget::save_file(String const& path)
+ErrorOr<void> MainWidget::save_file(DeprecatedString const& path)
 {
     auto masked_font = TRY(m_edited_font->masked_character_set());
     TRY(masked_font->write_to_file(path));
@@ -687,6 +732,22 @@ ErrorOr<void> MainWidget::save_file(String const& path)
     window()->set_modified(false);
     update_title();
     return {};
+}
+
+void MainWidget::set_show_toolbar(bool show)
+{
+    if (m_toolbar_container->is_visible() == show)
+        return;
+    m_toolbar_container->set_visible(show);
+}
+
+void MainWidget::set_show_statusbar(bool show)
+{
+    if (m_statusbar->is_visible() == show)
+        return;
+    m_statusbar->set_visible(show);
+    if (show)
+        update_statusbar();
 }
 
 void MainWidget::set_show_font_metadata(bool show)
@@ -703,6 +764,10 @@ void MainWidget::set_show_unicode_blocks(bool show)
         return;
     m_unicode_blocks = show;
     m_unicode_block_container->set_visible(m_unicode_blocks);
+    if (show)
+        m_search_textbox->set_focus(true);
+    else
+        m_glyph_map_widget->set_focus(true);
 }
 
 void MainWidget::set_highlight_modifications(bool highlight_modifications)
@@ -710,7 +775,12 @@ void MainWidget::set_highlight_modifications(bool highlight_modifications)
     m_glyph_map_widget->set_highlight_modifications(highlight_modifications);
 }
 
-ErrorOr<void> MainWidget::open_file(String const& path)
+void MainWidget::set_show_system_emoji(bool show)
+{
+    m_glyph_map_widget->set_show_system_emoji(show);
+}
+
+ErrorOr<void> MainWidget::open_file(DeprecatedString const& path)
 {
     auto unmasked_font = TRY(TRY(Gfx::BitmapFont::try_load_from_file(path))->unmasked_character_set());
     TRY(initialize(path, move(unmasked_font)));
@@ -721,12 +791,12 @@ void MainWidget::push_undo()
 {
     auto maybe_state = m_undo_selection->save_state();
     if (maybe_state.is_error())
-        return show_error("Failed to save undo state"sv, maybe_state.error());
+        return show_error(maybe_state.error(), "Saving undo state failed"sv);
     auto maybe_command = try_make<SelectionUndoCommand>(*m_undo_selection, move(maybe_state.value()));
     if (maybe_command.is_error())
-        return show_error("Failed to make undo command"sv, maybe_command.error());
+        return show_error(maybe_command.error(), "Making undo command failed"sv);
     if (auto maybe_push = m_undo_stack->try_push(move(maybe_command.value())); maybe_push.is_error())
-        show_error("Failed to push undo stack"sv, maybe_push.error());
+        show_error(maybe_push.error(), "Pushing undo stack failed"sv);
 }
 
 void MainWidget::reset_selection_and_push_undo()
@@ -756,7 +826,7 @@ void MainWidget::undo()
     deferred_invoke([this, glyph] {
         auto start = m_undo_selection->restored_start();
         auto size = m_undo_selection->restored_size();
-        m_glyph_map_widget->set_selection(start, size, glyph);
+        m_glyph_map_widget->restore_selection(start, size, glyph);
         m_glyph_map_widget->scroll_to_glyph(glyph);
         m_glyph_map_widget->set_focus(true);
     });
@@ -786,7 +856,7 @@ void MainWidget::redo()
     deferred_invoke([this, glyph] {
         auto start = m_undo_selection->restored_start();
         auto size = m_undo_selection->restored_size();
-        m_glyph_map_widget->set_selection(start, size, glyph);
+        m_glyph_map_widget->restore_selection(start, size, glyph);
         m_glyph_map_widget->scroll_to_glyph(glyph);
         m_glyph_map_widget->set_focus(true);
     });
@@ -825,7 +895,7 @@ void MainWidget::update_title()
     else
         title.append(m_path);
     title.append("[*] - Font Editor"sv);
-    window()->set_title(title.to_string());
+    window()->set_title(title.to_deprecated_string());
 }
 
 void MainWidget::did_modify_font()
@@ -838,6 +908,9 @@ void MainWidget::did_modify_font()
 
 void MainWidget::update_statusbar()
 {
+    if (!m_statusbar->is_visible())
+        return;
+
     auto glyph = m_glyph_map_widget->active_glyph();
     StringBuilder builder;
     builder.appendff("U+{:04X} (", glyph);
@@ -863,7 +936,16 @@ void MainWidget::update_statusbar()
         builder.appendff(" [{}x{}]", m_edited_font->raw_glyph_width(glyph), m_edited_font->glyph_height());
     else if (Gfx::Emoji::emoji_for_code_point(glyph))
         builder.appendff(" [emoji]");
-    m_statusbar->set_text(builder.to_string());
+    m_statusbar->set_text(builder.to_deprecated_string());
+
+    builder.clear();
+
+    auto selection = m_glyph_map_widget->selection().normalized();
+    if (selection.size() > 1)
+        builder.appendff("{} glyphs selected", selection.size());
+    else
+        builder.appendff("U+{:04X}-U+{:04X}", m_range.first, m_range.last);
+    m_statusbar->set_text(1, builder.to_deprecated_string());
 }
 
 void MainWidget::update_preview()
@@ -893,19 +975,14 @@ void MainWidget::drop_event(GUI::DropEvent& event)
             return;
 
         if (auto result = open_file(urls.first().path()); result.is_error())
-            show_error("Failed to load font"sv, result.error());
+            show_error(result.error(), "Opening"sv, LexicalPath { urls.first().path() }.basename());
     }
-}
-
-void MainWidget::set_scale(i32 scale)
-{
-    m_glyph_editor_widget->set_scale(scale);
 }
 
 void MainWidget::set_scale_and_save(i32 scale)
 {
-    set_scale(scale);
     Config::write_i32("FontEditor"sv, "GlyphEditor"sv, "Scale"sv, scale);
+    m_glyph_editor_widget->set_scale(scale);
     m_glyph_editor_widget->set_fixed_size(m_glyph_editor_widget->preferred_width(), m_glyph_editor_widget->preferred_height());
 }
 
@@ -920,11 +997,11 @@ ErrorOr<void> MainWidget::copy_selected_glyphs()
     TRY(buffer.try_append(rows, bytes_per_glyph * selection.size()));
     TRY(buffer.try_append(widths, selection.size()));
 
-    HashMap<String, String> metadata;
-    metadata.set("start", String::number(selection.start()));
-    metadata.set("count", String::number(selection.size()));
-    metadata.set("width", String::number(edited_font().max_glyph_width()));
-    metadata.set("height", String::number(edited_font().glyph_height()));
+    HashMap<DeprecatedString, DeprecatedString> metadata;
+    metadata.set("start", DeprecatedString::number(selection.start()));
+    metadata.set("count", DeprecatedString::number(selection.size()));
+    metadata.set("width", DeprecatedString::number(edited_font().max_glyph_width()));
+    metadata.set("height", DeprecatedString::number(edited_font().glyph_height()));
     GUI::Clipboard::the().set_data(buffer.bytes(), "glyph/x-fonteditor", metadata);
 
     return {};
@@ -980,6 +1057,7 @@ void MainWidget::paste_glyphs()
 
     m_glyph_editor_widget->update();
     m_glyph_map_widget->update();
+    update_preview();
     update_statusbar();
 }
 
@@ -1001,12 +1079,17 @@ void MainWidget::delete_selected_glyphs()
 
     m_glyph_editor_widget->update();
     m_glyph_map_widget->update();
+    update_preview();
     update_statusbar();
 }
 
-void MainWidget::show_error(StringView preface, Error error)
+void MainWidget::show_error(Error error, StringView preface, StringView basename)
 {
-    auto formatted_error = String::formatted("{}: {}", preface, error);
+    DeprecatedString formatted_error;
+    if (basename.is_empty())
+        formatted_error = DeprecatedString::formatted("{}: {}", preface, error);
+    else
+        formatted_error = DeprecatedString::formatted("{} \"{}\" failed: {}", preface, basename, error);
     GUI::MessageBox::show_error(window(), formatted_error);
     warnln(formatted_error);
 }

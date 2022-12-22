@@ -26,7 +26,7 @@ PageHost::PageHost(ConnectionFromClient& client)
 {
     setup_palette();
     m_invalidation_coalescing_timer = Web::Platform::Timer::create_single_shot(0, [this] {
-        m_client.async_did_invalidate_content_rect(m_invalidation_rect);
+        m_client.async_did_invalidate_content_rect({ m_invalidation_rect.x().value(), m_invalidation_rect.y().value(), m_invalidation_rect.width().value(), m_invalidation_rect.height().value() });
         m_invalidation_rect = {};
     });
 }
@@ -48,6 +48,11 @@ void PageHost::setup_palette()
     theme->color[(int)Gfx::ColorRole::Window] = Color::Magenta;
     theme->color[(int)Gfx::ColorRole::WindowText] = Color::Cyan;
     m_palette_impl = Gfx::PaletteImpl::create_with_anonymous_buffer(buffer);
+}
+
+bool PageHost::is_connection_open() const
+{
+    return m_client.is_open();
 }
 
 Gfx::Palette PageHost::palette() const
@@ -74,25 +79,20 @@ void PageHost::set_is_scripting_enabled(bool is_scripting_enabled)
     page().set_is_scripting_enabled(is_scripting_enabled);
 }
 
-void PageHost::set_is_webdriver_active(bool is_webdriver_active)
-{
-    page().set_is_webdriver_active(is_webdriver_active);
-}
-
-void PageHost::set_window_position(Gfx::IntPoint const& position)
+void PageHost::set_window_position(Gfx::IntPoint position)
 {
     page().set_window_position(position);
 }
 
-void PageHost::set_window_size(Gfx::IntSize const& size)
+void PageHost::set_window_size(Gfx::IntSize size)
 {
     page().set_window_size(size);
 }
 
-ErrorOr<void> PageHost::connect_to_webdriver(String const& webdriver_ipc_path)
+ErrorOr<void> PageHost::connect_to_webdriver(DeprecatedString const& webdriver_ipc_path)
 {
     VERIFY(!m_webdriver);
-    m_webdriver = TRY(WebDriverConnection::connect(m_client, *this, webdriver_ipc_path));
+    m_webdriver = TRY(WebDriverConnection::connect(*this, webdriver_ipc_path));
     return {};
 }
 
@@ -104,10 +104,10 @@ Web::Layout::InitialContainingBlock* PageHost::layout_root()
     return document->layout_node();
 }
 
-void PageHost::paint(Gfx::IntRect const& content_rect, Gfx::Bitmap& target)
+void PageHost::paint(Web::DevicePixelRect const& content_rect, Gfx::Bitmap& target)
 {
     Gfx::Painter painter(target);
-    Gfx::IntRect bitmap_rect { {}, content_rect.size() };
+    Gfx::IntRect bitmap_rect { {}, content_rect.size().to_type<int>() };
 
     if (auto* document = page().top_level_browsing_context().active_document())
         document->update_layout();
@@ -118,9 +118,9 @@ void PageHost::paint(Gfx::IntRect const& content_rect, Gfx::Bitmap& target)
         return;
     }
 
-    Web::PaintContext context(painter, palette(), content_rect.top_left());
+    Web::PaintContext context(painter, palette(), device_pixels_per_css_pixel());
     context.set_should_show_line_box_borders(m_should_show_line_box_borders);
-    context.set_viewport_rect(content_rect);
+    context.set_device_viewport_rect(content_rect);
     context.set_has_focus(m_has_focus);
     layout_root->paint_all_phases(context);
 }
@@ -130,9 +130,9 @@ void PageHost::set_viewport_rect(Gfx::IntRect const& rect)
     page().top_level_browsing_context().set_viewport_rect(rect);
 }
 
-void PageHost::page_did_invalidate(Gfx::IntRect const& content_rect)
+void PageHost::page_did_invalidate(Web::CSSPixelRect const& content_rect)
 {
-    m_invalidation_rect = m_invalidation_rect.united(content_rect);
+    m_invalidation_rect = m_invalidation_rect.united(page().enclosing_device_rect(content_rect));
     if (!m_invalidation_coalescing_timer->is_active())
         m_invalidation_coalescing_timer->start();
 }
@@ -152,15 +152,60 @@ void PageHost::page_did_layout()
     auto* layout_root = this->layout_root();
     VERIFY(layout_root);
     if (layout_root->paint_box()->has_overflow())
-        m_content_size = enclosing_int_rect(layout_root->paint_box()->scrollable_overflow_rect().value()).size();
+        m_content_size = page().enclosing_device_rect(layout_root->paint_box()->scrollable_overflow_rect().value()).size();
     else
-        m_content_size = enclosing_int_rect(layout_root->paint_box()->absolute_rect()).size();
-    m_client.async_did_layout(m_content_size);
+        m_content_size = page().enclosing_device_rect(layout_root->paint_box()->absolute_rect()).size();
+    m_client.async_did_layout(m_content_size.to_type<int>());
 }
 
-void PageHost::page_did_change_title(String const& title)
+void PageHost::page_did_change_title(DeprecatedString const& title)
 {
     m_client.async_did_change_title(title);
+}
+
+void PageHost::page_did_request_navigate_back()
+{
+    m_client.async_did_request_navigate_back();
+}
+
+void PageHost::page_did_request_navigate_forward()
+{
+    m_client.async_did_request_navigate_forward();
+}
+
+void PageHost::page_did_request_refresh()
+{
+    m_client.async_did_request_refresh();
+}
+
+Gfx::IntSize PageHost::page_did_request_resize_window(Gfx::IntSize size)
+{
+    return m_client.did_request_resize_window(size);
+}
+
+Gfx::IntPoint PageHost::page_did_request_reposition_window(Gfx::IntPoint position)
+{
+    return m_client.did_request_reposition_window(position);
+}
+
+void PageHost::page_did_request_restore_window()
+{
+    m_client.async_did_request_restore_window();
+}
+
+Gfx::IntRect PageHost::page_did_request_maximize_window()
+{
+    return m_client.did_request_maximize_window();
+}
+
+Gfx::IntRect PageHost::page_did_request_minimize_window()
+{
+    return m_client.did_request_minimize_window();
+}
+
+Gfx::IntRect PageHost::page_did_request_fullscreen_window()
+{
+    return m_client.did_request_fullscreen_window();
 }
 
 void PageHost::page_did_request_scroll(i32 x_delta, i32 y_delta)
@@ -168,19 +213,23 @@ void PageHost::page_did_request_scroll(i32 x_delta, i32 y_delta)
     m_client.async_did_request_scroll(x_delta, y_delta);
 }
 
-void PageHost::page_did_request_scroll_to(Gfx::IntPoint const& scroll_position)
+void PageHost::page_did_request_scroll_to(Web::CSSPixelPoint scroll_position)
 {
-    m_client.async_did_request_scroll_to(scroll_position);
+    m_client.async_did_request_scroll_to({ scroll_position.x().value(), scroll_position.y().value() });
 }
 
-void PageHost::page_did_request_scroll_into_view(Gfx::IntRect const& rect)
+void PageHost::page_did_request_scroll_into_view(Web::CSSPixelRect const& rect)
 {
-    m_client.async_did_request_scroll_into_view(rect);
+    auto device_pixel_rect = page().enclosing_device_rect(rect);
+    m_client.async_did_request_scroll_into_view({ device_pixel_rect.x().value(),
+        device_pixel_rect.y().value(),
+        device_pixel_rect.width().value(),
+        device_pixel_rect.height().value() });
 }
 
-void PageHost::page_did_enter_tooltip_area(Gfx::IntPoint const& content_position, String const& title)
+void PageHost::page_did_enter_tooltip_area(Web::CSSPixelPoint content_position, DeprecatedString const& title)
 {
-    m_client.async_did_enter_tooltip_area(content_position, title);
+    m_client.async_did_enter_tooltip_area({ content_position.x().value(), content_position.y().value() }, title);
 }
 
 void PageHost::page_did_leave_tooltip_area()
@@ -198,19 +247,19 @@ void PageHost::page_did_unhover_link()
     m_client.async_did_unhover_link();
 }
 
-void PageHost::page_did_click_link(const URL& url, String const& target, unsigned modifiers)
+void PageHost::page_did_click_link(const URL& url, DeprecatedString const& target, unsigned modifiers)
 {
     m_client.async_did_click_link(url, target, modifiers);
 }
 
-void PageHost::page_did_middle_click_link(const URL& url, [[maybe_unused]] String const& target, [[maybe_unused]] unsigned modifiers)
+void PageHost::page_did_middle_click_link(const URL& url, [[maybe_unused]] DeprecatedString const& target, [[maybe_unused]] unsigned modifiers)
 {
     m_client.async_did_middle_click_link(url, target, modifiers);
 }
 
-void PageHost::page_did_start_loading(const URL& url)
+void PageHost::page_did_start_loading(const URL& url, bool is_redirect)
 {
-    m_client.async_did_start_loading(url);
+    m_client.async_did_start_loading(url, is_redirect);
 }
 
 void PageHost::page_did_create_main_document()
@@ -223,43 +272,59 @@ void PageHost::page_did_finish_loading(const URL& url)
     m_client.async_did_finish_loading(url);
 }
 
-void PageHost::page_did_request_context_menu(Gfx::IntPoint const& content_position)
+void PageHost::page_did_request_context_menu(Web::CSSPixelPoint content_position)
 {
-    m_client.async_did_request_context_menu(content_position);
+    m_client.async_did_request_context_menu(page().css_to_device_point(content_position).to_type<int>());
 }
 
-void PageHost::page_did_request_link_context_menu(Gfx::IntPoint const& content_position, const URL& url, String const& target, unsigned modifiers)
+void PageHost::page_did_request_link_context_menu(Web::CSSPixelPoint content_position, URL const& url, DeprecatedString const& target, unsigned modifiers)
 {
-    m_client.async_did_request_link_context_menu(content_position, url, target, modifiers);
+    m_client.async_did_request_link_context_menu(page().css_to_device_point(content_position).to_type<int>(), url, target, modifiers);
 }
 
-void PageHost::page_did_request_alert(String const& message)
+void PageHost::page_did_request_alert(DeprecatedString const& message)
 {
-    auto response = m_client.send_sync_but_allow_failure<Messages::WebContentClient::DidRequestAlert>(message);
-    if (!response) {
-        dbgln("WebContent client disconnected during DidRequestAlert. Exiting peacefully.");
-        exit(0);
-    }
+    m_client.async_did_request_alert(message);
 }
 
-bool PageHost::page_did_request_confirm(String const& message)
+void PageHost::alert_closed()
 {
-    auto response = m_client.send_sync_but_allow_failure<Messages::WebContentClient::DidRequestConfirm>(message);
-    if (!response) {
-        dbgln("WebContent client disconnected during DidRequestConfirm. Exiting peacefully.");
-        exit(0);
-    }
-    return response->take_result();
+    page().alert_closed();
 }
 
-String PageHost::page_did_request_prompt(String const& message, String const& default_)
+void PageHost::page_did_request_confirm(DeprecatedString const& message)
 {
-    auto response = m_client.send_sync_but_allow_failure<Messages::WebContentClient::DidRequestPrompt>(message, default_);
-    if (!response) {
-        dbgln("WebContent client disconnected during DidRequestPrompt. Exiting peacefully.");
-        exit(0);
-    }
-    return response->take_response();
+    m_client.async_did_request_confirm(message);
+}
+
+void PageHost::confirm_closed(bool accepted)
+{
+    page().confirm_closed(accepted);
+}
+
+void PageHost::page_did_request_prompt(DeprecatedString const& message, DeprecatedString const& default_)
+{
+    m_client.async_did_request_prompt(message, default_);
+}
+
+void PageHost::page_did_request_set_prompt_text(DeprecatedString const& text)
+{
+    m_client.async_did_request_set_prompt_text(text);
+}
+
+void PageHost::prompt_closed(DeprecatedString response)
+{
+    page().prompt_closed(move(response));
+}
+
+void PageHost::page_did_request_accept_dialog()
+{
+    m_client.async_did_request_accept_dialog();
+}
+
+void PageHost::page_did_request_dismiss_dialog()
+{
+    m_client.async_did_request_dismiss_dialog();
 }
 
 void PageHost::page_did_change_favicon(Gfx::Bitmap const& favicon)
@@ -267,13 +332,23 @@ void PageHost::page_did_change_favicon(Gfx::Bitmap const& favicon)
     m_client.async_did_change_favicon(favicon.to_shareable_bitmap());
 }
 
-void PageHost::page_did_request_image_context_menu(Gfx::IntPoint const& content_position, const URL& url, String const& target, unsigned modifiers, Gfx::Bitmap const* bitmap_pointer)
+void PageHost::page_did_request_image_context_menu(Web::CSSPixelPoint content_position, URL const& url, DeprecatedString const& target, unsigned modifiers, Gfx::Bitmap const* bitmap_pointer)
 {
     auto bitmap = bitmap_pointer ? bitmap_pointer->to_shareable_bitmap() : Gfx::ShareableBitmap();
-    m_client.async_did_request_image_context_menu(content_position, url, target, modifiers, bitmap);
+    m_client.async_did_request_image_context_menu({ content_position.x().value(), content_position.y().value() }, url, target, modifiers, bitmap);
 }
 
-String PageHost::page_did_request_cookie(const URL& url, Web::Cookie::Source source)
+Vector<Web::Cookie::Cookie> PageHost::page_did_request_all_cookies(URL const& url)
+{
+    return m_client.did_request_all_cookies(url);
+}
+
+Optional<Web::Cookie::Cookie> PageHost::page_did_request_named_cookie(URL const& url, DeprecatedString const& name)
+{
+    return m_client.did_request_named_cookie(url, name);
+}
+
+DeprecatedString PageHost::page_did_request_cookie(const URL& url, Web::Cookie::Source source)
 {
     auto response = m_client.send_sync_but_allow_failure<Messages::WebContentClient::DidRequestCookie>(move(url), static_cast<u8>(source));
     if (!response) {
@@ -286,6 +361,11 @@ String PageHost::page_did_request_cookie(const URL& url, Web::Cookie::Source sou
 void PageHost::page_did_set_cookie(const URL& url, Web::Cookie::ParsedCookie const& cookie, Web::Cookie::Source source)
 {
     m_client.async_did_set_cookie(url, cookie, static_cast<u8>(source));
+}
+
+void PageHost::page_did_update_cookie(Web::Cookie::Cookie cookie)
+{
+    m_client.async_did_update_cookie(move(cookie));
 }
 
 void PageHost::page_did_update_resource_count(i32 count_waiting)

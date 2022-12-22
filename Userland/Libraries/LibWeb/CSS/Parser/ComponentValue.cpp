@@ -26,25 +26,25 @@ ComponentValue::ComponentValue(NonnullRefPtr<Block> block)
 
 ComponentValue::~ComponentValue() = default;
 
-String ComponentValue::to_string() const
+DeprecatedString ComponentValue::to_deprecated_string() const
 {
     return m_value.visit(
-        [](Token const& token) { return token.to_string(); },
-        [](NonnullRefPtr<Block> const& block) { return block->to_string(); },
-        [](NonnullRefPtr<Function> const& function) { return function->to_string(); });
+        [](Token const& token) { return token.to_deprecated_string(); },
+        [](NonnullRefPtr<Block> const& block) { return block->to_deprecated_string(); },
+        [](NonnullRefPtr<Function> const& function) { return function->to_deprecated_string(); });
 }
 
-String ComponentValue::to_debug_string() const
+DeprecatedString ComponentValue::to_debug_string() const
 {
     return m_value.visit(
         [](Token const& token) {
-            return String::formatted("Token: {}", token.to_debug_string());
+            return DeprecatedString::formatted("Token: {}", token.to_debug_string());
         },
         [](NonnullRefPtr<Block> const& block) {
-            return String::formatted("Block: {}", block->to_string());
+            return DeprecatedString::formatted("Block: {}", block->to_deprecated_string());
         },
         [](NonnullRefPtr<Function> const& function) {
-            return String::formatted("Function: {}", function->to_string());
+            return DeprecatedString::formatted("Function: {}", function->to_deprecated_string());
         });
 }
 

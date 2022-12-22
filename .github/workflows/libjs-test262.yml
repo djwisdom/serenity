@@ -110,6 +110,7 @@ jobs:
         run: |
           cp -f ../libjs-website/test262/data/per-file-master.json .
           cp -f ../libjs-website/test262/data/per-file-bytecode-master.json .
+          cp -f ../libjs-website/test262/data/per-file-bytecode-optimized-master.json .
           cp -f ../libjs-website/wasm/data/per-file-master.json wasm-per-file-master.json
 
       - name: Run test262 and test262-parser-tests
@@ -121,7 +122,8 @@ jobs:
             --test262-parser-tests ../test262-parser-tests \
             --results-json ../libjs-website/test262/data/results.json \
             --per-file-output ../libjs-website/test262/data/per-file-master.json \
-            --per-file-bytecode-output ../libjs-website/test262/data/per-file-bytecode-master.json
+            --per-file-bytecode-output ../libjs-website/test262/data/per-file-bytecode-master.json \
+            --per-file-bytecode-optimized-output ../libjs-website/test262/data/per-file-bytecode-optimized-master.json
 
       - name: Run test-wasm
         working-directory: libjs-test262/Build
@@ -151,7 +153,7 @@ jobs:
           mv wasm-new-results.json ../../libjs-website/wasm/data/results.json
 
       - name: Deploy to GitHub pages
-        uses: JamesIves/github-pages-deploy-action@4.1.1
+        uses: JamesIves/github-pages-deploy-action@v4.4.1
         with:
           git-config-name: BuggieBot
           git-config-email: buggiebot@serenityos.org
@@ -170,20 +172,12 @@ jobs:
         working-directory: libjs-test262
         run: ./per_file_result_diff.py -o per-file-bytecode-master.json -n ../libjs-website/test262/data/per-file-bytecode-master.json
 
+      - name: Compare optimized bytecode
+        continue-on-error: true
+        working-directory: libjs-test262
+        run: ./per_file_result_diff.py -o per-file-bytecode-optimized-master.json -n ../libjs-website/test262/data/per-file-bytecode-optimized-master.json
+
       - name: Compare wasm
         continue-on-error: true
         working-directory: libjs-test262
         run: ./per_file_result_diff.py -o wasm-per-file-master.json -n ../libjs-website/wasm/data/per-file-master.json
-
-      - name: Build and package js
-        working-directory: libjs-test262/Build
-        run: |
-          ninja js
-          cpack -D CPACK_INSTALL_CMAKE_PROJECTS="$(pwd)/_deps/lagom-build;js;js;/"
-
-      - name: Upload js package
-        uses: actions/upload-artifact@v2
-        with:
-          name: serenity-js
-          path: libjs-test262/Build/serenity-js.tar.gz
-          retention-days: 7

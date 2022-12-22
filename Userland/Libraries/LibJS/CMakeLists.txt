@@ -10,6 +10,7 @@ set(SOURCES
     Bytecode/Op.cpp
     Bytecode/Pass/DumpCFG.cpp
     Bytecode/Pass/GenerateCFG.cpp
+    Bytecode/Pass/LoadElimination.cpp
     Bytecode/Pass/MergeBlocks.cpp
     Bytecode/Pass/PlaceBlocks.cpp
     Bytecode/Pass/UnifySameBlocks.cpp
@@ -31,6 +32,8 @@ set(SOURCES
     MarkupGenerator.cpp
     Module.cpp
     Parser.cpp
+    ParserError.cpp
+    Print.cpp
     Runtime/AbstractOperations.cpp
     Runtime/AggregateError.cpp
     Runtime/AggregateErrorConstructor.cpp
@@ -78,6 +81,7 @@ set(SOURCES
     Runtime/ErrorConstructor.cpp
     Runtime/ErrorPrototype.cpp
     Runtime/ErrorTypes.cpp
+    Runtime/ExecutionContext.cpp
     Runtime/FinalizationRegistry.cpp
     Runtime/FinalizationRegistryConstructor.cpp
     Runtime/FinalizationRegistryPrototype.cpp
@@ -136,6 +140,7 @@ set(SOURCES
     Runtime/IteratorOperations.cpp
     Runtime/IteratorPrototype.cpp
     Runtime/JSONObject.cpp
+    Runtime/JobCallback.cpp
     Runtime/Map.cpp
     Runtime/MapConstructor.cpp
     Runtime/MapIterator.cpp
@@ -244,6 +249,7 @@ set(SOURCES
     Runtime/WeakSetPrototype.cpp
     Runtime/WrappedFunction.cpp
     Script.cpp
+    SourceCode.cpp
     SourceTextModule.cpp
     SyntaxHighlighter.cpp
     SyntheticModule.cpp

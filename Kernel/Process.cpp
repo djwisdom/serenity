@@ -320,13 +320,14 @@ ErrorOr<NonnullLockRefPtr<Process>> Process::try_create(LockRefPtr<Thread>& firs
         new_address_space = TRY(Memory::AddressSpace::try_create(nullptr));
     }
     auto unveil_tree = UnveilNode { TRY(KString::try_create("/"sv)), UnveilMetadata(TRY(KString::try_create("/"sv))) };
+    auto exec_unveil_tree = UnveilNode { TRY(KString::try_create("/"sv)), UnveilMetadata(TRY(KString::try_create("/"sv))) };
     auto credentials = TRY(Credentials::create(uid, gid, uid, gid, uid, gid, {}));
-    auto process = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) Process(move(name), move(credentials), ppid, is_kernel_process, move(current_directory), move(executable), tty, move(unveil_tree))));
+    auto process = TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) Process(move(name), move(credentials), ppid, is_kernel_process, move(current_directory), move(executable), tty, move(unveil_tree), move(exec_unveil_tree))));
     TRY(process->attach_resources(new_address_space.release_nonnull(), first_thread, fork_parent));
     return process;
 }
 
-Process::Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials> credentials, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree)
+Process::Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials> credentials, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree, UnveilNode exec_unveil_tree)
     : m_name(move(name))
     , m_space(LockRank::None)
     , m_protected_data_lock(LockRank::None)
@@ -335,6 +336,7 @@ Process::Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials> credent
     , m_current_directory(LockRank::None, move(current_directory))
     , m_tty(tty)
     , m_unveil_data(LockRank::None, move(unveil_tree))
+    , m_exec_unveil_data(LockRank::None, move(exec_unveil_tree))
     , m_wait_blocker_set(*this)
 {
     // Ensure that we protect the process data when exiting the constructor.
@@ -694,7 +696,16 @@ ErrorOr<void> Process::dump_core()
     VERIFY(is_dumpable());
     VERIFY(should_generate_coredump());
     dbgln("Generating coredump for pid: {}", pid().value());
-    auto coredump_path = TRY(KString::formatted("/tmp/coredump/{}_{}_{}", name(), pid().value(), kgettimeofday().to_truncated_seconds()));
+    auto coredump_directory_path = TRY(Coredump::directory_path().with([&](auto& coredump_directory_path) -> ErrorOr<NonnullOwnPtr<KString>> {
+        if (coredump_directory_path)
+            return KString::try_create(coredump_directory_path->view());
+        return KString::try_create(""sv);
+    }));
+    if (coredump_directory_path->view() == ""sv) {
+        dbgln("Generating coredump for pid {} failed because coredump directory was not set.", pid().value());
+        return {};
+    }
+    auto coredump_path = TRY(KString::formatted("{}/{}_{}_{}", coredump_directory_path->view(), name(), pid().value(), kgettimeofday().to_truncated_seconds()));
     auto coredump = TRY(Coredump::try_create(*this, coredump_path->view()));
     return coredump->write();
 }
@@ -1087,6 +1098,17 @@ RefPtr<Custody> Process::executable()
 RefPtr<Custody const> Process::executable() const
 {
     return m_executable.with([](auto& executable) { return executable; });
+}
+
+ErrorOr<NonnullRefPtr<Custody>> Process::custody_for_dirfd(int dirfd)
+{
+    if (dirfd == AT_FDCWD)
+        return current_directory();
+
+    auto base_description = TRY(open_file_description(dirfd));
+    if (!base_description->custody())
+        return EINVAL;
+    return *base_description->custody();
 }
 
 }

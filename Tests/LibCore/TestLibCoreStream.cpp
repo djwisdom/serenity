@@ -5,8 +5,10 @@
  */
 
 #include <AK/Format.h>
+#include <AK/String.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/LocalServer.h>
+#include <LibCore/MemoryStream.h>
 #include <LibCore/Stream.h>
 #include <LibCore/TCPServer.h>
 #include <LibCore/Timer.h>
@@ -29,8 +31,6 @@ TEST_CASE(file_open)
     // Testing out some basic file properties.
     auto file = maybe_file.release_value();
     EXPECT(file->is_open());
-    EXPECT(!file->is_readable());
-    EXPECT(file->is_writable());
     EXPECT(!file->is_eof());
 
     auto maybe_size = file->size();
@@ -89,17 +89,17 @@ TEST_CASE(file_seeking_around)
 
     EXPECT(!file->seek(500, Core::Stream::SeekMode::SetPosition).is_error());
     EXPECT_EQ(file->tell().release_value(), 500);
-    EXPECT(file->read_or_error(buffer));
+    EXPECT(!file->read_entire_buffer(buffer).is_error());
     EXPECT_EQ(buffer_contents, expected_seek_contents1);
 
     EXPECT(!file->seek(234, Core::Stream::SeekMode::FromCurrentPosition).is_error());
     EXPECT_EQ(file->tell().release_value(), 750);
-    EXPECT(file->read_or_error(buffer));
+    EXPECT(!file->read_entire_buffer(buffer).is_error());
     EXPECT_EQ(buffer_contents, expected_seek_contents2);
 
     EXPECT(!file->seek(-105, Core::Stream::SeekMode::FromEndPosition).is_error());
     EXPECT_EQ(file->tell().release_value(), 8597);
-    EXPECT(file->read_or_error(buffer));
+    EXPECT(!file->read_entire_buffer(buffer).is_error());
     EXPECT_EQ(buffer_contents, expected_seek_contents3);
 }
 
@@ -122,7 +122,7 @@ TEST_CASE(file_adopt_fd)
 
     EXPECT(!file->seek(500, Core::Stream::SeekMode::SetPosition).is_error());
     EXPECT_EQ(file->tell().release_value(), 500);
-    EXPECT(file->read_or_error(buffer));
+    EXPECT(!file->read_entire_buffer(buffer).is_error());
     EXPECT_EQ(buffer_contents, expected_seek_contents1);
 
     // A single seek & read test should be fine for now.
@@ -220,7 +220,7 @@ TEST_CASE(tcp_socket_write)
     auto server_socket = maybe_server_socket.release_value();
     EXPECT(!server_socket->set_blocking(true).is_error());
 
-    EXPECT(client_socket->write_or_error({ sent_data.characters_without_null_termination(), sent_data.length() }));
+    EXPECT(!client_socket->write_entire_buffer({ sent_data.characters_without_null_termination(), sent_data.length() }).is_error());
     client_socket->close();
 
     auto maybe_receive_buffer = ByteBuffer::create_uninitialized(64);
@@ -284,14 +284,16 @@ TEST_CASE(udp_socket_read_write)
     auto client_socket = maybe_client_socket.release_value();
 
     EXPECT(client_socket->is_open());
-    EXPECT(client_socket->write_or_error({ sent_data.characters_without_null_termination(), sent_data.length() }));
+    EXPECT(!client_socket->write_entire_buffer({ sent_data.characters_without_null_termination(), sent_data.length() }).is_error());
 
     // FIXME: UDPServer::receive sadly doesn't give us a way to block on it,
     // currently.
     usleep(100000);
 
     struct sockaddr_in client_address;
-    auto server_receive_buffer = udp_server->receive(64, client_address);
+    auto server_receive_buffer_or_error = udp_server->receive(64, client_address);
+    EXPECT(!server_receive_buffer_or_error.is_error());
+    auto server_receive_buffer = server_receive_buffer_or_error.release_value();
     EXPECT(!server_receive_buffer.is_empty());
 
     StringView server_received_data { server_receive_buffer.bytes() };
@@ -402,7 +404,7 @@ TEST_CASE(local_socket_write)
             EXPECT(!maybe_client_socket.is_error());
             auto client_socket = maybe_client_socket.release_value();
 
-            EXPECT(client_socket->write_or_error({ sent_data.characters_without_null_termination(), sent_data.length() }));
+            EXPECT(!client_socket->write_entire_buffer({ sent_data.characters_without_null_termination(), sent_data.length() }).is_error());
             client_socket->close();
 
             return 0;
@@ -505,4 +507,55 @@ TEST_CASE(buffered_tcp_socket_read)
     EXPECT(!maybe_second_received_line.is_error());
     auto second_received_line = maybe_second_received_line.value();
     EXPECT_EQ(second_received_line, second_line);
+}
+
+// Allocating memory stream tests
+
+TEST_CASE(allocating_memory_stream_empty)
+{
+    Core::Stream::AllocatingMemoryStream stream;
+
+    EXPECT_EQ(stream.used_buffer_size(), 0ul);
+
+    {
+        Array<u8, 32> array;
+        auto read_bytes = MUST(stream.read(array));
+        EXPECT_EQ(read_bytes.size(), 0ul);
+    }
+}
+
+TEST_CASE(allocating_memory_stream_10kb)
+{
+    auto file = MUST(Core::Stream::File::open("/usr/Tests/LibCore/10kb.txt"sv, Core::Stream::OpenMode::Read));
+    size_t const file_size = MUST(file->size());
+    size_t constexpr test_chunk_size = 4096;
+
+    // Read file contents into the memory stream.
+    Core::Stream::AllocatingMemoryStream stream;
+    while (!file->is_eof()) {
+        Array<u8, test_chunk_size> array;
+        MUST(stream.write(MUST(file->read(array))));
+    }
+
+    EXPECT_EQ(stream.used_buffer_size(), file_size);
+
+    MUST(file->seek(0, Core::Stream::SeekMode::SetPosition));
+
+    // Check the stream contents when reading back.
+    size_t offset = 0;
+    while (!file->is_eof()) {
+        Array<u8, test_chunk_size> file_array;
+        Array<u8, test_chunk_size> stream_array;
+        auto file_span = MUST(file->read(file_array));
+        auto stream_span = MUST(stream.read(stream_array));
+        EXPECT_EQ(file_span.size(), stream_span.size());
+
+        for (size_t i = 0; i < file_span.size(); i++) {
+            if (file_array[i] == stream_array[i])
+                continue;
+
+            FAIL(String::formatted("Data started to diverge at index {}: file={}, stream={}", offset + i, file_array[i], stream_array[i]));
+        }
+        offset += file_span.size();
+    }
 }

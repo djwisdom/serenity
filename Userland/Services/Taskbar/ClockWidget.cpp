@@ -32,19 +32,13 @@ ClockWidget::ClockWidget()
         if (now != last_update_time) {
             tick_clock();
             last_update_time = now;
-            set_tooltip(Core::DateTime::now().to_string("%Y-%m-%d"sv));
+            set_tooltip(Core::DateTime::now().to_deprecated_string("%Y-%m-%d"sv));
         }
     });
 
     m_calendar_window = add<GUI::Window>(window());
+    m_calendar_window->set_window_type(GUI::WindowType::Popup);
     m_calendar_window->resize(m_window_size.width(), m_window_size.height());
-    m_calendar_window->set_frameless(true);
-    m_calendar_window->set_resizable(false);
-    m_calendar_window->set_minimizable(false);
-    m_calendar_window->on_active_input_change = [this](bool is_active_input) {
-        if (!is_active_input)
-            close();
-    };
 
     auto& root_container = m_calendar_window->set_main_widget<GUI::Frame>();
     root_container.set_fill_with_background_color(true);
@@ -161,17 +155,17 @@ ClockWidget::ClockWidget()
     };
 }
 
-void ClockWidget::update_format(String const& format)
+void ClockWidget::update_format(DeprecatedString const& format)
 {
     m_time_format = format;
-    m_time_width = font().width(Core::DateTime::create(122, 2, 22, 22, 22, 22).to_string(format));
+    m_time_width = font().width(Core::DateTime::create(122, 2, 22, 22, 22, 22).to_deprecated_string(format));
     set_fixed_size(m_time_width + 20, 21);
 }
 
 void ClockWidget::paint_event(GUI::PaintEvent& event)
 {
     GUI::Frame::paint_event(event);
-    auto time_text = Core::DateTime::now().to_string(m_time_format);
+    auto time_text = Core::DateTime::now().to_deprecated_string(m_time_format);
     GUI::Painter painter(*this);
     painter.add_clip_rect(frame_inner_rect());
 

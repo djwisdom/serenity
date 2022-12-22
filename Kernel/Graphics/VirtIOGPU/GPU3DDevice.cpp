@@ -21,25 +21,24 @@ VirtIOGPU3DDevice::PerContextState::PerContextState(Graphics::VirtIOGPU::Context
 {
 }
 
-NonnullLockRefPtr<VirtIOGPU3DDevice> VirtIOGPU3DDevice::must_create(VirtIOGraphicsAdapter const& adapter)
+ErrorOr<NonnullLockRefPtr<VirtIOGPU3DDevice>> VirtIOGPU3DDevice::try_create(VirtIOGraphicsAdapter& adapter)
 {
     // Setup memory transfer region
-    auto region_result = MM.allocate_kernel_region(
+    auto region_result = TRY(MM.allocate_kernel_region(
         NUM_TRANSFER_REGION_PAGES * PAGE_SIZE,
         "VIRGL3D kernel upload buffer"sv,
         Memory::Region::Access::ReadWrite,
-        AllocationStrategy::AllocateNow);
-    VERIFY(!region_result.is_error());
-    auto device = MUST(DeviceManagement::try_create_device<VirtIOGPU3DDevice>(adapter, region_result.release_value()));
-    return device;
+        AllocationStrategy::AllocateNow));
+    auto kernel_context_id = TRY(adapter.create_context());
+    return TRY(DeviceManagement::try_create_device<VirtIOGPU3DDevice>(adapter, move(region_result), kernel_context_id));
 }
 
-VirtIOGPU3DDevice::VirtIOGPU3DDevice(VirtIOGraphicsAdapter const& graphics_adapter, NonnullOwnPtr<Memory::Region> transfer_buffer_region)
+VirtIOGPU3DDevice::VirtIOGPU3DDevice(VirtIOGraphicsAdapter const& graphics_adapter, NonnullOwnPtr<Memory::Region> transfer_buffer_region, Graphics::VirtIOGPU::ContextID kernel_context_id)
     : CharacterDevice(28, 0)
     , m_graphics_adapter(graphics_adapter)
+    , m_kernel_context_id(kernel_context_id)
     , m_transfer_buffer_region(move(transfer_buffer_region))
 {
-    m_kernel_context_id = m_graphics_adapter->create_context();
 }
 
 void VirtIOGPU3DDevice::detach(OpenFileDescription& description)
@@ -65,7 +64,7 @@ ErrorOr<void> VirtIOGPU3DDevice::ioctl(OpenFileDescription& description, unsigne
             return EEXIST;
         SpinlockLocker locker(m_graphics_adapter->operation_lock());
         // TODO: Delete the context if it fails to be set in m_context_state_lookup
-        auto context_id = m_graphics_adapter->create_context();
+        auto context_id = TRY(m_graphics_adapter->create_context());
         LockRefPtr<PerContextState> per_context_state = TRY(PerContextState::try_create(context_id));
         TRY(m_context_state_lookup.try_set(&description, per_context_state));
         return {};
@@ -95,12 +94,12 @@ ErrorOr<void> VirtIOGPU3DDevice::ioctl(OpenFileDescription& description, unsigne
         SpinlockLocker locker(m_graphics_adapter->operation_lock());
         auto user_command_buffer = static_ptr_cast<VirGLCommandBuffer const*>(arg);
         auto command_buffer = TRY(copy_typed_from_user(user_command_buffer));
-        m_graphics_adapter->submit_command_buffer(context_id, [&](Bytes buffer) {
+        TRY(m_graphics_adapter->submit_command_buffer(context_id, [&](Bytes buffer) {
             auto num_bytes = command_buffer.num_elems * sizeof(u32);
             VERIFY(num_bytes <= buffer.size());
             MUST(copy_from_user(buffer.data(), command_buffer.data, num_bytes));
             return num_bytes;
-        });
+        }));
         return {};
     }
     case VIRGL_IOCTL_CREATE_RESOURCE: {
@@ -122,10 +121,12 @@ ErrorOr<void> VirtIOGPU3DDevice::ioctl(OpenFileDescription& description, unsigne
             .padding = 0,
         };
         SpinlockLocker locker(m_graphics_adapter->operation_lock());
-        auto resource_id = m_graphics_adapter->create_3d_resource(resource_spec).value();
-        m_graphics_adapter->attach_resource_to_context(resource_id, per_context_state->context_id());
-        m_graphics_adapter->ensure_backing_storage(resource_id, per_context_state->transfer_buffer_region(), 0, NUM_TRANSFER_REGION_PAGES * PAGE_SIZE);
-        spec.created_resource_id = resource_id;
+        // FIXME: What would be an appropriate resource free-ing mechanism to use in case anything
+        // after this fails?
+        auto resource_id = TRY(m_graphics_adapter->create_3d_resource(resource_spec));
+        TRY(m_graphics_adapter->attach_resource_to_context(resource_id, per_context_state->context_id()));
+        TRY(m_graphics_adapter->ensure_backing_storage(resource_id, per_context_state->transfer_buffer_region(), 0, NUM_TRANSFER_REGION_PAGES * PAGE_SIZE));
+        spec.created_resource_id = resource_id.value();
         // FIXME: We should delete the resource we just created if we fail to copy the resource id out
         return copy_to_user(static_ptr_cast<VirGL3DResourceSpec*>(arg), &spec);
     }

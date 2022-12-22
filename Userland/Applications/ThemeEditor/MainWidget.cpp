@@ -15,15 +15,11 @@
 #include <Applications/ThemeEditor/MetricPropertyGML.h>
 #include <Applications/ThemeEditor/PathPropertyGML.h>
 #include <Applications/ThemeEditor/ThemeEditorGML.h>
-// FIXME: LibIPC Decoder and Encoder are sensitive to include order here
-// clang-format off
-#include <LibGUI/ConnectionToWindowServer.h>
-// clang-format on
 #include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/ActionGroup.h>
-#include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/FilePicker.h>
 #include <LibGUI/Frame.h>
 #include <LibGUI/GroupBox.h>
@@ -194,8 +190,7 @@ MainWidget::MainWidget()
 
     m_alignment_model = MUST(AlignmentModel::try_create());
 
-    m_preview_widget = find_descendant_of_type_named<GUI::Frame>("preview_frame")
-                           ->add<ThemeEditor::PreviewWidget>(m_current_palette);
+    m_preview_widget = find_descendant_of_type_named<ThemeEditor::PreviewWidget>("preview_widget");
     m_property_tabs = find_descendant_of_type_named<GUI::TabWidget>("property_tabs");
     add_property_tab(window_tab);
     add_property_tab(widgets_tab);
@@ -213,7 +208,11 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
         auto response = FileSystemAccessClient::Client::the().try_open_file(&window, "Select theme file", "/res/themes"sv);
         if (response.is_error())
             return;
-        load_from_file(*response.value());
+        auto load_from_file_result = load_from_file(*response.value());
+        if (load_from_file_result.is_error()) {
+            GUI::MessageBox::show_error(&window, DeprecatedString::formatted("Can't open file named {}: {}", response.value()->filename(), load_from_file_result.error()));
+            return;
+        }
     })));
 
     m_save_action = GUI::CommonActions::make_save_action([&](auto&) {
@@ -223,7 +222,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
                 return;
             save_to_file(result.value());
         } else {
-            auto result = FileSystemAccessClient::Client::the().try_save_file(&window, "Theme", "ini", Core::OpenMode::ReadWrite | Core::OpenMode::Truncate);
+            auto result = FileSystemAccessClient::Client::the().try_save_file_deprecated(&window, "Theme", "ini", Core::OpenMode::ReadWrite | Core::OpenMode::Truncate);
             if (result.is_error())
                 return;
             save_to_file(result.value());
@@ -232,7 +231,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
     TRY(file_menu->try_add_action(*m_save_action));
 
     TRY(file_menu->try_add_action(GUI::CommonActions::make_save_as_action([&](auto&) {
-        auto result = FileSystemAccessClient::Client::the().try_save_file(&window, "Theme", "ini", Core::OpenMode::ReadWrite | Core::OpenMode::Truncate);
+        auto result = FileSystemAccessClient::Client::the().try_save_file_deprecated(&window, "Theme", "ini", Core::OpenMode::ReadWrite | Core::OpenMode::Truncate);
         if (result.is_error())
             return;
         save_to_file(result.value());
@@ -244,66 +243,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
             GUI::Application::the()->quit();
     })));
 
-    auto accessibility_menu = TRY(window.try_add_menu("&Accessibility"));
-
-    auto default_accessibility_action = GUI::Action::create_checkable("Default - non-impaired", { Mod_AltGr, Key_1 }, [&](auto&) {
-        m_preview_widget->set_color_filter(nullptr);
-    });
-    default_accessibility_action->set_checked(true);
-
-    auto pratanopia_accessibility_action = GUI::Action::create_checkable("Protanopia", { Mod_AltGr, Key_2 }, [&](auto&) {
-        m_preview_widget->set_color_filter(Gfx::ColorBlindnessFilter::create_protanopia());
-    });
-
-    auto pratanomaly_accessibility_action = GUI::Action::create_checkable("Protanomaly", { Mod_AltGr, Key_3 }, [&](auto&) {
-        m_preview_widget->set_color_filter(Gfx::ColorBlindnessFilter::create_protanomaly());
-    });
-
-    auto tritanopia_accessibility_action = GUI::Action::create_checkable("Tritanopia", { Mod_AltGr, Key_4 }, [&](auto&) {
-        m_preview_widget->set_color_filter(Gfx::ColorBlindnessFilter::create_tritanopia());
-    });
-
-    auto tritanomaly_accessibility_action = GUI::Action::create_checkable("Tritanomaly", { Mod_AltGr, Key_5 }, [&](auto&) {
-        m_preview_widget->set_color_filter(Gfx::ColorBlindnessFilter::create_tritanomaly());
-    });
-
-    auto deuteranopia_accessibility_action = GUI::Action::create_checkable("Deuteranopia", { Mod_AltGr, Key_6 }, [&](auto&) {
-        m_preview_widget->set_color_filter(Gfx::ColorBlindnessFilter::create_deuteranopia());
-    });
-
-    auto deuteranomaly_accessibility_action = GUI::Action::create_checkable("Deuteranomaly", { Mod_AltGr, Key_7 }, [&](auto&) {
-        m_preview_widget->set_color_filter(Gfx::ColorBlindnessFilter::create_deuteranomaly());
-    });
-
-    auto achromatopsia_accessibility_action = GUI::Action::create_checkable("Achromatopsia", { Mod_AltGr, Key_8 }, [&](auto&) {
-        m_preview_widget->set_color_filter(Gfx::ColorBlindnessFilter::create_achromatopsia());
-    });
-
-    auto achromatomaly_accessibility_action = GUI::Action::create_checkable("Achromatomaly", { Mod_AltGr, Key_9 }, [&](auto&) {
-        m_preview_widget->set_color_filter(Gfx::ColorBlindnessFilter::create_achromatomaly());
-    });
-
-    m_preview_type_action_group = make<GUI::ActionGroup>();
-    m_preview_type_action_group->set_exclusive(true);
-    m_preview_type_action_group->add_action(*default_accessibility_action);
-    m_preview_type_action_group->add_action(*pratanopia_accessibility_action);
-    m_preview_type_action_group->add_action(*pratanomaly_accessibility_action);
-    m_preview_type_action_group->add_action(*tritanopia_accessibility_action);
-    m_preview_type_action_group->add_action(*tritanomaly_accessibility_action);
-    m_preview_type_action_group->add_action(*deuteranopia_accessibility_action);
-    m_preview_type_action_group->add_action(*deuteranomaly_accessibility_action);
-    m_preview_type_action_group->add_action(*achromatopsia_accessibility_action);
-    m_preview_type_action_group->add_action(*achromatomaly_accessibility_action);
-
-    TRY(accessibility_menu->try_add_action(default_accessibility_action));
-    TRY(accessibility_menu->try_add_action(pratanopia_accessibility_action));
-    TRY(accessibility_menu->try_add_action(pratanomaly_accessibility_action));
-    TRY(accessibility_menu->try_add_action(tritanopia_accessibility_action));
-    TRY(accessibility_menu->try_add_action(tritanomaly_accessibility_action));
-    TRY(accessibility_menu->try_add_action(deuteranopia_accessibility_action));
-    TRY(accessibility_menu->try_add_action(deuteranomaly_accessibility_action));
-    TRY(accessibility_menu->try_add_action(achromatopsia_accessibility_action));
-    TRY(accessibility_menu->try_add_action(achromatomaly_accessibility_action));
+    TRY(window.try_add_menu(TRY(GUI::CommonMenus::make_accessibility_menu(*m_preview_widget))));
 
     auto help_menu = TRY(window.try_add_menu("&Help"));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(&window)));
@@ -314,7 +254,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
 
 void MainWidget::update_title()
 {
-    window()->set_title(String::formatted("{}[*] - Theme Editor", m_path.value_or("Untitled")));
+    window()->set_title(DeprecatedString::formatted("{}[*] - Theme Editor", m_path.value_or("Untitled")));
 }
 
 GUI::Window::CloseRequestDecision MainWidget::request_close()
@@ -336,7 +276,7 @@ GUI::Window::CloseRequestDecision MainWidget::request_close()
     return GUI::Window::CloseRequestDecision::StayOpen;
 }
 
-void MainWidget::set_path(String path)
+void MainWidget::set_path(DeprecatedString path)
 {
     m_path = path;
     update_title();
@@ -350,7 +290,7 @@ void MainWidget::save_to_file(Core::File& file)
     ENUMERATE_ALIGNMENT_ROLES(__ENUMERATE_ALIGNMENT_ROLE)
 #undef __ENUMERATE_ALIGNMENT_ROLE
 
-#define __ENUMERATE_COLOR_ROLE(role) theme->write_entry("Colors", to_string(Gfx::ColorRole::role), m_current_palette.color(Gfx::ColorRole::role).to_string());
+#define __ENUMERATE_COLOR_ROLE(role) theme->write_entry("Colors", to_string(Gfx::ColorRole::role), m_current_palette.color(Gfx::ColorRole::role).to_deprecated_string());
     ENUMERATE_COLOR_ROLES(__ENUMERATE_COLOR_ROLE)
 #undef __ENUMERATE_COLOR_ROLE
 
@@ -368,7 +308,7 @@ void MainWidget::save_to_file(Core::File& file)
 
     auto sync_result = theme->sync();
     if (sync_result.is_error()) {
-        GUI::MessageBox::show_error(window(), String::formatted("Failed to save theme file: {}", sync_result.error()));
+        GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Failed to save theme file: {}", sync_result.error()));
     } else {
         m_last_modified_time = Time::now_monotonic();
         set_path(file.filename());
@@ -433,8 +373,8 @@ void MainWidget::build_override_controls()
 {
     auto* theme_override_controls = find_descendant_of_type_named<GUI::Widget>("theme_override_controls");
 
-    m_theme_override_apply = theme_override_controls->find_child_of_type_named<GUI::Button>("apply");
-    m_theme_override_reset = theme_override_controls->find_child_of_type_named<GUI::Button>("reset");
+    m_theme_override_apply = theme_override_controls->find_child_of_type_named<GUI::DialogButton>("apply_button");
+    m_theme_override_reset = theme_override_controls->find_child_of_type_named<GUI::DialogButton>("reset_button");
 
     m_theme_override_apply->on_click = [&](auto) {
         auto encoded = encode();
@@ -589,7 +529,7 @@ void MainWidget::set_metric(Gfx::MetricRole role, int value)
     set_palette(preview_palette);
 }
 
-void MainWidget::set_path(Gfx::PathRole role, String value)
+void MainWidget::set_path(Gfx::PathRole role, DeprecatedString value)
 {
     auto preview_palette = m_current_palette;
     preview_palette.set_path(role, value);
@@ -607,7 +547,7 @@ void MainWidget::set_palette(Gfx::Palette palette)
 void MainWidget::show_path_picker_dialog(StringView property_display_name, GUI::TextBox& path_input, PathPickerTarget path_picker_target)
 {
     bool open_folder = path_picker_target == PathPickerTarget::Folder;
-    auto window_title = String::formatted(open_folder ? "Select {} folder"sv : "Select {} file"sv, property_display_name);
+    auto window_title = DeprecatedString::formatted(open_folder ? "Select {} folder"sv : "Select {} file"sv, property_display_name);
     auto target_path = path_input.text();
     if (Core::File::exists(target_path)) {
         if (!Core::File::is_directory(target_path))
@@ -621,10 +561,10 @@ void MainWidget::show_path_picker_dialog(StringView property_display_name, GUI::
     path_input.set_text(*result);
 }
 
-void MainWidget::load_from_file(Core::File& file)
+ErrorOr<void> MainWidget::load_from_file(Core::File& file)
 {
-    auto config_file = Core::ConfigFile::open(file.filename(), file.leak_fd()).release_value_but_fixme_should_propagate_errors();
-    auto theme = Gfx::load_system_theme(config_file);
+    auto config_file = TRY(Core::ConfigFile::open(file.filename(), file.leak_fd()));
+    auto theme = TRY(Gfx::load_system_theme(config_file));
     VERIFY(theme.is_valid());
 
     auto new_palette = Gfx::Palette(Gfx::PaletteImpl::create_with_anonymous_buffer(theme));
@@ -663,6 +603,7 @@ void MainWidget::load_from_file(Core::File& file)
 
     m_last_modified_time = Time::now_monotonic();
     window()->set_modified(false);
+    return {};
 }
 
 }

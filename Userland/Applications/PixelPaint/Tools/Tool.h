@@ -61,12 +61,13 @@ public:
     virtual void on_context_menu(Layer*, GUI::ContextMenuEvent&) { }
     virtual void on_tool_button_contextmenu(GUI::ContextMenuEvent&) { }
     virtual void on_second_paint(Layer const*, GUI::PaintEvent&) { }
-    virtual bool on_keydown(GUI::KeyEvent const&);
+    virtual bool on_keydown(GUI::KeyEvent&);
     virtual void on_keyup(GUI::KeyEvent&) { }
     virtual void on_tool_activation() { }
+    virtual void on_tool_deactivation() { }
     virtual GUI::Widget* get_properties_widget() { return nullptr; }
     virtual Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> cursor() { return Gfx::StandardCursor::None; }
-    virtual Gfx::IntPoint point_position_to_preferred_cell(Gfx::FloatPoint const& position) const { return position.to_type<int>(); }
+    virtual Gfx::IntPoint point_position_to_preferred_cell(Gfx::FloatPoint position) const { return position.to_type<int>(); }
 
     void clear() { m_editor = nullptr; }
     void setup(ImageEditor&);
@@ -89,7 +90,7 @@ protected:
 
     Gfx::IntPoint editor_layer_location(Layer const& layer) const;
 
-    virtual Gfx::IntPoint editor_stroke_position(Gfx::IntPoint const& pixel_coords, int stroke_thickness) const;
+    virtual Gfx::IntPoint editor_stroke_position(Gfx::IntPoint pixel_coords, int stroke_thickness) const;
 
     void set_primary_slider(GUI::ValueSlider* primary) { m_primary_slider = primary; }
     void set_secondary_slider(GUI::ValueSlider* secondary) { m_secondary_slider = secondary; }

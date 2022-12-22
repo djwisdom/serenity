@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibCore/ElapsedTimer.h>
 #include <LibCore/Notifier.h>
 #include <LibCore/Timer.h>
@@ -57,10 +57,10 @@ public:
 
     bool has_selection() const;
     bool selection_contains(const VT::Position&) const;
-    String selected_text() const;
+    DeprecatedString selected_text() const;
     VT::Range normalized_selection() const { return m_selection.normalized(); }
     void set_selection(const VT::Range& selection);
-    VT::Position buffer_position_at(Gfx::IntPoint const&) const;
+    VT::Position buffer_position_at(Gfx::IntPoint) const;
 
     VT::Range find_next(StringView, const VT::Position& start = {}, bool case_sensitivity = false, bool should_wrap = false);
     VT::Range find_previous(StringView, const VT::Position& start = {}, bool case_sensitivity = false, bool should_wrap = false);
@@ -85,7 +85,7 @@ public:
     const StringView color_scheme_name() const { return m_color_scheme_name; }
 
     Function<void(StringView)> on_title_change;
-    Function<void(Gfx::IntSize const&)> on_terminal_size_change;
+    Function<void(Gfx::IntSize)> on_terminal_size_change;
     Function<void()> on_command_exit;
 
     GUI::Menu& context_menu() { return *m_context_menu; }
@@ -96,12 +96,14 @@ public:
 
     void set_color_scheme(StringView);
 
+    void set_logical_focus(bool);
+
     VT::CursorShape cursor_shape() { return m_cursor_shape; }
     virtual void set_cursor_blinking(bool) override;
     virtual void set_cursor_shape(CursorShape) override;
 
     static Optional<VT::CursorShape> parse_cursor_shape(StringView);
-    static String stringify_cursor_shape(VT::CursorShape);
+    static DeprecatedString stringify_cursor_shape(VT::CursorShape);
 
 private:
     TerminalWidget(int ptm_fd, bool automatic_size_policy);
@@ -134,9 +136,7 @@ private:
     virtual void emit(u8 const*, size_t) override;
 
     // ^GUI::Clipboard::ClipboardClient
-    virtual void clipboard_content_did_change(String const&) override { update_paste_action(); }
-
-    void set_logical_focus(bool);
+    virtual void clipboard_content_did_change(DeprecatedString const&) override { update_paste_action(); }
 
     void send_non_user_input(ReadonlyBytes);
 
@@ -148,7 +148,7 @@ private:
     void update_cursor();
     void invalidate_cursor();
 
-    void relayout(Gfx::IntSize const&);
+    void relayout(Gfx::IntSize);
 
     void update_copy_action();
     void update_paste_action();
@@ -165,21 +165,21 @@ private:
 
     VT::Range m_selection;
 
-    String m_hovered_href;
-    String m_hovered_href_id;
+    DeprecatedString m_hovered_href;
+    DeprecatedString m_hovered_href_id;
 
-    String m_active_href;
-    String m_active_href_id;
+    DeprecatedString m_active_href;
+    DeprecatedString m_active_href_id;
 
     // Snapshot of m_hovered_href when opening a context menu for a hyperlink.
-    String m_context_menu_href;
+    DeprecatedString m_context_menu_href;
 
     unsigned m_colors[256];
     Gfx::Color m_default_foreground_color;
     Gfx::Color m_default_background_color;
     bool m_show_bold_text_as_bright { true };
 
-    String m_color_scheme_name;
+    DeprecatedString m_color_scheme_name;
 
     BellMode m_bell_mode { BellMode::Visible };
     bool m_alt_key_held { false };

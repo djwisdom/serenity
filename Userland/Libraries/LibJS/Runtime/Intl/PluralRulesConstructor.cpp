@@ -43,7 +43,7 @@ ThrowCompletionOr<Value> PluralRulesConstructor::call()
 }
 
 // 16.1.1 Intl.PluralRules ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-intl.pluralrules
-ThrowCompletionOr<Object*> PluralRulesConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> PluralRulesConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -51,10 +51,10 @@ ThrowCompletionOr<Object*> PluralRulesConstructor::construct(FunctionObject& new
     auto options = vm.argument(1);
 
     // 2. Let pluralRules be ? OrdinaryCreateFromConstructor(NewTarget, "%PluralRules.prototype%", « [[InitializedPluralRules]], [[Locale]], [[Type]], [[MinimumIntegerDigits]], [[MinimumFractionDigits]], [[MaximumFractionDigits]], [[MinimumSignificantDigits]], [[MaximumSignificantDigits]], [[RoundingType]] »).
-    auto* plural_rules = TRY(ordinary_create_from_constructor<PluralRules>(vm, new_target, &Intrinsics::intl_plural_rules_prototype));
+    auto plural_rules = TRY(ordinary_create_from_constructor<PluralRules>(vm, new_target, &Intrinsics::intl_plural_rules_prototype));
 
     // 3. Return ? InitializePluralRules(pluralRules, locales, options).
-    return TRY(initialize_plural_rules(vm, *plural_rules, locales, options));
+    return *TRY(initialize_plural_rules(vm, plural_rules, locales, options));
 }
 
 // 16.2.2 Intl.PluralRules.supportedLocalesOf ( locales [ , options ] ), https://tc39.es/ecma402/#sec-intl.pluralrules.supportedlocalesof
@@ -94,7 +94,7 @@ ThrowCompletionOr<PluralRules*> initialize_plural_rules(VM& vm, PluralRules& plu
     auto type = TRY(get_option(vm, *options, vm.names.type, OptionType::String, AK::Array { "cardinal"sv, "ordinal"sv }, "cardinal"sv));
 
     // 7. Set pluralRules.[[Type]] to t.
-    plural_rules.set_type(type.as_string().string());
+    plural_rules.set_type(type.as_string().deprecated_string());
 
     // 8. Perform ? SetNumberFormatDigitOptions(pluralRules, options, +0𝔽, 3𝔽, "standard").
     TRY(set_number_format_digit_options(vm, plural_rules, *options, 0, 3, NumberFormat::Notation::Standard));

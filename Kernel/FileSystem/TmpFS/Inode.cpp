@@ -18,6 +18,18 @@ TmpFSInode::TmpFSInode(TmpFS& fs, InodeMetadata const& metadata, LockWeakPtr<Tmp
     m_metadata.inode = identifier();
 }
 
+TmpFSInode::TmpFSInode(TmpFS& fs)
+    : Inode(fs, 1)
+    , m_root_directory_inode(true)
+{
+    auto now = kgettimeofday();
+    m_metadata.inode = identifier();
+    m_metadata.atime = now;
+    m_metadata.ctime = now;
+    m_metadata.mtime = now;
+    m_metadata.mode = S_IFDIR | S_ISVTX | 0777;
+}
+
 TmpFSInode::~TmpFSInode() = default;
 
 ErrorOr<NonnullLockRefPtr<TmpFSInode>> TmpFSInode::try_create(TmpFS& fs, InodeMetadata const& metadata, LockWeakPtr<TmpFSInode> parent)
@@ -27,13 +39,7 @@ ErrorOr<NonnullLockRefPtr<TmpFSInode>> TmpFSInode::try_create(TmpFS& fs, InodeMe
 
 ErrorOr<NonnullLockRefPtr<TmpFSInode>> TmpFSInode::try_create_root(TmpFS& fs)
 {
-    InodeMetadata metadata;
-    auto now = kgettimeofday().to_truncated_seconds();
-    metadata.atime = now;
-    metadata.ctime = now;
-    metadata.mtime = now;
-    metadata.mode = S_IFDIR | S_ISVTX | 0777;
-    return try_create(fs, metadata, {});
+    return adopt_nonnull_lock_ref_or_enomem(new (nothrow) TmpFSInode(fs));
 }
 
 InodeMetadata TmpFSInode::metadata() const
@@ -51,12 +57,35 @@ ErrorOr<void> TmpFSInode::traverse_as_directory(Function<ErrorOr<void>(FileSyste
         return ENOTDIR;
 
     TRY(callback({ "."sv, identifier(), 0 }));
-    if (auto parent = m_parent.strong_ref())
+    if (m_root_directory_inode) {
+        TRY(callback({ ".."sv, identifier(), 0 }));
+    } else if (auto parent = m_parent.strong_ref()) {
         TRY(callback({ ".."sv, parent->identifier(), 0 }));
+    }
 
     for (auto& child : m_children) {
         TRY(callback({ child.name->view(), child.inode->identifier(), 0 }));
     }
+    return {};
+}
+
+ErrorOr<void> TmpFSInode::replace_child(StringView name, Inode& new_child)
+{
+    MutexLocker locker(m_inode_lock);
+    VERIFY(is_directory());
+    VERIFY(new_child.fsid() == fsid());
+
+    auto* child = find_child_by_name(name);
+    if (!child)
+        return ENOENT;
+
+    auto old_child = child->inode;
+    child->inode = static_cast<TmpFSInode&>(new_child);
+
+    old_child->did_delete_self();
+
+    // TODO: Emit a did_replace_child event.
+
     return {};
 }
 
@@ -266,7 +295,7 @@ ErrorOr<void> TmpFSInode::chown(UserID uid, GroupID gid)
 ErrorOr<NonnullLockRefPtr<Inode>> TmpFSInode::create_child(StringView name, mode_t mode, dev_t dev, UserID uid, GroupID gid)
 {
     MutexLocker locker(m_inode_lock);
-    time_t now = kgettimeofday().to_truncated_seconds();
+    auto now = kgettimeofday();
 
     InodeMetadata metadata;
     metadata.mode = mode;
@@ -352,7 +381,7 @@ ErrorOr<void> TmpFSInode::truncate(u64 size)
     return {};
 }
 
-ErrorOr<void> TmpFSInode::update_timestamps(Optional<time_t> atime, Optional<time_t> ctime, Optional<time_t> mtime)
+ErrorOr<void> TmpFSInode::update_timestamps(Optional<Time> atime, Optional<Time> ctime, Optional<Time> mtime)
 {
     MutexLocker locker(m_inode_lock);
 
@@ -361,7 +390,7 @@ ErrorOr<void> TmpFSInode::update_timestamps(Optional<time_t> atime, Optional<tim
     if (ctime.has_value())
         m_metadata.ctime = ctime.value();
     if (mtime.has_value())
-        m_metadata.ctime = mtime.value();
+        m_metadata.mtime = mtime.value();
     set_metadata_dirty(true);
     return {};
 }

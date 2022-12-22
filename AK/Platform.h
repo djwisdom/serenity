@@ -1,11 +1,15 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, Nico Weber <thakis@chromium.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
+
+#ifndef USING_AK_GLOBALLY
+#    define USING_AK_GLOBALLY 1
+#endif
 
 #ifdef __i386__
 #    define AK_ARCH_I386 1
@@ -17,6 +21,10 @@
 
 #ifdef __aarch64__
 #    define AK_ARCH_AARCH64 1
+#endif
+
+#ifdef __wasm32__
+#    define AK_ARCH_WASM32 1
 #endif
 
 #if (defined(__SIZEOF_POINTER__) && __SIZEOF_POINTER__ == 8) || defined(_WIN64)
@@ -68,8 +76,6 @@
 #    define AK_OS_WINDOWS
 #endif
 
-// FIXME: Remove clang-format suppression after https://github.com/llvm/llvm-project/issues/56602 resolved
-// clang-format off
 #if defined(__ANDROID__)
 #    define STR(x) __STR(x)
 #    define __STR(x) #x
@@ -81,7 +87,10 @@
 #    undef __STR
 #    define AK_OS_ANDROID
 #endif
-// clang-format on
+
+#if defined(__EMSCRIPTEN__)
+#    define AK_OS_EMSCRIPTEN
+#endif
 
 #define ARCH(arch) (defined(AK_ARCH_##arch) && AK_ARCH_##arch)
 
@@ -159,16 +168,21 @@
 #endif
 
 #ifndef AK_OS_SERENITY
+#    ifdef AK_OS_WINDOWS
+// FIXME: No idea where to get this, but it's 4096 anyway :^)
+#        define PAGE_SIZE 4096
 // On macOS (at least Mojave), Apple's version of this header is not wrapped
 // in extern "C".
-#    ifdef AK_OS_MACOS
+#    else
+#        if defined(AK_OS_MACOS)
 extern "C" {
-#    endif
-#    include <unistd.h>
-#    undef PAGE_SIZE
-#    define PAGE_SIZE sysconf(_SC_PAGESIZE)
-#    ifdef AK_OS_MACOS
-};
+#        endif
+#        include <unistd.h>
+#        undef PAGE_SIZE
+#        define PAGE_SIZE sysconf(_SC_PAGESIZE)
+#        ifdef AK_OS_MACOS
+}
+#        endif
 #    endif
 #endif
 

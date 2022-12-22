@@ -126,7 +126,7 @@ Result<StringView, DecodeError> Decoder::decode_octet_string(ReadonlyBytes bytes
     return StringView { bytes.data(), bytes.size() };
 }
 
-Result<std::nullptr_t, DecodeError> Decoder::decode_null(ReadonlyBytes data)
+Result<nullptr_t, DecodeError> Decoder::decode_null(ReadonlyBytes data)
 {
     if (data.size() != 0)
         return DecodeError::InvalidInputFormat;
@@ -318,7 +318,7 @@ void pretty_print(Decoder& decoder, OutputStream& stream, int indent)
                 break;
             }
             case Kind::BitString: {
-                auto value = decoder.read<const BitmapView>();
+                auto value = decoder.read<BitmapView const>();
                 if (value.is_error()) {
                     dbgln("BitString PrettyPrint error: {}", value.error());
                     return;

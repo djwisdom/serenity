@@ -7,11 +7,10 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/FlyString.h>
 #include <AK/HashMap.h>
-#include <AK/String.h>
 #include <AK/Weakable.h>
-#include <LibJS/AST.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/DeferGC.h>
 #include <LibJS/Heap/Heap.h>
@@ -37,7 +36,8 @@ struct ExecutingASTNodeChain {
 class Interpreter : public Weakable<Interpreter> {
 public:
     template<typename GlobalObjectType, typename... Args>
-    static NonnullOwnPtr<Interpreter> create(VM& vm, Args&&... args) requires(IsBaseOf<GlobalObject, GlobalObjectType>)
+    static NonnullOwnPtr<Interpreter> create(VM& vm, Args&&... args)
+    requires(IsBaseOf<GlobalObject, GlobalObjectType>)
     {
         DeferGC defer_gc(vm.heap());
         auto interpreter = adopt_own(*new Interpreter(vm));
@@ -66,7 +66,7 @@ public:
 
     ~Interpreter() = default;
 
-    ThrowCompletionOr<Value> run(Script&);
+    ThrowCompletionOr<Value> run(Script&, JS::GCPtr<Environment> lexical_environment_override = {});
     ThrowCompletionOr<Value> run(SourceTextModule&);
 
     Realm& realm();

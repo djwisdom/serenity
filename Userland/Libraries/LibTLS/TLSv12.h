@@ -223,18 +223,21 @@ struct Options {
     }
     Vector<CipherSuite> usable_cipher_suites = default_usable_cipher_suites();
 
-#define OPTION_WITH_DEFAULTS(typ, name, ...)                    \
-    static typ default_##name() { return typ { __VA_ARGS__ }; } \
-    typ name = default_##name();                                \
-    Options& set_##name(typ new_value)&                         \
-    {                                                           \
-        name = move(new_value);                                 \
-        return *this;                                           \
-    }                                                           \
-    Options&& set_##name(typ new_value)&&                       \
-    {                                                           \
-        name = move(new_value);                                 \
-        return move(*this);                                     \
+#define OPTION_WITH_DEFAULTS(typ, name, ...) \
+    static typ default_##name()              \
+    {                                        \
+        return typ { __VA_ARGS__ };          \
+    }                                        \
+    typ name = default_##name();             \
+    Options& set_##name(typ new_value)&      \
+    {                                        \
+        name = move(new_value);              \
+        return *this;                        \
+    }                                        \
+    Options&& set_##name(typ new_value)&&    \
+    {                                        \
+        name = move(new_value);              \
+        return move(*this);                  \
     }
 
     OPTION_WITH_DEFAULTS(Version, version, Version::V12)
@@ -307,7 +310,7 @@ struct Context {
 
     struct {
         // Server Name Indicator
-        String SNI; // I hate your existence
+        DeprecatedString SNI; // I hate your existence
     } extensions;
 
     u8 request_client_certificate { 0 };
@@ -323,9 +326,9 @@ struct Context {
     // message flags
     u8 handshake_messages[11] { 0 };
     ByteBuffer user_data;
-    HashMap<String, Certificate> root_certificates;
+    HashMap<DeprecatedString, Certificate> root_certificates;
 
-    Vector<String> alpn;
+    Vector<DeprecatedString> alpn;
     StringView negotiated_alpn;
 
     size_t send_retries { 0 };
@@ -353,9 +356,6 @@ private:
     }
 
 public:
-    virtual bool is_readable() const override { return true; }
-    virtual bool is_writable() const override { return true; }
-
     /// Reads into a buffer, with the maximum size being the size of the buffer.
     /// The amount of bytes read can be smaller than the size of the buffer.
     /// Returns either the bytes that were read, or an errno in the case of
@@ -383,8 +383,8 @@ public:
 
     virtual void set_notifications_enabled(bool enabled) override { underlying_stream().set_notifications_enabled(enabled); }
 
-    static ErrorOr<NonnullOwnPtr<TLSv12>> connect(String const& host, u16 port, Options = {});
-    static ErrorOr<NonnullOwnPtr<TLSv12>> connect(String const& host, Core::Stream::Socket& underlying_stream, Options = {});
+    static ErrorOr<NonnullOwnPtr<TLSv12>> connect(DeprecatedString const& host, u16 port, Options = {});
+    static ErrorOr<NonnullOwnPtr<TLSv12>> connect(DeprecatedString const& host, Core::Stream::Socket& underlying_stream, Options = {});
 
     using StreamVariantType = Variant<OwnPtr<Core::Stream::Socket>, Core::Stream::Socket*>;
     explicit TLSv12(StreamVariantType, Options);
@@ -435,7 +435,7 @@ public:
 
     bool can_read_line() const { return m_context.application_buffer.size() && memchr(m_context.application_buffer.data(), '\n', m_context.application_buffer.size()); }
     bool can_read() const { return m_context.application_buffer.size() > 0; }
-    String read_line(size_t max_size);
+    DeprecatedString read_line(size_t max_size);
 
     Function<void(AlertDescription)> on_tls_error;
     Function<void()> on_tls_finished;

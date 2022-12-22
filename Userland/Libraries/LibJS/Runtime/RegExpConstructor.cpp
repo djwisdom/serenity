@@ -80,7 +80,7 @@ ThrowCompletionOr<Value> RegExpConstructor::call()
 }
 
 // 22.2.3.1 RegExp ( pattern, flags ), https://tc39.es/ecma262/#sec-regexp-pattern-flags
-ThrowCompletionOr<Object*> RegExpConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> RegExpConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -100,11 +100,11 @@ ThrowCompletionOr<Object*> RegExpConstructor::construct(FunctionObject& new_targ
     if (pattern.is_object() && is<RegExpObject>(pattern.as_object())) {
         // a. Let P be pattern.[[OriginalSource]].
         auto& regexp_pattern = static_cast<RegExpObject&>(pattern.as_object());
-        pattern_value = js_string(vm, regexp_pattern.pattern());
+        pattern_value = PrimitiveString::create(vm, regexp_pattern.pattern());
 
         // b. If flags is undefined, let F be pattern.[[OriginalFlags]].
         if (flags.is_undefined())
-            flags_value = js_string(vm, regexp_pattern.flags());
+            flags_value = PrimitiveString::create(vm, regexp_pattern.flags());
         // c. Else, let F be flags.
         else
             flags_value = flags;
@@ -137,7 +137,7 @@ ThrowCompletionOr<Object*> RegExpConstructor::construct(FunctionObject& new_targ
     auto regexp_object = TRY(regexp_alloc(vm, new_target));
 
     // 8. Return ? RegExpInitialize(O, P, F).
-    return TRY(regexp_object->regexp_initialize(vm, pattern_value, flags_value)).ptr();
+    return TRY(regexp_object->regexp_initialize(vm, pattern_value, flags_value));
 }
 
 // 22.2.4.2 get RegExp [ @@species ], https://tc39.es/ecma262/#sec-get-regexp-@@species

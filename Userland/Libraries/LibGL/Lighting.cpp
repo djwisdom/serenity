@@ -171,7 +171,7 @@ void GLContext::gl_light_model(GLenum pname, GLfloat x, GLfloat y, GLfloat z, GL
         lighting_params.scene_ambient_color = { x, y, z, w };
         break;
     case GL_LIGHT_MODEL_COLOR_CONTROL: {
-        GLenum color_control = static_cast<GLenum>(x);
+        auto color_control = static_cast<GLenum>(x);
         RETURN_WITH_ERROR_IF(color_control != GL_SINGLE_COLOR && color_control != GL_SEPARATE_SPECULAR_COLOR, GL_INVALID_ENUM);
         lighting_params.color_control = (color_control == GL_SINGLE_COLOR) ? GPU::ColorControl::SingleColor : GPU::ColorControl::SeparateSpecularColor;
         break;
@@ -179,17 +179,37 @@ void GLContext::gl_light_model(GLenum pname, GLfloat x, GLfloat y, GLfloat z, GL
     case GL_LIGHT_MODEL_LOCAL_VIEWER:
         // 0 means the viewer is at infinity
         // 1 means they're in local (eye) space
-        lighting_params.viewer_at_infinity = (x != 1.0f);
+        lighting_params.viewer_at_infinity = (x == 0.f);
         break;
     case GL_LIGHT_MODEL_TWO_SIDE:
-        VERIFY(y == 0.0f && z == 0.0f && w == 0.0f);
-        lighting_params.two_sided_lighting = x;
+        lighting_params.two_sided_lighting = (x != 0.f);
         break;
     default:
         VERIFY_NOT_REACHED();
     }
 
     m_rasterizer->set_light_model_params(lighting_params);
+}
+
+void GLContext::gl_light_modelv(GLenum pname, void const* params, GLenum type)
+{
+    VERIFY(type == GL_FLOAT || type == GL_INT);
+
+    auto parameters_to_vector = [&]<typename T>(T const* params) -> FloatVector4 {
+        return (pname == GL_LIGHT_MODEL_AMBIENT)
+            ? Vector4<T> { params[0], params[1], params[2], params[3] }.template to_type<float>()
+            : Vector4<T> { params[0], 0, 0, 0 }.template to_type<float>();
+    };
+
+    auto light_model_parameters = (type == GL_FLOAT)
+        ? parameters_to_vector(reinterpret_cast<GLfloat const*>(params))
+        : parameters_to_vector(reinterpret_cast<GLint const*>(params));
+
+    // Normalize integers to -1..1
+    if (pname == GL_LIGHT_MODEL_AMBIENT && type == GL_INT)
+        light_model_parameters = (light_model_parameters + 2147483648.f) / 2147483647.5f - 1.f;
+
+    gl_light_model(pname, light_model_parameters[0], light_model_parameters[1], light_model_parameters[2], light_model_parameters[3]);
 }
 
 void GLContext::gl_lightf(GLenum light, GLenum pname, GLfloat param)
@@ -399,7 +419,7 @@ void GLContext::gl_materialfv(GLenum face, GLenum pname, GLfloat const* params)
             material.emissive = { params[0], params[1], params[2], params[3] };
             break;
         case GL_SHININESS:
-            material.shininess = *params;
+            material.shininess = params[0];
             break;
         case GL_AMBIENT_AND_DIFFUSE:
             material.ambient = { params[0], params[1], params[2], params[3] };

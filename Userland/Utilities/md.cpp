@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <LibMarkdown/Document.h>
@@ -17,7 +17,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     TRY(Core::System::pledge("stdio rpath tty"));
 
-    char const* filename = nullptr;
+    StringView filename;
     bool html = false;
     int view_width = 0;
 
@@ -40,25 +40,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             view_width = 80;
         }
     }
-    auto file = Core::File::construct();
-    bool success;
-    if (filename == nullptr) {
-        success = file->open(STDIN_FILENO, Core::OpenMode::ReadOnly, Core::File::ShouldCloseFileDescriptor::No);
-    } else {
-        file->set_filename(filename);
-        success = file->open(Core::OpenMode::ReadOnly);
-    }
-    if (!success) {
-        warnln("Error: {}", file->error_string());
-        return 1;
-    }
+
+    auto file = TRY(Core::Stream::File::open_file_or_standard_stream(filename, Core::Stream::OpenMode::Read));
 
     TRY(Core::System::pledge("stdio"));
 
-    auto buffer = file->read_all();
+    auto buffer = TRY(file->read_until_eof());
     dbgln("Read size {}", buffer.size());
 
-    auto input = String::copy(buffer);
+    auto input = DeprecatedString::copy(buffer);
     auto document = Markdown::Document::parse(input);
 
     if (!document) {
@@ -66,7 +56,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    String res = html ? document->render_to_html() : document->render_for_terminal(view_width);
+    DeprecatedString res = html ? document->render_to_html() : document->render_for_terminal(view_width);
     out("{}", res);
     return 0;
 }

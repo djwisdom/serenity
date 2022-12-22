@@ -23,7 +23,7 @@ public:
 private:
     ErrorOr<JsonValue> parse_helper();
 
-    ErrorOr<String> consume_and_unescape_string();
+    ErrorOr<DeprecatedString> consume_and_unescape_string();
     ErrorOr<JsonValue> parse_array();
     ErrorOr<JsonValue> parse_object();
     ErrorOr<JsonValue> parse_number();
@@ -35,4 +35,6 @@ private:
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::JsonParser;
+#endif

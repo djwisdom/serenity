@@ -20,7 +20,7 @@ REGISTER_WIDGET(GUI, DialogButton)
 
 namespace GUI {
 
-Button::Button(String text)
+Button::Button(DeprecatedString text)
     : AbstractButton(move(text))
 {
     set_min_size({ 40, 22 });
@@ -42,7 +42,7 @@ Button::Button(String text)
         { Gfx::ButtonStyle::Normal, "Normal" },
         { Gfx::ButtonStyle::Coolbar, "Coolbar" });
 
-    REGISTER_STRING_PROPERTY("icon", icon, set_icon_from_path);
+    REGISTER_WRITE_ONLY_STRING_PROPERTY("icon", set_icon_from_path);
     REGISTER_BOOL_PROPERTY("default", is_default, set_default);
 }
 
@@ -165,29 +165,11 @@ void Button::set_action(Action& action)
 {
     m_action = action;
     action.register_button({}, *this);
+    set_visible(action.is_visible());
     set_enabled(action.is_enabled());
     set_checkable(action.is_checkable());
     if (action.is_checkable())
         set_checked(action.is_checked());
-    set_text_from_action();
-}
-
-static String create_tooltip_for_action(Action const& action)
-{
-    StringBuilder builder;
-    builder.append(action.text());
-    if (action.shortcut().is_valid()) {
-        builder.append(" ("sv);
-        builder.append(action.shortcut().to_string());
-        builder.append(')');
-    }
-    return builder.to_string();
-}
-
-void Button::set_text_from_action()
-{
-    set_text(action()->text());
-    set_tooltip(create_tooltip_for_action(*action()));
 }
 
 void Button::set_icon(RefPtr<Gfx::Bitmap> icon)
@@ -198,7 +180,7 @@ void Button::set_icon(RefPtr<Gfx::Bitmap> icon)
     update();
 }
 
-void Button::set_icon_from_path(String const& path)
+void Button::set_icon_from_path(DeprecatedString const& path)
 {
     auto maybe_bitmap = Gfx::Bitmap::try_load_from_file(path);
     if (maybe_bitmap.is_error()) {

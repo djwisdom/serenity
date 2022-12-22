@@ -7,17 +7,43 @@
 #include <LibCore/ArgsParser.h>
 #include <LibCore/Directory.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/StandardPaths.h>
 #include <LibCore/System.h>
 #include <LibCore/TCPServer.h>
 #include <LibMain/Main.h>
 #include <WebDriver/Client.h>
 
+static ErrorOr<pid_t> launch_browser(DeprecatedString const& socket_path)
+{
+    char const* argv[] = {
+        "/bin/Browser",
+        "--webdriver-content-path",
+        socket_path.characters(),
+        nullptr,
+    };
+
+    return Core::System::posix_spawn("/bin/Browser"sv, nullptr, nullptr, const_cast<char**>(argv), environ);
+}
+
+static ErrorOr<pid_t> launch_headless_browser(DeprecatedString const& socket_path)
+{
+    char const* argv[] = {
+        "/bin/headless-browser",
+        "--webdriver-ipc-path",
+        socket_path.characters(),
+        "about:blank",
+        nullptr,
+    };
+
+    return Core::System::posix_spawn("/bin/headless-browser"sv, nullptr, nullptr, const_cast<char**>(argv), environ);
+}
+
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    String default_listen_address = "0.0.0.0";
+    DeprecatedString default_listen_address = "0.0.0.0";
     u16 default_port = 8000;
 
-    String listen_address = default_listen_address;
+    DeprecatedString listen_address = default_listen_address;
     int port = default_port;
 
     Core::ArgsParser args_parser;
@@ -38,8 +64,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(Core::System::pledge("stdio accept cpath rpath recvfd inet unix proc exec fattr"));
 
-    TRY(Core::Directory::create("/tmp/webdriver"sv, Core::Directory::CreateDirectories::Yes));
-    TRY(Core::System::pledge("stdio accept rpath recvfd inet unix proc exec fattr"));
+    auto webdriver_socket_path = DeprecatedString::formatted("{}/webdriver", TRY(Core::StandardPaths::runtime_directory()));
+    TRY(Core::Directory::create(webdriver_socket_path, Core::Directory::CreateDirectories::Yes));
 
     Core::EventLoop loop;
 
@@ -59,7 +85,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return;
         }
 
-        auto maybe_client = WebDriver::Client::try_create(maybe_buffered_socket.release_value(), server);
+        auto maybe_client = WebDriver::Client::try_create(maybe_buffered_socket.release_value(), { launch_browser, launch_headless_browser }, server);
         if (maybe_client.is_error()) {
             warnln("Could not create a WebDriver client: {}", maybe_client.error());
             return;
@@ -71,11 +97,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     outln("Listening on {}:{}", ipv4_address.value(), port);
 
     TRY(Core::System::unveil("/bin/Browser", "rx"));
+    TRY(Core::System::unveil("/bin/headless-browser", "rx"));
     TRY(Core::System::unveil("/etc/timezone", "r"));
     TRY(Core::System::unveil("/res/icons", "r"));
-    TRY(Core::System::unveil("/tmp/webdriver", "rwc"));
+    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
+    TRY(Core::System::unveil(webdriver_socket_path, "rwc"sv));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    TRY(Core::System::pledge("stdio accept rpath recvfd unix proc exec fattr"));
+    TRY(Core::System::pledge("stdio accept cpath rpath recvfd unix proc exec fattr"));
     return loop.exec();
 }

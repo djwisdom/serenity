@@ -231,11 +231,11 @@ void Editor::get_terminal_size()
     m_num_lines = ws.ws_row;
 }
 
-void Editor::add_to_history(String const& line)
+void Editor::add_to_history(DeprecatedString const& line)
 {
     if (line.is_empty())
         return;
-    String histcontrol = getenv("HISTCONTROL");
+    DeprecatedString histcontrol = getenv("HISTCONTROL");
     auto ignoredups = histcontrol == "ignoredups" || histcontrol == "ignoreboth";
     auto ignorespace = histcontrol == "ignorespace" || histcontrol == "ignoreboth";
     if (ignoredups && !m_history.is_empty() && line == m_history.last().entry)
@@ -250,7 +250,7 @@ void Editor::add_to_history(String const& line)
     m_history_dirty = true;
 }
 
-bool Editor::load_history(String const& path)
+bool Editor::load_history(DeprecatedString const& path)
 {
     auto history_file = Core::File::construct(path);
     if (!history_file->open(Core::OpenMode::ReadOnly))
@@ -259,7 +259,7 @@ bool Editor::load_history(String const& path)
     auto hist = StringView { data.data(), data.size() };
     for (auto& str : hist.split_view("\n\n"sv)) {
         auto it = str.find("::"sv).value_or(0);
-        auto time = str.substring_view(0, it).to_uint<time_t>().value_or(0);
+        auto time = str.substring_view(0, it).to_int<time_t>().value_or(0);
         auto string = str.substring_view(it == 0 ? it : it + 2);
         m_history.append({ string, time });
     }
@@ -308,7 +308,7 @@ static void merge(It0&& begin0, It0 const& end0, It1&& begin1, It1 const& end1, 
     }
 }
 
-bool Editor::save_history(String const& path)
+bool Editor::save_history(DeprecatedString const& path)
 {
     Vector<HistoryEntry> final_history { { "", 0 } };
     {
@@ -320,7 +320,7 @@ bool Editor::save_history(String const& path)
             file->line_begin(), file->line_end(), m_history.begin(), m_history.end(), final_history,
             [](StringView str) {
                 auto it = str.find("::"sv).value_or(0);
-                auto time = str.substring_view(0, it).to_uint<time_t>().value_or(0);
+                auto time = str.substring_view(0, it).to_int<time_t>().value_or(0);
                 auto string = str.substring_view(it == 0 ? it : it + 2);
                 return HistoryEntry { string, time };
             },
@@ -333,7 +333,7 @@ bool Editor::save_history(String const& path)
     auto file = file_or_error.release_value();
     final_history.take_first();
     for (auto const& entry : final_history)
-        file->write(String::formatted("{}::{}\n\n", entry.timestamp, entry.entry));
+        file->write(DeprecatedString::formatted("{}::{}\n\n", entry.timestamp, entry.entry));
 
     m_history_dirty = false;
     return true;
@@ -357,7 +357,7 @@ void Editor::insert(Utf32View const& string)
         insert(string.code_points()[i]);
 }
 
-void Editor::insert(String const& string)
+void Editor::insert(DeprecatedString const& string)
 {
     for (auto ch : Utf8View { string })
         insert(ch);
@@ -403,7 +403,7 @@ void Editor::register_key_input_callback(KeyBinding const& binding)
         return register_key_input_callback(binding.keys, move(internal_function));
     }
 
-    return register_key_input_callback(binding.keys, [binding = String(binding.binding)](auto& editor) {
+    return register_key_input_callback(binding.keys, [binding = DeprecatedString(binding.binding)](auto& editor) {
         editor.insert(binding);
         return false;
     });
@@ -678,7 +678,7 @@ void Editor::really_quit_event_loop()
     Core::EventLoop::current().quit(Exit);
 }
 
-auto Editor::get_line(String const& prompt) -> Result<String, Editor::Error>
+auto Editor::get_line(DeprecatedString const& prompt) -> Result<DeprecatedString, Editor::Error>
 {
     initialize();
     m_is_editing = true;
@@ -702,7 +702,7 @@ auto Editor::get_line(String const& prompt) -> Result<String, Editor::Error>
         }
         restore();
         if (line) {
-            String result { line, (size_t)line_length, Chomp };
+            DeprecatedString result { line, (size_t)line_length, Chomp };
             free(line);
             return result;
         }
@@ -750,7 +750,7 @@ auto Editor::get_line(String const& prompt) -> Result<String, Editor::Error>
     if (loop.exec() == Retry)
         return get_line(prompt);
 
-    return m_input_error.has_value() ? Result<String, Editor::Error> { m_input_error.value() } : Result<String, Editor::Error> { m_returned_line };
+    return m_input_error.has_value() ? Result<DeprecatedString, Editor::Error> { m_input_error.value() } : Result<DeprecatedString, Editor::Error> { m_returned_line };
 }
 
 void Editor::save_to(JsonObject& object)
@@ -922,7 +922,7 @@ void Editor::handle_read_event()
         case InputState::CSIExpectFinal: {
             m_state = m_previous_free_state;
             auto is_in_paste = m_state == InputState::Paste;
-            for (auto& parameter : String::copy(csi_parameter_bytes).split(';')) {
+            for (auto& parameter : DeprecatedString::copy(csi_parameter_bytes).split(';')) {
                 if (auto value = parameter.to_uint(); value.has_value())
                     csi_parameters.append(value.value());
                 else
@@ -985,6 +985,12 @@ void Editor::handle_read_event()
                 continue;
             case 'F': // ^[[F: end
                 go_end();
+                continue;
+            case 127:
+                if (modifiers == CSIMod::Ctrl)
+                    erase_alnum_word_backwards();
+                else
+                    erase_character_backwards();
                 continue;
             case '~':
                 if (param1 == 3) { // ^[[3~: delete
@@ -1492,14 +1498,14 @@ void Editor::refresh_display()
             dbgln("Drawn Spans:");
             for (auto& sentry : m_drawn_spans.m_spans_starting) {
                 for (auto& entry : sentry.value) {
-                    dbgln("{}-{}: {}", sentry.key, entry.key, entry.value.to_string());
+                    dbgln("{}-{}: {}", sentry.key, entry.key, entry.value.to_deprecated_string());
                 }
             }
             dbgln("==========================================================================");
             dbgln("Current Spans:");
             for (auto& sentry : m_current_spans.m_spans_starting) {
                 for (auto& entry : sentry.value) {
-                    dbgln("{}-{}: {}", sentry.key, entry.key, entry.value.to_string());
+                    dbgln("{}-{}: {}", sentry.key, entry.key, entry.value.to_deprecated_string());
                 }
             }
         }
@@ -1571,7 +1577,7 @@ void Editor::reposition_cursor(OutputStream& stream, bool to_end)
 
 void VT::move_absolute(u32 row, u32 col, OutputStream& stream)
 {
-    stream.write(String::formatted("\033[{};{}H", row, col).bytes());
+    stream.write(DeprecatedString::formatted("\033[{};{}H", row, col).bytes());
 }
 
 void VT::move_relative(int row, int col, OutputStream& stream)
@@ -1588,9 +1594,9 @@ void VT::move_relative(int row, int col, OutputStream& stream)
         col = -col;
 
     if (row > 0)
-        stream.write(String::formatted("\033[{}{}", row, x_op).bytes());
+        stream.write(DeprecatedString::formatted("\033[{}{}", row, x_op).bytes());
     if (col > 0)
-        stream.write(String::formatted("\033[{}{}", col, y_op).bytes());
+        stream.write(DeprecatedString::formatted("\033[{}{}", col, y_op).bytes());
 }
 
 Style Editor::find_applicable_style(size_t offset) const
@@ -1618,36 +1624,36 @@ Style Editor::find_applicable_style(size_t offset) const
     return style;
 }
 
-String Style::Background::to_vt_escape() const
+DeprecatedString Style::Background::to_vt_escape() const
 {
     if (is_default())
         return "";
 
     if (m_is_rgb) {
-        return String::formatted("\e[48;2;{};{};{}m", m_rgb_color[0], m_rgb_color[1], m_rgb_color[2]);
+        return DeprecatedString::formatted("\e[48;2;{};{};{}m", m_rgb_color[0], m_rgb_color[1], m_rgb_color[2]);
     } else {
-        return String::formatted("\e[{}m", (u8)m_xterm_color + 40);
+        return DeprecatedString::formatted("\e[{}m", (u8)m_xterm_color + 40);
     }
 }
 
-String Style::Foreground::to_vt_escape() const
+DeprecatedString Style::Foreground::to_vt_escape() const
 {
     if (is_default())
         return "";
 
     if (m_is_rgb) {
-        return String::formatted("\e[38;2;{};{};{}m", m_rgb_color[0], m_rgb_color[1], m_rgb_color[2]);
+        return DeprecatedString::formatted("\e[38;2;{};{};{}m", m_rgb_color[0], m_rgb_color[1], m_rgb_color[2]);
     } else {
-        return String::formatted("\e[{}m", (u8)m_xterm_color + 30);
+        return DeprecatedString::formatted("\e[{}m", (u8)m_xterm_color + 30);
     }
 }
 
-String Style::Hyperlink::to_vt_escape(bool starting) const
+DeprecatedString Style::Hyperlink::to_vt_escape(bool starting) const
 {
     if (is_empty())
         return "";
 
-    return String::formatted("\e]8;;{}\e\\", starting ? m_link : String::empty());
+    return DeprecatedString::formatted("\e]8;;{}\e\\", starting ? m_link : DeprecatedString::empty());
 }
 
 void Style::unify_with(Style const& other, bool prefer_other)
@@ -1674,7 +1680,7 @@ void Style::unify_with(Style const& other, bool prefer_other)
         m_hyperlink = other.hyperlink();
 }
 
-String Style::to_string() const
+DeprecatedString Style::to_deprecated_string() const
 {
     StringBuilder builder;
     builder.append("Style { "sv);
@@ -1727,7 +1733,7 @@ String Style::to_string() const
 void VT::apply_style(Style const& style, OutputStream& stream, bool is_starting)
 {
     if (is_starting) {
-        stream.write(String::formatted("\033[{};{};{}m{}{}{}",
+        stream.write(DeprecatedString::formatted("\033[{};{};{}m{}{}{}",
             style.bold() ? 1 : 22,
             style.underline() ? 4 : 24,
             style.italic() ? 3 : 23,
@@ -1747,7 +1753,7 @@ void VT::clear_lines(size_t count_above, size_t count_below, OutputStream& strea
     } else {
         // Go down count_below lines.
         if (count_below > 0)
-            stream.write(String::formatted("\033[{}B", count_below).bytes());
+            stream.write(DeprecatedString::formatted("\033[{}B", count_below).bytes());
         // Then clear lines going upwards.
         for (size_t i = count_below + count_above; i > 0; --i) {
             stream.write("\033[2K"sv.bytes());
@@ -2145,7 +2151,7 @@ Result<Vector<size_t, 2>, Editor::Error> Editor::vt_dsr()
     return Vector<size_t, 2> { row, col };
 }
 
-String Editor::line(size_t up_to_index) const
+DeprecatedString Editor::line(size_t up_to_index) const
 {
     StringBuilder builder;
     builder.append(Utf32View { m_buffer.data(), min(m_buffer.size(), up_to_index) });
@@ -2271,11 +2277,11 @@ bool Editor::Spans::contains_up_to_offset(Spans const& other, size_t offset) con
                     if constexpr (LINE_EDITOR_DEBUG) {
                         dbgln("Compare for {}-{} failed, no entry", entry.key, left_entry.key);
                         for (auto& x : entry.value)
-                            dbgln("Have: {}-{} = {}", entry.key, x.key, x.value.to_string());
+                            dbgln("Have: {}-{} = {}", entry.key, x.key, x.value.to_deprecated_string());
                     }
                     return false;
                 } else if (value_it->value != left_entry.value) {
-                    dbgln_if(LINE_EDITOR_DEBUG, "Compare for {}-{} failed, different values: {} != {}", entry.key, left_entry.key, value_it->value.to_string(), left_entry.value.to_string());
+                    dbgln_if(LINE_EDITOR_DEBUG, "Compare for {}-{} failed, different values: {} != {}", entry.key, left_entry.key, value_it->value.to_deprecated_string(), left_entry.value.to_deprecated_string());
                     return false;
                 }
             }

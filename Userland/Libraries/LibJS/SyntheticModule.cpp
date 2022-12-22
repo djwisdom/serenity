@@ -51,7 +51,7 @@ ThrowCompletionOr<void> SyntheticModule::link(VM& vm)
     // Note: This must be true because we use a reference.
 
     // 3. Let env be NewModuleEnvironment(realm.[[GlobalEnv]]).
-    auto* environment = vm.heap().allocate_without_realm<ModuleEnvironment>(&realm().global_environment());
+    auto environment = vm.heap().allocate_without_realm<ModuleEnvironment>(&realm().global_environment());
 
     // 4. Set module.[[Environment]] to env.
     set_environment(environment);
@@ -107,7 +107,7 @@ ThrowCompletionOr<Promise*> SyntheticModule::evaluate(VM& vm)
 
     // 12. Return Completion(result).
     // Note: Because we expect it to return a promise we convert this here.
-    auto* promise = Promise::create(realm());
+    auto promise = Promise::create(realm());
     if (result.is_error()) {
         VERIFY(result.throw_completion().value().has_value());
         promise->reject(*result.throw_completion().value());
@@ -115,7 +115,7 @@ ThrowCompletionOr<Promise*> SyntheticModule::evaluate(VM& vm)
         // Note: This value probably isn't visible to JS code? But undefined is fine anyway.
         promise->fulfill(js_undefined());
     }
-    return promise;
+    return promise.ptr();
 }
 
 // 1.2.2 SetSyntheticModuleExport ( module, exportName, exportValue ), https://tc39.es/proposal-json-modules/#sec-setsyntheticmoduleexport
@@ -139,7 +139,7 @@ NonnullGCPtr<SyntheticModule> SyntheticModule::create_default_export_synthetic_m
     };
 
     // 2. Return CreateSyntheticModule("default", closure, realm)
-    return *realm.heap().allocate_without_realm<SyntheticModule>(Vector<FlyString> { "default" }, move(closure), realm, filename);
+    return realm.heap().allocate_without_realm<SyntheticModule>(Vector<FlyString> { "default" }, move(closure), realm, filename);
 }
 
 // 1.4 ParseJSONModule ( source ), https://tc39.es/proposal-json-modules/#sec-parse-json-module
@@ -151,7 +151,7 @@ ThrowCompletionOr<NonnullGCPtr<Module>> parse_json_module(StringView source_text
     auto* json_parse = realm.intrinsics().json_parse_function();
 
     // 2. Let json be ? Call(jsonParse, undefined, « sourceText »).
-    auto json = TRY(call(vm, *json_parse, js_undefined(), js_string(realm.vm(), source_text)));
+    auto json = TRY(call(vm, *json_parse, js_undefined(), PrimitiveString::create(realm.vm(), source_text)));
 
     // 3. Return CreateDefaultExportSyntheticModule(json, realm, hostDefined).
     return SyntheticModule::create_default_export_synthetic_module(json, realm, filename);

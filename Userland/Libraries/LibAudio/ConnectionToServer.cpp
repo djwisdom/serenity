@@ -11,9 +11,11 @@
 #include <AK/Time.h>
 #include <AK/Types.h>
 #include <LibAudio/ConnectionToServer.h>
+#include <LibAudio/Queue.h>
 #include <LibAudio/UserSampleQueue.h>
 #include <LibCore/Event.h>
 #include <LibThreading/Mutex.h>
+#include <sched.h>
 #include <time.h>
 
 namespace Audio {
@@ -58,8 +60,10 @@ void ConnectionToServer::die()
 
 ErrorOr<void> ConnectionToServer::async_enqueue(FixedArray<Sample>&& samples)
 {
-    if (!m_background_audio_enqueuer->is_started())
+    if (!m_background_audio_enqueuer->is_started()) {
         m_background_audio_enqueuer->start();
+        TRY(m_background_audio_enqueuer->set_priority(THREAD_PRIORITY_MAX));
+    }
 
     update_good_sleep_time();
     m_user_queue->append(move(samples));
@@ -111,6 +115,11 @@ void ConnectionToServer::custom_event(Core::CustomEvent&)
 ErrorOr<void, AudioQueue::QueueStatus> ConnectionToServer::realtime_enqueue(Array<Sample, AUDIO_BUFFER_SIZE> samples)
 {
     return m_buffer->try_enqueue(samples);
+}
+
+ErrorOr<void> ConnectionToServer::blocking_realtime_enqueue(Array<Sample, AUDIO_BUFFER_SIZE> samples, Function<void()> wait_function)
+{
+    return m_buffer->try_blocking_enqueue(samples, move(wait_function));
 }
 
 unsigned ConnectionToServer::total_played_samples() const

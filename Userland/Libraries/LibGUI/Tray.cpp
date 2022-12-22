@@ -33,7 +33,7 @@ Gfx::IntRect Tray::Item::rect(Tray const& tray) const
     };
 }
 
-size_t Tray::add_item(String text, RefPtr<Gfx::Bitmap> bitmap, String custom_data)
+size_t Tray::add_item(DeprecatedString text, RefPtr<Gfx::Bitmap> bitmap, DeprecatedString custom_data)
 {
     auto new_index = m_items.size();
 
@@ -155,7 +155,7 @@ void Tray::leave_event(Core::Event&)
     update();
 }
 
-Tray::Item* Tray::item_at(Gfx::IntPoint const& position)
+Tray::Item* Tray::item_at(Gfx::IntPoint position)
 {
     for (auto& item : m_items) {
         if (item.rect(*this).contains(position))

@@ -23,12 +23,12 @@ public:
     virtual void on_mousedown(Layer*, MouseEvent& event) override;
     virtual void on_mousemove(Layer*, MouseEvent& event) override;
     virtual void on_mouseup(Layer*, MouseEvent& event) override;
-    virtual bool on_keydown(GUI::KeyEvent const&) override;
+    virtual bool on_keydown(GUI::KeyEvent&) override;
     virtual void on_keyup(GUI::KeyEvent&) override;
     virtual void on_second_paint(Layer const*, GUI::PaintEvent&) override;
     virtual GUI::Widget* get_properties_widget() override;
     virtual Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> cursor() override { return Gfx::StandardCursor::Crosshair; }
-    virtual Gfx::IntPoint point_position_to_preferred_cell(Gfx::FloatPoint const& position) const override;
+    virtual Gfx::IntPoint point_position_to_preferred_cell(Gfx::FloatPoint position) const override;
 
 private:
     virtual StringView tool_name() const override { return "Rectangle Select Tool"sv; }
@@ -40,7 +40,7 @@ private:
     };
 
     RefPtr<GUI::Widget> m_properties_widget;
-    Vector<String> m_merge_mode_names {};
+    Vector<DeprecatedString> m_merge_mode_names {};
     Selection::MergeMode m_merge_mode { Selection::MergeMode::Set };
     float m_edge_feathering { 0.0f };
     bool m_selecting { false };

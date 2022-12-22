@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibWeb/WebAssembly/WebAssemblyMemoryPrototype.h>
 #include <LibWeb/WebAssembly/WebAssemblyObject.h>
@@ -49,8 +50,8 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyMemoryPrototype::buffer_getter)
     if (!memory)
         return JS::js_undefined();
 
-    auto* array_buffer = JS::ArrayBuffer::create(realm, &memory->data());
-    array_buffer->set_detach_key(JS::js_string(vm, "WebAssembly.Memory"));
+    auto array_buffer = JS::ArrayBuffer::create(realm, &memory->data());
+    array_buffer->set_detach_key(JS::PrimitiveString::create(vm, "WebAssembly.Memory"));
     return array_buffer;
 }
 

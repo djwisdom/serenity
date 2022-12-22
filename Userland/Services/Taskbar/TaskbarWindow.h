@@ -13,6 +13,7 @@
 #include <LibGUI/Widget.h>
 #include <LibGUI/Window.h>
 #include <LibGfx/ShareableBitmap.h>
+#include <Services/Taskbar/QuickLaunchWidget.h>
 #include <Services/WindowServer/ScreenLayout.h>
 
 class TaskbarWindow final : public GUI::Window
@@ -25,13 +26,14 @@ public:
     static int taskbar_height() { return 27; }
     static int taskbar_icon_size() { return 16; }
 
-    virtual void config_string_did_change(String const&, String const&, String const&, String const&) override;
+    virtual void config_string_did_change(DeprecatedString const&, DeprecatedString const&, DeprecatedString const&, DeprecatedString const&) override;
+    virtual void add_system_menu(NonnullRefPtr<GUI::Menu> system_menu);
 
 private:
-    explicit TaskbarWindow(NonnullRefPtr<GUI::Menu> start_menu);
+    explicit TaskbarWindow();
     static void show_desktop_button_clicked(unsigned);
     static void toggle_show_desktop();
-    void set_quick_launch_button_data(GUI::Button&, String const&, NonnullRefPtr<Desktop::AppFile>);
+    void set_quick_launch_button_data(GUI::Button&, DeprecatedString const&, NonnullRefPtr<Desktop::AppFile>);
     void on_screen_rects_change(Vector<Gfx::IntRect, 4> const&, size_t);
     NonnullRefPtr<GUI::Button> create_button(WindowIdentifier const&);
     void add_window_button(::Window&, WindowIdentifier const&);
@@ -49,7 +51,7 @@ private:
 
     void set_start_button_font(Gfx::Font const&);
 
-    NonnullRefPtr<GUI::Menu> m_start_menu;
+    RefPtr<GUI::Menu> m_system_menu;
     RefPtr<GUI::Widget> m_task_button_container;
     RefPtr<Gfx::Bitmap> m_default_icon;
 
@@ -57,6 +59,7 @@ private:
     RefPtr<GUI::Frame> m_applet_area_container;
     RefPtr<GUI::Button> m_start_button;
     RefPtr<GUI::Button> m_show_desktop_button;
+    RefPtr<Taskbar::QuickLaunchWidget> m_quick_launch;
     RefPtr<Taskbar::ClockWidget> m_clock_widget;
 
     RefPtr<Desktop::AppFile> m_assistant_app_file;

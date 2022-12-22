@@ -14,21 +14,21 @@
 
 namespace JS::Intl {
 
-Locale* Locale::create(Realm& realm, ::Locale::LocaleID const& locale_id)
+NonnullGCPtr<Locale> Locale::create(Realm& realm, ::Locale::LocaleID const& locale_id)
 {
     return realm.heap().allocate<Locale>(realm, locale_id, *realm.intrinsics().intl_locale_prototype());
 }
 
 // 14 Locale Objects, https://tc39.es/ecma402/#locale-objects
 Locale::Locale(Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
 {
 }
 
 Locale::Locale(::Locale::LocaleID const& locale_id, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
 {
-    set_locale(locale_id.to_string());
+    set_locale(locale_id.to_deprecated_string());
 
     for (auto const& extension : locale_id.extensions) {
         if (!extension.has<::Locale::LocaleExtension>())
@@ -55,7 +55,7 @@ Locale::Locale(::Locale::LocaleID const& locale_id, Object& prototype)
 }
 
 // 1.1.1 CreateArrayFromListOrRestricted ( list , restricted )
-static Array* create_array_from_list_or_restricted(VM& vm, Vector<StringView> list, Optional<String> restricted)
+static Array* create_array_from_list_or_restricted(VM& vm, Vector<StringView> list, Optional<DeprecatedString> restricted)
 {
     auto& realm = *vm.current_realm();
 
@@ -67,7 +67,7 @@ static Array* create_array_from_list_or_restricted(VM& vm, Vector<StringView> li
 
     // 2. Return ! CreateArrayFromList( list ).
     return Array::create_from<StringView>(realm, list, [&vm](auto value) {
-        return js_string(vm, value);
+        return PrimitiveString::create(vm, value);
     });
 }
 
@@ -75,7 +75,7 @@ static Array* create_array_from_list_or_restricted(VM& vm, Vector<StringView> li
 Array* calendars_of_locale(VM& vm, Locale const& locale_object)
 {
     // 1. Let restricted be loc.[[Calendar]].
-    Optional<String> restricted = locale_object.has_calendar() ? locale_object.calendar() : Optional<String> {};
+    Optional<DeprecatedString> restricted = locale_object.has_calendar() ? locale_object.calendar() : Optional<DeprecatedString> {};
 
     // 2. Let locale be loc.[[Locale]].
     auto const& locale = locale_object.locale();
@@ -94,7 +94,7 @@ Array* calendars_of_locale(VM& vm, Locale const& locale_object)
 Array* collations_of_locale(VM& vm, Locale const& locale_object)
 {
     // 1. Let restricted be loc.[[Collation]].
-    Optional<String> restricted = locale_object.has_collation() ? locale_object.collation() : Optional<String> {};
+    Optional<DeprecatedString> restricted = locale_object.has_collation() ? locale_object.collation() : Optional<DeprecatedString> {};
 
     // 2. Let locale be loc.[[Locale]].
     auto const& locale = locale_object.locale();
@@ -113,7 +113,7 @@ Array* collations_of_locale(VM& vm, Locale const& locale_object)
 Array* hour_cycles_of_locale(VM& vm, Locale const& locale_object)
 {
     // 1. Let restricted be loc.[[HourCycle]].
-    Optional<String> restricted = locale_object.has_hour_cycle() ? locale_object.hour_cycle() : Optional<String> {};
+    Optional<DeprecatedString> restricted = locale_object.has_hour_cycle() ? locale_object.hour_cycle() : Optional<DeprecatedString> {};
 
     // 2. Let locale be loc.[[Locale]].
     auto const& locale = locale_object.locale();
@@ -132,7 +132,7 @@ Array* hour_cycles_of_locale(VM& vm, Locale const& locale_object)
 Array* numbering_systems_of_locale(VM& vm, Locale const& locale_object)
 {
     // 1. Let restricted be loc.[[NumberingSystem]].
-    Optional<String> restricted = locale_object.has_numbering_system() ? locale_object.numbering_system() : Optional<String> {};
+    Optional<DeprecatedString> restricted = locale_object.has_numbering_system() ? locale_object.numbering_system() : Optional<DeprecatedString> {};
 
     // 2. Let locale be loc.[[Locale]].
     auto const& locale = locale_object.locale();
@@ -163,7 +163,7 @@ Array* time_zones_of_locale(VM& vm, StringView region)
 
     // 5. Return ! CreateArrayFromList( list ).
     return Array::create_from<StringView>(realm, list, [&vm](auto value) {
-        return js_string(vm, value);
+        return PrimitiveString::create(vm, value);
     });
 }
 

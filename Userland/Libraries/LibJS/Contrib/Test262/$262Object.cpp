@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TypeCasts.h>
 #include <LibJS/Contrib/Test262/$262Object.h>
 #include <LibJS/Contrib/Test262/AgentObject.h>
 #include <LibJS/Contrib/Test262/GlobalObject.h>
@@ -57,9 +58,8 @@ JS_DEFINE_NATIVE_FUNCTION($262Object::clear_kept_objects)
 
 JS_DEFINE_NATIVE_FUNCTION($262Object::create_realm)
 {
-    auto* realm = Realm::create(vm);
-    VERIFY(realm);
-    auto* realm_global_object = vm.heap().allocate_without_realm<GlobalObject>(*realm);
+    auto realm = Realm::create(vm);
+    auto realm_global_object = vm.heap().allocate_without_realm<GlobalObject>(*realm);
     VERIFY(realm_global_object);
     realm->set_global_object(realm_global_object, nullptr);
     set_default_global_bindings(*realm);
@@ -96,7 +96,7 @@ JS_DEFINE_NATIVE_FUNCTION($262Object::eval_script)
         auto& error = script_or_error.error()[0];
 
         // b. Return Completion { [[Type]]: throw, [[Value]]: error, [[Target]]: empty }.
-        return vm.throw_completion<SyntaxError>(error.to_string());
+        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
     }
 
     // 5. Let status be ScriptEvaluation(s).

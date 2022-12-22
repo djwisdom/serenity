@@ -11,7 +11,7 @@
 namespace JS {
 
 // 3.1.1 WrappedFunctionCreate ( callerRealm: a Realm Record, Target: a function object, ), https://tc39.es/proposal-shadowrealm/#sec-wrappedfunctioncreate
-ThrowCompletionOr<WrappedFunction*> WrappedFunction::create(Realm& realm, Realm& caller_realm, FunctionObject& target)
+ThrowCompletionOr<NonnullGCPtr<WrappedFunction>> WrappedFunction::create(Realm& realm, Realm& caller_realm, FunctionObject& target)
 {
     auto& vm = realm.vm();
 
@@ -22,7 +22,7 @@ ThrowCompletionOr<WrappedFunction*> WrappedFunction::create(Realm& realm, Realm&
     // 5. Set wrapped.[[WrappedTargetFunction]] to Target.
     // 6. Set wrapped.[[Realm]] to callerRealm.
     auto& prototype = *caller_realm.intrinsics().function_prototype();
-    auto* wrapped = vm.heap().allocate<WrappedFunction>(realm, caller_realm, target, prototype);
+    auto wrapped = vm.heap().allocate<WrappedFunction>(realm, caller_realm, target, prototype);
 
     // 7. Let result be CopyNameAndLength(wrapped, Target).
     auto result = copy_name_and_length(vm, *wrapped, target);

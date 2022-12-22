@@ -22,7 +22,7 @@ public:
     {
     }
 
-    StringOrSymbol(String const& string)
+    StringOrSymbol(DeprecatedString const& string)
         : StringOrSymbol(FlyString(string))
     {
     }
@@ -74,19 +74,19 @@ public:
         return reinterpret_cast<Symbol const*>(bits() & ~1ul);
     }
 
-    String to_display_string() const
+    DeprecatedString to_display_string() const
     {
         if (is_string())
             return as_string();
         if (is_symbol())
-            return as_symbol()->to_string();
+            return as_symbol()->to_deprecated_string();
         VERIFY_NOT_REACHED();
     }
 
     Value to_value(VM& vm) const
     {
         if (is_string())
-            return js_string(vm, as_string());
+            return PrimitiveString::create(vm, as_string());
         if (is_symbol())
             return const_cast<Symbol*>(as_symbol());
         return {};

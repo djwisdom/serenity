@@ -28,7 +28,7 @@ void URLSearchParams::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_url);
 }
 
-String url_encode(Vector<QueryParam> const& pairs, AK::URL::PercentEncodeSet percent_encode_set)
+DeprecatedString url_encode(Vector<QueryParam> const& pairs, AK::URL::PercentEncodeSet percent_encode_set)
 {
     StringBuilder builder;
     for (size_t i = 0; i < pairs.size(); ++i) {
@@ -38,7 +38,7 @@ String url_encode(Vector<QueryParam> const& pairs, AK::URL::PercentEncodeSet per
         if (i != pairs.size() - 1)
             builder.append('&');
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 Vector<QueryParam> url_decode(StringView input)
@@ -84,12 +84,12 @@ Vector<QueryParam> url_decode(StringView input)
 
 JS::NonnullGCPtr<URLSearchParams> URLSearchParams::create(JS::Realm& realm, Vector<QueryParam> list)
 {
-    return *realm.heap().allocate<URLSearchParams>(realm, realm, move(list));
+    return realm.heap().allocate<URLSearchParams>(realm, realm, move(list));
 }
 
 // https://url.spec.whatwg.org/#dom-urlsearchparams-urlsearchparams
 // https://url.spec.whatwg.org/#urlsearchparams-initialize
-WebIDL::ExceptionOr<JS::NonnullGCPtr<URLSearchParams>> URLSearchParams::construct_impl(JS::Realm& realm, Variant<Vector<Vector<String>>, OrderedHashMap<String, String>, String> const& init)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<URLSearchParams>> URLSearchParams::construct_impl(JS::Realm& realm, Variant<Vector<Vector<DeprecatedString>>, OrderedHashMap<DeprecatedString, DeprecatedString>, DeprecatedString> const& init)
 {
     // 1. If init is a string and starts with U+003F (?), then remove the first code point from init.
     // NOTE: We do this when we know that it's a string on step 3 of initialization.
@@ -99,8 +99,8 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<URLSearchParams>> URLSearchParams::construc
     // URLSearchParams init from this point forward
 
     // 1. If init is a sequence, then for each pair in init:
-    if (init.has<Vector<Vector<String>>>()) {
-        auto const& init_sequence = init.get<Vector<Vector<String>>>();
+    if (init.has<Vector<Vector<DeprecatedString>>>()) {
+        auto const& init_sequence = init.get<Vector<Vector<DeprecatedString>>>();
 
         Vector<QueryParam> list;
         list.ensure_capacity(init_sequence.size());
@@ -108,7 +108,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<URLSearchParams>> URLSearchParams::construc
         for (auto const& pair : init_sequence) {
             // a. If pair does not contain exactly two items, then throw a TypeError.
             if (pair.size() != 2)
-                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, String::formatted("Expected only 2 items in pair, got {}", pair.size()) };
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, DeprecatedString::formatted("Expected only 2 items in pair, got {}", pair.size()) };
 
             // b. Append a new name-value pair whose name is pair’s first item, and value is pair’s second item, to query’s list.
             list.append(QueryParam { .name = pair[0], .value = pair[1] });
@@ -118,8 +118,8 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<URLSearchParams>> URLSearchParams::construc
     }
 
     // 2. Otherwise, if init is a record, then for each name → value of init, append a new name-value pair whose name is name and value is value, to query’s list.
-    if (init.has<OrderedHashMap<String, String>>()) {
-        auto const& init_record = init.get<OrderedHashMap<String, String>>();
+    if (init.has<OrderedHashMap<DeprecatedString, DeprecatedString>>()) {
+        auto const& init_record = init.get<OrderedHashMap<DeprecatedString, DeprecatedString>>();
 
         Vector<QueryParam> list;
         list.ensure_capacity(init_record.size());
@@ -133,7 +133,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<URLSearchParams>> URLSearchParams::construc
     // 3. Otherwise:
     // a. Assert: init is a string.
     // NOTE: `get` performs `VERIFY(has<T>())`
-    auto const& init_string = init.get<String>();
+    auto const& init_string = init.get<DeprecatedString>();
 
     // See NOTE at the start of this function.
     StringView stripped_init = init_string.substring_view(init_string.starts_with('?'));
@@ -142,7 +142,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<URLSearchParams>> URLSearchParams::construc
     return URLSearchParams::create(realm, url_decode(stripped_init));
 }
 
-void URLSearchParams::append(String const& name, String const& value)
+void URLSearchParams::append(DeprecatedString const& name, DeprecatedString const& value)
 {
     // 1. Append a new name-value pair whose name is name and value is value, to list.
     m_list.empend(name, value);
@@ -156,7 +156,7 @@ void URLSearchParams::update()
     if (!m_url)
         return;
     // 2. Let serializedQuery be the serialization of query’s list.
-    auto serialized_query = to_string();
+    auto serialized_query = to_deprecated_string();
     // 3. If serializedQuery is the empty string, then set serializedQuery to null.
     if (serialized_query.is_empty())
         serialized_query = {};
@@ -164,7 +164,7 @@ void URLSearchParams::update()
     m_url->set_query({}, move(serialized_query));
 }
 
-void URLSearchParams::delete_(String const& name)
+void URLSearchParams::delete_(DeprecatedString const& name)
 {
     // 1. Remove all name-value pairs whose name is name from list.
     m_list.remove_all_matching([&name](auto& entry) {
@@ -174,7 +174,7 @@ void URLSearchParams::delete_(String const& name)
     update();
 }
 
-String URLSearchParams::get(String const& name)
+DeprecatedString URLSearchParams::get(DeprecatedString const& name)
 {
     // return the value of the first name-value pair whose name is name in this’s list, if there is such a pair, and null otherwise.
     auto result = m_list.find_if([&name](auto& entry) {
@@ -186,10 +186,10 @@ String URLSearchParams::get(String const& name)
 }
 
 // https://url.spec.whatwg.org/#dom-urlsearchparams-getall
-Vector<String> URLSearchParams::get_all(String const& name)
+Vector<DeprecatedString> URLSearchParams::get_all(DeprecatedString const& name)
 {
     // return the values of all name-value pairs whose name is name, in this’s list, in list order, and the empty sequence otherwise.
-    Vector<String> values;
+    Vector<DeprecatedString> values;
     for (auto& entry : m_list) {
         if (entry.name == name)
             values.append(entry.value);
@@ -197,7 +197,7 @@ Vector<String> URLSearchParams::get_all(String const& name)
     return values;
 }
 
-bool URLSearchParams::has(String const& name)
+bool URLSearchParams::has(DeprecatedString const& name)
 {
     // return true if there is a name-value pair whose name is name in this’s list, and false otherwise.
     return !m_list.find_if([&name](auto& entry) {
@@ -206,7 +206,7 @@ bool URLSearchParams::has(String const& name)
                 .is_end();
 }
 
-void URLSearchParams::set(String const& name, String const& value)
+void URLSearchParams::set(DeprecatedString const& name, DeprecatedString const& value)
 {
     // 1. If this’s list contains any name-value pairs whose name is name, then set the value of the first such name-value pair to value and remove the others.
     auto existing = m_list.find_if([&name](auto& entry) {
@@ -255,7 +255,7 @@ void URLSearchParams::sort()
     update();
 }
 
-String URLSearchParams::to_string() const
+DeprecatedString URLSearchParams::to_deprecated_string() const
 {
     // return the serialization of this’s list.
     return url_encode(m_list, AK::URL::PercentEncodeSet::ApplicationXWWWFormUrlencoded);

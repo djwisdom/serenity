@@ -12,7 +12,7 @@
 #include <LibTLS/TLSv12.h>
 #include <LibTest/TestCase.h>
 
-static char const* ca_certs_file = "./ca_certs.ini";
+static StringView ca_certs_file = "./ca_certs.ini"sv;
 static int port = 443;
 
 constexpr auto DEFAULT_SERVER = "www.google.com"sv;
@@ -23,14 +23,14 @@ static ByteBuffer operator""_b(char const* string, size_t length)
 }
 
 Vector<Certificate> load_certificates();
-String locate_ca_certs_file();
+DeprecatedString locate_ca_certs_file();
 
-String locate_ca_certs_file()
+DeprecatedString locate_ca_certs_file()
 {
     if (Core::File::exists(ca_certs_file)) {
         return ca_certs_file;
     }
-    auto on_target_path = String("/etc/ca_certs.ini");
+    auto on_target_path = DeprecatedString("/etc/ca_certs.ini");
     if (Core::File::exists(on_target_path)) {
         return on_target_path;
     }
@@ -96,17 +96,17 @@ TEST_CASE(test_TLS_hello_handshake)
         loop.quit(0);
     };
 
-    if (!tls->write_or_error("GET / HTTP/1.1\r\nHost: "_b)) {
+    if (tls->write_entire_buffer("GET / HTTP/1.1\r\nHost: "_b).is_error()) {
         FAIL("write(0) failed");
         return;
     }
 
     auto the_server = DEFAULT_SERVER;
-    if (!tls->write_or_error(the_server.bytes())) {
+    if (tls->write_entire_buffer(the_server.bytes()).is_error()) {
         FAIL("write(1) failed");
         return;
     }
-    if (!tls->write_or_error("\r\nConnection : close\r\n\r\n"_b)) {
+    if (tls->write_entire_buffer("\r\nConnection : close\r\n\r\n"_b).is_error()) {
         FAIL("write(2) failed");
         return;
     }

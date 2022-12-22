@@ -16,26 +16,35 @@
 
 #include <AK/Assertions.h>
 
+namespace AK {
+
 template<typename T, typename U>
-constexpr auto round_up_to_power_of_two(T value, U power_of_two) requires(IsIntegral<T>&& IsIntegral<U>)
+constexpr auto round_up_to_power_of_two(T value, U power_of_two)
+requires(AK::Detail::IsIntegral<T> && AK::Detail::IsIntegral<U>)
 {
     return ((value - 1) & ~(power_of_two - 1)) + power_of_two;
 }
 
 template<typename T>
-constexpr bool is_power_of_two(T value) requires(IsIntegral<T>)
+constexpr bool is_power_of_two(T value)
+requires(AK::Detail::IsIntegral<T>)
 {
     return value && !((value) & (value - 1));
 }
 
-// HACK: clang-format does not format this correctly because of the requires clause above.
-// Disabling formatting for that doesn't help either.
-//
-// clang-format off
-#ifndef AK_DONT_REPLACE_STD
-namespace std { // NOLINT(cert-dcl58-cpp) Names in std to aid tools
+}
+
+#if !USING_AK_GLOBALLY || defined(AK_DONT_REPLACE_STD)
+#    define AK_REPLACED_STD_NAMESPACE AK::replaced_std
+#else
+#    define AK_REPLACED_STD_NAMESPACE std
+#endif
+
+namespace AK_REPLACED_STD_NAMESPACE { // NOLINT(cert-dcl58-cpp) Names in std to aid tools
 
 // NOTE: These are in the "std" namespace since some compilers and static analyzers rely on it.
+//       If USING_AK_GLOBALLY is false, we can't put them in ::std, so we put them in AK::replaced_std instead
+//       The user code should not notice anything unless it explicitly asks for std::stuff, so...don't.
 
 template<typename T>
 constexpr T&& forward(AK::Detail::RemoveReference<T>& param)
@@ -46,7 +55,7 @@ constexpr T&& forward(AK::Detail::RemoveReference<T>& param)
 template<typename T>
 constexpr T&& forward(AK::Detail::RemoveReference<T>&& param) noexcept
 {
-    static_assert(!IsLvalueReference<T>, "Can't forward an rvalue as an lvalue.");
+    static_assert(!AK::Detail::IsLvalueReference<T>, "Can't forward an rvalue as an lvalue.");
     return static_cast<T&&>(param);
 }
 
@@ -57,13 +66,11 @@ constexpr T&& move(T& arg)
 }
 
 }
-#else
-#include <utility>
-#endif
-// clang-format on
 
-using std::forward;
-using std::move;
+namespace AK {
+using AK_REPLACED_STD_NAMESPACE::forward;
+using AK_REPLACED_STD_NAMESPACE::move;
+}
 
 namespace AK::Detail {
 template<typename T>
@@ -81,19 +88,19 @@ constexpr SizeType array_size(T (&)[N])
 }
 
 template<typename T>
-constexpr T min(const T& a, IdentityType<T> const& b)
+constexpr T min(T const& a, IdentityType<T> const& b)
 {
     return b < a ? b : a;
 }
 
 template<typename T>
-constexpr T max(const T& a, IdentityType<T> const& b)
+constexpr T max(T const& a, IdentityType<T> const& b)
 {
     return a < b ? b : a;
 }
 
 template<typename T>
-constexpr T clamp(const T& value, IdentityType<T> const& min, IdentityType<T> const& max)
+constexpr T clamp(T const& value, IdentityType<T> const& min, IdentityType<T> const& max)
 {
     VERIFY(max >= min);
     if (value > max)
@@ -141,7 +148,8 @@ template<typename T>
 using RawPtr = typename Detail::_RawPtr<T>::Type;
 
 template<typename V>
-constexpr decltype(auto) to_underlying(V value) requires(IsEnum<V>)
+constexpr decltype(auto) to_underlying(V value)
+requires(IsEnum<V>)
 {
     return static_cast<UnderlyingType<V>>(value);
 }
@@ -178,14 +186,20 @@ __DEFINE_GENERIC_ABS(long double, 0.0L, fabsl);
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::array_size;
 using AK::ceil_div;
 using AK::clamp;
 using AK::exchange;
+using AK::forward;
 using AK::is_constant_evaluated;
+using AK::is_power_of_two;
 using AK::max;
 using AK::min;
 using AK::mix;
+using AK::move;
 using AK::RawPtr;
+using AK::round_up_to_power_of_two;
 using AK::swap;
 using AK::to_underlying;
+#endif

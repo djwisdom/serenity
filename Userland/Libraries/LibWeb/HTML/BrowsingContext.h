@@ -124,19 +124,23 @@ public:
     HTML::WindowProxy* window_proxy();
     HTML::WindowProxy const* window_proxy() const;
 
+    JS::GCPtr<BrowsingContext> opener_browsing_context() const { return m_opener_browsing_context; }
+
+    void set_opener_browsing_context(JS::GCPtr<BrowsingContext> browsing_context) { m_opener_browsing_context = browsing_context; }
+
     HTML::Window* active_window();
     HTML::Window const* active_window() const;
 
     Page* page() { return m_page; }
     Page const* page() const { return m_page; }
 
-    Gfx::IntSize const& size() const { return m_size; }
-    void set_size(Gfx::IntSize const&);
+    Gfx::IntSize size() const { return m_size; }
+    void set_size(Gfx::IntSize);
 
     void set_needs_display();
     void set_needs_display(Gfx::IntRect const&);
 
-    Gfx::IntPoint const& viewport_scroll_offset() const { return m_viewport_scroll_offset; }
+    Gfx::IntPoint viewport_scroll_offset() const { return m_viewport_scroll_offset; }
     Gfx::IntRect viewport_rect() const { return { m_viewport_scroll_offset, m_size }; }
     void set_viewport_rect(Gfx::IntRect const&);
 
@@ -146,8 +150,8 @@ public:
     Web::EventHandler& event_handler() { return m_event_handler; }
     Web::EventHandler const& event_handler() const { return m_event_handler; }
 
-    void scroll_to(Gfx::IntPoint const&);
-    void scroll_to_anchor(String const&);
+    void scroll_to(Gfx::IntPoint);
+    void scroll_to_anchor(DeprecatedString const&);
 
     BrowsingContext& top_level_browsing_context()
     {
@@ -159,7 +163,18 @@ public:
 
     BrowsingContext const& top_level_browsing_context() const { return const_cast<BrowsingContext*>(this)->top_level_browsing_context(); }
 
-    BrowsingContext* choose_a_browsing_context(StringView name, bool noopener);
+    enum class WindowType {
+        ExistingOrNone,
+        NewAndUnrestricted,
+        NewWithNoOpener,
+    };
+
+    struct ChosenBrowsingContext {
+        JS::GCPtr<BrowsingContext> browsing_context;
+        WindowType window_type;
+    };
+
+    ChosenBrowsingContext choose_a_browsing_context(StringView name, bool no_opener);
 
     size_t document_tree_child_browsing_context_count() const;
 
@@ -168,8 +183,8 @@ public:
     HTML::BrowsingContextContainer* container() { return m_container; }
     HTML::BrowsingContextContainer const* container() const { return m_container; }
 
-    Gfx::IntPoint to_top_level_position(Gfx::IntPoint const&);
-    Gfx::IntRect to_top_level_rect(Gfx::IntRect const&);
+    CSSPixelPoint to_top_level_position(CSSPixelPoint);
+    CSSPixelRect to_top_level_rect(CSSPixelRect const&);
 
     DOM::Position const& cursor_position() const { return m_cursor_position; }
     void set_cursor_position(DOM::Position);
@@ -178,7 +193,7 @@ public:
 
     bool cursor_blink_state() const { return m_cursor_blink_state; }
 
-    String selected_text() const;
+    DeprecatedString selected_text() const;
     void select_all();
 
     void did_edit(Badge<EditEventHandler>);
@@ -196,8 +211,8 @@ public:
 
     JS::GCPtr<DOM::Node> currently_focused_area();
 
-    String const& name() const { return m_name; }
-    void set_name(String const& name) { m_name = name; }
+    DeprecatedString const& name() const { return m_name; }
+    void set_name(DeprecatedString const& name) { m_name = name; }
 
     Vector<SessionHistoryEntry>& session_history() { return m_session_history; }
     Vector<SessionHistoryEntry> const& session_history() const { return m_session_history; }
@@ -222,12 +237,12 @@ public:
         bool exceptions_enabled = false,
         HistoryHandlingBehavior history_handling = HistoryHandlingBehavior::Default,
         Optional<PolicyContainer> history_policy_container = {},
-        String navigation_type = "other",
-        Optional<String> navigation_id = {},
+        DeprecatedString navigation_type = "other",
+        Optional<DeprecatedString> navigation_id = {},
         Function<void(JS::NonnullGCPtr<Fetch::Infrastructure::Response>)> process_response_end_of_body = {});
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-fragid
-    WebIDL::ExceptionOr<void> navigate_to_a_fragment(AK::URL const&, HistoryHandlingBehavior, String navigation_id);
+    WebIDL::ExceptionOr<void> navigate_to_a_fragment(AK::URL const&, HistoryHandlingBehavior, DeprecatedString navigation_id);
 
     // https://html.spec.whatwg.org/multipage/origin.html#one-permitted-sandboxed-navigator
     BrowsingContext const* the_one_permitted_sandboxed_navigator() const;
@@ -240,6 +255,8 @@ public:
 
     VisibilityState system_visibility_state() const;
     void set_system_visibility_state(VisibilityState);
+
+    void set_is_popup(bool is_popup) { m_is_popup = is_popup; }
 
     // https://html.spec.whatwg.org/multipage/window-object.html#a-browsing-context-is-discarded
     void discard();
@@ -286,6 +303,9 @@ private:
     // https://html.spec.whatwg.org/multipage/browsers.html#browsing-context
     JS::GCPtr<HTML::WindowProxy> m_window_proxy;
 
+    // https://html.spec.whatwg.org/multipage/browsers.html#opener-browsing-context
+    JS::GCPtr<BrowsingContext> m_opener_browsing_context;
+
     DOM::Position m_cursor_position;
     RefPtr<Platform::Timer> m_cursor_blink_timer;
     bool m_cursor_blink_state { false };
@@ -293,10 +313,13 @@ private:
     HashTable<ViewportClient*> m_viewport_clients;
 
     HashMap<AK::URL, size_t> m_frame_nesting_levels;
-    String m_name;
+    DeprecatedString m_name;
 
     // https://html.spec.whatwg.org/multipage/browsers.html#tlbc-group
     JS::GCPtr<BrowsingContextGroup> m_group;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#is-popup
+    bool m_is_popup { false };
 
     // https://html.spec.whatwg.org/multipage/interaction.html#system-visibility-state
     VisibilityState m_system_visibility_state { VisibilityState::Hidden };

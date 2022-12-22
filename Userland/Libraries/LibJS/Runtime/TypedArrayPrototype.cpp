@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ArrayIterator.h>
@@ -16,7 +17,7 @@
 namespace JS {
 
 TypedArrayPrototype::TypedArrayPrototype(Realm& realm)
-    : Object(*realm.intrinsics().object_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
 {
 }
 
@@ -86,7 +87,7 @@ static ThrowCompletionOr<TypedArrayBase*> validate_typed_array_from_this(VM& vm)
     return typed_array;
 }
 
-static ThrowCompletionOr<FunctionObject*> callback_from_args(VM& vm, String const& name)
+static ThrowCompletionOr<FunctionObject*> callback_from_args(VM& vm, DeprecatedString const& name)
 {
     if (vm.argument_count() < 1)
         return vm.throw_completion<TypeError>(ErrorType::TypedArrayPrototypeOneArg, name);
@@ -96,7 +97,7 @@ static ThrowCompletionOr<FunctionObject*> callback_from_args(VM& vm, String cons
     return &callback.as_function();
 }
 
-static ThrowCompletionOr<void> for_each_item(VM& vm, String const& name, Function<IterationDecision(size_t index, Value value, Value callback_result)> callback)
+static ThrowCompletionOr<void> for_each_item(VM& vm, DeprecatedString const& name, Function<IterationDecision(size_t index, Value value, Value callback_result)> callback)
 {
     auto* typed_array = TRY(validate_typed_array_from_this(vm));
 
@@ -118,7 +119,7 @@ static ThrowCompletionOr<void> for_each_item(VM& vm, String const& name, Functio
     return {};
 }
 
-static ThrowCompletionOr<void> for_each_item_from_last(VM& vm, String const& name, Function<IterationDecision(size_t index, Value value, Value callback_result)> callback)
+static ThrowCompletionOr<void> for_each_item_from_last(VM& vm, DeprecatedString const& name, Function<IterationDecision(size_t index, Value value, Value callback_result)> callback)
 {
     auto* typed_array = TRY(validate_typed_array_from_this(vm));
 
@@ -387,7 +388,11 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::entries)
 {
     auto& realm = *vm.current_realm();
 
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
     auto* typed_array = TRY(validate_typed_array_from_this(vm));
+
+    // 3. Return CreateArrayIterator(O, key+value).
     return ArrayIterator::create(realm, typed_array, Object::PropertyKind::KeyAndValue);
 }
 
@@ -408,26 +413,36 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::every)
 // 23.2.3.9 %TypedArray%.prototype.fill ( value [ , start [ , end ] ] ), https://tc39.es/ecma262/#sec-%typedarray%.prototype.fill
 JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::fill)
 {
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
     auto typed_array = TRY(validate_typed_array_from_this(vm));
 
+    // 3. Let len be O.[[ArrayLength]].
     auto length = typed_array->array_length();
 
     Value value;
+    // 4. If O.[[ContentType]] is BigInt, set value to ? ToBigInt(value).
     if (typed_array->content_type() == TypedArrayBase::ContentType::BigInt)
         value = TRY(vm.argument(0).to_bigint(vm));
+    // 5. Otherwise, set value to ? ToNumber(value).
     else
         value = TRY(vm.argument(0).to_number(vm));
 
+    // 6. Let relativeStart be ? ToIntegerOrInfinity(start).
     auto relative_start = TRY(vm.argument(1).to_integer_or_infinity(vm));
 
     u32 k;
+    // 7. If relativeStart is -∞, let k be 0.
     if (Value(relative_start).is_negative_infinity())
         k = 0;
+    // 8. Else if relativeStart < 0, let k be max(len + relativeStart, 0).
     else if (relative_start < 0)
         k = max(length + relative_start, 0);
+    // 9. Else, let k be min(relativeStart, len).
     else
         k = min(relative_start, length);
 
+    // 10. If end is undefined, let relativeEnd be len; else let relativeEnd be ? ToIntegerOrInfinity(end).
     double relative_end;
     if (vm.argument(2).is_undefined())
         relative_end = length;
@@ -435,19 +450,30 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::fill)
         relative_end = TRY(vm.argument(2).to_integer_or_infinity(vm));
 
     u32 final;
+    // 11. If relativeEnd is -∞, let final be 0.
     if (Value(relative_end).is_negative_infinity())
         final = 0;
+    // 12. Else if relativeEnd < 0, let final be max(len + relativeEnd, 0).
     else if (relative_end < 0)
         final = max(length + relative_end, 0);
+    // 13. Else, let final be min(relativeEnd, len).
     else
         final = min(relative_end, length);
 
+    // 14. If IsDetachedBuffer(O.[[ViewedArrayBuffer]]) is true, throw a TypeError exception.
     if (typed_array->viewed_array_buffer()->is_detached())
         return vm.throw_completion<TypeError>(ErrorType::DetachedArrayBuffer);
 
-    for (; k < final; ++k)
-        TRY(typed_array->set(k, value, Object::ShouldThrowExceptions::Yes));
+    // 15. Repeat, while k < final,
+    for (; k < final; ++k) {
+        // a. Let Pk be ! ToString(𝔽(k)).
+        // b. Perform ! Set(O, Pk, value, true).
+        MUST(typed_array->set(k, value, Object::ShouldThrowExceptions::Yes));
 
+        // c. Set k to k + 1.
+    }
+
+    // 16. Return O.
     return typed_array;
 }
 
@@ -583,105 +609,178 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::for_each)
 // 23.2.3.16 %TypedArray%.prototype.includes ( searchElement [ , fromIndex ] ), https://tc39.es/ecma262/#sec-%typedarray%.prototype.includes
 JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::includes)
 {
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
     auto typed_array = TRY(validate_typed_array_from_this(vm));
 
+    // 3. Let len be O.[[ArrayLength]].
     auto length = typed_array->array_length();
 
+    // 4. If len is 0, return false.
     if (length == 0)
         return Value(false);
 
+    // 5. Let n be ? ToIntegerOrInfinity(fromIndex).
     auto n = TRY(vm.argument(1).to_integer_or_infinity(vm));
 
+    // 6. Assert: If fromIndex is undefined, then n is 0.
+    if (vm.argument(1).is_undefined())
+        VERIFY(n == 0);
+
     auto value_n = Value(n);
+    // 7. If n is +∞, return false.
     if (value_n.is_positive_infinity())
         return Value(false);
+    // 8. Else if n is -∞, set n to 0.
     else if (value_n.is_negative_infinity())
         n = 0;
 
     u32 k;
+    // 9. If n ≥ 0, then
     if (n >= 0) {
+        // a. Let k be n.
         k = n;
-    } else {
+    }
+    // 10. Else,
+    else {
+        // a. Let k be len + n.
         auto relative_k = length + n;
+
+        // b. If k < 0, set k to 0.
         if (relative_k < 0)
             relative_k = 0;
         k = relative_k;
     }
 
     auto search_element = vm.argument(0);
+    // 11. Repeat, while k < len,
     for (; k < length; ++k) {
+        // a. Let elementK be ! Get(O, ! ToString(𝔽(k))).
         auto element_k = MUST(typed_array->get(k));
 
+        // b. If SameValueZero(searchElement, elementK) is true, return true.
         if (same_value_zero(search_element, element_k))
             return Value(true);
+
+        // c. Set k to k + 1.
     }
 
+    // 12. Return false.
     return Value(false);
 }
 
 // 23.2.3.17 %TypedArray%.prototype.indexOf ( searchElement [ , fromIndex ] ), https://tc39.es/ecma262/#sec-%typedarray%.prototype.indexof
 JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::index_of)
 {
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
     auto typed_array = TRY(validate_typed_array_from_this(vm));
 
+    // 3. Let len be O.[[ArrayLength]].
     auto length = typed_array->array_length();
 
+    // 4. If len is 0, return -1𝔽.
     if (length == 0)
         return Value(-1);
 
+    // 5. Let n be ? ToIntegerOrInfinity(fromIndex).
     auto n = TRY(vm.argument(1).to_integer_or_infinity(vm));
 
+    // 6. Assert: If fromIndex is undefined, then n is 0.
+    if (vm.argument(1).is_undefined())
+        VERIFY(n == 0);
+
     auto value_n = Value(n);
+    // 7. If n is +∞, return -1𝔽.
     if (value_n.is_positive_infinity())
         return Value(-1);
+    // 8. Else if n is -∞, set n to 0.
     else if (value_n.is_negative_infinity())
         n = 0;
 
     u32 k;
+    // 9. If n ≥ 0, then
     if (n >= 0) {
+        // a. Let k be n.
         k = n;
-    } else {
+    }
+    // 10. Else,
+    else {
+        // a. Let k be len + n.
         auto relative_k = length + n;
+
+        // b. If k < 0, set k to 0.
         if (relative_k < 0)
             relative_k = 0;
         k = relative_k;
     }
 
+    // 11. Repeat, while k < len,
     auto search_element = vm.argument(0);
     for (; k < length; ++k) {
+        // a. Let kPresent be ! HasProperty(O, ! ToString(𝔽(k))).
         auto k_present = MUST(typed_array->has_property(k));
+
+        // b. If kPresent is true, then
         if (k_present) {
+            // i. Let elementK be ! Get(O, ! ToString(𝔽(k))).
             auto element_k = MUST(typed_array->get(k));
 
+            // ii. Let same be IsStrictlyEqual(searchElement, elementK).
+            // iii. If same is true, return 𝔽(k).
             if (is_strictly_equal(search_element, element_k))
                 return Value(k);
         }
+
+        // c. Set k to k + 1.
     }
 
+    // 12. Return -1𝔽.
     return Value(-1);
 }
 
 // 23.2.3.18 %TypedArray%.prototype.join ( separator ), https://tc39.es/ecma262/#sec-%typedarray%.prototype.join
 JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::join)
 {
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
     auto* typed_array = TRY(validate_typed_array_from_this(vm));
+
+    // 3. Let len be O.[[ArrayLength]].
     auto length = typed_array->array_length();
-    String separator = ",";
+
+    // 4. If separator is undefined, let sep be ",".
+    // 5. Else, let sep be ? ToString(separator).
+    DeprecatedString separator = ",";
     if (!vm.argument(0).is_undefined())
         separator = TRY(vm.argument(0).to_string(vm));
 
+    // 6. Let R be the empty String.
     StringBuilder builder;
+
+    // 7. Let k be 0.
+    // 8. Repeat, while k < len,
     for (size_t i = 0; i < length; ++i) {
+        // a. If k > 0, set R to the string-concatenation of R and sep.
         if (i > 0)
             builder.append(separator);
-        auto value = TRY(typed_array->get(i));
-        if (value.is_nullish())
+
+        // b. Let element be ! Get(O, ! ToString(𝔽(k))).
+        auto element = MUST(typed_array->get(i));
+
+        // c. If element is undefined, let next be the empty String; otherwise, let next be ! ToString(element).
+        if (element.is_undefined())
             continue;
-        auto string = TRY(value.to_string(vm));
-        builder.append(string);
+        auto next = MUST(element.to_string(vm));
+
+        // d. Set R to the string-concatenation of R and next.
+        builder.append(next);
+
+        // e. Set k to k + 1.
     }
 
-    return js_string(vm, builder.to_string());
+    // 9. Return R.
+    return PrimitiveString::create(vm, builder.to_deprecated_string());
 }
 
 // 23.2.3.19 %TypedArray%.prototype.keys ( ), https://tc39.es/ecma262/#sec-%typedarray%.prototype.keys
@@ -689,7 +788,11 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::keys)
 {
     auto& realm = *vm.current_realm();
 
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
     auto* typed_array = TRY(validate_typed_array_from_this(vm));
+
+    // 3. Return CreateArrayIterator(O, key).
     return ArrayIterator::create(realm, typed_array, Object::PropertyKind::Key);
 }
 
@@ -790,60 +893,108 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::map)
 // 23.2.3.23 %TypedArray%.prototype.reduce ( callbackfn [ , initialValue ] ), https://tc39.es/ecma262/#sec-%typedarray%.prototype.reduce
 JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::reduce)
 {
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
     auto* typed_array = TRY(validate_typed_array_from_this(vm));
 
+    // 3. Let len be O.[[ArrayLength]].
     auto length = typed_array->array_length();
 
+    // 4. If IsCallable(callbackfn) is false, throw a TypeError exception.
     auto* callback_function = TRY(callback_from_args(vm, vm.names.reduce.as_string()));
 
+    // 5. If len = 0 and initialValue is not present, throw a TypeError exception.
     if (length == 0 && vm.argument_count() <= 1)
         return vm.throw_completion<TypeError>(ErrorType::ReduceNoInitial);
 
+    // 6. Let k be 0.
     u32 k = 0;
+
+    // 7. Let accumulator be undefined.
     Value accumulator;
+
+    // 8. If initialValue is present, then
     if (vm.argument_count() > 1) {
+        // a. Set accumulator to initialValue.
         accumulator = vm.argument(1);
-    } else {
+    }
+    // 9. Else,
+    else {
+        // a. Let Pk be ! ToString(𝔽(k)).
+        // b. Set accumulator to ! Get(O, Pk).
         accumulator = MUST(typed_array->get(k));
+
+        // c. Set k to k + 1.
         ++k;
     }
 
+    // 10. Repeat, while k < len,
     for (; k < length; ++k) {
+        // a. Let Pk be ! ToString(𝔽(k)).
+        // b. Let kValue be ! Get(O, Pk).
         auto k_value = MUST(typed_array->get(k));
 
+        // c. Set accumulator to ? Call(callbackfn, undefined, « accumulator, kValue, 𝔽(k), O »).
         accumulator = TRY(call(vm, *callback_function, js_undefined(), accumulator, k_value, Value(k), typed_array));
+
+        // d. Set k to k + 1.
     }
 
+    // 11. Return accumulator.
     return accumulator;
 }
 
 // 23.2.3.24 %TypedArray%.prototype.reduceRight ( callbackfn [ , initialValue ] ), https://tc39.es/ecma262/#sec-%typedarray%.prototype.reduce
 JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::reduce_right)
 {
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
     auto* typed_array = TRY(validate_typed_array_from_this(vm));
 
+    // 3. Let len be O.[[ArrayLength]].
     auto length = typed_array->array_length();
 
+    // 4. If IsCallable(callbackfn) is false, throw a TypeError exception.
     auto* callback_function = TRY(callback_from_args(vm, vm.names.reduce.as_string()));
 
+    // 5. If len is 0 and initialValue is not present, throw a TypeError exception.
     if (length == 0 && vm.argument_count() <= 1)
         return vm.throw_completion<TypeError>(ErrorType::ReduceNoInitial);
 
+    // 6. Let k be len - 1.
     i32 k = (i32)length - 1;
+
+    // 7. Let accumulator be undefined.
     Value accumulator;
+
+    // 8. If initialValue is present, then
     if (vm.argument_count() > 1) {
+        // a. Set accumulator to initialValue.
         accumulator = vm.argument(1);
-    } else {
+    }
+    // 9. Else,
+    else {
+        // a. Let Pk be ! ToString(𝔽(k)).
+        // b. Set accumulator to ! Get(O, Pk).
         accumulator = MUST(typed_array->get(k));
+
+        // c. Set k to k - 1.
         --k;
     }
 
+    // 10. Repeat, while k ≥ 0,
     for (; k >= 0; --k) {
+        // a. Let Pk be ! ToString(𝔽(k)).
+        // b. Let kValue be ! Get(O, Pk).
         auto k_value = MUST(typed_array->get(k));
 
+        // c. Set accumulator to ? Call(callbackfn, undefined, « accumulator, kValue, 𝔽(k), O »).
         accumulator = TRY(call(vm, *callback_function, js_undefined(), accumulator, k_value, Value(k), typed_array));
+
+        // d. Set k to k - 1.
     }
 
+    // 11. Return accumulator.
     return accumulator;
 }
 
@@ -1046,7 +1197,8 @@ static ThrowCompletionOr<void> set_typed_array_from_array_like(VM& vm, TypedArra
         auto value = TRY(src->get(k));
 
         // c. Let targetIndex be 𝔽(targetOffset + k).
-        CanonicalIndex target_index(CanonicalIndex::Type::Index, target_offset + k);
+        // NOTE: We verify above that target_offset + source_length is valid, so this cannot fail.
+        auto target_index = MUST(CanonicalIndex::from_double(vm, CanonicalIndex::Type::Index, target_offset + k));
 
         // d. Perform ? IntegerIndexedElementSet(target, targetIndex, value).
         // FIXME: This is very awkward.
@@ -1268,62 +1420,8 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::sort)
     // 5. NOTE: The following closure performs a numeric comparison rather than the string comparison used in 23.1.3.30.
     // 6. Let SortCompare be a new Abstract Closure with parameters (x, y) that captures comparefn and performs the following steps when called:
     Function<ThrowCompletionOr<double>(Value, Value)> sort_compare = [&](auto x, auto y) -> ThrowCompletionOr<double> {
-        // FIXME: Replace the following steps with CompareTypedArrayElements when the change-array-by-copy proposal is
-        //        updated to no longer throw on detached array buffers. See: https://github.com/tc39/ecma262/commit/e0c74e1
-
-        // a.  Assert: Both Type(x) and Type(y) are Number or both are BigInt.
-        VERIFY((x.is_number() && y.is_number()) || (x.is_bigint() && y.is_bigint()));
-
-        // b. If comparefn is not undefined, then
-        if (!compare_fn.is_undefined()) {
-            // i. Let v be ? ToNumber(? Call(comparefn, undefined, « x, y »)).
-            auto result = TRY(call(vm, compare_fn.as_function(), js_undefined(), x, y));
-            auto value = TRY(result.to_number(vm));
-
-            // ii. If v is NaN, return +0𝔽.
-            if (value.is_nan())
-                return 0;
-
-            // iii. Return v.
-            return value.as_double();
-        }
-
-        // c. If x and y are both NaN, return +0𝔽.
-        if (x.is_nan() && y.is_nan())
-            return 0;
-
-        // d. If x is NaN, return 1𝔽.
-        if (x.is_nan())
-            return 1;
-
-        // e. If y is NaN, return -1𝔽.
-        if (y.is_nan())
-            return -1;
-
-        // f. If x < y, return -1𝔽.
-        if (x.is_bigint()
-                ? (x.as_bigint().big_integer() < y.as_bigint().big_integer())
-                : (x.as_double() < y.as_double())) {
-            return -1;
-        }
-
-        // g. If x > y, return 1𝔽.
-        if (x.is_bigint()
-                ? (x.as_bigint().big_integer() > y.as_bigint().big_integer())
-                : (x.as_double() > y.as_double())) {
-            return 1;
-        }
-
-        // h. If x is -0𝔽 and y is +0𝔽, return -1𝔽.
-        if (x.is_negative_zero() && y.is_positive_zero())
-            return -1;
-
-        // i. If x is +0𝔽 and y is -0𝔽, return 1𝔽.
-        if (x.is_positive_zero() && y.is_negative_zero())
-            return 1;
-
-        // j. Return +0𝔽.
-        return 0;
+        // a. Return ? CompareTypedArrayElements(x, y, comparefn).
+        return TRY(compare_typed_array_elements(vm, x, y, compare_fn.is_undefined() ? nullptr : &compare_fn.as_function()));
     };
 
     // 7. Let sortedList be ? SortIndexedProperties(obj, len, SortCompare, false).
@@ -1468,7 +1566,7 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::to_locale_string)
     }
 
     // 7. Return R.
-    return js_string(vm, builder.to_string());
+    return PrimitiveString::create(vm, builder.to_deprecated_string());
 }
 
 // 1.2.2.1.3 %TypedArray%.prototype.toReversed ( ), https://tc39.es/proposal-change-array-by-copy/#sec-%typedarray%.prototype.toReversed
@@ -1522,33 +1620,29 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::to_sorted)
     // 3. Perform ? ValidateTypedArray(O).
     auto* typed_array = TRY(validate_typed_array_from_this(vm));
 
-    // 4. Let buffer be obj.[[ViewedArrayBuffer]].
-    auto* array_buffer = typed_array->viewed_array_buffer();
-    VERIFY(array_buffer);
-
-    // 5. Let len be O.[[ArrayLength]].
+    // 4. Let len be O.[[ArrayLength]].
     auto length = typed_array->array_length();
 
-    // 6. Let A be ? TypedArrayCreateSameType(O, « 𝔽(len) »).
+    // 5. Let A be ? TypedArrayCreateSameType(O, « 𝔽(len) »).
     MarkedVector<Value> arguments(vm.heap());
     arguments.empend(length);
     auto* return_array = TRY(typed_array_create_same_type(vm, *typed_array, move(arguments)));
 
-    // 7. NOTE: The following closure performs a numeric comparison rather than the string comparison used in  Array.prototype.toSorted
-    // 8. Let SortCompare be a new Abstract Closure with parameters (x, y) that captures comparefn and buffer and performs the following steps when called:
+    // 6. NOTE: The following closure performs a numeric comparison rather than the string comparison used in  Array.prototype.toSorted
+    // 7. Let SortCompare be a new Abstract Closure with parameters (x, y) that captures comparefn and performs the following steps when called:
     Function<ThrowCompletionOr<double>(Value, Value)> sort_compare = [&](auto x, auto y) -> ThrowCompletionOr<double> {
-        // a. Return ? CompareTypedArrayElements(x, y, comparefn, buffer).
-        return TRY(compare_typed_array_elements(vm, x, y, comparefn.is_undefined() ? nullptr : &comparefn.as_function(), *return_array->viewed_array_buffer()));
+        // a. Return ? CompareTypedArrayElements(x, y, comparefn).
+        return TRY(compare_typed_array_elements(vm, x, y, comparefn.is_undefined() ? nullptr : &comparefn.as_function()));
     };
 
-    // 9. Let sortedList be ? SortIndexedProperties(obj, len, SortCompare, false).
+    // 8. Let sortedList be ? SortIndexedProperties(obj, len, SortCompare, false).
     auto sorted_list = TRY(sort_indexed_properties(vm, *object, length, sort_compare, false));
 
-    // 10. Let j be 0.
-    // 11. Repeat, while j < len,
+    // 9. Let j be 0.
+    // 10. Repeat, while j < len,
     for (size_t j = 0; j < length; j++) {
-        // Perform ! Set(A, ! ToString(𝔽(j)), sortedList[j], true).
-        MUST(return_array->create_data_property_or_throw(j, sorted_list[j]));
+        // a. Perform ! Set(A, ! ToString(𝔽(j)), sortedList[j], true).
+        MUST(return_array->set(j, sorted_list[j], Object::ShouldThrowExceptions::Yes));
         // b. Set j to j + 1.
     }
 
@@ -1586,8 +1680,8 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::with)
         value = TRY(value.to_number(vm));
 
     // 9. If ! IsValidIntegerIndex(O, 𝔽(actualIndex)) is false, throw a RangeError exception.
-    if (!is_valid_integer_index(*typed_array, CanonicalIndex(CanonicalIndex::Type::Index, actual_index)))
-        return vm.throw_completion<RangeError>(ErrorType::InvalidIndex);
+    if (!is_valid_integer_index(*typed_array, TRY(CanonicalIndex::from_double(vm, CanonicalIndex::Type::Index, actual_index))))
+        return vm.throw_completion<RangeError>(ErrorType::TypedArrayInvalidIntegerIndex, actual_index);
 
     // 10. Let A be ? TypedArrayCreateSameType(O, « 𝔽(len) »).
     MarkedVector<Value> arguments(vm.heap());
@@ -1623,7 +1717,11 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::values)
 {
     auto& realm = *vm.current_realm();
 
-    auto* typed_array = TRY(typed_array_from_this(vm));
+    // 1. Let O be the this value.
+    // 2. Perform ? ValidateTypedArray(O).
+    auto* typed_array = TRY(validate_typed_array_from_this(vm));
+
+    // 3. Return CreateArrayIterator(O, value).
     return ArrayIterator::create(realm, typed_array, Object::PropertyKind::Value);
 }
 
@@ -1636,7 +1734,7 @@ JS_DEFINE_NATIVE_FUNCTION(TypedArrayPrototype::to_string_tag_getter)
     auto& this_object = this_value.as_object();
     if (!this_object.is_typed_array())
         return js_undefined();
-    return js_string(vm, static_cast<TypedArrayBase&>(this_object).element_name());
+    return PrimitiveString::create(vm, static_cast<TypedArrayBase&>(this_object).element_name());
 }
 
 }

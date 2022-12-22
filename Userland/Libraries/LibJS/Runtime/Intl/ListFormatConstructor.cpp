@@ -43,7 +43,7 @@ ThrowCompletionOr<Value> ListFormatConstructor::call()
 }
 
 // 13.1.1 Intl.ListFormat ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-Intl.ListFormat
-ThrowCompletionOr<Object*> ListFormatConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> ListFormatConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -51,7 +51,7 @@ ThrowCompletionOr<Object*> ListFormatConstructor::construct(FunctionObject& new_
     auto options_value = vm.argument(1);
 
     // 2. Let listFormat be ? OrdinaryCreateFromConstructor(NewTarget, "%ListFormat.prototype%", « [[InitializedListFormat]], [[Locale]], [[Type]], [[Style]], [[Templates]] »).
-    auto* list_format = TRY(ordinary_create_from_constructor<ListFormat>(vm, new_target, &Intrinsics::intl_list_format_prototype));
+    auto list_format = TRY(ordinary_create_from_constructor<ListFormat>(vm, new_target, &Intrinsics::intl_list_format_prototype));
 
     // 3. Let requestedLocales be ? CanonicalizeLocaleList(locales).
     auto requested_locales = TRY(canonicalize_locale_list(vm, locale_value));
@@ -80,13 +80,13 @@ ThrowCompletionOr<Object*> ListFormatConstructor::construct(FunctionObject& new_
     auto type = TRY(get_option(vm, *options, vm.names.type, OptionType::String, { "conjunction"sv, "disjunction"sv, "unit"sv }, "conjunction"sv));
 
     // 12. Set listFormat.[[Type]] to type.
-    list_format->set_type(type.as_string().string());
+    list_format->set_type(type.as_string().deprecated_string());
 
     // 13. Let style be ? GetOption(options, "style", "string", « "long", "short", "narrow" », "long").
     auto style = TRY(get_option(vm, *options, vm.names.style, OptionType::String, { "long"sv, "short"sv, "narrow"sv }, "long"sv));
 
     // 14. Set listFormat.[[Style]] to style.
-    list_format->set_style(style.as_string().string());
+    list_format->set_style(style.as_string().deprecated_string());
 
     // Note: The remaining steps are skipped in favor of deferring to LibUnicode.
 

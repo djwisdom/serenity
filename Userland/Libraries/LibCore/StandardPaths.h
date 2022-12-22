@@ -6,18 +6,21 @@
 
 #pragma once
 
+#include <AK/Error.h>
 #include <AK/Forward.h>
 
 namespace Core {
 
 class StandardPaths {
 public:
-    static String home_directory();
-    static String desktop_directory();
-    static String documents_directory();
-    static String downloads_directory();
-    static String tempfile_directory();
-    static String config_directory();
+    static DeprecatedString home_directory();
+    static DeprecatedString desktop_directory();
+    static DeprecatedString documents_directory();
+    static DeprecatedString downloads_directory();
+    static DeprecatedString tempfile_directory();
+    static DeprecatedString config_directory();
+    static DeprecatedString data_directory();
+    static ErrorOr<DeprecatedString> runtime_directory();
 };
 
 }

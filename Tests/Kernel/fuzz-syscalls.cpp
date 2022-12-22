@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/Random.h>
-#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/Vector.h>
 #include <Kernel/API/SyscallString.h>
@@ -44,7 +44,7 @@ static bool is_bad_idea(int fn, size_t const* direct_sc_args, size_t const* fake
         // FIXME: Known bug: https://github.com/SerenityOS/serenity/issues/5328
         return direct_sc_args[0] == 1;
     case SC_write:
-    case SC_writev:
+    case SC_pwritev:
         // FIXME: Known bug: https://github.com/SerenityOS/serenity/issues/5328
         return direct_sc_args[0] == 0;
     case SC_pledge:

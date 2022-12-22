@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/EnumBits.h>
 #include <AK/Function.h>
 #include <AK/IPv4Address.h>
@@ -14,7 +15,6 @@
 #include <AK/Noncopyable.h>
 #include <AK/Result.h>
 #include <AK/Span.h>
-#include <AK/String.h>
 #include <AK/Time.h>
 #include <AK/Variant.h>
 #include <LibCore/Notifier.h>
@@ -24,11 +24,52 @@
 
 namespace Core::Stream {
 
+template<DerivedFrom<Core::Stream::Stream> T>
+class Handle {
+public:
+    template<DerivedFrom<T> U>
+    Handle(NonnullOwnPtr<U> handle)
+        : m_handle(adopt_own<T>(*handle.leak_ptr()))
+    {
+    }
+
+    // This is made `explicit` to not accidentally create a non-owning Handle,
+    // which may not always be intended.
+    explicit Handle(T& handle)
+        : m_handle(&handle)
+    {
+    }
+
+    T* ptr()
+    {
+        if (m_handle.template has<T*>())
+            return m_handle.template get<T*>();
+        else
+            return m_handle.template get<NonnullOwnPtr<T>>();
+    }
+
+    T const* ptr() const
+    {
+        if (m_handle.template has<T*>())
+            return m_handle.template get<T*>();
+        else
+            return m_handle.template get<NonnullOwnPtr<T>>();
+    }
+
+    T* operator->() { return ptr(); }
+    T const* operator->() const { return ptr(); }
+
+    T& operator*() { return *ptr(); }
+    T const& operator*() const { return *ptr(); }
+
+private:
+    Variant<NonnullOwnPtr<T>, T*> m_handle;
+};
+
 /// The base, abstract class for stream operations. This class defines the
 /// operations one can perform on every stream in LibCore.
 class Stream {
 public:
-    virtual bool is_readable() const { return false; }
     /// Reads into a buffer, with the maximum size being the size of the buffer.
     /// The amount of bytes read can be smaller than the size of the buffer.
     /// Returns either the bytes that were read, or an errno in the case of
@@ -36,21 +77,34 @@ public:
     virtual ErrorOr<Bytes> read(Bytes) = 0;
     /// Tries to fill the entire buffer through reading. Returns whether the
     /// buffer was filled without an error.
-    virtual bool read_or_error(Bytes);
+    virtual ErrorOr<void> read_entire_buffer(Bytes);
     /// Reads the stream until EOF, storing the contents into a ByteBuffer which
     /// is returned once EOF is encountered. The block size determines the size
     /// of newly allocated chunks while reading.
-    virtual ErrorOr<ByteBuffer> read_all(size_t block_size = 4096);
+    virtual ErrorOr<ByteBuffer> read_until_eof(size_t block_size = 4096);
+    /// Discards the given number of bytes from the stream. As this is usually used
+    /// as an efficient version of `read_entire_buffer`, it returns an error
+    /// if reading failed or if not all bytes could be discarded.
+    /// Unless specifically overwritten, this just uses read() to read into an
+    /// internal stack-based buffer.
+    virtual ErrorOr<void> discard(size_t discarded_bytes);
 
-    virtual bool is_writable() const { return false; }
     /// Tries to write the entire contents of the buffer. It is possible for
     /// less than the full buffer to be written. Returns either the amount of
     /// bytes written into the stream, or an errno in the case of failure.
     virtual ErrorOr<size_t> write(ReadonlyBytes) = 0;
     /// Same as write, but does not return until either the entire buffer
-    /// contents are written or an error occurs. Returns whether the entire
-    /// contents were written without an error.
-    virtual bool write_or_error(ReadonlyBytes);
+    /// contents are written or an error occurs.
+    virtual ErrorOr<void> write_entire_buffer(ReadonlyBytes);
+
+    // This is a wrapper around `write_entire_buffer` that is compatible with
+    // `write_or_error`. This is required by some templated code in LibProtocol
+    // that needs to work with either type of stream.
+    // TODO: Fully port or wrap `Request::stream_into_impl` into `Core::Stream` and remove this.
+    bool write_or_error(ReadonlyBytes buffer)
+    {
+        return !write_entire_buffer(buffer).is_error();
+    }
 
     /// Returns whether the stream has reached the end of file. For sockets,
     /// this most likely means that the protocol has disconnected (in the case
@@ -67,12 +121,12 @@ public:
     }
 
 protected:
-    /// Provides a default implementation of read_all that works for streams
+    /// Provides a default implementation of read_until_eof that works for streams
     /// that behave like POSIX file descriptors. expected_file_size can be
     /// passed as a heuristic for what the Stream subclass expects the file
     /// content size to be in order to reduce allocations (does not affect
     /// actual reading).
-    ErrorOr<ByteBuffer> read_all_impl(size_t block_size, size_t expected_file_size = 0);
+    ErrorOr<ByteBuffer> read_until_eof_impl(size_t block_size, size_t expected_file_size = 0);
 };
 
 enum class SeekMode {
@@ -97,6 +151,14 @@ public:
     /// Shrinks or extends the stream to the given size. Returns an errno in
     /// the case of an error.
     virtual ErrorOr<void> truncate(off_t length) = 0;
+    /// Seeks until after the given amount of bytes to be discarded instead of
+    /// reading and discarding everything manually;
+    virtual ErrorOr<void> discard(size_t discarded_bytes) override;
+};
+
+enum class PreventSIGPIPE {
+    No,
+    Yes,
 };
 
 /// The Socket class is the base class for all concrete BSD-style socket
@@ -142,17 +204,29 @@ protected:
         Datagram,
     };
 
-    Socket()
+    Socket(PreventSIGPIPE prevent_sigpipe = PreventSIGPIPE::No)
+        : m_prevent_sigpipe(prevent_sigpipe == PreventSIGPIPE::Yes)
     {
     }
 
     static ErrorOr<int> create_fd(SocketDomain, SocketType);
     // FIXME: This will need to be updated when IPv6 socket arrives. Perhaps a
     //        base class for all address types is appropriate.
-    static ErrorOr<IPv4Address> resolve_host(String const&, SocketType);
+    static ErrorOr<IPv4Address> resolve_host(DeprecatedString const&, SocketType);
 
-    static ErrorOr<void> connect_local(int fd, String const& path);
+    static ErrorOr<void> connect_local(int fd, DeprecatedString const& path);
     static ErrorOr<void> connect_inet(int fd, SocketAddress const&);
+
+    int default_flags() const
+    {
+        int flags = 0;
+        if (m_prevent_sigpipe)
+            flags |= MSG_NOSIGNAL;
+        return flags;
+    }
+
+private:
+    bool m_prevent_sigpipe { false };
 };
 
 /// A reusable socket maintains state about being connected in addition to
@@ -163,7 +237,7 @@ public:
     virtual bool is_connected() = 0;
     /// Reconnects the socket to the given host and port. Returns EALREADY if
     /// is_connected() is true.
-    virtual ErrorOr<void> reconnect(String const& host, u16 port) = 0;
+    virtual ErrorOr<void> reconnect(DeprecatedString const& host, u16 port) = 0;
     /// Connects the socket to the given socket address (IP address + port).
     /// Returns EALREADY is_connected() is true.
     virtual ErrorOr<void> reconnect(SocketAddress const&) = 0;
@@ -196,7 +270,6 @@ class File final : public SeekableStream {
 public:
     static ErrorOr<NonnullOwnPtr<File>> open(StringView filename, OpenMode, mode_t = 0644);
     static ErrorOr<NonnullOwnPtr<File>> adopt_fd(int fd, OpenMode, ShouldCloseFileDescriptor = ShouldCloseFileDescriptor::Yes);
-    static bool exists(StringView filename);
 
     static ErrorOr<NonnullOwnPtr<File>> standard_input();
     static ErrorOr<NonnullOwnPtr<File>> standard_output();
@@ -216,10 +289,8 @@ public:
         return *this;
     }
 
-    virtual bool is_readable() const override;
     virtual ErrorOr<Bytes> read(Bytes) override;
-    virtual ErrorOr<ByteBuffer> read_all(size_t block_size = 4096) override;
-    virtual bool is_writable() const override;
+    virtual ErrorOr<ByteBuffer> read_until_eof(size_t block_size = 4096) override;
     virtual ErrorOr<size_t> write(ReadonlyBytes) override;
     virtual bool is_eof() const override;
     virtual bool is_open() const override;
@@ -255,7 +326,10 @@ class PosixSocketHelper {
 
 public:
     template<typename T>
-    PosixSocketHelper(Badge<T>) requires(IsBaseOf<Socket, T>) { }
+    PosixSocketHelper(Badge<T>)
+    requires(IsBaseOf<Socket, T>)
+    {
+    }
 
     PosixSocketHelper(PosixSocketHelper&& other)
     {
@@ -273,8 +347,8 @@ public:
     int fd() const { return m_fd; }
     void set_fd(int fd) { m_fd = fd; }
 
-    ErrorOr<Bytes> read(Bytes, int flags = 0);
-    ErrorOr<size_t> write(ReadonlyBytes);
+    ErrorOr<Bytes> read(Bytes, int flags);
+    ErrorOr<size_t> write(ReadonlyBytes, int flags);
 
     bool is_eof() const { return !is_open() || m_last_read_was_eof; }
     bool is_open() const { return m_fd != -1; }
@@ -298,7 +372,7 @@ private:
 
 class TCPSocket final : public Socket {
 public:
-    static ErrorOr<NonnullOwnPtr<TCPSocket>> connect(String const& host, u16 port);
+    static ErrorOr<NonnullOwnPtr<TCPSocket>> connect(DeprecatedString const& host, u16 port);
     static ErrorOr<NonnullOwnPtr<TCPSocket>> connect(SocketAddress const& address);
     static ErrorOr<NonnullOwnPtr<TCPSocket>> adopt_fd(int fd);
 
@@ -320,10 +394,8 @@ public:
         return *this;
     }
 
-    virtual bool is_readable() const override { return is_open(); }
-    virtual bool is_writable() const override { return is_open(); }
-    virtual ErrorOr<Bytes> read(Bytes buffer) override { return m_helper.read(buffer); }
-    virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_helper.write(buffer); }
+    virtual ErrorOr<Bytes> read(Bytes buffer) override { return m_helper.read(buffer, default_flags()); }
+    virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_helper.write(buffer, default_flags()); }
     virtual bool is_eof() const override { return m_helper.is_eof(); }
     virtual bool is_open() const override { return m_helper.is_open(); };
     virtual void close() override { m_helper.close(); };
@@ -340,7 +412,8 @@ public:
     virtual ~TCPSocket() override { close(); }
 
 private:
-    TCPSocket()
+    TCPSocket(PreventSIGPIPE prevent_sigpipe = PreventSIGPIPE::No)
+        : Socket(prevent_sigpipe)
     {
     }
 
@@ -360,7 +433,7 @@ private:
 
 class UDPSocket final : public Socket {
 public:
-    static ErrorOr<NonnullOwnPtr<UDPSocket>> connect(String const& host, u16 port, Optional<Time> timeout = {});
+    static ErrorOr<NonnullOwnPtr<UDPSocket>> connect(DeprecatedString const& host, u16 port, Optional<Time> timeout = {});
     static ErrorOr<NonnullOwnPtr<UDPSocket>> connect(SocketAddress const& address, Optional<Time> timeout = {});
 
     UDPSocket(UDPSocket&& other)
@@ -393,12 +466,10 @@ public:
             return Error::from_errno(EMSGSIZE);
         }
 
-        return m_helper.read(buffer);
+        return m_helper.read(buffer, default_flags());
     }
 
-    virtual bool is_readable() const override { return is_open(); }
-    virtual bool is_writable() const override { return is_open(); }
-    virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_helper.write(buffer); }
+    virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_helper.write(buffer, default_flags()); }
     virtual bool is_eof() const override { return m_helper.is_eof(); }
     virtual bool is_open() const override { return m_helper.is_open(); }
     virtual void close() override { m_helper.close(); }
@@ -415,7 +486,10 @@ public:
     virtual ~UDPSocket() override { close(); }
 
 private:
-    UDPSocket() = default;
+    UDPSocket(PreventSIGPIPE prevent_sigpipe = PreventSIGPIPE::No)
+        : Socket(prevent_sigpipe)
+    {
+    }
 
     void setup_notifier()
     {
@@ -433,8 +507,8 @@ private:
 
 class LocalSocket final : public Socket {
 public:
-    static ErrorOr<NonnullOwnPtr<LocalSocket>> connect(String const& path);
-    static ErrorOr<NonnullOwnPtr<LocalSocket>> adopt_fd(int fd);
+    static ErrorOr<NonnullOwnPtr<LocalSocket>> connect(DeprecatedString const& path, PreventSIGPIPE = PreventSIGPIPE::No);
+    static ErrorOr<NonnullOwnPtr<LocalSocket>> adopt_fd(int fd, PreventSIGPIPE = PreventSIGPIPE::No);
 
     LocalSocket(LocalSocket&& other)
         : Socket(static_cast<Socket&&>(other))
@@ -454,10 +528,8 @@ public:
         return *this;
     }
 
-    virtual bool is_readable() const override { return is_open(); }
-    virtual bool is_writable() const override { return is_open(); }
-    virtual ErrorOr<Bytes> read(Bytes buffer) override { return m_helper.read(buffer); }
-    virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_helper.write(buffer); }
+    virtual ErrorOr<Bytes> read(Bytes buffer) override { return m_helper.read(buffer, default_flags()); }
+    virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_helper.write(buffer, default_flags()); }
     virtual bool is_eof() const override { return m_helper.is_eof(); }
     virtual bool is_open() const override { return m_helper.is_open(); }
     virtual void close() override { m_helper.close(); }
@@ -488,7 +560,10 @@ public:
     virtual ~LocalSocket() { close(); }
 
 private:
-    LocalSocket() = default;
+    LocalSocket(PreventSIGPIPE prevent_sigpipe = PreventSIGPIPE::No)
+        : Socket(prevent_sigpipe)
+    {
+    }
 
     void setup_notifier()
     {
@@ -684,7 +759,7 @@ public:
         if (m_buffer.span().slice(0, m_buffered_size).contains_slow('\n'))
             return true;
 
-        if (!stream().is_readable())
+        if (stream().is_eof())
             return false;
 
         while (m_buffered_size < m_buffer.size()) {
@@ -785,9 +860,7 @@ public:
     BufferedSeekable(BufferedSeekable&& other) = default;
     BufferedSeekable& operator=(BufferedSeekable&& other) = default;
 
-    virtual bool is_readable() const override { return m_helper.stream().is_readable(); }
     virtual ErrorOr<Bytes> read(Bytes buffer) override { return m_helper.read(move(buffer)); }
-    virtual bool is_writable() const override { return m_helper.stream().is_writable(); }
     virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_helper.stream().write(buffer); }
     virtual bool is_eof() const override { return m_helper.is_eof(); }
     virtual bool is_open() const override { return m_helper.stream().is_open(); }
@@ -856,9 +929,7 @@ public:
         return *this;
     }
 
-    virtual bool is_readable() const override { return m_helper.stream().is_readable(); }
     virtual ErrorOr<Bytes> read(Bytes buffer) override { return m_helper.read(move(buffer)); }
-    virtual bool is_writable() const override { return m_helper.stream().is_writable(); }
     virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_helper.stream().write(buffer); }
     virtual bool is_eof() const override { return m_helper.is_eof(); }
     virtual bool is_open() const override { return m_helper.stream().is_open(); }
@@ -911,7 +982,7 @@ using BufferedLocalSocket = BufferedSocket<LocalSocket>;
 template<SocketLike T>
 class BasicReusableSocket final : public ReusableSocket {
 public:
-    static ErrorOr<NonnullOwnPtr<BasicReusableSocket<T>>> connect(String const& host, u16 port)
+    static ErrorOr<NonnullOwnPtr<BasicReusableSocket<T>>> connect(DeprecatedString const& host, u16 port)
     {
         return make<BasicReusableSocket<T>>(TRY(T::connect(host, port)));
     }
@@ -926,7 +997,7 @@ public:
         return m_socket.is_open();
     }
 
-    virtual ErrorOr<void> reconnect(String const& host, u16 port) override
+    virtual ErrorOr<void> reconnect(DeprecatedString const& host, u16 port) override
     {
         if (is_connected())
             return Error::from_errno(EALREADY);
@@ -944,9 +1015,7 @@ public:
         return {};
     }
 
-    virtual bool is_readable() const override { return m_socket.is_readable(); }
     virtual ErrorOr<Bytes> read(Bytes buffer) override { return m_socket.read(move(buffer)); }
-    virtual bool is_writable() const override { return m_socket.is_writable(); }
     virtual ErrorOr<size_t> write(ReadonlyBytes buffer) override { return m_socket.write(buffer); }
     virtual bool is_eof() const override { return m_socket.is_eof(); }
     virtual bool is_open() const override { return m_socket.is_open(); }
@@ -967,5 +1036,47 @@ private:
 
 using ReusableTCPSocket = BasicReusableSocket<TCPSocket>;
 using ReusableUDPSocket = BasicReusableSocket<UDPSocket>;
+
+// Note: This is only a temporary hack, to break up the task of moving away from AK::Stream into smaller parts.
+class WrappedAKInputStream final : public Stream {
+public:
+    WrappedAKInputStream(NonnullOwnPtr<InputStream> stream);
+    virtual ErrorOr<Bytes> read(Bytes) override;
+    virtual ErrorOr<void> discard(size_t discarded_bytes) override;
+    virtual ErrorOr<size_t> write(ReadonlyBytes) override;
+    virtual bool is_eof() const override;
+    virtual bool is_open() const override;
+    virtual void close() override;
+
+private:
+    NonnullOwnPtr<InputStream> m_stream;
+};
+
+// Note: This is only a temporary hack, to break up the task of moving away from AK::Stream into smaller parts.
+class WrappedAKOutputStream final : public Stream {
+public:
+    WrappedAKOutputStream(NonnullOwnPtr<OutputStream> stream);
+    virtual ErrorOr<Bytes> read(Bytes) override;
+    virtual ErrorOr<size_t> write(ReadonlyBytes) override;
+    virtual bool is_eof() const override;
+    virtual bool is_open() const override;
+    virtual void close() override;
+
+private:
+    NonnullOwnPtr<OutputStream> m_stream;
+};
+
+// Note: This is only a temporary hack, to break up the task of moving away from AK::Stream into smaller parts.
+class WrapInAKInputStream final : public InputStream {
+public:
+    WrapInAKInputStream(Core::Stream::Stream& stream);
+    virtual size_t read(Bytes) override;
+    virtual bool unreliable_eof() const override;
+    virtual bool read_or_error(Bytes) override;
+    virtual bool discard_or_error(size_t count) override;
+
+private:
+    Core::Stream::Stream& m_stream;
+};
 
 }

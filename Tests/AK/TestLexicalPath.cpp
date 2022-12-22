@@ -7,18 +7,20 @@
 
 #include <LibTest/TestCase.h>
 
+#include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
-#include <AK/String.h>
 
 TEST_CASE(relative_path)
 {
     EXPECT_EQ(LexicalPath::relative_path("/tmp/abc.txt"sv, "/tmp"sv), "abc.txt"sv);
     EXPECT_EQ(LexicalPath::relative_path("/tmp/abc.txt"sv, "/tmp/"sv), "abc.txt"sv);
     EXPECT_EQ(LexicalPath::relative_path("/tmp/abc.txt"sv, "/"sv), "tmp/abc.txt"sv);
-    EXPECT_EQ(LexicalPath::relative_path("/tmp/abc.txt"sv, "/usr"sv), "/tmp/abc.txt"sv);
+    EXPECT_EQ(LexicalPath::relative_path("/tmp/abc.txt"sv, "/usr"sv), "../tmp/abc.txt"sv);
 
     EXPECT_EQ(LexicalPath::relative_path("/tmp/foo.txt"sv, "tmp"sv), ""sv);
     EXPECT_EQ(LexicalPath::relative_path("tmp/foo.txt"sv, "/tmp"sv), ""sv);
+
+    EXPECT_EQ(LexicalPath::relative_path("/tmp/foo/bar/baz.txt"sv, "/tmp/bar/foo/"sv), "../../foo/bar/baz.txt"sv);
 }
 
 TEST_CASE(regular_absolute_path)
@@ -206,5 +208,46 @@ TEST_CASE(parent)
         LexicalPath path("/");
         auto parent = path.parent();
         EXPECT_EQ(parent.string(), "/");
+    }
+}
+
+TEST_CASE(is_child_of)
+{
+    {
+        LexicalPath parent("/a/parent/directory");
+        LexicalPath child("/a/parent/directory/a/child");
+        LexicalPath mismatching("/not/a/child/directory");
+        EXPECT(child.is_child_of(parent));
+        EXPECT(child.is_child_of(child));
+        EXPECT(parent.is_child_of(parent));
+        EXPECT(!parent.is_child_of(child));
+        EXPECT(!mismatching.is_child_of(parent));
+
+        EXPECT(parent.is_child_of(parent.parent()));
+        EXPECT(child.parent().parent().is_child_of(parent));
+        EXPECT(!child.parent().parent().parent().is_child_of(parent));
+    }
+    {
+        LexicalPath root("/");
+        EXPECT(LexicalPath("/").is_child_of(root));
+        EXPECT(LexicalPath("/any").is_child_of(root));
+        EXPECT(LexicalPath("/child/directory").is_child_of(root));
+    }
+    {
+        LexicalPath relative("folder");
+        LexicalPath relative_child("folder/sub");
+        LexicalPath absolute("/folder");
+        LexicalPath absolute_child("/folder/sub");
+        EXPECT(relative_child.is_child_of(relative));
+        EXPECT(absolute_child.is_child_of(absolute));
+
+        EXPECT(relative.is_child_of(absolute));
+        EXPECT(relative.is_child_of(absolute_child));
+        EXPECT(relative_child.is_child_of(absolute));
+        EXPECT(relative_child.is_child_of(absolute_child));
+
+        EXPECT(!absolute.is_child_of(relative));
+        EXPECT(!absolute_child.is_child_of(relative));
+        EXPECT(!absolute_child.is_child_of(relative_child));
     }
 }

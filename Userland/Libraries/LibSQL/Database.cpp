@@ -5,9 +5,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/RefPtr.h>
-#include <AK/String.h>
 
 #include <LibSQL/BTree.h>
 #include <LibSQL/Database.h>
@@ -18,15 +18,16 @@
 
 namespace SQL {
 
-Database::Database(String name)
+Database::Database(DeprecatedString name)
     : m_heap(Heap::construct(move(name)))
     , m_serializer(m_heap)
 {
 }
 
-ErrorOr<void> Database::open()
+ResultOr<void> Database::open()
 {
     TRY(m_heap->open());
+
     m_schemas = BTree::construct(m_serializer, SchemaDef::index_def()->to_tuple_descriptor(), m_heap->schemas_root());
     m_schemas->on_new_root = [&]() {
         m_heap->set_schemas_root(m_schemas->root());
@@ -43,40 +44,37 @@ ErrorOr<void> Database::open()
     };
 
     m_open = true;
-    auto default_schema = TRY(get_schema("default"));
-    if (!default_schema) {
-        default_schema = SchemaDef::construct("default");
-        TRY(add_schema(*default_schema));
-    }
 
-    auto master_schema = TRY(get_schema("master"));
-    if (!master_schema) {
-        master_schema = SchemaDef::construct("master");
-        TRY(add_schema(*master_schema));
-    }
+    auto ensure_schema_exists = [&](auto schema_name) -> ResultOr<NonnullRefPtr<SchemaDef>> {
+        if (auto result = get_schema(schema_name); result.is_error()) {
+            if (result.error().error() != SQLErrorCode::SchemaDoesNotExist)
+                return result.release_error();
 
-    auto table_def = TRY(get_table("master", "internal_describe_table"));
-    if (!table_def) {
-        auto describe_internal_table = TableDef::construct(master_schema, "internal_describe_table");
-        describe_internal_table->append_column("Name", SQLType::Text);
-        describe_internal_table->append_column("Type", SQLType::Text);
-        TRY(add_table(*describe_internal_table));
+            auto schema_def = SchemaDef::construct(schema_name);
+            TRY(add_schema(*schema_def));
+            return schema_def;
+        } else {
+            return result.release_value();
+        }
+    };
+
+    (void)TRY(ensure_schema_exists("default"sv));
+    auto master_schema = TRY(ensure_schema_exists("master"sv));
+
+    if (auto result = get_table("master"sv, "internal_describe_table"sv); result.is_error()) {
+        if (result.error().error() != SQLErrorCode::TableDoesNotExist)
+            return result.release_error();
+
+        auto internal_describe_table = TableDef::construct(master_schema, "internal_describe_table");
+        internal_describe_table->append_column("Name", SQLType::Text);
+        internal_describe_table->append_column("Type", SQLType::Text);
+        TRY(add_table(*internal_describe_table));
     }
 
     return {};
 }
 
-Database::~Database()
-{
-    // This crashes if the database can't commit. It's recommended to commit
-    // before the Database goes out of scope so the application can handle
-    // errors.
-    // Maybe we should enforce that by having a VERIFY here that there are no
-    // pending writes. But that's a new API on Heap so let's not do that right
-    // now.
-    if (is_open())
-        MUST(commit());
-}
+Database::~Database() = default;
 
 ErrorOr<void> Database::commit()
 {
@@ -85,93 +83,92 @@ ErrorOr<void> Database::commit()
     return {};
 }
 
-ErrorOr<void> Database::add_schema(SchemaDef const& schema)
+ResultOr<void> Database::add_schema(SchemaDef const& schema)
 {
     VERIFY(is_open());
-    if (!m_schemas->insert(schema.key())) {
-        warnln("Duplicate schema name {}"sv, schema.name());
-        return Error::from_string_literal("Duplicate schema name");
-    }
+
+    if (!m_schemas->insert(schema.key()))
+        return Result { SQLCommand::Unknown, SQLErrorCode::SchemaExists, schema.name() };
     return {};
 }
 
-Key Database::get_schema_key(String const& schema_name)
+Key Database::get_schema_key(DeprecatedString const& schema_name)
 {
     auto key = SchemaDef::make_key();
     key["schema_name"] = schema_name;
     return key;
 }
 
-ErrorOr<RefPtr<SchemaDef>> Database::get_schema(String const& schema)
+ResultOr<NonnullRefPtr<SchemaDef>> Database::get_schema(DeprecatedString const& schema)
 {
     VERIFY(is_open());
+
     auto schema_name = schema;
-    if (schema.is_null() || schema.is_empty())
-        schema_name = "default";
+    if (schema.is_empty())
+        schema_name = "default"sv;
+
     Key key = get_schema_key(schema_name);
-    auto schema_def_opt = m_schema_cache.get(key.hash());
-    if (schema_def_opt.has_value()) {
-        return RefPtr<SchemaDef>(schema_def_opt.value());
-    }
+    if (auto it = m_schema_cache.find(key.hash()); it != m_schema_cache.end())
+        return it->value;
+
     auto schema_iterator = m_schemas->find(key);
-    if (schema_iterator.is_end() || (*schema_iterator != key)) {
-        return RefPtr<SchemaDef>(nullptr);
-    }
-    auto ret = SchemaDef::construct(*schema_iterator);
-    m_schema_cache.set(key.hash(), ret);
-    return RefPtr<SchemaDef>(ret);
+    if (schema_iterator.is_end() || (*schema_iterator != key))
+        return Result { SQLCommand::Unknown, SQLErrorCode::SchemaDoesNotExist, schema_name };
+
+    auto schema_def = SchemaDef::construct(*schema_iterator);
+    m_schema_cache.set(key.hash(), schema_def);
+    return schema_def;
 }
 
-ErrorOr<void> Database::add_table(TableDef& table)
+ResultOr<void> Database::add_table(TableDef& table)
 {
     VERIFY(is_open());
-    if (!m_tables->insert(table.key())) {
-        warnln("Duplicate table name '{}'.'{}'"sv, table.parent()->name(), table.name());
-        return Error::from_string_literal("Duplicate table name");
-    }
+
+    if (!m_tables->insert(table.key()))
+        return Result { SQLCommand::Unknown, SQLErrorCode::TableExists, table.name() };
+
     for (auto& column : table.columns()) {
-        VERIFY(m_table_columns->insert(column.key()));
+        if (!m_table_columns->insert(column.key()))
+            VERIFY_NOT_REACHED();
     }
+
     return {};
 }
 
-Key Database::get_table_key(String const& schema_name, String const& table_name)
+Key Database::get_table_key(DeprecatedString const& schema_name, DeprecatedString const& table_name)
 {
     auto key = TableDef::make_key(get_schema_key(schema_name));
     key["table_name"] = table_name;
     return key;
 }
 
-ErrorOr<RefPtr<TableDef>> Database::get_table(String const& schema, String const& name)
+ResultOr<NonnullRefPtr<TableDef>> Database::get_table(DeprecatedString const& schema, DeprecatedString const& name)
 {
     VERIFY(is_open());
+
     auto schema_name = schema;
-    if (schema.is_null() || schema.is_empty())
-        schema_name = "default";
+    if (schema.is_empty())
+        schema_name = "default"sv;
+
     Key key = get_table_key(schema_name, name);
-    auto table_def_opt = m_table_cache.get(key.hash());
-    if (table_def_opt.has_value())
-        return RefPtr<TableDef>(table_def_opt.value());
+    if (auto it = m_table_cache.find(key.hash()); it != m_table_cache.end())
+        return it->value;
+
     auto table_iterator = m_tables->find(key);
-    if (table_iterator.is_end() || (*table_iterator != key)) {
-        return RefPtr<TableDef>(nullptr);
-    }
+    if (table_iterator.is_end() || (*table_iterator != key))
+        return Result { SQLCommand::Unknown, SQLErrorCode::TableDoesNotExist, DeprecatedString::formatted("{}.{}", schema_name, name) };
+
     auto schema_def = TRY(get_schema(schema));
-    if (!schema_def) {
-        warnln("Schema '{}' does not exist"sv, schema);
-        return Error::from_string_literal("Schema does not exist");
-    }
-    auto ret = TableDef::construct(schema_def, name);
-    ret->set_pointer((*table_iterator).pointer());
-    m_table_cache.set(key.hash(), ret);
-    auto hash = ret->hash();
-    auto column_key = ColumnDef::make_key(ret);
-    for (auto column_iterator = m_table_columns->find(column_key);
-         !column_iterator.is_end() && ((*column_iterator)["table_hash"].to_u32().value() == hash);
-         column_iterator++) {
-        ret->append_column(*column_iterator);
-    }
-    return RefPtr<TableDef>(ret);
+    auto table_def = TableDef::construct(schema_def, name);
+    table_def->set_pointer((*table_iterator).pointer());
+    m_table_cache.set(key.hash(), table_def);
+
+    auto table_hash = table_def->hash();
+    auto column_key = ColumnDef::make_key(table_def);
+    for (auto it = m_table_columns->find(column_key); !it.is_end() && ((*it)["table_hash"].to_int<u32>() == table_hash); ++it)
+        table_def->append_column(*it);
+
+    return table_def;
 }
 
 ErrorOr<Vector<Row>> Database::select_all(TableDef const& table)
@@ -202,28 +199,57 @@ ErrorOr<Vector<Row>> Database::match(TableDef const& table, Key const& key)
 
 ErrorOr<void> Database::insert(Row& row)
 {
-    VERIFY(m_table_cache.get(row.table()->key().hash()).has_value());
+    VERIFY(m_table_cache.get(row.table().key().hash()).has_value());
     // TODO Check constraints
 
     row.set_pointer(m_heap->new_record_pointer());
-    row.next_pointer(row.table()->pointer());
+    row.set_next_pointer(row.table().pointer());
     TRY(update(row));
 
     // TODO update indexes defined on table.
 
-    auto table_key = row.table()->key();
+    auto table_key = row.table().key();
     table_key.set_pointer(row.pointer());
     VERIFY(m_tables->update_key_pointer(table_key));
-    row.table()->set_pointer(row.pointer());
+    row.table().set_pointer(row.pointer());
+    return {};
+}
+
+ErrorOr<void> Database::remove(Row& row)
+{
+    auto& table = row.table();
+    VERIFY(m_table_cache.get(table.key().hash()).has_value());
+
+    if (table.pointer() == row.pointer()) {
+        auto table_key = table.key();
+        table_key.set_pointer(row.next_pointer());
+        m_tables->update_key_pointer(table_key);
+
+        table.set_pointer(row.next_pointer());
+        return {};
+    }
+
+    for (auto pointer = table.pointer(); pointer;) {
+        auto current = m_serializer.deserialize_block<Row>(pointer, table, pointer);
+
+        if (current.next_pointer() == row.pointer()) {
+            current.set_next_pointer(row.next_pointer());
+            TRY(update(current));
+            break;
+        }
+
+        pointer = current.next_pointer();
+    }
+
     return {};
 }
 
 ErrorOr<void> Database::update(Row& tuple)
 {
-    VERIFY(m_table_cache.get(tuple.table()->key().hash()).has_value());
+    VERIFY(m_table_cache.get(tuple.table().key().hash()).has_value());
     // TODO Check constraints
     m_serializer.reset();
-    m_serializer.serialize_and_write<Tuple>(tuple, tuple.pointer());
+    m_serializer.serialize_and_write<Tuple>(tuple);
 
     // TODO update indexes defined on table.
     return {};

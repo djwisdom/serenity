@@ -19,8 +19,10 @@ namespace AK {
 
 [[nodiscard]] ErrorOr<ByteBuffer> decode_base64(StringView);
 
-[[nodiscard]] String encode_base64(ReadonlyBytes);
+[[nodiscard]] ErrorOr<String> encode_base64(ReadonlyBytes);
 }
 
+#if USING_AK_GLOBALLY
 using AK::decode_base64;
 using AK::encode_base64;
+#endif

@@ -89,7 +89,7 @@ ErrorOr<void> Decoder::decode(double& value)
     return m_stream.try_handle_any_error();
 }
 
-ErrorOr<void> Decoder::decode(String& value)
+ErrorOr<void> Decoder::decode(DeprecatedString& value)
 {
     i32 length;
     TRY(decode(length));
@@ -99,7 +99,7 @@ ErrorOr<void> Decoder::decode(String& value)
         return {};
     }
     if (length == 0) {
-        value = String::empty();
+        value = DeprecatedString::empty();
         return {};
     }
     char* text_buffer = nullptr;
@@ -131,7 +131,7 @@ ErrorOr<void> Decoder::decode(ByteBuffer& value)
 
 ErrorOr<void> Decoder::decode(JsonValue& value)
 {
-    String string;
+    DeprecatedString string;
     TRY(decode(string));
     value = TRY(JsonValue::from_string(string));
     return {};
@@ -139,7 +139,7 @@ ErrorOr<void> Decoder::decode(JsonValue& value)
 
 ErrorOr<void> Decoder::decode(URL& value)
 {
-    String string;
+    DeprecatedString string;
     TRY(decode(string));
     value = URL(string);
     return {};
@@ -153,9 +153,9 @@ ErrorOr<void> Decoder::decode(Dictionary& dictionary)
         VERIFY_NOT_REACHED();
 
     for (size_t i = 0; i < size; ++i) {
-        String key;
+        DeprecatedString key;
         TRY(decode(key));
-        String value;
+        DeprecatedString value;
         TRY(decode(value));
         dictionary.add(move(key), move(value));
     }
@@ -170,6 +170,7 @@ ErrorOr<void> Decoder::decode([[maybe_unused]] File& file)
     return {};
 }
 
+template<>
 ErrorOr<void> decode(Decoder& decoder, Core::AnonymousBuffer& buffer)
 {
     bool valid;
@@ -187,6 +188,7 @@ ErrorOr<void> decode(Decoder& decoder, Core::AnonymousBuffer& buffer)
     return {};
 }
 
+template<>
 ErrorOr<void> decode(Decoder& decoder, Core::DateTime& datetime)
 {
     i64 timestamp;
@@ -195,6 +197,7 @@ ErrorOr<void> decode(Decoder& decoder, Core::DateTime& datetime)
     return {};
 }
 
+template<>
 ErrorOr<void> decode(Decoder& decoder, Core::ProxyData& data)
 {
     UnderlyingType<decltype(data.type)> type;
@@ -202,6 +205,12 @@ ErrorOr<void> decode(Decoder& decoder, Core::ProxyData& data)
     data.type = static_cast<Core::ProxyData::Type>(type);
     TRY(decoder.decode(data.host_ipv4));
     TRY(decoder.decode(data.port));
+    return {};
+}
+
+// No-op.
+ErrorOr<void> Decoder::decode(AK::Empty&)
+{
     return {};
 }
 

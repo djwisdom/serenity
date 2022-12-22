@@ -12,13 +12,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#ifndef AK_OS_MACOS
+#if !defined(AK_OS_MACOS) && !defined(AK_OS_EMSCRIPTEN)
 #    include <sys/prctl.h>
 #endif
 
 namespace Test {
 
-Crash::Crash(String test_type, Function<Crash::Failure()> crash_function, int crash_signal)
+Crash::Crash(DeprecatedString test_type, Function<Crash::Failure()> crash_function, int crash_signal)
     : m_type(move(test_type))
     , m_crash_function(move(crash_function))
     , m_crash_signal(crash_signal)
@@ -38,7 +38,7 @@ bool Crash::run(RunType run_type)
             perror("fork");
             VERIFY_NOT_REACHED();
         } else if (pid == 0) {
-#ifndef AK_OS_MACOS
+#if !defined(AK_OS_MACOS) && !defined(AK_OS_EMSCRIPTEN)
             if (prctl(PR_SET_DUMPABLE, 0, 0) < 0)
                 perror("prctl(PR_SET_DUMPABLE)");
 #endif

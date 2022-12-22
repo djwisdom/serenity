@@ -25,7 +25,7 @@ MonitorWidget::MonitorWidget()
     set_fixed_size(304, 201);
 }
 
-bool MonitorWidget::set_wallpaper(String path)
+bool MonitorWidget::set_wallpaper(DeprecatedString path)
 {
     if (!is_different_to_current_wallpaper_path(path))
         return false;
@@ -37,17 +37,19 @@ bool MonitorWidget::set_wallpaper(String path)
             return Gfx::Bitmap::try_load_from_file(path);
         },
 
-        [this, path](ErrorOr<NonnullRefPtr<Gfx::Bitmap>> bitmap_or_error) {
+        [this, path](ErrorOr<NonnullRefPtr<Gfx::Bitmap>> bitmap_or_error) -> ErrorOr<void> {
             // If we've been requested to change while we were loading the bitmap, don't bother spending the cost to
             // move and render the now stale bitmap.
             if (is_different_to_current_wallpaper_path(path))
-                return;
+                return {};
             if (bitmap_or_error.is_error())
                 m_wallpaper_bitmap = nullptr;
             else
                 m_wallpaper_bitmap = bitmap_or_error.release_value();
             m_desktop_dirty = true;
             update();
+
+            return bitmap_or_error.is_error() ? bitmap_or_error.release_error() : ErrorOr<void> {};
         });
 
     if (path.is_empty())
@@ -63,7 +65,7 @@ StringView MonitorWidget::wallpaper() const
     return m_desktop_wallpaper_path;
 }
 
-void MonitorWidget::set_wallpaper_mode(String mode)
+void MonitorWidget::set_wallpaper_mode(DeprecatedString mode)
 {
     if (m_desktop_wallpaper_mode == mode)
         return;
@@ -148,7 +150,7 @@ void MonitorWidget::paint_event(GUI::PaintEvent& event)
 
 #if 0
     if (!m_desktop_resolution.is_null()) {
-        auto displayed_resolution_string = Gfx::IntSize { m_desktop_resolution.width(), m_desktop_resolution.height() }.to_string();
+        auto displayed_resolution_string = Gfx::IntSize { m_desktop_resolution.width(), m_desktop_resolution.height() }.to_deprecated_string();
 
         // Render text label scaled with scale factor to hint at its effect.
         // FIXME: Once bitmaps have intrinsic scale factors, we could create a bitmap with an intrinsic scale factor of m_desktop_scale_factor

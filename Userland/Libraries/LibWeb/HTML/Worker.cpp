@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/Debug.h>
+#include <AK/DeprecatedString.h>
 #include <LibJS/Runtime/ConsoleObject.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
@@ -82,7 +83,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Worker>> Worker::create(FlyString const& sc
     worker->run_a_worker(url, outside_settings, *outside_port, options);
 
     // 10. Return worker
-    return JS::NonnullGCPtr(*worker);
+    return worker;
 }
 
 // https://html.spec.whatwg.org/multipage/workers.html#run-a-worker
@@ -154,7 +155,7 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
 
             auto& event_loop = get_vm_event_loop(m_document->realm().vm());
 
-            event_loop.task_queue().add(HTML::Task::create(HTML::Task::Source::PostedMessage, nullptr, [this, message]() mutable {
+            event_loop.task_queue().add(HTML::Task::create(HTML::Task::Source::PostedMessage, nullptr, [this, message] {
                 MessageEventInit event_init {};
                 event_init.data = message;
                 event_init.origin = "<origin>";
@@ -246,7 +247,7 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
 
             // Asynchronously complete the perform the fetch steps with response.
             dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Script ready!");
-            auto script = ClassicScript::create(url.to_string(), data, *m_inner_settings, AK::URL());
+            auto script = ClassicScript::create(url.to_deprecated_string(), data, *m_inner_settings, AK::URL());
 
             // NOTE: Steps 15-31 below pick up after step 14 in the main context, steps 1-10 above
             //       are only for validation when used in a top-level case (ie: from a Window)

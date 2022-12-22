@@ -7,15 +7,20 @@
 
 #pragma once
 
+#include <AK/Concepts.h>
+#include <AK/DeprecatedString.h>
+#include <AK/Error.h>
 #include <AK/HashMap.h>
 #include <AK/JsonArray.h>
 #include <AK/JsonObjectSerializer.h>
 #include <AK/JsonValue.h>
-#include <AK/String.h>
 
 namespace AK {
 
 class JsonObject {
+    template<typename Callback>
+    using CallbackErrorType = decltype(declval<Callback>()(declval<DeprecatedString const&>(), declval<JsonValue const&>()).release_error());
+
 public:
     JsonObject() = default;
     ~JsonObject() = default;
@@ -130,7 +135,7 @@ public:
     }
 #endif
 
-    void set(String const& key, JsonValue value)
+    void set(DeprecatedString const& key, JsonValue value)
     {
         m_members.set(key, move(value));
     }
@@ -140,6 +145,14 @@ public:
     {
         for (auto const& member : m_members)
             callback(member.key, member.value);
+    }
+
+    template<FallibleFunction<DeprecatedString const&, JsonValue const&> Callback>
+    ErrorOr<void, CallbackErrorType<Callback>> try_for_each_member(Callback&& callback) const
+    {
+        for (auto const& member : m_members)
+            TRY(callback(member.key, member.value));
+        return {};
     }
 
     bool remove(StringView key)
@@ -153,10 +166,10 @@ public:
     template<typename Builder>
     void serialize(Builder&) const;
 
-    [[nodiscard]] String to_string() const { return serialized<StringBuilder>(); }
+    [[nodiscard]] DeprecatedString to_deprecated_string() const { return serialized<StringBuilder>(); }
 
 private:
-    OrderedHashMap<String, JsonValue> m_members;
+    OrderedHashMap<DeprecatedString, JsonValue> m_members;
 };
 
 template<typename Builder>
@@ -230,4 +243,6 @@ inline typename Builder::OutputType JsonValue::serialized() const
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::JsonObject;
+#endif

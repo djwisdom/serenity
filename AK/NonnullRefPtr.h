@@ -17,8 +17,6 @@
 namespace AK {
 
 template<typename T>
-class OwnPtr;
-template<typename T>
 class RefPtr;
 
 template<typename T>
@@ -56,7 +54,8 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE NonnullRefPtr(U const& object) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE NonnullRefPtr(U const& object)
+    requires(IsConvertible<U*, T*>)
         : m_ptr(const_cast<T*>(static_cast<T const*>(&object)))
     {
         m_ptr->ref();
@@ -73,7 +72,8 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE NonnullRefPtr(NonnullRefPtr<U>&& other) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE NonnullRefPtr(NonnullRefPtr<U>&& other)
+    requires(IsConvertible<U*, T*>)
         : m_ptr(static_cast<T*>(&other.leak_ref()))
     {
     }
@@ -85,7 +85,8 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE NonnullRefPtr(NonnullRefPtr<U> const& other) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE NonnullRefPtr(NonnullRefPtr<U> const& other)
+    requires(IsConvertible<U*, T*>)
         : m_ptr(const_cast<T*>(static_cast<T const*>(other.ptr())))
     {
         m_ptr->ref();
@@ -120,7 +121,8 @@ public:
     }
 
     template<typename U>
-    NonnullRefPtr& operator=(NonnullRefPtr<U> const& other) requires(IsConvertible<U*, T*>)
+    NonnullRefPtr& operator=(NonnullRefPtr<U> const& other)
+    requires(IsConvertible<U*, T*>)
     {
         NonnullRefPtr tmp { other };
         swap(tmp);
@@ -135,7 +137,8 @@ public:
     }
 
     template<typename U>
-    NonnullRefPtr& operator=(NonnullRefPtr<U>&& other) requires(IsConvertible<U*, T*>)
+    NonnullRefPtr& operator=(NonnullRefPtr<U>&& other)
+    requires(IsConvertible<U*, T*>)
     {
         NonnullRefPtr tmp { move(other) };
         swap(tmp);
@@ -156,47 +159,27 @@ public:
         return *ptr;
     }
 
-    ALWAYS_INLINE RETURNS_NONNULL T* ptr()
-    {
-        return as_nonnull_ptr();
-    }
-    ALWAYS_INLINE RETURNS_NONNULL T const* ptr() const
+    ALWAYS_INLINE RETURNS_NONNULL T* ptr() const
     {
         return as_nonnull_ptr();
     }
 
-    ALWAYS_INLINE RETURNS_NONNULL T* operator->()
-    {
-        return as_nonnull_ptr();
-    }
-    ALWAYS_INLINE RETURNS_NONNULL T const* operator->() const
+    ALWAYS_INLINE RETURNS_NONNULL T* operator->() const
     {
         return as_nonnull_ptr();
     }
 
-    ALWAYS_INLINE T& operator*()
-    {
-        return *as_nonnull_ptr();
-    }
-    ALWAYS_INLINE T const& operator*() const
+    ALWAYS_INLINE T& operator*() const
     {
         return *as_nonnull_ptr();
     }
 
-    ALWAYS_INLINE RETURNS_NONNULL operator T*()
-    {
-        return as_nonnull_ptr();
-    }
-    ALWAYS_INLINE RETURNS_NONNULL operator T const*() const
+    ALWAYS_INLINE RETURNS_NONNULL operator T*() const
     {
         return as_nonnull_ptr();
     }
 
-    ALWAYS_INLINE operator T&()
-    {
-        return *as_nonnull_ptr();
-    }
-    ALWAYS_INLINE operator T const&() const
+    ALWAYS_INLINE operator T&() const
     {
         return *as_nonnull_ptr();
     }
@@ -210,19 +193,23 @@ public:
     }
 
     template<typename U>
-    void swap(NonnullRefPtr<U>& other) requires(IsConvertible<U*, T*>)
+    void swap(NonnullRefPtr<U>& other)
+    requires(IsConvertible<U*, T*>)
     {
         AK::swap(m_ptr, other.m_ptr);
     }
 
     bool operator==(NonnullRefPtr const& other) const { return m_ptr == other.m_ptr; }
 
-    bool operator==(NonnullRefPtr& other) { return m_ptr == other.m_ptr; }
+    template<typename RawPtr>
+    bool operator==(RawPtr other) const
+    requires(IsPointer<RawPtr>)
+    {
+        return m_ptr == other;
+    }
 
-    // clang-format off
 private:
     NonnullRefPtr() = delete;
-    // clang-format on
 
     ALWAYS_INLINE RETURNS_NONNULL T* as_nonnull_ptr() const
     {
@@ -239,7 +226,16 @@ inline NonnullRefPtr<T> adopt_ref(T& object)
     return NonnullRefPtr<T>(NonnullRefPtr<T>::Adopt, object);
 }
 
+template<Formattable T>
+struct Formatter<NonnullRefPtr<T>> : Formatter<T> {
+    ErrorOr<void> format(FormatBuilder& builder, NonnullRefPtr<T> const& value)
+    {
+        return Formatter<T>::format(builder, *value);
+    }
+};
+
 template<typename T>
+requires(!HasFormatter<T>)
 struct Formatter<NonnullRefPtr<T>> : Formatter<T const*> {
     ErrorOr<void> format(FormatBuilder& builder, NonnullRefPtr<T> const& value)
     {
@@ -248,7 +244,8 @@ struct Formatter<NonnullRefPtr<T>> : Formatter<T const*> {
 };
 
 template<typename T, typename U>
-inline void swap(NonnullRefPtr<T>& a, NonnullRefPtr<U>& b) requires(IsConvertible<U*, T*>)
+inline void swap(NonnullRefPtr<T>& a, NonnullRefPtr<U>& b)
+requires(IsConvertible<U*, T*>)
 {
     a.swap(b);
 }
@@ -265,7 +262,6 @@ inline NonnullRefPtr<T> make_ref_counted(Args&&... args)
 {
     return NonnullRefPtr<T>(NonnullRefPtr<T>::Adopt, *new T { forward<Args>(args)... });
 }
-}
 
 template<typename T>
 struct Traits<NonnullRefPtr<T>> : public GenericTraits<NonnullRefPtr<T>> {
@@ -275,6 +271,10 @@ struct Traits<NonnullRefPtr<T>> : public GenericTraits<NonnullRefPtr<T>> {
     static bool equals(NonnullRefPtr<T> const& a, NonnullRefPtr<T> const& b) { return a.ptr() == b.ptr(); }
 };
 
+}
+
+#if USING_AK_GLOBALLY
 using AK::adopt_ref;
 using AK::make_ref_counted;
 using AK::NonnullRefPtr;
+#endif

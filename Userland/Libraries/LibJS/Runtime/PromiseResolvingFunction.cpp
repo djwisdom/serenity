@@ -11,7 +11,7 @@
 
 namespace JS {
 
-PromiseResolvingFunction* PromiseResolvingFunction::create(Realm& realm, Promise& promise, AlreadyResolved& already_resolved, FunctionType function)
+NonnullGCPtr<PromiseResolvingFunction> PromiseResolvingFunction::create(Realm& realm, Promise& promise, AlreadyResolved& already_resolved, FunctionType function)
 {
     return realm.heap().allocate<PromiseResolvingFunction>(realm, promise, already_resolved, move(function), *realm.intrinsics().function_prototype());
 }

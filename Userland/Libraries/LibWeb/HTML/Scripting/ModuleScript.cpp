@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/Interpreter.h>
+#include <LibJS/Runtime/ModuleRequest.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/HTML/Scripting/ModuleScript.h>
@@ -15,20 +16,20 @@ namespace Web::HTML {
 
 ModuleScript::~ModuleScript() = default;
 
-ModuleScript::ModuleScript(AK::URL base_url, String filename, EnvironmentSettingsObject& environment_settings_object)
+ModuleScript::ModuleScript(AK::URL base_url, DeprecatedString filename, EnvironmentSettingsObject& environment_settings_object)
     : Script(move(base_url), move(filename), environment_settings_object)
 {
 }
 
 JavaScriptModuleScript::~JavaScriptModuleScript() = default;
 
-JavaScriptModuleScript::JavaScriptModuleScript(AK::URL base_url, String filename, EnvironmentSettingsObject& environment_settings_object)
+JavaScriptModuleScript::JavaScriptModuleScript(AK::URL base_url, DeprecatedString filename, EnvironmentSettingsObject& environment_settings_object)
     : ModuleScript(move(base_url), move(filename), environment_settings_object)
 {
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-javascript-module-script
-JS::GCPtr<JavaScriptModuleScript> JavaScriptModuleScript::create(String const& filename, StringView source, EnvironmentSettingsObject& settings_object, AK::URL base_url)
+JS::GCPtr<JavaScriptModuleScript> JavaScriptModuleScript::create(DeprecatedString const& filename, StringView source, EnvironmentSettingsObject& settings_object, AK::URL base_url)
 {
     // 1. If scripting is disabled for settings, then set source to the empty string.
     if (settings_object.is_scripting_disabled())
@@ -37,7 +38,7 @@ JS::GCPtr<JavaScriptModuleScript> JavaScriptModuleScript::create(String const& f
     auto& realm = settings_object.realm();
 
     // 2. Let script be a new module script that this algorithm will subsequently initialize.
-    auto* script = realm.heap().allocate<JavaScriptModuleScript>(realm, move(base_url), filename, settings_object);
+    auto script = realm.heap().allocate<JavaScriptModuleScript>(realm, move(base_url), filename, settings_object);
 
     // 3. Set script's settings object to settings.
     // NOTE: This was already done when constructing.
@@ -56,7 +57,7 @@ JS::GCPtr<JavaScriptModuleScript> JavaScriptModuleScript::create(String const& f
     // 8. If result is a list of errors, then:
     if (result.is_error()) {
         auto& parse_error = result.error().first();
-        dbgln("JavaScriptModuleScript: Failed to parse: {}", parse_error.to_string());
+        dbgln("JavaScriptModuleScript: Failed to parse: {}", parse_error.to_deprecated_string());
 
         // FIXME: 1. Set script's parse error to result[0].
 
@@ -111,7 +112,7 @@ JS::Promise* JavaScriptModuleScript::run(PreventErrorReporting)
 
     // 2. Check if we can run script with settings. If this returns "do not run", then return a promise resolved with undefined.
     if (settings.can_run_script() == RunScriptDecision::DoNotRun) {
-        auto* promise = JS::Promise::create(settings.realm());
+        auto promise = JS::Promise::create(settings.realm());
         promise->fulfill(JS::js_undefined());
         return promise;
     }
@@ -139,7 +140,7 @@ JS::Promise* JavaScriptModuleScript::run(PreventErrorReporting)
         // If Evaluate fails to complete as a result of the user agent aborting the running script,
         // then set evaluationPromise to a promise rejected with a new "QuotaExceededError" DOMException.
         if (elevation_promise_or_error.is_error()) {
-            auto* promise = JS::Promise::create(settings_object().realm());
+            auto promise = JS::Promise::create(settings_object().realm());
             promise->reject(WebIDL::QuotaExceededError::create(settings_object().realm(), "Failed to evaluate module script").ptr());
 
             evaluation_promise = promise;

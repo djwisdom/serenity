@@ -8,7 +8,7 @@ list(APPEND REQUIRED_TARGETS
 )
 list(APPEND RECOMMENDED_TARGETS
     adjtime aplay abench asctl bt checksum chres cksum copy fortune gunzip gzip init install keymap lsirq lsof lspci man mknod mktemp
-    nc netstat notify ntpquery open passwd pls printf pro shot tar tt unzip wallpaper zip
+    nc netstat notify ntpquery open passwd pls printf pro shot strings tar tt unzip wallpaper zip
 )
 
 # FIXME: Support specifying component dependencies for utilities (e.g. WebSocket for telws)
@@ -89,7 +89,7 @@ target_link_libraries(gml-format PRIVATE LibGUI)
 target_link_libraries(grep PRIVATE LibRegex)
 target_link_libraries(gunzip PRIVATE LibCompress)
 target_link_libraries(gzip PRIVATE LibCompress)
-target_link_libraries(headless-browser PRIVATE LibCrypto LibGemini LibGfx LibHTTP LibTLS LibWeb LibWebSocket)
+target_link_libraries(headless-browser PRIVATE LibCrypto LibGemini LibGfx LibHTTP LibTLS LibWeb LibWebSocket LibIPC LibJS)
 target_link_libraries(jail-attach PRIVATE LibCore LibMain)
 target_link_libraries(jail-create PRIVATE LibCore LibMain)
 target_link_libraries(js PRIVATE LibCrypto LibJS LibLine LibLocale LibTextCodec)
@@ -98,7 +98,7 @@ target_link_libraries(keymap PRIVATE LibKeyboard)
 target_link_libraries(less PRIVATE LibLine)
 target_link_libraries(lspci PRIVATE LibPCIDB)
 target_link_libraries(lsusb PRIVATE LibUSBDB)
-target_link_libraries(man PRIVATE LibMarkdown)
+target_link_libraries(man PRIVATE LibMarkdown LibManual)
 target_link_libraries(markdown-check PRIVATE LibMarkdown)
 target_link_libraries(matroska PRIVATE LibVideo)
 target_link_libraries(md PRIVATE LibMarkdown)
@@ -120,7 +120,8 @@ target_link_libraries(telws PRIVATE LibProtocol LibLine)
 target_link_libraries(test-fuzz PRIVATE LibGemini LibGfx LibHTTP LibIPC LibJS LibMarkdown LibRegex LibShell)
 target_link_libraries(test-imap PRIVATE LibIMAP)
 target_link_libraries(test-pthread PRIVATE LibThreading)
-target_link_libraries(unzip PRIVATE LibArchive LibCompress)
+target_link_libraries(unveil PRIVATE LibMain)
+target_link_libraries(unzip PRIVATE LibArchive LibCompress LibCrypto)
 target_link_libraries(update-cpp-test-results PRIVATE LibCpp)
 target_link_libraries(useradd PRIVATE LibCrypt)
 target_link_libraries(wallpaper PRIVATE LibGfx LibGUI)
@@ -128,3 +129,6 @@ target_link_libraries(wasm PRIVATE LibWasm LibLine)
 target_link_libraries(wsctl PRIVATE LibGUI LibIPC)
 target_link_libraries(xml PRIVATE LibXML)
 target_link_libraries(zip PRIVATE LibArchive LibCompress LibCrypto)
+
+# FIXME: Link this file into headless-browser without compiling it again.
+target_sources(headless-browser PRIVATE "${SerenityOS_SOURCE_DIR}/Userland/Services/WebContent/WebDriverConnection.cpp")

@@ -115,7 +115,7 @@ class HashTable {
         alignas(T) u8 storage[sizeof(T)];
 
         T* slot() { return reinterpret_cast<T*>(storage); }
-        const T* slot() const { return reinterpret_cast<const T*>(storage); }
+        T const* slot() const { return reinterpret_cast<T const*>(storage); }
     };
 
     struct OrderedBucket {
@@ -124,7 +124,7 @@ class HashTable {
         BucketState state;
         alignas(T) u8 storage[sizeof(T)];
         T* slot() { return reinterpret_cast<T*>(storage); }
-        const T* slot() const { return reinterpret_cast<const T*>(storage); }
+        T const* slot() const { return reinterpret_cast<T const*>(storage); }
     };
 
     using BucketType = Conditional<IsOrdered, OrderedBucket, Bucket>;
@@ -265,8 +265,8 @@ public:
     }
 
     using ConstIterator = Conditional<IsOrdered,
-        OrderedHashTableIterator<const HashTable, const T, const BucketType>,
-        HashTableIterator<const HashTable, const T, const BucketType>>;
+        OrderedHashTableIterator<const HashTable, const T, BucketType const>,
+        HashTableIterator<const HashTable, const T, BucketType const>>;
 
     [[nodiscard]] ConstIterator begin() const
     {
@@ -293,7 +293,7 @@ public:
     {
         if (m_capacity == 0)
             return;
-        if constexpr (!Detail::IsTriviallyDestructible<T>) {
+        if constexpr (!IsTriviallyDestructible<T>) {
             for (auto* bucket : *this)
                 bucket->~T();
         }
@@ -389,7 +389,7 @@ public:
         return find(Traits<K>::hash(value), move(predicate));
     }
 
-    bool remove(const T& value)
+    bool remove(T const& value)
     {
         auto it = find(value);
         if (it != end()) {
@@ -440,6 +440,24 @@ public:
         }
         rehash_in_place_if_needed();
         return removed_count;
+    }
+
+    T pop()
+    {
+        VERIFY(!is_empty());
+        T element;
+        if constexpr (IsOrdered) {
+            element = *m_collection_data.tail->slot();
+        } else {
+            for (size_t i = 0; i < m_capacity; ++i) {
+                if (is_used_bucket(m_buckets[i].state)) {
+                    element = *m_buckets[i].slot();
+                    break;
+                }
+            }
+        }
+        remove(element);
+        return element;
     }
 
 private:
@@ -724,5 +742,8 @@ private:
 };
 }
 
+#if USING_AK_GLOBALLY
+using AK::HashSetResult;
 using AK::HashTable;
 using AK::OrderedHashTable;
+#endif

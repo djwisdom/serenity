@@ -37,19 +37,19 @@ class UnregisteredWidget final : public GUI::Widget {
     C_OBJECT(UnregisteredWidget);
 
 private:
-    UnregisteredWidget(String const& class_name);
+    UnregisteredWidget(DeprecatedString const& class_name);
 
     virtual void paint_event(GUI::PaintEvent& event) override;
 
-    String m_text;
+    DeprecatedString m_text;
 };
 
-UnregisteredWidget::UnregisteredWidget(String const& class_name)
+UnregisteredWidget::UnregisteredWidget(DeprecatedString const& class_name)
 {
     StringBuilder builder;
     builder.append(class_name);
     builder.append("\nnot registered"sv);
-    m_text = builder.to_string();
+    m_text = builder.to_deprecated_string();
 }
 
 void UnregisteredWidget::paint_event(GUI::PaintEvent& event)
@@ -104,7 +104,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     editor->set_automatic_indentation_enabled(true);
     editor->set_ruler_visible(true);
 
-    String file_path;
+    DeprecatedString file_path;
     auto update_title = [&] {
         StringBuilder builder;
         if (file_path.is_empty())
@@ -116,12 +116,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             builder.append("[*]"sv);
 
         builder.append(" - GML Playground"sv);
-        window->set_title(builder.to_string());
+        window->set_title(builder.to_deprecated_string());
     };
 
     editor->on_change = [&] {
         preview->remove_all_children();
-        preview->load_from_gml(editor->text(), [](const String& class_name) -> RefPtr<Core::Object> {
+        preview->load_from_gml(editor->text(), [](const DeprecatedString& class_name) -> RefPtr<Core::Object> {
             return UnregisteredWidget::construct(class_name);
         });
     };
@@ -134,7 +134,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto file_menu = TRY(window->try_add_menu("&File"));
 
     auto save_as_action = GUI::CommonActions::make_save_as_action([&](auto&) {
-        auto response = FileSystemAccessClient::Client::the().try_save_file(window, "Untitled", "gml");
+        auto response = FileSystemAccessClient::Client::the().try_save_file_deprecated(window, "Untitled", "gml");
         if (response.is_error())
             return;
 
@@ -212,7 +212,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         } else {
             GUI::MessageBox::show(
                 window,
-                String::formatted("GML could not be formatted: {}", formatted_gml_or_error.error()),
+                DeprecatedString::formatted("GML could not be formatted: {}", formatted_gml_or_error.error()),
                 "Error"sv,
                 GUI::MessageBox::Type::Error);
         }
@@ -286,7 +286,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     window->show();
 
-    if (String(path).is_empty()) {
+    if (DeprecatedString(path).is_empty()) {
         editor->set_text(R"~~~(@GUI::Frame {
     layout: @GUI::VerticalBoxLayout {
     }

@@ -7,7 +7,7 @@ print_help() {
     NAME=$(basename "$ARG0")
     cat <<EOF
 Usage: $NAME COMMAND [TARGET] [TOOLCHAIN] [ARGS...]
-  Supported TARGETs: aarch64, i686, x86_64, lagom. Defaults to SERENITY_ARCH, or i686 if not set.
+  Supported TARGETs: aarch64, i686, x86_64, lagom. Defaults to SERENITY_ARCH, or x86_64 if not set.
   Supported TOOLCHAINs: GNU, Clang. Defaults to SERENITY_TOOLCHAIN, or GNU if not set.
   Supported COMMANDs:
     build:      Compiles the target binaries, [ARGS...] are passed through to ninja
@@ -154,11 +154,14 @@ is_supported_compiler() {
     local MAJOR_VERSION=""
     MAJOR_VERSION="${VERSION%%.*}"
     if $COMPILER --version 2>&1 | grep "Apple clang" >/dev/null; then
-        return 1
+        # Apple Clang version check
+        [ "$MAJOR_VERSION" -ge 14 ] && return 0
     elif $COMPILER --version 2>&1 | grep "clang" >/dev/null; then
-        [ "$MAJOR_VERSION" -gt 12 ] && return 0
+        # Clang version check
+        [ "$MAJOR_VERSION" -ge 13 ] && return 0
     else
-        [ "$MAJOR_VERSION" -gt 10 ] && return 0
+        # GCC version check
+        [ "$MAJOR_VERSION" -ge 12 ] && return 0
     fi
     return 1
 }
@@ -168,9 +171,6 @@ find_newest_compiler() {
     local BEST_CANDIDATE=""
     for CANDIDATE in "$@"; do
         if ! command -v "$CANDIDATE" >/dev/null 2>&1; then
-            continue
-        fi
-        if $CANDIDATE --version 2>&1 | grep "Apple clang" >/dev/null; then
             continue
         fi
         if ! $CANDIDATE -dumpversion >/dev/null 2>&1; then
@@ -192,17 +192,17 @@ pick_host_compiler() {
         return
     fi
 
-    find_newest_compiler egcc gcc gcc-12 /usr/local/bin/gcc-12 /opt/homebrew/bin/gcc-12
-    if is_supported_compiler "$HOST_COMPILER"; then
-        export CC="${HOST_COMPILER}"
-        export CXX="${HOST_COMPILER/gcc/g++}"
-        return
-    fi
-
     find_newest_compiler clang clang-13 clang-14 clang-15 /opt/homebrew/opt/llvm/bin/clang
     if is_supported_compiler "$HOST_COMPILER"; then
         export CC="${HOST_COMPILER}"
         export CXX="${HOST_COMPILER/clang/clang++}"
+        return
+    fi
+
+    find_newest_compiler egcc gcc gcc-12 /usr/local/bin/gcc-12 /opt/homebrew/bin/gcc-12
+    if is_supported_compiler "$HOST_COMPILER"; then
+        export CC="${HOST_COMPILER}"
+        export CXX="${HOST_COMPILER/gcc/g++}"
         return
     fi
 
@@ -239,6 +239,7 @@ cmd_with_target() {
         SUPER_BUILD_DIR="$BUILD_DIR"
         CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$SERENITY_SOURCE_DIR/Build/lagom-install")
     fi
+    export PATH="$SERENITY_SOURCE_DIR/Toolchain/Local/cmake/bin":$PATH
 }
 
 ensure_target() {
@@ -287,6 +288,11 @@ delete_target() {
     [ ! -d "$SUPER_BUILD_DIR" ] || rm -rf "$SUPER_BUILD_DIR"
 }
 
+build_cmake() {
+    echo "CMake version too old: build_cmake"
+    ( cd "$SERENITY_SOURCE_DIR/Toolchain" && ./BuildCMake.sh )
+}
+
 build_toolchain() {
     echo "build_toolchain: $TOOLCHAIN_DIR"
     if [ "$TOOLCHAIN_TYPE" = "Clang" ]; then
@@ -297,6 +303,9 @@ build_toolchain() {
 }
 
 ensure_toolchain() {
+    if [ "$(cmake -P "$SERENITY_SOURCE_DIR"/Meta/CMake/cmake-version.cmake)" -ne 1 ]; then
+        build_cmake
+    fi
     [ -d "$TOOLCHAIN_DIR" ] || build_toolchain
 
     if [ "$TOOLCHAIN_TYPE" = "GNU" ]; then

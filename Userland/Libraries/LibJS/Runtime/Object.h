@@ -8,8 +8,8 @@
 #pragma once
 
 #include <AK/Badge.h>
+#include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
-#include <AK/String.h>
 #include <AK/StringView.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -44,10 +44,10 @@ class Object : public Cell {
     JS_CELL(Object, Cell);
 
 public:
-    static Object* create(Realm&, Object* prototype);
+    static NonnullGCPtr<Object> create(Realm&, Object* prototype);
 
     virtual void initialize(Realm&) override;
-    virtual ~Object() = default;
+    virtual ~Object();
 
     enum class PropertyKind {
         Key,
@@ -108,6 +108,7 @@ public:
     ThrowCompletionOr<Value> private_get(PrivateName const& name);
     ThrowCompletionOr<void> private_set(PrivateName const& name, Value value);
     ThrowCompletionOr<void> define_field(ClassFieldDefinition const&);
+    ThrowCompletionOr<void> initialize_instance_elements(ECMAScriptFunctionObject& constructor);
 
     // 10.1 Ordinary Object Internal Methods and Internal Slots, https://tc39.es/ecma262/#sec-ordinary-object-internal-methods-and-internal-slots
 
@@ -151,6 +152,9 @@ public:
     void define_direct_property(PropertyKey const& property_key, Value value, PropertyAttributes attributes) { storage_set(property_key, { value, attributes }); };
     void define_direct_accessor(PropertyKey const&, FunctionObject* getter, FunctionObject* setter, PropertyAttributes attributes);
 
+    using IntrinsicAccessor = Value (*)(Realm&);
+    virtual void define_intrinsic_accessor(PropertyKey const&, PropertyAttributes attributes, IntrinsicAccessor accessor);
+
     void define_native_function(Realm&, PropertyKey const&, SafeFunction<ThrowCompletionOr<Value>(VM&)>, i32 length, PropertyAttributes attributes);
     void define_native_accessor(Realm&, PropertyKey const&, SafeFunction<ThrowCompletionOr<Value>(VM&)> getter, SafeFunction<ThrowCompletionOr<Value>(VM&)> setter, PropertyAttributes attributes);
 
@@ -187,11 +191,12 @@ public:
 protected:
     enum class GlobalObjectTag { Tag };
     enum class ConstructWithoutPrototypeTag { Tag };
+    enum class ConstructWithPrototypeTag { Tag };
 
     Object(GlobalObjectTag, Realm&);
     Object(ConstructWithoutPrototypeTag, Realm&);
     Object(Realm&, Object* prototype);
-    explicit Object(Object& prototype);
+    Object(ConstructWithPrototypeTag, Object& prototype);
     explicit Object(Shape&);
 
     void set_prototype(Object*);

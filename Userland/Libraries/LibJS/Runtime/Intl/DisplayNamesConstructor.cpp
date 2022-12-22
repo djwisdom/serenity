@@ -44,7 +44,7 @@ ThrowCompletionOr<Value> DisplayNamesConstructor::call()
 }
 
 // 12.1.1 Intl.DisplayNames ( locales, options ), https://tc39.es/ecma402/#sec-Intl.DisplayNames
-ThrowCompletionOr<Object*> DisplayNamesConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> DisplayNamesConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -52,7 +52,7 @@ ThrowCompletionOr<Object*> DisplayNamesConstructor::construct(FunctionObject& ne
     auto options_value = vm.argument(1);
 
     // 2. Let displayNames be ? OrdinaryCreateFromConstructor(NewTarget, "%DisplayNames.prototype%", « [[InitializedDisplayNames]], [[Locale]], [[Style]], [[Type]], [[Fallback]], [[LanguageDisplay]], [[Fields]] »).
-    auto* display_names = TRY(ordinary_create_from_constructor<DisplayNames>(vm, new_target, &Intrinsics::intl_display_names_prototype));
+    auto display_names = TRY(ordinary_create_from_constructor<DisplayNames>(vm, new_target, &Intrinsics::intl_display_names_prototype));
 
     // 3. Let requestedLocales be ? CanonicalizeLocaleList(locales).
     auto requested_locales = TRY(canonicalize_locale_list(vm, locale_value));
@@ -82,7 +82,7 @@ ThrowCompletionOr<Object*> DisplayNamesConstructor::construct(FunctionObject& ne
     auto style = TRY(get_option(vm, *options, vm.names.style, OptionType::String, { "narrow"sv, "short"sv, "long"sv }, "long"sv));
 
     // 12. Set displayNames.[[Style]] to style.
-    display_names->set_style(style.as_string().string());
+    display_names->set_style(style.as_string().deprecated_string());
 
     // 13. Let type be ? GetOption(options, "type", "string", « "language", "region", "script", "currency", "calendar", "dateTimeField" », undefined).
     auto type = TRY(get_option(vm, *options, vm.names.type, OptionType::String, { "language"sv, "region"sv, "script"sv, "currency"sv, "calendar"sv, "dateTimeField"sv }, Empty {}));
@@ -92,13 +92,13 @@ ThrowCompletionOr<Object*> DisplayNamesConstructor::construct(FunctionObject& ne
         return vm.throw_completion<TypeError>(ErrorType::IsUndefined, "options.type"sv);
 
     // 15. Set displayNames.[[Type]] to type.
-    display_names->set_type(type.as_string().string());
+    display_names->set_type(type.as_string().deprecated_string());
 
     // 16. Let fallback be ? GetOption(options, "fallback", "string", « "code", "none" », "code").
     auto fallback = TRY(get_option(vm, *options, vm.names.fallback, OptionType::String, { "code"sv, "none"sv }, "code"sv));
 
     // 17. Set displayNames.[[Fallback]] to fallback.
-    display_names->set_fallback(fallback.as_string().string());
+    display_names->set_fallback(fallback.as_string().deprecated_string());
 
     // 18. Set displayNames.[[Locale]] to r.[[locale]].
     display_names->set_locale(move(result.locale));
@@ -119,7 +119,7 @@ ThrowCompletionOr<Object*> DisplayNamesConstructor::construct(FunctionObject& ne
     // 26. If type is "language", then
     if (display_names->type() == DisplayNames::Type::Language) {
         // a. Set displayNames.[[LanguageDisplay]] to languageDisplay.
-        display_names->set_language_display(language_display.as_string().string());
+        display_names->set_language_display(language_display.as_string().deprecated_string());
 
         // b. Let typeFields be typeFields.[[<languageDisplay>]].
         // c. Assert: typeFields is a Record (see 12.4.3).

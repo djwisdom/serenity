@@ -9,10 +9,15 @@
 #pragma once
 
 #include <AK/Error.h>
+#include <AK/Noncopyable.h>
+#include <AK/OwnPtr.h>
 #include <AK/StringView.h>
+#include <AK/Vector.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <netdb.h>
+#include <poll.h>
 #include <pwd.h>
 #include <signal.h>
 #include <spawn.h>
@@ -36,6 +41,7 @@ namespace Core::System {
 ErrorOr<void> beep();
 ErrorOr<void> pledge(StringView promises, StringView execpromises = {});
 ErrorOr<void> unveil(StringView path, StringView permissions);
+ErrorOr<void> unveil_after_exec(StringView path, StringView permissions);
 ErrorOr<void> sendfd(int sockfd, int fd);
 ErrorOr<int> recvfd(int sockfd, int options);
 ErrorOr<void> ptrace_peekbuf(pid_t tid, void const* tracee_addr, Bytes destination_buf);
@@ -72,7 +78,7 @@ ALWAYS_INLINE ErrorOr<void> unveil(char const (&path)[NPath], char const (&permi
     return unveil(StringView { path, NPath - 1 }, StringView { permissions, NPermissions - 1 });
 }
 
-ALWAYS_INLINE ErrorOr<void> unveil(std::nullptr_t, std::nullptr_t)
+ALWAYS_INLINE ErrorOr<void> unveil(nullptr_t, nullptr_t)
 {
     return unveil(StringView {}, StringView {});
 }
@@ -109,10 +115,10 @@ ErrorOr<void> kill(pid_t, int signal);
 ErrorOr<void> killpg(int pgrp, int signal);
 ErrorOr<int> dup(int source_fd);
 ErrorOr<int> dup2(int source_fd, int destination_fd);
-ErrorOr<String> ptsname(int fd);
-ErrorOr<String> gethostname();
+ErrorOr<DeprecatedString> ptsname(int fd);
+ErrorOr<DeprecatedString> gethostname();
 ErrorOr<void> sethostname(StringView);
-ErrorOr<String> getcwd();
+ErrorOr<DeprecatedString> getcwd();
 ErrorOr<void> ioctl(int fd, unsigned request, ...);
 ErrorOr<struct termios> tcgetattr(int fd);
 ErrorOr<void> tcsetattr(int fd, int optional_actions, struct termios const&);
@@ -120,9 +126,11 @@ ErrorOr<int> tcsetpgrp(int fd, pid_t pgrp);
 ErrorOr<void> chmod(StringView pathname, mode_t mode);
 ErrorOr<void> lchown(StringView pathname, uid_t uid, gid_t gid);
 ErrorOr<void> chown(StringView pathname, uid_t uid, gid_t gid);
+ErrorOr<Optional<struct passwd>> getpwent(Span<char> buffer);
 ErrorOr<Optional<struct passwd>> getpwnam(StringView name);
 ErrorOr<Optional<struct group>> getgrnam(StringView name);
 ErrorOr<Optional<struct passwd>> getpwuid(uid_t);
+ErrorOr<Optional<struct group>> getgrent(Span<char> buffer);
 ErrorOr<Optional<struct group>> getgrgid(gid_t);
 ErrorOr<void> clock_settime(clockid_t clock_id, struct timespec* ts);
 ErrorOr<pid_t> posix_spawn(StringView path, posix_spawn_file_actions_t const* file_actions, posix_spawnattr_t const* attr, char* const arguments[], char* const envp[]);
@@ -203,6 +211,39 @@ ErrorOr<int> posix_openpt(int flags);
 ErrorOr<void> grantpt(int fildes);
 ErrorOr<void> unlockpt(int fildes);
 ErrorOr<void> access(StringView pathname, int mode);
-ErrorOr<String> readlink(StringView pathname);
+ErrorOr<DeprecatedString> readlink(StringView pathname);
+ErrorOr<int> poll(Span<struct pollfd>, int timeout);
+
+class AddressInfoVector {
+    AK_MAKE_NONCOPYABLE(AddressInfoVector);
+
+public:
+    AddressInfoVector(AddressInfoVector&&) = default;
+    ~AddressInfoVector() = default;
+
+    Span<struct addrinfo const> addresses() const { return m_addresses; }
+
+private:
+    friend ErrorOr<AddressInfoVector> getaddrinfo(char const* nodename, char const* servname, struct addrinfo const& hints);
+
+    AddressInfoVector(Vector<struct addrinfo>&& addresses, struct addrinfo* ptr)
+        : m_addresses(move(addresses))
+        , m_ptr(adopt_own_if_nonnull(ptr))
+    {
+    }
+
+    struct AddrInfoDeleter {
+        void operator()(struct addrinfo* ptr) { ::freeaddrinfo(ptr); }
+    };
+
+    Vector<struct addrinfo> m_addresses {};
+    OwnPtr<struct addrinfo, AddrInfoDeleter> m_ptr {};
+};
+
+ErrorOr<AddressInfoVector> getaddrinfo(char const* nodename, char const* servname, struct addrinfo const& hints);
+
+#ifdef AK_OS_SERENITY
+ErrorOr<void> posix_fallocate(int fd, off_t offset, off_t length);
+#endif
 
 }

@@ -168,6 +168,11 @@ public:
         return m_value;
     }
 
+    ALWAYS_INLINE constexpr T value_unchecked() const
+    {
+        return m_value;
+    }
+
     constexpr void add(T other)
     {
         m_overflow |= __builtin_add_overflow(m_value, other, &m_value);
@@ -197,6 +202,14 @@ public:
             return;
         }
         m_value /= other;
+    }
+
+    constexpr void mod(T other)
+    {
+        auto initial = m_value;
+        div(other);
+        m_value *= other;
+        m_value = initial - m_value;
     }
 
     constexpr void saturating_sub(T other)
@@ -273,6 +286,19 @@ public:
         return *this;
     }
 
+    constexpr Checked& operator%=(Checked const& other)
+    {
+        m_overflow |= other.m_overflow;
+        mod(other.value());
+        return *this;
+    }
+
+    constexpr Checked& operator%=(T other)
+    {
+        mod(other);
+        return *this;
+    }
+
     constexpr Checked& operator++()
     {
         add(1);
@@ -302,26 +328,26 @@ public:
     template<typename U, typename V>
     [[nodiscard]] static constexpr bool addition_would_overflow(U u, V v)
     {
-#if defined(AK_COMPILER_CLANG)
+#if __has_builtin(__builtin_add_overflow_p)
+        return __builtin_add_overflow_p(u, v, (T)0);
+#else
         Checked checked;
         checked = u;
         checked += v;
         return checked.has_overflow();
-#else
-        return __builtin_add_overflow_p(u, v, (T)0);
 #endif
     }
 
     template<typename U, typename V>
     [[nodiscard]] static constexpr bool multiplication_would_overflow(U u, V v)
     {
-#if defined(AK_COMPILER_CLANG)
+#if __has_builtin(__builtin_mul_overflow_p)
+        return __builtin_mul_overflow_p(u, v, (T)0);
+#else
         Checked checked;
         checked = u;
         checked *= v;
         return checked.has_overflow();
-#else
-        return __builtin_mul_overflow_p(u, v, (T)0);
 #endif
     }
 
@@ -369,6 +395,14 @@ constexpr Checked<T> operator/(Checked<T> const& a, Checked<T> const& b)
 {
     Checked<T> c { a };
     c.div(b.value());
+    return c;
+}
+
+template<typename T>
+constexpr Checked<T> operator%(Checked<T> const& a, Checked<T> const& b)
+{
+    Checked<T> c { a };
+    c.mod(b.value());
     return c;
 }
 
@@ -452,5 +486,7 @@ constexpr Checked<T> make_checked(T value)
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::Checked;
 using AK::make_checked;
+#endif

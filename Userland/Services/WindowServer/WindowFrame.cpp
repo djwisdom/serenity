@@ -54,11 +54,11 @@ static RefPtr<MultiScaleBitmaps> s_inactive_window_shadow;
 static RefPtr<MultiScaleBitmaps> s_menu_shadow;
 static RefPtr<MultiScaleBitmaps> s_taskbar_shadow;
 static RefPtr<MultiScaleBitmaps> s_tooltip_shadow;
-static String s_last_active_window_shadow_path;
-static String s_last_inactive_window_shadow_path;
-static String s_last_menu_shadow_path;
-static String s_last_taskbar_shadow_path;
-static String s_last_tooltip_shadow_path;
+static DeprecatedString s_last_active_window_shadow_path;
+static DeprecatedString s_last_inactive_window_shadow_path;
+static DeprecatedString s_last_menu_shadow_path;
+static DeprecatedString s_last_taskbar_shadow_path;
+static DeprecatedString s_last_tooltip_shadow_path;
 
 static Gfx::IntRect frame_rect_for_window(Window& window, Gfx::IntRect const& rect)
 {
@@ -148,7 +148,7 @@ void WindowFrame::set_button_icons()
 
 void WindowFrame::reload_config()
 {
-    String icons_path = WindowManager::the().palette().title_button_icons_path();
+    DeprecatedString icons_path = WindowManager::the().palette().title_button_icons_path();
 
     auto reload_bitmap = [&](RefPtr<MultiScaleBitmaps>& multiscale_bitmap, StringView path, StringView default_path = ""sv) {
         StringBuilder full_path;
@@ -177,9 +177,9 @@ void WindowFrame::reload_config()
     reload_icon(s_close_icon, "window-close"sv, "/res/icons/16x16/window-close.png"sv);
     reload_icon(s_close_modified_icon, "window-close-modified"sv, "/res/icons/16x16/window-close-modified.png"sv);
 
-    auto load_shadow = [](String const& path, String& last_path, RefPtr<MultiScaleBitmaps>& shadow_bitmap) {
+    auto load_shadow = [](DeprecatedString const& path, DeprecatedString& last_path, RefPtr<MultiScaleBitmaps>& shadow_bitmap) {
         if (path.is_empty()) {
-            last_path = String::empty();
+            last_path = DeprecatedString::empty();
             shadow_bitmap = nullptr;
         } else if (!shadow_bitmap || last_path != path) {
             if (shadow_bitmap)
@@ -189,7 +189,7 @@ void WindowFrame::reload_config()
             if (shadow_bitmap)
                 last_path = path;
             else
-                last_path = String::empty();
+                last_path = DeprecatedString::empty();
         }
     };
     load_shadow(WindowManager::the().palette().active_window_shadow_path(), s_last_active_window_shadow_path, s_active_window_shadow);
@@ -210,6 +210,7 @@ MultiScaleBitmaps const* WindowFrame::shadow_bitmap() const
         if (!WindowManager::the().system_effects().menu_shadow())
             return nullptr;
         return s_menu_shadow;
+    case WindowType::Autocomplete:
     case WindowType::Tooltip:
         if (!WindowManager::the().system_effects().tooltip_shadow())
             return nullptr;
@@ -220,6 +221,12 @@ MultiScaleBitmaps const* WindowFrame::shadow_bitmap() const
         return nullptr;
     case WindowType::WindowSwitcher:
         return nullptr;
+    case WindowType::Popup:
+        if (!WindowManager::the().system_effects().window_shadow())
+            return nullptr;
+        if (!m_window.has_forced_shadow())
+            return nullptr;
+        return s_active_window_shadow;
     default:
         if (!WindowManager::the().system_effects().window_shadow())
             return nullptr;
@@ -279,7 +286,7 @@ Gfx::WindowTheme::WindowState WindowFrame::window_state_for_theme() const
         return Gfx::WindowTheme::WindowState::Highlighted;
     if (&m_window == wm.m_move_window)
         return Gfx::WindowTheme::WindowState::Moving;
-    if (wm.is_active_window_or_capturing_modal(m_window))
+    if (m_window.is_active())
         return Gfx::WindowTheme::WindowState::Active;
     return Gfx::WindowTheme::WindowState::Inactive;
 }
@@ -673,7 +680,7 @@ void WindowFrame::layout_buttons()
         m_buttons[i].set_relative_rect(button_rects[i]);
 }
 
-Optional<HitTestResult> WindowFrame::hit_test(Gfx::IntPoint const& position)
+Optional<HitTestResult> WindowFrame::hit_test(Gfx::IntPoint position)
 {
     if (m_window.is_frameless() || m_window.is_fullscreen())
         return {};
@@ -699,7 +706,7 @@ Optional<HitTestResult> WindowFrame::hit_test(Gfx::IntPoint const& position)
     return cached->hit_test(*this, position, window_relative_position);
 }
 
-Optional<HitTestResult> WindowFrame::PerScaleRenderedCache::hit_test(WindowFrame& frame, Gfx::IntPoint const& position, Gfx::IntPoint const& window_relative_position)
+Optional<HitTestResult> WindowFrame::PerScaleRenderedCache::hit_test(WindowFrame& frame, Gfx::IntPoint position, Gfx::IntPoint window_relative_position)
 {
     HitTestResult result {
         .window = frame.window(),
@@ -760,7 +767,7 @@ bool WindowFrame::handle_titlebar_icon_mouse_event(MouseEvent const& event)
         // this click, and when we receive the MouseUp event check if
         // it would have been considered a double click, if it weren't
         // for the fact that we opened and closed a window in the meanwhile
-        wm.start_menu_doubleclick(m_window, event);
+        wm.system_menu_doubleclick(m_window, event);
 
         m_window.popup_window_menu(titlebar_rect().bottom_left().translated(rect().location()), WindowMenuDefaultAction::Close);
         return true;

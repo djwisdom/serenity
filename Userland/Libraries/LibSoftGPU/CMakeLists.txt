@@ -3,7 +3,10 @@ set(SOURCES
     Device.cpp
     Image.cpp
     PixelConverter.cpp
+    ShaderCompiler.cpp
+    ShaderProcessor.cpp
     Sampler.cpp
+    Shader.cpp
 )
 
 add_compile_options(-Wno-psabi)

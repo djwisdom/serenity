@@ -7,13 +7,13 @@
 
 #include <AK/Bitmap.h>
 #include <AK/Checked.h>
+#include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
 #include <AK/Memory.h>
 #include <AK/MemoryStream.h>
 #include <AK/Optional.h>
 #include <AK/Queue.h>
 #include <AK/ScopeGuard.h>
-#include <AK/String.h>
 #include <AK/Try.h>
 #include <LibCore/MappedFile.h>
 #include <LibCore/System.h>
@@ -52,7 +52,7 @@ size_t Bitmap::minimum_pitch(size_t physical_width, BitmapFormat format)
     return physical_width * element_size;
 }
 
-static bool size_would_overflow(BitmapFormat format, IntSize const& size, int scale_factor)
+static bool size_would_overflow(BitmapFormat format, IntSize size, int scale_factor)
 {
     if (size.width() < 0 || size.height() < 0)
         return true;
@@ -64,13 +64,13 @@ static bool size_would_overflow(BitmapFormat format, IntSize const& size, int sc
     return Checked<size_t>::multiplication_would_overflow(pitch, size.height() * scale_factor);
 }
 
-ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create(BitmapFormat format, IntSize const& size, int scale_factor)
+ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create(BitmapFormat format, IntSize size, int scale_factor)
 {
     auto backing_store = TRY(Bitmap::allocate_backing_store(format, size, scale_factor));
     return AK::adopt_nonnull_ref_or_enomem(new (nothrow) Bitmap(format, size, scale_factor, backing_store));
 }
 
-ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_shareable(BitmapFormat format, IntSize const& size, int scale_factor)
+ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_shareable(BitmapFormat format, IntSize size, int scale_factor)
 {
     if (size_would_overflow(format, size, scale_factor))
         return Error::from_string_literal("Gfx::Bitmap::try_create_shareable size overflow");
@@ -83,7 +83,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_shareable(BitmapFormat format,
     return bitmap;
 }
 
-Bitmap::Bitmap(BitmapFormat format, IntSize const& size, int scale_factor, BackingStore const& backing_store)
+Bitmap::Bitmap(BitmapFormat format, IntSize size, int scale_factor, BackingStore const& backing_store)
     : m_size(size)
     , m_scale(scale_factor)
     , m_data(backing_store.data)
@@ -98,7 +98,7 @@ Bitmap::Bitmap(BitmapFormat format, IntSize const& size, int scale_factor, Backi
     m_needs_munmap = true;
 }
 
-ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_wrapper(BitmapFormat format, IntSize const& size, int scale_factor, size_t pitch, void* data)
+ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_wrapper(BitmapFormat format, IntSize size, int scale_factor, size_t pitch, void* data)
 {
     if (size_would_overflow(format, size, scale_factor))
         return Error::from_string_literal("Gfx::Bitmap::try_create_wrapper size overflow");
@@ -152,7 +152,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_load_from_fd_and_close(int fd, String
     return Error::from_string_literal("Gfx::Bitmap unable to load from fd");
 }
 
-Bitmap::Bitmap(BitmapFormat format, IntSize const& size, int scale_factor, size_t pitch, void* data)
+Bitmap::Bitmap(BitmapFormat format, IntSize size, int scale_factor, size_t pitch, void* data)
     : m_size(size)
     , m_scale(scale_factor)
     , m_data(data)
@@ -166,7 +166,7 @@ Bitmap::Bitmap(BitmapFormat format, IntSize const& size, int scale_factor, size_
     allocate_palette_from_format(format, {});
 }
 
-static bool check_size(IntSize const& size, int scale_factor, BitmapFormat format, unsigned actual_size)
+static bool check_size(IntSize size, int scale_factor, BitmapFormat format, unsigned actual_size)
 {
     // FIXME: Code duplication of size_in_bytes() and m_pitch
     unsigned expected_size_min = Bitmap::minimum_pitch(size.width() * scale_factor, format) * size.height() * scale_factor;
@@ -186,12 +186,17 @@ static bool check_size(IntSize const& size, int scale_factor, BitmapFormat forma
     return true;
 }
 
-ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_with_anonymous_buffer(BitmapFormat format, Core::AnonymousBuffer buffer, IntSize const& size, int scale_factor, Vector<ARGB32> const& palette)
+ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_with_anonymous_buffer(BitmapFormat format, Core::AnonymousBuffer buffer, IntSize size, int scale_factor, Vector<ARGB32> const& palette)
 {
     if (size_would_overflow(format, size, scale_factor))
         return Error::from_string_literal("Gfx::Bitmap::try_create_with_anonymous_buffer size overflow");
 
     return adopt_nonnull_ref_or_enomem(new (nothrow) Bitmap(format, move(buffer), size, scale_factor, palette));
+}
+
+ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_from_serialized_byte_buffer(ByteBuffer&& buffer)
+{
+    return try_create_from_serialized_bytes(buffer.bytes());
 }
 
 /// Read a bitmap as described by:
@@ -203,9 +208,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_with_anonymous_buffer(BitmapFo
 /// - palette count
 /// - palette data (= palette count * BGRA8888)
 /// - image data (= actual size * u8)
-ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_from_serialized_byte_buffer(ByteBuffer&& buffer)
+ErrorOr<NonnullRefPtr<Bitmap>> Bitmap::try_create_from_serialized_bytes(ReadonlyBytes bytes)
 {
-    InputMemoryStream stream { buffer };
+    InputMemoryStream stream { bytes };
     size_t actual_size;
     unsigned width;
     unsigned height;
@@ -279,7 +284,7 @@ ByteBuffer Bitmap::serialize_to_byte_buffer() const
     return buffer;
 }
 
-Bitmap::Bitmap(BitmapFormat format, Core::AnonymousBuffer buffer, IntSize const& size, int scale_factor, Vector<ARGB32> const& palette)
+Bitmap::Bitmap(BitmapFormat format, Core::AnonymousBuffer buffer, IntSize size, int scale_factor, Vector<ARGB32> const& palette)
     : m_size(size)
     , m_scale(scale_factor)
     , m_data(buffer.data<void>())
@@ -498,7 +503,7 @@ Bitmap::~Bitmap()
     delete[] m_palette;
 }
 
-void Bitmap::set_mmap_name([[maybe_unused]] String const& name)
+void Bitmap::set_mmap_name([[maybe_unused]] DeprecatedString const& name)
 {
     VERIFY(m_needs_munmap);
 #ifdef AK_OS_SERENITY
@@ -560,7 +565,7 @@ Gfx::ShareableBitmap Bitmap::to_shareable_bitmap() const
     return Gfx::ShareableBitmap { bitmap_or_error.release_value_but_fixme_should_propagate_errors(), Gfx::ShareableBitmap::ConstructWithKnownGoodBitmap };
 }
 
-ErrorOr<BackingStore> Bitmap::allocate_backing_store(BitmapFormat format, IntSize const& size, int scale_factor)
+ErrorOr<BackingStore> Bitmap::allocate_backing_store(BitmapFormat format, IntSize size, int scale_factor)
 {
     if (size_would_overflow(format, size, scale_factor))
         return Error::from_string_literal("Gfx::Bitmap backing store size overflow");
@@ -571,7 +576,7 @@ ErrorOr<BackingStore> Bitmap::allocate_backing_store(BitmapFormat format, IntSiz
     int map_flags = MAP_ANONYMOUS | MAP_PRIVATE;
 #ifdef AK_OS_SERENITY
     map_flags |= MAP_PURGEABLE;
-    void* data = mmap_with_name(nullptr, data_size_in_bytes, PROT_READ | PROT_WRITE, map_flags, 0, 0, String::formatted("GraphicsBitmap [{}]", size).characters());
+    void* data = mmap_with_name(nullptr, data_size_in_bytes, PROT_READ | PROT_WRITE, map_flags, 0, 0, DeprecatedString::formatted("GraphicsBitmap [{}]", size).characters());
 #else
     void* data = mmap(nullptr, data_size_in_bytes, PROT_READ | PROT_WRITE, map_flags, -1, 0);
 #endif
@@ -636,7 +641,7 @@ Optional<Color> Bitmap::solid_color(u8 alpha_threshold) const
     return color;
 }
 
-void Bitmap::flood_visit_from_point(Gfx::IntPoint const& start_point, int threshold,
+void Bitmap::flood_visit_from_point(Gfx::IntPoint start_point, int threshold,
     Function<void(Gfx::IntPoint location)> pixel_reached)
 {
 
@@ -650,7 +655,7 @@ void Bitmap::flood_visit_from_point(Gfx::IntPoint const& start_point, int thresh
 
     points_to_visit.enqueue(start_point);
     pixel_reached(start_point);
-    auto flood_mask = AK::Bitmap::must_create(width() * height(), false);
+    auto flood_mask = AK::Bitmap::create(width() * height(), false).release_value_but_fixme_should_propagate_errors();
 
     flood_mask.set(width() * start_point.y() + start_point.x(), true);
 

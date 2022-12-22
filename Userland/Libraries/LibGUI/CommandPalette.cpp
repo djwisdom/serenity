@@ -92,7 +92,7 @@ public:
         return Column::__Count;
     }
 
-    virtual String column_name(int) const override { return {}; }
+    virtual DeprecatedString column_name(int) const override { return {}; }
 
     virtual ModelIndex index(int row, int column = 0, ModelIndex const& = ModelIndex()) const override
     {
@@ -129,7 +129,7 @@ public:
         case Column::Shortcut:
             if (!action.shortcut().is_valid())
                 return "";
-            return action.shortcut().to_string();
+            return action.shortcut().to_deprecated_string();
         }
 
         VERIFY_NOT_REACHED();
@@ -141,20 +141,20 @@ public:
         if (needle.is_empty())
             return TriState::True;
 
-        auto haystack = String::formatted("{} {}", menu_name(index), action_text(index));
+        auto haystack = DeprecatedString::formatted("{} {}", menu_name(index), action_text(index));
         if (fuzzy_match(needle, haystack).score > 0)
             return TriState::True;
         return TriState::False;
     }
 
-    static String action_text(ModelIndex const& index)
+    static DeprecatedString action_text(ModelIndex const& index)
     {
         auto& action = *static_cast<GUI::Action*>(index.internal_data());
 
         return Gfx::parse_ampersand_string(action.text());
     }
 
-    static String menu_name(ModelIndex const& index)
+    static DeprecatedString menu_name(ModelIndex const& index)
     {
         auto& action = *static_cast<GUI::Action*>(index.internal_data());
         if (action.menu_items().is_empty())
@@ -175,7 +175,8 @@ private:
 CommandPalette::CommandPalette(GUI::Window& parent_window, ScreenPosition screen_position)
     : GUI::Dialog(&parent_window, screen_position)
 {
-    set_frameless(true);
+    set_window_type(GUI::WindowType::Popup);
+    set_window_mode(GUI::WindowMode::Modeless);
     set_blocks_emoji_input(true);
     resize(450, 300);
 
@@ -198,6 +199,7 @@ CommandPalette::CommandPalette(GUI::Window& parent_window, ScreenPosition screen
 
     m_table_view->set_column_painting_delegate(0, make<ActionIconDelegate>());
     m_table_view->set_model(*m_filter_model);
+    m_table_view->set_focus_proxy(m_text_box);
 
     m_text_box->on_change = [this] {
         m_filter_model->set_filter_term(m_text_box->text());
@@ -223,16 +225,6 @@ CommandPalette::CommandPalette(GUI::Window& parent_window, ScreenPosition screen
     };
 
     m_text_box->set_focus(true);
-
-    on_active_input_change = [this](bool is_active_input) {
-        if (!is_active_input)
-            close();
-    };
-
-    on_input_preemption = [this](InputPreemptor preemptor) {
-        if (preemptor != InputPreemptor::ContextMenu)
-            close();
-    };
 }
 
 void CommandPalette::collect_actions(GUI::Window& parent_window)

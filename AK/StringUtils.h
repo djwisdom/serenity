@@ -90,6 +90,7 @@ StringView trim_whitespace(StringView string, TrimMode mode);
 Optional<size_t> find(StringView haystack, char needle, size_t start = 0);
 Optional<size_t> find(StringView haystack, StringView needle, size_t start = 0);
 Optional<size_t> find_last(StringView haystack, char needle);
+Optional<size_t> find_last(StringView haystack, StringView needle);
 Optional<size_t> find_last_not(StringView haystack, char needle);
 Vector<size_t> find_all(StringView haystack, StringView needle);
 enum class SearchDirection {
@@ -98,19 +99,23 @@ enum class SearchDirection {
 };
 Optional<size_t> find_any_of(StringView haystack, StringView needles, SearchDirection);
 
-String to_snakecase(StringView);
-String to_titlecase(StringView);
-String invert_case(StringView);
+DeprecatedString to_snakecase(StringView);
+DeprecatedString to_titlecase(StringView);
+DeprecatedString invert_case(StringView);
 
-String replace(StringView, StringView needle, StringView replacement, ReplaceMode);
+DeprecatedString replace(StringView, StringView needle, StringView replacement, ReplaceMode);
+ErrorOr<String> replace(String const&, StringView needle, StringView replacement, ReplaceMode);
+
 size_t count(StringView, StringView needle);
 
 }
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::CaseSensitivity;
 using AK::ReplaceMode;
 using AK::SplitBehavior;
 using AK::TrimMode;
 using AK::TrimWhitespace;
+#endif

@@ -23,7 +23,7 @@ void Tool::set_action(GUI::Action* action)
     m_action = action;
 }
 
-bool Tool::on_keydown(GUI::KeyEvent const& event)
+bool Tool::on_keydown(GUI::KeyEvent& event)
 {
     switch (event.key()) {
     case KeyCode::Key_LeftBracket:
@@ -62,7 +62,7 @@ Gfx::IntPoint Tool::editor_layer_location(Layer const& layer) const
     return (Gfx::FloatPoint { layer.location() } * m_editor->scale()).to_rounded<int>();
 }
 
-Gfx::IntPoint Tool::editor_stroke_position(Gfx::IntPoint const& pixel_coords, int stroke_thickness) const
+Gfx::IntPoint Tool::editor_stroke_position(Gfx::IntPoint pixel_coords, int stroke_thickness) const
 {
     auto position = m_editor->content_to_frame_position(pixel_coords);
     auto offset = (stroke_thickness % 2 == 0) ? 0 : m_editor->scale() / 2;

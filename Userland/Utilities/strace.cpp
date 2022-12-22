@@ -12,7 +12,7 @@
 #include <Kernel/API/SyscallString.h>
 #include <LibC/sys/arch/i386/regs.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <errno.h>
@@ -34,13 +34,13 @@
 #define HANDLE(VALUE) \
     case VALUE:       \
         return #VALUE##sv;
-#define VALUES_TO_NAMES(FUNC_NAME)     \
-    static String FUNC_NAME(int value) \
-    {                                  \
+#define VALUES_TO_NAMES(FUNC_NAME)               \
+    static DeprecatedString FUNC_NAME(int value) \
+    {                                            \
         switch (value) {
-#define END_VALUES_TO_NAMES()              \
-    }                                      \
-    return String::formatted("{}", value); \
+#define END_VALUES_TO_NAMES()                        \
+    }                                                \
+    return DeprecatedString::formatted("{}", value); \
     }
 
 VALUES_TO_NAMES(errno_name)
@@ -239,7 +239,7 @@ static ErrorOr<ByteBuffer> copy_from_process(void const* source, size_t length)
 }
 
 template<typename T>
-static ErrorOr<T> copy_from_process(const T* source)
+static ErrorOr<T> copy_from_process(T const* source)
 {
     T value {};
     TRY(copy_from_process(source, Bytes { &value, sizeof(T) }));
@@ -251,8 +251,11 @@ struct BitflagOption {
     StringView name;
 };
 
-#define BITFLAG(NAME) \
-    BitflagOption { NAME, #NAME##sv }
+#define BITFLAG(NAME)   \
+    BitflagOption       \
+    {                   \
+        NAME, #NAME##sv \
+    }
 
 struct BitflagBase {
     int flagset;
@@ -599,7 +602,7 @@ struct Formatter<struct sockaddr> : StandardFormatter {
             builder.appendff(
                 ", sin_port={}, sin_addr={}",
                 address_in->sin_port,
-                IPv4Address(address_in->sin_addr.s_addr).to_string());
+                IPv4Address(address_in->sin_addr.s_addr).to_deprecated_string());
         } else if (address.sa_family == AF_UNIX) {
             auto* address_un = (const struct sockaddr_un*)&address;
             builder.appendff(
@@ -812,12 +815,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Vector<StringView> child_argv;
 
-    char const* output_filename = nullptr;
+    StringView output_filename;
     char const* exclude_syscalls_option = nullptr;
     char const* include_syscalls_option = nullptr;
     HashTable<StringView> exclude_syscalls;
     HashTable<StringView> include_syscalls;
-    auto trace_file = Core::File::standard_error();
 
     Core::ArgsParser parser;
     parser.set_stop_on_first_non_option(true);
@@ -831,8 +833,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     parser.parse(arguments);
 
-    if (output_filename != nullptr)
-        trace_file = TRY(Core::File::open(output_filename, Core::OpenMode::WriteOnly));
+    auto trace_file = output_filename.is_empty()
+        ? TRY(Core::Stream::File::standard_error())
+        : TRY(Core::Stream::File::open(output_filename, Core::Stream::OpenMode::Write));
 
     auto parse_syscalls = [](char const* option, auto& hash_table) {
         if (option != nullptr) {
@@ -933,9 +936,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         FormattedSyscallBuilder builder(syscall_name);
         format_syscall(builder, syscall_function, arg1, arg2, arg3, res);
 
-        if (!trace_file->write(builder.string_view())) {
-            warnln("write: {}", trace_file->error_string());
-            return 1;
-        }
+        TRY(trace_file->write(builder.string_view().bytes()));
     }
 }

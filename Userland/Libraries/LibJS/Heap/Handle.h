@@ -60,25 +60,14 @@ public:
     {
     }
 
-    T* cell()
+    T* cell() const
     {
         if (!m_impl)
             return nullptr;
         return static_cast<T*>(m_impl->cell());
     }
 
-    T const* cell() const
-    {
-        if (!m_impl)
-            return nullptr;
-        return static_cast<T const*>(m_impl->cell());
-    }
-
-    T* ptr()
-    {
-        return cell();
-    }
-    T const* ptr() const
+    T* ptr() const
     {
         return cell();
     }
@@ -88,20 +77,12 @@ public:
         return m_impl.is_null();
     }
 
-    T* operator->()
-    {
-        return cell();
-    }
-    T const* operator->() const
+    T* operator->() const
     {
         return cell();
     }
 
-    T& operator*()
-    {
-        return *cell();
-    }
-    T const& operator*() const
+    T& operator*() const
     {
         return *cell();
     }
@@ -115,8 +96,7 @@ public:
         return cell();
     }
 
-    operator T*() { return cell(); }
-    operator T const*() const { return cell(); }
+    operator T*() const { return cell(); }
 
 private:
     explicit Handle(NonnullRefPtr<HandleImpl> impl)
@@ -139,6 +119,20 @@ template<class T>
 inline Handle<T> make_handle(T& cell)
 {
     return Handle<T>::create(&cell);
+}
+
+template<class T>
+inline Handle<T> make_handle(GCPtr<T> cell)
+{
+    if (!cell)
+        return Handle<T> {};
+    return Handle<T>::create(cell.ptr());
+}
+
+template<class T>
+inline Handle<T> make_handle(NonnullGCPtr<T> cell)
+{
+    return Handle<T>::create(cell.ptr());
 }
 
 template<>

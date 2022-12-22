@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/IPv4Address.h>
 #include <AK/JsonArray.h>
 #include <AK/JsonObject.h>
 #include <AK/QuickSort.h>
-#include <AK/String.h>
 #include <AK/StringView.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
 #include <LibCore/ProcessStatisticsReader.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <net/if.h>
@@ -51,10 +51,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     };
 
     struct Column {
-        String title;
+        DeprecatedString title;
         Alignment alignment { Alignment::Left };
         int width { 0 };
-        String buffer;
+        DeprecatedString buffer;
     };
 
     Vector<Column> columns;
@@ -89,8 +89,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     };
 
     if (modify_action.is_empty()) {
-        auto file = TRY(Core::File::open("/sys/kernel/net/route", Core::OpenMode::ReadOnly));
-        auto file_contents = file->read_all();
+        auto file = TRY(Core::Stream::File::open("/sys/kernel/net/route"sv, Core::Stream::OpenMode::Read));
+        auto file_contents = TRY(file->read_until_eof());
         auto json = TRY(JsonValue::from_string(file_contents));
 
         outln("Kernel IP routing table");
@@ -101,16 +101,16 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
         Vector<JsonValue> sorted_regions = json.as_array().values();
         quick_sort(sorted_regions, [](auto& a, auto& b) {
-            return a.as_object().get("destination"sv).to_string() < b.as_object().get("destination"sv).to_string();
+            return a.as_object().get("destination"sv).to_deprecated_string() < b.as_object().get("destination"sv).to_deprecated_string();
         });
 
         for (auto& value : sorted_regions) {
             auto& if_object = value.as_object();
 
-            auto destination = if_object.get("destination"sv).to_string();
-            auto gateway = if_object.get("gateway"sv).to_string();
-            auto genmask = if_object.get("genmask"sv).to_string();
-            auto interface = if_object.get("interface"sv).to_string();
+            auto destination = if_object.get("destination"sv).to_deprecated_string();
+            auto gateway = if_object.get("gateway"sv).to_deprecated_string();
+            auto genmask = if_object.get("genmask"sv).to_deprecated_string();
+            auto interface = if_object.get("interface"sv).to_deprecated_string();
             auto flags = if_object.get("flags"sv).to_u32();
 
             StringBuilder flags_builder;

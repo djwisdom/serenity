@@ -8,10 +8,10 @@
 #define __USE_MISC
 #define TTYDEFCHARS
 #include <AK/Array.h>
+#include <AK/DeprecatedString.h>
 #include <AK/Optional.h>
 #include <AK/Result.h>
 #include <AK/ScopeGuard.h>
-#include <AK/String.h>
 #include <AK/StringView.h>
 #include <AK/Vector.h>
 #include <LibCore/System.h>
@@ -212,7 +212,7 @@ void print_human_readable(termios const& modes, winsize const& ws, bool verbose_
         } else {
             sb.append(ch);
         }
-        return sb.to_string();
+        return sb.to_deprecated_string();
     };
 
     auto print_control_characters = [&] {
@@ -536,7 +536,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/dev", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    String device_file;
+    DeprecatedString device_file;
     bool stty_readable = false;
     bool all_settings = false;
 

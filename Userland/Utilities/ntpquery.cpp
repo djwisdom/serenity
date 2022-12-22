@@ -76,7 +76,7 @@ static timeval timeval_from_ntp_timestamp(NtpTimestamp const& ntp_timestamp)
     return t;
 }
 
-static String format_ntp_timestamp(NtpTimestamp ntp_timestamp)
+static DeprecatedString format_ntp_timestamp(NtpTimestamp ntp_timestamp)
 {
     char buffer[28]; // YYYY-MM-DDTHH:MM:SS.UUUUUUZ is 27 characters long.
     timeval t = timeval_from_ntp_timestamp(ntp_timestamp);
@@ -187,7 +187,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     iovec iov { &packet, sizeof(packet) };
     char control_message_buffer[CMSG_SPACE(sizeof(timeval))];
-    msghdr msg = { &peer_address, sizeof(peer_address), &iov, 1, control_message_buffer, sizeof(control_message_buffer), 0 };
+    msghdr msg = {};
+    msg.msg_name = &peer_address;
+    msg.msg_namelen = sizeof(peer_address);
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control_message_buffer;
+    msg.msg_controllen = sizeof(control_message_buffer);
+    msg.msg_flags = 0;
+
     rc = recvmsg(fd, &msg, 0);
     if (rc < 0) {
         perror("recvmsg");

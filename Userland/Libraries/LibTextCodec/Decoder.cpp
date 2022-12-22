@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/StringBuilder.h>
 #include <AK/Utf8View.h>
 #include <LibTextCodec/Decoder.h>
@@ -26,7 +26,7 @@ TurkishDecoder s_turkish_decoder;
 XUserDefinedDecoder s_x_user_defined_decoder;
 }
 
-Decoder* decoder_for(String const& a_encoding)
+Decoder* decoder_for(DeprecatedString const& a_encoding)
 {
     auto encoding = get_standardized_encoding(a_encoding);
     if (encoding.has_value()) {
@@ -184,7 +184,7 @@ Decoder* bom_sniff_to_decoder(StringView input)
 }
 
 // https://encoding.spec.whatwg.org/#decode
-String convert_input_to_utf8_using_given_decoder_unless_there_is_a_byte_order_mark(Decoder& fallback_decoder, StringView input)
+DeprecatedString convert_input_to_utf8_using_given_decoder_unless_there_is_a_byte_order_mark(Decoder& fallback_decoder, StringView input)
 {
     Decoder* actual_decoder = &fallback_decoder;
 
@@ -207,11 +207,11 @@ String convert_input_to_utf8_using_given_decoder_unless_there_is_a_byte_order_ma
     return actual_decoder->to_utf8(input);
 }
 
-String Decoder::to_utf8(StringView input)
+DeprecatedString Decoder::to_utf8(StringView input)
 {
     StringBuilder builder(input.length());
     process(input, [&builder](u32 c) { builder.append_code_point(c); });
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 void UTF8Decoder::process(StringView input, Function<void(u32)> on_code_point)
@@ -221,7 +221,7 @@ void UTF8Decoder::process(StringView input, Function<void(u32)> on_code_point)
     }
 }
 
-String UTF8Decoder::to_utf8(StringView input)
+DeprecatedString UTF8Decoder::to_utf8(StringView input)
 {
     // Discard the BOM
     auto bomless_input = input;
@@ -241,7 +241,7 @@ void UTF16BEDecoder::process(StringView input, Function<void(u32)> on_code_point
     }
 }
 
-String UTF16BEDecoder::to_utf8(StringView input)
+DeprecatedString UTF16BEDecoder::to_utf8(StringView input)
 {
     // Discard the BOM
     auto bomless_input = input;
@@ -250,7 +250,7 @@ String UTF16BEDecoder::to_utf8(StringView input)
 
     StringBuilder builder(bomless_input.length() / 2);
     process(bomless_input, [&builder](u32 c) { builder.append_code_point(c); });
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 void UTF16LEDecoder::process(StringView input, Function<void(u32)> on_code_point)
@@ -262,7 +262,7 @@ void UTF16LEDecoder::process(StringView input, Function<void(u32)> on_code_point
     }
 }
 
-String UTF16LEDecoder::to_utf8(StringView input)
+DeprecatedString UTF16LEDecoder::to_utf8(StringView input)
 {
     // Discard the BOM
     auto bomless_input = input;
@@ -271,7 +271,7 @@ String UTF16LEDecoder::to_utf8(StringView input)
 
     StringBuilder builder(bomless_input.length() / 2);
     process(bomless_input, [&builder](u32 c) { builder.append_code_point(c); });
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 void Latin1Decoder::process(StringView input, Function<void(u32)> on_code_point)

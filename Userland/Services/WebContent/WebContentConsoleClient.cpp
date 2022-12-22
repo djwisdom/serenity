@@ -1,64 +1,58 @@
 /*
  * Copyright (c) 2021, Brandon Scott <xeon.productions@gmail.com>
  * Copyright (c) 2020, Hunter Salyer <thefalsehonesty@gmail.com>
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "WebContentConsoleClient.h"
+#include <AK/TemporaryChange.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/MarkupGenerator.h>
+#include <LibJS/Runtime/AbstractOperations.h>
+#include <LibJS/Runtime/ObjectEnvironment.h>
+#include <LibWeb/HTML/PolicyContainers.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
-#include <WebContent/ConsoleGlobalObject.h>
+#include <WebContent/ConsoleGlobalEnvironmentExtensions.h>
 
 namespace WebContent {
 
 WebContentConsoleClient::WebContentConsoleClient(JS::Console& console, JS::Realm& realm, ConnectionFromClient& client)
     : ConsoleClient(console)
     , m_client(client)
-    , m_realm(realm)
 {
-    JS::DeferGC defer_gc(realm.heap());
-
-    auto& vm = realm.vm();
-    auto& window = static_cast<Web::HTML::Window&>(realm.global_object());
-
-    auto console_global_object = realm.heap().allocate_without_realm<ConsoleGlobalObject>(realm, window);
-
-    // NOTE: We need to push an execution context here for NativeFunction::create() to succeed during global object initialization.
-    auto& eso = Web::Bindings::host_defined_environment_settings_object(realm);
-    vm.push_execution_context(eso.realm_execution_context());
-    console_global_object->initialize(realm);
-    vm.pop_execution_context();
-
-    m_console_global_object = JS::make_handle(console_global_object);
+    auto& window = verify_cast<Web::HTML::Window>(realm.global_object());
+    m_console_global_environment_extensions = realm.heap().allocate<ConsoleGlobalEnvironmentExtensions>(realm, realm, window).ptr();
 }
 
-void WebContentConsoleClient::handle_input(String const& js_source)
+void WebContentConsoleClient::handle_input(DeprecatedString const& js_source)
 {
-    if (!m_realm)
+    if (!m_console_global_environment_extensions)
         return;
 
-    auto& settings = Web::Bindings::host_defined_environment_settings_object(*m_realm);
+    auto& settings = Web::HTML::relevant_settings_object(*m_console_global_environment_extensions);
     auto script = Web::HTML::ClassicScript::create("(console)", js_source, settings, settings.api_base_url());
 
+    JS::NonnullGCPtr<JS::Environment> with_scope = JS::new_object_environment(*m_console_global_environment_extensions, true, &settings.realm().global_environment());
+
     // FIXME: Add parse error printouts back once ClassicScript can report parse errors.
+    auto result = script->run(Web::HTML::ClassicScript::RethrowErrors::No, with_scope);
 
-    auto result = script->run();
-
-    if (result.value().has_value())
-        print_html(JS::MarkupGenerator::html_from_value(*result.value()));
+    if (result.value().has_value()) {
+        m_console_global_environment_extensions->set_most_recent_result(result.value().value());
+        print_html(JS::MarkupGenerator::html_from_value(*result.value()).release_value_but_fixme_should_propagate_errors().to_deprecated_string());
+    }
 }
 
 void WebContentConsoleClient::report_exception(JS::Error const& exception, bool in_promise)
 {
-    print_html(JS::MarkupGenerator::html_from_error(exception, in_promise));
+    print_html(JS::MarkupGenerator::html_from_error(exception, in_promise).release_value_but_fixme_should_propagate_errors().to_deprecated_string());
 }
 
-void WebContentConsoleClient::print_html(String const& line)
+void WebContentConsoleClient::print_html(DeprecatedString const& line)
 {
     m_message_log.append({ .type = ConsoleOutput::Type::HTML, .data = line });
     m_client.async_did_output_js_console_message(m_message_log.size() - 1);
@@ -70,7 +64,7 @@ void WebContentConsoleClient::clear_output()
     m_client.async_did_output_js_console_message(m_message_log.size() - 1);
 }
 
-void WebContentConsoleClient::begin_group(String const& label, bool start_expanded)
+void WebContentConsoleClient::begin_group(DeprecatedString const& label, bool start_expanded)
 {
     m_message_log.append({ .type = start_expanded ? ConsoleOutput::Type::BeginGroup : ConsoleOutput::Type::BeginGroupCollapsed, .data = label });
     m_client.async_did_output_js_console_message(m_message_log.size() - 1);
@@ -96,8 +90,8 @@ void WebContentConsoleClient::send_messages(i32 start_index)
     }
 
     // FIXME: Replace with a single Vector of message structs
-    Vector<String> message_types;
-    Vector<String> messages;
+    Vector<DeprecatedString> message_types;
+    Vector<DeprecatedString> messages;
     message_types.ensure_capacity(messages_to_send);
     messages.ensure_capacity(messages_to_send);
 
@@ -155,11 +149,11 @@ JS::ThrowCompletionOr<JS::Value> WebContentConsoleClient::printer(JS::Console::L
 
     if (log_level == JS::Console::LogLevel::Group || log_level == JS::Console::LogLevel::GroupCollapsed) {
         auto group = arguments.get<JS::Console::Group>();
-        begin_group(String::formatted("<span style='{}'>{}</span>", styling, escape_html_entities(group.label)), log_level == JS::Console::LogLevel::Group);
+        begin_group(DeprecatedString::formatted("<span style='{}'>{}</span>", styling, escape_html_entities(group.label)), log_level == JS::Console::LogLevel::Group);
         return JS::js_undefined();
     }
 
-    auto output = String::join(' ', arguments.get<JS::MarkedVector<JS::Value>>());
+    auto output = DeprecatedString::join(' ', arguments.get<JS::MarkedVector<JS::Value>>());
     m_console.output_debug_message(log_level, output);
 
     StringBuilder html;

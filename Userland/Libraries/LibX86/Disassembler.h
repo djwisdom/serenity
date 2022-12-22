@@ -23,10 +23,14 @@ public:
         if (!m_stream.can_read())
             return {};
 #if ARCH(I386)
-        return Instruction::from_stream(m_stream, true, true);
+        return Instruction::from_stream(m_stream, ProcessorMode::Protected);
 #else
-        dbgln("FIXME: Implement disassembly support for x86_64");
+#    if ARCH(X86_64)
+        return Instruction::from_stream(m_stream, ProcessorMode::Long);
+#    else
+        dbgln("Unsupported platform");
         return {};
+#    endif
 #endif
     }
 

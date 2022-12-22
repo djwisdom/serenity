@@ -26,7 +26,7 @@
 namespace Web::Bindings {
 
 WebAssemblyObject::WebAssemblyObject(JS::Realm& realm)
-    : Object(*realm.intrinsics().object_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
 {
     s_abstract_machine.enable_instruction_count_limit();
 }
@@ -43,25 +43,25 @@ void WebAssemblyObject::initialize(JS::Realm& realm)
     auto& vm = this->vm();
 
     auto& memory_constructor = Bindings::ensure_web_constructor<WebAssemblyMemoryConstructor>(realm, "WebAssembly.Memory");
-    memory_constructor.define_direct_property(vm.names.name, js_string(vm, "WebAssembly.Memory"), JS::Attribute::Configurable);
+    memory_constructor.define_direct_property(vm.names.name, JS::PrimitiveString::create(vm, "WebAssembly.Memory"), JS::Attribute::Configurable);
     auto& memory_prototype = Bindings::ensure_web_prototype<WebAssemblyMemoryPrototype>(realm, "WebAssemblyMemoryPrototype");
     memory_prototype.define_direct_property(vm.names.constructor, &memory_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
     define_direct_property("Memory", &memory_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
 
     auto& instance_constructor = Bindings::ensure_web_constructor<WebAssemblyInstanceConstructor>(realm, "WebAssembly.Instance");
-    instance_constructor.define_direct_property(vm.names.name, js_string(vm, "WebAssembly.Instance"), JS::Attribute::Configurable);
+    instance_constructor.define_direct_property(vm.names.name, JS::PrimitiveString::create(vm, "WebAssembly.Instance"), JS::Attribute::Configurable);
     auto& instance_prototype = Bindings::ensure_web_prototype<WebAssemblyInstancePrototype>(realm, "WebAssemblyInstancePrototype");
     instance_prototype.define_direct_property(vm.names.constructor, &instance_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
     define_direct_property("Instance", &instance_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
 
     auto& module_constructor = Bindings::ensure_web_constructor<WebAssemblyModuleConstructor>(realm, "WebAssembly.Module");
-    module_constructor.define_direct_property(vm.names.name, js_string(vm, "WebAssembly.Module"), JS::Attribute::Configurable);
+    module_constructor.define_direct_property(vm.names.name, JS::PrimitiveString::create(vm, "WebAssembly.Module"), JS::Attribute::Configurable);
     auto& module_prototype = Bindings::ensure_web_prototype<WebAssemblyModulePrototype>(realm, "WebAssemblyModulePrototype");
     module_prototype.define_direct_property(vm.names.constructor, &module_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
     define_direct_property("Module", &module_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
 
     auto& table_constructor = Bindings::ensure_web_constructor<WebAssemblyTableConstructor>(realm, "WebAssembly.Table");
-    table_constructor.define_direct_property(vm.names.name, js_string(vm, "WebAssembly.Table"), JS::Attribute::Configurable);
+    table_constructor.define_direct_property(vm.names.name, JS::PrimitiveString::create(vm, "WebAssembly.Table"), JS::Attribute::Configurable);
     auto& table_prototype = Bindings::ensure_web_prototype<WebAssemblyTablePrototype>(realm, "WebAssemblyTablePrototype");
     table_prototype.define_direct_property(vm.names.constructor, &table_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
     define_direct_property("Table", &table_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
@@ -83,6 +83,8 @@ void WebAssemblyObject::visit_edges(Visitor& visitor)
         for (auto& entry : module_cache.function_instances)
             visitor.visit(entry.value);
         for (auto& entry : module_cache.memory_instances)
+            visitor.visit(entry.value);
+        for (auto& entry : module_cache.table_instances)
             visitor.visit(entry.value);
     }
 }
@@ -139,7 +141,7 @@ JS::ThrowCompletionOr<size_t> parse_module(JS::VM& vm, JS::Object* buffer_object
     };
     if (module_result.is_error()) {
         // FIXME: Throw CompileError instead.
-        return vm.throw_completion<JS::TypeError>(Wasm::parse_error_to_string(module_result.error()));
+        return vm.throw_completion<JS::TypeError>(Wasm::parse_error_to_deprecated_string(module_result.error()));
     }
 
     if (auto validation_result = WebAssemblyObject::s_abstract_machine.validate(module_result.value()); validation_result.is_error()) {
@@ -341,7 +343,7 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyObject::instantiate)
     } else if (is<WebAssemblyModuleObject>(buffer)) {
         module = &static_cast<WebAssemblyModuleObject*>(buffer)->module();
     } else {
-        auto error = JS::TypeError::create(realm, String::formatted("{} is not an ArrayBuffer or a Module", buffer->class_name()));
+        auto error = JS::TypeError::create(realm, DeprecatedString::formatted("{} is not an ArrayBuffer or a Module", buffer->class_name()));
         promise->reject(error);
         return promise;
     }
@@ -437,7 +439,7 @@ JS::ThrowCompletionOr<Wasm::Value> to_webassembly_value(JS::VM& vm, JS::Value va
     VERIFY_NOT_REACHED();
 }
 
-JS::NativeFunction* create_native_function(JS::VM& vm, Wasm::FunctionAddress address, String const& name)
+JS::NativeFunction* create_native_function(JS::VM& vm, Wasm::FunctionAddress address, DeprecatedString const& name)
 {
     auto& realm = *vm.current_realm();
     Optional<Wasm::FunctionType> type;
@@ -461,7 +463,7 @@ JS::NativeFunction* create_native_function(JS::VM& vm, Wasm::FunctionAddress add
             auto result = WebAssemblyObject::s_abstract_machine.invoke(address, move(values));
             // FIXME: Use the convoluted mapping of errors defined in the spec.
             if (result.is_trap())
-                return vm.throw_completion<JS::TypeError>(String::formatted("Wasm execution trapped (WIP): {}", result.trap().reason));
+                return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("Wasm execution trapped (WIP): {}", result.trap().reason));
 
             if (result.values().is_empty())
                 return JS::js_undefined();
@@ -481,7 +483,7 @@ JS::NativeFunction* create_native_function(JS::VM& vm, Wasm::FunctionAddress add
 }
 
 WebAssemblyMemoryObject::WebAssemblyMemoryObject(JS::Realm& realm, Wasm::MemoryAddress address)
-    : Object(Bindings::ensure_web_prototype<WebAssemblyMemoryPrototype>(realm, "WebAssemblyMemoryPrototype"))
+    : Object(ConstructWithPrototypeTag::Tag, Bindings::ensure_web_prototype<WebAssemblyMemoryPrototype>(realm, "WebAssemblyMemoryPrototype"))
     , m_address(address)
 {
 }

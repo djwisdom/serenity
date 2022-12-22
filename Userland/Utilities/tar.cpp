@@ -15,6 +15,7 @@
 #include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
 #include <LibCore/FileStream.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <fcntl.h>
@@ -35,7 +36,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     StringView archive_file;
     bool dereference;
     StringView directory;
-    Vector<String> paths;
+    Vector<DeprecatedString> paths;
 
     Core::ArgsParser args_parser;
     args_parser.add_option(create, "Create archive", "create", 'c');
@@ -61,36 +62,26 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     }
 
     if (list || extract) {
-        auto file = Core::File::standard_input();
-
-        if (!archive_file.is_empty())
-            file = TRY(Core::File::open(archive_file, Core::OpenMode::ReadOnly));
-
         if (!directory.is_empty())
             TRY(Core::System::chdir(directory));
 
-        Core::InputFileStream file_stream(file);
-        Compress::GzipDecompressor gzip_stream(file_stream);
+        NonnullOwnPtr<Core::Stream::Stream> input_stream = TRY(Core::Stream::File::open_file_or_standard_stream(archive_file, Core::Stream::OpenMode::Read));
 
-        InputStream& file_input_stream = file_stream;
-        InputStream& gzip_input_stream = gzip_stream;
-        Archive::TarInputStream tar_stream((gzip) ? gzip_input_stream : file_input_stream);
-        // FIXME: implement ErrorOr<TarInputStream>?
-        if (!tar_stream.valid()) {
-            warnln("the provided file is not a well-formatted ustar file");
-            return 1;
-        }
+        if (gzip)
+            input_stream = make<Compress::GzipDecompressor>(move(input_stream));
 
-        HashMap<String, String> global_overrides;
-        HashMap<String, String> local_overrides;
+        auto tar_stream = TRY(Archive::TarInputStream::construct(move(input_stream)));
 
-        auto get_override = [&](StringView key) -> Optional<String> {
-            Optional<String> maybe_local = local_overrides.get(key);
+        HashMap<DeprecatedString, DeprecatedString> global_overrides;
+        HashMap<DeprecatedString, DeprecatedString> local_overrides;
+
+        auto get_override = [&](StringView key) -> Optional<DeprecatedString> {
+            Optional<DeprecatedString> maybe_local = local_overrides.get(key);
 
             if (maybe_local.has_value())
                 return maybe_local;
 
-            Optional<String> maybe_global = global_overrides.get(key);
+            Optional<DeprecatedString> maybe_global = global_overrides.get(key);
 
             if (maybe_global.has_value())
                 return maybe_global;
@@ -98,14 +89,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return {};
         };
 
-        while (!tar_stream.finished()) {
-            Archive::TarFileHeader const& header = tar_stream.header();
+        while (!tar_stream->finished()) {
+            Archive::TarFileHeader const& header = tar_stream->header();
 
             // Handle meta-entries earlier to avoid consuming the file content stream.
             if (header.content_is_like_extended_header()) {
                 switch (header.type_flag()) {
                 case Archive::TarFileType::GlobalExtendedHeader: {
-                    TRY(tar_stream.for_each_extended_header([&](StringView key, StringView value) {
+                    TRY(tar_stream->for_each_extended_header([&](StringView key, StringView value) {
                         if (value.length() == 0)
                             global_overrides.remove(key);
                         else
@@ -114,7 +105,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                     break;
                 }
                 case Archive::TarFileType::ExtendedHeader: {
-                    TRY(tar_stream.for_each_extended_header([&](StringView key, StringView value) {
+                    TRY(tar_stream->for_each_extended_header([&](StringView key, StringView value) {
                         local_overrides.set(key, value);
                     }));
                     break;
@@ -124,10 +115,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                     VERIFY_NOT_REACHED();
                 }
 
+                TRY(tar_stream->advance());
                 continue;
             }
 
-            Archive::TarFileStream file_stream = tar_stream.file_contents();
+            Archive::TarFileStream file_stream = tar_stream->file_contents();
 
             // Handle other header types that don't just have an effect on extraction.
             switch (header.type_flag()) {
@@ -135,12 +127,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 StringBuilder long_name;
 
                 Array<u8, buffer_size> buffer;
-                size_t bytes_read;
 
-                while ((bytes_read = file_stream.read(buffer)) > 0)
-                    long_name.append(reinterpret_cast<char*>(buffer.data()), bytes_read);
+                while (!file_stream.is_eof()) {
+                    auto slice = TRY(file_stream.read(buffer));
+                    long_name.append(reinterpret_cast<char*>(slice.data()), slice.size());
+                }
 
-                local_overrides.set("path", long_name.to_string());
+                local_overrides.set("path", long_name.to_deprecated_string());
+                TRY(tar_stream->advance());
                 continue;
             }
             default:
@@ -151,19 +145,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             LexicalPath path = LexicalPath(header.filename());
             if (!header.prefix().is_empty())
                 path = path.prepend(header.prefix());
-            String filename = get_override("path"sv).value_or(path.string());
+            DeprecatedString filename = get_override("path"sv).value_or(path.string());
 
             if (list || verbose)
                 outln("{}", filename);
 
             if (extract) {
-                String absolute_path = Core::File::absolute_path(filename);
+                DeprecatedString absolute_path = Core::File::absolute_path(filename);
                 auto parent_path = LexicalPath(absolute_path).parent();
-
-                auto header_mode_or_error = header.mode();
-                if (header_mode_or_error.is_error())
-                    return header_mode_or_error.release_error();
-                auto header_mode = header_mode_or_error.release_value();
+                auto header_mode = TRY(header.mode());
 
                 switch (header.type_flag()) {
                 case Archive::TarFileType::NormalFile:
@@ -173,9 +163,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                     int fd = TRY(Core::System::open(absolute_path, O_CREAT | O_WRONLY, header_mode));
 
                     Array<u8, buffer_size> buffer;
-                    size_t bytes_read;
-                    while ((bytes_read = file_stream.read(buffer)) > 0)
-                        TRY(Core::System::write(fd, buffer.span().slice(0, bytes_read)));
+                    while (!file_stream.is_eof()) {
+                        auto slice = TRY(file_stream.read(buffer));
+                        TRY(Core::System::write(fd, slice));
+                    }
 
                     TRY(Core::System::close(fd));
                     break;
@@ -204,11 +195,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             // Non-global headers should be cleared after every file.
             local_overrides.clear();
 
-            auto maybe_error = tar_stream.advance();
-            if (maybe_error.is_error())
-                return maybe_error.error();
+            TRY(tar_stream->advance());
         }
-        file_stream.close();
 
         return 0;
     }
@@ -227,14 +215,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         if (!directory.is_empty())
             TRY(Core::System::chdir(directory));
 
-        Core::OutputFileStream file_stream(file);
-        Compress::GzipCompressor gzip_stream(file_stream);
+        NonnullOwnPtr<OutputStream> file_output_stream = make<Core::OutputFileStream>(file);
+        NonnullOwnPtr<OutputStream> gzip_output_stream = make<Compress::GzipCompressor>(*file_output_stream);
 
-        OutputStream& file_output_stream = file_stream;
-        OutputStream& gzip_output_stream = gzip_stream;
-        Archive::TarOutputStream tar_stream((gzip) ? gzip_output_stream : file_output_stream);
+        Archive::TarOutputStream tar_stream(make<Core::Stream::WrappedAKOutputStream>(move((gzip) ? gzip_output_stream : file_output_stream)));
 
-        auto add_file = [&](String path) -> ErrorOr<void> {
+        auto add_file = [&](DeprecatedString path) -> ErrorOr<void> {
             auto file = Core::File::construct(path);
             if (!file->open(Core::OpenMode::ReadOnly)) {
                 warnln("Failed to open {}: {}", path, file->error_string());
@@ -243,29 +229,29 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
             auto statbuf = TRY(Core::System::lstat(path));
             auto canonicalized_path = LexicalPath::canonicalized_path(path);
-            tar_stream.add_file(canonicalized_path, statbuf.st_mode, file->read_all());
+            TRY(tar_stream.add_file(canonicalized_path, statbuf.st_mode, file->read_all()));
             if (verbose)
                 outln("{}", canonicalized_path);
 
             return {};
         };
 
-        auto add_link = [&](String path) -> ErrorOr<void> {
+        auto add_link = [&](DeprecatedString path) -> ErrorOr<void> {
             auto statbuf = TRY(Core::System::lstat(path));
 
             auto canonicalized_path = LexicalPath::canonicalized_path(path);
-            tar_stream.add_link(canonicalized_path, statbuf.st_mode, TRY(Core::System::readlink(path)));
+            TRY(tar_stream.add_link(canonicalized_path, statbuf.st_mode, TRY(Core::System::readlink(path))));
             if (verbose)
                 outln("{}", canonicalized_path);
 
             return {};
         };
 
-        auto add_directory = [&](String path, auto handle_directory) -> ErrorOr<void> {
+        auto add_directory = [&](DeprecatedString path, auto handle_directory) -> ErrorOr<void> {
             auto statbuf = TRY(Core::System::lstat(path));
 
             auto canonicalized_path = LexicalPath::canonicalized_path(path);
-            tar_stream.add_directory(canonicalized_path, statbuf.st_mode);
+            TRY(tar_stream.add_directory(canonicalized_path, statbuf.st_mode));
             if (verbose)
                 outln("{}", canonicalized_path);
 
@@ -292,7 +278,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             }
         }
 
-        tar_stream.finish();
+        TRY(tar_stream.finish());
 
         return 0;
     }

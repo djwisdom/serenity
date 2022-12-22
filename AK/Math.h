@@ -760,7 +760,7 @@ constexpr T ceil(T num)
     if (is_constant_evaluated()) {
         if (num < NumericLimits<i64>::min() || num > NumericLimits<i64>::max())
             return num;
-        return (static_cast<double>(static_cast<i64>(num)) == num)
+        return (static_cast<T>(static_cast<i64>(num)) == num)
             ? static_cast<i64>(num)
             : static_cast<i64>(num) + ((num > 0) ? 1 : 0);
     }
@@ -775,4 +775,6 @@ constexpr T ceil(T num)
 #undef AARCH64_INSTRUCTION
 }
 
+#if USING_AK_GLOBALLY
 using AK::round_to;
+#endif

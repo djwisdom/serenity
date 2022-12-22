@@ -27,7 +27,7 @@ namespace Web::HTML {
 
 HTMLInputElement::HTMLInputElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
-    , m_value(String::empty())
+    , m_value(DeprecatedString::empty())
 {
     set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLInputElement"));
 
@@ -123,7 +123,7 @@ void HTMLInputElement::set_files(JS::GCPtr<FileAPI::FileList> files)
 void HTMLInputElement::update_the_file_selection(JS::NonnullGCPtr<FileAPI::FileList> files)
 {
     // 1. Queue an element task on the user interaction task source given element and the following steps:
-    queue_an_element_task(Task::Source::UserInteraction, [this, files]() mutable {
+    queue_an_element_task(Task::Source::UserInteraction, [this, files] {
         // 1. Update element's selected files so that it represents the user's selection.
         this->set_files(files.ptr());
 
@@ -268,14 +268,14 @@ void HTMLInputElement::did_edit_text_node(Badge<BrowsingContext>)
     });
 }
 
-String HTMLInputElement::value() const
+DeprecatedString HTMLInputElement::value() const
 {
     // https://html.spec.whatwg.org/multipage/input.html#dom-input-value-filename
     if (type_state() == TypeAttributeState::FileUpload) {
         // NOTE: This "fakepath" requirement is a sad accident of history. See the example in the File Upload state section for more information.
         // NOTE: Since path components are not permitted in filenames in the list of selected files, the "\fakepath\" cannot be mistaken for a path component.
         if (m_selected_files && m_selected_files->item(0))
-            return String::formatted("C:\\fakepath\\{}", m_selected_files->item(0)->name());
+            return DeprecatedString::formatted("C:\\fakepath\\{}", m_selected_files->item(0)->name());
         return "C:\\fakepath\\"sv;
     }
 
@@ -284,12 +284,12 @@ String HTMLInputElement::value() const
     return m_value;
 }
 
-WebIDL::ExceptionOr<void> HTMLInputElement::set_value(String value)
+WebIDL::ExceptionOr<void> HTMLInputElement::set_value(DeprecatedString value)
 {
     // https://html.spec.whatwg.org/multipage/input.html#dom-input-value-filename
     if (type_state() == TypeAttributeState::FileUpload) {
         // On setting, if the new value is the empty string, empty the list of selected files; otherwise, throw an "InvalidStateError" DOMException.
-        if (value != String::empty())
+        if (value != DeprecatedString::empty())
             return WebIDL::InvalidStateError::create(realm(), "Setting value of input type file to non-empty string"sv);
         m_selected_files = nullptr;
         return {};
@@ -317,6 +317,47 @@ WebIDL::ExceptionOr<void> HTMLInputElement::set_value(String value)
     return {};
 }
 
+// https://html.spec.whatwg.org/multipage/input.html#the-input-element:attr-input-placeholder-3
+static bool is_allowed_to_have_placeholder(HTML::HTMLInputElement::TypeAttributeState state)
+{
+    switch (state) {
+    case HTML::HTMLInputElement::TypeAttributeState::Text:
+    case HTML::HTMLInputElement::TypeAttributeState::Search:
+    case HTML::HTMLInputElement::TypeAttributeState::URL:
+    case HTML::HTMLInputElement::TypeAttributeState::Telephone:
+    case HTML::HTMLInputElement::TypeAttributeState::Email:
+    case HTML::HTMLInputElement::TypeAttributeState::Password:
+    case HTML::HTMLInputElement::TypeAttributeState::Number:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#attr-input-placeholder
+Optional<DeprecatedString> HTMLInputElement::placeholder_value() const
+{
+    if (!m_text_node || !m_text_node->data().is_empty())
+        return {};
+    if (!is_allowed_to_have_placeholder(type_state()))
+        return {};
+    if (!has_attribute(HTML::AttributeNames::placeholder))
+        return {};
+
+    auto placeholder = attribute(HTML::AttributeNames::placeholder);
+
+    if (placeholder.contains('\r') || placeholder.contains('\n')) {
+        StringBuilder builder;
+        for (auto ch : placeholder) {
+            if (ch != '\r' && ch != '\n')
+                builder.append(ch);
+        }
+        placeholder = builder.to_deprecated_string();
+    }
+
+    return placeholder;
+}
+
 void HTMLInputElement::create_shadow_tree_if_needed()
 {
     if (shadow_root())
@@ -335,10 +376,10 @@ void HTMLInputElement::create_shadow_tree_if_needed()
         break;
     }
 
-    auto* shadow_root = heap().allocate<DOM::ShadowRoot>(realm(), document(), *this);
+    auto shadow_root = heap().allocate<DOM::ShadowRoot>(realm(), document(), *this);
     auto initial_value = m_value;
     if (initial_value.is_null())
-        initial_value = String::empty();
+        initial_value = DeprecatedString::empty();
     auto element = document().create_element(HTML::TagNames::div).release_value();
     MUST(element->set_attribute(HTML::AttributeNames::style, "white-space: pre; padding-top: 1px; padding-bottom: 1px; padding-left: 2px; padding-right: 2px"));
     m_text_node = heap().allocate<DOM::Text>(realm(), document(), initial_value);
@@ -349,8 +390,8 @@ void HTMLInputElement::create_shadow_tree_if_needed()
         m_text_node->set_is_password_input({}, true);
 
     MUST(element->append_child(*m_text_node));
-    MUST(shadow_root->append_child(move(element)));
-    set_shadow_root(move(shadow_root));
+    MUST(shadow_root->append_child(element));
+    set_shadow_root(shadow_root);
 }
 
 void HTMLInputElement::did_receive_focus()
@@ -363,7 +404,7 @@ void HTMLInputElement::did_receive_focus()
     browsing_context->set_cursor_position(DOM::Position { *m_text_node, 0 });
 }
 
-void HTMLInputElement::parse_attribute(FlyString const& name, String const& value)
+void HTMLInputElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
 {
     HTMLElement::parse_attribute(name, value);
     if (name == HTML::AttributeNames::checked) {
@@ -403,11 +444,11 @@ void HTMLInputElement::did_remove_attribute(FlyString const& name)
             set_checked(false, ChangeSource::Programmatic);
     } else if (name == HTML::AttributeNames::value) {
         if (!m_dirty_value)
-            m_value = String::empty();
+            m_value = DeprecatedString::empty();
     }
 }
 
-String HTMLInputElement::type() const
+DeprecatedString HTMLInputElement::type() const
 {
     switch (m_type) {
 #define __ENUMERATE_HTML_INPUT_TYPE_ATTRIBUTE(keyword, state) \
@@ -420,13 +461,204 @@ String HTMLInputElement::type() const
     VERIFY_NOT_REACHED();
 }
 
-void HTMLInputElement::set_type(String const& type)
+void HTMLInputElement::set_type(DeprecatedString const& type)
 {
     MUST(set_attribute(HTML::AttributeNames::type, type));
 }
 
+// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#valid-simple-colour
+static bool is_valid_simple_color(DeprecatedString const& value)
+{
+    // if it is exactly seven characters long,
+    if (value.length() != 7)
+        return false;
+    // and the first character is a U+0023 NUMBER SIGN character (#),
+    if (!value.starts_with('#'))
+        return false;
+    // and the remaining six characters are all ASCII hex digits
+    for (size_t i = 1; i < value.length(); i++)
+        if (!is_ascii_hex_digit(value[i]))
+            return false;
+
+    return true;
+}
+
+// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#valid-time-string
+static bool is_valid_time_string(DeprecatedString const& value)
+{
+    // A string is a valid time string representing an hour hour, a minute minute, and a second second if it consists of the following components in the given order:
+
+    // 1. Two ASCII digits, representing hour, in the range 0 ≤ hour ≤ 23
+    // 2. A U+003A COLON character (:)
+    // 3. Two ASCII digits, representing minute, in the range 0 ≤ minute ≤ 59
+    // 4. If second is nonzero, or optionally if second is zero:
+    // 1. A U+003A COLON character (:)
+    // 2. Two ASCII digits, representing the integer part of second, in the range 0 ≤ s ≤ 59
+    // 3. If second is not an integer, or optionally if second is an integer:
+    // 1. A U+002E FULL STOP character (.)
+    // 2. One, two, or three ASCII digits, representing the fractional part of second
+    auto parts = value.split(':');
+    if (parts.size() != 2 || parts.size() != 3)
+        return false;
+    if (parts[0].length() != 2)
+        return false;
+    auto hour = (parse_ascii_digit(parts[0][0]) * 10) + parse_ascii_digit(parts[0][1]);
+    if (hour > 23)
+        return false;
+    if (parts[1].length() != 2)
+        return false;
+    auto minute = (parse_ascii_digit(parts[1][0]) * 10) + parse_ascii_digit(parts[1][1]);
+    if (minute > 59)
+        return false;
+    if (parts.size() == 2)
+        return true;
+
+    if (parts[2].length() < 2)
+        return false;
+    auto second = (parse_ascii_digit(parts[2][0]) * 10) + parse_ascii_digit(parts[2][1]);
+    if (second > 59)
+        return false;
+    if (parts[2].length() == 2)
+        return true;
+    auto second_parts = parts[2].split('.');
+    if (second_parts.size() != 2)
+        return false;
+    if (second_parts[1].length() < 1 || second_parts[1].length() > 3)
+        return false;
+    for (auto digit : second_parts[1])
+        if (!is_ascii_digit(digit))
+            return false;
+
+    return true;
+}
+
+// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#week-number-of-the-last-day
+static u32 week_number_of_the_last_day(u64)
+{
+    // FIXME: sometimes return 53 (!)
+    // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#weeks
+    return 52;
+}
+
+// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#valid-week-string
+static bool is_valid_week_string(DeprecatedString const& value)
+{
+    // A string is a valid week string representing a week-year year and week week if it consists of the following components in the given order:
+
+    // 1. Four or more ASCII digits, representing year, where year > 0
+    // 2. A U+002D HYPHEN-MINUS character (-)
+    // 3. A U+0057 LATIN CAPITAL LETTER W character (W)
+    // 4. Two ASCII digits, representing the week week, in the range 1 ≤ week ≤ maxweek, where maxweek is the week number of the last day of week-year year
+    auto parts = value.split('-');
+    if (parts.size() != 2)
+        return false;
+    if (parts[0].length() < 4)
+        return false;
+    for (auto digit : parts[0])
+        if (!is_ascii_digit(digit))
+            return false;
+    if (parts[1].length() != 3)
+        return false;
+
+    if (!parts[1].starts_with('W'))
+        return false;
+    if (!is_ascii_digit(parts[1][1]))
+        return false;
+    if (!is_ascii_digit(parts[1][2]))
+        return false;
+
+    u64 year = 0;
+    for (auto d : parts[0]) {
+        year *= 10;
+        year += parse_ascii_digit(d);
+    }
+    auto week = (parse_ascii_digit(parts[1][1]) * 10) + parse_ascii_digit(parts[1][2]);
+
+    return week >= 1 && week <= week_number_of_the_last_day(year);
+}
+
+// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#valid-month-string
+static bool is_valid_month_string(DeprecatedString const& value)
+{
+    // A string is a valid month string representing a year year and month month if it consists of the following components in the given order:
+
+    // 1. Four or more ASCII digits, representing year, where year > 0
+    // 2. A U+002D HYPHEN-MINUS character (-)
+    // 3. Two ASCII digits, representing the month month, in the range 1 ≤ month ≤ 12
+
+    auto parts = value.split('-');
+    if (parts.size() != 2)
+        return false;
+
+    if (parts[0].length() < 4)
+        return false;
+    for (auto digit : parts[0])
+        if (!is_ascii_digit(digit))
+            return false;
+
+    if (parts[1].length() != 2)
+        return false;
+
+    if (!is_ascii_digit(parts[1][0]))
+        return false;
+    if (!is_ascii_digit(parts[1][1]))
+        return false;
+
+    auto month = (parse_ascii_digit(parts[1][0]) * 10) + parse_ascii_digit(parts[1][1]);
+    return month >= 1 && month <= 12;
+}
+
+// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#valid-date-string
+static bool is_valid_date_string(DeprecatedString const& value)
+{
+    // A string is a valid date string representing a year year, month month, and day day if it consists of the following components in the given order:
+
+    // 1. A valid month string, representing year and month
+    // 2. A U+002D HYPHEN-MINUS character (-)
+    // 3. Two ASCII digits, representing day, in the range 1 ≤ day ≤ maxday where maxday is the number of days in the month month and year year
+    auto parts = value.split('-');
+    if (parts.size() != 3)
+        return false;
+
+    if (!is_valid_month_string(DeprecatedString::formatted("{}-{}", parts[0], parts[1])))
+        return false;
+
+    if (parts[2].length() != 2)
+        return false;
+
+    i64 year = 0;
+    for (auto d : parts[0]) {
+        year *= 10;
+        year += parse_ascii_digit(d);
+    }
+    auto month = (parse_ascii_digit(parts[1][0]) * 10) + parse_ascii_digit(parts[1][1]);
+    i64 day = (parse_ascii_digit(parts[2][0]) * 10) + parse_ascii_digit(parts[2][1]);
+
+    return day >= 1 && day <= AK::days_in_month(year, month);
+}
+
+// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#valid-local-date-and-time-string
+static bool is_valid_local_date_and_time_string(DeprecatedString const& value)
+{
+    auto parts_split_by_T = value.split('T');
+    if (parts_split_by_T.size() == 2)
+        return is_valid_date_string(parts_split_by_T[0]) && is_valid_time_string(parts_split_by_T[1]);
+    auto parts_split_by_space = value.split(' ');
+    if (parts_split_by_space.size() == 2)
+        return is_valid_date_string(parts_split_by_space[0]) && is_valid_time_string(parts_split_by_space[1]);
+
+    return false;
+}
+
+// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#valid-normalised-local-date-and-time-string
+static DeprecatedString normalize_local_date_and_time_string(DeprecatedString const& value)
+{
+    VERIFY(value.count(" "sv) == 1);
+    return value.replace(" "sv, "T"sv, ReplaceMode::FirstOnly);
+}
+
 // https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
-String HTMLInputElement::value_sanitization_algorithm(String value) const
+DeprecatedString HTMLInputElement::value_sanitization_algorithm(DeprecatedString value) const
 {
     if (type_state() == HTMLInputElement::TypeAttributeState::Text || type_state() == HTMLInputElement::TypeAttributeState::Search || type_state() == HTMLInputElement::TypeAttributeState::Telephone || type_state() == HTMLInputElement::TypeAttributeState::Password) {
         // Strip newlines from the value.
@@ -436,9 +668,21 @@ String HTMLInputElement::value_sanitization_algorithm(String value) const
                 if (!(c == '\r' || c == '\n'))
                     builder.append(c);
             }
-            return builder.to_string();
+            return builder.to_deprecated_string();
         }
     } else if (type_state() == HTMLInputElement::TypeAttributeState::URL) {
+        // Strip newlines from the value, then strip leading and trailing ASCII whitespace from the value.
+        if (value.contains('\r') || value.contains('\n')) {
+            StringBuilder builder;
+            for (auto c : value) {
+                if (!(c == '\r' || c == '\n'))
+                    builder.append(c);
+            }
+            return builder.string_view().trim(Infra::ASCII_WHITESPACE);
+        }
+    } else if (type_state() == HTMLInputElement::TypeAttributeState::Email) {
+        // https://html.spec.whatwg.org/multipage/input.html#email-state-(type=email):value-sanitization-algorithm
+        // FIXME: handle the `multiple` attribute
         // Strip newlines from the value, then strip leading and trailing ASCII whitespace from the value.
         if (value.contains('\r') || value.contains('\n')) {
             StringBuilder builder;
@@ -455,9 +699,40 @@ String HTMLInputElement::value_sanitization_algorithm(String value) const
         auto maybe_double = value.to_double(TrimWhitespace::Yes);
         if (!maybe_double.has_value() || !isfinite(maybe_double.value()))
             return "";
+    } else if (type_state() == HTMLInputElement::TypeAttributeState::Date) {
+        // https://html.spec.whatwg.org/multipage/input.html#date-state-(type=date):value-sanitization-algorithm
+        if (!is_valid_date_string(value))
+            return "";
+    } else if (type_state() == HTMLInputElement::TypeAttributeState::Month) {
+        // https://html.spec.whatwg.org/multipage/input.html#month-state-(type=month):value-sanitization-algorithm
+        if (!is_valid_month_string(value))
+            return "";
+    } else if (type_state() == HTMLInputElement::TypeAttributeState::Week) {
+        // https://html.spec.whatwg.org/multipage/input.html#week-state-(type=week):value-sanitization-algorithm
+        if (!is_valid_week_string(value))
+            return "";
+    } else if (type_state() == HTMLInputElement::TypeAttributeState::Time) {
+        // https://html.spec.whatwg.org/multipage/input.html#time-state-(type=time):value-sanitization-algorithm
+        if (!is_valid_time_string(value))
+            return "";
+    } else if (type_state() == HTMLInputElement::TypeAttributeState::LocalDateAndTime) {
+        // https://html.spec.whatwg.org/multipage/input.html#local-date-and-time-state-(type=datetime-local):value-sanitization-algorithm
+        if (is_valid_local_date_and_time_string(value))
+            return normalize_local_date_and_time_string(value);
+        return "";
+    } else if (type_state() == HTMLInputElement::TypeAttributeState::Range) {
+        // https://html.spec.whatwg.org/multipage/input.html#range-state-(type=range):value-sanitization-algorithm
+        auto maybe_double = value.to_double(TrimWhitespace::Yes);
+        if (!maybe_double.has_value() || !isfinite(maybe_double.value()))
+            return JS::number_to_string(maybe_double.value_or(0));
+    } else if (type_state() == HTMLInputElement::TypeAttributeState::Color) {
+        // https://html.spec.whatwg.org/multipage/input.html#color-state-(type=color):value-sanitization-algorithm
+        // If the value of the element is a valid simple color, then set it to the value of the element converted to ASCII lowercase;
+        if (is_valid_simple_color(value))
+            return value.to_lowercase();
+        // otherwise, set it to the string "#000000".
+        return "#000000";
     }
-
-    // FIXME: Implement remaining value sanitation algorithms
     return value;
 }
 
@@ -472,7 +747,7 @@ void HTMLInputElement::set_checked_within_group()
         return;
 
     set_checked(true, ChangeSource::User);
-    String name = this->name();
+    DeprecatedString name = this->name();
 
     document().for_each_in_inclusive_subtree_of_type<HTML::HTMLInputElement>([&](auto& element) {
         if (element.checked() && &element != this && element.name() == name)
@@ -500,7 +775,7 @@ void HTMLInputElement::legacy_pre_activation_behavior()
     // has its checkedness set to true, if any, and then set this element's
     // checkedness to true.
     if (type_state() == TypeAttributeState::RadioButton) {
-        String name = this->name();
+        DeprecatedString name = this->name();
 
         document().for_each_in_inclusive_subtree_of_type<HTML::HTMLInputElement>([&](auto& element) {
             if (element.checked() && element.name() == name) {
@@ -533,7 +808,7 @@ void HTMLInputElement::legacy_cancelled_activation_behavior()
     // group, or if this element no longer has a radio button group, setting
     // this element's checkedness to false.
     if (type_state() == TypeAttributeState::RadioButton) {
-        String name = this->name();
+        DeprecatedString name = this->name();
         bool did_reselect_previous_element = false;
         if (m_legacy_pre_activation_behavior_checked_element_in_group) {
             auto& element_in_group = *m_legacy_pre_activation_behavior_checked_element_in_group;

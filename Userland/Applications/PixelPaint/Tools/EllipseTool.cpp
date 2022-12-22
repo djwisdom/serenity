@@ -23,7 +23,7 @@
 
 namespace PixelPaint {
 
-void EllipseTool::draw_using(GUI::Painter& painter, Gfx::IntPoint const& start_position, Gfx::IntPoint const& end_position, int thickness)
+void EllipseTool::draw_using(GUI::Painter& painter, Gfx::IntPoint start_position, Gfx::IntPoint end_position, int thickness)
 {
     Gfx::IntRect ellipse_intersecting_rect;
     if (m_draw_mode == DrawMode::FromCenter) {
@@ -37,17 +37,10 @@ void EllipseTool::draw_using(GUI::Painter& painter, Gfx::IntPoint const& start_p
 
     switch (m_fill_mode) {
     case FillMode::Outline:
-        if (m_antialias_enabled) {
+        if (m_antialias_enabled)
             aa_painter.draw_ellipse(ellipse_intersecting_rect, m_editor->color_for(m_drawing_button), thickness);
-        } else {
-            // For some reason for non-AA draw_ellipse() the ellipse is outside of the rect (unlike all other ellipse drawing functions).
-            // Scale the ellipse rect by sqrt(2) to get an ellipse arc that appears as if it was inside of the rect.
-            // Ie. reduce the size by a factor of 1 - sqrt(1/2)
-            auto shrink_width = ellipse_intersecting_rect.width() * (1 - AK::Sqrt1_2<float>);
-            auto shrink_height = ellipse_intersecting_rect.height() * (1 - AK::Sqrt1_2<float>);
-            ellipse_intersecting_rect.shrink(shrink_width, shrink_height);
+        else
             painter.draw_ellipse_intersecting(ellipse_intersecting_rect, m_editor->color_for(m_drawing_button), thickness);
-        }
         break;
     case FillMode::Fill:
         if (m_antialias_enabled)
@@ -123,7 +116,7 @@ void EllipseTool::on_second_paint(Layer const* layer, GUI::PaintEvent& event)
     draw_using(painter, preview_start, preview_end, AK::max(m_thickness * m_editor->scale(), 1));
 }
 
-bool EllipseTool::on_keydown(GUI::KeyEvent const& event)
+bool EllipseTool::on_keydown(GUI::KeyEvent& event)
 {
     if (event.key() == Key_Escape && m_drawing_button != GUI::MouseButton::None) {
         m_drawing_button = GUI::MouseButton::None;
@@ -180,7 +173,7 @@ GUI::Widget* EllipseTool::get_properties_widget()
                 m_fill_mode = FillMode::Fill;
         };
 
-        aa_enable_checkbox.set_checked(false);
+        aa_enable_checkbox.set_checked(true);
         outline_mode_radio.set_checked(true);
 
         auto& aspect_container = m_properties_widget->add<GUI::Widget>();

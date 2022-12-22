@@ -18,7 +18,7 @@ static FlyString s_html_namespace = "http://www.w3.org/1999/xhtml";
 
 namespace Web {
 
-ErrorOr<String> resolve_xml_resource(XML::SystemID const&, Optional<XML::PublicID> const& public_id)
+ErrorOr<DeprecatedString> resolve_xml_resource(XML::SystemID const&, Optional<XML::PublicID> const& public_id)
 {
     if (!public_id.has_value())
         return Error::from_string_literal("Refusing to load disallowed external entity");
@@ -46,12 +46,12 @@ XMLDocumentBuilder::XMLDocumentBuilder(DOM::Document& document, XMLScriptingSupp
 {
 }
 
-void XMLDocumentBuilder::set_source(String source)
+void XMLDocumentBuilder::set_source(DeprecatedString source)
 {
     m_document.set_source(move(source));
 }
 
-void XMLDocumentBuilder::element_start(const XML::Name& name, HashMap<XML::Name, String> const& attributes)
+void XMLDocumentBuilder::element_start(const XML::Name& name, HashMap<XML::Name, DeprecatedString> const& attributes)
 {
     if (m_has_error)
         return;
@@ -66,12 +66,12 @@ void XMLDocumentBuilder::element_start(const XML::Name& name, HashMap<XML::Name,
 
     auto node = DOM::create_element(m_document, name, {});
     // When an XML parser with XML scripting support enabled creates a script element,
-    // it must have its parser document set and its "non-blocking" flag must be unset.
+    // it must have its parser document set and its "force async" flag must be unset.
     // FIXME: If the parser was created as part of the XML fragment parsing algorithm, then the element must be marked as "already started" also.
     if (m_scripting_support == XMLScriptingSupport::Enabled && HTML::TagNames::script == name) {
         auto& script_element = static_cast<HTML::HTMLScriptElement&>(*node);
         script_element.set_parser_document(Badge<XMLDocumentBuilder> {}, m_document);
-        script_element.set_non_blocking(Badge<XMLDocumentBuilder> {}, false);
+        script_element.set_force_async(Badge<XMLDocumentBuilder> {}, false);
     }
     if (HTML::TagNames::template_ == m_current_node->node_name()) {
         // When an XML parser would append a node to a template element, it must instead append it to the template element's template contents (a DocumentFragment node).
@@ -123,7 +123,7 @@ void XMLDocumentBuilder::element_end(const XML::Name& name)
     m_current_node = m_current_node->parent_node();
 }
 
-void XMLDocumentBuilder::text(String const& data)
+void XMLDocumentBuilder::text(DeprecatedString const& data)
 {
     if (m_has_error)
         return;
@@ -132,7 +132,7 @@ void XMLDocumentBuilder::text(String const& data)
         auto& text_node = static_cast<DOM::Text&>(*last);
         text_builder.append(text_node.data());
         text_builder.append(data);
-        text_node.set_data(text_builder.to_string());
+        text_node.set_data(text_builder.to_deprecated_string());
         text_builder.clear();
     } else {
         auto node = m_document.create_text_node(data);
@@ -140,7 +140,7 @@ void XMLDocumentBuilder::text(String const& data)
     }
 }
 
-void XMLDocumentBuilder::comment(String const& data)
+void XMLDocumentBuilder::comment(DeprecatedString const& data)
 {
     if (m_has_error)
         return;
@@ -178,7 +178,7 @@ void XMLDocumentBuilder::document_end()
         (void)m_document.scripts_to_execute_when_parsing_has_finished().take_first();
     }
     // Queue a global task on the DOM manipulation task source given the Document's relevant global object to run the following substeps:
-    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = &m_document]() mutable {
+    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = &m_document] {
         // Set the Document's load timing info's DOM content loaded event start time to the current high resolution time given the Document's relevant global object.
         document->load_timing_info().dom_content_loaded_event_start_time = HighResolutionTime::unsafe_shared_current_time();
 
@@ -206,7 +206,7 @@ void XMLDocumentBuilder::document_end()
     });
 
     // Queue a global task on the DOM manipulation task source given the Document's relevant global object to run the following steps:
-    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = &m_document]() mutable {
+    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = &m_document] {
         // Update the current document readiness to "complete".
         document->update_readiness(HTML::DocumentReadyState::Complete);
 

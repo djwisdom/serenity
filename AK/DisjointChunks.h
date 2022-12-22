@@ -15,11 +15,11 @@
 
 namespace AK {
 
-template<typename ChunkType, bool IsConst>
+template<typename ChunkType, bool IsConst, size_t InlineCapacity = 0>
 struct DisjointIterator {
     struct EndTag {
     };
-    using ReferenceType = Conditional<IsConst, AddConst<Vector<ChunkType>>, Vector<ChunkType>>&;
+    using ReferenceType = Conditional<IsConst, AddConst<Vector<ChunkType, InlineCapacity>>, Vector<ChunkType, InlineCapacity>>&;
 
     DisjointIterator(ReferenceType chunks)
         : m_chunks(chunks)
@@ -59,8 +59,16 @@ struct DisjointIterator {
         return &other.m_chunks == &m_chunks && other.m_index_in_chunk == m_index_in_chunk && other.m_chunk_index == m_chunk_index;
     }
 
-    auto& operator*() requires(!IsConst) { return m_chunks[m_chunk_index][m_index_in_chunk]; }
-    auto* operator->() requires(!IsConst) { return &m_chunks[m_chunk_index][m_index_in_chunk]; }
+    auto& operator*()
+    requires(!IsConst)
+    {
+        return m_chunks[m_chunk_index][m_index_in_chunk];
+    }
+    auto* operator->()
+    requires(!IsConst)
+    {
+        return &m_chunks[m_chunk_index][m_index_in_chunk];
+    }
     auto const& operator*() const { return m_chunks[m_chunk_index][m_index_in_chunk]; }
     auto const* operator->() const { return &m_chunks[m_chunk_index][m_index_in_chunk]; }
 
@@ -70,7 +78,7 @@ private:
     ReferenceType m_chunks;
 };
 
-template<typename T>
+template<typename T, typename SpanContainer = Vector<Span<T>>>
 class DisjointSpans {
 public:
     DisjointSpans() = default;
@@ -78,7 +86,7 @@ public:
     DisjointSpans(DisjointSpans const&) = default;
     DisjointSpans(DisjointSpans&&) = default;
 
-    explicit DisjointSpans(Vector<Span<T>> spans)
+    explicit DisjointSpans(SpanContainer spans)
         : m_spans(move(spans))
     {
     }
@@ -185,7 +193,7 @@ private:
         return { m_spans.last(), index - (offset - m_spans.last().size()) };
     }
 
-    Vector<Span<T>> m_spans;
+    SpanContainer m_spans;
 };
 
 namespace Detail {
@@ -232,6 +240,9 @@ FixedArray<T> shatter_chunk(FixedArray<T>& source_chunk, size_t start, size_t sl
 
 template<typename T, typename ChunkType = Vector<T>>
 class DisjointChunks {
+private:
+    constexpr static auto InlineCapacity = IsCopyConstructible<ChunkType> ? 1 : 0;
+
 public:
     DisjointChunks() = default;
     ~DisjointChunks() = default;
@@ -311,13 +322,19 @@ public:
         return all_of(m_chunks, [](auto& chunk) { return chunk.is_empty(); });
     }
 
-    DisjointSpans<T> spans() const&
+    template<size_t InlineSize = 0>
+    DisjointSpans<T, Vector<Span<T>, InlineSize>> spans() const&
     {
-        Vector<Span<T>> spans;
+        Vector<Span<T>, InlineSize> spans;
         spans.ensure_capacity(m_chunks.size());
+        if (m_chunks.size() == 1) {
+            spans.append(const_cast<ChunkType&>(m_chunks[0]).span());
+            return DisjointSpans<T, Vector<Span<T>, InlineSize>> { move(spans) };
+        }
+
         for (auto& chunk : m_chunks)
             spans.unchecked_append(const_cast<ChunkType&>(chunk).span());
-        return DisjointSpans<T> { move(spans) };
+        return DisjointSpans<T, Vector<Span<T>, InlineSize>> { move(spans) };
     }
 
     bool operator==(DisjointChunks const& other) const
@@ -391,10 +408,10 @@ public:
         m_chunks.remove(1, m_chunks.size() - 1);
     }
 
-    DisjointIterator<ChunkType, false> begin() { return { m_chunks }; }
-    DisjointIterator<ChunkType, false> end() { return { m_chunks, {} }; }
-    DisjointIterator<ChunkType, true> begin() const { return { m_chunks }; }
-    DisjointIterator<ChunkType, true> end() const { return { m_chunks, {} }; }
+    DisjointIterator<ChunkType, false, InlineCapacity> begin() { return { m_chunks }; }
+    DisjointIterator<ChunkType, false, InlineCapacity> end() { return { m_chunks, {} }; }
+    DisjointIterator<ChunkType, true, InlineCapacity> begin() const { return { m_chunks }; }
+    DisjointIterator<ChunkType, true, InlineCapacity> end() const { return { m_chunks, {} }; }
 
 private:
     struct ChunkAndOffset {
@@ -422,10 +439,12 @@ private:
         return { &m_chunks.last(), index - (offset - m_chunks.last().size()) };
     }
 
-    Vector<ChunkType> m_chunks;
+    Vector<ChunkType, InlineCapacity> m_chunks;
 };
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::DisjointChunks;
 using AK::DisjointSpans;
+#endif

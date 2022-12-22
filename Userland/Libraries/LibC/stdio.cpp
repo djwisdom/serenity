@@ -6,11 +6,11 @@
  */
 
 #include <AK/BuiltinWrappers.h>
+#include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/PrintfImplementation.h>
 #include <AK/ScopedValueRollback.h>
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
 #include <LibC/bits/mutex_locker.h>
 #include <LibC/bits/stdio_file_implementation.h>
 #include <assert.h>
@@ -276,7 +276,7 @@ bool FILE::gets(T* data, size_t size)
         if (m_buffer.may_use()) {
             // Let's see if the buffer has something queued for us.
             size_t queued_size;
-            const T* queued_data = bit_cast<const T*>(m_buffer.begin_dequeue(queued_size));
+            T const* queued_data = bit_cast<T const*>(m_buffer.begin_dequeue(queued_size));
             queued_size /= sizeof(T);
             if (queued_size == 0) {
                 // Nothing buffered; we're going to have to read some.
@@ -930,7 +930,7 @@ int vasprintf(char** strp, char const* fmt, va_list ap)
     builder.appendvf(fmt, ap);
     VERIFY(builder.length() <= NumericLimits<int>::max());
     int length = builder.length();
-    *strp = strdup(builder.to_string().characters());
+    *strp = strdup(builder.to_deprecated_string().characters());
     return length;
 }
 
@@ -944,7 +944,7 @@ int asprintf(char** strp, char const* fmt, ...)
     va_end(ap);
     VERIFY(builder.length() <= NumericLimits<int>::max());
     int length = builder.length();
-    *strp = strdup(builder.to_string().characters());
+    *strp = strdup(builder.to_deprecated_string().characters());
     return length;
 }
 
@@ -1126,11 +1126,17 @@ int fclose(FILE* stream)
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/rename.html
 int rename(char const* oldpath, char const* newpath)
 {
+    return renameat(AT_FDCWD, oldpath, AT_FDCWD, newpath);
+}
+
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/renameat.html
+int renameat(int olddirfd, char const* oldpath, int newdirfd, char const* newpath)
+{
     if (!oldpath || !newpath) {
         errno = EFAULT;
         return -1;
     }
-    Syscall::SC_rename_params params { { oldpath, strlen(oldpath) }, { newpath, strlen(newpath) } };
+    Syscall::SC_rename_params params { olddirfd, { oldpath, strlen(oldpath) }, newdirfd, { newpath, strlen(newpath) } };
     int rc = syscall(SC_rename, &params);
     __RETURN_WITH_ERRNO(rc, rc, -1);
 }

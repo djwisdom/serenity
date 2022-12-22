@@ -14,13 +14,13 @@
 
 namespace Web::DOM {
 
-Text::Text(Document& document, String const& data)
+Text::Text(Document& document, DeprecatedString const& data)
     : CharacterData(document, NodeType::TEXT_NODE, data)
 {
     set_prototype(&Bindings::cached_web_prototype(realm(), "Text"));
 }
 
-Text::Text(Document& document, NodeType type, String const& data)
+Text::Text(Document& document, NodeType type, DeprecatedString const& data)
     : CharacterData(document, type, data)
 {
     set_prototype(&Bindings::cached_web_prototype(realm(), "Text"));
@@ -33,11 +33,11 @@ void Text::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://dom.spec.whatwg.org/#dom-text-text
-JS::NonnullGCPtr<Text> Text::construct_impl(JS::Realm& realm, String const& data)
+JS::NonnullGCPtr<Text> Text::construct_impl(JS::Realm& realm, DeprecatedString const& data)
 {
     // The new Text(data) constructor steps are to set this’s data to data and this’s node document to current global object’s associated Document.
     auto& window = verify_cast<HTML::Window>(HTML::current_global_object());
-    return *realm.heap().allocate<Text>(realm, window.associated_document(), data);
+    return realm.heap().allocate<Text>(realm, window.associated_document(), data);
 }
 
 void Text::set_owner_input_element(Badge<HTML::HTMLInputElement>, HTML::HTMLInputElement& input_element)
@@ -63,7 +63,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Text>> Text::split_text(size_t offset)
     auto new_data = TRY(substring_data(offset, count));
 
     // 5. Let new node be a new Text node, with the same node document as node. Set new node’s data to new data.
-    auto new_node = JS::NonnullGCPtr(*heap().allocate<Text>(realm(), document(), new_data));
+    auto new_node = heap().allocate<Text>(realm(), document(), new_data);
 
     // 6. Let parent be node’s parent.
     JS::GCPtr<Node> parent = this->parent();

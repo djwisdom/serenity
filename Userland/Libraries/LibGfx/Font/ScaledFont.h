@@ -33,7 +33,8 @@ public:
     RefPtr<Gfx::Bitmap> rasterize_glyph(u32 glyph_id) const;
 
     // ^Gfx::Font
-    virtual NonnullRefPtr<Font> clone() const override { return *this; } // FIXME: clone() should not need to be implemented
+    virtual NonnullRefPtr<Font> clone() const override { return MUST(try_clone()); } // FIXME: clone() should not need to be implemented
+    virtual ErrorOr<NonnullRefPtr<Font>> try_clone() const override { return *this; }
     virtual u8 presentation_size() const override { return m_point_height; }
     virtual int pixel_size() const override { return m_point_height * 1.33333333f; }
     virtual float point_size() const override { return m_point_height; }
@@ -56,14 +57,14 @@ public:
     virtual int width(StringView) const override;
     virtual int width(Utf8View const&) const override;
     virtual int width(Utf32View const&) const override;
-    virtual String name() const override { return String::formatted("{} {}", family(), variant()); }
+    virtual DeprecatedString name() const override { return DeprecatedString::formatted("{} {}", family(), variant()); }
     virtual bool is_fixed_width() const override { return m_font->is_fixed_width(); }
     virtual u8 glyph_spacing() const override { return 0; }
     virtual size_t glyph_count() const override { return m_font->glyph_count(); }
-    virtual String family() const override { return m_font->family(); }
-    virtual String variant() const override { return m_font->variant(); }
-    virtual String qualified_name() const override { return String::formatted("{} {} {} {}", family(), presentation_size(), weight(), slope()); }
-    virtual String human_readable_name() const override { return String::formatted("{} {} {}", family(), variant(), presentation_size()); }
+    virtual DeprecatedString family() const override { return m_font->family(); }
+    virtual DeprecatedString variant() const override { return m_font->variant(); }
+    virtual DeprecatedString qualified_name() const override { return DeprecatedString::formatted("{} {} {} {}", family(), presentation_size(), weight(), slope()); }
+    virtual DeprecatedString human_readable_name() const override { return DeprecatedString::formatted("{} {} {}", family(), variant(), presentation_size()); }
 
 private:
     NonnullRefPtr<VectorFont> m_font;

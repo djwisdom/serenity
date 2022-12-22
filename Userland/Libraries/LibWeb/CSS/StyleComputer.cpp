@@ -7,13 +7,15 @@
  */
 
 #include <AK/Debug.h>
+#include <AK/Error.h>
+#include <AK/HashMap.h>
 #include <AK/QuickSort.h>
 #include <AK/TemporaryChange.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Font/FontStyleMapping.h>
+#include <LibGfx/Font/OpenType/Font.h>
 #include <LibGfx/Font/ScaledFont.h>
-#include <LibGfx/Font/TrueType/Font.h>
 #include <LibGfx/Font/VectorFont.h>
 #include <LibGfx/Font/WOFF/Font.h>
 #include <LibWeb/CSS/CSSFontFaceRule.h>
@@ -90,10 +92,10 @@ private:
         // FIXME: This could maybe use the format() provided in @font-face as well, since often the mime type is just application/octet-stream and we have to try every format
         auto mime_type = resource()->mime_type();
         if (mime_type == "font/ttf"sv || mime_type == "application/x-font-ttf"sv)
-            return TRY(TTF::Font::try_load_from_externally_owned_memory(resource()->encoded_data()));
+            return TRY(OpenType::Font::try_load_from_externally_owned_memory(resource()->encoded_data()));
         if (mime_type == "font/woff"sv)
             return TRY(WOFF::Font::try_load_from_externally_owned_memory(resource()->encoded_data()));
-        auto ttf = TTF::Font::try_load_from_externally_owned_memory(resource()->encoded_data());
+        auto ttf = OpenType::Font::try_load_from_externally_owned_memory(resource()->encoded_data());
         if (!ttf.is_error())
             return ttf.release_value();
         auto woff = WOFF::Font::try_load_from_externally_owned_memory(resource()->encoded_data());
@@ -114,7 +116,7 @@ static CSSStyleSheet& default_stylesheet()
     static JS::Handle<CSSStyleSheet> sheet;
     if (!sheet.cell()) {
         extern char const default_stylesheet_source[];
-        String css = default_stylesheet_source;
+        DeprecatedString css = default_stylesheet_source;
         sheet = JS::make_handle(parse_css_stylesheet(CSS::Parser::ParsingContext(), css));
     }
     return *sheet;
@@ -125,7 +127,7 @@ static CSSStyleSheet& quirks_mode_stylesheet()
     static JS::Handle<CSSStyleSheet> sheet;
     if (!sheet.cell()) {
         extern char const quirks_mode_stylesheet_source[];
-        String css = quirks_mode_stylesheet_source;
+        DeprecatedString css = quirks_mode_stylesheet_source;
         sheet = JS::make_handle(parse_css_stylesheet(CSS::Parser::ParsingContext(), css));
     }
     return *sheet;
@@ -805,7 +807,7 @@ void StyleComputer::cascade_declarations(StyleProperties& style, DOM::Element& e
     }
 }
 
-static void cascade_custom_properties(DOM::Element& element, Vector<MatchingRule> const& matching_rules)
+static ErrorOr<void> cascade_custom_properties(DOM::Element& element, Vector<MatchingRule> const& matching_rules)
 {
     size_t needed_capacity = 0;
     for (auto const& matching_rule : matching_rules)
@@ -814,7 +816,7 @@ static void cascade_custom_properties(DOM::Element& element, Vector<MatchingRule
         needed_capacity += inline_style->custom_properties().size();
 
     HashMap<FlyString, StyleProperty> custom_properties;
-    custom_properties.ensure_capacity(needed_capacity);
+    TRY(custom_properties.try_ensure_capacity(needed_capacity));
 
     for (auto const& matching_rule : matching_rules) {
         for (auto const& it : verify_cast<PropertyOwningCSSStyleDeclaration>(matching_rule.rule->declaration()).custom_properties())
@@ -827,10 +829,12 @@ static void cascade_custom_properties(DOM::Element& element, Vector<MatchingRule
     }
 
     element.set_custom_properties(move(custom_properties));
+
+    return {};
 }
 
 // https://www.w3.org/TR/css-cascade/#cascading
-void StyleComputer::compute_cascaded_values(StyleProperties& style, DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
+ErrorOr<void> StyleComputer::compute_cascaded_values(StyleProperties& style, DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
 {
     // First, we collect all the CSS rules whose selectors match `element`:
     MatchingRuleSet matching_rule_set;
@@ -842,7 +846,7 @@ void StyleComputer::compute_cascaded_values(StyleProperties& style, DOM::Element
     // Then we resolve all the CSS custom properties ("variables") for this element:
     // FIXME: Look into how custom properties should interact with pseudo elements and support that properly.
     if (!pseudo_element.has_value())
-        cascade_custom_properties(element, matching_rule_set.author_rules);
+        TRY(cascade_custom_properties(element, matching_rule_set.author_rules));
 
     // Then we apply the declarations from the matched rules in cascade order:
 
@@ -868,6 +872,8 @@ void StyleComputer::compute_cascaded_values(StyleProperties& style, DOM::Element
     cascade_declarations(style, element, matching_rule_set.user_agent_rules, CascadeOrigin::UserAgent, Important::Yes);
 
     // FIXME: Transition declarations [css-transitions-1]
+
+    return {};
 }
 
 static DOM::Element const* element_to_inherit_style_from(DOM::Element const* element, Optional<CSS::Selector::PseudoElement> pseudo_element)
@@ -1007,31 +1013,38 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
 
     bool bold = weight > Gfx::FontWeight::Regular;
 
+    // FIXME: Should be based on "user's default font size"
     float font_size_in_px = 16;
 
     if (font_size->is_identifier()) {
-        switch (static_cast<IdentifierStyleValue const&>(*font_size).id()) {
-        case CSS::ValueID::XxSmall:
-        case CSS::ValueID::XSmall:
-        case CSS::ValueID::Small:
-        case CSS::ValueID::Medium:
-            // FIXME: Should be based on "user's default font size"
-            font_size_in_px = 16;
-            break;
-        case CSS::ValueID::Large:
-        case CSS::ValueID::XLarge:
-        case CSS::ValueID::XxLarge:
-        case CSS::ValueID::XxxLarge:
-            // FIXME: Should be based on "user's default font size"
-            font_size_in_px = 12;
-            break;
-        case CSS::ValueID::Smaller:
-        case CSS::ValueID::Larger:
-            // FIXME: Should be based on parent element
-            break;
-        default:
-            break;
+        // https://w3c.github.io/csswg-drafts/css-fonts/#absolute-size-mapping
+        AK::HashMap<Web::CSS::ValueID, float> absolute_size_mapping = {
+            { CSS::ValueID::XxSmall, 0.6 },
+            { CSS::ValueID::XSmall, 0.75 },
+            { CSS::ValueID::Small, 8.0 / 9.0 },
+            { CSS::ValueID::Medium, 1.0 },
+            { CSS::ValueID::Large, 1.2 },
+            { CSS::ValueID::XLarge, 1.5 },
+            { CSS::ValueID::XxLarge, 2.0 },
+            { CSS::ValueID::XxxLarge, 3.0 },
+            { CSS::ValueID::Smaller, 0.8 },
+            { CSS::ValueID::Larger, 1.25 },
+        };
+
+        auto const identifier = static_cast<IdentifierStyleValue const&>(*font_size).id();
+
+        // https://w3c.github.io/csswg-drafts/css-fonts/#valdef-font-size-relative-size
+        // TODO: If the parent element has a keyword font size in the absolute size keyword mapping table,
+        //       larger may compute the font size to the next entry in the table,
+        //       and smaller may compute the font size to the previous entry in the table.
+        if (identifier == CSS::ValueID::Smaller || identifier == CSS::ValueID::Larger) {
+            if (parent_element && parent_element->computed_css_values()) {
+                font_size_in_px = parent_element->computed_css_values()->computed_font().pixel_metrics().size;
+            }
         }
+        auto const multiplier = absolute_size_mapping.get(identifier).value_or(1.0);
+        font_size_in_px *= multiplier;
+
     } else {
         float root_font_size = root_element_font_size();
 
@@ -1097,7 +1110,7 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
     FontSelector font_selector;
     bool monospace = false;
 
-    auto find_font = [&](String const& family) -> RefPtr<Gfx::Font> {
+    auto find_font = [&](DeprecatedString const& family) -> RefPtr<Gfx::Font> {
         float font_size_in_pt = font_size_in_px * 0.75f;
         font_selector = { family, font_size_in_pt, weight, slope };
 
@@ -1160,7 +1173,7 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
             if (family.is_identifier()) {
                 found_font = find_generic_font(family.to_identifier());
             } else if (family.is_string()) {
-                found_font = find_font(family.to_string());
+                found_font = find_font(family.to_deprecated_string());
             }
             if (found_font)
                 break;
@@ -1168,7 +1181,7 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
     } else if (family_value->is_identifier()) {
         found_font = find_generic_font(family_value->to_identifier());
     } else if (family_value->is_string()) {
-        found_font = find_font(family_value->to_string());
+        found_font = find_font(family_value->to_deprecated_string());
     }
 
     if (!found_font) {
@@ -1285,13 +1298,13 @@ NonnullRefPtr<StyleProperties> StyleComputer::create_document_style() const
     return style;
 }
 
-NonnullRefPtr<StyleProperties> StyleComputer::compute_style(DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
+ErrorOr<NonnullRefPtr<StyleProperties>> StyleComputer::compute_style(DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
 {
     build_rule_cache_if_needed();
 
     auto style = StyleProperties::create();
     // 1. Perform the cascade. This produces the "specified style"
-    compute_cascaded_values(style, element, pseudo_element);
+    TRY(compute_cascaded_values(style, element, pseudo_element));
 
     // 2. Compute the font, since that may be needed for font-relative CSS units
     compute_font(style, &element, pseudo_element);
@@ -1308,7 +1321,7 @@ NonnullRefPtr<StyleProperties> StyleComputer::compute_style(DOM::Element& elemen
     return style;
 }
 
-PropertyDependencyNode::PropertyDependencyNode(String name)
+PropertyDependencyNode::PropertyDependencyNode(DeprecatedString name)
     : m_name(move(name))
 {
 }
@@ -1446,7 +1459,7 @@ void StyleComputer::load_fonts_from_sheet(CSSStyleSheet const& sheet)
             continue;
 
         // NOTE: This is rather ad-hoc, we just look for the first valid
-        //       source URL that's either a WOFF or TTF file and try loading that.
+        //       source URL that's either a WOFF or OpenType file and try loading that.
         // FIXME: Find out exactly which resources we need to load and how.
         Optional<AK::URL> candidate_url;
         for (auto& source : font_face.sources()) {
@@ -1469,7 +1482,7 @@ void StyleComputer::load_fonts_from_sheet(CSSStyleSheet const& sheet)
             continue;
 
         LoadRequest request;
-        auto url = m_document.parse_url(candidate_url.value().to_string());
+        auto url = m_document.parse_url(candidate_url.value().to_deprecated_string());
         auto loader = make<FontLoader>(const_cast<StyleComputer&>(*this), font_face.font_family(), move(url));
         const_cast<StyleComputer&>(*this).m_loaded_fonts.set(font_face.font_family(), move(loader));
     }

@@ -21,7 +21,7 @@ bool WebSocketImplSerenity::can_read_line()
 
 bool WebSocketImplSerenity::send(ReadonlyBytes bytes)
 {
-    return m_socket->write_or_error(bytes);
+    return !m_socket->write_entire_buffer(bytes).is_error();
 }
 
 bool WebSocketImplSerenity::eof()
@@ -79,11 +79,11 @@ ErrorOr<ByteBuffer> WebSocketImplSerenity::read(int max_size)
     return buffer.slice(0, read_bytes.size());
 }
 
-ErrorOr<String> WebSocketImplSerenity::read_line(size_t size)
+ErrorOr<DeprecatedString> WebSocketImplSerenity::read_line(size_t size)
 {
     auto buffer = TRY(ByteBuffer::create_uninitialized(size));
     auto line = TRY(m_socket->read_line(buffer));
-    return line.to_string();
+    return line.to_deprecated_string();
 }
 
 }

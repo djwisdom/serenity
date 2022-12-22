@@ -40,22 +40,18 @@ public:
     static NonnullLockRefPtr<VirtIOGraphicsAdapter> initialize(PCI::DeviceIdentifier const&);
 
     virtual void initialize() override;
-    void initialize_3d_device();
-
-    bool edid_feature_accepted() const;
-
-    Graphics::VirtIOGPU::ResourceID allocate_resource_id(Badge<VirtIODisplayConnector>);
-    Graphics::VirtIOGPU::ContextID allocate_context_id(Badge<VirtIODisplayConnector>);
 
     ErrorOr<void> mode_set_resolution(Badge<VirtIODisplayConnector>, VirtIODisplayConnector&, size_t width, size_t height);
     void set_dirty_displayed_rect(Badge<VirtIODisplayConnector>, VirtIODisplayConnector&, Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect, bool main_buffer);
-    void flush_displayed_image(Badge<VirtIODisplayConnector>, VirtIODisplayConnector&, Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect, bool main_buffer);
-    void transfer_framebuffer_data_to_host(Badge<VirtIODisplayConnector>, VirtIODisplayConnector&, Graphics::VirtIOGPU::Protocol::Rect const& rect, bool main_buffer);
+    ErrorOr<void> flush_displayed_image(Badge<VirtIODisplayConnector>, VirtIODisplayConnector&, Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect, bool main_buffer);
+    ErrorOr<void> transfer_framebuffer_data_to_host(Badge<VirtIODisplayConnector>, VirtIODisplayConnector&, Graphics::VirtIOGPU::Protocol::Rect const& rect, bool main_buffer);
 
 private:
     ErrorOr<void> attach_physical_range_to_framebuffer(VirtIODisplayConnector& connector, bool main_buffer, size_t framebuffer_offset, size_t framebuffer_size);
 
-    void flush_dirty_rectangle(Graphics::VirtIOGPU::ScanoutID, Graphics::VirtIOGPU::ResourceID, Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect);
+    ErrorOr<void> initialize_3d_device();
+
+    ErrorOr<void> flush_dirty_rectangle(Graphics::VirtIOGPU::ScanoutID, Graphics::VirtIOGPU::ResourceID, Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect);
     struct Scanout {
         struct PhysicalBuffer {
             size_t framebuffer_offset { 0 };
@@ -68,7 +64,7 @@ private:
         PhysicalBuffer back_buffer;
     };
 
-    VirtIOGraphicsAdapter(PCI::DeviceIdentifier const&, NonnullOwnPtr<Memory::Region> scratch_space_region);
+    VirtIOGraphicsAdapter(PCI::DeviceIdentifier const&, Bitmap&& active_context_ids, NonnullOwnPtr<Memory::Region> scratch_space_region);
 
     ErrorOr<void> initialize_adapter();
 
@@ -85,31 +81,29 @@ private:
     }
 
     // 3D Command stuff
-    Graphics::VirtIOGPU::ContextID create_context();
-    void attach_resource_to_context(Graphics::VirtIOGPU::ResourceID resource_id, Graphics::VirtIOGPU::ContextID context_id);
-    void submit_command_buffer(Graphics::VirtIOGPU::ContextID, Function<size_t(Bytes)> buffer_writer);
+    ErrorOr<Graphics::VirtIOGPU::ContextID> create_context();
+    ErrorOr<void> attach_resource_to_context(Graphics::VirtIOGPU::ResourceID resource_id, Graphics::VirtIOGPU::ContextID context_id);
+    ErrorOr<void> submit_command_buffer(Graphics::VirtIOGPU::ContextID, Function<size_t(Bytes)> buffer_writer);
     Graphics::VirtIOGPU::Protocol::TextureFormat get_framebuffer_format() const { return Graphics::VirtIOGPU::Protocol::TextureFormat::VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM; }
 
     auto& operation_lock() { return m_operation_lock; }
     Graphics::VirtIOGPU::ResourceID allocate_resource_id();
-    Graphics::VirtIOGPU::ContextID allocate_context_id();
 
     PhysicalAddress start_of_scratch_space() const { return m_scratch_space->physical_page(0)->paddr(); }
     AK::BinaryBufferWriter create_scratchspace_writer()
     {
         return { Bytes(m_scratch_space->vaddr().as_ptr(), m_scratch_space->size()) };
     }
-    void synchronous_virtio_gpu_command(PhysicalAddress buffer_start, size_t request_size, size_t response_size);
-    void populate_virtio_gpu_request_header(Graphics::VirtIOGPU::Protocol::ControlHeader& header, Graphics::VirtIOGPU::Protocol::CommandType ctrl_type, u32 flags = 0);
+    ErrorOr<void> synchronous_virtio_gpu_command(size_t microseconds_timeout, PhysicalAddress buffer_start, size_t request_size, size_t response_size);
 
-    Graphics::VirtIOGPU::ResourceID create_2d_resource(Graphics::VirtIOGPU::Protocol::Rect rect);
-    Graphics::VirtIOGPU::ResourceID create_3d_resource(Graphics::VirtIOGPU::Protocol::Resource3DSpecification const& resource_3d_specification);
-    void delete_resource(Graphics::VirtIOGPU::ResourceID resource_id);
-    void ensure_backing_storage(Graphics::VirtIOGPU::ResourceID resource_id, Memory::Region const& region, size_t buffer_offset, size_t buffer_length);
-    void detach_backing_storage(Graphics::VirtIOGPU::ResourceID resource_id);
-    void set_scanout_resource(Graphics::VirtIOGPU::ScanoutID scanout, Graphics::VirtIOGPU::ResourceID resource_id, Graphics::VirtIOGPU::Protocol::Rect rect);
-    void transfer_framebuffer_data_to_host(Graphics::VirtIOGPU::ScanoutID scanout, Graphics::VirtIOGPU::ResourceID resource_id, Graphics::VirtIOGPU::Protocol::Rect const& rect);
-    void flush_displayed_image(Graphics::VirtIOGPU::ResourceID resource_id, Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect);
+    ErrorOr<Graphics::VirtIOGPU::ResourceID> create_2d_resource(Graphics::VirtIOGPU::Protocol::Rect rect);
+    ErrorOr<Graphics::VirtIOGPU::ResourceID> create_3d_resource(Graphics::VirtIOGPU::Protocol::Resource3DSpecification const& resource_3d_specification);
+    ErrorOr<void> delete_resource(Graphics::VirtIOGPU::ResourceID resource_id);
+    ErrorOr<void> ensure_backing_storage(Graphics::VirtIOGPU::ResourceID resource_id, Memory::Region const& region, size_t buffer_offset, size_t buffer_length);
+    ErrorOr<void> detach_backing_storage(Graphics::VirtIOGPU::ResourceID resource_id);
+    ErrorOr<void> set_scanout_resource(Graphics::VirtIOGPU::ScanoutID scanout, Graphics::VirtIOGPU::ResourceID resource_id, Graphics::VirtIOGPU::Protocol::Rect rect);
+    ErrorOr<void> transfer_framebuffer_data_to_host(Graphics::VirtIOGPU::ScanoutID scanout, Graphics::VirtIOGPU::ResourceID resource_id, Graphics::VirtIOGPU::Protocol::Rect const& rect);
+    ErrorOr<void> flush_displayed_image(Graphics::VirtIOGPU::ResourceID resource_id, Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect);
     ErrorOr<void> query_and_set_edid(u32 scanout_id, VirtIODisplayConnector& display_connector);
 
     size_t m_num_scanouts { 0 };
@@ -118,12 +112,10 @@ private:
     VirtIO::Configuration const* m_device_configuration { nullptr };
     // Note: Resource ID 0 is invalid, and we must not allocate 0 as the first resource ID.
     Atomic<u32> m_resource_id_counter { 1 };
-    Atomic<u32> m_context_id_counter { 1 };
+    SpinlockProtected<Bitmap> m_active_context_ids { LockRank::None };
     LockRefPtr<VirtIOGPU3DDevice> m_3d_device;
     bool m_has_virgl_support { false };
 
-    // Synchronous commands
-    WaitQueue m_outstanding_request;
     Spinlock m_operation_lock { LockRank::None };
     NonnullOwnPtr<Memory::Region> m_scratch_space;
 };

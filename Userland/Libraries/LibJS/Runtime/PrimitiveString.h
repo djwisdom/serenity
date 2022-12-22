@@ -1,12 +1,13 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/StringView.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -19,6 +20,11 @@ class PrimitiveString final : public Cell {
     JS_CELL(PrimitiveString, Cell);
 
 public:
+    [[nodiscard]] static NonnullGCPtr<PrimitiveString> create(VM&, Utf16View const&);
+    [[nodiscard]] static NonnullGCPtr<PrimitiveString> create(VM&, Utf16String);
+    [[nodiscard]] static NonnullGCPtr<PrimitiveString> create(VM&, DeprecatedString);
+    [[nodiscard]] static NonnullGCPtr<PrimitiveString> create(VM&, PrimitiveString&, PrimitiveString&);
+
     virtual ~PrimitiveString();
 
     PrimitiveString(PrimitiveString const&) = delete;
@@ -26,7 +32,7 @@ public:
 
     bool is_empty() const;
 
-    String const& string() const;
+    DeprecatedString const& deprecated_string() const;
     bool has_utf8_string() const { return m_has_utf8_string; }
 
     Utf16String const& utf16_string() const;
@@ -37,7 +43,7 @@ public:
 
 private:
     explicit PrimitiveString(PrimitiveString&, PrimitiveString&);
-    explicit PrimitiveString(String);
+    explicit PrimitiveString(DeprecatedString);
     explicit PrimitiveString(Utf16String);
 
     virtual void visit_edges(Cell::Visitor&) override;
@@ -51,20 +57,9 @@ private:
     mutable PrimitiveString* m_lhs { nullptr };
     mutable PrimitiveString* m_rhs { nullptr };
 
-    mutable String m_utf8_string;
+    mutable DeprecatedString m_utf8_string;
 
     mutable Utf16String m_utf16_string;
 };
-
-PrimitiveString* js_string(Heap&, Utf16View const&);
-PrimitiveString* js_string(VM&, Utf16View const&);
-
-PrimitiveString* js_string(Heap&, Utf16String);
-PrimitiveString* js_string(VM&, Utf16String);
-
-PrimitiveString* js_string(Heap&, String);
-PrimitiveString* js_string(VM&, String);
-
-PrimitiveString* js_rope_string(VM&, PrimitiveString&, PrimitiveString&);
 
 }

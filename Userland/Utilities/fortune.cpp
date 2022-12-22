@@ -12,7 +12,7 @@
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DateTime.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <stdio.h>
@@ -41,20 +41,20 @@ public:
         return q;
     }
 
-    String const& quote() const { return m_quote; }
-    String const& author() const { return m_author; }
+    DeprecatedString const& quote() const { return m_quote; }
+    DeprecatedString const& author() const { return m_author; }
     u64 const& utc_time() const { return m_utc_time; }
-    String const& url() const { return m_url; }
-    Optional<String> const& context() const { return m_context; }
+    DeprecatedString const& url() const { return m_url; }
+    Optional<DeprecatedString> const& context() const { return m_context; }
 
 private:
     Quote() = default;
 
-    String m_quote;
-    String m_author;
+    DeprecatedString m_quote;
+    DeprecatedString m_author;
     u64 m_utc_time;
-    String m_url;
-    Optional<String> m_context;
+    DeprecatedString m_url;
+    Optional<DeprecatedString> m_context;
 };
 
 static Vector<Quote> parse_all(JsonArray const& array)
@@ -75,19 +75,19 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     TRY(Core::System::pledge("stdio rpath"));
 
-    char const* path = "/res/fortunes.json";
+    StringView path = "/res/fortunes.json"sv;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("Open a fortune cookie, receive a free quote for the day!");
     args_parser.add_positional_argument(path, "Path to JSON file with quotes (/res/fortunes.json by default)", "path", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
-    auto file = TRY(Core::File::open(path, Core::OpenMode::ReadOnly));
+    auto file = TRY(Core::Stream::File::open(path, Core::Stream::OpenMode::Read));
 
     TRY(Core::System::unveil("/etc/timezone", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    auto file_contents = file->read_all();
+    auto file_contents = TRY(file->read_until_eof());
     auto json = TRY(JsonValue::from_string(file_contents));
     if (!json.is_array()) {
         warnln("{} does not contain an array of quotes", path);
@@ -106,11 +106,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     outln(); // Tasteful spacing
 
-    out("\033]8;;{}\033\\", chosen_quote.url());         // Begin link
-    out("\033[34m({})\033[m", datetime.to_string());     // Datetime
-    out(" \033[34;1m<{}>\033[m", chosen_quote.author()); // Author
-    out(" \033[32m{}\033[m", chosen_quote.quote());      // Quote itself
-    out("\033]8;;\033\\");                               // End link
+    out("\033]8;;{}\033\\", chosen_quote.url());                // Begin link
+    out("\033[34m({})\033[m", datetime.to_deprecated_string()); // Datetime
+    out(" \033[34;1m<{}>\033[m", chosen_quote.author());        // Author
+    out(" \033[32m{}\033[m", chosen_quote.quote());             // Quote itself
+    out("\033]8;;\033\\");                                      // End link
     outln();
 
     if (chosen_quote.context().has_value())

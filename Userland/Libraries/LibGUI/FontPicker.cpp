@@ -31,11 +31,11 @@ FontPicker::FontPicker(Window* parent_window, Gfx::Font const* current_font, boo
         VERIFY_NOT_REACHED();
 
     m_family_list_view = *widget.find_descendant_of_type_named<ListView>("family_list_view");
-    m_family_list_view->set_model(ItemListModel<String>::create(m_families));
+    m_family_list_view->set_model(ItemListModel<DeprecatedString>::create(m_families));
     m_family_list_view->horizontal_scrollbar().set_visible(false);
 
     m_variant_list_view = *widget.find_descendant_of_type_named<ListView>("variant_list_view");
-    m_variant_list_view->set_model(ItemListModel<String>::create(m_variants));
+    m_variant_list_view->set_model(ItemListModel<DeprecatedString>::create(m_variants));
     m_variant_list_view->horizontal_scrollbar().set_visible(false);
 
     m_size_spin_box = *widget.find_descendant_of_type_named<SpinBox>("size_spin_box");
@@ -58,7 +58,7 @@ FontPicker::FontPicker(Window* parent_window, Gfx::Font const* current_font, boo
 
     m_family_list_view->on_selection_change = [this] {
         const auto& index = m_family_list_view->selection().first();
-        m_family = index.data().to_string();
+        m_family = index.data().to_deprecated_string();
         m_variants.clear();
         Gfx::FontDatabase::the().for_each_typeface([&](auto& typeface) {
             if (m_fixed_width_only && !typeface.is_fixed_width())
@@ -79,7 +79,7 @@ FontPicker::FontPicker(Window* parent_window, Gfx::Font const* current_font, boo
     m_variant_list_view->on_selection_change = [this] {
         const auto& index = m_variant_list_view->selection().first();
         bool font_is_fixed_size = false;
-        m_variant = index.data().to_string();
+        m_variant = index.data().to_deprecated_string();
         m_sizes.clear();
         Gfx::FontDatabase::the().for_each_typeface([&](auto& typeface) {
             if (m_fixed_width_only && !typeface.is_fixed_width())

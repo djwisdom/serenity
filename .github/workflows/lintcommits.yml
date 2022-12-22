@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Lint PR commits
-        uses: actions/github-script@v5
+        uses: actions/github-script@v6
         with:
           script: |
             const rules = [
@@ -27,6 +27,10 @@ jobs:
               {
                 pattern: /^.{0,72}(?:\r?\n(?:(.{0,72})|(.*?([a-z]+:\/\/)?(([a-zA-Z0-9_]|-)+\.)+[a-z]{2,}(:\d+)?([a-zA-Z_0-9@:%\+.~\?&/=]|-)+).*?))*$/,
                 error: "Commit message lines are too long (maximum allowed is 72 characters, except for URLs)",
+              },
+              {
+                pattern: /^((?!^Merge branch )[\s\S])*$/,
+                error: "Commit is a git merge commit, use the rebase command instead",
               },
               {
                 pattern: /^\S.*?\S: .+/,

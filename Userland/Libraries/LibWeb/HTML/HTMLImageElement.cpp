@@ -72,7 +72,7 @@ void HTMLImageElement::apply_presentational_hints(CSS::StyleProperties& style) c
     });
 }
 
-void HTMLImageElement::parse_attribute(FlyString const& name, String const& value)
+void HTMLImageElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
 {
     HTMLElement::parse_attribute(name, value);
 
@@ -102,7 +102,7 @@ unsigned HTMLImageElement::width() const
 
     // Return the rendered width of the image, in CSS pixels, if the image is being rendered.
     if (auto* paint_box = this->paint_box())
-        return paint_box->content_width();
+        return paint_box->content_width().value();
 
     // NOTE: This step seems to not be in the spec, but all browsers do it.
     auto width_attr = get_attribute(HTML::AttributeNames::width);
@@ -120,7 +120,7 @@ unsigned HTMLImageElement::width() const
 
 void HTMLImageElement::set_width(unsigned width)
 {
-    MUST(set_attribute(HTML::AttributeNames::width, String::number(width)));
+    MUST(set_attribute(HTML::AttributeNames::width, DeprecatedString::number(width)));
 }
 
 // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-height
@@ -130,7 +130,7 @@ unsigned HTMLImageElement::height() const
 
     // Return the rendered height of the image, in CSS pixels, if the image is being rendered.
     if (auto* paint_box = this->paint_box())
-        return paint_box->content_height();
+        return paint_box->content_height().value();
 
     // NOTE: This step seems to not be in the spec, but all browsers do it.
     auto height_attr = get_attribute(HTML::AttributeNames::height);
@@ -148,7 +148,7 @@ unsigned HTMLImageElement::height() const
 
 void HTMLImageElement::set_height(unsigned height)
 {
-    MUST(set_attribute(HTML::AttributeNames::height, String::number(height)));
+    MUST(set_attribute(HTML::AttributeNames::height, DeprecatedString::number(height)));
 }
 
 // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-naturalwidth

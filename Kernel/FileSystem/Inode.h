@@ -66,6 +66,9 @@ public:
     virtual ErrorOr<NonnullLockRefPtr<Inode>> create_child(StringView name, mode_t, dev_t, UserID, GroupID) = 0;
     virtual ErrorOr<void> add_child(Inode&, StringView name, mode_t) = 0;
     virtual ErrorOr<void> remove_child(StringView name) = 0;
+    /// Replace child atomically, incrementing the link count of the replacement
+    /// inode and decrementing the older inode's.
+    virtual ErrorOr<void> replace_child(StringView name, Inode&) = 0;
     virtual ErrorOr<void> chmod(mode_t) = 0;
     virtual ErrorOr<void> chown(UserID, GroupID) = 0;
     virtual ErrorOr<void> truncate(u64) { return {}; }
@@ -80,7 +83,7 @@ public:
 
     bool is_metadata_dirty() const { return m_metadata_dirty; }
 
-    virtual ErrorOr<void> update_timestamps(Optional<time_t> atime, Optional<time_t> ctime, Optional<time_t> mtime);
+    virtual ErrorOr<void> update_timestamps(Optional<Time> atime, Optional<Time> ctime, Optional<Time> mtime);
     virtual ErrorOr<void> increment_link_count();
     virtual ErrorOr<void> decrement_link_count();
 
@@ -101,7 +104,7 @@ public:
 
     ErrorOr<NonnullLockRefPtr<FIFO>> fifo();
 
-    bool can_apply_flock(flock const&) const;
+    bool can_apply_flock(flock const&, Optional<OpenFileDescription const&> = {}) const;
     ErrorOr<void> apply_flock(Process const&, OpenFileDescription const&, Userspace<flock const*>, ShouldBlock);
     ErrorOr<void> get_flock(OpenFileDescription const&, Userspace<flock*>) const;
     void remove_flocks_for_description(OpenFileDescription const&);

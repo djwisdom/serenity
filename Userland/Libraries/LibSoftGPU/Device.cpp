@@ -22,6 +22,8 @@
 #include <LibSoftGPU/PixelConverter.h>
 #include <LibSoftGPU/PixelQuad.h>
 #include <LibSoftGPU/SIMD.h>
+#include <LibSoftGPU/Shader.h>
+#include <LibSoftGPU/ShaderCompiler.h>
 #include <math.h>
 
 namespace SoftGPU {
@@ -185,7 +187,7 @@ void Device::setup_blend_factors()
 
 ALWAYS_INLINE static void test_alpha(PixelQuad& quad, GPU::AlphaTestFunction alpha_test_function, f32x4 const& reference_value)
 {
-    auto const alpha = quad.out_color.w();
+    auto const alpha = quad.get_output_float(SHADER_OUTPUT_FIRST_COLOR + 3);
 
     switch (alpha_test_function) {
     case GPU::AlphaTestFunction::Always:
@@ -493,11 +495,13 @@ ALWAYS_INLINE void Device::rasterize(Gfx::IntRect& render_bounds, CB1 set_covera
             if (m_options.enable_blending || m_options.color_mask != 0xffffffff)
                 dst_u32 = load4_masked(color_ptrs[0], color_ptrs[1], color_ptrs[2], color_ptrs[3], quad.mask);
 
+            auto out_color = quad.get_output_vector4(SHADER_OUTPUT_FIRST_COLOR);
+
             if (m_options.enable_blending) {
                 INCREASE_STATISTICS_COUNTER(g_num_pixels_blended, maskcount(quad.mask));
 
                 // Blend color values from pixel_staging into color_buffer
-                auto const& src = quad.out_color;
+                auto const& src = out_color;
                 auto dst = to_vec4(dst_u32);
 
                 auto src_factor = expand4(m_alpha_blend_factors.src_constant)
@@ -512,10 +516,10 @@ ALWAYS_INLINE void Device::rasterize(Gfx::IntRect& render_bounds, CB1 set_covera
                     + dst * m_alpha_blend_factors.dst_factor_dst_color
                     + Vector4<f32x4> { dst.w(), dst.w(), dst.w(), dst.w() } * m_alpha_blend_factors.dst_factor_dst_alpha;
 
-                quad.out_color = src * src_factor + dst * dst_factor;
+                out_color = src * src_factor + dst * dst_factor;
             }
 
-            auto const argb32_color = to_argb32(quad.out_color);
+            auto const argb32_color = to_argb32(out_color);
             if (m_options.color_mask == 0xffffffff)
                 store4_masked(argb32_color, color_ptrs[0], color_ptrs[1], color_ptrs[2], color_ptrs[3], quad.mask);
             else
@@ -577,9 +581,10 @@ void Device::rasterize_line_antialiased(GPU::Vertex& from, GPU::Vertex& to)
         [&from_color4, &from, &from_fog_depth4](auto& quad) {
             // FIXME: interpolate color, tex coords and fog depth along the distance of the line
             //        in clip space (i.e. NOT distance_from_line)
-            quad.vertex_color = from_color4;
+            quad.set_input(SHADER_INPUT_VERTEX_COLOR, from_color4);
             for (size_t i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i)
-                quad.texture_coordinates[i] = expand4(from.tex_coords[i]);
+                quad.set_input(SHADER_INPUT_FIRST_TEXCOORD + i * 4, expand4(from.tex_coords[i]));
+
             quad.fog_depth = from_fog_depth4;
         });
 }
@@ -624,9 +629,10 @@ void Device::rasterize_point_aliased(GPU::Vertex& point)
             quad.depth = expand4(point.window_coordinates.z());
         },
         [&point](auto& quad) {
-            quad.vertex_color = expand4(point.color);
+            quad.set_input(SHADER_INPUT_VERTEX_COLOR, expand4(point.color));
             for (size_t i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i)
-                quad.texture_coordinates[i] = expand4(point.tex_coords[i]);
+                quad.set_input(SHADER_INPUT_FIRST_TEXCOORD + i * 4, expand4(point.tex_coords[i]));
+
             quad.fog_depth = expand4(abs(point.eye_coordinates.z()));
         });
 }
@@ -659,9 +665,10 @@ void Device::rasterize_point_antialiased(GPU::Vertex& point)
             quad.depth = expand4(point.window_coordinates.z());
         },
         [&point](auto& quad) {
-            quad.vertex_color = expand4(point.color);
+            quad.set_input(SHADER_INPUT_VERTEX_COLOR, expand4(point.color));
             for (size_t i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i)
-                quad.texture_coordinates[i] = expand4(point.tex_coords[i]);
+                quad.set_input(SHADER_INPUT_FIRST_TEXCOORD + i * 4, expand4(point.tex_coords[i]));
+
             quad.fog_depth = expand4(abs(point.eye_coordinates.z()));
         });
 }
@@ -809,20 +816,21 @@ void Device::rasterize_triangle(Triangle& triangle)
 
             // FIXME: make this more generic. We want to interpolate more than just color and uv
             if (m_options.shade_smooth)
-                quad.vertex_color = interpolate(expand4(vertex0.color), expand4(vertex1.color), expand4(vertex2.color), quad.barycentrics);
+                quad.set_input(SHADER_INPUT_VERTEX_COLOR, interpolate(expand4(vertex0.color), expand4(vertex1.color), expand4(vertex2.color), quad.barycentrics));
             else
-                quad.vertex_color = expand4(vertex0.color);
+                quad.set_input(SHADER_INPUT_VERTEX_COLOR, expand4(vertex0.color));
 
             for (GPU::TextureUnitIndex i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i)
-                quad.texture_coordinates[i] = interpolate(expand4(vertex0.tex_coords[i]), expand4(vertex1.tex_coords[i]), expand4(vertex2.tex_coords[i]), quad.barycentrics);
+                quad.set_input(SHADER_INPUT_FIRST_TEXCOORD + i * 4, interpolate(expand4(vertex0.tex_coords[i]), expand4(vertex1.tex_coords[i]), expand4(vertex2.tex_coords[i]), quad.barycentrics));
 
             if (m_options.fog_enabled)
                 quad.fog_depth = fog_depth.dot(quad.barycentrics);
         });
 }
 
-Device::Device(Gfx::IntSize const& size)
+Device::Device(Gfx::IntSize size)
     : m_frame_buffer(FrameBuffer<GPU::ColorType, GPU::DepthType, GPU::StencilType>::try_create(size).release_value_but_fixme_should_propagate_errors())
+    , m_shader_processor(m_samplers)
 {
     m_options.scissor_box = m_frame_buffer->rect();
     m_options.viewport = m_frame_buffer->rect();
@@ -1205,16 +1213,23 @@ void Device::draw_primitives(GPU::PrimitiveType primitive_type, FloatMatrix4x4 c
 
 ALWAYS_INLINE void Device::shade_fragments(PixelQuad& quad)
 {
+    if (m_current_fragment_shader) {
+        m_shader_processor.execute(quad, *m_current_fragment_shader);
+        return;
+    }
+
     Array<Vector4<f32x4>, GPU::NUM_TEXTURE_UNITS> texture_stage_texel;
 
-    auto current_color = quad.vertex_color;
+    auto current_color = quad.get_input_vector4(SHADER_INPUT_VERTEX_COLOR);
+
     for (GPU::TextureUnitIndex i = 0; i < GPU::NUM_TEXTURE_UNITS; ++i) {
         if (!m_texture_unit_configuration[i].enabled)
             continue;
         auto const& sampler = m_samplers[i];
 
         // OpenGL 2.0 ¶ 3.5.1 states (in a roundabout way) that texture coordinates must be divided by Q
-        auto texel = sampler.sample_2d(quad.texture_coordinates[i].xy() / quad.texture_coordinates[i].w());
+        auto homogeneous_texture_coordinate = quad.get_input_vector4(SHADER_INPUT_FIRST_TEXCOORD + i * 4);
+        auto texel = sampler.sample_2d(homogeneous_texture_coordinate.xy() / homogeneous_texture_coordinate.w());
         texture_stage_texel[i] = texel;
         INCREASE_STATISTICS_COUNTER(g_num_sampler_calls, 1);
 
@@ -1243,7 +1258,7 @@ ALWAYS_INLINE void Device::shade_fragments(PixelQuad& quad)
                 case GPU::TextureSource::Previous:
                     return current_color;
                 case GPU::TextureSource::PrimaryColor:
-                    return quad.vertex_color;
+                    return quad.get_input_vector4(SHADER_INPUT_VERTEX_COLOR);
                 case GPU::TextureSource::Texture:
                     return texel;
                 case GPU::TextureSource::TextureStage:
@@ -1325,7 +1340,6 @@ ALWAYS_INLINE void Device::shade_fragments(PixelQuad& quad)
             break;
         }
     }
-    quad.out_color = current_color;
 
     // Calculate fog
     // Math from here: https://opengl-notes.readthedocs.io/en/latest/topics/texturing/aliasing.html
@@ -1352,16 +1366,19 @@ ALWAYS_INLINE void Device::shade_fragments(PixelQuad& quad)
 
         // Mix texel's RGB with fog's RBG - leave alpha alone
         auto fog_color = expand4(m_options.fog_color);
-        quad.out_color.set_x(mix(fog_color.x(), quad.out_color.x(), factor));
-        quad.out_color.set_y(mix(fog_color.y(), quad.out_color.y(), factor));
-        quad.out_color.set_z(mix(fog_color.z(), quad.out_color.z(), factor));
+        current_color.set_x(mix(fog_color.x(), current_color.x(), factor));
+        current_color.set_y(mix(fog_color.y(), current_color.y(), factor));
+        current_color.set_z(mix(fog_color.z(), current_color.z(), factor));
     }
 
+    quad.set_output(SHADER_OUTPUT_FIRST_COLOR, current_color.x());
+    quad.set_output(SHADER_OUTPUT_FIRST_COLOR + 1, current_color.y());
+    quad.set_output(SHADER_OUTPUT_FIRST_COLOR + 2, current_color.z());
     // Multiply coverage with the fragment's alpha to obtain the final alpha value
-    quad.out_color.set_w(quad.out_color.w() * quad.coverage);
+    quad.set_output(SHADER_OUTPUT_FIRST_COLOR + 3, current_color.w() * quad.coverage);
 }
 
-void Device::resize(Gfx::IntSize const& size)
+void Device::resize(Gfx::IntSize size)
 {
     auto frame_buffer_or_error = FrameBuffer<GPU::ColorType, GPU::DepthType, GPU::StencilType>::try_create(size);
     m_frame_buffer = MUST(frame_buffer_or_error);
@@ -1549,7 +1566,7 @@ void Device::blit_to_depth_buffer_at_raster_position(void const* input_data, GPU
 void Device::draw_statistics_overlay(Gfx::Bitmap& target)
 {
     static Core::ElapsedTimer timer;
-    static String debug_string;
+    static DeprecatedString debug_string;
     static int frame_counter;
 
     frame_counter++;
@@ -1566,20 +1583,20 @@ void Device::draw_statistics_overlay(Gfx::Bitmap& target)
         int num_rendertarget_pixels = m_frame_buffer->rect().size().area();
 
         StringBuilder builder;
-        builder.append(String::formatted("Timings      : {:.1}ms {:.1}FPS\n",
+        builder.append(DeprecatedString::formatted("Timings      : {:.1}ms {:.1}FPS\n",
             static_cast<double>(milliseconds) / frame_counter,
             (milliseconds > 0) ? 1000.0 * frame_counter / milliseconds : 9999.0));
-        builder.append(String::formatted("Triangles    : {}\n", g_num_rasterized_triangles));
-        builder.append(String::formatted("SIMD usage   : {}%\n", g_num_quads > 0 ? g_num_pixels_shaded * 25 / g_num_quads : 0));
-        builder.append(String::formatted("Pixels       : {}, Stencil: {}%, Shaded: {}%, Blended: {}%, Overdraw: {}%\n",
+        builder.append(DeprecatedString::formatted("Triangles    : {}\n", g_num_rasterized_triangles));
+        builder.append(DeprecatedString::formatted("SIMD usage   : {}%\n", g_num_quads > 0 ? g_num_pixels_shaded * 25 / g_num_quads : 0));
+        builder.append(DeprecatedString::formatted("Pixels       : {}, Stencil: {}%, Shaded: {}%, Blended: {}%, Overdraw: {}%\n",
             g_num_pixels,
             g_num_pixels > 0 ? g_num_stencil_writes * 100 / g_num_pixels : 0,
             g_num_pixels > 0 ? g_num_pixels_shaded * 100 / g_num_pixels : 0,
             g_num_pixels_shaded > 0 ? g_num_pixels_blended * 100 / g_num_pixels_shaded : 0,
             num_rendertarget_pixels > 0 ? g_num_pixels_shaded * 100 / num_rendertarget_pixels - 100 : 0));
-        builder.append(String::formatted("Sampler calls: {}\n", g_num_sampler_calls));
+        builder.append(DeprecatedString::formatted("Sampler calls: {}\n", g_num_sampler_calls));
 
-        debug_string = builder.to_string();
+        debug_string = builder.to_deprecated_string();
 
         frame_counter = 0;
         timer.start();
@@ -1624,6 +1641,13 @@ NonnullRefPtr<GPU::Image> Device::create_image(GPU::PixelFormat const& pixel_for
     VERIFY(max_levels > 0);
 
     return adopt_ref(*new Image(this, pixel_format, width, height, depth, max_levels));
+}
+
+ErrorOr<NonnullRefPtr<GPU::Shader>> Device::create_shader(GPU::IR::Shader const& intermediate_representation)
+{
+    ShaderCompiler compiler;
+    auto shader = TRY(compiler.compile(this, intermediate_representation));
+    return shader;
 }
 
 void Device::set_sampler_config(unsigned sampler, GPU::SamplerConfig const& config)
@@ -1694,6 +1718,19 @@ void Device::set_raster_position(FloatVector4 const& position, FloatMatrix4x4 co
     m_raster_position.eye_coordinate_distance = eye_coordinates.length();
 }
 
+void Device::bind_fragment_shader(RefPtr<GPU::Shader> shader)
+{
+    VERIFY(shader.is_null() || shader->ownership_token() == this);
+
+    if (shader.is_null()) {
+        m_current_fragment_shader = nullptr;
+        return;
+    }
+
+    auto softgpu_shader = static_ptr_cast<Shader>(shader);
+    m_current_fragment_shader = softgpu_shader;
+}
+
 Gfx::IntRect Device::get_rasterization_rect_of_size(Gfx::IntSize size) const
 {
     // Round the X and Y floating point coordinates to the nearest integer; OpenGL 1.5 spec:
@@ -1711,7 +1748,7 @@ Gfx::IntRect Device::get_rasterization_rect_of_size(Gfx::IntSize size) const
 
 extern "C" {
 
-GPU::Device* serenity_gpu_create_device(Gfx::IntSize const& size)
+GPU::Device* serenity_gpu_create_device(Gfx::IntSize size)
 {
     return make<SoftGPU::Device>(size).leak_ptr();
 }

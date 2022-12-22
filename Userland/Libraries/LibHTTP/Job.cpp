@@ -20,7 +20,7 @@
 
 namespace HTTP {
 
-static Optional<ByteBuffer> handle_content_encoding(ByteBuffer const& buf, String const& content_encoding)
+static Optional<ByteBuffer> handle_content_encoding(ByteBuffer const& buf, DeprecatedString const& content_encoding)
 {
     dbgln_if(JOB_DEBUG, "Job::handle_content_encoding: buf has content_encoding={}", content_encoding);
 
@@ -37,8 +37,8 @@ static Optional<ByteBuffer> handle_content_encoding(ByteBuffer const& buf, Strin
         dbgln_if(JOB_DEBUG, "Job::handle_content_encoding: buf is gzip compressed!");
 
         auto uncompressed = Compress::GzipDecompressor::decompress_all(buf);
-        if (!uncompressed.has_value()) {
-            dbgln("Job::handle_content_encoding: Gzip::decompress() failed.");
+        if (uncompressed.is_error()) {
+            dbgln("Job::handle_content_encoding: Gzip::decompress() failed: {}", uncompressed.error());
             return {};
         }
 
@@ -60,12 +60,14 @@ static Optional<ByteBuffer> handle_content_encoding(ByteBuffer const& buf, Strin
             // "Note: Some non-conformant implementations send the "deflate"
             //        compressed data without the zlib wrapper."
             dbgln_if(JOB_DEBUG, "Job::handle_content_encoding: Zlib::decompress_all() failed. Trying DeflateDecompressor::decompress_all()");
-            uncompressed = Compress::DeflateDecompressor::decompress_all(buf);
+            auto uncompressed_or_error = Compress::DeflateDecompressor::decompress_all(buf);
 
-            if (!uncompressed.has_value()) {
-                dbgln("Job::handle_content_encoding: DeflateDecompressor::decompress_all() failed.");
+            if (uncompressed_or_error.is_error()) {
+                dbgln("Job::handle_content_encoding: DeflateDecompressor::decompress_all() failed: {}", uncompressed_or_error.error());
                 return {};
             }
+
+            uncompressed = uncompressed_or_error.release_value();
         }
 
         if constexpr (JOB_DEBUG) {
@@ -78,8 +80,7 @@ static Optional<ByteBuffer> handle_content_encoding(ByteBuffer const& buf, Strin
     } else if (content_encoding == "br") {
         dbgln_if(JOB_DEBUG, "Job::handle_content_encoding: buf is brotli compressed!");
 
-        // FIXME: MemoryStream is both read and write, however we only need the read part here
-        auto bufstream_result = Core::Stream::MemoryStream::construct({ const_cast<u8*>(buf.data()), buf.size() });
+        auto bufstream_result = Core::Stream::FixedMemoryStream::construct({ buf.data(), buf.size() });
         if (bufstream_result.is_error()) {
             dbgln("Job::handle_content_encoding: MemoryStream::construct() failed.");
             return {};
@@ -87,7 +88,7 @@ static Optional<ByteBuffer> handle_content_encoding(ByteBuffer const& buf, Strin
         auto bufstream = bufstream_result.release_value();
         auto brotli_stream = Compress::BrotliDecompressionStream { *bufstream };
 
-        auto uncompressed = brotli_stream.read_all();
+        auto uncompressed = brotli_stream.read_until_eof();
         if (uncompressed.is_error()) {
             dbgln("Job::handle_content_encoding: Brotli::decompress() failed: {}.", uncompressed.error());
             return {};
@@ -188,11 +189,11 @@ void Job::register_on_ready_to_read(Function<void()> callback)
     };
 }
 
-ErrorOr<String> Job::read_line(size_t size)
+ErrorOr<DeprecatedString> Job::read_line(size_t size)
 {
     auto buffer = TRY(ByteBuffer::create_uninitialized(size));
     auto bytes_read = TRY(m_socket->read_until(buffer, "\r\n"sv));
-    return String::copy(bytes_read);
+    return DeprecatedString::copy(bytes_read);
 }
 
 ErrorOr<ByteBuffer> Job::receive(size_t size)
@@ -218,10 +219,10 @@ void Job::on_socket_connected()
 
     if constexpr (JOB_DEBUG) {
         dbgln("Job: raw_request:");
-        dbgln("{}", String::copy(raw_request));
+        dbgln("{}", DeprecatedString::copy(raw_request));
     }
 
-    bool success = m_socket->write_or_error(raw_request);
+    bool success = !m_socket->write_entire_buffer(raw_request).is_error();
     if (!success)
         deferred_invoke([this] { did_fail(Core::NetworkJob::Error::TransmissionFailed); });
 
@@ -250,16 +251,11 @@ void Job::on_socket_connected()
             }
 
             if (!can_read_line.value()) {
-                dbgln_if(JOB_DEBUG, "Job {} cannot read line", m_request.url());
-                auto maybe_buf = receive(64);
-                if (maybe_buf.is_error()) {
-                    dbgln_if(JOB_DEBUG, "Job {} cannot read any bytes!", m_request.url());
-                    return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::TransmissionFailed); });
-                }
-
-                dbgln_if(JOB_DEBUG, "{} bytes was read", maybe_buf.value().bytes().size());
-                return;
+                dbgln_if(JOB_DEBUG, "Job {} cannot read a full line", m_request.url());
+                // TODO: Should we retry here instead of failing instantly?
+                return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::TransmissionFailed); });
             }
+
             auto maybe_line = read_line(PAGE_SIZE);
             if (maybe_line.is_error()) {
                 dbgln_if(JOB_DEBUG, "Job {} could not read line: {}", m_request.url(), maybe_line.error());
@@ -338,7 +334,7 @@ void Job::on_socket_connected()
                 }
                 if (on_headers_received) {
                     if (!m_set_cookie_headers.is_empty())
-                        m_headers.set("Set-Cookie", JsonArray { m_set_cookie_headers }.to_string());
+                        m_headers.set("Set-Cookie", JsonArray { m_set_cookie_headers }.to_deprecated_string());
                     on_headers_received(m_headers, m_code > 0 ? m_code : Optional<u32> {});
                 }
                 m_state = State::InBody;
@@ -454,7 +450,7 @@ void Job::on_socket_connected()
                         break;
                     } else {
                         auto chunk = size_lines[0].split_view(';', SplitBehavior::KeepEmpty);
-                        String size_string = chunk[0];
+                        DeprecatedString size_string = chunk[0];
                         char* endptr;
                         auto size = strtoul(size_string.characters(), &endptr, 16);
                         if (*endptr) {

@@ -30,27 +30,27 @@ public:
         auto settings_object = realm->heap().allocate<WorkerEnvironmentSettingsObject>(*realm, move(execution_context));
         settings_object->target_browsing_context = nullptr;
 
-        auto* intrinsics = realm->heap().allocate<Bindings::Intrinsics>(*realm, *realm);
-        auto host_defined = make<Bindings::HostDefined>(*settings_object, *intrinsics);
+        auto intrinsics = realm->heap().allocate<Bindings::Intrinsics>(*realm, *realm);
+        auto host_defined = make<Bindings::HostDefined>(settings_object, intrinsics);
         realm->set_host_defined(move(host_defined));
 
         // FIXME: Shared workers should use the shared worker method
         Bindings::add_dedicated_worker_exposed_interfaces(realm->global_object(), *realm);
 
-        return *settings_object;
+        return settings_object;
     }
 
     virtual ~WorkerEnvironmentSettingsObject() override = default;
 
     JS::GCPtr<DOM::Document> responsible_document() override { return nullptr; }
-    String api_url_character_encoding() override { return m_api_url_character_encoding; }
+    DeprecatedString api_url_character_encoding() override { return m_api_url_character_encoding; }
     AK::URL api_base_url() override { return m_url; }
     Origin origin() override { return m_origin; }
     PolicyContainer policy_container() override { return m_policy_container; }
     CanUseCrossOriginIsolatedAPIs cross_origin_isolated_capability() override { TODO(); }
 
 private:
-    String m_api_url_character_encoding;
+    DeprecatedString m_api_url_character_encoding;
     AK::URL m_url;
     HTML::Origin m_origin;
     HTML::PolicyContainer m_policy_container;

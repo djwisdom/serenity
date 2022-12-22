@@ -46,7 +46,7 @@ ThrowCompletionOr<Value> RelativeTimeFormatConstructor::call()
 }
 
 // 17.1.1 Intl.RelativeTimeFormat ( [ locales [ , options ] ] ), https://tc39.es/ecma402/#sec-Intl.RelativeTimeFormat
-ThrowCompletionOr<Object*> RelativeTimeFormatConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> RelativeTimeFormatConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
@@ -54,10 +54,10 @@ ThrowCompletionOr<Object*> RelativeTimeFormatConstructor::construct(FunctionObje
     auto options = vm.argument(1);
 
     // 2. Let relativeTimeFormat be ? OrdinaryCreateFromConstructor(NewTarget, "%RelativeTimeFormat.prototype%", « [[InitializedRelativeTimeFormat]], [[Locale]], [[DataLocale]], [[Style]], [[Numeric]], [[NumberFormat]], [[NumberingSystem]], [[PluralRules]] »).
-    auto* relative_time_format = TRY(ordinary_create_from_constructor<RelativeTimeFormat>(vm, new_target, &Intrinsics::intl_relative_time_format_prototype));
+    auto relative_time_format = TRY(ordinary_create_from_constructor<RelativeTimeFormat>(vm, new_target, &Intrinsics::intl_relative_time_format_prototype));
 
     // 3. Return ? InitializeRelativeTimeFormat(relativeTimeFormat, locales, options).
-    return TRY(initialize_relative_time_format(vm, *relative_time_format, locales, options));
+    return *TRY(initialize_relative_time_format(vm, relative_time_format, locales, options));
 }
 
 // 17.2.2 Intl.RelativeTimeFormat.supportedLocalesOf ( locales [ , options ] ), https://tc39.es/ecma402/#sec-Intl.RelativeTimeFormat.supportedLocalesOf
@@ -101,11 +101,11 @@ ThrowCompletionOr<RelativeTimeFormat*> initialize_relative_time_format(VM& vm, R
     // 7. If numberingSystem is not undefined, then
     if (!numbering_system.is_undefined()) {
         // a. If numberingSystem does not match the Unicode Locale Identifier type nonterminal, throw a RangeError exception.
-        if (!::Locale::is_type_identifier(numbering_system.as_string().string()))
+        if (!::Locale::is_type_identifier(numbering_system.as_string().deprecated_string()))
             return vm.throw_completion<RangeError>(ErrorType::OptionIsNotValidValue, numbering_system, "numberingSystem"sv);
 
         // 8. Set opt.[[nu]] to numberingSystem.
-        opt.nu = numbering_system.as_string().string();
+        opt.nu = numbering_system.as_string().deprecated_string();
     }
 
     // 9. Let localeData be %RelativeTimeFormat%.[[LocaleData]].
@@ -129,21 +129,21 @@ ThrowCompletionOr<RelativeTimeFormat*> initialize_relative_time_format(VM& vm, R
     auto style = TRY(get_option(vm, *options, vm.names.style, OptionType::String, { "long"sv, "short"sv, "narrow"sv }, "long"sv));
 
     // 16. Set relativeTimeFormat.[[Style]] to style.
-    relative_time_format.set_style(style.as_string().string());
+    relative_time_format.set_style(style.as_string().deprecated_string());
 
     // 17. Let numeric be ? GetOption(options, "numeric", "string", « "always", "auto" », "always").
     auto numeric = TRY(get_option(vm, *options, vm.names.numeric, OptionType::String, { "always"sv, "auto"sv }, "always"sv));
 
     // 18. Set relativeTimeFormat.[[Numeric]] to numeric.
-    relative_time_format.set_numeric(numeric.as_string().string());
+    relative_time_format.set_numeric(numeric.as_string().deprecated_string());
 
     // 19. Let relativeTimeFormat.[[NumberFormat]] be ! Construct(%NumberFormat%, « locale »).
-    auto* number_format = MUST(construct(vm, *realm.intrinsics().intl_number_format_constructor(), js_string(vm, locale)));
-    relative_time_format.set_number_format(static_cast<NumberFormat*>(number_format));
+    auto number_format = MUST(construct(vm, *realm.intrinsics().intl_number_format_constructor(), PrimitiveString::create(vm, locale)));
+    relative_time_format.set_number_format(static_cast<NumberFormat*>(number_format.ptr()));
 
     // 20. Let relativeTimeFormat.[[PluralRules]] be ! Construct(%PluralRules%, « locale »).
-    auto* plural_rules = MUST(construct(vm, *realm.intrinsics().intl_plural_rules_constructor(), js_string(vm, locale)));
-    relative_time_format.set_plural_rules(static_cast<PluralRules*>(plural_rules));
+    auto plural_rules = MUST(construct(vm, *realm.intrinsics().intl_plural_rules_constructor(), PrimitiveString::create(vm, locale)));
+    relative_time_format.set_plural_rules(static_cast<PluralRules*>(plural_rules.ptr()));
 
     // 21. Return relativeTimeFormat.
     return &relative_time_format;

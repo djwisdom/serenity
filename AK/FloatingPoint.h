@@ -15,6 +15,26 @@ namespace AK {
 template<typename T>
 union FloatExtractor;
 
+#ifdef AK_HAS_FLOAT_128
+template<>
+union FloatExtractor<f128> {
+    static constexpr int mantissa_bits = 112;
+    static constexpr unsigned __int128 mantissa_max = (((unsigned __int128)1) << 112) - 1;
+    static constexpr int exponent_bias = 16383;
+    static constexpr int exponent_bits = 15;
+    static constexpr unsigned exponent_max = 32767;
+    struct {
+        unsigned __int128 mantissa : 112;
+        unsigned exponent : 15;
+        unsigned sign : 1;
+    };
+    f128 d;
+};
+// Validate that f128 and the FloatExtractor union are 128 bits.
+static_assert(sizeof(f128) == 16);
+static_assert(sizeof(FloatExtractor<f128>) == 16);
+#endif
+
 #ifdef AK_HAS_FLOAT_80
 template<>
 union FloatExtractor<f80> {
@@ -70,7 +90,7 @@ public:
     static const size_t mantissabits = M;
 
     template<typename T>
-    requires(IsIntegral<T>&& IsUnsigned<T> && sizeof(T) <= 8) constexpr FloatingPointBits(T bits)
+    requires(IsIntegral<T> && IsUnsigned<T> && sizeof(T) <= 8) constexpr FloatingPointBits(T bits)
         : m_bits(bits)
     {
     }
@@ -85,8 +105,16 @@ public:
     {
     }
 
-    double as_double() const requires(S == 1 && E == 11 && M == 52) { return bit_cast<double>(m_bits); }
-    float as_float() const requires(S == 1 && E == 8 && M == 23) { return bit_cast<float>(static_cast<u32>(m_bits)); }
+    double as_double() const
+    requires(S == 1 && E == 11 && M == 52)
+    {
+        return bit_cast<double>(m_bits);
+    }
+    float as_float() const
+    requires(S == 1 && E == 8 && M == 23)
+    {
+        return bit_cast<float>(static_cast<u32>(m_bits));
+    }
     u64 bits() const { return m_bits; }
 
 private:
@@ -232,6 +260,7 @@ constexpr float convert_to_native_float(I input) { return float_to_float<SingleF
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::DoubleFloatingPointBits;
 using AK::FloatExtractor;
 using AK::FloatingPointBits;
@@ -242,3 +271,4 @@ using AK::convert_from_native_float;
 using AK::convert_to_native_double;
 using AK::convert_to_native_float;
 using AK::float_to_float;
+#endif

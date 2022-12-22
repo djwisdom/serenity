@@ -56,12 +56,12 @@ public:
     }
 
     template<typename T>
-    const T* data() const
+    T const* data() const
     {
         static_assert(IsVoid<T> || IsTrivial<T>);
         if (!m_impl)
             return nullptr;
-        return (const T*)m_impl->data();
+        return (T const*)m_impl->data();
     }
 
 private:
@@ -74,7 +74,10 @@ private:
 
 namespace IPC {
 
+template<>
 bool encode(Encoder&, Core::AnonymousBuffer const&);
+
+template<>
 ErrorOr<void> decode(Decoder&, Core::AnonymousBuffer&);
 
 }

@@ -6,7 +6,9 @@
 
 #include "ImageCodecPluginSerenity.h"
 #include <LibCore/EventLoop.h>
+#include <LibCore/File.h>
 #include <LibCore/LocalServer.h>
+#include <LibCore/StandardPaths.h>
 #include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibIPC/SingleServer.h>
@@ -26,12 +28,14 @@ ErrorOr<int> serenity_main(Main::Arguments)
     TRY(Core::System::pledge("stdio recvfd sendfd accept unix rpath"));
 
     // This must be first; we can't check if /tmp/webdriver exists once we've unveiled other paths.
-    if (Core::Stream::File::exists("/tmp/webdriver"sv))
-        TRY(Core::System::unveil("/tmp/webdriver", "rw"));
+    auto webdriver_socket_path = DeprecatedString::formatted("{}/webdriver", TRY(Core::StandardPaths::runtime_directory()));
+    if (Core::File::exists(webdriver_socket_path))
+        TRY(Core::System::unveil(webdriver_socket_path, "rw"sv));
 
     TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/etc/timezone", "r"));
+    TRY(Core::System::unveil("/usr/lib", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/request", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/image", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/websocket", "rw"));

@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Temporal/Calendar.h>
@@ -19,7 +20,7 @@ namespace JS::Temporal {
 
 // 10 Temporal.PlainMonthDay Objects, https://tc39.es/proposal-temporal/#sec-temporal-plainmonthday-objects
 PlainMonthDay::PlainMonthDay(u8 iso_month, u8 iso_day, i32 iso_year, Object& calendar, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_iso_year(iso_year)
     , m_iso_month(iso_month)
     , m_iso_day(iso_day)
@@ -125,7 +126,7 @@ ThrowCompletionOr<PlainMonthDay*> to_temporal_month_day(VM& vm, Value item, Obje
     auto result = TRY(parse_temporal_month_day_string(vm, string));
 
     // 8. Let calendar be ? ToTemporalCalendarWithISODefault(result.[[Calendar]]).
-    auto* calendar = TRY(to_temporal_calendar_with_iso_default(vm, result.calendar.has_value() ? js_string(vm, move(*result.calendar)) : js_undefined()));
+    auto* calendar = TRY(to_temporal_calendar_with_iso_default(vm, result.calendar.has_value() ? PrimitiveString::create(vm, move(*result.calendar)) : js_undefined()));
 
     // 9. If result.[[Year]] is undefined, then
     if (!result.year.has_value()) {
@@ -166,14 +167,14 @@ ThrowCompletionOr<PlainMonthDay*> create_temporal_month_day(VM& vm, u8 iso_month
     // 8. Set object.[[ISODay]] to isoDay.
     // 9. Set object.[[Calendar]] to calendar.
     // 10. Set object.[[ISOYear]] to referenceISOYear.
-    auto* object = TRY(ordinary_create_from_constructor<PlainMonthDay>(vm, *new_target, &Intrinsics::temporal_plain_month_day_prototype, iso_month, iso_day, reference_iso_year, calendar));
+    auto object = TRY(ordinary_create_from_constructor<PlainMonthDay>(vm, *new_target, &Intrinsics::temporal_plain_month_day_prototype, iso_month, iso_day, reference_iso_year, calendar));
 
     // 11. Return object.
-    return object;
+    return object.ptr();
 }
 
 // 10.5.3 TemporalMonthDayToString ( monthDay, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-temporalmonthdaytostring
-ThrowCompletionOr<String> temporal_month_day_to_string(VM& vm, PlainMonthDay& month_day, StringView show_calendar)
+ThrowCompletionOr<DeprecatedString> temporal_month_day_to_string(VM& vm, PlainMonthDay& month_day, StringView show_calendar)
 {
     // 1. Assert: Type(monthDay) is Object.
     // 2. Assert: monthDay has an [[InitializedTemporalMonthDay]] internal slot.
@@ -181,7 +182,7 @@ ThrowCompletionOr<String> temporal_month_day_to_string(VM& vm, PlainMonthDay& mo
     // 3. Let month be ToZeroPaddedDecimalString(temporalDate.[[ISOMonth]], 2).
     // 4. Let day be ToZeroPaddedDecimalString(temporalDate.[[ISODay]], 2).
     // 5. Let result be the string-concatenation of month, the code unit 0x002D (HYPHEN-MINUS), and day.
-    auto result = String::formatted("{:02}-{:02}", month_day.iso_month(), month_day.iso_day());
+    auto result = DeprecatedString::formatted("{:02}-{:02}", month_day.iso_month(), month_day.iso_day());
 
     // 6. Let calendarID be ? ToString(monthDay.[[Calendar]]).
     auto calendar_id = TRY(Value(&month_day.calendar()).to_string(vm));
@@ -190,7 +191,7 @@ ThrowCompletionOr<String> temporal_month_day_to_string(VM& vm, PlainMonthDay& mo
     if (show_calendar.is_one_of("always"sv, "critical"sv) || calendar_id != "iso8601"sv) {
         // a. Let year be ! PadISOYear(monthDay.[[ISOYear]]).
         // b. Set result to the string-concatenation of year, the code unit 0x002D (HYPHEN-MINUS), and result.
-        result = String::formatted("{}-{}", pad_iso_year(month_day.iso_year()), result);
+        result = DeprecatedString::formatted("{}-{}", pad_iso_year(month_day.iso_year()), result);
     }
 
     // 8. Let calendarString be ! FormatCalendarAnnotation(calendarID, showCalendar).
@@ -198,7 +199,7 @@ ThrowCompletionOr<String> temporal_month_day_to_string(VM& vm, PlainMonthDay& mo
 
     // 9. Set result to the string-concatenation of result and calendarString.
     // 10. Return result.
-    return String::formatted("{}{}", result, calendar_string);
+    return DeprecatedString::formatted("{}{}", result, calendar_string);
 }
 
 }

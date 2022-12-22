@@ -15,12 +15,18 @@ class SnakeGame : public GUI::Frame {
     C_OBJECT(SnakeGame);
 
 public:
+    static ErrorOr<NonnullRefPtr<SnakeGame>> create();
     virtual ~SnakeGame() override = default;
 
+    void start();
+    void pause();
     void reset();
 
+    void set_snake_base_color(Color color) { m_snake_base_color = color; };
+
 private:
-    SnakeGame();
+    explicit SnakeGame(NonnullRefPtrVector<Gfx::Bitmap> food_bitmaps);
+
     virtual void paint_event(GUI::PaintEvent&) override;
     virtual void keydown_event(GUI::KeyEvent&) override;
     virtual void timer_event(Core::TimerEvent&) override;
@@ -65,10 +71,12 @@ private:
 
     size_t m_length { 0 };
     unsigned m_score { 0 };
-    String m_score_text;
+    DeprecatedString m_score_text;
     unsigned m_high_score { 0 };
-    String m_high_score_text;
+    DeprecatedString m_high_score_text;
     bool m_is_new_high_score { false };
 
     NonnullRefPtrVector<Gfx::Bitmap> m_food_bitmaps;
+
+    Gfx::Color m_snake_base_color { Color::Yellow };
 };

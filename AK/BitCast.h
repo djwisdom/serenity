@@ -6,10 +6,12 @@
 
 #pragma once
 
+#include <AK/Platform.h>
+
 namespace AK {
 
 template<typename T, typename U>
-[[nodiscard]] constexpr inline T bit_cast(const U& a)
+[[nodiscard]] constexpr inline T bit_cast(U const& a)
 {
 #if (__has_builtin(__builtin_bit_cast))
     return __builtin_bit_cast(T, a);
@@ -24,4 +26,6 @@ template<typename T, typename U>
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::bit_cast;
+#endif

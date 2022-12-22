@@ -43,7 +43,7 @@ public:
 
     template<size_t size>
     requires(IsConst<T>)
-        ALWAYS_INLINE constexpr Span(Array<T, size> const& array)
+    ALWAYS_INLINE constexpr Span(Array<T, size> const& array)
         : m_values(array.data())
         , m_size(size)
     {
@@ -257,6 +257,8 @@ struct Traits<Span<T>> : public GenericTraits<Span<T>> {
         }
         return hash;
     }
+
+    constexpr static bool is_trivial() { return true; }
 };
 
 using ReadonlyBytes = Span<u8 const>;
@@ -264,6 +266,8 @@ using Bytes = Span<u8>;
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::Bytes;
 using AK::ReadonlyBytes;
 using AK::Span;
+#endif

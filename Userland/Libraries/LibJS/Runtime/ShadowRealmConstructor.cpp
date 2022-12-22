@@ -37,12 +37,12 @@ ThrowCompletionOr<Value> ShadowRealmConstructor::call()
 }
 
 // 3.2.1 ShadowRealm ( ), https://tc39.es/proposal-shadowrealm/#sec-shadowrealm
-ThrowCompletionOr<Object*> ShadowRealmConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> ShadowRealmConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 
     // 3. Let realmRec be CreateRealm().
-    auto* realm = Realm::create(vm);
+    auto realm = Realm::create(vm);
 
     // 5. Let context be a new execution context.
     auto context = ExecutionContext { vm.heap() };
@@ -59,7 +59,7 @@ ThrowCompletionOr<Object*> ShadowRealmConstructor::construct(FunctionObject& new
     // 2. Let O be ? OrdinaryCreateFromConstructor(NewTarget, "%ShadowRealm.prototype%", « [[ShadowRealm]], [[ExecutionContext]] »).
     // 4. Set O.[[ShadowRealm]] to realmRec.
     // 9. Set O.[[ExecutionContext]] to context.
-    auto* object = TRY(ordinary_create_from_constructor<ShadowRealm>(vm, new_target, &Intrinsics::shadow_realm_prototype, *realm, move(context)));
+    auto object = TRY(ordinary_create_from_constructor<ShadowRealm>(vm, new_target, &Intrinsics::shadow_realm_prototype, *realm, move(context)));
 
     // 10. Perform ? SetRealmGlobalObject(realmRec, undefined, undefined).
     realm->set_global_object(nullptr, nullptr);

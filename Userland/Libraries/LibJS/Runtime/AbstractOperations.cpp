@@ -71,7 +71,7 @@ ThrowCompletionOr<Value> call_impl(VM& vm, FunctionObject& function, Value this_
 }
 
 // 7.3.15 Construct ( F [ , argumentsList [ , newTarget ] ] ), https://tc39.es/ecma262/#sec-construct
-ThrowCompletionOr<Object*> construct_impl(VM& vm, FunctionObject& function, Optional<MarkedVector<Value>> arguments_list, FunctionObject* new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> construct_impl(VM& vm, FunctionObject& function, Optional<MarkedVector<Value>> arguments_list, FunctionObject* new_target)
 {
     // 1. If newTarget is not present, set newTarget to F.
     if (!new_target)
@@ -88,8 +88,8 @@ ThrowCompletionOr<Object*> construct_impl(VM& vm, FunctionObject& function, Opti
 // 7.3.19 LengthOfArrayLike ( obj ), https://tc39.es/ecma262/#sec-lengthofarraylike
 ThrowCompletionOr<size_t> length_of_array_like(VM& vm, Object const& object)
 {
-    auto result = TRY(object.get(vm.names.length));
-    return result.to_length(vm);
+    // 1. Return ℝ(? ToLength(? Get(obj, "length"))).
+    return TRY(object.get(vm.names.length)).to_length(vm);
 }
 
 // 7.3.20 CreateListFromArrayLike ( obj [ , elementTypes ] ), https://tc39.es/ecma262/#sec-createlistfromarraylike
@@ -249,7 +249,7 @@ bool validate_and_apply_property_descriptor(Object* object, PropertyKey const& p
         // c. If IsAccessorDescriptor(Desc) is true, then
         if (descriptor.is_accessor_descriptor()) {
             // i. Create an own accessor property named P of object O whose [[Get]], [[Set]], [[Enumerable]], and [[Configurable]] attributes are set to the value of the corresponding field in Desc if Desc has that field, or to the attribute's default value otherwise.
-            auto* accessor = Accessor::create(object->vm(), descriptor.get.value_or(nullptr), descriptor.set.value_or(nullptr));
+            auto accessor = Accessor::create(object->vm(), descriptor.get.value_or(nullptr), descriptor.set.value_or(nullptr));
             object->storage_set(property_key, { accessor, descriptor.attributes() });
         }
         // d. Else,
@@ -316,7 +316,7 @@ bool validate_and_apply_property_descriptor(Object* object, PropertyKey const& p
             auto enumerable = descriptor.enumerable.value_or(*current->enumerable);
 
             // iii. Replace the property named P of object O with an accessor property having [[Configurable]] and [[Enumerable]] attributes set to configurable and enumerable, respectively, and each other attribute set to its corresponding value in Desc if present, otherwise to its default value.
-            auto* accessor = Accessor::create(object->vm(), descriptor.get.value_or(nullptr), descriptor.set.value_or(nullptr));
+            auto accessor = Accessor::create(object->vm(), descriptor.get.value_or(nullptr), descriptor.set.value_or(nullptr));
             PropertyAttributes attributes;
             attributes.set_enumerable(enumerable);
             attributes.set_configurable(configurable);
@@ -383,25 +383,36 @@ ThrowCompletionOr<Object*> get_prototype_from_constructor(VM& vm, FunctionObject
 }
 
 // 9.1.2.2 NewDeclarativeEnvironment ( E ), https://tc39.es/ecma262/#sec-newdeclarativeenvironment
-DeclarativeEnvironment* new_declarative_environment(Environment& environment)
+NonnullGCPtr<DeclarativeEnvironment> new_declarative_environment(Environment& environment)
 {
-    return environment.heap().allocate_without_realm<DeclarativeEnvironment>(&environment);
+    auto& heap = environment.heap();
+
+    // 1. Let env be a new Declarative Environment Record containing no bindings.
+    // 2. Set env.[[OuterEnv]] to E.
+    // 3. Return env.
+    return heap.allocate_without_realm<DeclarativeEnvironment>(&environment);
 }
 
 // 9.1.2.3 NewObjectEnvironment ( O, W, E ), https://tc39.es/ecma262/#sec-newobjectenvironment
-ObjectEnvironment* new_object_environment(Object& object, bool is_with_environment, Environment* environment)
+NonnullGCPtr<ObjectEnvironment> new_object_environment(Object& object, bool is_with_environment, Environment* environment)
 {
     auto& heap = object.heap();
+
+    // 1. Let env be a new Object Environment Record.
+    // 2. Set env.[[BindingObject]] to O.
+    // 3. Set env.[[IsWithEnvironment]] to W.
+    // 4. Set env.[[OuterEnv]] to E.
+    // 5. Return env.
     return heap.allocate_without_realm<ObjectEnvironment>(object, is_with_environment ? ObjectEnvironment::IsWithEnvironment::Yes : ObjectEnvironment::IsWithEnvironment::No, environment);
 }
 
 // 9.1.2.4 NewFunctionEnvironment ( F, newTarget ), https://tc39.es/ecma262/#sec-newfunctionenvironment
-FunctionEnvironment* new_function_environment(ECMAScriptFunctionObject& function, Object* new_target)
+NonnullGCPtr<FunctionEnvironment> new_function_environment(ECMAScriptFunctionObject& function, Object* new_target)
 {
     auto& heap = function.heap();
 
     // 1. Let env be a new function Environment Record containing no bindings.
-    auto* env = heap.allocate_without_realm<FunctionEnvironment>(function.environment());
+    auto env = heap.allocate_without_realm<FunctionEnvironment>(function.environment());
 
     // 2. Set env.[[FunctionObject]] to F.
     env->set_function_object(function);
@@ -424,7 +435,7 @@ FunctionEnvironment* new_function_environment(ECMAScriptFunctionObject& function
 }
 
 // 9.2.1.1 NewPrivateEnvironment ( outerPrivEnv ), https://tc39.es/ecma262/#sec-newprivateenvironment
-PrivateEnvironment* new_private_environment(VM& vm, PrivateEnvironment* outer)
+NonnullGCPtr<PrivateEnvironment> new_private_environment(VM& vm, PrivateEnvironment* outer)
 {
     // 1. Let names be a new empty List.
     // 2. Return the PrivateEnvironment Record { [[OuterPrivateEnvironment]]: outerPrivEnv, [[Names]]: names }.
@@ -432,11 +443,19 @@ PrivateEnvironment* new_private_environment(VM& vm, PrivateEnvironment* outer)
 }
 
 // 9.4.3 GetThisEnvironment ( ), https://tc39.es/ecma262/#sec-getthisenvironment
-Environment& get_this_environment(VM& vm)
+NonnullGCPtr<Environment> get_this_environment(VM& vm)
 {
+    // 1. Let env be the running execution context's LexicalEnvironment.
+    // 2. Repeat,
     for (auto* env = vm.lexical_environment(); env; env = env->outer_environment()) {
+        // a. Let exists be env.HasThisBinding().
+        // b. If exists is true, return env.
         if (env->has_this_binding())
             return *env;
+
+        // c. Let outer be env.[[OuterEnv]].
+        // d. Assert: outer is not null.
+        // e. Set env to outer.
     }
     VERIFY_NOT_REACHED();
 }
@@ -464,12 +483,12 @@ bool can_be_held_weakly(Value value)
 Object* get_super_constructor(VM& vm)
 {
     // 1. Let envRec be GetThisEnvironment().
-    auto& env = get_this_environment(vm);
+    auto env = get_this_environment(vm);
 
     // 2. Assert: envRec is a function Environment Record.
     // 3. Let activeFunction be envRec.[[FunctionObject]].
     // 4. Assert: activeFunction is an ECMAScript function object.
-    auto& active_function = verify_cast<FunctionEnvironment>(env).function_object();
+    auto& active_function = verify_cast<FunctionEnvironment>(*env).function_object();
 
     // 5. Let superConstructor be ! activeFunction.[[GetPrototypeOf]]().
     auto* super_constructor = MUST(active_function.internal_get_prototype_of());
@@ -482,7 +501,7 @@ Object* get_super_constructor(VM& vm)
 ThrowCompletionOr<Reference> make_super_property_reference(VM& vm, Value actual_this, PropertyKey const& property_key, bool strict)
 {
     // 1. Let env be GetThisEnvironment().
-    auto& env = verify_cast<FunctionEnvironment>(get_this_environment(vm));
+    auto& env = verify_cast<FunctionEnvironment>(*get_this_environment(vm));
 
     // 2. Assert: env.HasSuperBinding() is true.
     VERIFY(env.has_super_binding());
@@ -529,11 +548,11 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
     // 10. If direct is true, then
     if (direct == EvalMode::Direct) {
         // a. Let thisEnvRec be GetThisEnvironment().
-        auto& this_environment_record = get_this_environment(vm);
+        auto this_environment_record = get_this_environment(vm);
 
         // b. If thisEnvRec is a function Environment Record, then
-        if (is<FunctionEnvironment>(this_environment_record)) {
-            auto& this_function_environment_record = static_cast<FunctionEnvironment&>(this_environment_record);
+        if (is<FunctionEnvironment>(*this_environment_record)) {
+            auto& this_function_environment_record = static_cast<FunctionEnvironment&>(*this_environment_record);
 
             // i. Let F be thisEnvRec.[[FunctionObject]].
             auto& function = this_function_environment_record.function_object();
@@ -575,13 +594,13 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
         .in_class_field_initializer = in_class_field_initializer,
     };
 
-    Parser parser { Lexer { code_string.string() }, Program::Type::Script, move(initial_state) };
+    Parser parser { Lexer { code_string.deprecated_string() }, Program::Type::Script, move(initial_state) };
     auto program = parser.parse_program(strict_caller == CallerMode::Strict);
 
     //     b. If script is a List of errors, throw a SyntaxError exception.
     if (parser.has_errors()) {
         auto& error = parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_string());
+        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
     }
 
     bool strict_eval = false;
@@ -683,7 +702,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
     if (auto* bytecode_interpreter = Bytecode::Interpreter::current()) {
         auto executable_result = Bytecode::Generator::generate(program);
         if (executable_result.is_error())
-            return vm.throw_completion<InternalError>(ErrorType::NotImplemented, executable_result.error().to_string());
+            return vm.throw_completion<InternalError>(ErrorType::NotImplemented, executable_result.error().to_deprecated_string());
 
         auto executable = executable_result.release_value();
         executable->name = "eval"sv;
@@ -804,6 +823,8 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, Program const& pr
         // Note: Already done in step iv.
 
         // 3. Insert d as the first element of functionsToInitialize.
+        // NOTE: Since prepending is much slower, we just append
+        //       and iterate in reverse order in step 17 below.
         functions_to_initialize.append(function);
         return {};
     }));
@@ -958,10 +979,13 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, Program const& pr
     }));
 
     // 17. For each Parse Node f of functionsToInitialize, do
-    for (auto& declaration : functions_to_initialize) {
+    // NOTE: We iterate in reverse order since we appended the functions
+    //       instead of prepending. We append because prepending is much slower
+    //       and we only use the created vector here.
+    for (auto& declaration : functions_to_initialize.in_reverse()) {
         // a. Let fn be the sole element of the BoundNames of f.
         // b. Let fo be InstantiateFunctionObject of f with arguments lexEnv and privateEnv.
-        auto* function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), lexical_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object());
+        auto function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), lexical_environment, private_environment, declaration.kind(), declaration.is_strict_mode(), declaration.might_need_arguments_object());
 
         // c. If varEnv is a global Environment Record, then
         if (global_var_environment) {
@@ -1029,7 +1053,7 @@ Object* create_unmapped_arguments_object(VM& vm, Span<Value> arguments)
 
     // 2. Let obj be OrdinaryObjectCreate(%Object.prototype%, « [[ParameterMap]] »).
     // 3. Set obj.[[ParameterMap]] to undefined.
-    auto* object = Object::create(realm, realm.intrinsics().object_prototype());
+    auto object = Object::create(realm, realm.intrinsics().object_prototype());
     object->set_has_parameter_map();
 
     // 4. Perform ! DefinePropertyOrThrow(obj, "length", PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
@@ -1060,7 +1084,7 @@ Object* create_unmapped_arguments_object(VM& vm, Span<Value> arguments)
 }
 
 // 10.4.4.7 CreateMappedArgumentsObject ( func, formals, argumentsList, env ), https://tc39.es/ecma262/#sec-createmappedargumentsobject
-Object* create_mapped_arguments_object(VM& vm, FunctionObject& function, Vector<FunctionNode::Parameter> const& formals, Span<Value> arguments, Environment& environment)
+Object* create_mapped_arguments_object(VM& vm, FunctionObject& function, Vector<FunctionParameter> const& formals, Span<Value> arguments, Environment& environment)
 {
     auto& realm = *vm.current_realm();
 
@@ -1077,7 +1101,7 @@ Object* create_mapped_arguments_object(VM& vm, FunctionObject& function, Vector<
     // 7. Set obj.[[Set]] as specified in 10.4.4.4.
     // 8. Set obj.[[Delete]] as specified in 10.4.4.5.
     // 9. Set obj.[[Prototype]] to %Object.prototype%.
-    auto* object = vm.heap().allocate<ArgumentsObject>(realm, realm, environment);
+    auto object = vm.heap().allocate<ArgumentsObject>(realm, realm, environment);
 
     // 14. Let index be 0.
     // 15. Repeat, while index < len,
@@ -1203,13 +1227,13 @@ CanonicalIndex canonical_numeric_index_string(PropertyKey const& property_key, C
     return CanonicalIndex(CanonicalIndex::Type::Undefined, 0);
 }
 
-// 22.1.3.17.1 GetSubstitution ( matched, str, position, captures, namedCaptures, replacement ), https://tc39.es/ecma262/#sec-getsubstitution
-ThrowCompletionOr<String> get_substitution(VM& vm, Utf16View const& matched, Utf16View const& str, size_t position, Span<Value> captures, Value named_captures, Value replacement)
+// 22.1.3.18.1 GetSubstitution ( matched, str, position, captures, namedCaptures, replacementTemplate ), https://tc39.es/ecma262/#sec-getsubstitution
+ThrowCompletionOr<DeprecatedString> get_substitution(VM& vm, Utf16View const& matched, Utf16View const& str, size_t position, Span<Value> captures, Value named_captures, Value replacement_template)
 {
-    auto replace_string = TRY(replacement.to_utf16_string(vm));
+    auto replace_string = TRY(replacement_template.to_utf16_string(vm));
     auto replace_view = replace_string.view();
 
-    StringBuilder result;
+    Vector<u16, 1> result;
 
     for (size_t i = 0; i < replace_view.length_in_code_units(); ++i) {
         u16 curr = replace_view.code_unit_at(i);
@@ -1225,17 +1249,17 @@ ThrowCompletionOr<String> get_substitution(VM& vm, Utf16View const& matched, Utf
             result.append('$');
             ++i;
         } else if (next == '&') {
-            result.append(matched);
+            result.append(matched.data(), matched.length_in_code_units());
             ++i;
         } else if (next == '`') {
             auto substring = str.substring_view(0, position);
-            result.append(substring);
+            result.append(substring.data(), substring.length_in_code_units());
             ++i;
         } else if (next == '\'') {
             auto tail_pos = position + matched.length_in_code_units();
             if (tail_pos < str.length_in_code_units()) {
                 auto substring = str.substring_view(tail_pos);
-                result.append(substring);
+                result.append(substring.data(), substring.length_in_code_units());
             }
             ++i;
         } else if (is_ascii_digit(next)) {
@@ -1248,8 +1272,8 @@ ThrowCompletionOr<String> get_substitution(VM& vm, Utf16View const& matched, Utf
                 auto& value = captures[*capture_position - 1];
 
                 if (!value.is_undefined()) {
-                    auto value_string = TRY(value.to_string(vm));
-                    result.append(value_string);
+                    auto value_string = TRY(value.to_utf16_string(vm));
+                    result.append(value_string.view().data(), value_string.length_in_code_units());
                 }
 
                 i += is_two_digits ? 2 : 1;
@@ -1276,8 +1300,8 @@ ThrowCompletionOr<String> get_substitution(VM& vm, Utf16View const& matched, Utf
                 auto capture = TRY(named_captures.as_object().get(group_name));
 
                 if (!capture.is_undefined()) {
-                    auto capture_string = TRY(capture.to_string(vm));
-                    result.append(capture_string);
+                    auto capture_string = TRY(capture.to_utf16_string(vm));
+                    result.append(capture_string.view().data(), capture_string.length_in_code_units());
                 }
 
                 i = *end_position;
@@ -1287,7 +1311,7 @@ ThrowCompletionOr<String> get_substitution(VM& vm, Utf16View const& matched, Utf
         }
     }
 
-    return result.build();
+    return Utf16String(move(result)).to_utf8();
 }
 
 }

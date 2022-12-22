@@ -7,9 +7,9 @@
 
 #include <LibTest/TestCase.h>
 
+#include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
 #include <AK/Result.h>
-#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
 #include <AK/TypeCasts.h>
@@ -31,7 +31,7 @@ public:
     }
 };
 
-using ParseResult = AK::Result<NonnullRefPtr<SQL::AST::Expression>, String>;
+using ParseResult = AK::Result<NonnullRefPtr<SQL::AST::Expression>, DeprecatedString>;
 
 ParseResult parse(StringView sql)
 {
@@ -39,7 +39,7 @@ ParseResult parse(StringView sql)
     auto expression = parser.parse();
 
     if (parser.has_errors()) {
-        return parser.errors()[0].to_string();
+        return parser.errors()[0].to_deprecated_string();
     }
 
     return expression;
@@ -129,6 +129,19 @@ TEST_CASE(null_literal)
     };
 
     validate("NULL"sv);
+}
+
+TEST_CASE(bind_parameter)
+{
+    auto validate = [](StringView sql) {
+        auto result = parse(sql);
+        EXPECT(!result.is_error());
+
+        auto expression = result.release_value();
+        EXPECT(is<SQL::AST::Placeholder>(*expression));
+    };
+
+    validate("?"sv);
 }
 
 TEST_CASE(column_name)
@@ -633,7 +646,7 @@ TEST_CASE(in_selection_expression)
 
 TEST_CASE(expression_tree_depth_limit)
 {
-    auto too_deep_expression = String::formatted("{:+^{}}1", "", SQL::AST::Limits::maximum_expression_tree_depth);
+    auto too_deep_expression = DeprecatedString::formatted("{:+^{}}1", "", SQL::AST::Limits::maximum_expression_tree_depth);
     EXPECT(!parse(too_deep_expression.substring_view(1)).is_error());
     EXPECT(parse(too_deep_expression).is_error());
 }

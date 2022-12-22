@@ -23,11 +23,12 @@ struct ScaleFactorBand;
 
 class MP3LoaderPlugin : public LoaderPlugin {
 public:
-    explicit MP3LoaderPlugin(StringView path);
-    explicit MP3LoaderPlugin(Bytes buffer);
+    explicit MP3LoaderPlugin(NonnullOwnPtr<Core::Stream::SeekableStream> stream);
     virtual ~MP3LoaderPlugin() = default;
 
-    virtual MaybeLoaderError initialize() override;
+    static Result<NonnullOwnPtr<MP3LoaderPlugin>, LoaderError> try_create(StringView path);
+    static Result<NonnullOwnPtr<MP3LoaderPlugin>, LoaderError> try_create(Bytes buffer);
+
     virtual LoaderSamples get_more_samples(size_t max_bytes_to_read_from_input = 128 * KiB) override;
 
     virtual MaybeLoaderError reset() override;
@@ -38,9 +39,10 @@ public:
     virtual u32 sample_rate() override { return m_sample_rate; }
     virtual u16 num_channels() override { return m_num_channels; }
     virtual PcmSampleFormat pcm_format() override { return m_sample_format; }
-    virtual String format_name() override { return "MP3 (.mp3)"; }
+    virtual DeprecatedString format_name() override { return "MP3 (.mp3)"; }
 
 private:
+    MaybeLoaderError initialize();
     MaybeLoaderError synchronize();
     MaybeLoaderError build_seek_table();
     ErrorOr<MP3::Header, LoaderError> read_header();

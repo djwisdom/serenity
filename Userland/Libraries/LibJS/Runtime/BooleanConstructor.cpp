@@ -37,7 +37,7 @@ ThrowCompletionOr<Value> BooleanConstructor::call()
 }
 
 // 20.3.1.1 Boolean ( value ), https://tc39.es/ecma262/#sec-boolean-constructor-boolean-value
-ThrowCompletionOr<Object*> BooleanConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> BooleanConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 

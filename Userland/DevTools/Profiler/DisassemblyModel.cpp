@@ -48,7 +48,7 @@ DisassemblyModel::DisassemblyModel(Profile& profile, ProfileNode& node)
         if (elf == nullptr)
             return;
         if (g_kernel_debug_info == nullptr)
-            g_kernel_debug_info = make<Debug::DebugInfo>(g_kernel_debuginfo_object->elf, String::empty(), base_address);
+            g_kernel_debug_info = make<Debug::DebugInfo>(g_kernel_debuginfo_object->elf, DeprecatedString::empty(), base_address);
         debug_info = g_kernel_debug_info.ptr();
     } else {
         auto const& process = node.process();
@@ -107,11 +107,11 @@ DisassemblyModel::DisassemblyModel(Profile& profile, ProfileNode& node)
             break;
 
         auto insn = disassembler.next();
-        if (!insn.has_value() || !insn.value().is_valid())
+        if (!insn.has_value())
             break;
         FlatPtr address_in_profiled_program = node.address() + offset_into_symbol;
 
-        auto disassembly = insn.value().to_string(address_in_profiled_program, &symbol_provider);
+        auto disassembly = insn.value().to_deprecated_string(address_in_profiled_program, &symbol_provider);
 
         StringView instruction_bytes = view.substring_view(offset_into_symbol, insn.value().length());
         u32 samples_at_this_instruction = m_node.events_per_address().get(address_in_profiled_program).value_or(0);
@@ -128,7 +128,7 @@ int DisassemblyModel::row_count(GUI::ModelIndex const&) const
     return m_instructions.size();
 }
 
-String DisassemblyModel::column_name(int column) const
+DeprecatedString DisassemblyModel::column_name(int column) const
 {
     switch (column) {
     case Column::SampleCount:
@@ -192,14 +192,14 @@ GUI::Variant DisassemblyModel::data(GUI::ModelIndex const& index, GUI::ModelRole
         }
 
         if (index.column() == Column::Address)
-            return String::formatted("{:p}", insn.address);
+            return DeprecatedString::formatted("{:p}", insn.address);
 
         if (index.column() == Column::InstructionBytes) {
             StringBuilder builder;
             for (auto ch : insn.bytes) {
                 builder.appendff("{:02x} ", (u8)ch);
             }
-            return builder.to_string();
+            return builder.to_deprecated_string();
         }
 
         if (index.column() == Column::Disassembly)
