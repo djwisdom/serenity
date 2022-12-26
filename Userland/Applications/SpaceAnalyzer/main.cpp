@@ -364,12 +364,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         while (try_again) {
             try_again = false;
 
-            auto deletion_result = Core::File::remove(selected_node_path, Core::File::RecursionMode::Allowed, true);
+            auto deletion_result = Core::File::remove(selected_node_path, Core::File::RecursionMode::Allowed);
             if (deletion_result.is_error()) {
                 auto retry_message_result = GUI::MessageBox::show(window,
                     DeprecatedString::formatted("Failed to delete \"{}\": {}. Retry?",
-                        deletion_result.error().file,
-                        static_cast<Error const&>(deletion_result.error())),
+                        selected_node_path,
+                        deletion_result.error()),
                     "Deletion failed"sv,
                     GUI::MessageBox::Type::Error,
                     GUI::MessageBox::InputType::YesNo);

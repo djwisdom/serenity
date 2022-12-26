@@ -25,6 +25,8 @@ get_filename_component(
 )
 set(SerenityOS_SOURCE_DIR "${SERENITY_PROJECT_ROOT}" CACHE STRING "")
 
+set(SERENITY_CACHE_DIR "${PROJECT_BINARY_DIR}" CACHE STRING "")
+
 list(APPEND CMAKE_MODULE_PATH "${SERENITY_PROJECT_ROOT}/Meta/CMake")
 
 if(NOT COMMAND serenity_option)
@@ -38,6 +40,11 @@ include(lagom_options NO_POLICY_SCOPE)
 
 if(ENABLE_ALL_THE_DEBUG_MACROS)
     include(all_the_debug_macros)
+endif()
+
+# FIXME: Is it worth inventing `serenity_dependent_option` ?
+if (ENABLE_LAGOM_LADYBIRD)
+    set(ENABLE_LAGOM_LIBWEB ON CACHE BOOL "" FORCE)
 endif()
 
 # FIXME: BUILD_SHARED_LIBS has a default of OFF, as it's intended to be set by the
@@ -111,6 +118,13 @@ endif()
 
 if (ENABLE_FUZZERS)
     add_compile_options(-fno-omit-frame-pointer)
+endif()
+
+if (ENABLE_LAGOM_LADYBIRD AND (ENABLE_FUZZERS OR ENABLE_COMPILER_EXPLORER_BUILD))
+    message(FATAL_ERROR
+        "Ladybird build not supported for Fuzzers or Compiler Explorer."
+        "Disable ENABLE_LAGOM_LADYBIRD and try again."
+    )
 endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
@@ -438,6 +452,10 @@ if (BUILD_LAGOM)
     endif()
 
     add_serenity_subdirectory(Userland/Shell)
+
+    if (ENABLE_LAGOM_LADYBIRD)
+        add_serenity_subdirectory(Ladybird)
+    endif()
 
     if (NOT ENABLE_FUZZERS AND NOT ENABLE_COMPILER_EXPLORER_BUILD AND NOT ANDROID)
         # Lagom Services
