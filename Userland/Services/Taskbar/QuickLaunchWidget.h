@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <AK/Error.h>
+#include <AK/RefPtr.h>
 #include <LibConfig/Listener.h>
 #include <LibCore/FileWatcher.h>
 #include <LibDesktop/AppFile.h>
@@ -78,6 +80,7 @@ class QuickLaunchWidget : public GUI::Frame
     C_OBJECT(QuickLaunchWidget);
 
 public:
+    static ErrorOr<NonnullRefPtr<QuickLaunchWidget>> create();
     virtual ~QuickLaunchWidget() override = default;
 
     virtual void config_key_was_removed(DeprecatedString const&, DeprecatedString const&, DeprecatedString const&) override;
@@ -87,8 +90,11 @@ public:
     virtual void drop_event(GUI::DropEvent&) override;
 
 private:
-    QuickLaunchWidget();
-    void add_or_adjust_button(DeprecatedString const&, NonnullOwnPtr<QuickLaunchEntry>&&);
+    explicit QuickLaunchWidget();
+    ErrorOr<void> add_or_adjust_button(DeprecatedString const&, NonnullOwnPtr<QuickLaunchEntry>&&);
+    ErrorOr<void> create_context_menu();
+    ErrorOr<void> add_quick_launch_buttons(Vector<NonnullOwnPtr<QuickLaunchEntry>> entries);
+
     RefPtr<GUI::Menu> m_context_menu;
     RefPtr<GUI::Action> m_context_menu_default_action;
     DeprecatedString m_context_menu_app_name;

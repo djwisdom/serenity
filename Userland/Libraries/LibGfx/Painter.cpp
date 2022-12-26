@@ -1150,6 +1150,8 @@ void Painter::blit(IntPoint position, Gfx::Bitmap const& source, IntRect const& 
 template<bool has_alpha_channel, typename GetPixel>
 ALWAYS_INLINE static void do_draw_integer_scaled_bitmap(Gfx::Bitmap& target, IntRect const& dst_rect, IntRect const& src_rect, Gfx::Bitmap const& source, int hfactor, int vfactor, GetPixel get_pixel, float opacity)
 {
+    int x_limit = min(target.physical_width() - 1, dst_rect.right());
+    int y_limit = min(target.physical_height() - 1, dst_rect.bottom());
     bool has_opacity = opacity != 1.0f;
     for (int y = 0; y < src_rect.height(); ++y) {
         int dst_y = dst_rect.y() + y * vfactor;
@@ -1157,10 +1159,10 @@ ALWAYS_INLINE static void do_draw_integer_scaled_bitmap(Gfx::Bitmap& target, Int
             auto src_pixel = get_pixel(source, x + src_rect.left(), y + src_rect.top());
             if (has_opacity)
                 src_pixel.set_alpha(src_pixel.alpha() * opacity);
-            for (int yo = 0; yo < vfactor; ++yo) {
+            for (int yo = 0; yo < vfactor && dst_y + yo <= y_limit; ++yo) {
                 auto* scanline = (Color*)target.scanline(dst_y + yo);
                 int dst_x = dst_rect.x() + x * hfactor;
-                for (int xo = 0; xo < hfactor; ++xo) {
+                for (int xo = 0; xo < hfactor && dst_x + xo <= x_limit; ++xo) {
                     if constexpr (has_alpha_channel)
                         scanline[dst_x + xo] = scanline[dst_x + xo].blend(src_pixel);
                     else
@@ -1178,6 +1180,12 @@ ALWAYS_INLINE static void do_draw_scaled_bitmap(Gfx::Bitmap& target, IntRect con
     auto clipped_src_rect = int_src_rect.intersected(source.rect());
     if (clipped_src_rect.is_empty())
         return;
+
+    if (scaling_mode == Painter::ScalingMode::NearestFractional) {
+        int hfactor = (dst_rect.width() + int_src_rect.width() - 1) / int_src_rect.width();
+        int vfactor = (dst_rect.height() + int_src_rect.height() - 1) / int_src_rect.height();
+        return do_draw_integer_scaled_bitmap<has_alpha_channel>(target, dst_rect, int_src_rect, source, hfactor, vfactor, get_pixel, opacity);
+    }
 
     if constexpr (scaling_mode == Painter::ScalingMode::NearestNeighbor || scaling_mode == Painter::ScalingMode::SmoothPixels) {
         if (dst_rect == clipped_rect && int_src_rect == src_rect && !(dst_rect.width() % int_src_rect.width()) && !(dst_rect.height() % int_src_rect.height())) {
@@ -1280,6 +1288,9 @@ template<bool has_alpha_channel, typename GetPixel>
 ALWAYS_INLINE static void do_draw_scaled_bitmap(Gfx::Bitmap& target, IntRect const& dst_rect, IntRect const& clipped_rect, Gfx::Bitmap const& source, FloatRect const& src_rect, GetPixel get_pixel, float opacity, Painter::ScalingMode scaling_mode)
 {
     switch (scaling_mode) {
+    case Painter::ScalingMode::NearestFractional:
+        do_draw_scaled_bitmap<has_alpha_channel, Painter::ScalingMode::NearestFractional>(target, dst_rect, clipped_rect, source, src_rect, get_pixel, opacity);
+        break;
     case Painter::ScalingMode::NearestNeighbor:
         do_draw_scaled_bitmap<has_alpha_channel, Painter::ScalingMode::NearestNeighbor>(target, dst_rect, clipped_rect, source, src_rect, get_pixel, opacity);
         break;
@@ -1831,7 +1842,14 @@ void Painter::set_pixel(IntPoint p, Color color, bool blend)
     // scaling and call set_pixel() -- do not scale the pixel.
     if (!clip_rect().contains(point / scale()))
         return;
-    auto& dst = m_target->scanline(point.y())[point.x()];
+    set_physical_pixel(point, color, blend);
+}
+
+void Painter::set_physical_pixel(IntPoint physical_point, Color color, bool blend)
+{
+    // This function should only be called after translation, clipping, etc has been handled elsewhere
+    // if not use set_pixel().
+    auto& dst = m_target->scanline(physical_point.y())[physical_point.x()];
     if (!blend || color.alpha() == 255)
         dst = color.value();
     else if (color.alpha())

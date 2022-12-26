@@ -1,18 +1,22 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Thomas Keppler <serenity@tkeppler.de>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Base64.h>
 #include <AK/FileStream.h>
 #include <AK/GenericLexer.h>
 #include <AK/LexicalPath.h>
 #include <AK/NumberFormat.h>
+#include <AK/String.h>
 #include <AK/URL.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/File.h>
 #include <LibCore/System.h>
+#include <LibHTTP/HttpResponse.h>
 #include <LibMain/Main.h>
 #include <LibProtocol/Request.h>
 #include <LibProtocol/RequestClient.h>
@@ -151,11 +155,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     StringView url_str;
     bool save_at_provided_name = false;
     bool should_follow_url = false;
+    bool verbose_output = false;
     char const* data = nullptr;
     StringView proxy_spec;
     DeprecatedString method = "GET";
     StringView method_override;
     HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> request_headers;
+    String credentials;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help(
@@ -170,7 +176,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         .help_string = "Add a header entry to the request",
         .long_name = "header",
         .short_name = 'H',
-        .value_name = "header-value",
+        .value_name = "key:value",
         .accept_value = [&](auto* s) {
             StringView header { s, strlen(s) };
             auto split = header.find(':');
@@ -179,7 +185,28 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             request_headers.set(header.substring_view(0, split.value()), header.substring_view(split.value() + 1));
             return true;
         } });
+    args_parser.add_option(Core::ArgsParser::Option {
+        .argument_mode = Core::ArgsParser::OptionArgumentMode::Required,
+        .help_string = "(HTTP only) Provide basic authentication credentials",
+        .long_name = "auth",
+        .short_name = 'u',
+        .value_name = "username:password",
+        .accept_value = [&](auto* s) {
+            StringView input { s, strlen(s) };
+            if (!input.contains(':'))
+                return false;
+
+            // NOTE: Input is explicitly not trimmed, but instad taken in raw;
+            //       Space prepended usernames and appended passwords might be legal in the user's context.
+            auto maybe_credentials = String::from_utf8(input);
+            if (maybe_credentials.is_error())
+                return false;
+
+            credentials = maybe_credentials.release_value();
+            return true;
+        } });
     args_parser.add_option(proxy_spec, "Specify a proxy server to use for this request (proto://ip:port)", "proxy", 'p', "proxy");
+    args_parser.add_option(verbose_output, "(HTTP only) Log request and response metadata", "verbose", 'v');
     args_parser.add_positional_argument(url_str, "URL to download from", "url");
     args_parser.parse(arguments);
 
@@ -195,6 +222,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         warnln("'{}' is not a valid URL", url_str);
         return 1;
     }
+
+    bool const is_http_url = url.scheme().is_one_of("http"sv, "https"sv);
 
     Core::ProxyData proxy_data {};
     if (!proxy_spec.is_empty())
@@ -216,10 +245,35 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto protocol_client = TRY(Protocol::RequestClient::try_create());
     auto output_stream = ConditionalOutputFileStream { [&] { return should_save_stream_data; }, stdout };
 
+    // https://httpwg.org/specs/rfc9110.html#authentication
+    auto const has_credentials = !credentials.is_empty();
+    auto const has_manual_authorization_header = request_headers.contains("Authorization");
+    if (is_http_url && has_credentials && !has_manual_authorization_header) {
+        // 11.2. Authentication Parameters
+        // The authentication scheme is followed by additional information necessary for achieving authentication via
+        // that scheme as (...) or a single sequence of characters capable of holding base64-encoded information.
+        auto const encoded_credentials = TRY(encode_base64(credentials.bytes()));
+        auto const authorization = TRY(String::formatted("Basic {}", encoded_credentials));
+        request_headers.set("Authorization", authorization.to_deprecated_string());
+    } else {
+        if (is_http_url && has_credentials && has_manual_authorization_header)
+            warnln("* Skipping encoding provided authorization, manual header present.");
+        if (!is_http_url && has_credentials)
+            warnln("* Skipping adding Authorization header, request was not for the HTTP protocol.");
+    }
+
     Function<void()> setup_request = [&] {
         if (!request) {
             warnln("Failed to start request for '{}'", url_str);
             exit(1);
+        }
+
+        if (verbose_output && is_http_url) {
+            warnln("* Setting up request");
+            warnln("> Method={}, URL={}", method, url);
+            for (auto const& header : request_headers) {
+                warnln("> {}: {}", header.key, header.value);
+            }
         }
 
         request->on_progress = [&](Optional<u32> maybe_total_size, u32 downloaded_size) {
@@ -251,6 +305,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             dbgln("Received headers! response code = {}", status_code.value_or(0));
             received_actual_headers = true; // And not trailers!
             should_save_stream_data = true;
+
+            if (verbose_output && is_http_url) {
+                warnln("* Received headers");
+                auto const value = status_code.value_or(0);
+                auto const reason_phrase = (value != 0)
+                    ? HTTP::HttpResponse::reason_phrase_for_code(value)
+                    : "UNKNOWN"sv;
+                warnln("< Code={}, Reason={}", value, reason_phrase);
+                for (auto const& header : response_headers) {
+                    warnln("< {}: {}", header.key, header.value);
+                }
+            }
 
             if (!following_url && save_at_provided_name) {
                 DeprecatedString output_name;
