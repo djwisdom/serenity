@@ -5,6 +5,7 @@
  */
 
 #include "../LibUnicode/GeneratorUtil.h" // FIXME: Move this somewhere common.
+#include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/HashMap.h>
 #include <AK/JsonObject.h>
@@ -12,19 +13,12 @@
 #include <AK/JsonValue.h>
 #include <AK/LexicalPath.h>
 #include <AK/SourceGenerator.h>
-#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DirIterator.h>
 #include <LibCore/Stream.h>
 #include <LibLocale/Locale.h>
 #include <LibLocale/RelativeTimeFormat.h>
-
-using StringIndexType = u16;
-constexpr auto s_string_index_type = "u16"sv;
-
-using RelativeTimeFormatIndexType = u16;
-constexpr auto s_relative_time_format_index_type = "u16"sv;
 
 struct RelativeTimeFormat {
     unsigned hash() const
@@ -46,11 +40,11 @@ struct RelativeTimeFormat {
             && (pattern == other.pattern);
     }
 
-    String time_unit;
-    String style;
-    String plurality;
-    StringIndexType tense_or_number { 0 };
-    StringIndexType pattern { 0 };
+    DeprecatedString time_unit;
+    DeprecatedString style;
+    DeprecatedString plurality;
+    size_t tense_or_number { 0 };
+    size_t pattern { 0 };
 };
 
 template<>
@@ -73,17 +67,17 @@ struct AK::Traits<RelativeTimeFormat> : public GenericTraits<RelativeTimeFormat>
 };
 
 struct LocaleData {
-    Vector<RelativeTimeFormatIndexType> time_units;
+    Vector<size_t> time_units;
 };
 
 struct CLDR {
-    UniqueStringStorage<StringIndexType> unique_strings;
-    UniqueStorage<RelativeTimeFormat, RelativeTimeFormatIndexType> unique_formats;
+    UniqueStringStorage unique_strings;
+    UniqueStorage<RelativeTimeFormat> unique_formats;
 
-    HashMap<String, LocaleData> locales;
+    HashMap<DeprecatedString, LocaleData> locales;
 };
 
-static ErrorOr<void> parse_date_fields(String locale_dates_path, CLDR& cldr, LocaleData& locale)
+static ErrorOr<void> parse_date_fields(DeprecatedString locale_dates_path, CLDR& cldr, LocaleData& locale)
 {
     LexicalPath date_fields_path(move(locale_dates_path));
     date_fields_path = date_fields_path.append("dateFields.json"sv);
@@ -142,12 +136,12 @@ static ErrorOr<void> parse_date_fields(String locale_dates_path, CLDR& cldr, Loc
     return {};
 }
 
-static ErrorOr<void> parse_all_locales(String dates_path, CLDR& cldr)
+static ErrorOr<void> parse_all_locales(DeprecatedString dates_path, CLDR& cldr)
 {
     auto dates_iterator = TRY(path_to_dir_iterator(move(dates_path)));
 
-    auto remove_variants_from_path = [&](String path) -> ErrorOr<String> {
-        auto parsed_locale = TRY(CanonicalLanguageID<StringIndexType>::parse(cldr.unique_strings, LexicalPath::basename(path)));
+    auto remove_variants_from_path = [&](DeprecatedString path) -> ErrorOr<DeprecatedString> {
+        auto parsed_locale = TRY(CanonicalLanguageID::parse(cldr.unique_strings, LexicalPath::basename(path)));
 
         StringBuilder builder;
         builder.append(cldr.unique_strings.get(parsed_locale.language));
@@ -195,8 +189,8 @@ static ErrorOr<void> generate_unicode_locale_implementation(Core::Stream::Buffer
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
-    generator.set("string_index_type"sv, s_string_index_type);
-    generator.set("relative_time_format_index_type"sv, s_relative_time_format_index_type);
+    generator.set("string_index_type"sv, cldr.unique_strings.type_that_fits());
+    generator.set("relative_time_format_index_type"sv, cldr.unique_formats.type_that_fits());
 
     generator.append(R"~~~(
 #include <AK/Array.h>
@@ -233,9 +227,9 @@ struct RelativeTimeFormatImpl {
 
     cldr.unique_formats.generate(generator, "RelativeTimeFormatImpl"sv, "s_relative_time_formats"sv, 10);
 
-    auto append_list = [&](String name, auto const& list) {
+    auto append_list = [&](DeprecatedString name, auto const& list) {
         generator.set("name", name);
-        generator.set("size", String::number(list.size()));
+        generator.set("size", DeprecatedString::number(list.size()));
 
         generator.append(R"~~~(
 static constexpr Array<@relative_time_format_index_type@, @size@> @name@ { {)~~~");
@@ -243,14 +237,14 @@ static constexpr Array<@relative_time_format_index_type@, @size@> @name@ { {)~~~
         bool first = true;
         for (auto index : list) {
             generator.append(first ? " "sv : ", "sv);
-            generator.append(String::number(index));
+            generator.append(DeprecatedString::number(index));
             first = false;
         }
 
         generator.append(" } };");
     };
 
-    generate_mapping(generator, cldr.locales, s_relative_time_format_index_type, "s_locale_relative_time_formats"sv, "s_number_systems_digits_{}"sv, nullptr, [&](auto const& name, auto const& value) { append_list(name, value.time_units); });
+    generate_mapping(generator, cldr.locales, cldr.unique_formats.type_that_fits(), "s_locale_relative_time_formats"sv, "s_number_systems_digits_{}"sv, nullptr, [&](auto const& name, auto const& value) { append_list(name, value.time_units); });
 
     generator.append(R"~~~(
 Vector<RelativeTimeFormat> get_relative_time_format_patterns(StringView locale, TimeUnit time_unit, StringView tense_or_number, Style style)

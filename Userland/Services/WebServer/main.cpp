@@ -1,10 +1,12 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Max Wipfli <mail@maxwipfli.ch>
+ * Copyright (c) 2022, Thomas Keppler <serenity@tkeppler.de>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/String.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/File.h>
@@ -20,21 +22,22 @@
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    String default_listen_address = "0.0.0.0";
-    u16 default_port = 8000;
-    String root_path = "/www";
+    static auto const default_listen_address = TRY(String::from_utf8("0.0.0.0"sv));
+    static auto const default_port = 8000;
+    static auto const default_document_root_path = TRY(String::from_utf8("/www"sv));
 
-    String listen_address = default_listen_address;
+    DeprecatedString listen_address = default_listen_address.to_deprecated_string();
     int port = default_port;
-    String username;
-    String password;
+    DeprecatedString username;
+    DeprecatedString password;
+    DeprecatedString document_root_path = default_document_root_path.to_deprecated_string();
 
     Core::ArgsParser args_parser;
     args_parser.add_option(listen_address, "IP address to listen on", "listen-address", 'l', "listen_address");
     args_parser.add_option(port, "Port to listen on", "port", 'p', "port");
     args_parser.add_option(username, "HTTP basic authentication username", "user", 'U', "username");
     args_parser.add_option(password, "HTTP basic authentication password", "pass", 'P', "password");
-    args_parser.add_positional_argument(root_path, "Path to serve the contents of", "path", Core::ArgsParser::Required::No);
+    args_parser.add_positional_argument(document_root_path, "Path to serve the contents of", "path", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
     auto ipv4_address = IPv4Address::from_string(listen_address);
@@ -53,19 +56,19 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    auto real_root_path = Core::File::real_path_for(root_path);
-
-    if (!Core::File::exists(real_root_path)) {
-        warnln("Root path does not exist: '{}'", root_path);
+    auto real_document_root_path = Core::File::real_path_for(document_root_path);
+    if (!Core::File::exists(real_document_root_path)) {
+        warnln("Root path does not exist: '{}'", document_root_path);
         return 1;
     }
 
     TRY(Core::System::pledge("stdio accept rpath inet unix"));
 
-    WebServer::Configuration configuration(real_root_path);
-
+    Optional<HTTP::HttpRequest::BasicAuthenticationCredentials> credentials;
     if (!username.is_empty() && !password.is_empty())
-        configuration.set_credentials(HTTP::HttpRequest::BasicAuthenticationCredentials { username, password });
+        credentials = HTTP::HttpRequest::BasicAuthenticationCredentials { username, password };
+
+    WebServer::Configuration configuration(real_document_root_path, credentials);
 
     Core::EventLoop loop;
 
@@ -99,7 +102,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(Core::System::unveil("/etc/timezone", "r"));
     TRY(Core::System::unveil("/res/icons", "r"));
-    TRY(Core::System::unveil(real_root_path, "r"sv));
+    TRY(Core::System::unveil(real_document_root_path, "r"sv));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     TRY(Core::System::pledge("stdio accept rpath"));

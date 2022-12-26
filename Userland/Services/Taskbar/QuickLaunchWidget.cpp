@@ -6,6 +6,7 @@
 
 #include "QuickLaunchWidget.h"
 #include <AK/LexicalPath.h>
+#include <AK/OwnPtr.h>
 #include <Kernel/API/InodeWatcherFlags.h>
 #include <LibConfig/Client.h>
 #include <LibCore/FileWatcher.h>
@@ -57,7 +58,7 @@ GUI::Icon QuickLaunchEntryExecutable::icon() const
     return GUI::FileIconProvider::icon_for_executable(m_path);
 }
 
-String QuickLaunchEntryExecutable::name() const
+DeprecatedString QuickLaunchEntryExecutable::name() const
 {
     return LexicalPath { m_path }.basename();
 }
@@ -76,10 +77,29 @@ GUI::Icon QuickLaunchEntryFile::icon() const
     return GUI::FileIconProvider::icon_for_path(m_path);
 }
 
-String QuickLaunchEntryFile::name() const
+DeprecatedString QuickLaunchEntryFile::name() const
 {
     // '=' is a special character in config files
     return m_path;
+}
+
+ErrorOr<NonnullRefPtr<QuickLaunchWidget>> QuickLaunchWidget::create()
+{
+    Vector<NonnullOwnPtr<QuickLaunchEntry>> entries;
+    auto keys = Config::list_keys("Taskbar"sv, quick_launch);
+    for (auto& name : keys) {
+        auto value = Config::read_string("Taskbar"sv, quick_launch, name);
+        auto entry = QuickLaunchEntry::create_from_config_value(value);
+        if (!entry)
+            continue;
+
+        entries.append(entry.release_nonnull());
+    }
+
+    auto widget = TRY(AK::adopt_nonnull_ref_or_enomem(new (nothrow) QuickLaunchWidget()));
+    TRY(widget->create_context_menu());
+    TRY(widget->add_quick_launch_buttons(move(entries)));
+    return widget;
 }
 
 QuickLaunchWidget::QuickLaunchWidget()
@@ -89,9 +109,13 @@ QuickLaunchWidget::QuickLaunchWidget()
     layout()->set_spacing(0);
     set_frame_thickness(0);
     set_fixed_height(24);
+}
 
+ErrorOr<void> QuickLaunchWidget::create_context_menu()
+{
+    auto icon = TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/delete.png"sv));
     m_context_menu = GUI::Menu::construct();
-    m_context_menu_default_action = GUI::Action::create("&Remove", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/delete.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+    m_context_menu_default_action = GUI::Action::create("&Remove", icon, [this](auto&) {
         Config::remove_key("Taskbar"sv, quick_launch, m_context_menu_app_name);
         auto button = find_child_of_type_named<GUI::Button>(m_context_menu_app_name);
         if (button) {
@@ -100,20 +124,23 @@ QuickLaunchWidget::QuickLaunchWidget()
     });
     m_context_menu->add_action(*m_context_menu_default_action);
 
-    auto keys = Config::list_keys("Taskbar"sv, quick_launch);
-    for (auto& name : keys) {
-        auto value = Config::read_string("Taskbar"sv, quick_launch, name);
-        auto entry = QuickLaunchEntry::create_from_config_value(value);
-        if (!entry)
-            continue;
-        add_or_adjust_button(name, entry.release_nonnull());
+    return {};
+}
+
+ErrorOr<void> QuickLaunchWidget::add_quick_launch_buttons(Vector<NonnullOwnPtr<QuickLaunchEntry>> entries)
+{
+    for (auto& entry : entries) {
+        auto name = entry->name();
+        TRY(add_or_adjust_button(name, move(entry)));
     }
+
+    return {};
 }
 
 OwnPtr<QuickLaunchEntry> QuickLaunchEntry::create_from_config_value(StringView value)
 {
     if (!value.starts_with('/') && value.ends_with(".af"sv)) {
-        auto af_path = String::formatted("{}/{}", Desktop::AppFile::APP_FILES_DIRECTORY, value);
+        auto af_path = DeprecatedString::formatted("{}/{}", Desktop::AppFile::APP_FILES_DIRECTORY, value);
         return make<QuickLaunchEntryAppFile>(Desktop::AppFile::open(af_path));
     }
     return create_from_path(value);
@@ -135,18 +162,17 @@ OwnPtr<QuickLaunchEntry> QuickLaunchEntry::create_from_path(StringView path)
     return make<QuickLaunchEntryFile>(path);
 }
 
-static String sanitize_entry_name(String const& name)
+static DeprecatedString sanitize_entry_name(DeprecatedString const& name)
 {
     return name.replace(" "sv, ""sv, ReplaceMode::All).replace("="sv, ""sv, ReplaceMode::All);
 }
 
-void QuickLaunchWidget::add_or_adjust_button(String const& button_name, NonnullOwnPtr<QuickLaunchEntry>&& entry)
+ErrorOr<void> QuickLaunchWidget::add_or_adjust_button(DeprecatedString const& button_name, NonnullOwnPtr<QuickLaunchEntry>&& entry)
 {
     auto file_name_to_watch = entry->file_name_to_watch();
     if (!file_name_to_watch.is_null()) {
         if (!m_watcher) {
-            // FIXME: Propagate errors
-            m_watcher = MUST(Core::FileWatcher::create());
+            m_watcher = TRY(Core::FileWatcher::create());
             m_watcher->on_change = [this](Core::FileWatcherEvent const& event) {
                 auto name = sanitize_entry_name(event.event_path);
                 dbgln("Removing QuickLaunch entry {}", name);
@@ -155,8 +181,7 @@ void QuickLaunchWidget::add_or_adjust_button(String const& button_name, NonnullO
                     remove_child(*button);
             };
         }
-        // FIXME: Propagate errors
-        MUST(m_watcher->add_watch(file_name_to_watch, Core::FileWatcherEvent::Type::Deleted));
+        TRY(m_watcher->add_watch(file_name_to_watch, Core::FileWatcherEvent::Type::Deleted));
     }
 
     auto button = find_child_of_type_named<GUI::Button>(button_name);
@@ -173,16 +198,18 @@ void QuickLaunchWidget::add_or_adjust_button(String const& button_name, NonnullO
         auto result = entry->launch();
         if (result.is_error()) {
             // FIXME: This message box is displayed in a weird position
-            GUI::MessageBox::show_error(window(), String::formatted("Failed to open quick launch entry: {}", result.release_error()));
+            GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Failed to open quick launch entry: {}", result.release_error()));
         }
     };
     button->on_context_menu_request = [this, button_name](auto& context_menu_event) {
         m_context_menu_app_name = button_name;
         m_context_menu->popup(context_menu_event.screen_position(), m_context_menu_default_action);
     };
+
+    return {};
 }
 
-void QuickLaunchWidget::config_key_was_removed(String const& domain, String const& group, String const& key)
+void QuickLaunchWidget::config_key_was_removed(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key)
 {
     if (domain == "Taskbar" && group == quick_launch) {
         auto button = find_child_of_type_named<GUI::Button>(key);
@@ -191,13 +218,15 @@ void QuickLaunchWidget::config_key_was_removed(String const& domain, String cons
     }
 }
 
-void QuickLaunchWidget::config_string_did_change(String const& domain, String const& group, String const& key, String const& value)
+void QuickLaunchWidget::config_string_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, DeprecatedString const& value)
 {
     if (domain == "Taskbar" && group == quick_launch) {
         auto entry = QuickLaunchEntry::create_from_config_value(value);
         if (!entry)
             return;
-        add_or_adjust_button(key, entry.release_nonnull());
+        auto result = add_or_adjust_button(key, entry.release_nonnull());
+        if (result.is_error())
+            GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Failed to change quick launch entry: {}", result.release_error()));
     }
 }
 
@@ -218,7 +247,9 @@ void QuickLaunchWidget::drop_event(GUI::DropEvent& event)
             auto entry = QuickLaunchEntry::create_from_path(url.path());
             if (entry) {
                 auto item_name = sanitize_entry_name(entry->name());
-                add_or_adjust_button(item_name, entry.release_nonnull());
+                auto result = add_or_adjust_button(item_name, entry.release_nonnull());
+                if (result.is_error())
+                    GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Failed to add quick launch entry: {}", result.release_error()));
                 Config::write_string("Taskbar"sv, quick_launch, item_name, url.path());
             }
         }

@@ -15,7 +15,7 @@
 
 namespace JS {
 
-ProxyObject* ProxyObject::create(Realm& realm, Object& target, Object& handler)
+NonnullGCPtr<ProxyObject> ProxyObject::create(Realm& realm, Object& target, Object& handler)
 {
     return realm.heap().allocate<ProxyObject>(realm, target, handler, *realm.intrinsics().object_prototype());
 }
@@ -34,10 +34,10 @@ static Value property_key_to_value(VM& vm, PropertyKey const& property_key)
         return property_key.as_symbol();
 
     if (property_key.is_string())
-        return js_string(vm, property_key.as_string());
+        return PrimitiveString::create(vm, property_key.as_string());
 
     VERIFY(property_key.is_number());
-    return js_string(vm, String::number(property_key.as_number()));
+    return PrimitiveString::create(vm, DeprecatedString::number(property_key.as_number()));
 }
 
 // 10.5.1 [[GetPrototypeOf]] ( ), https://tc39.es/ecma262/#sec-proxy-object-internal-methods-and-internal-slots-getprototypeof
@@ -767,7 +767,7 @@ ThrowCompletionOr<Value> ProxyObject::internal_call(Value this_argument, MarkedV
     }
 
     // 7. Let argArray be CreateArrayFromList(argumentsList).
-    auto* arguments_array = Array::create_from(realm, arguments_list);
+    auto arguments_array = Array::create_from(realm, arguments_list);
 
     // 8. Return ? Call(trap, handler, « target, thisArgument, argArray »).
     return call(vm, trap, &m_handler, &m_target, this_argument, arguments_array);
@@ -784,7 +784,7 @@ bool ProxyObject::has_constructor() const
 }
 
 // 10.5.13 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-proxy-object-internal-methods-and-internal-slots-construct-argumentslist-newtarget
-ThrowCompletionOr<Object*> ProxyObject::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> ProxyObject::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
 {
     auto& vm = this->vm();
     auto& realm = *vm.current_realm();
@@ -812,7 +812,7 @@ ThrowCompletionOr<Object*> ProxyObject::internal_construct(MarkedVector<Value> a
     }
 
     // 8. Let argArray be CreateArrayFromList(argumentsList).
-    auto* arguments_array = Array::create_from(realm, arguments_list);
+    auto arguments_array = Array::create_from(realm, arguments_list);
 
     // 9. Let newObj be ? Call(trap, handler, « target, argArray, newTarget »).
     auto new_object = TRY(call(vm, trap, &m_handler, &m_target, arguments_array, &new_target));
@@ -822,7 +822,7 @@ ThrowCompletionOr<Object*> ProxyObject::internal_construct(MarkedVector<Value> a
         return vm.throw_completion<TypeError>(ErrorType::ProxyConstructBadReturnType);
 
     // 11. Return newObj.
-    return &new_object.as_object();
+    return new_object.as_object();
 }
 
 void ProxyObject::visit_edges(Cell::Visitor& visitor)

@@ -76,14 +76,13 @@ public:
     void notify_occlusion_state_changed(Window&);
     void notify_progress_changed(Window&);
     void notify_modified_changed(Window&);
-    void notify_input_preempted(Window&, InputPreemptor = InputPreemptor::Other);
 
     Gfx::IntRect tiled_window_rect(Window const&, WindowTileType tile_type = WindowTileType::Maximized, bool relative_to_window_screen = false) const;
 
     ConnectionFromClient const* dnd_client() const { return m_dnd_client.ptr(); }
     Core::MimeData const& dnd_mime_data() const { return *m_dnd_mime_data; }
 
-    void start_dnd_drag(ConnectionFromClient&, String const& text, Gfx::Bitmap const*, Core::MimeData const&);
+    void start_dnd_drag(ConnectionFromClient&, DeprecatedString const& text, Gfx::Bitmap const*, Core::MimeData const&);
     void end_dnd_drag();
 
     void set_accepts_drag(bool);
@@ -99,16 +98,8 @@ public:
         return m_current_window_stack->active_window();
     }
 
-    Window* active_input_window()
-    {
-        VERIFY(m_current_window_stack);
-        return m_current_window_stack->active_input_window();
-    }
-    Window const* active_input_window() const
-    {
-        VERIFY(m_current_window_stack);
-        return m_current_window_stack->active_input_window();
-    }
+    Window* foremost_popup_window(WindowStack& stack = WindowManager::the().current_window_stack());
+    void request_close_fragile_windows(WindowStack& stack = WindowManager::the().current_window_stack());
 
     ConnectionFromClient const* active_client() const;
 
@@ -152,20 +143,20 @@ public:
     Gfx::Font const& font() const;
     Gfx::Font const& window_title_font() const;
 
-    bool set_screen_layout(ScreenLayout&&, bool, String&);
+    bool set_screen_layout(ScreenLayout&&, bool, DeprecatedString&);
     ScreenLayout get_screen_layout() const;
-    bool save_screen_layout(String&);
+    bool save_screen_layout(DeprecatedString&);
 
     void set_acceleration_factor(double);
     void set_scroll_step_size(unsigned);
     void set_double_click_speed(int);
     int double_click_speed() const;
-    void set_buttons_switched(bool);
-    bool get_buttons_switched() const;
+    void set_mouse_buttons_switched(bool);
+    bool are_mouse_buttons_switched() const;
+    void set_natural_scroll(bool);
+    bool is_natural_scroll() const;
 
-    Window* set_active_input_window(Window*);
-    void restore_active_input_window(Window*);
-    void set_active_window(Window*, bool make_input = true);
+    void set_active_window(Window*);
     void set_hovered_button(Button*);
 
     Button const* cursor_tracking_button() const { return m_cursor_tracking_button.ptr(); }
@@ -180,21 +171,19 @@ public:
     void tell_wms_window_icon_changed(Window&);
     void tell_wms_window_rect_changed(Window&);
     void tell_wms_screen_rects_changed();
-    void tell_wms_applet_area_size_changed(Gfx::IntSize const&);
+    void tell_wms_applet_area_size_changed(Gfx::IntSize);
     void tell_wms_super_key_pressed();
     void tell_wms_super_space_key_pressed();
     void tell_wms_super_d_key_pressed();
     void tell_wms_super_digit_key_pressed(u8);
     void tell_wms_current_window_stack_changed();
 
-    bool is_active_window_or_capturing_modal(Window&) const;
-
     void check_hide_geometry_overlay(Window&);
 
-    void start_window_resize(Window&, Gfx::IntPoint const&, MouseButton, ResizeDirection);
+    void start_window_resize(Window&, Gfx::IntPoint, MouseButton, ResizeDirection);
     void start_window_resize(Window&, MouseEvent const&, ResizeDirection);
     void start_window_move(Window&, MouseEvent const&);
-    void start_window_move(Window&, Gfx::IntPoint const&);
+    void start_window_move(Window&, Gfx::IntPoint);
 
     Window const* active_fullscreen_window() const
     {
@@ -210,7 +199,7 @@ public:
         return nullptr;
     }
 
-    bool update_theme(String theme_path, String theme_name, bool keep_desktop_background);
+    bool update_theme(DeprecatedString theme_path, DeprecatedString theme_name, bool keep_desktop_background);
     void invalidate_after_theme_or_font_change();
 
     bool set_theme_override(Core::AnonymousBuffer const& theme_override);
@@ -223,7 +212,7 @@ public:
 
     void did_popup_a_menu(Badge<Menu>);
 
-    void start_menu_doubleclick(Window& window, MouseEvent const& event);
+    void system_menu_doubleclick(Window& window, MouseEvent const& event);
     bool is_menu_doubleclick(Window& window, MouseEvent const& event) const;
 
     void minimize_windows(Window&, bool);
@@ -257,7 +246,7 @@ public:
     }
     bool is_window_in_modal_chain(Window& chain_window, Window& other_window);
 
-    Gfx::IntPoint get_recommended_window_position(Gfx::IntPoint const& desired);
+    Gfx::IntPoint get_recommended_window_position(Gfx::IntPoint desired);
 
     void reload_icon_bitmaps_after_scale_change();
 
@@ -301,11 +290,21 @@ public:
     {
         switch (window_type) {
         case WindowType::Normal:
-        case WindowType::Tooltip:
-        case WindowType::Popup:
             return false;
         default:
             return true;
+        }
+    }
+
+    static constexpr bool is_fragile_window_type(WindowType window_type)
+    {
+        switch (window_type) {
+        case WindowType::Autocomplete:
+        case WindowType::Popup:
+        case WindowType::Tooltip:
+            return true;
+        default:
+            return false;
         }
     }
 
@@ -318,10 +317,10 @@ public:
 
     MultiScaleBitmaps const* overlay_rect_shadow() const { return m_overlay_rect_shadow.ptr(); }
 
-    void apply_cursor_theme(String const& name);
+    void apply_cursor_theme(DeprecatedString const& name);
 
     void set_cursor_highlight_radius(int radius);
-    void set_cursor_highlight_color(Gfx::Color const& color);
+    void set_cursor_highlight_color(Gfx::Color color);
 
     bool is_cursor_highlight_enabled() const { return m_cursor_highlight_radius > 0 && m_cursor_highlight_enabled; }
 
@@ -341,9 +340,9 @@ private:
     explicit WindowManager(Gfx::PaletteImpl const&);
 
     void notify_new_active_window(Window&);
-    void notify_new_active_input_window(Window&);
     void notify_previous_active_window(Window&);
-    void notify_previous_active_input_window(Window&);
+    void notify_active_window_input_preempted();
+    void notify_active_window_input_restored();
 
     void process_mouse_event(MouseEvent&);
     void process_event_for_doubleclick(Window& window, MouseEvent& event);
@@ -429,13 +428,14 @@ private:
 
     bool is_considered_doubleclick(MouseEvent const&, DoubleClickInfo::ClickMetadata const&) const;
 
-    Gfx::IntPoint to_floating_cursor_position(Gfx::IntPoint const&) const;
+    Gfx::IntPoint to_floating_cursor_position(Gfx::IntPoint) const;
 
     DoubleClickInfo m_double_click_info;
     int m_double_click_speed { 0 };
     int m_max_distance_for_double_click { 4 };
     bool m_previous_event_was_super_keydown { false };
-    bool m_buttons_switched { false };
+    bool m_mouse_buttons_switched { false };
+    bool m_natural_scroll { false };
     bool m_theme_overridden { false };
 
     WeakPtr<Window> m_hovered_window;
@@ -472,7 +472,7 @@ private:
 
     OwnPtr<DndOverlay> m_dnd_overlay;
     WeakPtr<ConnectionFromClient> m_dnd_client;
-    String m_dnd_text;
+    DeprecatedString m_dnd_text;
     bool m_dnd_accepts_drag { false };
 
     RefPtr<Core::MimeData> m_dnd_mime_data;
@@ -511,9 +511,11 @@ inline IterationDecision WindowManager::for_each_visible_window_from_back_to_fro
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Notification>() == IterationDecision::Break)
         return IterationDecision::Break;
-    if (for_each_window.template operator()<WindowType::Tooltip>() == IterationDecision::Break)
+    if (for_each_window.template operator()<WindowType::Autocomplete>() == IterationDecision::Break)
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Popup>() == IterationDecision::Break)
+        return IterationDecision::Break;
+    if (for_each_window.template operator()<WindowType::Tooltip>() == IterationDecision::Break)
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Menu>() == IterationDecision::Break)
         return IterationDecision::Break;
@@ -545,6 +547,8 @@ inline IterationDecision WindowManager::for_each_visible_window_from_front_to_ba
     if (for_each_window.template operator()<WindowType::Tooltip>() == IterationDecision::Break)
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Popup>() == IterationDecision::Break)
+        return IterationDecision::Break;
+    if (for_each_window.template operator()<WindowType::Autocomplete>() == IterationDecision::Break)
         return IterationDecision::Break;
     if (for_each_window.template operator()<WindowType::Notification>() == IterationDecision::Break)
         return IterationDecision::Break;

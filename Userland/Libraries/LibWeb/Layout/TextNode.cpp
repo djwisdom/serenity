@@ -7,6 +7,7 @@
 
 #include <AK/CharacterTypes.h>
 #include <AK/StringBuilder.h>
+#include <LibUnicode/CharacterTypes.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/InlineFormattingContext.h>
@@ -31,13 +32,22 @@ static bool is_all_whitespace(StringView string)
     return true;
 }
 
+static DeprecatedString apply_text_transform(DeprecatedString const& string, CSS::TextTransform text_transform)
+{
+    if (text_transform == CSS::TextTransform::Uppercase)
+        return Unicode::to_unicode_uppercase_full(string);
+    if (text_transform == CSS::TextTransform::Lowercase)
+        return Unicode::to_unicode_lowercase_full(string);
+    return string;
+}
+
 // NOTE: This collapses whitespace into a single ASCII space if collapse is true.
 void TextNode::compute_text_for_rendering(bool collapse)
 {
-    auto& data = dom_node().data();
+    auto data = apply_text_transform(dom_node().data(), computed_values().text_transform());
 
     if (dom_node().is_password_input()) {
-        m_text_for_rendering = String::repeated('*', data.length());
+        m_text_for_rendering = DeprecatedString::repeated('*', data.length());
         return;
     }
 
@@ -49,7 +59,7 @@ void TextNode::compute_text_for_rendering(bool collapse)
     // NOTE: A couple fast returns to avoid unnecessarily allocating a StringBuilder.
     if (data.length() == 1) {
         if (is_ascii_space(data[0])) {
-            static String s_single_space_string = " ";
+            static DeprecatedString s_single_space_string = " ";
             m_text_for_rendering = s_single_space_string;
         } else {
             m_text_for_rendering = data;
@@ -88,7 +98,7 @@ void TextNode::compute_text_for_rendering(bool collapse)
         }
     }
 
-    m_text_for_rendering = builder.to_string();
+    m_text_for_rendering = builder.to_deprecated_string();
 }
 
 TextNode::ChunkIterator::ChunkIterator(StringView text, bool wrap_lines, bool respect_linebreaks, bool is_generated_empty_string)

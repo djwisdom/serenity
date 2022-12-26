@@ -148,6 +148,7 @@ namespace JS {
     P(deleteProperty)                        \
     P(deref)                                 \
     P(description)                           \
+    P(difference)                            \
     P(direction)                             \
     P(disambiguation)                        \
     P(done)                                  \
@@ -287,8 +288,10 @@ namespace JS {
     P(inLeapYear)                            \
     P(input)                                 \
     P(instant)                               \
+    P(intersection)                          \
     P(is)                                    \
     P(isArray)                               \
+    P(isDisjointFrom)                        \
     P(isExtensible)                          \
     P(isFinite)                              \
     P(isFrozen)                              \
@@ -298,6 +301,8 @@ namespace JS {
     P(isPrototypeOf)                         \
     P(isSafeInteger)                         \
     P(isSealed)                              \
+    P(isSubsetOf)                            \
+    P(isSupersetOf)                          \
     P(isView)                                \
     P(isoDay)                                \
     P(isoHour)                               \
@@ -308,6 +313,7 @@ namespace JS {
     P(isoNanosecond)                         \
     P(isoSecond)                             \
     P(isoYear)                               \
+    P(isWellFormed)                          \
     P(isWordLike)                            \
     P(italics)                               \
     P(join)                                  \
@@ -485,6 +491,7 @@ namespace JS {
     P(sup)                                   \
     P(supportedLocalesOf)                    \
     P(supportedValuesOf)                     \
+    P(symmetricDifference)                   \
     P(tan)                                   \
     P(tanh)                                  \
     P(test)                                  \
@@ -525,6 +532,7 @@ namespace JS {
     P(toTimeString)                          \
     P(toUpperCase)                           \
     P(toUTCString)                           \
+    P(toWellFormed)                          \
     P(toZonedDateTime)                       \
     P(toZonedDateTimeISO)                    \
     P(trace)                                 \
@@ -565,6 +573,7 @@ namespace JS {
     P(writable)                              \
     P(year)                                  \
     P(yearMonthFromFields)                   \
+    P(yearOfWeek)                            \
     P(years)                                 \
     P(yearsDisplay)                          \
     P(zonedDateTime)                         \
@@ -579,6 +588,7 @@ struct CommonPropertyNames {
     PropertyKey register_ { "register", PropertyKey::StringMayBeNumber::No };
     PropertyKey return_ { "return", PropertyKey::StringMayBeNumber::No };
     PropertyKey throw_ { "throw", PropertyKey::StringMayBeNumber::No };
+    PropertyKey union_ { "union", PropertyKey::StringMayBeNumber::No };
     PropertyKey xor_ { "xor", PropertyKey::StringMayBeNumber::No };
     PropertyKey inputAlias { "$_", PropertyKey::StringMayBeNumber::No };
     PropertyKey lastMatchAlias { "$&", PropertyKey::StringMayBeNumber::No };

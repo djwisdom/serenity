@@ -6,10 +6,13 @@
 
 #include "MagnifierWidget.h"
 #include <AK/LexicalPath.h>
+#include <LibConfig/Client.h>
 #include <LibCore/System.h>
+#include <LibDesktop/Launcher.h>
 #include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/ActionGroup.h>
 #include <LibGUI/Application.h>
+#include <LibGUI/ColorPicker.h>
 #include <LibGUI/Icon.h>
 #include <LibGUI/Menu.h>
 #include <LibGUI/Menubar.h>
@@ -40,6 +43,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::pledge("stdio cpath rpath recvfd sendfd unix"));
     auto app = TRY(GUI::Application::try_create(arguments));
 
+    TRY(Desktop::Launcher::add_allowed_handler_with_only_specific_urls("/bin/Help", { URL::create_with_file_scheme("/usr/share/man/man1/Magnifier.md") }));
+    TRY(Desktop::Launcher::seal_allowlist());
+    Config::pledge_domain("Magnifier");
+
     TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/res", "r"));
@@ -57,14 +64,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto magnifier = TRY(window->try_set_main_widget<MagnifierWidget>());
 
     auto file_menu = TRY(window->try_add_menu("&File"));
-    TRY(file_menu->try_add_action(GUI::CommonActions::make_quit_action([&](auto&) {
-        app->quit();
-    })));
-
     TRY(file_menu->try_add_action(GUI::CommonActions::make_save_as_action([&](auto&) {
-        AK::String filename = "file for saving";
+        AK::DeprecatedString filename = "file for saving";
         auto do_save = [&]() -> ErrorOr<void> {
-            auto response = FileSystemAccessClient::Client::the().try_save_file(window, "Capture", "png");
+            auto response = FileSystemAccessClient::Client::the().try_save_file_deprecated(window, "Capture", "png");
             if (response.is_error())
                 return {};
             auto file = response.release_value();
@@ -83,6 +86,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             GUI::MessageBox::show(window, "Unable to save file.\n"sv, "Error"sv, GUI::MessageBox::Type::Error);
             warnln("Error saving bitmap to {}: {}", filename, result.error().string_literal());
         }
+    })));
+    TRY(file_menu->try_add_separator());
+    TRY(file_menu->try_add_action(GUI::CommonActions::make_quit_action([&](auto&) {
+        app->quit();
     })));
 
     auto size_action_group = make<GUI::ActionGroup>();
@@ -107,10 +114,30 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             magnifier->pause_capture(action.is_checked());
         });
 
-    auto always_on_top_action = GUI::Action::create_checkable(
-        "&Always on Top", [&](auto& action) {
-            window->set_always_on_top(action.is_checked());
+    auto lock_location_action = GUI::Action::create_checkable(
+        "&Lock Location", { Key_L }, [&](auto& action) {
+            magnifier->lock_location(action.is_checked());
         });
+
+    auto show_grid_action = GUI::Action::create_checkable(
+        "Show &Grid", { Key_G }, [&](auto& action) {
+            magnifier->show_grid(action.is_checked());
+        });
+
+    auto choose_grid_color_action = GUI::Action::create(
+        "Choose Grid &Color", [&](auto& action [[maybe_unused]]) {
+            auto dialog = GUI::ColorPicker::construct(magnifier->grid_color(), window, "Magnifier: choose grid color");
+            dialog->set_color_has_alpha_channel(true);
+            if (dialog->exec() == GUI::Dialog::ExecResult::OK) {
+                Config::write_string("Magnifier"sv, "Grid"sv, "Color"sv, dialog->color().to_deprecated_string());
+                magnifier->set_grid_color(dialog->color());
+            }
+        });
+    {
+        auto color_string = Config::read_string("Magnifier"sv, "Grid"sv, "Color"sv, "#ff00ff64"sv);
+        auto maybe_color = Gfx::Color::from_string(color_string);
+        magnifier->set_grid_color(maybe_color.value_or(Gfx::Color::Magenta));
+    }
 
     size_action_group->add_action(two_x_action);
     size_action_group->add_action(four_x_action);
@@ -124,9 +151,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     two_x_action->set_checked(true);
 
     TRY(view_menu->try_add_separator());
-    TRY(view_menu->try_add_action(always_on_top_action));
     TRY(view_menu->try_add_action(pause_action));
-    always_on_top_action->set_checked(true);
+    TRY(view_menu->try_add_action(lock_location_action));
+    TRY(view_menu->try_add_action(show_grid_action));
+    TRY(view_menu->try_add_action(choose_grid_color_action));
 
     auto timeline_menu = TRY(window->try_add_menu("&Timeline"));
     auto previous_frame_action = GUI::Action::create(
@@ -144,72 +172,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(timeline_menu->try_add_action(previous_frame_action));
     TRY(timeline_menu->try_add_action(next_frame_action));
 
-    auto accessibility_menu = TRY(window->try_add_menu("&Accessibility"));
-
-    auto default_accessibility_action = GUI::Action::create_checkable("Default - non-impaired", { Mod_AltGr, Key_1 }, [&](auto&) {
-        magnifier->set_color_filter(nullptr);
-    });
-    default_accessibility_action->set_checked(true);
-
-    auto pratanopia_accessibility_action = GUI::Action::create_checkable("Protanopia", { Mod_AltGr, Key_2 }, [&](auto&) {
-        magnifier->set_color_filter(Gfx::ColorBlindnessFilter::create_protanopia());
-    });
-
-    auto pratanomaly_accessibility_action = GUI::Action::create_checkable("Protanomaly", { Mod_AltGr, Key_3 }, [&](auto&) {
-        magnifier->set_color_filter(Gfx::ColorBlindnessFilter::create_protanomaly());
-    });
-
-    auto tritanopia_accessibility_action = GUI::Action::create_checkable("Tritanopia", { Mod_AltGr, Key_4 }, [&](auto&) {
-        magnifier->set_color_filter(Gfx::ColorBlindnessFilter::create_tritanopia());
-    });
-
-    auto tritanomaly_accessibility_action = GUI::Action::create_checkable("Tritanomaly", { Mod_AltGr, Key_5 }, [&](auto&) {
-        magnifier->set_color_filter(Gfx::ColorBlindnessFilter::create_tritanomaly());
-    });
-
-    auto deuteranopia_accessibility_action = GUI::Action::create_checkable("Deuteranopia", { Mod_AltGr, Key_6 }, [&](auto&) {
-        magnifier->set_color_filter(Gfx::ColorBlindnessFilter::create_deuteranopia());
-    });
-
-    auto deuteranomaly_accessibility_action = GUI::Action::create_checkable("Deuteranomaly", { Mod_AltGr, Key_7 }, [&](auto&) {
-        magnifier->set_color_filter(Gfx::ColorBlindnessFilter::create_deuteranomaly());
-    });
-
-    auto achromatopsia_accessibility_action = GUI::Action::create_checkable("Achromatopsia", { Mod_AltGr, Key_8 }, [&](auto&) {
-        magnifier->set_color_filter(Gfx::ColorBlindnessFilter::create_achromatopsia());
-    });
-
-    auto achromatomaly_accessibility_action = GUI::Action::create_checkable("Achromatomaly", { Mod_AltGr, Key_9 }, [&](auto&) {
-        magnifier->set_color_filter(Gfx::ColorBlindnessFilter::create_achromatomaly());
-    });
-
-    auto preview_type_action_group = make<GUI::ActionGroup>();
-    preview_type_action_group->set_exclusive(true);
-    preview_type_action_group->add_action(*default_accessibility_action);
-    preview_type_action_group->add_action(*pratanopia_accessibility_action);
-    preview_type_action_group->add_action(*pratanomaly_accessibility_action);
-    preview_type_action_group->add_action(*tritanopia_accessibility_action);
-    preview_type_action_group->add_action(*tritanomaly_accessibility_action);
-    preview_type_action_group->add_action(*deuteranopia_accessibility_action);
-    preview_type_action_group->add_action(*deuteranomaly_accessibility_action);
-    preview_type_action_group->add_action(*achromatopsia_accessibility_action);
-    preview_type_action_group->add_action(*achromatomaly_accessibility_action);
-
-    TRY(accessibility_menu->try_add_action(default_accessibility_action));
-    TRY(accessibility_menu->try_add_action(pratanopia_accessibility_action));
-    TRY(accessibility_menu->try_add_action(pratanomaly_accessibility_action));
-    TRY(accessibility_menu->try_add_action(tritanopia_accessibility_action));
-    TRY(accessibility_menu->try_add_action(tritanomaly_accessibility_action));
-    TRY(accessibility_menu->try_add_action(deuteranopia_accessibility_action));
-    TRY(accessibility_menu->try_add_action(deuteranomaly_accessibility_action));
-    TRY(accessibility_menu->try_add_action(achromatopsia_accessibility_action));
-    TRY(accessibility_menu->try_add_action(achromatomaly_accessibility_action));
+    TRY(window->try_add_menu(TRY(GUI::CommonMenus::make_accessibility_menu(magnifier))));
 
     auto help_menu = TRY(window->try_add_menu("&Help"));
-    help_menu->add_action(GUI::CommonActions::make_command_palette_action(window));
-    help_menu->add_action(GUI::CommonActions::make_about_action("Magnifier", app_icon, window));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
+        Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/Magnifier.md"), "/bin/Help");
+    })));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Magnifier", app_icon, window)));
 
     window->show();
+    window->set_always_on_top(true);
 
     return app->exec();
 }

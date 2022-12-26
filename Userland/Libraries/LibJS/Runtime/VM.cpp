@@ -11,6 +11,7 @@
 #include <AK/ScopeGuard.h>
 #include <AK/StringBuilder.h>
 #include <LibCore/File.h>
+#include <LibJS/AST.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
@@ -40,9 +41,9 @@ VM::VM(OwnPtr<CustomData> custom_data)
     : m_heap(*this)
     , m_custom_data(move(custom_data))
 {
-    m_empty_string = m_heap.allocate_without_realm<PrimitiveString>(String::empty());
+    m_empty_string = m_heap.allocate_without_realm<PrimitiveString>(DeprecatedString::empty());
     for (size_t i = 0; i < 128; ++i) {
-        m_single_ascii_character_strings[i] = m_heap.allocate_without_realm<PrimitiveString>(String::formatted("{:c}", i));
+        m_single_ascii_character_strings[i] = m_heap.allocate_without_realm<PrimitiveString>(DeprecatedString::formatted("{:c}", i));
     }
 
     // Default hook implementations. These can be overridden by the host, for example, LibWeb overrides the default hooks to place promise jobs on the microtask queue.
@@ -74,7 +75,7 @@ VM::VM(OwnPtr<CustomData> custom_data)
         // By default, we throw on dynamic imports this is to prevent arbitrary file access by scripts.
         VERIFY(current_realm());
         auto& realm = *current_realm();
-        auto* promise = Promise::create(realm);
+        auto promise = Promise::create(realm);
 
         // If you are here because you want to enable dynamic module importing make sure it won't be a security problem
         // by checking the default implementation of HostImportModuleDynamically and creating your own hook or calling
@@ -109,7 +110,7 @@ VM::VM(OwnPtr<CustomData> custom_data)
     };
 
     host_get_supported_import_assertions = [&] {
-        return Vector<String> { "type" };
+        return Vector<DeprecatedString> { "type" };
     };
 
     // 19.2.1.2 HostEnsureCanCompileStrings ( callerRealm, calleeRealm ), https://tc39.es/ecma262/#sec-hostensurecancompilestrings
@@ -139,7 +140,7 @@ VM::VM(OwnPtr<CustomData> custom_data)
     };
 
 #define __JS_ENUMERATE(SymbolName, snake_name) \
-    m_well_known_symbol_##snake_name = js_symbol(*this, "Symbol." #SymbolName, false);
+    m_well_known_symbol_##snake_name = Symbol::create(*this, "Symbol." #SymbolName, false);
     JS_ENUMERATE_WELL_KNOWN_SYMBOLS
 #undef __JS_ENUMERATE
 }
@@ -204,6 +205,8 @@ void VM::gather_roots(HashTable<Cell*>& roots)
             roots.set(execution_context->lexical_environment);
             roots.set(execution_context->variable_environment);
             roots.set(execution_context->private_environment);
+            if (auto* context_owner = execution_context->context_owner)
+                roots.set(context_owner);
             execution_context->script_or_module.visit(
                 [](Empty) {},
                 [&](auto& script_or_module) {
@@ -221,22 +224,11 @@ void VM::gather_roots(HashTable<Cell*>& roots)
     JS_ENUMERATE_WELL_KNOWN_SYMBOLS
 #undef __JS_ENUMERATE
 
-    for (auto& symbol : m_global_symbol_map)
+    for (auto& symbol : m_global_symbol_registry)
         roots.set(symbol.value);
 
     for (auto* finalization_registry : m_finalization_registry_cleanup_jobs)
         roots.set(finalization_registry);
-}
-
-Symbol* VM::get_global_symbol(String const& description)
-{
-    auto result = m_global_symbol_map.get(description);
-    if (result.has_value())
-        return result.value();
-
-    auto new_global_symbol = js_symbol(*this, description, true);
-    m_global_symbol_map.set(description, new_global_symbol);
-    return new_global_symbol;
 }
 
 ThrowCompletionOr<Value> VM::named_evaluation_if_anonymous_function(ASTNode const& expression, FlyString const& name)
@@ -340,7 +332,7 @@ ThrowCompletionOr<void> VM::property_binding_initialization(BindingPattern const
                 VERIFY_NOT_REACHED();
             }
 
-            auto* rest_object = Object::create(realm, realm.intrinsics().object_prototype());
+            auto rest_object = Object::create(realm, realm.intrinsics().object_prototype());
             VERIFY(rest_object);
 
             TRY(rest_object->copy_data_properties(vm, object, seen_names));
@@ -439,7 +431,7 @@ ThrowCompletionOr<void> VM::iterator_binding_initialization(BindingPattern const
             VERIFY(i == binding.entries.size() - 1);
 
             // 2. Let A be ! ArrayCreate(0).
-            auto* array = MUST(Array::create(realm, 0));
+            auto array = MUST(Array::create(realm, 0));
 
             // 3. Let n be 0.
             // 4. Repeat,
@@ -563,8 +555,11 @@ ThrowCompletionOr<Reference> VM::get_identifier_reference(Environment* environme
 
     // Note: This is an optimization for looking up the same reference.
     Optional<EnvironmentCoordinate> environment_coordinate;
-    if (index.has_value())
-        environment_coordinate = EnvironmentCoordinate { .hops = hops, .index = index.value() };
+    if (index.has_value()) {
+        VERIFY(hops <= NumericLimits<u32>::max());
+        VERIFY(index.value() <= NumericLimits<u32>::max());
+        environment_coordinate = EnvironmentCoordinate { .hops = static_cast<u32>(hops), .index = static_cast<u32>(index.value()) };
+    }
 
     // 3. If exists is true, then
     if (exists) {
@@ -602,49 +597,27 @@ ThrowCompletionOr<Reference> VM::resolve_binding(FlyString const& name, Environm
     //       But this is not actually correct as GetIdentifierReference (or really the methods it calls) can throw.
 }
 
-// 7.3.33 InitializeInstanceElements ( O, constructor ), https://tc39.es/ecma262/#sec-initializeinstanceelements
-ThrowCompletionOr<void> VM::initialize_instance_elements(Object& object, ECMAScriptFunctionObject& constructor)
-{
-    for (auto& method : constructor.private_methods())
-        TRY(object.private_method_or_accessor_add(method));
-
-    for (auto& field : constructor.fields())
-        TRY(object.define_field(field));
-    return {};
-}
-
 // 9.4.4 ResolveThisBinding ( ), https://tc39.es/ecma262/#sec-resolvethisbinding
 ThrowCompletionOr<Value> VM::resolve_this_binding()
 {
     auto& vm = *this;
 
     // 1. Let envRec be GetThisEnvironment().
-    auto& environment = get_this_environment(vm);
+    auto environment = get_this_environment(vm);
 
     // 2. Return ? envRec.GetThisBinding().
-    return TRY(environment.get_this_binding(vm));
-}
-
-String VM::join_arguments(size_t start_index) const
-{
-    StringBuilder joined_arguments;
-    for (size_t i = start_index; i < argument_count(); ++i) {
-        joined_arguments.append(argument(i).to_string_without_side_effects().view());
-        if (i != argument_count() - 1)
-            joined_arguments.append(' ');
-    }
-    return joined_arguments.build();
+    return TRY(environment->get_this_binding(vm));
 }
 
 // 9.4.5 GetNewTarget ( ), https://tc39.es/ecma262/#sec-getnewtarget
 Value VM::get_new_target()
 {
     // 1. Let envRec be GetThisEnvironment().
-    auto& env = get_this_environment(*this);
+    auto env = get_this_environment(*this);
 
     // 2. Assert: envRec has a [[NewTarget]] field.
     // 3. Return envRec.[[NewTarget]].
-    return verify_cast<FunctionEnvironment>(env).new_target();
+    return verify_cast<FunctionEnvironment>(*env).new_target();
 }
 
 // 9.4.5 GetGlobalObject ( ), https://tc39.es/ecma262/#sec-getglobalobject
@@ -726,8 +699,8 @@ void VM::dump_backtrace() const
     for (ssize_t i = m_execution_context_stack.size() - 1; i >= 0; --i) {
         auto& frame = m_execution_context_stack[i];
         if (frame->current_node) {
-            auto& source_range = frame->current_node->source_range();
-            dbgln("-> {} @ {}:{},{}", frame->function_name, source_range.filename, source_range.start.line, source_range.start.column);
+            auto source_range = frame->current_node->source_range();
+            dbgln("-> {} @ {}:{},{}", frame->function_name, source_range.filename(), source_range.start.line, source_range.start.column);
         } else {
             dbgln("-> {}", frame->function_name);
         }
@@ -763,7 +736,7 @@ ScriptOrModule VM::get_active_script_or_module() const
     return m_execution_context_stack[0]->script_or_module;
 }
 
-VM::StoredModule* VM::get_stored_module(ScriptOrModule const&, String const& filename, String const&)
+VM::StoredModule* VM::get_stored_module(ScriptOrModule const&, DeprecatedString const& filename, DeprecatedString const&)
 {
     // Note the spec says:
     // Each time this operation is called with a specific referencingScriptOrModule, specifier pair as arguments
@@ -806,7 +779,7 @@ ThrowCompletionOr<void> VM::link_and_eval_module(Module& module)
         m_loaded_modules.empend(
             NonnullGCPtr(module),
             module.filename(),
-            String {}, // Null type
+            DeprecatedString {}, // Null type
             module,
             true);
         stored_module = &m_loaded_modules.last();
@@ -845,7 +818,7 @@ ThrowCompletionOr<void> VM::link_and_eval_module(Module& module)
     return {};
 }
 
-static String resolve_module_filename(StringView filename, StringView module_type)
+static DeprecatedString resolve_module_filename(StringView filename, StringView module_type)
 {
     auto extensions = Vector<StringView, 2> { "js"sv, "mjs"sv };
     if (module_type == "json"sv)
@@ -853,14 +826,14 @@ static String resolve_module_filename(StringView filename, StringView module_typ
     if (!Core::File::exists(filename)) {
         for (auto extension : extensions) {
             // import "./foo" -> import "./foo.ext"
-            auto resolved_filepath = String::formatted("{}.{}", filename, extension);
+            auto resolved_filepath = DeprecatedString::formatted("{}.{}", filename, extension);
             if (Core::File::exists(resolved_filepath))
                 return resolved_filepath;
         }
     } else if (Core::File::is_directory(filename)) {
         for (auto extension : extensions) {
             // import "./foo" -> import "./foo/index.ext"
-            auto resolved_filepath = LexicalPath::join(filename, String::formatted("index.{}", extension)).string();
+            auto resolved_filepath = LexicalPath::join(filename, DeprecatedString::formatted("index.{}", extension)).string();
             if (Core::File::exists(resolved_filepath))
                 return resolved_filepath;
         }
@@ -887,7 +860,7 @@ ThrowCompletionOr<NonnullGCPtr<Module>> VM::resolve_imported_module(ScriptOrModu
 
     // We only allow "type" as a supported assertion so it is the only valid key that should ever arrive here.
     VERIFY(module_request.assertions.is_empty() || (module_request.assertions.size() == 1 && module_request.assertions.first().key == "type"));
-    auto module_type = module_request.assertions.is_empty() ? String {} : module_request.assertions.first().value;
+    auto module_type = module_request.assertions.is_empty() ? DeprecatedString {} : module_request.assertions.first().value;
 
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] module at {} has type {} [is_null={}]", module_request.module_specifier, module_type, module_type.is_null());
 
@@ -910,15 +883,15 @@ ThrowCompletionOr<NonnullGCPtr<Module>> VM::resolve_imported_module(ScriptOrModu
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] resolved filename: '{}'", filename);
 
 #if JS_MODULE_DEBUG
-    String referencing_module_string = referencing_script_or_module.visit(
-        [&](Empty) -> String {
+    DeprecatedString referencing_module_string = referencing_script_or_module.visit(
+        [&](Empty) -> DeprecatedString {
             return ".";
         },
         [&](auto& script_or_module) {
             if constexpr (IsSame<Script*, decltype(script_or_module)>) {
-                return String::formatted("Script @ {}", script_or_module.ptr());
+                return DeprecatedString::formatted("Script @ {}", script_or_module.ptr());
             }
-            return String::formatted("Module @ {}", script_or_module.ptr());
+            return DeprecatedString::formatted("Module @ {}", script_or_module.ptr());
         });
 
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] resolve_imported_module({}, {})", referencing_module_string, filename);
@@ -957,7 +930,7 @@ ThrowCompletionOr<NonnullGCPtr<Module>> VM::resolve_imported_module(ScriptOrModu
 
         if (module_or_errors.is_error()) {
             VERIFY(module_or_errors.error().size() > 0);
-            return throw_completion<SyntaxError>(module_or_errors.error().first().to_string());
+            return throw_completion<SyntaxError>(module_or_errors.error().first().to_deprecated_string());
         }
         return module_or_errors.release_value();
     }());
@@ -992,7 +965,7 @@ void VM::import_module_dynamically(ScriptOrModule referencing_script_or_module, 
     //    FinishDynamicImport(referencingScriptOrModule, moduleRequest, promiseCapability, promise),
     //    where promise is a Promise rejected with an error representing the cause of failure.
 
-    auto* promise = Promise::create(realm);
+    auto promise = Promise::create(realm);
 
     ScopeGuard finish_dynamic_import = [&] {
         host_finish_dynamic_import(referencing_script_or_module, module_request, promise_capability, promise);
@@ -1006,7 +979,7 @@ void VM::import_module_dynamically(ScriptOrModule referencing_script_or_module, 
         // If there is no ScriptOrModule in any of the execution contexts
         if (referencing_script_or_module.has<Empty>()) {
             // Throw an error for now
-            promise->reject(InternalError::create(realm, String::formatted(ErrorType::ModuleNotFoundNoReferencingScript.message(), module_request.module_specifier)));
+            promise->reject(InternalError::create(realm, DeprecatedString::formatted(ErrorType::ModuleNotFoundNoReferencingScript.message(), module_request.module_specifier)));
             return;
         }
     }
@@ -1070,7 +1043,7 @@ void VM::finish_dynamic_import(ScriptOrModule referencing_script_or_module, Modu
     };
 
     // 2. Let onFulfilled be CreateBuiltinFunction(fulfilledClosure, 0, "", « »).
-    auto* on_fulfilled = NativeFunction::create(realm, move(fulfilled_closure), 0, "");
+    auto on_fulfilled = NativeFunction::create(realm, move(fulfilled_closure), 0, "");
 
     // 3. Let rejectedClosure be a new Abstract Closure with parameters (error) that captures promiseCapability and performs the following steps when called:
     auto rejected_closure = [&promise_capability](VM& vm) -> ThrowCompletionOr<Value> {
@@ -1084,7 +1057,7 @@ void VM::finish_dynamic_import(ScriptOrModule referencing_script_or_module, Modu
     };
 
     // 4. Let onRejected be CreateBuiltinFunction(rejectedClosure, 0, "", « »).
-    auto* on_rejected = NativeFunction::create(realm, move(rejected_closure), 0, "");
+    auto on_rejected = NativeFunction::create(realm, move(rejected_closure), 0, "");
 
     // 5. Perform PerformPromiseThen(innerPromise, onFulfilled, onRejected).
     inner_promise->perform_then(on_fulfilled, on_rejected, {});

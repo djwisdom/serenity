@@ -5,7 +5,7 @@
  */
 
 #include "GridTrackSize.h"
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/Percentage.h>
 #include <LibWeb/CSS/StyleValue.h>
@@ -44,15 +44,15 @@ GridSize GridSize::make_auto()
     return GridSize(CSS::Length::make_auto());
 }
 
-String GridSize::to_string() const
+DeprecatedString GridSize::to_deprecated_string() const
 {
     switch (m_type) {
     case Type::Length:
-        return m_length.to_string();
+        return m_length.to_deprecated_string();
     case Type::Percentage:
-        return m_percentage.to_string();
+        return m_percentage.to_deprecated_string();
     case Type::FlexibleLength:
-        return String::formatted("{}fr", m_flexible_length);
+        return DeprecatedString::formatted("{}fr", m_flexible_length);
     }
     VERIFY_NOT_REACHED();
 }
@@ -68,15 +68,15 @@ GridMinMax::GridMinMax(GridSize min_grid_size, GridSize max_grid_size)
 {
 }
 
-String GridMinMax::to_string() const
+DeprecatedString GridMinMax::to_deprecated_string() const
 {
     StringBuilder builder;
     builder.append("minmax("sv);
-    builder.appendff("{}", m_min_grid_size.to_string());
+    builder.appendff("{}", m_min_grid_size.to_deprecated_string());
     builder.append(", "sv);
-    builder.appendff("{}", m_max_grid_size.to_string());
+    builder.appendff("{}", m_max_grid_size.to_deprecated_string());
     builder.append(")"sv);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 GridRepeat::GridRepeat(GridTrackSizeList grid_track_size_list, int repeat_count)
@@ -96,7 +96,7 @@ GridRepeat::GridRepeat()
 {
 }
 
-String GridRepeat::to_string() const
+DeprecatedString GridRepeat::to_deprecated_string() const
 {
     StringBuilder builder;
     builder.append("repeat("sv);
@@ -114,9 +114,9 @@ String GridRepeat::to_string() const
         VERIFY_NOT_REACHED();
     }
     builder.append(", "sv);
-    builder.appendff("{}", m_grid_track_size_list.to_string());
+    builder.appendff("{}", m_grid_track_size_list.to_deprecated_string());
     builder.append(")"sv);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 ExplicitGridTrack::ExplicitGridTrack(CSS::GridMinMax grid_minmax)
@@ -137,21 +137,21 @@ ExplicitGridTrack::ExplicitGridTrack(CSS::GridSize grid_size)
 {
 }
 
-String ExplicitGridTrack::to_string() const
+DeprecatedString ExplicitGridTrack::to_deprecated_string() const
 {
     switch (m_type) {
     case Type::MinMax:
-        return m_grid_minmax.to_string();
+        return m_grid_minmax.to_deprecated_string();
     case Type::Repeat:
-        return m_grid_repeat.to_string();
+        return m_grid_repeat.to_deprecated_string();
     case Type::Default:
-        return m_grid_size.to_string();
+        return m_grid_size.to_deprecated_string();
     default:
         VERIFY_NOT_REACHED();
     }
 }
 
-GridTrackSizeList::GridTrackSizeList(Vector<CSS::ExplicitGridTrack> track_list, Vector<Vector<String>> line_names)
+GridTrackSizeList::GridTrackSizeList(Vector<CSS::ExplicitGridTrack> track_list, Vector<Vector<DeprecatedString>> line_names)
     : m_track_list(track_list)
     , m_line_names(line_names)
 {
@@ -168,7 +168,7 @@ GridTrackSizeList GridTrackSizeList::make_auto()
     return GridTrackSizeList();
 }
 
-String GridTrackSizeList::to_string() const
+DeprecatedString GridTrackSizeList::to_deprecated_string() const
 {
     StringBuilder builder;
     auto print_line_names = [&](size_t index) -> void {
@@ -186,7 +186,7 @@ String GridTrackSizeList::to_string() const
             print_line_names(i);
             builder.append(" "sv);
         }
-        builder.append(m_track_list[i].to_string());
+        builder.append(m_track_list[i].to_deprecated_string());
         if (i < m_track_list.size() - 1)
             builder.append(" "sv);
     }
@@ -194,7 +194,7 @@ String GridTrackSizeList::to_string() const
         builder.append(" "sv);
         print_line_names(m_track_list.size());
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 }

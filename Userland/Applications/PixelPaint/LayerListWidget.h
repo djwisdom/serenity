@@ -46,7 +46,7 @@ private:
     virtual void image_did_modify_layer_properties(size_t) override;
     virtual void image_did_modify_layer_bitmap(size_t) override;
     virtual void image_did_modify_layer_stack() override;
-    virtual void on_automatic_scrolling_timer_fired() override;
+    virtual void automatic_scrolling_timer_did_fire() override;
 
     void rebuild_gadgets();
     void relayout_gadgets();
@@ -63,7 +63,7 @@ private:
     void get_gadget_rects(Gadget const& gadget, bool is_masked, Gfx::IntRect& outer_rect, Gfx::IntRect& outer_thumbnail_rect, Gfx::IntRect& inner_thumbnail_rect, Gfx::IntRect& outer_mask_thumbnail_rect, Gfx::IntRect& inner_mask_thumbnail_rect, Gfx::IntRect& text_rect);
     bool is_moving_gadget() const { return m_moving_gadget_index.has_value(); }
 
-    Optional<size_t> gadget_at(Gfx::IntPoint const&);
+    Optional<size_t> gadget_at(Gfx::IntPoint);
 
     size_t to_layer_index(size_t gadget_index) const;
     size_t to_gadget_index(size_t layer_index) const;

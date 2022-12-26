@@ -6,10 +6,10 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/Optional.h>
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/Rect.h>
@@ -134,7 +134,14 @@ public:
     void set_a(Point<T> const& a) { m_a = a; }
     void set_b(Point<T> const& b) { m_b = b; }
 
-    String to_string() const;
+    template<typename U>
+    requires(!IsSame<T, U>)
+    [[nodiscard]] ALWAYS_INLINE constexpr Line<U> to_type() const
+    {
+        return Line<U>(*this);
+    }
+
+    DeprecatedString to_deprecated_string() const;
 
 private:
     Point<T> m_a;
@@ -142,15 +149,15 @@ private:
 };
 
 template<>
-inline String IntLine::to_string() const
+inline DeprecatedString IntLine::to_deprecated_string() const
 {
-    return String::formatted("[{},{} -> {},{}]", m_a.x(), m_a.y(), m_b.x(), m_b.y());
+    return DeprecatedString::formatted("[{},{} -> {},{}]", m_a.x(), m_a.y(), m_b.x(), m_b.y());
 }
 
 template<>
-inline String FloatLine::to_string() const
+inline DeprecatedString FloatLine::to_deprecated_string() const
 {
-    return String::formatted("[{},{} -> {},{}]", m_a.x(), m_a.y(), m_b.x(), m_b.y());
+    return DeprecatedString::formatted("[{},{} -> {},{}]", m_a.x(), m_a.y(), m_b.x(), m_b.y());
 }
 
 }

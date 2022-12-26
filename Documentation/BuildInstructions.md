@@ -7,11 +7,13 @@ Make sure you have all the dependencies installed:
 ### Debian / Ubuntu
 
 ```console
-sudo apt install build-essential cmake curl libmpfr-dev libmpc-dev libgmp-dev e2fsprogs ninja-build qemu-system-gui qemu-system-x86 qemu-utils ccache rsync unzip texinfo
+sudo apt install build-essential cmake curl libmpfr-dev libmpc-dev libgmp-dev e2fsprogs ninja-build qemu-system-gui qemu-system-x86 qemu-utils ccache rsync unzip texinfo libssl-dev
 ```
 Optional: `fuse2fs` for [building images without root](https://github.com/SerenityOS/serenity/pull/11224).
 
-#### GCC 12
+#### GCC 12 or Clang 13
+
+A host compiler that supports C++20 features is required for building host tools, the newer the better. Tested versions include gcc-12 and clang-13.
 
 On Ubuntu gcc-12 is available in the repositories of 22.04 (Jammy) and later.
 If you are running an older version, you will either need to upgrade, or find an alternative installation source.
@@ -38,6 +40,15 @@ Note that you might need additional dev packages in order to build QEMU on your 
 ```console
 sudo apt install libgtk-3-dev libpixman-1-dev libsdl2-dev libspice-server-dev
 ```
+
+#### CMake version 3.25.0 or later
+
+Serenity-specific patches were upstreamed to CMake in major version 3.25. To avoid carrying
+patches to CMake, the minimum required CMake to build Serenity is set to that version.
+If more patches are upstreamed to CMake, the minimum will be bumped again once that version releases.
+
+To accomodate distributions that do not ship bleeding-edge CMake versions, the build scripts will
+attempt to build CMake from source if the version on your path is older than 3.25.x.
 
 ### Windows
 
@@ -74,7 +85,7 @@ Run the following command to build and run SerenityOS:
 Meta/serenity.sh run
 ```
 
-This will compile all of SerenityOS and install the built files into the `Build/i686/Root` directory inside your Git
+This will compile all of SerenityOS and install the built files into the `Build/x86_64/Root` directory inside your Git
 repository. It will also build a disk image and start SerenityOS using QEMU.
 
 Note that the `anon` user is able to become `root` without a password by default, as a development convenience.

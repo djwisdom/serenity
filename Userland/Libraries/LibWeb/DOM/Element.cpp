@@ -80,7 +80,7 @@ void Element::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://dom.spec.whatwg.org/#dom-element-getattribute
-String Element::get_attribute(FlyString const& name) const
+DeprecatedString Element::get_attribute(FlyString const& name) const
 {
     // 1. Let attr be the result of getting an attribute given qualifiedName and this.
     auto const* attribute = m_attributes->get_attribute(name);
@@ -101,7 +101,7 @@ JS::GCPtr<Attr> Element::get_attribute_node(FlyString const& name) const
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattribute
-WebIDL::ExceptionOr<void> Element::set_attribute(FlyString const& name, String const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute(FlyString const& name, DeprecatedString const& value)
 {
     // 1. If qualifiedName does not match the Name production in XML, then throw an "InvalidCharacterError" DOMException.
     // FIXME: Proper name validation
@@ -179,7 +179,7 @@ WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm& realm, FlyStr
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattributens
-WebIDL::ExceptionOr<void> Element::set_attribute_ns(FlyString const& namespace_, FlyString const& qualified_name, String const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute_ns(FlyString const& namespace_, FlyString const& qualified_name, DeprecatedString const& value)
 {
     // 1. Let namespace, prefix, and localName be the result of passing namespace and qualifiedName to validate and extract.
     auto extracted_qualified_name = TRY(validate_and_extract(realm(), namespace_, qualified_name));
@@ -253,10 +253,10 @@ WebIDL::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optio
 }
 
 // https://dom.spec.whatwg.org/#dom-element-getattributenames
-Vector<String> Element::get_attribute_names() const
+Vector<DeprecatedString> Element::get_attribute_names() const
 {
     // The getAttributeNames() method steps are to return the qualified names of the attributes in this’s attribute list, in order; otherwise a new list.
-    Vector<String> names;
+    Vector<DeprecatedString> names;
     for (size_t i = 0; i < m_attributes->length(); ++i) {
         auto const* attribute = m_attributes->item(i);
         names.append(attribute->name());
@@ -315,7 +315,7 @@ JS::GCPtr<Layout::Node> Element::create_layout_node_for_display_type(DOM::Docume
             return document.heap().allocate_without_realm<Layout::InlineNode>(document, element, move(style));
         if (display.is_flex_inside())
             return document.heap().allocate_without_realm<Layout::BlockContainer>(document, element, move(style));
-        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Support display: {}", display.to_string());
+        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Support display: {}", display.to_deprecated_string());
         return document.heap().allocate_without_realm<Layout::InlineNode>(document, element, move(style));
     }
 
@@ -330,7 +330,7 @@ CSS::CSSStyleDeclaration const* Element::inline_style() const
     return m_inline_style.ptr();
 }
 
-void Element::parse_attribute(FlyString const& name, String const& value)
+void Element::parse_attribute(FlyString const& name, DeprecatedString const& value)
 {
     if (name == HTML::AttributeNames::class_) {
         auto new_classes = value.split_view(Infra::is_ascii_whitespace);
@@ -400,7 +400,9 @@ Element::NeedsRelayout Element::recompute_style()
 {
     set_needs_style_update(false);
     VERIFY(parent());
-    auto new_computed_css_values = document().style_computer().compute_style(*this);
+
+    // FIXME propagate errors
+    auto new_computed_css_values = MUST(document().style_computer().compute_style(*this));
 
     auto required_invalidation = RequiredInvalidation::Relayout;
 
@@ -492,14 +494,14 @@ WebIDL::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) 
     return nullptr;
 }
 
-WebIDL::ExceptionOr<void> Element::set_inner_html(String const& markup)
+WebIDL::ExceptionOr<void> Element::set_inner_html(DeprecatedString const& markup)
 {
     TRY(DOMParsing::inner_html_setter(*this, markup));
     return {};
 }
 
 // https://w3c.github.io/DOM-Parsing/#dom-innerhtml-innerhtml
-WebIDL::ExceptionOr<String> Element::inner_html() const
+WebIDL::ExceptionOr<DeprecatedString> Element::inner_html() const
 {
     return serialize_fragment(DOMParsing::RequireWellFormed::Yes);
 }
@@ -591,7 +593,7 @@ JS::NonnullGCPtr<Geometry::DOMRect> Element::get_bounding_client_rect() const
     VERIFY(document().browsing_context());
     auto viewport_offset = document().browsing_context()->viewport_scroll_offset();
 
-    return Geometry::DOMRect::create(realm(), paint_box->absolute_rect().translated(-viewport_offset.x(), -viewport_offset.y()));
+    return Geometry::DOMRect::create(realm(), paint_box->absolute_rect().translated(-viewport_offset.x(), -viewport_offset.y()).to_type<float>());
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getclientrects
@@ -674,7 +676,7 @@ int Element::client_width() const
 
     // 3. Return the width of the padding edge excluding the width of any rendered scrollbar between the padding edge and the border edge,
     // ignoring any transforms that apply to the element and its ancestors.
-    return paint_box()->absolute_padding_box_rect().width();
+    return paint_box()->absolute_padding_box_rect().width().value();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-clientheight
@@ -699,7 +701,7 @@ int Element::client_height() const
 
     // 3. Return the height of the padding edge excluding the height of any rendered scrollbar between the padding edge and the border edge,
     //    ignoring any transforms that apply to the element and its ancestors.
-    return paint_box()->absolute_padding_box_rect().height();
+    return paint_box()->absolute_padding_box_rect().height().value();
 }
 
 void Element::children_changed()
@@ -730,7 +732,7 @@ void Element::serialize_pseudo_elements_as_json(JsonArraySerializer<StringBuilde
         if (!pseudo_element_node)
             continue;
         auto object = MUST(children_array.add_object());
-        MUST(object.add("name"sv, String::formatted("::{}", CSS::pseudo_element_name(static_cast<CSS::Selector::PseudoElement>(i)))));
+        MUST(object.add("name"sv, DeprecatedString::formatted("::{}", CSS::pseudo_element_name(static_cast<CSS::Selector::PseudoElement>(i)))));
         MUST(object.add("type"sv, "pseudo-element"));
         MUST(object.add("parent-id"sv, id()));
         MUST(object.add("pseudo-element"sv, i));
@@ -761,7 +763,7 @@ i32 Element::tab_index() const
 // https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
 void Element::set_tab_index(i32 tab_index)
 {
-    MUST(set_attribute(HTML::AttributeNames::tabindex, String::number(tab_index)));
+    MUST(set_attribute(HTML::AttributeNames::tabindex, DeprecatedString::number(tab_index)));
 }
 
 // https://drafts.csswg.org/cssom-view/#potentially-scrollable
@@ -1045,7 +1047,7 @@ bool Element::is_actually_disabled() const
 }
 
 // https://w3c.github.io/DOM-Parsing/#dom-element-insertadjacenthtml
-WebIDL::ExceptionOr<void> Element::insert_adjacent_html(String position, String text)
+WebIDL::ExceptionOr<void> Element::insert_adjacent_html(DeprecatedString position, DeprecatedString text)
 {
     JS::GCPtr<Node> context;
     // 1. Use the first matching item from this list:
@@ -1118,7 +1120,7 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_html(String position, String 
 }
 
 // https://dom.spec.whatwg.org/#insert-adjacent
-WebIDL::ExceptionOr<JS::GCPtr<Node>> Element::insert_adjacent(String const& where, JS::NonnullGCPtr<Node> node)
+WebIDL::ExceptionOr<JS::GCPtr<Node>> Element::insert_adjacent(DeprecatedString const& where, JS::NonnullGCPtr<Node> node)
 {
     // To insert adjacent, given an element element, string where, and a node node, run the steps associated with the first ASCII case-insensitive match for where:
     if (where.equals_ignoring_case("beforebegin"sv)) {
@@ -1155,11 +1157,11 @@ WebIDL::ExceptionOr<JS::GCPtr<Node>> Element::insert_adjacent(String const& wher
 
     // -> Otherwise
     // Throw a "SyntaxError" DOMException.
-    return WebIDL::SyntaxError::create(realm(), String::formatted("Unknown position '{}'. Must be one of 'beforebegin', 'afterbegin', 'beforeend' or 'afterend'"sv, where));
+    return WebIDL::SyntaxError::create(realm(), DeprecatedString::formatted("Unknown position '{}'. Must be one of 'beforebegin', 'afterbegin', 'beforeend' or 'afterend'"sv, where));
 }
 
 // https://dom.spec.whatwg.org/#dom-element-insertadjacentelement
-WebIDL::ExceptionOr<JS::GCPtr<Element>> Element::insert_adjacent_element(String const& where, JS::NonnullGCPtr<Element> element)
+WebIDL::ExceptionOr<JS::GCPtr<Element>> Element::insert_adjacent_element(DeprecatedString const& where, JS::NonnullGCPtr<Element> element)
 {
     // The insertAdjacentElement(where, element) method steps are to return the result of running insert adjacent, give this, where, and element.
     auto returned_node = TRY(insert_adjacent(where, move(element)));
@@ -1169,19 +1171,19 @@ WebIDL::ExceptionOr<JS::GCPtr<Element>> Element::insert_adjacent_element(String 
 }
 
 // https://dom.spec.whatwg.org/#dom-element-insertadjacenttext
-WebIDL::ExceptionOr<void> Element::insert_adjacent_text(String const& where, String const& data)
+WebIDL::ExceptionOr<void> Element::insert_adjacent_text(DeprecatedString const& where, DeprecatedString const& data)
 {
     // 1. Let text be a new Text node whose data is data and node document is this’s node document.
-    JS::NonnullGCPtr<Text> text = *heap().allocate<DOM::Text>(realm(), document(), data);
+    auto text = heap().allocate<DOM::Text>(realm(), document(), data);
 
     // 2. Run insert adjacent, given this, where, and text.
     // Spec Note: This method returns nothing because it existed before we had a chance to design it.
-    (void)TRY(insert_adjacent(where, move(text)));
+    (void)TRY(insert_adjacent(where, text));
     return {};
 }
 
 // https://w3c.github.io/csswg-drafts/cssom-view-1/#scroll-an-element-into-view
-static void scroll_an_element_into_view(DOM::Element& element, Bindings::ScrollBehavior behavior, Bindings::ScrollLogicalPosition block, Bindings::ScrollLogicalPosition inline_)
+static ErrorOr<void> scroll_an_element_into_view(DOM::Element& element, Bindings::ScrollBehavior behavior, Bindings::ScrollLogicalPosition block, Bindings::ScrollLogicalPosition inline_)
 {
     // FIXME: The below is ad-hoc, since we don't yet have scrollable elements.
     //        Return here and implement this according to spec once all overflow is made scrollable.
@@ -1191,16 +1193,16 @@ static void scroll_an_element_into_view(DOM::Element& element, Bindings::ScrollB
     (void)inline_;
 
     if (!element.document().browsing_context())
-        return;
+        Error::from_string_view("Element has no browsing context."sv);
 
     auto* page = element.document().browsing_context()->page();
     if (!page)
-        return;
+        return Error::from_string_view("Element has no page."sv);
 
     // If this element doesn't have a layout node, we can't scroll it into view.
     element.document().update_layout();
     if (!element.layout_node())
-        return;
+        return Error::from_string_view("Element has no layout node."sv);
 
     // Find the nearest layout node that is a box (since we need a box to get a usable rect)
     auto* layout_node = element.layout_node();
@@ -1208,13 +1210,15 @@ static void scroll_an_element_into_view(DOM::Element& element, Bindings::ScrollB
         layout_node = layout_node->parent();
 
     if (!layout_node)
-        return;
+        return Error::from_string_view("Element has no parent layout node that is a box."sv);
 
-    page->client().page_did_request_scroll_into_view(verify_cast<Layout::Box>(*layout_node).paint_box()->absolute_padding_box_rect().to_rounded<int>());
+    page->client().page_did_request_scroll_into_view(verify_cast<Layout::Box>(*layout_node).paint_box()->absolute_padding_box_rect());
+
+    return {};
 }
 
 // https://w3c.github.io/csswg-drafts/cssom-view-1/#dom-element-scrollintoview
-void Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> arg)
+ErrorOr<void> Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> arg)
 {
     // 1. Let behavior be "auto".
     auto behavior = Bindings::ScrollBehavior::Auto;
@@ -1244,10 +1248,12 @@ void Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> ar
     // 6. If the element does not have any associated box, or is not available to user-agent features, then return.
     document().update_layout();
     if (!layout_node())
-        return;
+        return Error::from_string_view("Element has no associated box"sv);
 
     // 7. Scroll the element into view with behavior, block, and inline.
-    scroll_an_element_into_view(*this, behavior, block, inline_);
+    TRY(scroll_an_element_into_view(*this, behavior, block, inline_));
+
+    return {};
 
     // FIXME: 8. Optionally perform some other action that brings the element to the user’s attention.
 }

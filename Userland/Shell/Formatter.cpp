@@ -13,14 +13,14 @@
 
 namespace Shell {
 
-String Formatter::format()
+DeprecatedString Formatter::format()
 {
     auto node = m_root_node ? m_root_node : Parser(m_source).parse();
     if (m_cursor >= 0)
         m_output_cursor = m_cursor;
 
     if (!node)
-        return String();
+        return DeprecatedString();
 
     if (node->is_syntax_error())
         return m_source;
@@ -44,7 +44,7 @@ String Formatter::format()
     if (!string.ends_with(' '))
         current_builder().append(m_trivia);
 
-    return current_builder().to_string();
+    return current_builder().to_deprecated_string();
 }
 
 void Formatter::with_added_indent(int indent, Function<void()> callback)
@@ -66,11 +66,11 @@ void Formatter::in_new_block(Function<void()> callback)
     current_builder().append('}');
 }
 
-String Formatter::in_new_builder(Function<void()> callback, StringBuilder new_builder)
+DeprecatedString Formatter::in_new_builder(Function<void()> callback, StringBuilder new_builder)
 {
     m_builders.append(move(new_builder));
     callback();
-    return m_builders.take_last().to_string();
+    return m_builders.take_last().to_deprecated_string();
 }
 
 void Formatter::test_and_update_output_cursor(const AST::Node* node)

@@ -14,6 +14,7 @@ set(SOURCES
     IODevice.cpp
     LockFile.cpp
     MappedFile.cpp
+    MemoryStream.cpp
     MimeData.cpp
     NetworkJob.cpp
     Notifier.cpp
@@ -34,7 +35,7 @@ set(SOURCES
     UDPServer.cpp
     Version.cpp
 )
-if (NOT ANDROID AND NOT WIN32)
+if (NOT ANDROID AND NOT WIN32 AND NOT EMSCRIPTEN)
     list(APPEND SOURCES
         Account.cpp
         FilePermissionsMask.cpp

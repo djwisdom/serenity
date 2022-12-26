@@ -100,7 +100,7 @@
   {
     "quote": "Changelog: All boogs fixed, thar be no moar boogs",
     "author": "CxByte",
-    "utc_time": "1627859603",
+    "utc_time": 1627859603,
     "url": "https://github.com/SerenityOS/serenity/pull/9127#issuecomment-890603297"
   },
   {
@@ -269,5 +269,26 @@
     "author": "thakis",
     "url": "https://discord.com/channels/830522505605283862/831544568767578162/1030534498925949060",
     "utc_time": 1665773194
+  },
+  {
+    "quote": "tfw your code has such high quality that the compiler explodes",
+    "author": "linusg",
+    "url": "https://discord.com/channels/830522505605283862/859531354219872266/1050792703849398282",
+    "utc_time": 1670598903,
+    "context": "\"Don't worry about if it's 'good enough'. AK isn't reserved for the highest quality code, it just tends to be better quality because it gets used a lot and bugs get fixed\""
+  },
+  {
+    "quote": "\"Windows is great\"\n~ CxBoog, 2022",
+    "author": "BertalanD",
+    "url":"https://discord.com/channels/830522505605283862/831544568767578162/1052206570274041987",
+    "utc_time": 1670935995,
+    "context": "windows is a great platform if you want to challenge every single portability issue in the universe, *including* differences in #include resolution algorithms..."
+  },
+  {
+    "quote": "⚠️ WEN DETECTED ⚠️\nAccording to the Law of Kling, you are now obligated to implement it. :yakkie:",
+    "author": "AtkinsSJ",
+    "url": "https://discord.com/channels/830522505605283862/1012807179075600535/1055163396187766835",
+    "utc_time":1671640957,
+    "context": "hardware compositor wen :yakbait:"
   }
 ]

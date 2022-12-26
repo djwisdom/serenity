@@ -13,7 +13,7 @@ namespace Web::Encoding {
 
 JS::NonnullGCPtr<TextEncoder> TextEncoder::construct_impl(JS::Realm& realm)
 {
-    return *realm.heap().allocate<TextEncoder>(realm, realm);
+    return realm.heap().allocate<TextEncoder>(realm, realm);
 }
 
 TextEncoder::TextEncoder(JS::Realm& realm)
@@ -25,9 +25,9 @@ TextEncoder::TextEncoder(JS::Realm& realm)
 TextEncoder::~TextEncoder() = default;
 
 // https://encoding.spec.whatwg.org/#dom-textencoder-encode
-JS::Uint8Array* TextEncoder::encode(String const& input) const
+JS::Uint8Array* TextEncoder::encode(DeprecatedString const& input) const
 {
-    // NOTE: The AK::String returned from PrimitiveString::string() is always UTF-8, regardless of the internal string type, so most of these steps are no-ops.
+    // NOTE: The AK::DeprecatedString returned from PrimitiveString::string() is always UTF-8, regardless of the internal string type, so most of these steps are no-ops.
 
     // 1. Convert input to an I/O queue of scalar values.
     // 2. Let output be the I/O queue of bytes « end-of-queue ».
@@ -39,7 +39,7 @@ JS::Uint8Array* TextEncoder::encode(String const& input) const
 
     auto byte_buffer = input.to_byte_buffer();
     auto array_length = byte_buffer.size();
-    auto* array_buffer = JS::ArrayBuffer::create(realm(), move(byte_buffer));
+    auto array_buffer = JS::ArrayBuffer::create(realm(), move(byte_buffer));
     return JS::Uint8Array::create(realm(), array_length, *array_buffer);
 }
 

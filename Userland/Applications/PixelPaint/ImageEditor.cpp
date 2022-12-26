@@ -34,7 +34,7 @@ ImageEditor::ImageEditor(NonnullRefPtr<Image> image)
     , m_gui_event_loop(Core::EventLoop::current())
 {
     set_focus_policy(GUI::FocusPolicy::StrongFocus);
-    m_undo_stack.push(make<ImageUndoCommand>(*m_image, String()));
+    m_undo_stack.push(make<ImageUndoCommand>(*m_image, DeprecatedString()));
     m_image->add_client(*this);
     m_image->selection().add_client(*this);
     set_original_rect(m_image->rect());
@@ -61,11 +61,9 @@ ImageEditor::~ImageEditor()
     m_image->remove_client(*this);
 }
 
-void ImageEditor::did_complete_action(String action_text)
+void ImageEditor::did_complete_action(DeprecatedString action_text)
 {
-    if (on_modified_change)
-        on_modified_change(true);
-    m_undo_stack.push(make<ImageUndoCommand>(*m_image, move(action_text)));
+    set_modified(move(action_text));
 }
 
 bool ImageEditor::is_modified()
@@ -105,17 +103,35 @@ bool ImageEditor::redo()
     return true;
 }
 
-void ImageEditor::set_title(String title)
+void ImageEditor::set_title(DeprecatedString title)
 {
     m_title = move(title);
     if (on_title_change)
         on_title_change(m_title);
 }
 
-void ImageEditor::set_path(String path)
+void ImageEditor::set_path(DeprecatedString path)
 {
     m_path = move(path);
     set_title(LexicalPath::title(m_path));
+}
+
+void ImageEditor::set_modified(DeprecatedString action_text)
+{
+    m_undo_stack.push(make<ImageUndoCommand>(*m_image, move(action_text)));
+    update_modified();
+}
+
+void ImageEditor::set_unmodified()
+{
+    m_undo_stack.set_current_unmodified();
+    update_modified();
+}
+
+void ImageEditor::update_modified()
+{
+    if (on_modified_change)
+        on_modified_change(is_modified());
 }
 
 void ImageEditor::paint_event(GUI::PaintEvent& event)
@@ -201,7 +217,7 @@ void ImageEditor::paint_event(GUI::PaintEvent& event)
 
             int const editor_x = content_to_frame_position({ x, 0 }).x();
             painter.draw_line({ editor_x, 0 }, { editor_x, m_ruler_thickness }, ruler_fg_color);
-            painter.draw_text({ { editor_x + 2, 0 }, { m_ruler_thickness, m_ruler_thickness - 2 } }, String::formatted("{}", x), painter.font(), Gfx::TextAlignment::CenterLeft, ruler_text_color);
+            painter.draw_text({ { editor_x + 2, 0 }, { m_ruler_thickness, m_ruler_thickness - 2 } }, DeprecatedString::formatted("{}", x), painter.font(), Gfx::TextAlignment::CenterLeft, ruler_text_color);
         }
 
         // Vertical ruler
@@ -218,7 +234,7 @@ void ImageEditor::paint_event(GUI::PaintEvent& event)
 
             int const editor_y = content_to_frame_position({ 0, y }).y();
             painter.draw_line({ 0, editor_y }, { m_ruler_thickness, editor_y }, ruler_fg_color);
-            painter.draw_text({ { 0, editor_y - m_ruler_thickness }, { m_ruler_thickness, m_ruler_thickness } }, String::formatted("{}", y), painter.font(), Gfx::TextAlignment::BottomRight, ruler_text_color);
+            painter.draw_text({ { 0, editor_y - m_ruler_thickness }, { m_ruler_thickness, m_ruler_thickness } }, DeprecatedString::formatted("{}", y), painter.font(), Gfx::TextAlignment::BottomRight, ruler_text_color);
         }
 
         // Mouse position indicator
@@ -264,8 +280,18 @@ Gfx::IntRect ImageEditor::mouse_indicator_rect_y() const
 
 void ImageEditor::second_paint_event(GUI::PaintEvent& event)
 {
-    if (m_active_tool)
-        m_active_tool->on_second_paint(m_active_layer, event);
+    if (m_active_tool) {
+        if (m_show_rulers) {
+            auto clipped_event = GUI::PaintEvent(Gfx::IntRect { event.rect().x() + m_ruler_thickness,
+                                                     event.rect().y() + m_ruler_thickness,
+                                                     event.rect().width() - m_ruler_thickness,
+                                                     event.rect().height() - m_ruler_thickness },
+                event.window_size());
+            m_active_tool->on_second_paint(m_active_layer, clipped_event);
+        } else {
+            m_active_tool->on_second_paint(m_active_layer, event);
+        }
+    }
 }
 
 GUI::MouseEvent ImageEditor::event_with_pan_and_scale_applied(GUI::MouseEvent const& event) const
@@ -417,11 +443,18 @@ void ImageEditor::keydown_event(GUI::KeyEvent& event)
 {
     if (event.key() == Key_Delete && !m_image->selection().is_empty() && active_layer()) {
         active_layer()->erase_selection(m_image->selection());
+        did_complete_action("Erase Selection"sv);
         return;
     }
 
     if (m_active_tool && m_active_tool->on_keydown(event))
         return;
+
+    if (event.key() == Key_Escape && !m_image->selection().is_empty()) {
+        m_image->selection().clear();
+        did_complete_action("Clear Selection"sv);
+        return;
+    }
 
     event.ignore();
 }
@@ -464,6 +497,8 @@ void ImageEditor::set_active_layer(Layer* layer)
         if (on_active_layer_change)
             on_active_layer_change({});
     }
+    if (m_show_active_layer_boundary)
+        update();
 }
 
 ErrorOr<void> ImageEditor::add_new_layer_from_selection()
@@ -498,8 +533,10 @@ void ImageEditor::set_active_tool(Tool* tool)
         return;
     }
 
-    if (m_active_tool)
+    if (m_active_tool) {
+        m_active_tool->on_tool_deactivation();
         m_active_tool->clear();
+    }
 
     m_active_tool = tool;
 
@@ -561,8 +598,7 @@ void ImageEditor::clear_guides()
 
 void ImageEditor::layers_did_change()
 {
-    if (on_modified_change)
-        on_modified_change(true);
+    update_modified();
     update();
 }
 
@@ -602,7 +638,7 @@ void ImageEditor::set_secondary_color(Color color)
         on_secondary_color_change(color);
 }
 
-Layer* ImageEditor::layer_at_editor_position(Gfx::IntPoint const& editor_position)
+Layer* ImageEditor::layer_at_editor_position(Gfx::IntPoint editor_position)
 {
     auto image_position = frame_to_content_position(editor_position);
     for (ssize_t i = m_image->layer_count() - 1; i >= 0; --i) {
@@ -677,52 +713,48 @@ void ImageEditor::save_project()
         return;
     auto result = save_project_to_file(*response.value());
     if (result.is_error()) {
-        GUI::MessageBox::show_error(window(), String::formatted("Could not save {}: {}", path(), result.error()));
+        GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Could not save {}: {}", path(), result.error()));
         return;
     }
-    undo_stack().set_current_unmodified();
-    if (on_modified_change)
-        on_modified_change(false);
+    set_unmodified();
 }
 
 void ImageEditor::save_project_as()
 {
-    auto response = FileSystemAccessClient::Client::the().try_save_file(window(), m_title, "pp");
+    auto response = FileSystemAccessClient::Client::the().try_save_file_deprecated(window(), m_title, "pp");
     if (response.is_error())
         return;
     auto file = response.value();
     auto result = save_project_to_file(*file);
     if (result.is_error()) {
-        GUI::MessageBox::show_error(window(), String::formatted("Could not save {}: {}", file->filename(), result.error()));
+        GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Could not save {}: {}", file->filename(), result.error()));
         return;
     }
     set_path(file->filename());
     set_loaded_from_image(false);
-    undo_stack().set_current_unmodified();
-    if (on_modified_change)
-        on_modified_change(false);
+    set_unmodified();
 }
 
-Result<void, String> ImageEditor::save_project_to_file(Core::File& file) const
+ErrorOr<void> ImageEditor::save_project_to_file(Core::File& file) const
 {
     StringBuilder builder;
-    auto json = MUST(JsonObjectSerializer<>::try_create(builder));
-    m_image->serialize_as_json(json);
-    auto json_guides = MUST(json.add_array("guides"sv));
+    auto json = TRY(JsonObjectSerializer<>::try_create(builder));
+    TRY(m_image->serialize_as_json(json));
+    auto json_guides = TRY(json.add_array("guides"sv));
     for (auto const& guide : m_guides) {
-        auto json_guide = MUST(json_guides.add_object());
-        MUST(json_guide.add("offset"sv, (double)guide.offset()));
+        auto json_guide = TRY(json_guides.add_object());
+        TRY(json_guide.add("offset"sv, (double)guide.offset()));
         if (guide.orientation() == Guide::Orientation::Vertical)
-            MUST(json_guide.add("orientation"sv, "vertical"));
+            TRY(json_guide.add("orientation"sv, "vertical"));
         else if (guide.orientation() == Guide::Orientation::Horizontal)
-            MUST(json_guide.add("orientation"sv, "horizontal"));
-        MUST(json_guide.finish());
+            TRY(json_guide.add("orientation"sv, "horizontal"));
+        TRY(json_guide.finish());
     }
-    MUST(json_guides.finish());
-    MUST(json.finish());
+    TRY(json_guides.finish());
+    TRY(json.finish());
 
     if (!file.write(builder.string_view()))
-        return String { file.error_string() };
+        return Error::from_errno(file.error());
     return {};
 }
 

@@ -87,6 +87,31 @@ public:
         return size;
     }
 
+    [[nodiscard]] constexpr float aspect_ratio() const
+    {
+        VERIFY(height() != 0);
+        return static_cast<float>(width()) / static_cast<float>(height());
+    }
+
+    // Horizontal means preserve the width, Vertical means preserve the height.
+    [[nodiscard]] constexpr Size<T> match_aspect_ratio(float aspect_ratio, Orientation side_to_preserve) const
+    {
+        VERIFY(aspect_ratio != 0.0f);
+        auto matched = *this;
+        auto height_corresponding_to_width = static_cast<T>(static_cast<float>(width()) / aspect_ratio);
+        auto width_corresponding_to_height = static_cast<T>(static_cast<float>(height()) * aspect_ratio);
+
+        switch (side_to_preserve) {
+        case Orientation::Vertical:
+            matched.m_width = width_corresponding_to_height;
+            break;
+        case Orientation::Horizontal:
+            matched.m_height = height_corresponding_to_width;
+            break;
+        }
+        return matched;
+    }
+
     template<typename U>
     [[nodiscard]] constexpr bool contains(Size<U> const& other) const
     {
@@ -151,12 +176,13 @@ public:
     }
 
     template<typename U>
+    requires(!IsSame<T, U>)
     [[nodiscard]] ALWAYS_INLINE constexpr Size<U> to_type() const
     {
         return Size<U>(*this);
     }
 
-    [[nodiscard]] String to_string() const;
+    [[nodiscard]] DeprecatedString to_deprecated_string() const;
 
     template<Integral I>
     [[nodiscard]] Size<I> to_rounded() const
@@ -188,7 +214,10 @@ struct Formatter<Gfx::Size<T>> : Formatter<FormatString> {
 
 namespace IPC {
 
+template<>
 bool encode(Encoder&, Gfx::IntSize const&);
-ErrorOr<void> decode(Decoder&, Gfx::IntSize&);
+
+template<>
+ErrorOr<Gfx::IntSize> decode(Decoder&);
 
 }

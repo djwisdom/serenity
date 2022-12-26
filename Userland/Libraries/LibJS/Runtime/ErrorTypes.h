@@ -36,6 +36,8 @@
     M(DynamicImportNotAllowed, "Dynamic Imports are not allowed")                                                                       \
     M(FinalizationRegistrySameTargetAndValue, "Target and held value must not be the same")                                             \
     M(GetCapabilitiesExecutorCalledMultipleTimes, "GetCapabilitiesExecutor was called multiple times")                                  \
+    M(GeneratorAlreadyExecuting, "Generator is already executing")                                                                      \
+    M(GeneratorBrandMismatch, "Generator brand '{}' does not match generator brand '{}')")                                              \
     M(GlobalEnvironmentAlreadyHasBinding, "Global environment already has binding '{}'")                                                \
     M(IndexOutOfRange, "Index {} is out of range of array length {}")                                                                   \
     M(InOperatorWithObject, "'in' operator must be used on an object")                                                                  \
@@ -280,6 +282,8 @@
     M(TemporalPropertyMustBeFinite, "Property must not be Infinity")                                                                    \
     M(TemporalPropertyMustBePositiveInteger, "Property must be a positive integer")                                                     \
     M(TemporalTimeZoneOffsetStringMismatch, "Time zone offset string mismatch: '{}' is not equal to '{}'")                              \
+    M(TemporalUnexpectedCalendarObject, "Got unexpected Calendar object in conversion to TimeZone")                                     \
+    M(TemporalUnexpectedTimeZoneObject, "Got unexpected TimeZone object in conversion to Calendar")                                     \
     M(TemporalUnknownCriticalAnnotation, "Unknown annotation key in critical annotation: '{}'")                                         \
     M(TemporalZonedDateTimeRoundZeroOrNegativeLengthDay, "Cannot round a ZonedDateTime in a calendar or time zone that has zero or "    \
                                                          "negative length days")                                                        \
@@ -292,6 +296,7 @@
     M(TypedArrayInvalidBufferLength, "Invalid buffer length for {}: must be a multiple of {}, got {}")                                  \
     M(TypedArrayInvalidByteOffset, "Invalid byte offset for {}: must be a multiple of {}, got {}")                                      \
     M(TypedArrayInvalidCopy, "Copy between arrays of different content types ({} and {}) is prohibited")                                \
+    M(TypedArrayInvalidIntegerIndex, "Invalid integer index: {}")                                                                       \
     M(TypedArrayInvalidTargetOffset, "Invalid target offset: must be {}")                                                               \
     M(TypedArrayOutOfRangeByteOffset, "Typed array byte offset {} is out of range for buffer with length {}")                           \
     M(TypedArrayOutOfRangeByteOffsetOrLength, "Typed array range {}:{} is out of range for buffer with length {}")                      \
@@ -304,6 +309,7 @@
     M(UnsupportedDeleteSuperProperty, "Can't delete a property on 'super'")                                                             \
     M(WrappedFunctionCallThrowCompletion, "Call of wrapped target function did not complete normally")                                  \
     M(WrappedFunctionCopyNameAndLengthThrowCompletion, "Trying to copy target name and length did not complete normally")               \
+    M(YieldFromIteratorMissingThrowMethod, "yield* protocol violation: iterator must have a throw method")                              \
     M(URIMalformed, "URI malformed") /* LibWeb bindings */                                                                              \
     M(NotAByteString, "Argument to {}() must be a byte string")                                                                         \
     M(BadArgCountOne, "{}() needs one argument")                                                                                        \

@@ -24,7 +24,7 @@ void CollatorPrototype::initialize(Realm& realm)
     auto& vm = this->vm();
 
     // 10.3.2 Intl.Collator.prototype [ @@toStringTag ], https://tc39.es/ecma402/#sec-intl.collator.prototype-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Intl.Collator"), Attribute::Configurable);
+    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Intl.Collator"), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_accessor(realm, vm.names.compare, compare_getter, {}, attr);
@@ -44,7 +44,7 @@ JS_DEFINE_NATIVE_FUNCTION(CollatorPrototype::compare_getter)
     if (!collator->bound_compare()) {
         // a. Let F be a new built-in function object as defined in 10.3.3.1.
         // b. Set F.[[Collator]] to collator.
-        auto* function = CollatorCompareFunction::create(realm, *collator);
+        auto function = CollatorCompareFunction::create(realm, *collator);
 
         // c. Set collator.[[BoundCompare]] to F.
         collator->set_bound_compare(function);
@@ -64,7 +64,7 @@ JS_DEFINE_NATIVE_FUNCTION(CollatorPrototype::resolved_options)
     auto* collator = TRY(typed_this_object(vm));
 
     // 3. Let options be OrdinaryObjectCreate(%Object.prototype%).
-    auto* options = Object::create(realm, realm.intrinsics().object_prototype());
+    auto options = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 4. For each row of Table 3, except the header row, in table order, do
     //     a. Let p be the Property value of the current row.
@@ -75,13 +75,13 @@ JS_DEFINE_NATIVE_FUNCTION(CollatorPrototype::resolved_options)
     //             1. Let v be undefined.
     //     d. If v is not undefined, then
     //         i. Perform ! CreateDataPropertyOrThrow(options, p, v).
-    MUST(options->create_data_property_or_throw(vm.names.locale, js_string(vm, collator->locale())));
-    MUST(options->create_data_property_or_throw(vm.names.usage, js_string(vm, collator->usage_string())));
-    MUST(options->create_data_property_or_throw(vm.names.sensitivity, js_string(vm, collator->sensitivity_string())));
+    MUST(options->create_data_property_or_throw(vm.names.locale, PrimitiveString::create(vm, collator->locale())));
+    MUST(options->create_data_property_or_throw(vm.names.usage, PrimitiveString::create(vm, collator->usage_string())));
+    MUST(options->create_data_property_or_throw(vm.names.sensitivity, PrimitiveString::create(vm, collator->sensitivity_string())));
     MUST(options->create_data_property_or_throw(vm.names.ignorePunctuation, Value(collator->ignore_punctuation())));
-    MUST(options->create_data_property_or_throw(vm.names.collation, js_string(vm, collator->collation())));
+    MUST(options->create_data_property_or_throw(vm.names.collation, PrimitiveString::create(vm, collator->collation())));
     MUST(options->create_data_property_or_throw(vm.names.numeric, Value(collator->numeric())));
-    MUST(options->create_data_property_or_throw(vm.names.caseFirst, js_string(vm, collator->case_first_string())));
+    MUST(options->create_data_property_or_throw(vm.names.caseFirst, PrimitiveString::create(vm, collator->case_first_string())));
 
     // 5. Return options.
     return options;

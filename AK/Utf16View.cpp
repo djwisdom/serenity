@@ -21,7 +21,8 @@ static constexpr u32 replacement_code_point = 0xfffd;
 static constexpr u32 first_supplementary_plane_code_point = 0x10000;
 
 template<typename UtfViewType>
-static Vector<u16, 1> to_utf16_impl(UtfViewType const& view) requires(IsSame<UtfViewType, Utf8View> || IsSame<UtfViewType, Utf32View>)
+static Vector<u16, 1> to_utf16_impl(UtfViewType const& view)
+requires(IsSame<UtfViewType, Utf8View> || IsSame<UtfViewType, Utf32View>)
 {
     Vector<u16, 1> utf16_data;
     utf16_data.ensure_capacity(view.length());
@@ -78,7 +79,7 @@ u32 Utf16View::decode_surrogate_pair(u16 high_surrogate, u16 low_surrogate)
     return ((high_surrogate - high_surrogate_min) << 10) + (low_surrogate - low_surrogate_min) + first_supplementary_plane_code_point;
 }
 
-String Utf16View::to_utf8(AllowInvalidCodeUnits allow_invalid_code_units) const
+DeprecatedString Utf16View::to_utf8(AllowInvalidCodeUnits allow_invalid_code_units) const
 {
     StringBuilder builder;
 

@@ -107,7 +107,7 @@ ThrowCompletionOr<Value> Console::trace()
         StringBuilder builder;
         auto data = vm_arguments();
         auto formatted_data = TRY(m_client->formatter(data));
-        trace.label = TRY(value_vector_to_string(formatted_data));
+        trace.label = TRY(value_vector_to_deprecated_string(formatted_data));
     }
 
     // 3. Perform Printer("trace", « trace »).
@@ -135,11 +135,11 @@ ThrowCompletionOr<Value> Console::count()
     }
 
     // 4. Let concat be the concatenation of label, U+003A (:), U+0020 SPACE, and ToString(map[label]).
-    String concat = String::formatted("{}: {}", label, map.get(label).value());
+    DeprecatedString concat = DeprecatedString::formatted("{}: {}", label, map.get(label).value());
 
     // 5. Perform Logger("count", « concat »).
     MarkedVector<Value> concat_as_vector { vm.heap() };
-    concat_as_vector.append(js_string(vm, concat));
+    concat_as_vector.append(PrimitiveString::create(vm, concat));
     if (m_client)
         TRY(m_client->logger(LogLevel::Count, concat_as_vector));
     return js_undefined();
@@ -164,10 +164,10 @@ ThrowCompletionOr<Value> Console::count_reset()
     else {
         // 1. Let message be a string without any formatting specifiers indicating generically
         //    that the given label does not have an associated count.
-        auto message = String::formatted("\"{}\" doesn't have a count", label);
+        auto message = DeprecatedString::formatted("\"{}\" doesn't have a count", label);
         // 2. Perform Logger("countReset", « message »);
         MarkedVector<Value> message_as_vector { vm.heap() };
-        message_as_vector.append(js_string(vm, message));
+        message_as_vector.append(PrimitiveString::create(vm, message));
         if (m_client)
             TRY(m_client->logger(LogLevel::CountReset, message_as_vector));
     }
@@ -186,7 +186,7 @@ ThrowCompletionOr<Value> Console::assert_()
         return js_undefined();
 
     // 2. Let message be a string without any formatting specifiers indicating generically an assertion failure (such as "Assertion failed").
-    auto message = js_string(vm, "Assertion failed");
+    auto message = PrimitiveString::create(vm, "Assertion failed");
 
     // NOTE: Assemble `data` from the function arguments.
     MarkedVector<Value> data { vm.heap() };
@@ -212,7 +212,7 @@ ThrowCompletionOr<Value> Console::assert_()
         // 3. Otherwise:
         else {
             // 1. Let concat be the concatenation of message, U+003A (:), U+0020 SPACE, and first.
-            auto concat = js_string(vm, String::formatted("{}: {}", message->string(), first.to_string(vm).value()));
+            auto concat = PrimitiveString::create(vm, DeprecatedString::formatted("{}: {}", message->deprecated_string(), first.to_string(vm).value()));
             // 2. Set data[0] to concat.
             data[0] = concat;
         }
@@ -231,11 +231,11 @@ ThrowCompletionOr<Value> Console::group()
     Group group;
 
     // 2. If data is not empty, let groupLabel be the result of Formatter(data).
-    String group_label;
+    DeprecatedString group_label;
     auto data = vm_arguments();
     if (!data.is_empty()) {
         auto formatted_data = TRY(m_client->formatter(data));
-        group_label = TRY(value_vector_to_string(formatted_data));
+        group_label = TRY(value_vector_to_deprecated_string(formatted_data));
     }
     // ... Otherwise, let groupLabel be an implementation-chosen label representing a group.
     else {
@@ -265,11 +265,11 @@ ThrowCompletionOr<Value> Console::group_collapsed()
     Group group;
 
     // 2. If data is not empty, let groupLabel be the result of Formatter(data).
-    String group_label;
+    DeprecatedString group_label;
     auto data = vm_arguments();
     if (!data.is_empty()) {
         auto formatted_data = TRY(m_client->formatter(data));
-        group_label = TRY(value_vector_to_string(formatted_data));
+        group_label = TRY(value_vector_to_deprecated_string(formatted_data));
     }
     // ... Otherwise, let groupLabel be an implementation-chosen label representing a group.
     else {
@@ -319,7 +319,7 @@ ThrowCompletionOr<Value> Console::time()
     if (m_timer_table.contains(label)) {
         if (m_client) {
             MarkedVector<Value> timer_already_exists_warning_message_as_vector { vm.heap() };
-            timer_already_exists_warning_message_as_vector.append(js_string(vm, String::formatted("Timer '{}' already exists.", label)));
+            timer_already_exists_warning_message_as_vector.append(PrimitiveString::create(vm, DeprecatedString::formatted("Timer '{}' already exists.", label)));
             TRY(m_client->printer(LogLevel::Warn, move(timer_already_exists_warning_message_as_vector)));
         }
         return js_undefined();
@@ -347,7 +347,7 @@ ThrowCompletionOr<Value> Console::time_log()
     if (maybe_start_time == m_timer_table.end()) {
         if (m_client) {
             MarkedVector<Value> timer_does_not_exist_warning_message_as_vector { vm.heap() };
-            timer_does_not_exist_warning_message_as_vector.append(js_string(vm, String::formatted("Timer '{}' does not exist.", label)));
+            timer_does_not_exist_warning_message_as_vector.append(PrimitiveString::create(vm, DeprecatedString::formatted("Timer '{}' does not exist.", label)));
             TRY(m_client->printer(LogLevel::Warn, move(timer_does_not_exist_warning_message_as_vector)));
         }
         return js_undefined();
@@ -358,12 +358,12 @@ ThrowCompletionOr<Value> Console::time_log()
     auto duration = TRY(format_time_since(start_time));
 
     // 4. Let concat be the concatenation of label, U+003A (:), U+0020 SPACE, and duration.
-    auto concat = String::formatted("{}: {}", label, duration);
+    auto concat = DeprecatedString::formatted("{}: {}", label, duration);
 
     // 5. Prepend concat to data.
     MarkedVector<Value> data { vm.heap() };
     data.ensure_capacity(vm.argument_count());
-    data.append(js_string(vm, concat));
+    data.append(PrimitiveString::create(vm, concat));
     for (size_t i = 1; i < vm.argument_count(); ++i)
         data.append(vm.argument(i));
 
@@ -390,7 +390,7 @@ ThrowCompletionOr<Value> Console::time_end()
     if (maybe_start_time == m_timer_table.end()) {
         if (m_client) {
             MarkedVector<Value> timer_does_not_exist_warning_message_as_vector { vm.heap() };
-            timer_does_not_exist_warning_message_as_vector.append(js_string(vm, String::formatted("Timer '{}' does not exist.", label)));
+            timer_does_not_exist_warning_message_as_vector.append(PrimitiveString::create(vm, DeprecatedString::formatted("Timer '{}' does not exist.", label)));
             TRY(m_client->printer(LogLevel::Warn, move(timer_does_not_exist_warning_message_as_vector)));
         }
         return js_undefined();
@@ -404,12 +404,12 @@ ThrowCompletionOr<Value> Console::time_end()
     auto duration = TRY(format_time_since(start_time));
 
     // 5. Let concat be the concatenation of label, U+003A (:), U+0020 SPACE, and duration.
-    auto concat = String::formatted("{}: {}", label, duration);
+    auto concat = DeprecatedString::formatted("{}: {}", label, duration);
 
     // 6. Perform Printer("timeEnd", « concat »).
     if (m_client) {
         MarkedVector<Value> concat_as_vector { vm.heap() };
-        concat_as_vector.append(js_string(vm, concat));
+        concat_as_vector.append(PrimitiveString::create(vm, concat));
         TRY(m_client->printer(LogLevel::TimeEnd, move(concat_as_vector)));
     }
     return js_undefined();
@@ -427,7 +427,7 @@ MarkedVector<Value> Console::vm_arguments()
     return arguments;
 }
 
-void Console::output_debug_message(LogLevel log_level, String const& output) const
+void Console::output_debug_message(LogLevel log_level, DeprecatedString const& output) const
 {
     switch (log_level) {
     case Console::LogLevel::Debug:
@@ -457,7 +457,7 @@ void Console::report_exception(JS::Error const& exception, bool in_promise) cons
         m_client->report_exception(exception, in_promise);
 }
 
-ThrowCompletionOr<String> Console::value_vector_to_string(MarkedVector<Value> const& values)
+ThrowCompletionOr<DeprecatedString> Console::value_vector_to_deprecated_string(MarkedVector<Value> const& values)
 {
     auto& vm = realm().vm();
     StringBuilder builder;
@@ -466,10 +466,10 @@ ThrowCompletionOr<String> Console::value_vector_to_string(MarkedVector<Value> co
             builder.append(' ');
         builder.append(TRY(item.to_string(vm)));
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-ThrowCompletionOr<String> Console::format_time_since(Core::ElapsedTimer timer)
+ThrowCompletionOr<DeprecatedString> Console::format_time_since(Core::ElapsedTimer timer)
 {
     auto& vm = realm().vm();
 
@@ -493,7 +493,7 @@ ThrowCompletionOr<String> Console::format_time_since(Core::ElapsedTimer timer)
         append(builder, "{:.3} seconds"sv, combined_seconds);
     }
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 // 2.1. Logger(logLevel, args), https://console.spec.whatwg.org/#logger
@@ -622,7 +622,7 @@ ThrowCompletionOr<MarkedVector<Value>> ConsoleClient::formatter(MarkedVector<Val
         else if (specifier == "%c"sv) {
             // NOTE: This has no spec yet. `%c` specifiers treat the argument as CSS styling for the log message.
             add_css_style_to_current_message(TRY(current.to_string(vm)));
-            converted = js_string(vm, "");
+            converted = PrimitiveString::create(vm, "");
         }
 
         // 7. If any of the previous steps set converted, replace specifier in target with converted.
@@ -633,7 +633,7 @@ ThrowCompletionOr<MarkedVector<Value>> ConsoleClient::formatter(MarkedVector<Val
     // 7. Let result be a list containing target together with the elements of args starting from the third onward.
     MarkedVector<Value> result { vm.heap() };
     result.ensure_capacity(args.size() - 1);
-    result.empend(js_string(vm, target));
+    result.empend(PrimitiveString::create(vm, target));
     for (size_t i = 2; i < args.size(); ++i)
         result.unchecked_append(args[i]);
 

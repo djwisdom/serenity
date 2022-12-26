@@ -92,12 +92,13 @@ enum RotationDirection {
 
 class Bitmap : public RefCounted<Bitmap> {
 public:
-    [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_create(BitmapFormat, IntSize const&, int intrinsic_scale = 1);
-    [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_create_shareable(BitmapFormat, IntSize const&, int intrinsic_scale = 1);
-    [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_create_wrapper(BitmapFormat, IntSize const&, int intrinsic_scale, size_t pitch, void*);
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_create(BitmapFormat, IntSize, int intrinsic_scale = 1);
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_create_shareable(BitmapFormat, IntSize, int intrinsic_scale = 1);
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_create_wrapper(BitmapFormat, IntSize, int intrinsic_scale, size_t pitch, void*);
     [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_load_from_file(StringView path, int scale_factor = 1);
     [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_load_from_fd_and_close(int fd, StringView path);
-    [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_create_with_anonymous_buffer(BitmapFormat, Core::AnonymousBuffer, IntSize const&, int intrinsic_scale, Vector<ARGB32> const& palette);
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<Bitmap>> try_create_with_anonymous_buffer(BitmapFormat, Core::AnonymousBuffer, IntSize, int intrinsic_scale, Vector<ARGB32> const& palette);
+    static ErrorOr<NonnullRefPtr<Bitmap>> try_create_from_serialized_bytes(ReadonlyBytes);
     static ErrorOr<NonnullRefPtr<Bitmap>> try_create_from_serialized_byte_buffer(ByteBuffer&&);
 
     static bool is_path_a_supported_image_format(StringView path)
@@ -206,7 +207,7 @@ public:
     [[nodiscard]] bool has_alpha_channel() const { return m_format == BitmapFormat::BGRA8888 || m_format == BitmapFormat::RGBA8888; }
     [[nodiscard]] BitmapFormat format() const { return m_format; }
 
-    void set_mmap_name(String const&);
+    void set_mmap_name(DeprecatedString const&);
 
     [[nodiscard]] static constexpr size_t size_in_bytes(size_t pitch, int physical_height) { return pitch * physical_height; }
     [[nodiscard]] size_t size_in_bytes() const { return size_in_bytes(m_pitch, physical_height()); }
@@ -217,7 +218,7 @@ public:
     template<StorageFormat>
     [[nodiscard]] Color get_pixel(int physical_x, int physical_y) const;
     [[nodiscard]] Color get_pixel(int physical_x, int physical_y) const;
-    [[nodiscard]] Color get_pixel(IntPoint const& physical_position) const
+    [[nodiscard]] Color get_pixel(IntPoint physical_position) const
     {
         return get_pixel(physical_position.x(), physical_position.y());
     }
@@ -225,7 +226,7 @@ public:
     template<StorageFormat>
     void set_pixel(int physical_x, int physical_y, Color);
     void set_pixel(int physical_x, int physical_y, Color);
-    void set_pixel(IntPoint const& physical_position, Color color)
+    void set_pixel(IntPoint physical_position, Color color)
     {
         set_pixel(physical_position.x(), physical_position.y(), color);
     }
@@ -244,14 +245,14 @@ public:
 
     [[nodiscard]] Optional<Color> solid_color(u8 alpha_threshold = 0) const;
 
-    void flood_visit_from_point(Gfx::IntPoint const& start_point, int threshold, Function<void(Gfx::IntPoint location)> pixel_reached);
+    void flood_visit_from_point(Gfx::IntPoint start_point, int threshold, Function<void(Gfx::IntPoint location)> pixel_reached);
 
 private:
-    Bitmap(BitmapFormat, IntSize const&, int, BackingStore const&);
-    Bitmap(BitmapFormat, IntSize const&, int, size_t pitch, void*);
-    Bitmap(BitmapFormat, Core::AnonymousBuffer, IntSize const&, int, Vector<ARGB32> const& palette);
+    Bitmap(BitmapFormat, IntSize, int, BackingStore const&);
+    Bitmap(BitmapFormat, IntSize, int, size_t pitch, void*);
+    Bitmap(BitmapFormat, Core::AnonymousBuffer, IntSize, int, Vector<ARGB32> const& palette);
 
-    static ErrorOr<BackingStore> allocate_backing_store(BitmapFormat format, IntSize const& size, int scale_factor);
+    static ErrorOr<BackingStore> allocate_backing_store(BitmapFormat format, IntSize size, int scale_factor);
 
     void allocate_palette_from_format(BitmapFormat, Vector<ARGB32> const& source_palette);
 
@@ -268,13 +269,15 @@ private:
 
 inline u8* Bitmap::scanline_u8(int y)
 {
-    VERIFY(y >= 0 && y < physical_height());
+    VERIFY(y >= 0);
+    VERIFY(y < physical_height());
     return reinterpret_cast<u8*>(m_data) + (y * m_pitch);
 }
 
 inline u8 const* Bitmap::scanline_u8(int y) const
 {
-    VERIFY(y >= 0 && y < physical_height());
+    VERIFY(y >= 0);
+    VERIFY(y < physical_height());
     return reinterpret_cast<u8 const*>(m_data) + (y * m_pitch);
 }
 
@@ -291,21 +294,24 @@ inline ARGB32 const* Bitmap::scanline(int y) const
 template<>
 inline Color Bitmap::get_pixel<StorageFormat::BGRx8888>(int x, int y) const
 {
-    VERIFY(x >= 0 && x < physical_width());
+    VERIFY(x >= 0);
+    VERIFY(x < physical_width());
     return Color::from_rgb(scanline(y)[x]);
 }
 
 template<>
 inline Color Bitmap::get_pixel<StorageFormat::BGRA8888>(int x, int y) const
 {
-    VERIFY(x >= 0 && x < physical_width());
+    VERIFY(x >= 0);
+    VERIFY(x < physical_width());
     return Color::from_argb(scanline(y)[x]);
 }
 
 template<>
 inline Color Bitmap::get_pixel<StorageFormat::Indexed8>(int x, int y) const
 {
-    VERIFY(x >= 0 && x < physical_width());
+    VERIFY(x >= 0);
+    VERIFY(x < physical_width());
     return Color::from_rgb(m_palette[scanline_u8(y)[x]]);
 }
 
@@ -326,19 +332,22 @@ inline Color Bitmap::get_pixel(int x, int y) const
 template<>
 inline void Bitmap::set_pixel<StorageFormat::BGRx8888>(int x, int y, Color color)
 {
-    VERIFY(x >= 0 && x < physical_width());
+    VERIFY(x >= 0);
+    VERIFY(x < physical_width());
     scanline(y)[x] = color.value();
 }
 template<>
 inline void Bitmap::set_pixel<StorageFormat::BGRA8888>(int x, int y, Color color)
 {
-    VERIFY(x >= 0 && x < physical_width());
+    VERIFY(x >= 0);
+    VERIFY(x < physical_width());
     scanline(y)[x] = color.value(); // drop alpha
 }
 template<>
 inline void Bitmap::set_pixel<StorageFormat::RGBA8888>(int x, int y, Color color)
 {
-    VERIFY(x >= 0 && x < physical_width());
+    VERIFY(x >= 0);
+    VERIFY(x < physical_width());
     // FIXME: There's a lot of inaccurately named functions in the Color class right now (RGBA vs BGRA),
     //        clear those up and then make this more convenient.
     auto rgba = (color.alpha() << 24) | (color.blue() << 16) | (color.green() << 8) | color.red();

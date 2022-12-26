@@ -76,7 +76,7 @@ void LayoutState::commit()
         if (is<Layout::Box>(node)) {
             auto& box = static_cast<Layout::Box const&>(node);
             auto& paint_box = const_cast<Painting::PaintableBox&>(*box.paint_box());
-            paint_box.set_offset(used_values.offset);
+            paint_box.set_offset(used_values.offset.to_type<CSSPixels>());
             paint_box.set_content_size(used_values.content_width(), used_values.content_height());
             paint_box.set_overflow_data(move(used_values.overflow_data));
             paint_box.set_containing_line_box_fragment(used_values.containing_line_box_fragment);
@@ -95,6 +95,32 @@ void LayoutState::commit()
 
     for (auto* text_node : text_nodes)
         text_node->set_paintable(text_node->create_paintable());
+}
+
+float box_baseline(LayoutState const& state, Box const& box)
+{
+    auto const& box_state = state.get(box);
+
+    auto const& vertical_align = box.computed_values().vertical_align();
+    if (vertical_align.has<CSS::VerticalAlign>()) {
+        switch (vertical_align.get<CSS::VerticalAlign>()) {
+        case CSS::VerticalAlign::Top:
+            return box_state.border_box_top();
+        case CSS::VerticalAlign::Bottom:
+            return box_state.content_height() + box_state.border_box_bottom();
+        default:
+            break;
+        }
+    }
+
+    if (!box_state.line_boxes.is_empty())
+        return box_state.border_box_top() + box_state.offset.y() + box_state.line_boxes.last().baseline();
+    if (box.has_children() && !box.children_are_inline()) {
+        auto const* child_box = box.last_child_of_type<Box>();
+        VERIFY(child_box);
+        return box_baseline(state, *child_box);
+    }
+    return box_state.border_box_height();
 }
 
 Gfx::FloatRect margin_box_rect(Box const& box, LayoutState const& state)

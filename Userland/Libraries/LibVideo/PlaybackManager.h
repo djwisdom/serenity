@@ -17,9 +17,9 @@
 #include <LibThreading/ConditionVariable.h>
 #include <LibThreading/Mutex.h>
 #include <LibThreading/Thread.h>
+#include <LibVideo/Containers/Demuxer.h>
+#include <LibVideo/Containers/Matroska/Document.h>
 
-#include "Demuxer.h"
-#include "MatroskaDocument.h"
 #include "VideoDecoder.h"
 
 namespace Video {
@@ -28,7 +28,8 @@ enum class PlaybackStatus {
     Playing,
     Paused,
     Buffering,
-    Seeking,
+    SeekingPlaying,
+    SeekingPaused,
     Stopped,
     Corrupted,
 };
@@ -62,11 +63,11 @@ struct FrameQueueItem {
         return error;
     }
 
-    String debug_string() const
+    DeprecatedString debug_string() const
     {
         if (is_error())
             return error().string_literal();
-        return String::formatted("frame at {}ms", timestamp().to_milliseconds());
+        return DeprecatedString::formatted("frame at {}ms", timestamp().to_milliseconds());
     }
 
 private:
@@ -93,6 +94,13 @@ using VideoFrameQueue = Queue<FrameQueueItem, FRAME_BUFFER_COUNT>;
 
 class PlaybackManager {
 public:
+    enum class SeekMode {
+        Accurate,
+        Fast,
+    };
+
+    static constexpr SeekMode DEFAULT_SEEK_MODE = SeekMode::Accurate;
+
     static DecoderErrorOr<NonnullOwnPtr<PlaybackManager>> from_file(Core::Object& event_handler, StringView file);
     static DecoderErrorOr<NonnullOwnPtr<PlaybackManager>> from_data(Core::Object& event_handler, Span<u8> data);
 
@@ -101,9 +109,14 @@ public:
     void resume_playback();
     void pause_playback();
     void restart_playback();
-    bool is_playing() const { return m_status == PlaybackStatus::Playing; }
+    void seek_to_timestamp(Time);
+    bool is_playing() const { return m_status == PlaybackStatus::Playing || m_status == PlaybackStatus::SeekingPlaying || m_status == PlaybackStatus::Buffering; }
+    bool is_seeking() const { return m_status == PlaybackStatus::SeekingPlaying || m_status == PlaybackStatus::SeekingPaused; }
     bool is_buffering() const { return m_status == PlaybackStatus::Buffering; }
-    bool is_stopped() const { return m_status == PlaybackStatus::Stopped; }
+    bool is_stopped() const { return m_status == PlaybackStatus::Stopped || m_status == PlaybackStatus::Corrupted; }
+
+    SeekMode seek_mode() { return m_seek_mode; }
+    void set_seek_mode(SeekMode mode) { m_seek_mode = mode; }
 
     u64 number_of_skipped_frames() const { return m_skipped_frames; }
 
@@ -117,7 +130,7 @@ public:
 private:
     void set_playback_status(PlaybackStatus status);
 
-    bool prepare_next_frame();
+    void end_seek();
     void update_presented_frame();
 
     // May run off the main thread
@@ -131,6 +144,9 @@ private:
     PlaybackStatus m_status { PlaybackStatus::Stopped };
     Time m_last_present_in_media_time = Time::zero();
     Time m_last_present_in_real_time = Time::zero();
+
+    Time m_seek_to_media_time = Time::min();
+    SeekMode m_seek_mode = DEFAULT_SEEK_MODE;
 
     NonnullOwnPtr<Demuxer> m_demuxer;
     Track m_selected_video_track;
@@ -212,8 +228,10 @@ inline StringView playback_status_to_string(PlaybackStatus status)
         return "Paused"sv;
     case PlaybackStatus::Buffering:
         return "Buffering"sv;
-    case PlaybackStatus::Seeking:
-        return "Seeking"sv;
+    case PlaybackStatus::SeekingPlaying:
+        return "SeekingPlaying"sv;
+    case PlaybackStatus::SeekingPaused:
+        return "SeekingPaused"sv;
     case PlaybackStatus::Stopped:
         return "Stopped"sv;
     case PlaybackStatus::Corrupted:

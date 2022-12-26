@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/ScopeGuard.h>
-#include <AK/String.h>
 #include <LibCore/MappedFile.h>
 #include <LibCore/System.h>
 #include <fcntl.h>
@@ -44,7 +44,9 @@ MappedFile::MappedFile(void* ptr, size_t size)
 
 MappedFile::~MappedFile()
 {
-    MUST(Core::System::munmap(m_data, m_size));
+    auto res = Core::System::munmap(m_data, m_size);
+    if (res.is_error())
+        dbgln("Failed to unmap MappedFile (@ {:p}): {}", m_data, res.error());
 }
 
 }

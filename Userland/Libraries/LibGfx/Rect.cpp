@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibGfx/Line.h>
 #include <LibGfx/Rect.h>
@@ -15,35 +15,34 @@
 namespace Gfx {
 
 template<>
-String IntRect::to_string() const
+DeprecatedString IntRect::to_deprecated_string() const
 {
-    return String::formatted("[{},{} {}x{}]", x(), y(), width(), height());
+    return DeprecatedString::formatted("[{},{} {}x{}]", x(), y(), width(), height());
 }
 
 template<>
-String FloatRect::to_string() const
+DeprecatedString FloatRect::to_deprecated_string() const
 {
-    return String::formatted("[{},{} {}x{}]", x(), y(), width(), height());
+    return DeprecatedString::formatted("[{},{} {}x{}]", x(), y(), width(), height());
 }
 
 }
 
 namespace IPC {
 
+template<>
 bool encode(Encoder& encoder, Gfx::IntRect const& rect)
 {
     encoder << rect.location() << rect.size();
     return true;
 }
 
-ErrorOr<void> decode(Decoder& decoder, Gfx::IntRect& rect)
+template<>
+ErrorOr<Gfx::IntRect> decode(Decoder& decoder)
 {
-    Gfx::IntPoint point;
-    Gfx::IntSize size;
-    TRY(decoder.decode(point));
-    TRY(decoder.decode(size));
-    rect = { point, size };
-    return {};
+    auto point = TRY(decoder.decode<Gfx::IntPoint>());
+    auto size = TRY(decoder.decode<Gfx::IntSize>());
+    return Gfx::IntRect { point, size };
 }
 
 }

@@ -51,8 +51,10 @@ class Function<Out(In...)> {
     AK_MAKE_NONCOPYABLE(Function);
 
 public:
+    using ReturnType = Out;
+
     Function() = default;
-    Function(std::nullptr_t)
+    Function(nullptr_t)
     {
     }
 
@@ -62,13 +64,15 @@ public:
     }
 
     template<typename CallableType>
-    Function(CallableType&& callable) requires((IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, In...> && !IsSame<RemoveCVReference<CallableType>, Function>))
+    Function(CallableType&& callable)
+    requires((IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, In...> && !IsSame<RemoveCVReference<CallableType>, Function>))
     {
         init_with_callable(forward<CallableType>(callable));
     }
 
     template<typename FunctionType>
-    Function(FunctionType f) requires((IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, In...> && !IsSame<RemoveCVReference<FunctionType>, Function>))
+    Function(FunctionType f)
+    requires((IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, In...> && !IsSame<RemoveCVReference<FunctionType>, Function>))
     {
         init_with_callable(move(f));
     }
@@ -94,7 +98,8 @@ public:
     explicit operator bool() const { return !!callable_wrapper(); }
 
     template<typename CallableType>
-    Function& operator=(CallableType&& callable) requires((IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, In...>))
+    Function& operator=(CallableType&& callable)
+    requires((IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, In...>))
     {
         clear();
         init_with_callable(forward<CallableType>(callable));
@@ -102,7 +107,8 @@ public:
     }
 
     template<typename FunctionType>
-    Function& operator=(FunctionType f) requires((IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, In...>))
+    Function& operator=(FunctionType f)
+    requires((IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, In...>))
     {
         clear();
         if (f)
@@ -110,7 +116,7 @@ public:
         return *this;
     }
 
-    Function& operator=(std::nullptr_t)
+    Function& operator=(nullptr_t)
     {
         clear();
         return *this;
@@ -263,4 +269,6 @@ private:
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::Function;
+#endif

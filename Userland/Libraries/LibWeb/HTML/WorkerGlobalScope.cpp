@@ -5,7 +5,7 @@
  */
 
 #include <AK/Base64.h>
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/Utf8View.h>
 #include <AK/Vector.h>
 #include <LibTextCodec/Decoder.h>
@@ -43,7 +43,7 @@ void WorkerGlobalScope::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://html.spec.whatwg.org/multipage/workers.html#importing-scripts-and-libraries
-WebIDL::ExceptionOr<void> WorkerGlobalScope::import_scripts(Vector<String> urls)
+WebIDL::ExceptionOr<void> WorkerGlobalScope::import_scripts(Vector<DeprecatedString> urls)
 {
     // The algorithm may optionally be customized by supplying custom perform the fetch hooks,
     // which if provided will be used when invoking fetch a classic worker-imported script.
@@ -98,7 +98,7 @@ ENUMERATE_WORKER_GLOBAL_SCOPE_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#dom-origin
-String WorkerGlobalScope::origin() const
+DeprecatedString WorkerGlobalScope::origin() const
 {
     // FIXME: The origin getter steps are to return this's relevant settings object's origin, serialized.
     return {};
@@ -121,7 +121,7 @@ bool WorkerGlobalScope::cross_origin_isolated() const
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#dom-btoa
-WebIDL::ExceptionOr<String> WorkerGlobalScope::btoa(String const& data) const
+WebIDL::ExceptionOr<DeprecatedString> WorkerGlobalScope::btoa(DeprecatedString const& data) const
 {
     // FIXME: This is the same as the implementation in Bindings/WindowObject.cpp
     //     Find a way to share this implementation, since they come from the same mixin.
@@ -137,11 +137,11 @@ WebIDL::ExceptionOr<String> WorkerGlobalScope::btoa(String const& data) const
 
     // Otherwise, the user agent must convert data to a byte sequence whose nth byte is the eight-bit representation of the nth code point of data,
     // and then must apply forgiving-base64 encode to that byte sequence and return the result.
-    return encode_base64(byte_string.span());
+    return TRY_OR_RETURN_OOM(realm(), encode_base64(byte_string.span())).to_deprecated_string();
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#dom-atob
-WebIDL::ExceptionOr<String> WorkerGlobalScope::atob(String const& data) const
+WebIDL::ExceptionOr<DeprecatedString> WorkerGlobalScope::atob(DeprecatedString const& data) const
 {
     // FIXME: This is the same as the implementation in Bindings/WindowObject.cpp
     //     Find a way to share this implementation, since they come from the same mixin.

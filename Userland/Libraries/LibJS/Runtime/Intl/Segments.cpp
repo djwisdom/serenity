@@ -11,7 +11,7 @@
 namespace JS::Intl {
 
 // 18.5.1 CreateSegmentsObject ( segmenter, string ), https://tc39.es/ecma402/#sec-createsegmentsobject
-Segments* Segments::create(Realm& realm, Segmenter& segmenter, Utf16String string)
+NonnullGCPtr<Segments> Segments::create(Realm& realm, Segmenter& segmenter, Utf16String string)
 {
     // 1. Let internalSlotsList be « [[SegmentsSegmenter]], [[SegmentsString]] ».
     // 2. Let segments be OrdinaryObjectCreate(%SegmentsPrototype%, internalSlotsList).
@@ -23,7 +23,7 @@ Segments* Segments::create(Realm& realm, Segmenter& segmenter, Utf16String strin
 
 // 18.5 Segments Objects, https://tc39.es/ecma402/#sec-segments-objects
 Segments::Segments(Realm& realm, Segmenter& segmenter, Utf16String string)
-    : Object(*realm.intrinsics().intl_segments_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().intl_segments_prototype())
     , m_segments_segmenter(segmenter)
     , m_segments_string(move(string))
 {

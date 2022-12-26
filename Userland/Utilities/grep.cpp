@@ -5,9 +5,9 @@
  */
 
 #include <AK/Assertions.h>
+#include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
 #include <AK/ScopeGuard.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DirIterator.h>
@@ -37,13 +37,13 @@ ErrorOr<int> serenity_main(Main::Arguments args)
 {
     TRY(Core::System::pledge("stdio rpath"));
 
-    String program_name = AK::LexicalPath::basename(args.strings[0]);
+    DeprecatedString program_name = AK::LexicalPath::basename(args.strings[0]);
 
-    Vector<String> files;
+    Vector<DeprecatedString> files;
 
     bool recursive = (program_name == "rgrep"sv);
     bool use_ere = (program_name == "egrep"sv);
-    Vector<String> patterns;
+    Vector<DeprecatedString> patterns;
     BinaryFileMode binary_mode { BinaryFileMode::Binary };
     bool case_insensitive = false;
     bool line_numbers = false;
@@ -178,7 +178,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
                         auto pre_match_length = match.global_offset - last_printed_char_pos;
                         out(colored_output ? "{}\x1B[32m{}\x1B[0m"sv : "{}{}"sv,
                             pre_match_length > 0 ? StringView(&str[last_printed_char_pos], pre_match_length) : ""sv,
-                            match.view.to_string());
+                            match.view.to_deprecated_string());
                         last_printed_char_pos = match.global_offset + match.view.length();
                     }
                     auto remaining_length = str.length() - last_printed_char_pos;
@@ -232,7 +232,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
             return true;
         };
 
-        auto add_directory = [&handle_file, user_has_specified_files](String base, Optional<String> recursive, auto handle_directory) -> void {
+        auto add_directory = [&handle_file, user_has_specified_files](DeprecatedString base, Optional<DeprecatedString> recursive, auto handle_directory) -> void {
             Core::DirIterator it(recursive.value_or(base), Core::DirIterator::Flags::SkipDots);
             while (it.has_next()) {
                 auto path = it.next_full_path();

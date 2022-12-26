@@ -293,12 +293,12 @@ bool MathematicalValue::is_zero() const
         [](auto) { return false; });
 }
 
-String MathematicalValue::to_string() const
+DeprecatedString MathematicalValue::to_deprecated_string() const
 {
     return m_value.visit(
         [](double value) { return number_to_string(value, NumberToStringMode::WithoutExponent); },
         [](Crypto::SignedBigInteger const& value) { return value.to_base(10); },
-        [](auto) -> String { VERIFY_NOT_REACHED(); });
+        [](auto) -> DeprecatedString { VERIFY_NOT_REACHED(); });
 }
 
 Value MathematicalValue::to_value(VM& vm) const
@@ -308,7 +308,7 @@ Value MathematicalValue::to_value(VM& vm) const
             return Value(value);
         },
         [&](Crypto::SignedBigInteger const& value) {
-            return Value(js_bigint(vm, value));
+            return Value(BigInt::create(vm, value));
         },
         [](auto symbol) {
             switch (symbol) {

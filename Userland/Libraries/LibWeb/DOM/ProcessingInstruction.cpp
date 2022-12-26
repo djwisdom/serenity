@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ProcessingInstruction.h>
 #include <LibWeb/Layout/TextNode.h>
 
 namespace Web::DOM {
 
-ProcessingInstruction::ProcessingInstruction(Document& document, String const& data, String const& target)
+ProcessingInstruction::ProcessingInstruction(Document& document, DeprecatedString const& data, DeprecatedString const& target)
     : CharacterData(document, NodeType::PROCESSING_INSTRUCTION_NODE, data)
     , m_target(target)
 {
+    set_prototype(&Bindings::cached_web_prototype(document.realm(), "ProcessingInstruction"));
 }
 
 }

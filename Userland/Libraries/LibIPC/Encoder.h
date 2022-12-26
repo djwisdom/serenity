@@ -9,6 +9,7 @@
 #include <AK/Concepts.h>
 #include <AK/HashMap.h>
 #include <AK/StdLibExtras.h>
+#include <AK/Variant.h>
 #include <LibCore/SharedCircularQueue.h>
 #include <LibIPC/Forward.h>
 #include <LibIPC/Message.h>
@@ -16,7 +17,7 @@
 namespace IPC {
 
 template<typename T>
-bool encode(Encoder&, T&)
+bool encode(Encoder&, T const&)
 {
     static_assert(DependentFalse<T>, "Base IPC::encode() was instantiated");
     VERIFY_NOT_REACHED();
@@ -43,12 +44,13 @@ public:
     Encoder& operator<<(double);
     Encoder& operator<<(char const*);
     Encoder& operator<<(StringView);
-    Encoder& operator<<(String const&);
+    Encoder& operator<<(DeprecatedString const&);
     Encoder& operator<<(ByteBuffer const&);
     Encoder& operator<<(JsonValue const&);
     Encoder& operator<<(URL const&);
     Encoder& operator<<(Dictionary const&);
     Encoder& operator<<(File const&);
+    Encoder& operator<<(AK::Empty const&);
     template<typename K, typename V>
     Encoder& operator<<(HashMap<K, V> const& hashmap)
     {
@@ -84,6 +86,14 @@ public:
     Encoder& operator<<(Core::SharedSingleProducerCircularQueue<T, Size> const& queue)
     {
         *this << IPC::File(queue.fd());
+        return *this;
+    }
+
+    template<typename... VariantTypes>
+    Encoder& operator<<(AK::Variant<VariantTypes...> const& variant)
+    {
+        *this << variant.index();
+        variant.visit([this](auto const& underlying_value) { *this << underlying_value; });
         return *this;
     }
 

@@ -32,6 +32,9 @@ struct TextStyle {
     bool const bold { false };
 };
 
+StringView language_to_string(Language);
+StringView common_language_extension(Language);
+
 class Highlighter {
     AK_MAKE_NONCOPYABLE(Highlighter);
     AK_MAKE_NONMOVABLE(Highlighter);
@@ -40,7 +43,8 @@ public:
     virtual ~Highlighter() = default;
 
     virtual Language language() const = 0;
-    StringView language_string(Language) const;
+    virtual Optional<StringView> comment_prefix() const = 0;
+    virtual Optional<StringView> comment_suffix() const = 0;
     virtual void rehighlight(Palette const&) = 0;
     virtual void highlight_matching_token_pair();
 
@@ -128,7 +132,7 @@ private:
     virtual Vector<GUI::TextDocumentSpan> const& spans() const override { return m_spans; }
     virtual void set_span_at_index(size_t index, GUI::TextDocumentSpan span) override { m_spans.at(index) = move(span); }
 
-    virtual String highlighter_did_request_text() const override { return m_text; }
+    virtual DeprecatedString highlighter_did_request_text() const override { return m_text; }
     virtual void highlighter_did_request_update() override { }
     virtual GUI::TextDocument& highlighter_did_request_document() override { return m_document; }
     virtual GUI::TextPosition highlighter_did_request_cursor() const override { return {}; }

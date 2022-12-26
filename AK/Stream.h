@@ -60,7 +60,7 @@ private:
 
 namespace AK {
 
-class InputStream : public virtual AK::Detail::Stream {
+class InputStream : public virtual Detail::Stream {
 public:
     // Reads at least one byte unless none are requested or none are available. Does nothing
     // and returns zero if there is already an error.
@@ -81,7 +81,7 @@ public:
     virtual bool discard_or_error(size_t count) = 0;
 };
 
-class OutputStream : public virtual AK::Detail::Stream {
+class OutputStream : public virtual Detail::Stream {
 public:
     virtual size_t write(ReadonlyBytes) = 0;
     virtual bool write_or_error(ReadonlyBytes) = 0;
@@ -134,14 +134,14 @@ InputStream& operator>>(InputStream& stream, Optional<T>& value)
     return stream;
 }
 
-template<typename Integral>
-InputStream& operator>>(InputStream& stream, Integral& value) requires IsIntegral<Integral>
+template<Integral I>
+InputStream& operator>>(InputStream& stream, I& value)
 {
     stream.read_or_error({ &value, sizeof(value) });
     return stream;
 }
-template<typename Integral>
-OutputStream& operator<<(OutputStream& stream, Integral value) requires IsIntegral<Integral>
+template<Integral I>
+OutputStream& operator<<(OutputStream& stream, I value)
 {
     stream.write_or_error({ &value, sizeof(value) });
     return stream;
@@ -149,14 +149,14 @@ OutputStream& operator<<(OutputStream& stream, Integral value) requires IsIntegr
 
 #ifndef KERNEL
 
-template<typename FloatingPoint>
-InputStream& operator>>(InputStream& stream, FloatingPoint& value) requires IsFloatingPoint<FloatingPoint>
+template<FloatingPoint F>
+InputStream& operator>>(InputStream& stream, F& value)
 {
     stream.read_or_error({ &value, sizeof(value) });
     return stream;
 }
-template<typename FloatingPoint>
-OutputStream& operator<<(OutputStream& stream, FloatingPoint value) requires IsFloatingPoint<FloatingPoint>
+template<FloatingPoint F>
+OutputStream& operator<<(OutputStream& stream, F value)
 {
     stream.write_or_error({ &value, sizeof(value) });
     return stream;

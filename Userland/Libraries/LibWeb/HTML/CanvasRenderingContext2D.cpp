@@ -26,7 +26,7 @@ namespace Web::HTML {
 
 JS::NonnullGCPtr<CanvasRenderingContext2D> CanvasRenderingContext2D::create(JS::Realm& realm, HTMLCanvasElement& element)
 {
-    return *realm.heap().allocate<CanvasRenderingContext2D>(realm, realm, element);
+    return realm.heap().allocate<CanvasRenderingContext2D>(realm, realm, element);
 }
 
 CanvasRenderingContext2D::CanvasRenderingContext2D(JS::Realm& realm, HTMLCanvasElement& element)
@@ -62,14 +62,14 @@ JS::NonnullGCPtr<HTMLCanvasElement> CanvasRenderingContext2D::canvas_for_binding
 
 void CanvasRenderingContext2D::fill_rect(float x, float y, float width, float height)
 {
-    auto painter = this->painter();
-    if (!painter)
+    auto painter = this->antialiased_painter();
+    if (!painter.has_value())
         return;
 
     auto& drawing_state = this->drawing_state();
 
     auto rect = drawing_state.transform.map(Gfx::FloatRect(x, y, width, height));
-    painter->fill_rect(enclosing_int_rect(rect), drawing_state.fill_style);
+    painter->fill_rect(rect, drawing_state.fill_style);
     did_draw(rect);
 }
 
@@ -86,23 +86,26 @@ void CanvasRenderingContext2D::clear_rect(float x, float y, float width, float h
 
 void CanvasRenderingContext2D::stroke_rect(float x, float y, float width, float height)
 {
-    auto painter = this->painter();
-    if (!painter)
+    auto painter = this->antialiased_painter();
+    if (!painter.has_value())
         return;
 
     auto& drawing_state = this->drawing_state();
 
     auto rect = drawing_state.transform.map(Gfx::FloatRect(x, y, width, height));
+    // We could remove the rounding here, but the lines look better when they have whole number pixel endponts.
+    auto top_left = drawing_state.transform.map(Gfx::FloatPoint(x, y)).to_rounded<float>();
+    auto top_right = drawing_state.transform.map(Gfx::FloatPoint(x + width - 1, y)).to_rounded<float>();
+    auto bottom_left = drawing_state.transform.map(Gfx::FloatPoint(x, y + height - 1)).to_rounded<float>();
+    auto bottom_right = drawing_state.transform.map(Gfx::FloatPoint(x + width - 1, y + height - 1)).to_rounded<float>();
 
-    auto top_left = drawing_state.transform.map(Gfx::FloatPoint(x, y)).to_type<int>();
-    auto top_right = drawing_state.transform.map(Gfx::FloatPoint(x + width - 1, y)).to_type<int>();
-    auto bottom_left = drawing_state.transform.map(Gfx::FloatPoint(x, y + height - 1)).to_type<int>();
-    auto bottom_right = drawing_state.transform.map(Gfx::FloatPoint(x + width - 1, y + height - 1)).to_type<int>();
-
-    painter->draw_line(top_left, top_right, drawing_state.stroke_style, drawing_state.line_width);
-    painter->draw_line(top_right, bottom_right, drawing_state.stroke_style, drawing_state.line_width);
-    painter->draw_line(bottom_right, bottom_left, drawing_state.stroke_style, drawing_state.line_width);
-    painter->draw_line(bottom_left, top_left, drawing_state.stroke_style, drawing_state.line_width);
+    Gfx::Path path;
+    path.move_to(top_left);
+    path.line_to(top_right);
+    path.line_to(bottom_right);
+    path.line_to(bottom_left);
+    path.line_to(top_left);
+    painter->stroke_path(path, drawing_state.stroke_style, drawing_state.line_width);
 
     did_draw(rect);
 }
@@ -121,7 +124,7 @@ WebIDL::ExceptionOr<void> CanvasRenderingContext2D::draw_image_internal(CanvasIm
     if (usability == CanvasImageSourceUsability::Bad)
         return {};
 
-    auto const* bitmap = image.visit([](auto const& source) { return source->bitmap(); });
+    auto const* bitmap = image.visit([](auto const& source) -> Gfx::Bitmap const* { return source->bitmap(); });
     if (!bitmap)
         return {};
 
@@ -173,17 +176,25 @@ void CanvasRenderingContext2D::did_draw(Gfx::FloatRect const&)
     canvas_element().layout_node()->set_needs_display();
 }
 
-OwnPtr<Gfx::Painter> CanvasRenderingContext2D::painter()
+Gfx::Painter* CanvasRenderingContext2D::painter()
 {
     if (!canvas_element().bitmap()) {
         if (!canvas_element().create_bitmap())
-            return {};
+            return nullptr;
+        m_painter = make<Gfx::Painter>(*canvas_element().bitmap());
     }
-
-    return make<Gfx::Painter>(*canvas_element().bitmap());
+    return m_painter.ptr();
 }
 
-void CanvasRenderingContext2D::fill_text(String const& text, float x, float y, Optional<double> max_width)
+Optional<Gfx::AntiAliasingPainter> CanvasRenderingContext2D::antialiased_painter()
+{
+    auto painter = this->painter();
+    if (painter)
+        return Gfx::AntiAliasingPainter { *painter };
+    return {};
+}
+
+void CanvasRenderingContext2D::fill_text(DeprecatedString const& text, float x, float y, Optional<double> max_width)
 {
     if (max_width.has_value() && max_width.value() <= 0)
         return;
@@ -201,7 +212,7 @@ void CanvasRenderingContext2D::fill_text(String const& text, float x, float y, O
     did_draw(transformed_rect.to_type<float>());
 }
 
-void CanvasRenderingContext2D::stroke_text(String const& text, float x, float y, Optional<double> max_width)
+void CanvasRenderingContext2D::stroke_text(DeprecatedString const& text, float x, float y, Optional<double> max_width)
 {
     // FIXME: Stroke the text instead of filling it.
     fill_text(text, x, y, max_width);
@@ -214,8 +225,8 @@ void CanvasRenderingContext2D::begin_path()
 
 void CanvasRenderingContext2D::stroke_internal(Gfx::Path const& path)
 {
-    auto painter = this->painter();
-    if (!painter)
+    auto painter = this->antialiased_painter();
+    if (!painter.has_value())
         return;
 
     auto& drawing_state = this->drawing_state();
@@ -236,10 +247,10 @@ void CanvasRenderingContext2D::stroke(Path2D const& path)
     stroke_internal(transformed_path);
 }
 
-void CanvasRenderingContext2D::fill_internal(Gfx::Path& path, String const& fill_rule)
+void CanvasRenderingContext2D::fill_internal(Gfx::Path& path, DeprecatedString const& fill_rule)
 {
-    auto painter = this->painter();
-    if (!painter)
+    auto painter = this->antialiased_painter();
+    if (!painter.has_value())
         return;
 
     path.close_all_subpaths();
@@ -256,12 +267,12 @@ void CanvasRenderingContext2D::fill_internal(Gfx::Path& path, String const& fill
     did_draw(path.bounding_box());
 }
 
-void CanvasRenderingContext2D::fill(String const& fill_rule)
+void CanvasRenderingContext2D::fill(DeprecatedString const& fill_rule)
 {
     return fill_internal(path(), fill_rule);
 }
 
-void CanvasRenderingContext2D::fill(Path2D& path, String const& fill_rule)
+void CanvasRenderingContext2D::fill(Path2D& path, DeprecatedString const& fill_rule)
 {
     auto transformed_path = path.path().copy_transformed(drawing_state().transform);
     return fill_internal(transformed_path, fill_rule);
@@ -346,7 +357,7 @@ void CanvasRenderingContext2D::reset_to_default_state()
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-measuretext
-JS::NonnullGCPtr<TextMetrics> CanvasRenderingContext2D::measure_text(String const& text)
+JS::NonnullGCPtr<TextMetrics> CanvasRenderingContext2D::measure_text(DeprecatedString const& text)
 {
     // The measureText(text) method steps are to run the text preparation
     // algorithm, passing it text and the object implementing the CanvasText
@@ -387,7 +398,7 @@ JS::NonnullGCPtr<TextMetrics> CanvasRenderingContext2D::measure_text(String cons
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#text-preparation-algorithm
-CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(String const& text, float max_width)
+CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(DeprecatedString const& text, float max_width)
 {
     // 1. If maxWidth was provided but is less than or equal to zero or equal to NaN, then return an empty array.
     if (max_width <= 0 || max_width != max_width) {
@@ -399,7 +410,7 @@ CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(St
     for (auto c : text) {
         builder.append(Infra::is_ascii_whitespace(c) ? ' ' : c);
     }
-    String replaced_text = builder.build();
+    DeprecatedString replaced_text = builder.build();
 
     // 3. Let font be the current font of target, as given by that object's font attribute.
     // FIXME: Once we have CanvasTextDrawingStyles, implement font selection.

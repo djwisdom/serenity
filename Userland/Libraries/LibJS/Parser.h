@@ -13,6 +13,7 @@
 #include <AK/StringBuilder.h>
 #include <LibJS/AST.h>
 #include <LibJS/Lexer.h>
+#include <LibJS/ParserError.h>
 #include <LibJS/Runtime/FunctionConstructor.h>
 #include <LibJS/SourceRange.h>
 #include <LibJS/Token.h>
@@ -57,7 +58,7 @@ public:
 
     template<typename FunctionNodeType>
     NonnullRefPtr<FunctionNodeType> parse_function_node(u16 parse_options = FunctionNodeParseOptions::CheckForFunctionAndName, Optional<Position> const& function_start = {});
-    Vector<FunctionNode::Parameter> parse_formal_parameters(int& function_length, u16 parse_options = 0);
+    Vector<FunctionParameter> parse_formal_parameters(int& function_length, u16 parse_options = 0);
 
     enum class AllowDuplicates {
         Yes,
@@ -85,7 +86,7 @@ public:
 
     NonnullRefPtr<Statement> parse_statement(AllowLabelledFunction allow_labelled_function = AllowLabelledFunction::No);
     NonnullRefPtr<BlockStatement> parse_block_statement();
-    NonnullRefPtr<FunctionBody> parse_function_body(Vector<FunctionDeclaration::Parameter> const& parameters, FunctionKind function_kind, bool& contains_direct_call_to_eval);
+    NonnullRefPtr<FunctionBody> parse_function_body(Vector<FunctionParameter> const& parameters, FunctionKind function_kind, bool& contains_direct_call_to_eval);
     NonnullRefPtr<ReturnStatement> parse_return_statement();
     NonnullRefPtr<VariableDeclaration> parse_variable_declaration(bool for_loop_variable_declaration = false);
     NonnullRefPtr<Statement> parse_for_statement();
@@ -173,36 +174,8 @@ public:
 
     Vector<CallExpression::Argument> parse_arguments();
 
-    struct Error {
-        String message;
-        Optional<Position> position;
-
-        String to_string() const
-        {
-            if (!position.has_value())
-                return message;
-            return String::formatted("{} (line: {}, column: {})", message, position.value().line, position.value().column);
-        }
-
-        String source_location_hint(StringView source, char const spacer = ' ', char const indicator = '^') const
-        {
-            if (!position.has_value())
-                return {};
-            // We need to modify the source to match what the lexer considers one line - normalizing
-            // line terminators to \n is easier than splitting using all different LT characters.
-            String source_string = source.replace("\r\n"sv, "\n"sv, ReplaceMode::All).replace("\r"sv, "\n"sv, ReplaceMode::All).replace(LINE_SEPARATOR_STRING, "\n"sv, ReplaceMode::All).replace(PARAGRAPH_SEPARATOR_STRING, "\n"sv, ReplaceMode::All);
-            StringBuilder builder;
-            builder.append(source_string.split_view('\n', SplitBehavior::KeepEmpty)[position.value().line - 1]);
-            builder.append('\n');
-            for (size_t i = 0; i < position.value().column - 1; ++i)
-                builder.append(spacer);
-            builder.append(indicator);
-            return builder.build();
-        }
-    };
-
     bool has_errors() const { return m_state.errors.size(); }
-    Vector<Error> const& errors() const { return m_state.errors; }
+    Vector<ParserError> const& errors() const { return m_state.errors; }
     void print_errors(bool print_hint = true) const
     {
         for (auto& error : m_state.errors) {
@@ -211,7 +184,7 @@ public:
                 if (!hint.is_empty())
                     warnln("{}", hint);
             }
-            warnln("SyntaxError: {}", error.to_string());
+            warnln("SyntaxError: {}", error.to_deprecated_string());
         }
     }
 
@@ -245,7 +218,7 @@ private:
     bool match(TokenType type) const;
     bool done() const;
     void expected(char const* what);
-    void syntax_error(String const& message, Optional<Position> = {});
+    void syntax_error(DeprecatedString const& message, Optional<Position> = {});
     Token consume();
     Token consume_identifier();
     Token consume_identifier_reference();
@@ -305,10 +278,11 @@ private:
     struct ParserState {
         Lexer lexer;
         Token current_token;
-        Vector<Error> errors;
+        Vector<ParserError> errors;
         ScopePusher* current_scope_pusher { nullptr };
 
         HashMap<StringView, Optional<Position>> labels_in_scope;
+        HashMap<size_t, Position> invalid_property_range_in_object_expression;
         HashTable<StringView>* referenced_private_names { nullptr };
 
         bool strict_mode { false };
@@ -343,6 +317,7 @@ private:
         }
     };
 
+    NonnullRefPtr<SourceCode> m_source_code;
     Vector<Position> m_rule_starts;
     ParserState m_state;
     FlyString m_filename;

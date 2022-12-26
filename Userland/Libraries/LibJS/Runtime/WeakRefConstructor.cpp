@@ -36,7 +36,7 @@ ThrowCompletionOr<Value> WeakRefConstructor::call()
 }
 
 // 26.1.1.1 WeakRef ( target ), https://tc39.es/ecma262/#sec-weak-ref-target
-ThrowCompletionOr<Object*> WeakRefConstructor::construct(FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> WeakRefConstructor::construct(FunctionObject& new_target)
 {
     auto& vm = this->vm();
 

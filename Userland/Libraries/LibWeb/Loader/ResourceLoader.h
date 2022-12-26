@@ -7,9 +7,9 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
-#include <AK/String.h>
 #include <AK/URL.h>
 #include <LibCore/Object.h>
 #include <LibCore/Proxy.h>
@@ -40,19 +40,24 @@ namespace Web {
 #    define OS_STRING "OpenBSD"
 #elif defined(AK_OS_NETBSD)
 #    define OS_STRING "NetBSD"
+#elif defined(AK_OS_DRAGONFLY)
+#    define OS_STRING "DragonFly"
 #else
 #    error Unknown OS
 #endif
 
-constexpr auto default_user_agent = "Mozilla/5.0 (" OS_STRING "; " CPU_STRING ") LibWeb+LibJS/1.0 Ladybird/1.0"sv;
+#define BROWSER_NAME "Ladybird"
+#define BROWSER_VERSION "1.0"
+
+constexpr auto default_user_agent = "Mozilla/5.0 (" OS_STRING "; " CPU_STRING ") LibWeb+LibJS/1.0 " BROWSER_NAME "/" BROWSER_VERSION ""sv;
 
 class ResourceLoaderConnectorRequest : public RefCounted<ResourceLoaderConnectorRequest> {
 public:
     virtual ~ResourceLoaderConnectorRequest();
 
     struct CertificateAndKey {
-        String certificate;
-        String key;
+        DeprecatedString certificate;
+        DeprecatedString key;
     };
 
     virtual void set_should_buffer_all_input(bool) = 0;
@@ -60,7 +65,7 @@ public:
 
     virtual void stream_into(Core::Stream::Stream&) = 0;
 
-    Function<void(bool success, u32 total_size, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> response_code, ReadonlyBytes payload)> on_buffered_request_finish;
+    Function<void(bool success, u32 total_size, HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> response_code, ReadonlyBytes payload)> on_buffered_request_finish;
     Function<void(bool success, u32 total_size)> on_finish;
     Function<void(Optional<u32> total_size, u32 downloaded_size)> on_progress;
     Function<CertificateAndKey()> on_certificate_requested;
@@ -76,7 +81,7 @@ public:
     virtual void prefetch_dns(AK::URL const&) = 0;
     virtual void preconnect(AK::URL const&) = 0;
 
-    virtual RefPtr<ResourceLoaderConnectorRequest> start_request(String const& method, AK::URL const&, HashMap<String, String> const& request_headers = {}, ReadonlyBytes request_body = {}, Core::ProxyData const& = {}) = 0;
+    virtual RefPtr<ResourceLoaderConnectorRequest> start_request(DeprecatedString const& method, AK::URL const&, HashMap<DeprecatedString, DeprecatedString> const& request_headers = {}, ReadonlyBytes request_body = {}, Core::ProxyData const& = {}) = 0;
 
 protected:
     explicit ResourceLoaderConnector();
@@ -90,8 +95,8 @@ public:
 
     RefPtr<Resource> load_resource(Resource::Type, LoadRequest&);
 
-    void load(LoadRequest&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {}, Function<void()> timeout_callback = nullptr);
-    void load(const AK::URL&, Function<void(ReadonlyBytes, HashMap<String, String, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(String const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {}, Function<void()> timeout_callback = nullptr);
+    void load(LoadRequest&, Function<void(ReadonlyBytes, HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(DeprecatedString const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {}, Function<void()> timeout_callback = nullptr);
+    void load(const AK::URL&, Function<void(ReadonlyBytes, HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> const& response_headers, Optional<u32> status_code)> success_callback, Function<void(DeprecatedString const&, Optional<u32> status_code)> error_callback = nullptr, Optional<u32> timeout = {}, Function<void()> timeout_callback = nullptr);
 
     ResourceLoaderConnector& connector() { return *m_connector; }
 
@@ -102,8 +107,8 @@ public:
 
     int pending_loads() const { return m_pending_loads; }
 
-    String const& user_agent() const { return m_user_agent; }
-    void set_user_agent(String const& user_agent) { m_user_agent = user_agent; }
+    DeprecatedString const& user_agent() const { return m_user_agent; }
+    void set_user_agent(DeprecatedString const& user_agent) { m_user_agent = user_agent; }
 
     void clear_cache();
     void evict_from_cache(LoadRequest const&);
@@ -118,7 +123,7 @@ private:
 
     HashTable<NonnullRefPtr<ResourceLoaderConnectorRequest>> m_active_requests;
     NonnullRefPtr<ResourceLoaderConnector> m_connector;
-    String m_user_agent;
+    DeprecatedString m_user_agent;
     Optional<Page&> m_page {};
 };
 

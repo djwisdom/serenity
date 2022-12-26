@@ -31,24 +31,24 @@ public:
     unsigned focus_offset() const;
     bool is_collapsed() const;
     unsigned range_count() const;
-    String type() const;
+    DeprecatedString type() const;
     WebIDL::ExceptionOr<JS::GCPtr<DOM::Range>> get_range_at(unsigned index);
     void add_range(JS::NonnullGCPtr<DOM::Range>);
     WebIDL::ExceptionOr<void> remove_range(JS::NonnullGCPtr<DOM::Range>);
     void remove_all_ranges();
     void empty();
-    void collapse(JS::GCPtr<DOM::Node>, unsigned offset);
-    void set_position(JS::GCPtr<DOM::Node>, unsigned offset);
-    void collapse_to_start();
-    void collapse_to_end();
+    WebIDL::ExceptionOr<void> collapse(JS::GCPtr<DOM::Node>, unsigned offset);
+    WebIDL::ExceptionOr<void> set_position(JS::GCPtr<DOM::Node>, unsigned offset);
+    WebIDL::ExceptionOr<void> collapse_to_start();
+    WebIDL::ExceptionOr<void> collapse_to_end();
     WebIDL::ExceptionOr<void> extend(JS::NonnullGCPtr<DOM::Node>, unsigned offset);
-    void set_base_and_extent(JS::NonnullGCPtr<DOM::Node> anchor_node, unsigned anchor_offset, JS::NonnullGCPtr<DOM::Node> focus_node, unsigned focus_offset);
+    WebIDL::ExceptionOr<void> set_base_and_extent(JS::NonnullGCPtr<DOM::Node> anchor_node, unsigned anchor_offset, JS::NonnullGCPtr<DOM::Node> focus_node, unsigned focus_offset);
     WebIDL::ExceptionOr<void> select_all_children(JS::NonnullGCPtr<DOM::Node>);
     WebIDL::ExceptionOr<void>
     delete_from_document();
     bool contains_node(JS::NonnullGCPtr<DOM::Node>, bool allow_partial_containment) const;
 
-    String to_string() const;
+    DeprecatedString to_deprecated_string() const;
 
 private:
     Selection(JS::NonnullGCPtr<JS::Realm>, JS::NonnullGCPtr<DOM::Document>);

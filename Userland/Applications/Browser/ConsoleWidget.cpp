@@ -92,7 +92,7 @@ void ConsoleWidget::notify_about_new_console_message(i32 message_index)
         request_console_messages();
 }
 
-void ConsoleWidget::handle_console_messages(i32 start_index, Vector<String> const& message_types, Vector<String> const& messages)
+void ConsoleWidget::handle_console_messages(i32 start_index, Vector<DeprecatedString> const& message_types, Vector<DeprecatedString> const& messages)
 {
     i32 end_index = start_index + message_types.size() - 1;
     if (end_index <= m_highest_received_message_index) {
@@ -133,7 +133,7 @@ void ConsoleWidget::print_source_line(StringView source)
     html.append("&gt; "sv);
     html.append("</span>"sv);
 
-    html.append(JS::MarkupGenerator::html_from_source(source));
+    html.append(JS::MarkupGenerator::html_from_source(source).release_value_but_fixme_should_propagate_errors());
 
     print_html(html.string_view());
 }

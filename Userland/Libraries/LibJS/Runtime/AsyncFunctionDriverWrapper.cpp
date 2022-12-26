@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AsyncFunctionDriverWrapper.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/NativeFunction.h>
@@ -35,8 +36,8 @@ ThrowCompletionOr<Value> AsyncFunctionDriverWrapper::react_to_async_task_complet
     auto& realm = *vm.current_realm();
 
     auto generator_result = is_successful
-        ? m_generator_object->next_impl(vm, value, {})
-        : m_generator_object->next_impl(vm, {}, value);
+        ? m_generator_object->resume(vm, value, {})
+        : m_generator_object->resume_abrupt(vm, throw_completion(value), {});
 
     if (generator_result.is_throw_completion()) {
         VERIFY(generator_result.throw_completion().type() == Completion::Type::Throw);
@@ -55,7 +56,7 @@ ThrowCompletionOr<Value> AsyncFunctionDriverWrapper::react_to_async_task_complet
         return promise;
     }
 
-    auto* promise = static_cast<Promise*>(&promise_value.as_object());
+    auto promise = static_cast<Promise*>(&promise_value.as_object());
     if (TRY(result.get(vm, vm.names.done)).to_boolean())
         return promise;
 

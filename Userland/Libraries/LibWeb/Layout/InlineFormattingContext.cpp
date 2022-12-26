@@ -127,7 +127,7 @@ void InlineFormattingContext::dimension_box_on_line(Box const& box, LayoutMode l
 
     auto const& width_value = box.computed_values().width();
     float unconstrained_width = 0;
-    if (width_value.is_auto()) {
+    if (should_treat_width_as_auto(box, *m_available_space)) {
         auto result = calculate_shrink_to_fit_widths(box);
 
         auto available_width = m_available_space->width.to_px()
@@ -202,7 +202,7 @@ void InlineFormattingContext::apply_justification_to_fragments(CSS::TextJustify 
     for (auto& fragment : line_box.fragments()) {
         if (fragment.is_justifiable_whitespace()) {
             ++whitespace_count;
-            excess_horizontal_space_including_whitespace += fragment.width();
+            excess_horizontal_space_including_whitespace += fragment.width().value();
         }
     }
 
@@ -221,7 +221,7 @@ void InlineFormattingContext::apply_justification_to_fragments(CSS::TextJustify 
 
         if (fragment.is_justifiable_whitespace()
             && fragment.width() != justified_space_width) {
-            running_diff += justified_space_width - fragment.width();
+            running_diff += justified_space_width - fragment.width().value();
             fragment.set_width(justified_space_width);
         }
     }

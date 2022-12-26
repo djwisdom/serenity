@@ -39,13 +39,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     return 0;
 }
 
-static String title_casify_transform_function(StringView input)
+static DeprecatedString title_casify_transform_function(StringView input)
 {
     // Transform function names look like `fooBar`, so we just have to make the first character uppercase.
     StringBuilder builder;
     builder.append(toupper(input[0]));
     builder.append(input.substring_view(1));
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 ErrorOr<void> generate_header_file(JsonObject& transforms_data, Core::Stream::File& file)
@@ -189,7 +189,7 @@ TransformFunctionMetadata transform_function_metadata(TransformFunction transfor
             member_generator.append(first ? " "sv : ", "sv);
             first = false;
 
-            member_generator.append(String::formatted("{{ TransformFunctionParameterType::{}, {}}}", parameter_type, value.as_object().get("required"sv).to_string()));
+            member_generator.append(DeprecatedString::formatted("{{ TransformFunctionParameterType::{}, {}}}", parameter_type, value.as_object().get("required"sv).to_deprecated_string()));
         });
 
         member_generator.append(R"~~~( }

@@ -8,7 +8,6 @@
 
 #include <AK/FlyString.h>
 #include <AK/HashMap.h>
-#include <LibJS/AST.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/Environment.h>
 #include <LibJS/Runtime/Value.h>
@@ -57,6 +56,8 @@ public:
 
     ThrowCompletionOr<void> set_mutable_binding_direct(VM&, size_t index, Value, bool strict);
     ThrowCompletionOr<Value> get_binding_value_direct(VM&, size_t index, bool strict);
+
+    void shrink_to_fit();
 
 private:
     ThrowCompletionOr<void> initialize_binding_direct(VM&, Binding&, Value);

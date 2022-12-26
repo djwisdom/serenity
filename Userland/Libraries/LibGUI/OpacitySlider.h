@@ -18,6 +18,8 @@ public:
     virtual ~OpacitySlider() override = default;
 
 protected:
+    explicit OpacitySlider(Gfx::Orientation);
+
     virtual void paint_event(PaintEvent&) override;
     virtual void mousedown_event(MouseEvent&) override;
     virtual void mousemove_event(MouseEvent&) override;
@@ -25,13 +27,40 @@ protected:
     virtual void mousewheel_event(MouseEvent&) override;
 
 private:
-    explicit OpacitySlider(Gfx::Orientation = Gfx::Orientation::Horizontal);
-
     Gfx::IntRect frame_inner_rect() const;
 
-    int value_at(Gfx::IntPoint const&) const;
+    virtual Optional<UISize> calculated_min_size() const override;
+    virtual Optional<UISize> calculated_preferred_size() const override;
+
+    int value_at(Gfx::IntPoint) const;
 
     bool m_dragging { false };
+};
+
+class VerticalOpacitySlider final : public OpacitySlider {
+    C_OBJECT(VerticalOpacitySlider);
+
+public:
+    virtual ~VerticalOpacitySlider() override = default;
+
+private:
+    VerticalOpacitySlider()
+        : OpacitySlider(Orientation::Vertical)
+    {
+    }
+};
+
+class HorizontalOpacitySlider final : public OpacitySlider {
+    C_OBJECT(HorizontalOpacitySlider);
+
+public:
+    virtual ~HorizontalOpacitySlider() override = default;
+
+private:
+    HorizontalOpacitySlider()
+        : OpacitySlider(Orientation::Horizontal)
+    {
+    }
 };
 
 }

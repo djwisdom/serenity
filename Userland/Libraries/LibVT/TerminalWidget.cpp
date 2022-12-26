@@ -6,9 +6,9 @@
  */
 
 #include "TerminalWidget.h"
+#include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Utf32View.h>
@@ -503,7 +503,7 @@ void TerminalWidget::resize_event(GUI::ResizeEvent& event)
     relayout(event.size());
 }
 
-void TerminalWidget::relayout(Gfx::IntSize const& size)
+void TerminalWidget::relayout(Gfx::IntSize size)
 {
     if (!m_scrollbar)
         return;
@@ -591,7 +591,7 @@ bool TerminalWidget::selection_contains(const VT::Position& position) const
     return position >= normalized_selection.start() && position <= normalized_selection.end();
 }
 
-VT::Position TerminalWidget::buffer_position_at(Gfx::IntPoint const& position) const
+VT::Position TerminalWidget::buffer_position_at(Gfx::IntPoint position) const
 {
     auto adjusted_position = position.translated(-(frame_thickness() + m_inset), -(frame_thickness() + m_inset));
     int row = adjusted_position.y() / m_line_height;
@@ -850,12 +850,12 @@ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
                     auto file_name = LexicalPath::basename(path);
 
                     if (path == handlers[0]) {
-                        set_tooltip(String::formatted("Execute {}", app_name));
+                        set_tooltip(DeprecatedString::formatted("Execute {}", app_name));
                     } else {
-                        set_tooltip(String::formatted("Open {} with {}", file_name, app_name));
+                        set_tooltip(DeprecatedString::formatted("Open {} with {}", file_name, app_name));
                     }
                 } else {
-                    set_tooltip(String::formatted("Open {} with {}", attribute.href, app_name));
+                    set_tooltip(DeprecatedString::formatted("Open {} with {}", attribute.href, app_name));
                 }
             }
         } else {
@@ -954,7 +954,7 @@ int TerminalWidget::scroll_length() const
     return m_scrollbar->step();
 }
 
-String TerminalWidget::selected_text() const
+DeprecatedString TerminalWidget::selected_text() const
 {
     StringBuilder builder;
 
@@ -980,7 +980,7 @@ String TerminalWidget::selected_text() const
         }
     }
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 int TerminalWidget::first_selection_column_on_row(int row) const
@@ -1105,7 +1105,7 @@ void TerminalWidget::context_menu_event(GUI::ContextMenuEvent& event)
             auto af = Desktop::AppFile::get_for_app(LexicalPath::basename(handler));
             if (!af->is_valid())
                 continue;
-            auto action = GUI::Action::create(String::formatted("&Open in {}", af->name()), af->icon().bitmap_for_size(16), [this, handler](auto&) {
+            auto action = GUI::Action::create(DeprecatedString::formatted("&Open in {}", af->name()), af->icon().bitmap_for_size(16), [this, handler](auto&) {
                 Desktop::Launcher::open(m_context_menu_href, handler);
             });
 
@@ -1153,7 +1153,7 @@ void TerminalWidget::drop_event(GUI::DropEvent& event)
             if (url.scheme() == "file")
                 send_non_user_input(url.path().bytes());
             else
-                send_non_user_input(url.to_string().bytes());
+                send_non_user_input(url.to_deprecated_string().bytes());
 
             first = false;
         }
@@ -1218,7 +1218,7 @@ void TerminalWidget::set_color_scheme(StringView name)
         "White"sv
     };
 
-    auto path = String::formatted("/res/terminal-colors/{}.ini", name);
+    auto path = DeprecatedString::formatted("/res/terminal-colors/{}.ini", name);
     auto color_config_or_error = Core::ConfigFile::open(path);
     if (color_config_or_error.is_error()) {
         dbgln("Unable to read color scheme file '{}': {}", path, color_config_or_error.error());
@@ -1340,7 +1340,7 @@ Optional<VT::CursorShape> TerminalWidget::parse_cursor_shape(StringView cursor_s
     return {};
 }
 
-String TerminalWidget::stringify_cursor_shape(VT::CursorShape cursor_shape)
+DeprecatedString TerminalWidget::stringify_cursor_shape(VT::CursorShape cursor_shape)
 {
     switch (cursor_shape) {
     case VT::CursorShape::Block:

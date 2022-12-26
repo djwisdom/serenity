@@ -13,19 +13,19 @@ static void run_test(StringView const file_name)
 {
     // This makes sure that the tests will run both on target and in Lagom.
 #ifdef AK_OS_SERENITY
-    String path = String::formatted("/usr/Tests/LibCompress/brotli-test-files/{}", file_name);
+    DeprecatedString path = DeprecatedString::formatted("/usr/Tests/LibCompress/brotli-test-files/{}", file_name);
 #else
-    String path = String::formatted("brotli-test-files/{}", file_name);
+    DeprecatedString path = DeprecatedString::formatted("brotli-test-files/{}", file_name);
 #endif
 
     auto cmp_file = MUST(Core::Stream::File::open(path, Core::Stream::OpenMode::Read));
-    auto cmp_data = MUST(cmp_file->read_all());
+    auto cmp_data = MUST(cmp_file->read_until_eof());
 
-    String path_compressed = String::formatted("{}.br", path);
+    DeprecatedString path_compressed = DeprecatedString::formatted("{}.br", path);
 
     auto file = MUST(Core::Stream::File::open(path_compressed, Core::Stream::OpenMode::Read));
     auto brotli_stream = Compress::BrotliDecompressionStream { *file };
-    auto data = MUST(brotli_stream.read_all());
+    auto data = MUST(brotli_stream.read_until_eof());
 
     EXPECT_EQ(data, cmp_data);
 }
@@ -89,12 +89,12 @@ TEST_CASE(brotli_decompress_zero_one_bin)
 {
     // This makes sure that the tests will run both on target and in Lagom.
 #ifdef AK_OS_SERENITY
-    String path = "/usr/Tests/LibCompress/brotli-test-files/zero-one.bin";
+    DeprecatedString path = "/usr/Tests/LibCompress/brotli-test-files/zero-one.bin";
 #else
-    String path = "brotli-test-files/zero-one.bin";
+    DeprecatedString path = "brotli-test-files/zero-one.bin";
 #endif
 
-    String path_compressed = String::formatted("{}.br", path);
+    DeprecatedString path_compressed = DeprecatedString::formatted("{}.br", path);
 
     auto file = MUST(Core::Stream::File::open(path_compressed, Core::Stream::OpenMode::Read));
     auto brotli_stream = Compress::BrotliDecompressionStream { *file };

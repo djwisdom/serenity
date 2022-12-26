@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/ScopeGuard.h>
 #include <AK/ScopedValueRollback.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
+#include <Kernel/API/Unveil.h>
 #include <LibCore/File.h>
 #include <alloca.h>
 #include <assert.h>
@@ -188,12 +189,12 @@ int execvpe(char const* filename, char* const argv[], char* const envp[])
     ScopedValueRollback errno_rollback(errno);
 
     // TODO: Make this use the PATH search implementation from Core::File.
-    String path = getenv("PATH");
+    DeprecatedString path = getenv("PATH");
     if (path.is_empty())
         path = DEFAULT_PATH;
     auto parts = path.split(':');
     for (auto& part : parts) {
-        auto candidate = String::formatted("{}/{}", part, filename);
+        auto candidate = DeprecatedString::formatted("{}/{}", part, filename);
         int rc = execve(candidate.characters(), argv, envp);
         if (rc < 0 && errno != ENOENT) {
             errno_rollback.set_override_rollback_value(errno);
@@ -629,10 +630,16 @@ int sethostname(char const* hostname, ssize_t size)
     __RETURN_WITH_ERRNO(rc, rc, -1);
 }
 
-// https://pubs.opengroup.org/onlinepubs/9699919799/functions/readlink.html
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/readlinkat.html
 ssize_t readlink(char const* path, char* buffer, size_t size)
 {
-    Syscall::SC_readlink_params params { { path, strlen(path) }, { buffer, size } };
+    return readlinkat(AT_FDCWD, path, buffer, size);
+}
+
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/readlinkat.html
+ssize_t readlinkat(int dirfd, char const* path, char* buffer, size_t size)
+{
+    Syscall::SC_readlink_params params { { path, strlen(path) }, { buffer, size }, dirfd };
     int rc = syscall(SC_readlink, &params);
     // Return the number of bytes placed in the buffer, not the full path size.
     __RETURN_WITH_ERRNO(rc, min((size_t)rc, size), -1);
@@ -672,11 +679,17 @@ int unlinkat(int dirfd, char const* pathname, int flags)
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/symlink.html
 int symlink(char const* target, char const* linkpath)
 {
+    return symlinkat(target, AT_FDCWD, linkpath);
+}
+
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/symlinkat.html
+int symlinkat(char const* target, int newdirfd, char const* linkpath)
+{
     if (!target || !linkpath) {
         errno = EFAULT;
         return -1;
     }
-    Syscall::SC_symlink_params params { { target, strlen(target) }, { linkpath, strlen(linkpath) } };
+    Syscall::SC_symlink_params params { { target, strlen(target) }, { linkpath, strlen(linkpath) }, newdirfd };
     int rc = syscall(SC_symlink, &params);
     __RETURN_WITH_ERRNO(rc, rc, -1);
 }
@@ -777,6 +790,12 @@ int setresuid(uid_t ruid, uid_t euid, uid_t suid)
     __RETURN_WITH_ERRNO(rc, rc, -1);
 }
 
+int setregid(gid_t rgid, gid_t egid)
+{
+    int rc = syscall(SC_setresgid, rgid, egid);
+    __RETURN_WITH_ERRNO(rc, rc, -1);
+}
+
 int setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 {
     int rc = syscall(SC_setresgid, rgid, egid, sgid);
@@ -786,11 +805,19 @@ int setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/access.html
 int access(char const* pathname, int mode)
 {
+    return faccessat(AT_FDCWD, pathname, mode, 0);
+}
+
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/faccessat.html
+int faccessat(int dirfd, char const* pathname, int mode, int flags)
+{
     if (!pathname) {
         errno = EFAULT;
         return -1;
     }
-    int rc = syscall(SC_access, pathname, strlen(pathname), mode);
+
+    Syscall::SC_faccessat_params params { dirfd, { pathname, strlen(pathname) }, mode, flags };
+    int rc = syscall(SC_faccessat, &params);
     __RETURN_WITH_ERRNO(rc, rc, -1);
 }
 
@@ -853,13 +880,13 @@ void sync()
     syscall(SC_sync);
 }
 
-static String getlogin_buffer;
+static DeprecatedString getlogin_buffer;
 
 char* getlogin()
 {
     if (getlogin_buffer.is_null()) {
         if (auto* passwd = getpwuid(getuid())) {
-            getlogin_buffer = String(passwd->pw_name);
+            getlogin_buffer = DeprecatedString(passwd->pw_name);
         }
         endpwent();
     }
@@ -965,6 +992,7 @@ int pledge(char const* promises, char const* execpromises)
 int unveil(char const* path, char const* permissions)
 {
     Syscall::SC_unveil_params params {
+        static_cast<int>(UnveilFlags::CurrentProgram),
         { path, path ? strlen(path) : 0 },
         { permissions, permissions ? strlen(permissions) : 0 }
     };

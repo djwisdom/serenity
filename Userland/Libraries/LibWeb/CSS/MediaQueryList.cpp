@@ -17,7 +17,7 @@ namespace Web::CSS {
 
 JS::NonnullGCPtr<MediaQueryList> MediaQueryList::create(DOM::Document& document, NonnullRefPtrVector<MediaQuery>&& media)
 {
-    return *document.heap().allocate<MediaQueryList>(document.realm(), document, move(media));
+    return document.heap().allocate<MediaQueryList>(document.realm(), document, move(media));
 }
 
 MediaQueryList::MediaQueryList(DOM::Document& document, NonnullRefPtrVector<MediaQuery>&& media)
@@ -36,7 +36,7 @@ void MediaQueryList::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-mediaquerylist-media
-String MediaQueryList::media() const
+DeprecatedString MediaQueryList::media() const
 {
     return serialize_a_media_query_list(m_media);
 }

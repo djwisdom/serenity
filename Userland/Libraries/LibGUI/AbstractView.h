@@ -93,7 +93,7 @@ public:
     virtual Gfx::IntRect editing_rect(ModelIndex const& index) const { return content_rect(index); }
     virtual Gfx::IntRect paint_invalidation_rect(ModelIndex const& index) const { return content_rect(index); }
 
-    virtual ModelIndex index_at_event_position(Gfx::IntPoint const&) const { return {}; }
+    virtual ModelIndex index_at_event_position(Gfx::IntPoint) const { return {}; }
     void begin_editing(ModelIndex const&);
     void stop_editing();
 
@@ -148,7 +148,7 @@ protected:
     virtual void hide_event(HideEvent&) override;
     virtual void focusin_event(FocusEvent&) override;
 
-    virtual void on_automatic_scrolling_timer_fired() override;
+    virtual void automatic_scrolling_timer_did_fire() override;
 
     virtual void clear_selection();
     virtual void set_selection(ModelIndex const&);
@@ -199,7 +199,7 @@ private:
 
     RefPtr<Model> m_model;
     ModelSelection m_selection;
-    String m_highlighted_search;
+    DeprecatedString m_highlighted_search;
     RefPtr<Core::Timer> m_highlighted_search_timer;
     SelectionBehavior m_selection_behavior { SelectionBehavior::SelectItems };
     SelectionMode m_selection_mode { SelectionMode::SingleSelection };

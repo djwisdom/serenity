@@ -6,18 +6,16 @@
 
 #include <AK/ScopeGuard.h>
 #include <Kernel/API/Graphics.h>
+#include <LibIPC/Decoder.h>
+#include <LibIPC/Encoder.h>
 #include <Services/WindowServer/ScreenLayout.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
 
-// Must be included after LibIPC/Forward.h
-#include <LibIPC/Decoder.h>
-#include <LibIPC/Encoder.h>
-
 namespace WindowServer {
 
-bool ScreenLayout::is_valid(String* error_msg) const
+bool ScreenLayout::is_valid(DeprecatedString* error_msg) const
 {
     if (screens.is_empty()) {
         if (error_msg)
@@ -26,7 +24,7 @@ bool ScreenLayout::is_valid(String* error_msg) const
     }
     if (main_screen_index >= screens.size()) {
         if (error_msg)
-            *error_msg = String::formatted("Invalid main screen index: {}", main_screen_index);
+            *error_msg = DeprecatedString::formatted("Invalid main screen index: {}", main_screen_index);
         return false;
     }
     int smallest_x = 0;
@@ -35,7 +33,7 @@ bool ScreenLayout::is_valid(String* error_msg) const
         auto& screen = screens[i];
         if (screen.mode == Screen::Mode::Device && (screen.device->is_empty() || screen.device->is_null())) {
             if (error_msg)
-                *error_msg = String::formatted("Screen #{} has no path", i);
+                *error_msg = DeprecatedString::formatted("Screen #{} has no path", i);
             return false;
         }
         for (size_t j = 0; j < screens.size(); j++) {
@@ -44,28 +42,28 @@ bool ScreenLayout::is_valid(String* error_msg) const
                 continue;
             if (screen.device == other_screen.device) {
                 if (error_msg)
-                    *error_msg = String::formatted("Screen #{} is using same device as screen #{}", i, j);
+                    *error_msg = DeprecatedString::formatted("Screen #{} is using same device as screen #{}", i, j);
                 return false;
             }
             if (screen.virtual_rect().intersects(other_screen.virtual_rect())) {
                 if (error_msg)
-                    *error_msg = String::formatted("Screen #{} overlaps with screen #{}", i, j);
+                    *error_msg = DeprecatedString::formatted("Screen #{} overlaps with screen #{}", i, j);
                 return false;
             }
         }
         if (screen.location.x() < 0 || screen.location.y() < 0) {
             if (error_msg)
-                *error_msg = String::formatted("Screen #{} has invalid location: {}", i, screen.location);
+                *error_msg = DeprecatedString::formatted("Screen #{} has invalid location: {}", i, screen.location);
             return false;
         }
         if (screen.resolution.width() <= 0 || screen.resolution.height() <= 0) {
             if (error_msg)
-                *error_msg = String::formatted("Screen #{} has invalid resolution: {}", i, screen.resolution);
+                *error_msg = DeprecatedString::formatted("Screen #{} has invalid resolution: {}", i, screen.resolution);
             return false;
         }
         if (screen.scale_factor < 1) {
             if (error_msg)
-                *error_msg = String::formatted("Screen #{} has invalid scale factor: {}", i, screen.scale_factor);
+                *error_msg = DeprecatedString::formatted("Screen #{} has invalid scale factor: {}", i, screen.scale_factor);
             return false;
         }
         if (i == 0 || screen.location.x() < smallest_x)
@@ -78,7 +76,7 @@ bool ScreenLayout::is_valid(String* error_msg) const
             *error_msg = "Screen layout has not been normalized";
         return false;
     }
-    Vector<const Screen*, 16> reachable_screens { &screens[main_screen_index] };
+    Vector<Screen const*, 16> reachable_screens { &screens[main_screen_index] };
     bool did_reach_another_screen;
     do {
         did_reach_another_screen = false;
@@ -98,7 +96,7 @@ bool ScreenLayout::is_valid(String* error_msg) const
             auto& screen = screens[i];
             if (!reachable_screens.contains_slow(&screen)) {
                 if (error_msg)
-                    *error_msg = String::formatted("Screen #{} {} cannot be reached from main screen #{} {}", i, screen.virtual_rect(), main_screen_index, screens[main_screen_index].virtual_rect());
+                    *error_msg = DeprecatedString::formatted("Screen #{} {} cannot be reached from main screen #{} {}", i, screen.virtual_rect(), main_screen_index, screens[main_screen_index].virtual_rect());
                 break;
             }
         }
@@ -227,12 +225,12 @@ bool ScreenLayout::normalize()
     return did_change;
 }
 
-bool ScreenLayout::load_config(const Core::ConfigFile& config_file, String* error_msg)
+bool ScreenLayout::load_config(Core::ConfigFile const& config_file, DeprecatedString* error_msg)
 {
     screens.clear_with_capacity();
     main_screen_index = config_file.read_num_entry("Screens", "MainScreen", 0);
     for (size_t index = 0;; index++) {
-        auto group_name = String::formatted("Screen{}", index);
+        auto group_name = DeprecatedString::formatted("Screen{}", index);
         if (!config_file.has_group(group_name))
             break;
         auto str_mode = config_file.read_entry(group_name, "Mode");
@@ -244,11 +242,11 @@ bool ScreenLayout::load_config(const Core::ConfigFile& config_file, String* erro
         }
 
         if (mode == Screen::Mode::Invalid) {
-            *error_msg = String::formatted("Invalid screen mode '{}'", str_mode);
+            *error_msg = DeprecatedString::formatted("Invalid screen mode '{}'", str_mode);
             *this = {};
             return false;
         }
-        auto device = (mode == Screen::Mode::Device) ? config_file.read_entry(group_name, "Device") : Optional<String> {};
+        auto device = (mode == Screen::Mode::Device) ? config_file.read_entry(group_name, "Device") : Optional<DeprecatedString> {};
         screens.append({ mode, device,
             { config_file.read_num_entry(group_name, "Left"), config_file.read_num_entry(group_name, "Top") },
             { config_file.read_num_entry(group_name, "Width"), config_file.read_num_entry(group_name, "Height") },
@@ -268,7 +266,7 @@ bool ScreenLayout::save_config(Core::ConfigFile& config_file, bool sync) const
     size_t index = 0;
     while (index < screens.size()) {
         auto& screen = screens[index];
-        auto group_name = String::formatted("Screen{}", index);
+        auto group_name = DeprecatedString::formatted("Screen{}", index);
         config_file.write_entry(group_name, "Mode", Screen::mode_to_string(screen.mode));
         if (screen.mode == Screen::Mode::Device)
             config_file.write_entry(group_name, "Device", screen.device.value());
@@ -281,7 +279,7 @@ bool ScreenLayout::save_config(Core::ConfigFile& config_file, bool sync) const
     }
     // Prune screens no longer in the layout
     for (;;) {
-        auto group_name = String::formatted("Screen{}", index++);
+        auto group_name = DeprecatedString::formatted("Screen{}", index++);
         if (!config_file.has_group(group_name))
             break;
         config_file.remove_group(group_name);
@@ -292,7 +290,7 @@ bool ScreenLayout::save_config(Core::ConfigFile& config_file, bool sync) const
     return true;
 }
 
-bool ScreenLayout::operator!=(const ScreenLayout& other) const
+bool ScreenLayout::operator!=(ScreenLayout const& other) const
 {
     if (this == &other)
         return false;
@@ -307,7 +305,7 @@ bool ScreenLayout::operator!=(const ScreenLayout& other) const
     return false;
 }
 
-bool ScreenLayout::try_auto_add_display_connector(String const& device_path)
+bool ScreenLayout::try_auto_add_display_connector(DeprecatedString const& device_path)
 {
     int display_connector_fd = open(device_path.characters(), O_RDWR | O_CLOEXEC);
     if (display_connector_fd < 0) {
@@ -394,42 +392,39 @@ bool ScreenLayout::try_auto_add_display_connector(String const& device_path)
 
 namespace IPC {
 
-bool encode(Encoder& encoder, const WindowServer::ScreenLayout::Screen& screen)
+template<>
+bool encode(Encoder& encoder, WindowServer::ScreenLayout::Screen const& screen)
 {
     encoder << screen.mode << screen.device << screen.location << screen.resolution << screen.scale_factor;
     return true;
 }
 
-ErrorOr<void> decode(Decoder& decoder, WindowServer::ScreenLayout::Screen& screen)
+template<>
+ErrorOr<WindowServer::ScreenLayout::Screen> decode(Decoder& decoder)
 {
-    WindowServer::ScreenLayout::Screen::Mode mode;
-    TRY(decoder.decode(mode));
-    Optional<String> device;
-    TRY(decoder.decode(device));
-    Gfx::IntPoint location;
-    TRY(decoder.decode(location));
-    Gfx::IntSize resolution;
-    TRY(decoder.decode(resolution));
-    int scale_factor = 0;
-    TRY(decoder.decode(scale_factor));
-    screen = { mode, device, location, resolution, scale_factor };
-    return {};
+    auto mode = TRY(decoder.decode<WindowServer::ScreenLayout::Screen::Mode>());
+    auto device = TRY(decoder.decode<Optional<DeprecatedString>>());
+    auto location = TRY(decoder.decode<Gfx::IntPoint>());
+    auto resolution = TRY(decoder.decode<Gfx::IntSize>());
+    auto scale_factor = TRY(decoder.decode<int>());
+
+    return WindowServer::ScreenLayout::Screen { mode, device, location, resolution, scale_factor };
 }
 
-bool encode(Encoder& encoder, const WindowServer::ScreenLayout& screen_layout)
+template<>
+bool encode(Encoder& encoder, WindowServer::ScreenLayout const& screen_layout)
 {
     encoder << screen_layout.screens << screen_layout.main_screen_index;
     return true;
 }
 
-ErrorOr<void> decode(Decoder& decoder, WindowServer::ScreenLayout& screen_layout)
+template<>
+ErrorOr<WindowServer::ScreenLayout> decode(Decoder& decoder)
 {
-    Vector<WindowServer::ScreenLayout::Screen> screens;
-    TRY(decoder.decode(screens));
-    unsigned main_screen_index = 0;
-    TRY(decoder.decode(main_screen_index));
-    screen_layout = { move(screens), main_screen_index };
-    return {};
+    auto screens = TRY(decoder.decode<Vector<WindowServer::ScreenLayout::Screen>>());
+    auto main_screen_index = TRY(decoder.decode<unsigned>());
+
+    return WindowServer::ScreenLayout { move(screens), main_screen_index };
 }
 
 }

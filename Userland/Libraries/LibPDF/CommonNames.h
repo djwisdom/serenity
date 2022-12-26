@@ -18,6 +18,7 @@
     A(BM)                         \
     A(BaseEncoding)               \
     A(BaseFont)                   \
+    A(BitsPerComponent)           \
     A(BlackPoint)                 \
     A(C)                          \
     A(CA)                         \
@@ -25,7 +26,9 @@
     A(CalRGB)                     \
     A(CIDSystemInfo)              \
     A(CIDToGIDMap)                \
+    A(Colors)                     \
     A(ColorSpace)                 \
+    A(Columns)                    \
     A(Contents)                   \
     A(Count)                      \
     A(CropBox)                    \
@@ -33,6 +36,8 @@
     A(D)                          \
     A(DW)                         \
     A(DCTDecode)                  \
+    A(DecodeParms)                \
+    A(Decode)                     \
     A(DescendantFonts)            \
     A(Dest)                       \
     A(Dests)                      \
@@ -66,10 +71,13 @@
     A(FontFile3)                  \
     A(Gamma)                      \
     A(H)                          \
+    A(Height)                     \
     A(HT)                         \
     A(HTO)                        \
     A(ICCBased)                   \
     A(ID)                         \
+    A(Image)                      \
+    A(ImageMask)                  \
     A(Index)                      \
     A(JBIG2Decode)                \
     A(JPXDecode)                  \
@@ -101,6 +109,7 @@
     A(Pages)                      \
     A(Parent)                     \
     A(Pattern)                    \
+    A(Predictor)                  \
     A(Prev)                       \
     A(R)                          \
     A(RI)                         \
@@ -125,9 +134,12 @@
     A(UCR)                        \
     A(UseBlackPTComp)             \
     A(UserUnit)                   \
+    A(V)                          \
     A(W)                          \
     A(WhitePoint)                 \
+    A(Width)                      \
     A(Widths)                     \
+    A(XObject)                    \
     A(XYZ)                        \
     A(ca)                         \
     A(op)

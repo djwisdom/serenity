@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2021, Brandon Scott <xeon.productions@gmail.com>
  * Copyright (c) 2020, Hunter Salyer <thefalsehonesty@gmail.com>
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -20,7 +20,7 @@ class WebContentConsoleClient final : public JS::ConsoleClient {
 public:
     WebContentConsoleClient(JS::Console&, JS::Realm&, ConnectionFromClient&);
 
-    void handle_input(String const& js_source);
+    void handle_input(DeprecatedString const& js_source);
     void send_messages(i32 start_index);
     void report_exception(JS::Error const&, bool) override;
 
@@ -35,12 +35,11 @@ private:
     }
 
     ConnectionFromClient& m_client;
-    WeakPtr<JS::Realm> m_realm;
-    JS::Handle<ConsoleGlobalObject> m_console_global_object;
+    JS::Handle<ConsoleGlobalEnvironmentExtensions> m_console_global_environment_extensions;
 
     void clear_output();
-    void print_html(String const& line);
-    void begin_group(String const& label, bool start_expanded);
+    void print_html(DeprecatedString const& line);
+    void begin_group(DeprecatedString const& label, bool start_expanded);
     virtual void end_group() override;
 
     struct ConsoleOutput {
@@ -52,7 +51,7 @@ private:
             EndGroup,
         };
         Type type;
-        String data;
+        DeprecatedString data;
     };
     Vector<ConsoleOutput> m_message_log;
 

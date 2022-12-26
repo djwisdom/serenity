@@ -477,10 +477,10 @@ InodeMetadata Ext2FSInode::metadata() const
     metadata.uid = m_raw_inode.i_uid;
     metadata.gid = m_raw_inode.i_gid;
     metadata.link_count = m_raw_inode.i_links_count;
-    metadata.atime = m_raw_inode.i_atime;
-    metadata.ctime = m_raw_inode.i_ctime;
-    metadata.mtime = m_raw_inode.i_mtime;
-    metadata.dtime = m_raw_inode.i_dtime;
+    metadata.atime = Time::from_timespec({ m_raw_inode.i_atime, 0 });
+    metadata.ctime = Time::from_timespec({ m_raw_inode.i_ctime, 0 });
+    metadata.mtime = Time::from_timespec({ m_raw_inode.i_mtime, 0 });
+    metadata.dtime = Time::from_timespec({ m_raw_inode.i_dtime, 0 });
     metadata.block_size = fs().block_size();
     metadata.block_count = m_raw_inode.i_blocks;
 
@@ -892,6 +892,63 @@ ErrorOr<void> Ext2FSInode::remove_child(StringView name)
     return {};
 }
 
+ErrorOr<void> Ext2FSInode::replace_child(StringView name, Inode& child)
+{
+    MutexLocker locker(m_inode_lock);
+    dbgln_if(EXT2_DEBUG, "Ext2FSInode[{}]::replace_child(): Replacing '{}' with inode {}", identifier(), name, child.index());
+    VERIFY(is_directory());
+
+    TRY(populate_lookup_cache());
+
+    if (name.length() > EXT2_NAME_LEN)
+        return ENAMETOOLONG;
+
+    Vector<Ext2FSDirectoryEntry> entries;
+
+    Optional<InodeIndex> old_child_index;
+    TRY(traverse_as_directory([&](auto& entry) -> ErrorOr<void> {
+        auto is_replacing_this_inode = name == entry.name;
+        auto inode_index = is_replacing_this_inode ? child.index() : entry.inode.index();
+
+        auto entry_name = TRY(KString::try_create(entry.name));
+        TRY(entries.try_empend(move(entry_name), inode_index, to_ext2_file_type(child.mode())));
+        if (is_replacing_this_inode)
+            old_child_index = entry.inode.index();
+
+        return {};
+    }));
+
+    if (!old_child_index.has_value())
+        return ENOENT;
+
+    auto old_child = TRY(fs().get_inode({ fsid(), *old_child_index }));
+
+    auto old_index_it = m_lookup_cache.find(name);
+    VERIFY(old_index_it != m_lookup_cache.end());
+    old_index_it->value = child.index();
+
+    // NOTE: Between this line and the write_directory line, all operations must
+    //       be atomic. Any changes made should be reverted.
+    TRY(child.increment_link_count());
+
+    auto maybe_decrement_error = old_child->decrement_link_count();
+    if (maybe_decrement_error.is_error()) {
+        old_index_it->value = *old_child_index;
+        MUST(child.decrement_link_count());
+        return maybe_decrement_error;
+    }
+
+    // FIXME: The filesystem is left in an inconsistent state if this fails.
+    //        Revert the changes made above if we can't write_directory.
+    //        Ideally, decrement should be the last operation, but we currently
+    //        can't "un-write" a directory entry list.
+    TRY(write_directory(entries));
+
+    // TODO: Emit a did_replace_child event.
+
+    return {};
+}
+
 ErrorOr<void> Ext2FSInode::populate_lookup_cache()
 {
     VERIFY(m_inode_lock.is_exclusively_locked_by_current_thread());
@@ -930,23 +987,23 @@ ErrorOr<NonnullLockRefPtr<Inode>> Ext2FSInode::lookup(StringView name)
     return fs().get_inode({ fsid(), inode_index });
 }
 
-ErrorOr<void> Ext2FSInode::update_timestamps(Optional<time_t> atime, Optional<time_t> ctime, Optional<time_t> mtime)
+ErrorOr<void> Ext2FSInode::update_timestamps(Optional<Time> atime, Optional<Time> ctime, Optional<Time> mtime)
 {
     MutexLocker locker(m_inode_lock);
     if (fs().is_readonly())
         return EROFS;
-    if (atime.value_or(0) > INT32_MAX)
+    if (atime.value_or({}).to_timespec().tv_sec > INT32_MAX)
         return EINVAL;
-    if (ctime.value_or(0) > INT32_MAX)
+    if (ctime.value_or({}).to_timespec().tv_sec > INT32_MAX)
         return EINVAL;
-    if (mtime.value_or(0) > INT32_MAX)
+    if (mtime.value_or({}).to_timespec().tv_sec > INT32_MAX)
         return EINVAL;
     if (atime.has_value())
-        m_raw_inode.i_atime = atime.value();
+        m_raw_inode.i_atime = atime.value().to_timespec().tv_sec;
     if (ctime.has_value())
-        m_raw_inode.i_ctime = ctime.value();
+        m_raw_inode.i_ctime = ctime.value().to_timespec().tv_sec;
     if (mtime.has_value())
-        m_raw_inode.i_mtime = mtime.value();
+        m_raw_inode.i_mtime = mtime.value().to_timespec().tv_sec;
     set_metadata_dirty(true);
     return {};
 }

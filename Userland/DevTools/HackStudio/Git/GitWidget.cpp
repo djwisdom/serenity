@@ -8,6 +8,7 @@
 #include "../Dialogs/Git/GitCommitDialog.h"
 #include "GitFilesModel.h"
 #include <LibCore/File.h>
+#include <LibCore/Stream.h>
 #include <LibDiff/Format.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
@@ -21,8 +22,7 @@
 
 namespace HackStudio {
 
-GitWidget::GitWidget(String const& repo_root)
-    : m_repo_root(repo_root)
+GitWidget::GitWidget()
 {
     set_layout<GUI::HorizontalBoxLayout>();
 
@@ -117,7 +117,7 @@ void GitWidget::refresh()
     m_staged_files->set_model(GitFilesModel::create(m_git_repo->staged_files()));
 }
 
-void GitWidget::stage_file(String const& file)
+void GitWidget::stage_file(DeprecatedString const& file)
 {
     dbgln("staging: {}", file);
     bool rc = m_git_repo->stage(file);
@@ -125,7 +125,7 @@ void GitWidget::stage_file(String const& file)
     refresh();
 }
 
-void GitWidget::unstage_file(String const& file)
+void GitWidget::unstage_file(DeprecatedString const& file)
 {
     dbgln("unstaging: {}", file);
     bool rc = m_git_repo->unstage(file);
@@ -153,18 +153,12 @@ void GitWidget::set_view_diff_callback(ViewDiffCallback callback)
     m_view_diff_callback = move(callback);
 }
 
-void GitWidget::show_diff(String const& file_path)
+void GitWidget::show_diff(DeprecatedString const& file_path)
 {
     if (!m_git_repo->is_tracked(file_path)) {
-        auto file = Core::File::construct(file_path);
-        if (!file->open(Core::OpenMode::ReadOnly)) {
-            perror("open");
-            VERIFY_NOT_REACHED();
-        }
-
-        auto content = file->read_all();
-        String content_string((char*)content.data(), content.size());
-        m_view_diff_callback("", Diff::generate_only_additions(content_string));
+        auto file = Core::Stream::File::open(file_path, Core::Stream::OpenMode::Read).release_value_but_fixme_should_propagate_errors();
+        auto content = file->read_until_eof().release_value_but_fixme_should_propagate_errors();
+        m_view_diff_callback("", Diff::generate_only_additions(content));
         return;
     }
     auto const& original_content = m_git_repo->original_file_content(file_path);
@@ -173,7 +167,7 @@ void GitWidget::show_diff(String const& file_path)
     m_view_diff_callback(original_content.value(), diff.value());
 }
 
-void GitWidget::change_repo(String const& repo_root)
+void GitWidget::change_repo(DeprecatedString const& repo_root)
 {
     m_repo_root = repo_root;
     m_git_repo = nullptr;

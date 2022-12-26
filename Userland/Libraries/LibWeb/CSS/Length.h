@@ -6,9 +6,10 @@
 
 #pragma once
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibGfx/Forward.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/PixelUnits.h>
 
 namespace Web::CSS {
 
@@ -40,10 +41,12 @@ public:
     // this file already. To break the cyclic dependency, we must move all method definitions out.
     Length(int value, Type type);
     Length(float value, Type type);
+    Length(CSSPixels value, Type type);
     ~Length();
 
     static Length make_auto();
     static Length make_px(float value);
+    static Length make_px(CSSPixels value);
     static Length make_calculated(NonnullRefPtr<CalculatedStyleValue>);
     Length percentage_of(Percentage const&) const;
 
@@ -116,7 +119,7 @@ public:
         }
     }
 
-    String to_string() const;
+    DeprecatedString to_deprecated_string() const;
 
     // We have a RefPtr<CalculatedStyleValue> member, but can't include the header StyleValue.h as it includes
     // this file already. To break the cyclic dependency, we must move all method definitions out.
@@ -139,6 +142,6 @@ template<>
 struct AK::Formatter<Web::CSS::Length> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Web::CSS::Length const& length)
     {
-        return Formatter<StringView>::format(builder, length.to_string());
+        return Formatter<StringView>::format(builder, length.to_deprecated_string());
     }
 };

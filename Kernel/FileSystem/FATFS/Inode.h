@@ -45,7 +45,7 @@ private:
 
     static ErrorOr<NonnullOwnPtr<KString>> compute_filename(FATEntry&, Vector<FATLongFileNameEntry> const& = {});
     static StringView byte_terminated_string(StringView, u8);
-    static time_t fat_date_time(FATPackedDate date, FATPackedTime time);
+    static Time fat_date_time(FATPackedDate, FATPackedTime);
 
     ErrorOr<Vector<BlockBasedFileSystem::BlockIndex>> compute_block_list();
     ErrorOr<NonnullOwnPtr<KBuffer>> read_block_list();
@@ -62,6 +62,7 @@ private:
     virtual ErrorOr<NonnullLockRefPtr<Inode>> create_child(StringView name, mode_t, dev_t, UserID, GroupID) override;
     virtual ErrorOr<void> add_child(Inode&, StringView name, mode_t) override;
     virtual ErrorOr<void> remove_child(StringView name) override;
+    virtual ErrorOr<void> replace_child(StringView name, Inode& child) override;
     virtual ErrorOr<void> chmod(mode_t) override;
     virtual ErrorOr<void> chown(UserID, GroupID) override;
     virtual ErrorOr<void> flush_metadata() override;

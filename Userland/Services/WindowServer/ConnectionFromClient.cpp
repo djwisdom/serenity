@@ -90,7 +90,7 @@ void ConnectionFromClient::notify_about_new_screen_rects()
     async_screen_rects_changed(Screen::rects(), Screen::main().index(), wm.window_stack_rows(), wm.window_stack_columns());
 }
 
-void ConnectionFromClient::create_menu(i32 menu_id, String const& menu_title)
+void ConnectionFromClient::create_menu(i32 menu_id, DeprecatedString const& menu_title)
 {
     auto menu = Menu::construct(this, menu_id, menu_title);
     m_menus.set(menu_id, move(menu));
@@ -127,8 +127,8 @@ void ConnectionFromClient::add_menu(i32 window_id, i32 menu_id)
 }
 
 void ConnectionFromClient::add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id,
-    String const& text, bool enabled, bool checkable, bool checked, bool is_default,
-    String const& shortcut, Gfx::ShareableBitmap const& icon, bool exclusive)
+    DeprecatedString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default,
+    DeprecatedString const& shortcut, Gfx::ShareableBitmap const& icon, bool exclusive)
 {
     auto it = m_menus.find(menu_id);
     if (it == m_menus.end()) {
@@ -136,7 +136,7 @@ void ConnectionFromClient::add_menu_item(i32 menu_id, i32 identifier, i32 submen
         return;
     }
     auto& menu = *(*it).value;
-    auto menu_item = make<MenuItem>(menu, identifier, text, shortcut, enabled, checkable, checked);
+    auto menu_item = make<MenuItem>(menu, identifier, text, shortcut, enabled, visible, checkable, checked);
     if (is_default)
         menu_item->set_default(true);
     menu_item->set_icon(icon.bitmap());
@@ -145,7 +145,7 @@ void ConnectionFromClient::add_menu_item(i32 menu_id, i32 identifier, i32 submen
     menu.add_item(move(menu_item));
 }
 
-void ConnectionFromClient::popup_menu(i32 menu_id, Gfx::IntPoint const& screen_position, Gfx::IntRect const& button_rect)
+void ConnectionFromClient::popup_menu(i32 menu_id, Gfx::IntPoint screen_position, Gfx::IntRect const& button_rect)
 {
     auto position = screen_position;
     auto it = m_menus.find(menu_id);
@@ -172,8 +172,8 @@ void ConnectionFromClient::dismiss_menu(i32 menu_id)
 }
 
 void ConnectionFromClient::update_menu_item(i32 menu_id, i32 identifier, [[maybe_unused]] i32 submenu_id,
-    String const& text, bool enabled, bool checkable, bool checked, bool is_default,
-    String const& shortcut, Gfx::ShareableBitmap const& icon)
+    DeprecatedString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default,
+    DeprecatedString const& shortcut, Gfx::ShareableBitmap const& icon)
 {
     auto it = m_menus.find(menu_id);
     if (it == m_menus.end()) {
@@ -190,6 +190,7 @@ void ConnectionFromClient::update_menu_item(i32 menu_id, i32 identifier, [[maybe
     menu_item->set_text(text);
     menu_item->set_shortcut_text(shortcut);
     menu_item->set_enabled(enabled);
+    menu_item->set_visible(visible);
     menu_item->set_checkable(checkable);
     menu_item->set_default(is_default);
     if (checkable)
@@ -234,7 +235,7 @@ void ConnectionFromClient::flash_menubar_menu(i32 window_id, i32 menu_id)
             m_flashed_menu_timer->stop();
         }
 
-        m_flashed_menu_timer = Core::Timer::create_single_shot(75, [weak_window = window.make_weak_ptr<Window>()]() mutable {
+        m_flashed_menu_timer = Core::Timer::create_single_shot(75, [weak_window = window.make_weak_ptr<Window>()] {
             if (!weak_window)
                 return;
             weak_window->menubar().flash_menu(nullptr);
@@ -315,12 +316,12 @@ Messages::WindowServer::SetWallpaperResponse ConnectionFromClient::set_wallpaper
     return Compositor::the().set_wallpaper(bitmap.bitmap());
 }
 
-void ConnectionFromClient::set_background_color(String const& background_color)
+void ConnectionFromClient::set_background_color(DeprecatedString const& background_color)
 {
     Compositor::the().set_background_color(background_color);
 }
 
-void ConnectionFromClient::set_wallpaper_mode(String const& mode)
+void ConnectionFromClient::set_wallpaper_mode(DeprecatedString const& mode)
 {
     Compositor::the().set_wallpaper_mode(mode);
 }
@@ -332,7 +333,7 @@ Messages::WindowServer::GetWallpaperResponse ConnectionFromClient::get_wallpaper
 
 Messages::WindowServer::SetScreenLayoutResponse ConnectionFromClient::set_screen_layout(ScreenLayout const& screen_layout, bool save)
 {
-    String error_msg;
+    DeprecatedString error_msg;
     bool success = WindowManager::the().set_screen_layout(ScreenLayout(screen_layout), save, error_msg);
     return { success, move(error_msg) };
 }
@@ -344,7 +345,7 @@ Messages::WindowServer::GetScreenLayoutResponse ConnectionFromClient::get_screen
 
 Messages::WindowServer::SaveScreenLayoutResponse ConnectionFromClient::save_screen_layout()
 {
-    String error_msg;
+    DeprecatedString error_msg;
     bool success = WindowManager::the().save_screen_layout(error_msg);
     return { success, move(error_msg) };
 }
@@ -374,7 +375,7 @@ void ConnectionFromClient::show_screen_numbers(bool show)
         Compositor::the().decrement_show_screen_number({});
 }
 
-void ConnectionFromClient::set_window_title(i32 window_id, String const& title)
+void ConnectionFromClient::set_window_title(i32 window_id, DeprecatedString const& title)
 {
     auto it = m_windows.find(window_id);
     if (it == m_windows.end()) {
@@ -466,7 +467,7 @@ Messages::WindowServer::SetWindowRectResponse ConnectionFromClient::set_window_r
         return nullptr;
     }
     if (rect.width() > INT16_MAX || rect.height() > INT16_MAX) {
-        did_misbehave(String::formatted("SetWindowRect: Bad window sizing(width={}, height={}), dimension exceeds INT16_MAX", rect.width(), rect.height()).characters());
+        did_misbehave(DeprecatedString::formatted("SetWindowRect: Bad window sizing(width={}, height={}), dimension exceeds INT16_MAX", rect.width(), rect.height()).characters());
         return nullptr;
     }
 
@@ -523,7 +524,7 @@ static Gfx::IntSize calculate_minimum_size_for_window(Window const& window)
     return { 0, 0 };
 }
 
-void ConnectionFromClient::set_window_minimum_size(i32 window_id, Gfx::IntSize const& size)
+void ConnectionFromClient::set_window_minimum_size(i32 window_id, Gfx::IntSize size)
 {
     auto it = m_windows.find(window_id);
     if (it == m_windows.end()) {
@@ -588,15 +589,20 @@ Window* ConnectionFromClient::window_from_id(i32 window_id)
 void ConnectionFromClient::create_window(i32 window_id, Gfx::IntRect const& rect,
     bool auto_position, bool has_alpha_channel, bool minimizable, bool closeable, bool resizable,
     bool fullscreen, bool frameless, bool forced_shadow, float opacity,
-    float alpha_hit_threshold, Gfx::IntSize const& base_size, Gfx::IntSize const& size_increment,
-    Gfx::IntSize const& minimum_size, Optional<Gfx::IntSize> const& resize_aspect_ratio, i32 type, i32 mode,
-    String const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
+    float alpha_hit_threshold, Gfx::IntSize base_size, Gfx::IntSize size_increment,
+    Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const& resize_aspect_ratio, i32 type, i32 mode,
+    DeprecatedString const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
 {
     Window* parent_window = nullptr;
     if (parent_window_id) {
         parent_window = window_from_id(parent_window_id);
         if (!parent_window) {
             did_misbehave("CreateWindow with bad parent_window_id");
+            return;
+        }
+
+        if (auto* blocker = parent_window->blocking_modal_window(); blocker && mode == (i32)WindowMode::Blocking) {
+            did_misbehave("CreateWindow with illegal mode: reciprocally blocked");
             return;
         }
     }
@@ -727,7 +733,7 @@ void ConnectionFromClient::did_finish_painting(i32 window_id, Vector<Gfx::IntRec
 
 void ConnectionFromClient::set_window_backing_store(i32 window_id, [[maybe_unused]] i32 bpp,
     [[maybe_unused]] i32 pitch, IPC::File const& anon_file, i32 serial, bool has_alpha_channel,
-    Gfx::IntSize const& size, bool flush_immediately)
+    Gfx::IntSize size, bool flush_immediately)
 {
     auto it = m_windows.find(window_id);
     if (it == m_windows.end()) {
@@ -841,7 +847,7 @@ void ConnectionFromClient::start_window_resize(i32 window_id, i32 resize_directi
     WindowManager::the().start_window_resize(window, ScreenInput::the().cursor_location(), MouseButton::Primary, (ResizeDirection)resize_direction);
 }
 
-Messages::WindowServer::StartDragResponse ConnectionFromClient::start_drag(String const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap)
+Messages::WindowServer::StartDragResponse ConnectionFromClient::start_drag(DeprecatedString const& text, HashMap<DeprecatedString, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap)
 {
     auto& wm = WindowManager::the();
     if (wm.dnd_client() || !(wm.last_processed_buttons() & MouseButton::Primary))
@@ -858,7 +864,7 @@ void ConnectionFromClient::set_accepts_drag(bool accepts)
     wm.set_accepts_drag(accepts);
 }
 
-Messages::WindowServer::SetSystemThemeResponse ConnectionFromClient::set_system_theme(String const& theme_path, String const& theme_name, bool keep_desktop_background)
+Messages::WindowServer::SetSystemThemeResponse ConnectionFromClient::set_system_theme(DeprecatedString const& theme_path, DeprecatedString const& theme_name, bool keep_desktop_background)
 {
     bool success = WindowManager::the().update_theme(theme_path, theme_name, keep_desktop_background);
     return success;
@@ -892,7 +898,7 @@ Messages::WindowServer::IsSystemThemeOverriddenResponse ConnectionFromClient::is
     return WindowManager::the().is_theme_overridden();
 }
 
-void ConnectionFromClient::apply_cursor_theme(String const& name)
+void ConnectionFromClient::apply_cursor_theme(DeprecatedString const& name)
 {
     WindowManager::the().apply_cursor_theme(name);
 }
@@ -907,7 +913,7 @@ Messages::WindowServer::GetCursorHighlightRadiusResponse ConnectionFromClient::g
     return WindowManager::the().cursor_highlight_radius();
 }
 
-void ConnectionFromClient::set_cursor_highlight_color(Gfx::Color const& color)
+void ConnectionFromClient::set_cursor_highlight_color(Gfx::Color color)
 {
     WindowManager::the().set_cursor_highlight_color(color);
 }
@@ -924,7 +930,7 @@ Messages::WindowServer::GetCursorThemeResponse ConnectionFromClient::get_cursor_
     return name;
 }
 
-Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_fonts(String const& default_font_query, String const& fixed_width_font_query, String const& window_title_font_query)
+Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_fonts(DeprecatedString const& default_font_query, DeprecatedString const& fixed_width_font_query, DeprecatedString const& window_title_font_query)
 {
     if (!Gfx::FontDatabase::the().get_by_name(default_font_query)
         || !Gfx::FontDatabase::the().get_by_name(fixed_width_font_query)) {
@@ -964,7 +970,7 @@ void ConnectionFromClient::set_system_effects(Vector<bool> const& effects, u8 ge
     });
 }
 
-void ConnectionFromClient::set_window_base_size_and_size_increment(i32 window_id, Gfx::IntSize const& base_size, Gfx::IntSize const& size_increment)
+void ConnectionFromClient::set_window_base_size_and_size_increment(i32 window_id, Gfx::IntSize base_size, Gfx::IntSize size_increment)
 {
     auto it = m_windows.find(window_id);
     if (it == m_windows.end()) {
@@ -1035,7 +1041,7 @@ void ConnectionFromClient::pong()
     set_unresponsive(false);
 }
 
-void ConnectionFromClient::set_global_cursor_position(Gfx::IntPoint const& position)
+void ConnectionFromClient::set_global_cursor_position(Gfx::IntPoint position)
 {
     if (!Screen::main().rect().contains(position)) {
         did_misbehave("SetGlobalCursorPosition with bad position");
@@ -1095,14 +1101,24 @@ Messages::WindowServer::GetDoubleClickSpeedResponse ConnectionFromClient::get_do
     return WindowManager::the().double_click_speed();
 }
 
-void ConnectionFromClient::set_buttons_switched(bool switched)
+void ConnectionFromClient::set_mouse_buttons_switched(bool switched)
 {
-    WindowManager::the().set_buttons_switched(switched);
+    WindowManager::the().set_mouse_buttons_switched(switched);
 }
 
-Messages::WindowServer::GetButtonsSwitchedResponse ConnectionFromClient::get_buttons_switched()
+Messages::WindowServer::AreMouseButtonsSwitchedResponse ConnectionFromClient::are_mouse_buttons_switched()
 {
-    return WindowManager::the().get_buttons_switched();
+    return WindowManager::the().are_mouse_buttons_switched();
+}
+
+void ConnectionFromClient::set_natural_scroll(bool inverted)
+{
+    WindowManager::the().set_natural_scroll(inverted);
+}
+
+Messages::WindowServer::IsNaturalScrollResponse ConnectionFromClient::is_natural_scroll()
+{
+    return WindowManager::the().is_natural_scroll();
 }
 
 void ConnectionFromClient::set_unresponsive(bool unresponsive)
@@ -1176,11 +1192,15 @@ Messages::WindowServer::GetScreenBitmapResponse ConnectionFromClient::get_screen
     return { Gfx::ShareableBitmap() };
 }
 
-Messages::WindowServer::GetScreenBitmapAroundCursorResponse ConnectionFromClient::get_screen_bitmap_around_cursor(Gfx::IntSize const& size)
+Messages::WindowServer::GetScreenBitmapAroundCursorResponse ConnectionFromClient::get_screen_bitmap_around_cursor(Gfx::IntSize size)
+{
+    return get_screen_bitmap_around_location(size, ScreenInput::the().cursor_location()).bitmap();
+}
+
+Messages::WindowServer::GetScreenBitmapAroundLocationResponse ConnectionFromClient::get_screen_bitmap_around_location(Gfx::IntSize size, Gfx::IntPoint location)
 {
     // TODO: Mixed scale setups at what scale? Lowest? Highest? Configurable?
-    auto cursor_location = ScreenInput::the().cursor_location();
-    Gfx::Rect rect { cursor_location.x() - (size.width() / 2), cursor_location.y() - (size.height() / 2), size.width(), size.height() };
+    Gfx::Rect rect { location.x() - (size.width() / 2), location.y() - (size.height() / 2), size.width(), size.height() };
 
     // Recompose the screen to make sure the cursor is painted in the location we think it is.
     // FIXME: This is rather wasteful. We can probably think of a way to avoid this.
@@ -1194,10 +1214,9 @@ Messages::WindowServer::GetScreenBitmapAroundCursorResponse ConnectionFromClient
         return IterationDecision::Continue;
     });
 
-    auto screen_scale_factor = ScreenInput::the().cursor_location_screen().scale_factor();
     if (intersecting_with_screens == 1) {
         auto& screen = Screen::closest_to_rect(rect);
-        auto crop_rect = rect.translated(-screen.rect().location()) * screen_scale_factor;
+        auto crop_rect = rect.translated(-screen.rect().location());
         auto bitmap_or_error = Compositor::the().front_bitmap_for_screenshot({}, screen).cropped(crop_rect);
         if (bitmap_or_error.is_error()) {
             dbgln("get_screen_bitmap_around_cursor: Failed to crop screenshot: {}", bitmap_or_error.error());

@@ -90,6 +90,35 @@ Date:   Mon Jan 20 22:12:04 2020 +0100
 Kernel: Add a basic implementation of unveil()
 ```
 
+### Jails
+
+`jails` are mitigation originating from FreeBSD.
+It allows a program to be placed inside a lightweight OS-level virtualization environment.
+
+Current restrictions on jailed processes:
+- Process ID view isolation, being limited (both in `/proc` and `/sys/kernel/processes`) to only processes that share the same jail.
+
+Special restrictions on filesystem also apply:
+- Write access is forbidden to the `/sys/kernel/power_state` node.
+- Read accesses is forbidden by default to all nodes in `/sys/kernel` directory, except for:
+    `df`, `interrupts`, `keymap`, `memstat`, `processes`, `stats` and `uptime`.
+- Write access is forbidden to kernel variables (which are located in `/sys/kernel/variables`).
+- Open access is forbidden to all device nodes except for `/dev/full`, `/dev/null`, `/dev/zero`, `/dev/random` and various
+    other TTY/PTY devices (not including Kernel virtual consoles).
+
+It was first added in the following [commit](https://github.com/SerenityOS/serenity/commit/5e062414c11df31ed595c363990005eef00fa263),
+for kernel support, and the following commits added basic userspace utilities:
+
+```
+commit 5e062414c11df31ed595c363990005eef00fa263
+Author: Liav A <liavalb@gmail.com>
+Date:   Wed Nov 2 22:26:02 2022 +0200
+
+Kernel: Add support for jails
+
+...
+```
+
 ### Readonly atexit
 
 [Readonly atexit](https://isopenbsdsecu.re/mitigations/atexit_hardening/) is a mitigation originating from OpenBSD.
@@ -132,6 +161,37 @@ Author Andreas Kling <kling@serenityos.org>
 Date:  Tue Feb 2 19:56:11 2021 +0100
 
 Kernel: Add a way to specify which memory regions can make syscalls
+```
+
+### Immutable memory mappings
+
+[Immutable memory mappings](https://lwn.net/SubscriberLink/915640/53bc300d11179c62/) is
+a mitigation which originated from OpenBSD.
+In short the annotation of a particular Kernel Region as immutable implies that
+that these virtual memory mappings are locked to their last state (in regard to protection bits, etc),
+and they cannot be unmapped by a process until that process gets finalized.
+
+It was first enabled in the following [commit](https://github.com/SerenityOS/serenity/commit/8585b2dc23ec206777a4cfbd558766d90fc577e7):
+
+```
+commit 8585b2dc23ec206777a4cfbd558766d90fc577e7
+Author: Liav A <liavalb@gmail.com>
+Date:   Thu Dec 15 21:08:57 2022 +0200
+
+Kernel/Memory: Add option to annotate region mapping as immutable
+
+We add this basic functionality to the Kernel so Userspace can request a
+particular virtual memory mapping to be immutable. This will be useful
+later on in the DynamicLoader code.
+
+The annotation of a particular Kernel Region as immutable implies that
+the following restrictions apply, so these features are prohibited:
+- Changing the region's protection bits
+- Unmapping the region
+- Annotating the region with other virtual memory flags
+- Applying further memory advises on the region
+- Changing the region name
+- Re-mapping the region
 ```
 
 ### Post-init read-only memory

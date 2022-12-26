@@ -45,7 +45,7 @@ JS::NonnullGCPtr<NodeIterator> NodeIterator::create(Node& root, unsigned what_to
     // 2. Set iterator’s root and iterator’s reference to root.
     // 3. Set iterator’s pointer before reference to true.
     auto& realm = root.realm();
-    auto* iterator = realm.heap().allocate<NodeIterator>(realm, root);
+    auto iterator = realm.heap().allocate<NodeIterator>(realm, root);
 
     // 4. Set iterator’s whatToShow to whatToShow.
     iterator->m_what_to_show = what_to_show;
@@ -54,7 +54,7 @@ JS::NonnullGCPtr<NodeIterator> NodeIterator::create(Node& root, unsigned what_to
     iterator->m_filter = filter;
 
     // 6. Return iterator.
-    return *iterator;
+    return iterator;
 }
 
 // https://dom.spec.whatwg.org/#dom-nodeiterator-detach
@@ -84,7 +84,7 @@ JS::ThrowCompletionOr<JS::GCPtr<Node>> NodeIterator::traverse(Direction directio
                 auto* next_node = m_traversal_pointer->node->next_in_pre_order(m_root.ptr());
                 if (!next_node)
                     return nullptr;
-                m_traversal_pointer->node = next_node;
+                m_traversal_pointer->node = *next_node;
             } else {
                 // If beforeNode is true, then set it to false.
                 m_traversal_pointer->is_before_node = false;
@@ -99,7 +99,7 @@ JS::ThrowCompletionOr<JS::GCPtr<Node>> NodeIterator::traverse(Direction directio
                 auto* previous_node = m_traversal_pointer->node->previous_in_pre_order();
                 if (!previous_node)
                     return nullptr;
-                m_traversal_pointer->node = previous_node;
+                m_traversal_pointer->node = *previous_node;
             } else {
                 // If beforeNode is false, then set it to true.
                 m_traversal_pointer->is_before_node = true;
@@ -194,7 +194,7 @@ void NodeIterator::run_pre_removing_steps_with_node_pointer(Node& to_be_removed_
             while (node && node->is_descendant_of(to_be_removed_node))
                 node = node->next_in_pre_order(root());
             if (node)
-                pointer.node = node;
+                pointer.node = *node;
             return;
         }
         if (auto* node = to_be_removed_node.previous_in_pre_order()) {
@@ -218,7 +218,7 @@ void NodeIterator::run_pre_removing_steps_with_node_pointer(Node& to_be_removed_
                 node = node->previous_in_pre_order();
         }
         if (node)
-            pointer.node = node;
+            pointer.node = *node;
         return;
     }
     auto* node = to_be_removed_node.next_in_pre_order(root());
@@ -227,7 +227,7 @@ void NodeIterator::run_pre_removing_steps_with_node_pointer(Node& to_be_removed_
             node = node->previous_in_pre_order();
     }
     if (node)
-        pointer.node = node;
+        pointer.node = *node;
 }
 
 // https://dom.spec.whatwg.org/#nodeiterator-pre-removing-steps

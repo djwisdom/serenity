@@ -16,12 +16,12 @@
 #include <stdio.h>
 
 struct Parameter {
-    Vector<String> attributes;
-    String type;
-    String name;
+    Vector<DeprecatedString> attributes;
+    DeprecatedString type;
+    DeprecatedString name;
 };
 
-static String pascal_case(String const& identifier)
+static DeprecatedString pascal_case(DeprecatedString const& identifier)
 {
     StringBuilder builder;
     bool was_new_word = true;
@@ -36,37 +36,48 @@ static String pascal_case(String const& identifier)
         } else
             builder.append(ch);
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 struct Message {
-    String name;
+    DeprecatedString name;
     bool is_synchronous { false };
     Vector<Parameter> inputs;
     Vector<Parameter> outputs;
 
-    String response_name() const
+    DeprecatedString response_name() const
     {
         StringBuilder builder;
         builder.append(pascal_case(name));
         builder.append("Response"sv);
-        return builder.to_string();
+        return builder.to_deprecated_string();
     }
 };
 
 struct Endpoint {
-    Vector<String> includes;
-    String name;
+    Vector<DeprecatedString> includes;
+    DeprecatedString name;
     u32 magic;
     Vector<Message> messages;
 };
 
-static bool is_primitive_type(String const& type)
+static bool is_primitive_type(DeprecatedString const& type)
 {
-    return type.is_one_of("u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "bool", "double", "float", "int", "unsigned", "unsigned int");
+    return type.is_one_of("u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "size_t", "bool", "double", "float", "int", "unsigned", "unsigned int");
 }
 
-static String message_name(String const& endpoint, String const& message, bool is_response)
+static bool is_simple_type(DeprecatedString const& type)
+{
+    // Small types that it makes sense just to pass by value.
+    return type.is_one_of("Gfx::Color", "Gfx::IntPoint", "Gfx::FloatPoint", "Gfx::IntSize", "Gfx::FloatSize");
+}
+
+static bool is_primitive_or_simple_type(DeprecatedString const& type)
+{
+    return is_primitive_type(type) || is_simple_type(type);
+}
+
+static DeprecatedString message_name(DeprecatedString const& endpoint, DeprecatedString const& message, bool is_response)
 {
     StringBuilder builder;
     builder.append("Messages::"sv);
@@ -75,7 +86,7 @@ static String message_name(String const& endpoint, String const& message, bool i
     builder.append(pascal_case(message));
     if (is_response)
         builder.append("Response"sv);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 Vector<Endpoint> parse(ByteBuffer const& file_contents)
@@ -121,7 +132,7 @@ Vector<Endpoint> parse(ByteBuffer const& file_contents)
                     consume_whitespace();
                 }
             }
-            // FIXME: This is not entirely correct. Types can have spaces, for example `HashMap<int, String>`.
+            // FIXME: This is not entirely correct. Types can have spaces, for example `HashMap<int, DeprecatedString>`.
             //        Maybe we should use LibCpp::Parser for parsing types.
             parameter.type = lexer.consume_until([](char ch) { return isspace(ch); });
             VERIFY(!lexer.is_eof());
@@ -191,7 +202,7 @@ Vector<Endpoint> parse(ByteBuffer const& file_contents)
     };
 
     auto parse_include = [&] {
-        String include;
+        DeprecatedString include;
         consume_whitespace();
         include = lexer.consume_while([](char ch) { return ch != '\n'; });
         consume_whitespace();
@@ -217,7 +228,7 @@ Vector<Endpoint> parse(ByteBuffer const& file_contents)
         lexer.consume_specific("endpoint");
         consume_whitespace();
         endpoints.last().name = lexer.consume_while([](char ch) { return !isspace(ch); });
-        endpoints.last().magic = Traits<String>::hash(endpoints.last().name);
+        endpoints.last().magic = Traits<DeprecatedString>::hash(endpoints.last().name);
         consume_whitespace();
         assert_specific('{');
         parse_messages();
@@ -231,22 +242,22 @@ Vector<Endpoint> parse(ByteBuffer const& file_contents)
     return endpoints;
 }
 
-HashMap<String, int> build_message_ids_for_endpoint(SourceGenerator generator, Endpoint const& endpoint)
+HashMap<DeprecatedString, int> build_message_ids_for_endpoint(SourceGenerator generator, Endpoint const& endpoint)
 {
-    HashMap<String, int> message_ids;
+    HashMap<DeprecatedString, int> message_ids;
 
     generator.appendln("\nenum class MessageID : i32 {");
     for (auto const& message : endpoint.messages) {
 
         message_ids.set(message.name, message_ids.size() + 1);
         generator.set("message.pascal_name", pascal_case(message.name));
-        generator.set("message.id", String::number(message_ids.size()));
+        generator.set("message.id", DeprecatedString::number(message_ids.size()));
 
         generator.appendln("    @message.pascal_name@ = @message.id@,");
         if (message.is_synchronous) {
             message_ids.set(message.response_name(), message_ids.size() + 1);
             generator.set("message.pascal_name", pascal_case(message.response_name()));
-            generator.set("message.id", String::number(message_ids.size()));
+            generator.set("message.id", DeprecatedString::number(message_ids.size()));
 
             generator.appendln("    @message.pascal_name@ = @message.id@,");
         }
@@ -255,14 +266,14 @@ HashMap<String, int> build_message_ids_for_endpoint(SourceGenerator generator, E
     return message_ids;
 }
 
-String constructor_for_message(String const& name, Vector<Parameter> const& parameters)
+DeprecatedString constructor_for_message(DeprecatedString const& name, Vector<Parameter> const& parameters)
 {
     StringBuilder builder;
     builder.append(name);
 
     if (parameters.is_empty()) {
         builder.append("() {}"sv);
-        return builder.to_string();
+        return builder.to_deprecated_string();
     }
     builder.append('(');
     for (size_t i = 0; i < parameters.size(); ++i) {
@@ -279,10 +290,25 @@ String constructor_for_message(String const& name, Vector<Parameter> const& para
             builder.append(", "sv);
     }
     builder.append(" {}"sv);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-void do_message(SourceGenerator message_generator, String const& name, Vector<Parameter> const& parameters, String const& response_type = {})
+static void append_handle_stream_error(SourceGenerator& generator, StringView error_message)
+{
+    if constexpr (GENERATE_DEBUG) {
+        generator.set("error_message"sv, error_message);
+        generator.append(R"~~~(
+        if (stream.handle_any_error()) {
+            dbgln("@error_message@");
+            return Error::from_string_literal("@error_message@");
+        })~~~");
+    } else {
+        generator.append(R"~~~(
+        TRY(stream.try_handle_any_error());)~~~");
+    }
+}
+
+void do_message(SourceGenerator message_generator, DeprecatedString const& name, Vector<Parameter> const& parameters, DeprecatedString const& response_type = {})
 {
     auto pascal_name = pascal_case(name);
     message_generator.set("message.name", name);
@@ -327,7 +353,7 @@ public:)~~~");
     static i32 static_message_id() { return (int)MessageID::@message.pascal_name@; }
     virtual const char* message_name() const override { return "@endpoint.name@::@message.pascal_name@"; }
 
-    static OwnPtr<@message.pascal_name@> decode(InputMemoryStream& stream, Core::Stream::LocalSocket& socket)
+    static ErrorOr<NonnullOwnPtr<@message.pascal_name@>> decode(InputMemoryStream& stream, Core::Stream::LocalSocket& socket)
     {
         IPC::Decoder decoder { stream, socket };)~~~");
 
@@ -343,14 +369,12 @@ public:)~~~");
             parameter_generator.set("parameter.initial_value", "{}");
 
         parameter_generator.appendln(R"~~~(
-        @parameter.type@ @parameter.name@ = @parameter.initial_value@;
-        if (decoder.decode(@parameter.name@).is_error())
-            return {};)~~~");
+        auto @parameter.name@ = TRY((decoder.decode<@parameter.type@>()));)~~~");
 
         if (parameter.attributes.contains_slow("UTF8")) {
             parameter_generator.appendln(R"~~~(
         if (!Utf8View(@parameter.name@).validate())
-            return {};)~~~");
+            return Error::from_string_literal("Decoded @parameter.name@ is invalid UTF-8");)~~~");
         }
     }
 
@@ -363,7 +387,7 @@ public:)~~~");
     }
 
     message_generator.set("message.constructor_call_parameters", builder.build());
-
+    append_handle_stream_error(message_generator, "Failed to read the message"sv);
     message_generator.appendln(R"~~~(
         return make<@message.pascal_name@>(@message.constructor_call_parameters@);
     })~~~");
@@ -418,17 +442,17 @@ private:
 
 void do_message_for_proxy(SourceGenerator message_generator, Endpoint const& endpoint, Message const& message)
 {
-    auto do_implement_proxy = [&](String const& name, Vector<Parameter> const& parameters, bool is_synchronous, bool is_try) {
-        String return_type = "void";
+    auto do_implement_proxy = [&](DeprecatedString const& name, Vector<Parameter> const& parameters, bool is_synchronous, bool is_try) {
+        DeprecatedString return_type = "void";
         if (is_synchronous) {
             if (message.outputs.size() == 1)
                 return_type = message.outputs[0].type;
             else if (!message.outputs.is_empty())
                 return_type = message_name(endpoint.name, message.name, true);
         }
-        String inner_return_type = return_type;
+        DeprecatedString inner_return_type = return_type;
         if (is_try)
-            return_type = String::formatted("IPC::IPCErrorOr<{}>", return_type);
+            return_type = DeprecatedString::formatted("IPC::IPCErrorOr<{}>", return_type);
 
         message_generator.set("message.name", message.name);
         message_generator.set("message.pascal_name", pascal_case(message.name));
@@ -477,7 +501,7 @@ void do_message_for_proxy(SourceGenerator message_generator, Endpoint const& end
             auto const& parameter = parameters[i];
             auto argument_generator = message_generator.fork();
             argument_generator.set("argument.name", parameter.name);
-            if (is_primitive_type(parameters[i].type))
+            if (is_primitive_or_simple_type(parameters[i].type))
                 argument_generator.append("@argument.name@");
             else
                 argument_generator.append("move(@argument.name@)");
@@ -527,14 +551,14 @@ void do_message_for_proxy(SourceGenerator message_generator, Endpoint const& end
 void build_endpoint(SourceGenerator generator, Endpoint const& endpoint)
 {
     generator.set("endpoint.name", endpoint.name);
-    generator.set("endpoint.magic", String::number(endpoint.magic));
+    generator.set("endpoint.magic", DeprecatedString::number(endpoint.magic));
 
     generator.appendln("\nnamespace Messages::@endpoint.name@ {");
 
-    HashMap<String, int> message_ids = build_message_ids_for_endpoint(generator.fork(), endpoint);
+    HashMap<DeprecatedString, int> message_ids = build_message_ids_for_endpoint(generator.fork(), endpoint);
 
     for (auto const& message : endpoint.messages) {
-        String response_name;
+        DeprecatedString response_name;
         if (message.is_synchronous) {
             response_name = message.response_name();
             do_message(generator.fork(), response_name, message.outputs);
@@ -563,7 +587,7 @@ private:
     IPC::Connection<LocalEndpoint, PeerEndpoint>& m_connection;
 };)~~~");
 
-    generator.appendln(R"~~~(
+    generator.append(R"~~~(
 template<typename LocalEndpoint, typename PeerEndpoint>
 class @endpoint.name@Proxy;
 class @endpoint.name@Stub;
@@ -576,54 +600,40 @@ public:
 
     static u32 static_magic() { return @endpoint.magic@; }
 
-    static OwnPtr<IPC::Message> decode_message(ReadonlyBytes buffer, [[maybe_unused]] Core::Stream::LocalSocket& socket)
+    static ErrorOr<NonnullOwnPtr<IPC::Message>> decode_message(ReadonlyBytes buffer, [[maybe_unused]] Core::Stream::LocalSocket& socket)
     {
         InputMemoryStream stream { buffer };
         u32 message_endpoint_magic = 0;
-        stream >> message_endpoint_magic;
-        if (stream.handle_any_error()) {)~~~");
-    if constexpr (GENERATE_DEBUG) {
-        generator.appendln(R"~~~(
-                dbgln(\"Failed to read message endpoint magic\"))~~~");
-    }
-    generator.appendln(R"~~~(
-            return {};
-        }
+        stream >> message_endpoint_magic;)~~~");
+    append_handle_stream_error(generator, "Failed to read message endpoint magic"sv);
+    generator.append(R"~~~(
 
         if (message_endpoint_magic != @endpoint.magic@) {)~~~");
     if constexpr (GENERATE_DEBUG) {
-        generator.appendln(R"~~~(
-                dbgln(\"@endpoint.name@: Endpoint magic number message_endpoint_magic != @endpoint.magic@, not my message! (the other endpoint may have handled it)\"))~~~");
+        generator.append(R"~~~(
+            dbgln("@endpoint.name@: Endpoint magic number message_endpoint_magic != @endpoint.magic@, not my message! (the other endpoint may have handled it)");)~~~");
     }
     generator.appendln(R"~~~(
-            return {};
+            return Error::from_string_literal("Endpoint magic number mismatch, not my message!");
         }
 
         i32 message_id = 0;
-        stream >> message_id;
-        if (stream.handle_any_error()) {)~~~");
-    if constexpr (GENERATE_DEBUG) {
-        generator.appendln(R"~~~(
-                dbgln(\"Failed to read message ID\"))~~~");
-    }
+        stream >> message_id;)~~~");
+    append_handle_stream_error(generator, "Failed to read message ID"sv);
     generator.appendln(R"~~~(
-            return {};
-        }
 
-        OwnPtr<IPC::Message> message;
         switch (message_id) {)~~~");
 
     for (auto const& message : endpoint.messages) {
-        auto do_decode_message = [&](String const& name) {
+        auto do_decode_message = [&](DeprecatedString const& name) {
             auto message_generator = generator.fork();
 
             message_generator.set("message.name", name);
             message_generator.set("message.pascal_name", pascal_case(name));
 
-            message_generator.appendln(R"~~~(
+            message_generator.append(R"~~~(
         case (int)Messages::@endpoint.name@::MessageID::@message.pascal_name@:
-            message = Messages::@endpoint.name@::@message.pascal_name@::decode(stream, socket);
-            break;)~~~");
+            return TRY(Messages::@endpoint.name@::@message.pascal_name@::decode(stream, socket));)~~~");
         };
 
         do_decode_message(message.name);
@@ -631,26 +641,18 @@ public:
             do_decode_message(message.response_name());
     }
 
-    generator.appendln(R"~~~(
+    generator.append(R"~~~(
         default:)~~~");
     if constexpr (GENERATE_DEBUG) {
-        generator.appendln(R"~~~(
-                dbgln(\"Failed to decode @endpoint.name@.({})\", message_id))~~~");
+        generator.append(R"~~~(
+            dbgln("Failed to decode @endpoint.name@.({})", message_id);)~~~");
     }
     generator.appendln(R"~~~(
-            return {};
-        }
+            return Error::from_string_literal("Failed to decode @endpoint.name@ message");
+        })~~~");
 
-        if (stream.handle_any_error()) {)~~~");
-    if constexpr (GENERATE_DEBUG) {
-        generator.appendln(R"~~~(
-                dbgln(\"Failed to read the message\");)~~~");
-    }
     generator.appendln(R"~~~(
-            return {};
-        }
-
-        return message;
+        VERIFY_NOT_REACHED();
     }
 
 };
@@ -661,13 +663,13 @@ public:
     virtual ~@endpoint.name@Stub() override { }
 
     virtual u32 magic() const override { return @endpoint.magic@; }
-    virtual String name() const override { return "@endpoint.name@"; }
+    virtual DeprecatedString name() const override { return "@endpoint.name@"; }
 
     virtual OwnPtr<IPC::MessageBuffer> handle(const IPC::Message& message) override
     {
         switch (message.message_id()) {)~~~");
     for (auto const& message : endpoint.messages) {
-        auto do_handle_message = [&](String const& name, Vector<Parameter> const& parameters, bool returns_something) {
+        auto do_handle_message = [&](DeprecatedString const& name, Vector<Parameter> const& parameters, bool returns_something) {
             auto message_generator = generator.fork();
 
             StringBuilder argument_generator;
@@ -683,7 +685,7 @@ public:
             message_generator.set("message.pascal_name", pascal_case(name));
             message_generator.set("message.response_type", pascal_case(message.response_name()));
             message_generator.set("handler_name", name);
-            message_generator.set("arguments", argument_generator.to_string());
+            message_generator.set("arguments", argument_generator.to_deprecated_string());
             message_generator.appendln(R"~~~(
         case (int)Messages::@endpoint.name@::MessageID::@message.pascal_name@: {)~~~");
             if (returns_something) {
@@ -721,8 +723,8 @@ public:
     for (auto const& message : endpoint.messages) {
         auto message_generator = generator.fork();
 
-        auto do_handle_message_decl = [&](String const& name, Vector<Parameter> const& parameters, bool is_response) {
-            String return_type = "void";
+        auto do_handle_message_decl = [&](DeprecatedString const& name, Vector<Parameter> const& parameters, bool is_response) {
+            DeprecatedString return_type = "void";
             if (message.is_synchronous && !message.outputs.is_empty() && !is_response)
                 return_type = message_name(endpoint.name, message.name, true);
             message_generator.set("message.complex_return_type", return_type);
@@ -731,16 +733,16 @@ public:
             message_generator.appendln(R"~~~(
     virtual @message.complex_return_type@ @handler_name@()~~~");
 
-            auto make_argument_type = [](String const& type) {
+            auto make_argument_type = [](DeprecatedString const& type) {
                 StringBuilder builder;
 
-                bool const_ref = !is_primitive_type(type);
+                bool const_ref = !is_primitive_or_simple_type(type);
 
                 builder.append(type);
                 if (const_ref)
                     builder.append(" const&"sv);
 
-                return builder.to_string();
+                return builder.to_deprecated_string();
             };
 
             for (size_t i = 0; i < parameters.size(); ++i) {
@@ -786,6 +788,7 @@ void build(StringBuilder& builder, Vector<Endpoint> const& endpoints)
     }
 
     generator.appendln(R"~~~(#include <AK/MemoryStream.h>
+#include <AK/Error.h>
 #include <AK/OwnPtr.h>
 #include <AK/Result.h>
 #include <AK/Utf8View.h>
@@ -815,7 +818,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto file = TRY(Core::Stream::File::open(arguments.strings[1], Core::Stream::OpenMode::Read));
 
-    auto file_contents = TRY(file->read_all());
+    auto file_contents = TRY(file->read_until_eof());
 
     auto endpoints = parse(file_contents);
 

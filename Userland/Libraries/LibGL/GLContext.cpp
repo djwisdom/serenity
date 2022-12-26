@@ -305,8 +305,7 @@ void GLContext::gl_blend_func(GLenum src_factor, GLenum dst_factor)
     m_blend_source_factor = src_factor;
     m_blend_destination_factor = dst_factor;
 
-    auto map_gl_blend_factor_to_device = [](GLenum factor) constexpr
-    {
+    auto map_gl_blend_factor_to_device = [](GLenum factor) constexpr {
         switch (factor) {
         case GL_ZERO:
             return GPU::BlendFactor::Zero;
@@ -948,7 +947,7 @@ void GLContext::build_extension_string()
     if (m_device_info.max_texture_lod_bias > 0.f)
         extensions.append("GL_EXT_texture_lod_bias"sv);
 
-    m_extensions = String::join(' ', extensions);
+    m_extensions = DeprecatedString::join(' ', extensions);
 }
 
 ErrorOr<NonnullOwnPtr<GLContext>> create_context(Gfx::Bitmap& bitmap)

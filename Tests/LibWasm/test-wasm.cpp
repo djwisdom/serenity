@@ -24,7 +24,7 @@ TESTJS_GLOBAL_FUNCTION(read_binary_wasm_file, readBinaryWasmFile)
     if (file_size.is_error())
         return vm.throw_completion<JS::TypeError>(strerror(file_size.error().code()));
 
-    auto* array = TRY(JS::Uint8Array::create(realm, file_size.value()));
+    auto array = TRY(JS::Uint8Array::create(realm, file_size.value()));
 
     auto read = file.value()->read(array->data());
     if (read.is_error())
@@ -38,7 +38,7 @@ class WebAssemblyModule final : public JS::Object {
 
 public:
     explicit WebAssemblyModule(JS::Object& prototype)
-        : JS::Object(prototype)
+        : JS::Object(ConstructWithPrototypeTag::Tag, prototype)
     {
         m_machine.enable_instruction_count_limit();
     }
@@ -50,7 +50,7 @@ public:
     static JS::ThrowCompletionOr<WebAssemblyModule*> create(JS::Realm& realm, Wasm::Module module, HashMap<Wasm::Linker::Name, Wasm::ExternValue> const& imports)
     {
         auto& vm = realm.vm();
-        auto* instance = realm.heap().allocate<WebAssemblyModule>(realm, *realm.intrinsics().object_prototype());
+        auto instance = realm.heap().allocate<WebAssemblyModule>(realm, *realm.intrinsics().object_prototype());
         instance->m_module = move(module);
         Wasm::Linker linker(*instance->m_module);
         linker.link(imports);
@@ -62,7 +62,7 @@ public:
         if (result.is_error())
             return vm.throw_completion<JS::TypeError>(result.release_error().error);
         instance->m_module_instance = result.release_value();
-        return instance;
+        return instance.ptr();
     }
     void initialize(JS::Realm&) override;
 
@@ -113,7 +113,7 @@ TESTJS_GLOBAL_FUNCTION(parse_webassembly_module, parseWebAssemblyModule)
     };
     auto result = Wasm::Module::parse(stream);
     if (result.is_error())
-        return vm.throw_completion<JS::SyntaxError>(Wasm::parse_error_to_string(result.error()));
+        return vm.throw_completion<JS::SyntaxError>(Wasm::parse_error_to_deprecated_string(result.error()));
 
     if (stream.handle_any_error())
         return vm.throw_completion<JS::SyntaxError>("Binary stream contained errors");
@@ -174,17 +174,17 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::get_export)
                 return m_machine.store().get(*v)->value().value().visit(
                     [&](auto const& value) -> JS::Value { return JS::Value(static_cast<double>(value)); },
                     [&](i32 value) { return JS::Value(static_cast<double>(value)); },
-                    [&](i64 value) -> JS::Value { return JS::js_bigint(vm, Crypto::SignedBigInteger { value }); },
+                    [&](i64 value) -> JS::Value { return JS::BigInt::create(vm, Crypto::SignedBigInteger { value }); },
                     [&](Wasm::Reference const& reference) -> JS::Value {
                         return reference.ref().visit(
                             [&](const Wasm::Reference::Null&) -> JS::Value { return JS::js_null(); },
                             [&](const auto& ref) -> JS::Value { return JS::Value(static_cast<double>(ref.address.value())); });
                     });
             }
-            return vm.throw_completion<JS::TypeError>(String::formatted("'{}' does not refer to a function or a global", name));
+            return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("'{}' does not refer to a function or a global", name));
         }
     }
-    return vm.throw_completion<JS::TypeError>(String::formatted("'{}' could not be found", name));
+    return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("'{}' could not be found", name));
 }
 
 JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
@@ -202,7 +202,7 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
 
     Vector<Wasm::Value> arguments;
     if (type->parameters().size() + 1 > vm.argument_count())
-        return vm.throw_completion<JS::TypeError>(String::formatted("Expected {} arguments for call, but found {}", type->parameters().size() + 1, vm.argument_count()));
+        return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("Expected {} arguments for call, but found {}", type->parameters().size() + 1, vm.argument_count()));
     size_t index = 1;
     for (auto& param : type->parameters()) {
         auto argument = vm.argument(index++);
@@ -211,14 +211,14 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
             double_value = TRY(argument.to_double(vm));
         switch (param.kind()) {
         case Wasm::ValueType::Kind::I32:
-            arguments.append(Wasm::Value(param, static_cast<u64>(double_value)));
+            arguments.append(Wasm::Value(param, static_cast<i64>(double_value)));
             break;
         case Wasm::ValueType::Kind::I64:
             if (argument.is_bigint()) {
                 auto value = TRY(argument.to_bigint_int64(vm));
-                arguments.append(Wasm::Value(param, bit_cast<u64>(value)));
+                arguments.append(Wasm::Value(param, value));
             } else {
-                arguments.append(Wasm::Value(param, static_cast<u64>(double_value)));
+                arguments.append(Wasm::Value(param, static_cast<i64>(double_value)));
             }
             break;
         case Wasm::ValueType::Kind::F32:
@@ -244,7 +244,7 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
 
     auto result = WebAssemblyModule::machine().invoke(function_address, arguments);
     if (result.is_trap())
-        return vm.throw_completion<JS::TypeError>(String::formatted("Execution trapped: {}", result.trap().reason));
+        return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("Execution trapped: {}", result.trap().reason));
 
     if (result.values().is_empty())
         return JS::js_null();
@@ -253,7 +253,7 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
     result.values().first().value().visit(
         [&](auto const& value) { return_value = JS::Value(static_cast<double>(value)); },
         [&](i32 value) { return_value = JS::Value(static_cast<double>(value)); },
-        [&](i64 value) { return_value = JS::Value(JS::js_bigint(vm, Crypto::SignedBigInteger { value })); },
+        [&](i64 value) { return_value = JS::Value(JS::BigInt::create(vm, Crypto::SignedBigInteger { value })); },
         [&](Wasm::Reference const& reference) {
             reference.ref().visit(
                 [&](const Wasm::Reference::Null&) { return_value = JS::js_null(); },

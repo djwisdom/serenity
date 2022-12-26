@@ -77,7 +77,7 @@ JS::NonnullGCPtr<Request> Request::create(JS::Realm& realm, JS::NonnullGCPtr<Inf
 {
     // 1. Let requestObject be a new Request object with realm.
     // 2. Set requestObject’s request to request.
-    auto* request_object = realm.heap().allocate<Request>(realm, realm, request);
+    auto request_object = realm.heap().allocate<Request>(realm, realm, request);
 
     // 3. Set requestObject’s headers to a new Headers object with realm, whose headers list is request’s headers list and guard is guard.
     request_object->m_headers = realm.heap().allocate<Headers>(realm, realm, request->header_list());
@@ -87,7 +87,7 @@ JS::NonnullGCPtr<Request> Request::create(JS::Realm& realm, JS::NonnullGCPtr<Inf
     request_object->m_signal = realm.heap().allocate<DOM::AbortSignal>(realm, realm);
 
     // 5. Return requestObject.
-    return JS::NonnullGCPtr { *request_object };
+    return request_object;
 }
 
 // https://fetch.spec.whatwg.org/#dom-request
@@ -96,7 +96,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
     auto& vm = realm.vm();
 
     // Referred to as 'this' in the spec.
-    auto request_object = JS::NonnullGCPtr { *realm.heap().allocate<Request>(realm, realm, Infrastructure::Request::create(vm)) };
+    auto request_object = realm.heap().allocate<Request>(realm, realm, Infrastructure::Request::create(vm));
 
     // 1. Let request be null.
     JS::GCPtr<Infrastructure::Request> input_request;
@@ -111,9 +111,9 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
     DOM::AbortSignal const* input_signal = nullptr;
 
     // 5. If input is a string, then:
-    if (input.has<String>()) {
+    if (input.has<DeprecatedString>()) {
         // 1. Let parsedURL be the result of parsing input with baseURL.
-        auto parsed_url = URLParser::parse(input.get<String>(), &base_url);
+        auto parsed_url = URLParser::parse(input.get<DeprecatedString>(), &base_url);
 
         // 2. If parsedURL is failure, then throw a TypeError.
         if (!parsed_url.is_valid())
@@ -413,10 +413,10 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
         // 3. Empty this’s headers’s header list.
         request_object->headers()->header_list()->clear();
 
-        // 4. If headers is a Headers object, then for each header in its header list, append (header’s name, header’s value) to this’s headers.
+        // 4. If headers is a Headers object, then for each header of its header list, append header to this’s headers.
         if (auto* header_list = headers.get_pointer<JS::NonnullGCPtr<Infrastructure::HeaderList>>()) {
             for (auto& header : *header_list->ptr())
-                TRY(request_object->headers()->append(String::copy(header.name), String::copy(header.value)));
+                TRY(request_object->headers()->append(DeprecatedString::copy(header.name), DeprecatedString::copy(header.value)));
         }
         // 5. Otherwise, fill this’s headers with headers.
         else {
@@ -449,7 +449,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
 
         // 4. If type is non-null and this’s headers’s header list does not contain `Content-Type`, then append (`Content-Type`, type) to this’s headers.
         if (type.has_value() && !request_object->headers()->header_list()->contains("Content-Type"sv.bytes()))
-            TRY(request_object->headers()->append("Content-Type"sv, String::copy(type->span())));
+            TRY(request_object->headers()->append("Content-Type"sv, DeprecatedString::copy(type->span())));
     }
 
     // 37. Let inputOrInitBody be initBody if it is non-null; otherwise inputBody.
@@ -492,14 +492,14 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-method
-String Request::method() const
+DeprecatedString Request::method() const
 {
     // The method getter steps are to return this’s request’s method.
-    return String::copy(m_request->method());
+    return DeprecatedString::copy(m_request->method());
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-url
-String Request::url() const
+DeprecatedString Request::url() const
 {
     // The url getter steps are to return this’s request’s URL, serialized.
     return m_request->url().serialize();
@@ -520,17 +520,17 @@ Bindings::RequestDestination Request::destination() const
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-referrer
-String Request::referrer() const
+DeprecatedString Request::referrer() const
 {
     return m_request->referrer().visit(
         [&](Infrastructure::Request::Referrer const& referrer) {
             switch (referrer) {
             // 1. If this’s request’s referrer is "no-referrer", then return the empty string.
             case Infrastructure::Request::Referrer::NoReferrer:
-                return String::empty();
+                return DeprecatedString::empty();
             // 2. If this’s request’s referrer is "client", then return "about:client".
             case Infrastructure::Request::Referrer::Client:
-                return String { "about:client"sv };
+                return DeprecatedString { "about:client"sv };
             default:
                 VERIFY_NOT_REACHED();
             }
@@ -577,7 +577,7 @@ Bindings::RequestRedirect Request::redirect() const
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-integrity
-String Request::integrity() const
+DeprecatedString Request::integrity() const
 {
     // The integrity getter steps are to return this’s request’s integrity metadata.
     return m_request->integrity_metadata();

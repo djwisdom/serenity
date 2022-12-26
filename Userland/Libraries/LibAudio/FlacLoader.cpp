@@ -5,6 +5,7 @@
  */
 
 #include <AK/Debug.h>
+#include <AK/DeprecatedString.h>
 #include <AK/FixedArray.h>
 #include <AK/FlyString.h>
 #include <AK/Format.h>
@@ -12,7 +13,6 @@
 #include <AK/Math.h>
 #include <AK/ScopeGuard.h>
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
 #include <AK/Try.h>
 #include <AK/TypedTransfer.h>
 #include <AK/UFixedBigInt.h>
@@ -25,20 +25,33 @@
 
 namespace Audio {
 
-FlacLoaderPlugin::FlacLoaderPlugin(StringView path)
-    : LoaderPlugin(path)
+FlacLoaderPlugin::FlacLoaderPlugin(NonnullOwnPtr<Core::Stream::SeekableStream> stream)
+    : LoaderPlugin(move(stream))
 {
 }
 
-FlacLoaderPlugin::FlacLoaderPlugin(Bytes buffer)
-    : LoaderPlugin(buffer)
+Result<NonnullOwnPtr<FlacLoaderPlugin>, LoaderError> FlacLoaderPlugin::try_create(StringView path)
 {
+    auto stream = LOADER_TRY(Core::Stream::BufferedFile::create(LOADER_TRY(Core::Stream::File::open(path, Core::Stream::OpenMode::Read))));
+    auto loader = make<FlacLoaderPlugin>(move(stream));
+
+    LOADER_TRY(loader->initialize());
+
+    return loader;
+}
+
+Result<NonnullOwnPtr<FlacLoaderPlugin>, LoaderError> FlacLoaderPlugin::try_create(Bytes buffer)
+{
+    auto stream = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(buffer));
+    auto loader = make<FlacLoaderPlugin>(move(stream));
+
+    LOADER_TRY(loader->initialize());
+
+    return loader;
 }
 
 MaybeLoaderError FlacLoaderPlugin::initialize()
 {
-    LOADER_TRY(LoaderPlugin::initialize());
-
     TRY(parse_header());
     TRY(reset());
     return {};
@@ -47,14 +60,14 @@ MaybeLoaderError FlacLoaderPlugin::initialize()
 // 11.5 STREAM
 MaybeLoaderError FlacLoaderPlugin::parse_header()
 {
-    auto bit_input = LOADER_TRY(BigEndianInputBitStream::construct(*m_stream));
+    auto bit_input = LOADER_TRY(BigEndianInputBitStream::construct(Core::Stream::Handle<Core::Stream::Stream>(*m_stream)));
 
     // A mixture of VERIFY and the non-crashing TRY().
-#define FLAC_VERIFY(check, category, msg)                                                                                           \
-    do {                                                                                                                            \
-        if (!(check)) {                                                                                                             \
-            return LoaderError { category, static_cast<size_t>(m_data_start_location), String::formatted("FLAC header: {}", msg) }; \
-        }                                                                                                                           \
+#define FLAC_VERIFY(check, category, msg)                                                                                                     \
+    do {                                                                                                                                      \
+        if (!(check)) {                                                                                                                       \
+            return LoaderError { category, static_cast<size_t>(m_data_start_location), DeprecatedString::formatted("FLAC header: {}", msg) }; \
+        }                                                                                                                                     \
     } while (0)
 
     // Magic number
@@ -65,8 +78,8 @@ MaybeLoaderError FlacLoaderPlugin::parse_header()
     // Receive the streaminfo block
     auto streaminfo = TRY(next_meta_block(*bit_input));
     FLAC_VERIFY(streaminfo.type == FlacMetadataBlockType::STREAMINFO, LoaderError::Category::Format, "First block must be STREAMINFO");
-    auto streaminfo_data_memory = LOADER_TRY(Core::Stream::MemoryStream::construct(streaminfo.data.bytes()));
-    auto streaminfo_data = LOADER_TRY(BigEndianInputBitStream::construct(*streaminfo_data_memory));
+    auto streaminfo_data_memory = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(streaminfo.data.bytes()));
+    auto streaminfo_data = LOADER_TRY(BigEndianInputBitStream::construct(Core::Stream::Handle<Core::Stream::Stream>(*streaminfo_data_memory)));
 
     // 11.10 METADATA_BLOCK_STREAMINFO
     m_min_block_size = LOADER_TRY(streaminfo_data->read_bits<u16>(16));
@@ -136,8 +149,8 @@ MaybeLoaderError FlacLoaderPlugin::parse_header()
 // 11.19. METADATA_BLOCK_PICTURE
 MaybeLoaderError FlacLoaderPlugin::load_picture(FlacRawMetadataBlock& block)
 {
-    auto memory_stream = LOADER_TRY(Core::Stream::MemoryStream::construct(block.data.bytes()));
-    auto picture_block_bytes = LOADER_TRY(BigEndianInputBitStream::construct(*memory_stream));
+    auto memory_stream = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(block.data.bytes()));
+    auto picture_block_bytes = LOADER_TRY(BigEndianInputBitStream::construct(Core::Stream::Handle<Core::Stream::Stream>(*memory_stream)));
 
     PictureData picture {};
 
@@ -173,8 +186,8 @@ MaybeLoaderError FlacLoaderPlugin::load_picture(FlacRawMetadataBlock& block)
 // 11.13. METADATA_BLOCK_SEEKTABLE
 MaybeLoaderError FlacLoaderPlugin::load_seektable(FlacRawMetadataBlock& block)
 {
-    auto memory_stream = LOADER_TRY(Core::Stream::MemoryStream::construct(block.data.bytes()));
-    auto seektable_bytes = LOADER_TRY(BigEndianInputBitStream::construct(*memory_stream));
+    auto memory_stream = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(block.data.bytes()));
+    auto seektable_bytes = LOADER_TRY(BigEndianInputBitStream::construct(Core::Stream::Handle<Core::Stream::Stream>(*memory_stream)));
     for (size_t i = 0; i < block.length / 18; ++i) {
         // 11.14. SEEKPOINT
         FlacSeekPoint seekpoint {
@@ -267,7 +280,7 @@ MaybeLoaderError FlacLoaderPlugin::seek(int int_sample_index)
         dbgln_if(AFLACLOADER_DEBUG, "Seeking to seektable: sample index {}, byte offset {}, sample count {}", target_seekpoint.sample_index, target_seekpoint.byte_offset, target_seekpoint.num_samples);
         auto position = target_seekpoint.byte_offset + m_data_start_location;
         if (m_stream->seek(static_cast<i64>(position), Core::Stream::SeekMode::SetPosition).is_error())
-            return LoaderError { LoaderError::Category::IO, m_loaded_samples, String::formatted("Invalid seek position {}", position) };
+            return LoaderError { LoaderError::Category::IO, m_loaded_samples, DeprecatedString::formatted("Invalid seek position {}", position) };
 
         auto remaining_samples_after_seekpoint = sample_index - m_data_start_location;
         if (remaining_samples_after_seekpoint > 0)
@@ -313,14 +326,14 @@ LoaderSamples FlacLoaderPlugin::get_more_samples(size_t max_bytes_to_read_from_i
 // 11.21. FRAME
 MaybeLoaderError FlacLoaderPlugin::next_frame(Span<Sample> target_vector)
 {
-#define FLAC_VERIFY(check, category, msg)                                                                                               \
-    do {                                                                                                                                \
-        if (!(check)) {                                                                                                                 \
-            return LoaderError { category, static_cast<size_t>(m_current_sample_or_frame), String::formatted("FLAC header: {}", msg) }; \
-        }                                                                                                                               \
+#define FLAC_VERIFY(check, category, msg)                                                                                                         \
+    do {                                                                                                                                          \
+        if (!(check)) {                                                                                                                           \
+            return LoaderError { category, static_cast<size_t>(m_current_sample_or_frame), DeprecatedString::formatted("FLAC header: {}", msg) }; \
+        }                                                                                                                                         \
     } while (0)
 
-    auto bit_stream = LOADER_TRY(BigEndianInputBitStream::construct(*m_stream));
+    auto bit_stream = LOADER_TRY(BigEndianInputBitStream::construct(Core::Stream::Handle<Core::Stream::Stream>(*m_stream)));
 
     // TODO: Check the CRC-16 checksum (and others) by keeping track of read data
 
@@ -548,7 +561,7 @@ ErrorOr<PcmSampleFormat, LoaderError> FlacLoaderPlugin::convert_bit_depth_code(u
     case 7:
         return LoaderError { LoaderError::Category::Format, static_cast<size_t>(m_current_sample_or_frame), "Reserved sample size" };
     default:
-        return LoaderError { LoaderError::Category::Format, static_cast<size_t>(m_current_sample_or_frame), String::formatted("Unsupported sample size {}", bit_depth_code) };
+        return LoaderError { LoaderError::Category::Format, static_cast<size_t>(m_current_sample_or_frame), DeprecatedString::formatted("Unsupported sample size {}", bit_depth_code) };
     }
 }
 
@@ -805,7 +818,7 @@ ErrorOr<Vector<i32>, LoaderError> FlacLoaderPlugin::decode_fixed_lpc(FlacSubfram
             decoded[i] += 4 * decoded[i - 1] - 6 * decoded[i - 2] + 4 * decoded[i - 3] - decoded[i - 4];
         break;
     default:
-        return LoaderError { LoaderError::Category::Format, static_cast<size_t>(m_current_sample_or_frame), String::formatted("Unrecognized predictor order {}", subframe.order) };
+        return LoaderError { LoaderError::Category::Format, static_cast<size_t>(m_current_sample_or_frame), DeprecatedString::formatted("Unrecognized predictor order {}", subframe.order) };
     }
     return decoded;
 }

@@ -88,7 +88,8 @@ AutocompleteBox::AutocompleteBox(TextEditor& editor)
     : m_editor(editor)
 {
     m_popup_window = GUI::Window::construct(m_editor->window());
-    m_popup_window->set_window_type(GUI::WindowType::Popup);
+    m_popup_window->set_window_type(GUI::WindowType::Autocomplete);
+    m_popup_window->set_obey_widget_min_size(false);
     m_popup_window->set_rect(0, 0, 175, 25);
 
     auto& main_widget = m_popup_window->set_main_widget<GUI::Widget>();
@@ -96,6 +97,8 @@ AutocompleteBox::AutocompleteBox(TextEditor& editor)
     main_widget.set_layout<GUI::VerticalBoxLayout>();
 
     m_suggestion_view = main_widget.add<GUI::TableView>();
+    m_suggestion_view->set_frame_shadow(Gfx::FrameShadow::Plain);
+    m_suggestion_view->set_frame_thickness(1);
     m_suggestion_view->set_column_headers_visible(false);
     m_suggestion_view->set_visible(false);
     m_suggestion_view->on_activation = [&](GUI::ModelIndex const& index) {
@@ -129,6 +132,7 @@ void AutocompleteBox::update_suggestions(Vector<CodeComprehension::AutocompleteR
         m_suggestion_view->set_cursor(m_suggestion_view->model()->index(0), GUI::AbstractView::SelectionUpdate::Set);
 
     m_suggestion_view->set_visible(has_suggestions);
+    m_suggestion_view->set_focus(has_suggestions);
     m_no_suggestions_view->set_visible(!has_suggestions);
     m_popup_window->resize(has_suggestions ? Gfx::IntSize(300, 100) : Gfx::IntSize(175, 25));
 
@@ -156,30 +160,12 @@ void AutocompleteBox::close()
 
 void AutocompleteBox::next_suggestion()
 {
-    GUI::ModelIndex new_index = m_suggestion_view->selection().first();
-    if (new_index.is_valid())
-        new_index = m_suggestion_view->model()->index(new_index.row() + 1);
-    else
-        new_index = m_suggestion_view->model()->index(0);
-
-    if (m_suggestion_view->model()->is_within_range(new_index)) {
-        m_suggestion_view->selection().set(new_index);
-        m_suggestion_view->scroll_into_view(new_index, Orientation::Vertical);
-    }
+    m_suggestion_view->move_cursor(GUI::AbstractView::CursorMovement::Down, GUI::AbstractView::SelectionUpdate::Set);
 }
 
 void AutocompleteBox::previous_suggestion()
 {
-    GUI::ModelIndex new_index = m_suggestion_view->selection().first();
-    if (new_index.is_valid())
-        new_index = m_suggestion_view->model()->index(new_index.row() - 1);
-    else
-        new_index = m_suggestion_view->model()->index(0);
-
-    if (m_suggestion_view->model()->is_within_range(new_index)) {
-        m_suggestion_view->selection().set(new_index);
-        m_suggestion_view->scroll_into_view(new_index, Orientation::Vertical);
-    }
+    m_suggestion_view->move_cursor(GUI::AbstractView::CursorMovement::Up, GUI::AbstractView::SelectionUpdate::Set);
 }
 
 CodeComprehension::AutocompleteResultEntry::HideAutocompleteAfterApplying AutocompleteBox::apply_suggestion()
@@ -197,7 +183,7 @@ CodeComprehension::AutocompleteResultEntry::HideAutocompleteAfterApplying Autoco
         return hide_when_done;
 
     auto suggestion_index = m_suggestion_view->model()->index(selected_index.row());
-    auto completion = suggestion_index.data((GUI::ModelRole)AutocompleteSuggestionModel::InternalRole::Completion).to_string();
+    auto completion = suggestion_index.data((GUI::ModelRole)AutocompleteSuggestionModel::InternalRole::Completion).to_deprecated_string();
     size_t partial_length = suggestion_index.data((GUI::ModelRole)AutocompleteSuggestionModel::InternalRole::PartialInputLength).to_i64();
     auto hide_after_applying = suggestion_index.data((GUI::ModelRole)AutocompleteSuggestionModel::InternalRole::HideAutocompleteAfterApplying).to_bool();
 

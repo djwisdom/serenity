@@ -229,6 +229,7 @@ public:
     [[nodiscard]] Point end_point_for_aspect_ratio(Point const& previous_end_point, float aspect_ratio) const;
 
     template<typename U>
+    requires(!IsSame<T, U>)
     [[nodiscard]] Point<U> to_type() const
     {
         return Point<U>(*this);
@@ -247,7 +248,7 @@ public:
         return Point<U>(ceil(x()), ceil(y()));
     }
 
-    [[nodiscard]] String to_string() const;
+    [[nodiscard]] DeprecatedString to_deprecated_string() const;
 
 private:
     T m_x { 0 };
@@ -290,8 +291,11 @@ struct Formatter<Gfx::Point<T>> : Formatter<FormatString> {
 
 namespace IPC {
 
+template<>
 bool encode(Encoder&, Gfx::IntPoint const&);
-ErrorOr<void> decode(Decoder&, Gfx::IntPoint&);
+
+template<>
+ErrorOr<Gfx::IntPoint> decode(Decoder&);
 
 }
 

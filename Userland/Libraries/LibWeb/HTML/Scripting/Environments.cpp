@@ -22,6 +22,8 @@ namespace Web::HTML {
 EnvironmentSettingsObject::EnvironmentSettingsObject(NonnullOwnPtr<JS::ExecutionContext> realm_execution_context)
     : m_realm_execution_context(move(realm_execution_context))
 {
+    m_realm_execution_context->context_owner = this;
+
     // Register with the responsible event loop so we can perform step 4 of "perform a microtask checkpoint".
     responsible_event_loop().register_environment_settings_object({}, *this);
 }
@@ -35,8 +37,6 @@ void EnvironmentSettingsObject::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(target_browsing_context);
-    for (auto& promise : m_about_to_be_notified_rejected_promises_list)
-        visitor.visit(promise);
 }
 
 JS::ExecutionContext& EnvironmentSettingsObject::realm_execution_context()
@@ -151,6 +151,22 @@ void EnvironmentSettingsObject::prepare_to_run_callback()
         context->skip_when_determining_incumbent_counter++;
 }
 
+// https://html.spec.whatwg.org/multipage/urls-and-fetching.html#parse-a-url
+AK::URL EnvironmentSettingsObject::parse_url(StringView url)
+{
+    // 1. Let encoding be document's character encoding, if document was given, and environment settings object's API URL character encoding otherwise.
+    // FIXME: Pass in environment settings object's API URL character encoding.
+
+    // 2. Let baseURL be document's base URL, if document was given, and environment settings object's API base URL otherwise.
+    auto base_url = api_base_url();
+
+    // 3. Let urlRecord be the result of applying the URL parser to url, with baseURL and encoding.
+    // 4. If urlRecord is failure, then return failure.
+    // 5. Let urlString be the result of applying the URL serializer to urlRecord.
+    // 6. Return urlString as the resulting URL string and urlRecord as the resulting URL record.
+    return base_url.complete_url(url);
+}
+
 // https://html.spec.whatwg.org/multipage/webappapis.html#clean-up-after-running-a-callback
 void EnvironmentSettingsObject::clean_up_after_running_callback()
 {
@@ -185,7 +201,7 @@ bool EnvironmentSettingsObject::remove_from_outstanding_rejected_promises_weak_s
 
 void EnvironmentSettingsObject::push_onto_about_to_be_notified_rejected_promises_list(JS::NonnullGCPtr<JS::Promise> promise)
 {
-    m_about_to_be_notified_rejected_promises_list.append(move(promise));
+    m_about_to_be_notified_rejected_promises_list.append(JS::make_handle(promise));
 }
 
 bool EnvironmentSettingsObject::remove_from_about_to_be_notified_rejected_promises_list(JS::NonnullGCPtr<JS::Promise> promise)
@@ -212,7 +228,7 @@ void EnvironmentSettingsObject::notify_about_rejected_promises(Badge<EventLoop>)
     auto& global = global_object();
 
     // 5. Queue a global task on the DOM manipulation task source given global to run the following substep:
-    queue_global_task(Task::Source::DOMManipulation, global, [this, &global, list = move(list)]() mutable {
+    queue_global_task(Task::Source::DOMManipulation, global, [this, &global, list = move(list)] {
         // 1. For each promise p in list:
         for (auto promise : list) {
 
@@ -283,7 +299,7 @@ bool EnvironmentSettingsObject::is_scripting_disabled() const
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#module-type-allowed
-bool EnvironmentSettingsObject::module_type_allowed(AK::String const& module_type) const
+bool EnvironmentSettingsObject::module_type_allowed(AK::DeprecatedString const& module_type) const
 {
     // 1. If moduleType is not "javascript", "css", or "json", then return false.
     if (module_type != "javascript"sv && module_type != "css"sv && module_type != "json"sv)
@@ -391,6 +407,32 @@ JS::Object& relevant_global_object(JS::Object const& object)
 {
     // Similarly, the relevant global object for a platform object o is the global object of the relevant Realm for o.
     return relevant_realm(object).global_object();
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#concept-entry-realm
+JS::Realm& entry_realm()
+{
+    auto& event_loop = HTML::main_thread_event_loop();
+    auto& vm = event_loop.vm();
+
+    // With this in hand, we define the entry execution context to be the most recently pushed item in the JavaScript execution context stack that is a realm execution context.
+    // The entry realm is the entry execution context's Realm component.
+    // NOTE: Currently all execution contexts in LibJS are realm execution contexts
+    return *vm.running_execution_context().realm;
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#entry-settings-object
+EnvironmentSettingsObject& entry_settings_object()
+{
+    // Then, the entry settings object is the environment settings object of the entry realm.
+    return Bindings::host_defined_environment_settings_object(entry_realm());
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#entry-global-object
+JS::Object& entry_global_object()
+{
+    // Similarly, the entry global object is the global object of the entry realm.
+    return entry_realm().global_object();
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#secure-context

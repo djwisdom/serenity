@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021, Tim Flynn <trflynn89@serenityos.org>
  * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Alexander Narsudinov <a.narsudinov@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,7 +16,7 @@ namespace Web::DOM {
 JS::NonnullGCPtr<NamedNodeMap> NamedNodeMap::create(Element& element)
 {
     auto& realm = element.realm();
-    return *realm.heap().allocate<NamedNodeMap>(realm, element);
+    return realm.heap().allocate<NamedNodeMap>(realm, element);
 }
 
 NamedNodeMap::NamedNodeMap(Element& element)
@@ -39,10 +40,10 @@ bool NamedNodeMap::is_supported_property_index(u32 index) const
 }
 
 // https://dom.spec.whatwg.org/#ref-for-dfn-supported-property-names%E2%91%A0
-Vector<String> NamedNodeMap::supported_property_names() const
+Vector<DeprecatedString> NamedNodeMap::supported_property_names() const
 {
     // 1. Let names be the qualified names of the attributes in this NamedNodeMap object’s attribute list, with duplicates omitted, in order.
-    Vector<String> names;
+    Vector<DeprecatedString> names;
     names.ensure_capacity(m_attributes.size());
 
     for (auto const& attribute : m_attributes) {
@@ -79,8 +80,20 @@ Attr const* NamedNodeMap::get_named_item(StringView qualified_name) const
     return get_attribute(qualified_name);
 }
 
+// https://dom.spec.whatwg.org/#dom-namednodemap-getnameditemns
+Attr const* NamedNodeMap::get_named_item_ns(StringView namespace_, StringView local_name) const
+{
+    return get_attribute_ns(namespace_, local_name);
+}
+
 // https://dom.spec.whatwg.org/#dom-namednodemap-setnameditem
 WebIDL::ExceptionOr<Attr const*> NamedNodeMap::set_named_item(Attr& attribute)
+{
+    return set_attribute(attribute);
+}
+
+// https://dom.spec.whatwg.org/#dom-namednodemap-setnameditemns
+WebIDL::ExceptionOr<Attr const*> NamedNodeMap::set_named_item_ns(Attr& attribute)
 {
     return set_attribute(attribute);
 }
@@ -93,10 +106,24 @@ WebIDL::ExceptionOr<Attr const*> NamedNodeMap::remove_named_item(StringView qual
 
     // 2. If attr is null, then throw a "NotFoundError" DOMException.
     if (!attribute)
-        return WebIDL::NotFoundError::create(realm(), String::formatted("Attribute with name '{}' not found", qualified_name));
+        return WebIDL::NotFoundError::create(realm(), DeprecatedString::formatted("Attribute with name '{}' not found", qualified_name));
 
     // 3. Return attr.
-    return nullptr;
+    return attribute;
+}
+
+// https://dom.spec.whatwg.org/#dom-namednodemap-removenameditemns
+WebIDL::ExceptionOr<Attr const*> NamedNodeMap::remove_named_item_ns(StringView namespace_, StringView local_name)
+{
+    // 1. Let attr be the result of removing an attribute given namespace, localName, and element.
+    auto const* attribute = remove_attribute_ns(namespace_, local_name);
+
+    // 2. If attr is null, then throw a "NotFoundError" DOMException.
+    if (!attribute)
+        return WebIDL::NotFoundError::create(realm(), DeprecatedString::formatted("Attribute with namespace '{}' and local name '{}' not found", namespace_, local_name));
+
+    // 3. Return attr.
+    return attribute;
 }
 
 // https://dom.spec.whatwg.org/#concept-element-attributes-get-by-name
@@ -132,6 +159,33 @@ Attr const* NamedNodeMap::get_attribute(StringView qualified_name, size_t* item_
     return nullptr;
 }
 
+// https://dom.spec.whatwg.org/#concept-element-attributes-get-by-namespace
+Attr* NamedNodeMap::get_attribute_ns(StringView namespace_, StringView local_name, size_t* item_index)
+{
+    return const_cast<Attr*>(const_cast<NamedNodeMap const*>(this)->get_attribute_ns(namespace_, local_name, item_index));
+}
+
+// https://dom.spec.whatwg.org/#concept-element-attributes-get-by-namespace
+Attr const* NamedNodeMap::get_attribute_ns(StringView namespace_, StringView local_name, size_t* item_index) const
+{
+    if (item_index)
+        *item_index = 0;
+
+    // 1. If namespace is the empty string, then set it to null.
+    if (namespace_.is_empty())
+        namespace_ = {};
+
+    // 2. Return the attribute in element’s attribute list whose namespace is namespace and local name is localName, if any; otherwise null.
+    for (auto const& attribute : m_attributes) {
+        if (attribute->namespace_uri() == namespace_ && attribute->local_name() == local_name)
+            return attribute.ptr();
+        if (item_index)
+            ++(*item_index);
+    }
+
+    return nullptr;
+}
+
 // https://dom.spec.whatwg.org/#concept-element-attributes-set
 WebIDL::ExceptionOr<Attr const*> NamedNodeMap::set_attribute(Attr& attribute)
 {
@@ -140,9 +194,8 @@ WebIDL::ExceptionOr<Attr const*> NamedNodeMap::set_attribute(Attr& attribute)
         return WebIDL::InUseAttributeError::create(realm(), "Attribute must not already be in use"sv);
 
     // 2. Let oldAttr be the result of getting an attribute given attr’s namespace, attr’s local name, and element.
-    // FIXME: When getNamedItemNS is implemented, use that instead.
     size_t old_attribute_index = 0;
-    auto* old_attribute = get_attribute(attribute.local_name(), &old_attribute_index);
+    auto* old_attribute = get_attribute_ns(attribute.namespace_uri(), attribute.local_name(), &old_attribute_index);
 
     // 3. If oldAttr is attr, return attr.
     if (old_attribute == &attribute)
@@ -215,6 +268,22 @@ Attr const* NamedNodeMap::remove_attribute(StringView qualified_name)
 
     // 1. Let attr be the result of getting an attribute given qualifiedName and element.
     auto const* attribute = get_attribute(qualified_name, &item_index);
+
+    // 2. If attr is non-null, then remove attr.
+    if (attribute)
+        remove_attribute_at_index(item_index);
+
+    // 3. Return attr.
+    return attribute;
+}
+
+// https://dom.spec.whatwg.org/#concept-element-attributes-remove-by-namespace
+Attr const* NamedNodeMap::remove_attribute_ns(StringView namespace_, StringView local_name)
+{
+    size_t item_index = 0;
+
+    // 1. Let attr be the result of getting an attribute given namespace, localName, and element.
+    auto const* attribute = get_attribute_ns(namespace_, local_name, &item_index);
 
     // 2. If attr is non-null, then remove attr.
     if (attribute)

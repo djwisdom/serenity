@@ -49,7 +49,7 @@ void CSSImportRule::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://www.w3.org/TR/cssom/#serialize-a-css-rule
-String CSSImportRule::serialized() const
+DeprecatedString CSSImportRule::serialized() const
 {
     StringBuilder builder;
     // The result of concatenating the following:
@@ -60,7 +60,7 @@ String CSSImportRule::serialized() const
     // 2. The result of performing serialize a URL on the rule’s location.
     // FIXME: Look into the correctness of this serialization
     builder.append("url("sv);
-    builder.append(m_url.to_string());
+    builder.append(m_url.to_deprecated_string());
     builder.append(')');
 
     // FIXME: 3. If the rule’s associated media list is not empty, a single SPACE (U+0020) followed by the result of performing serialize a media query list on the media list.
@@ -68,7 +68,7 @@ String CSSImportRule::serialized() const
     // 4. The string ";", i.e., SEMICOLON (U+003B).
     builder.append(';');
 
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 void CSSImportRule::resource_did_fail()

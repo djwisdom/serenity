@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,7 +15,7 @@ namespace Web::CSS {
 
 JS::NonnullGCPtr<Screen> Screen::create(HTML::Window& window)
 {
-    return *window.heap().allocate<Screen>(window.realm(), window);
+    return window.heap().allocate<Screen>(window.realm(), window);
 }
 
 Screen::Screen(HTML::Window& window)
@@ -33,7 +33,13 @@ void Screen::visit_edges(Cell::Visitor& visitor)
 
 Gfx::IntRect Screen::screen_rect() const
 {
-    return window().page()->screen_rect();
+    auto screen_rect_in_css_pixels = window().page()->web_exposed_screen_area();
+    return {
+        screen_rect_in_css_pixels.x().value(),
+        screen_rect_in_css_pixels.y().value(),
+        screen_rect_in_css_pixels.width().value(),
+        screen_rect_in_css_pixels.height().value()
+    };
 }
 
 }

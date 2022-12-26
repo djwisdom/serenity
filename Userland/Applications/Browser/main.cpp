@@ -10,6 +10,7 @@
 #include <Applications/Browser/Browser.h>
 #include <Applications/Browser/BrowserWindow.h>
 #include <Applications/Browser/CookieJar.h>
+#include <Applications/Browser/Database.h>
 #include <Applications/Browser/Tab.h>
 #include <Applications/Browser/WindowActions.h>
 #include <LibConfig/Client.h>
@@ -31,21 +32,21 @@
 
 namespace Browser {
 
-String g_search_engine;
-String g_home_url;
-String g_new_tab_url;
-Vector<String> g_content_filters;
+DeprecatedString g_search_engine;
+DeprecatedString g_home_url;
+DeprecatedString g_new_tab_url;
+Vector<DeprecatedString> g_content_filters;
 bool g_content_filters_enabled { true };
-Vector<String> g_proxies;
-HashMap<String, size_t> g_proxy_mappings;
+Vector<DeprecatedString> g_proxies;
+HashMap<DeprecatedString, size_t> g_proxy_mappings;
 IconBag g_icon_bag;
-String g_webdriver_content_ipc_path;
+DeprecatedString g_webdriver_content_ipc_path;
 
 }
 
 static ErrorOr<void> load_content_filters()
 {
-    auto file = TRY(Core::Stream::File::open(String::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::Stream::OpenMode::Read));
+    auto file = TRY(Core::Stream::File::open(DeprecatedString::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::Stream::OpenMode::Read));
     auto ad_filter_list = TRY(Core::Stream::BufferedFile::create(move(file)));
     auto buffer = TRY(ByteBuffer::create_uninitialized(4096));
     while (TRY(ad_filter_list->can_read_line())) {
@@ -66,7 +67,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(Core::System::pledge("stdio recvfd sendfd unix fattr cpath rpath wpath proc exec"));
 
-    Vector<String> specified_urls;
+    Vector<DeprecatedString> specified_urls;
 
     Core::ArgsParser args_parser;
     args_parser.add_positional_argument(specified_urls, "URLs to open", "url", Core::ArgsParser::Required::No);
@@ -94,6 +95,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/tmp/session/%sid/portal/image", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/webcontent", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/request", "rw"));
+    TRY(Core::System::unveil("/tmp/session/%sid/portal/sql", "rw"));
     TRY(Core::System::unveil("/home", "rwc"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/etc/passwd", "r"));
@@ -113,6 +115,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Browser::g_icon_bag = TRY(Browser::IconBag::try_create());
 
+    auto database = TRY(Browser::Database::create());
     TRY(load_content_filters());
 
     for (auto& group : Config::list_groups("Browser"sv)) {
@@ -129,7 +132,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
     }
 
-    auto url_from_argument_string = [](String const& string) -> URL {
+    auto url_from_argument_string = [](DeprecatedString const& string) -> URL {
         if (Core::File::exists(string)) {
             return URL::create_with_file_scheme(Core::File::real_path_for(string));
         }
@@ -140,7 +143,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     if (!specified_urls.is_empty())
         first_url = url_from_argument_string(specified_urls.first());
 
-    Browser::CookieJar cookie_jar;
+    auto cookie_jar = TRY(Browser::CookieJar::create(*database));
     auto window = Browser::BrowserWindow::construct(cookie_jar, first_url);
 
     auto content_filters_watcher = TRY(Core::FileWatcher::create());
@@ -153,7 +156,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
         window->content_filters_changed();
     };
-    TRY(content_filters_watcher->add_watch(String::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::FileWatcherEvent::Type::ContentModified));
+    TRY(content_filters_watcher->add_watch(DeprecatedString::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::FileWatcherEvent::Type::ContentModified));
 
     app->on_action_enter = [&](GUI::Action& action) {
         if (auto* browser_window = dynamic_cast<Browser::BrowserWindow*>(app->active_window())) {

@@ -12,7 +12,7 @@
 namespace JS {
 
 // 10.4.1.3 BoundFunctionCreate ( targetFunction, boundThis, boundArgs ), https://tc39.es/ecma262/#sec-boundfunctioncreate
-ThrowCompletionOr<BoundFunction*> BoundFunction::create(Realm& realm, FunctionObject& target_function, Value bound_this, Vector<Value> bound_arguments)
+ThrowCompletionOr<NonnullGCPtr<BoundFunction>> BoundFunction::create(Realm& realm, FunctionObject& target_function, Value bound_this, Vector<Value> bound_arguments)
 {
     // 1. Let proto be ? targetFunction.[[GetPrototypeOf]]().
     auto* prototype = TRY(target_function.internal_get_prototype_of());
@@ -26,7 +26,7 @@ ThrowCompletionOr<BoundFunction*> BoundFunction::create(Realm& realm, FunctionOb
     // 7. Set obj.[[BoundTargetFunction]] to targetFunction.
     // 8. Set obj.[[BoundThis]] to boundThis.
     // 9. Set obj.[[BoundArguments]] to boundArgs.
-    auto* object = realm.heap().allocate<BoundFunction>(realm, realm, target_function, bound_this, move(bound_arguments), prototype);
+    auto object = realm.heap().allocate<BoundFunction>(realm, realm, target_function, bound_this, move(bound_arguments), prototype);
 
     // 10. Return obj.
     return object;
@@ -38,7 +38,7 @@ BoundFunction::BoundFunction(Realm& realm, FunctionObject& bound_target_function
     , m_bound_this(bound_this)
     , m_bound_arguments(move(bound_arguments))
     // FIXME: Non-standard and redundant, remove.
-    , m_name(String::formatted("bound {}", bound_target_function.name()))
+    , m_name(DeprecatedString::formatted("bound {}", bound_target_function.name()))
 {
 }
 
@@ -66,7 +66,7 @@ ThrowCompletionOr<Value> BoundFunction::internal_call([[maybe_unused]] Value thi
 }
 
 // 10.4.1.2 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-bound-function-exotic-objects-construct-argumentslist-newtarget
-ThrowCompletionOr<Object*> BoundFunction::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
+ThrowCompletionOr<NonnullGCPtr<Object>> BoundFunction::internal_construct(MarkedVector<Value> arguments_list, FunctionObject& new_target)
 {
     auto& vm = this->vm();
 

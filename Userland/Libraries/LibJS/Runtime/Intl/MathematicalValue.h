@@ -87,7 +87,7 @@ public:
     bool is_positive() const;
     bool is_zero() const;
 
-    String to_string() const;
+    DeprecatedString to_deprecated_string() const;
     Value to_value(VM&) const;
 
 private:
@@ -95,11 +95,7 @@ private:
 
     static ValueType value_from_number(double number);
 
-    // NOTE: The specific alignment is to avoid an UBSAN error with Clang i686, due to Clang
-    //       disagreeing with UBSAN on the alignment of doubles. See:
-    //       https://github.com/llvm/llvm-project/issues/54845
-    //       https://github.com/SerenityOS/serenity/issues/13614
-    alignas(8) ValueType m_value { 0.0 };
+    ValueType m_value { 0.0 };
 };
 
 }

@@ -128,7 +128,7 @@ void EventTarget::add_event_listener(FlyString const& type, IDLEventListener* ca
     // 2. Add an event listener with this and an event listener whose type is type, callback is callback, capture is capture, passive is passive,
     //    once is once, and signal is signal.
 
-    auto* event_listener = heap().allocate_without_realm<DOMEventListener>();
+    auto event_listener = heap().allocate_without_realm<DOMEventListener>();
     event_listener->type = type;
     event_listener->callback = callback;
     event_listener->signal = move(flattened_options.signal);
@@ -171,7 +171,7 @@ void EventTarget::add_an_event_listener(DOMEventListener& listener)
     // 5. If listener’s signal is not null, then add the following abort steps to it:
     if (listener.signal) {
         // NOTE: `this` and `listener` are protected by AbortSignal using JS::SafeFunction.
-        listener.signal->add_abort_algorithm([this, &listener]() mutable {
+        listener.signal->add_abort_algorithm([this, &listener] {
             // 1. Remove an event listener with eventTarget and listener.
             remove_an_event_listener(listener);
         });
@@ -332,7 +332,7 @@ WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(FlyString 
     auto& event_handler = event_handler_iterator->value;
 
     // 3. If eventHandler's value is an internal raw uncompiled handler, then:
-    if (event_handler->value.has<String>()) {
+    if (event_handler->value.has<DeprecatedString>()) {
         // 1. If eventTarget is an element, then let element be eventTarget, and document be element's node document.
         //    Otherwise, eventTarget is a Window object, let element be null, and document be eventTarget's associated Document.
         JS::GCPtr<Element> element;
@@ -355,7 +355,7 @@ WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(FlyString 
             return nullptr;
 
         // 3. Let body be the uncompiled script body in eventHandler's value.
-        auto& body = event_handler->value.get<String>();
+        auto& body = event_handler->value.get<DeprecatedString>();
 
         // FIXME: 4. Let location be the location where the script body originated, as given by eventHandler's value.
 
@@ -386,7 +386,7 @@ WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(FlyString 
             builder.appendff("function {}(event) {{\n{}\n}}", name, body);
         }
 
-        auto source_text = builder.to_string();
+        auto source_text = builder.to_deprecated_string();
 
         auto parser = JS::Parser(JS::Lexer(source_text));
 
@@ -437,7 +437,7 @@ WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(FlyString 
         auto& realm = settings_object.realm();
 
         //  2. Let scope be realm.[[GlobalEnv]].
-        JS::Environment* scope = &realm.global_environment();
+        auto scope = JS::NonnullGCPtr<JS::Environment> { realm.global_environment() };
 
         // 3. If eventHandler is an element's event handler, then set scope to NewObjectEnvironment(document, true, scope).
         //    (Otherwise, eventHandler is a Window object's event handler.)
@@ -454,8 +454,7 @@ WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(FlyString 
 
         //  6. Return scope. (NOTE: Not necessary)
 
-        auto* function = JS::ECMAScriptFunctionObject::create(realm, name, builder.to_string(), program->body(), program->parameters(), program->function_length(), scope, nullptr, JS::FunctionKind::Normal, program->is_strict_mode(), program->might_need_arguments_object(), is_arrow_function);
-        VERIFY(function);
+        auto function = JS::ECMAScriptFunctionObject::create(realm, name, builder.to_deprecated_string(), program->body(), program->parameters(), program->function_length(), scope, nullptr, JS::FunctionKind::Normal, program->is_strict_mode(), program->might_need_arguments_object(), is_arrow_function);
 
         // 10. Remove settings object's realm execution context from the JavaScript execution context stack.
         VERIFY(vm.execution_context_stack().last() == &settings_object.realm_execution_context());
@@ -465,7 +464,7 @@ WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(FlyString 
         function->set_script_or_module({});
 
         // 12. Set eventHandler's value to the result of creating a Web IDL EventHandler callback function object whose object reference is function and whose callback context is settings object.
-        event_handler->value = realm.heap().allocate_without_realm<WebIDL::CallbackType>(*function, settings_object);
+        event_handler->value = realm.heap().allocate_without_realm<WebIDL::CallbackType>(*function, settings_object).ptr();
     }
 
     // 4. Return eventHandler's value.
@@ -499,7 +498,7 @@ void EventTarget::set_event_handler_attribute(FlyString const& name, WebIDL::Cal
     //  3. Set eventHandler's value to the given value.
     if (event_handler_iterator == handler_map.end()) {
         // NOTE: See the optimization comment in get_current_value_of_event_handler about why this is done.
-        auto* new_event_handler = heap().allocate_without_realm<HTML::EventHandler>(*value);
+        auto new_event_handler = heap().allocate_without_realm<HTML::EventHandler>(*value);
 
         //  4. Activate an event handler given eventTarget and name.
         // Optimization: We pass in the event handler here instead of having activate_event_handler do another hash map lookup just to get the same object.
@@ -557,10 +556,10 @@ void EventTarget::activate_event_handler(FlyString const& name, HTML::EventHandl
         0, "", &realm);
 
     // NOTE: As per the spec, the callback context is arbitrary.
-    auto* callback = realm.heap().allocate_without_realm<WebIDL::CallbackType>(*callback_function, Bindings::host_defined_environment_settings_object(realm));
+    auto callback = realm.heap().allocate_without_realm<WebIDL::CallbackType>(*callback_function, Bindings::host_defined_environment_settings_object(realm));
 
     // 5. Let listener be a new event listener whose type is the event handler event type corresponding to eventHandler and callback is callback.
-    auto* listener = realm.heap().allocate_without_realm<DOMEventListener>();
+    auto listener = realm.heap().allocate_without_realm<DOMEventListener>();
     listener->type = name;
     listener->callback = IDLEventListener::create(realm, *callback).ptr();
 
@@ -624,8 +623,8 @@ JS::ThrowCompletionOr<void> EventTarget::process_event_handler_for_event(FlyStri
         //    the fourth having the value of event's colno attribute, the fifth having the value of event's error attribute, and with the callback this value set to event's currentTarget.
         //    Let return value be the callback's return value. [WEBIDL]
         auto& error_event = verify_cast<HTML::ErrorEvent>(event);
-        auto* wrapped_message = JS::js_string(vm(), error_event.message());
-        auto* wrapped_filename = JS::js_string(vm(), error_event.filename());
+        auto wrapped_message = JS::PrimitiveString::create(vm(), error_event.message());
+        auto wrapped_filename = JS::PrimitiveString::create(vm(), error_event.filename());
         auto wrapped_lineno = JS::Value(error_event.lineno());
         auto wrapped_colno = JS::Value(error_event.colno());
 
@@ -680,7 +679,7 @@ JS::ThrowCompletionOr<void> EventTarget::process_event_handler_for_event(FlyStri
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-attributes:concept-element-attributes-change-ext
-void EventTarget::element_event_handler_attribute_changed(FlyString const& local_name, String const& value)
+void EventTarget::element_event_handler_attribute_changed(FlyString const& local_name, DeprecatedString const& value)
 {
     // NOTE: Step 1 of this algorithm was handled in HTMLElement::parse_attribute.
 
@@ -715,7 +714,7 @@ void EventTarget::element_event_handler_attribute_changed(FlyString const& local
     // NOTE: See the optimization comments in set_event_handler_attribute.
 
     if (event_handler_iterator == handler_map.end()) {
-        auto* new_event_handler = heap().allocate_without_realm<HTML::EventHandler>(value);
+        auto new_event_handler = heap().allocate_without_realm<HTML::EventHandler>(value);
 
         //  6. Activate an event handler given eventTarget and name.
         event_target->activate_event_handler(local_name, *new_event_handler);

@@ -6,10 +6,16 @@
 
 #pragma once
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
+#include <AK/Forward.h>
+#include <AK/RefPtr.h>
+#include <AK/StringView.h>
 #include <AK/Vector.h>
+#include <LibCore/Timer.h>
 #include <LibGUI/Frame.h>
 #include <LibGfx/Rect.h>
+
+namespace MasterWord {
 
 class WordGame : public GUI::Frame {
     C_OBJECT(WordGame);
@@ -24,7 +30,7 @@ public:
     void set_max_guesses(size_t max_guesses);
     Gfx::IntSize game_size() const;
 
-    Optional<String> random_word(size_t length);
+    Optional<DeprecatedString> random_word(size_t length);
     size_t shortest_word();
     size_t longest_word();
     bool is_checking_guesses() const;
@@ -32,9 +38,13 @@ public:
     void add_guess(AK::StringView guess);
     bool is_in_dictionary(AK::StringView guess);
 
+    Function<void(Optional<StringView>)> on_message;
+
 private:
     WordGame();
     void read_words();
+    void show_message(StringView message) const;
+    void clear_message() const;
 
     virtual void paint_event(GUI::PaintEvent&) override;
     virtual void keydown_event(GUI::KeyEvent&) override;
@@ -46,7 +56,7 @@ private:
     size_t m_max_guesses { 6 };
     size_t m_num_letters { 5 };
     bool m_check_guesses { false };
-    bool m_last_word_not_in_dictionary { false };
+    bool m_last_word_invalid { false };
     static constexpr int m_letter_width { 40 };
     static constexpr int m_letter_spacing { 5 };
     static constexpr int m_outer_margin { 20 };
@@ -67,13 +77,17 @@ private:
     };
 
     struct Guess {
-        AK::String text;
+        AK::DeprecatedString text;
         AK::Vector<LetterState> letter_states;
     };
 
     AK::Vector<Guess> m_guesses;
-    AK::String m_current_guess;
-    AK::String m_current_word;
+    AK::DeprecatedString m_current_guess;
+    AK::DeprecatedString m_current_word;
 
-    HashMap<size_t, AK::Vector<String>> m_words;
+    HashMap<size_t, AK::Vector<DeprecatedString>> m_words;
+
+    NonnullRefPtr<Core::Timer> m_clear_message_timer;
 };
+
+}

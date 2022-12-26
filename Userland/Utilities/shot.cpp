@@ -13,6 +13,7 @@
 #include <LibCore/DateTime.h>
 #include <LibCore/File.h>
 #include <LibCore/Process.h>
+#include <LibCore/Stream.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/Clipboard.h>
 #include <LibGUI/ConnectionToWindowServer.h>
@@ -92,7 +93,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     Core::ArgsParser args_parser;
 
-    String output_path;
+    DeprecatedString output_path;
     bool output_to_clipboard = false;
     unsigned delay = 0;
     bool select_region = false;
@@ -109,7 +110,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     if (output_path.is_empty()) {
-        output_path = Core::DateTime::now().to_string("screenshot-%Y-%m-%d-%H-%M-%S.png"sv);
+        output_path = Core::DateTime::now().to_deprecated_string("screenshot-%Y-%m-%d-%H-%M-%S.png"sv);
     }
 
     auto app = TRY(GUI::Application::try_create(arguments));
@@ -150,25 +151,24 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 0;
     }
 
-    auto encoded_bitmap = Gfx::PNGWriter::encode(*bitmap);
-    if (encoded_bitmap.is_empty()) {
+    auto encoded_bitmap_or_error = Gfx::PNGWriter::encode(*bitmap);
+    if (encoded_bitmap_or_error.is_error()) {
         warnln("Failed to encode PNG");
         return 1;
     }
-    if (edit_image)
-        output_path = Core::DateTime::now().to_string("/tmp/screenshot-%Y-%m-%d-%H-%M-%S.png"sv);
+    auto encoded_bitmap = encoded_bitmap_or_error.release_value();
 
-    auto file_or_error = Core::File::open(output_path, Core::OpenMode::ReadWrite);
+    if (edit_image)
+        output_path = Core::DateTime::now().to_deprecated_string("/tmp/screenshot-%Y-%m-%d-%H-%M-%S.png"sv);
+
+    auto file_or_error = Core::Stream::File::open(output_path, Core::Stream::OpenMode::ReadWrite);
     if (file_or_error.is_error()) {
         warnln("Could not open '{}' for writing: {}", output_path, file_or_error.error());
         return 1;
     }
 
     auto& file = *file_or_error.value();
-    if (!file.write(encoded_bitmap.data(), encoded_bitmap.size())) {
-        warnln("Failed to write PNG");
-        return 1;
-    }
+    TRY(file.write(encoded_bitmap.bytes()));
 
     if (edit_image)
         TRY(Core::Process::spawn("/bin/PixelPaint"sv, Array { output_path }));

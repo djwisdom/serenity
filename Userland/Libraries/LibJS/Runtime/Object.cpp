@@ -5,7 +5,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
+#include <AK/TypeCasts.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Accessor.h>
@@ -23,15 +24,17 @@
 
 namespace JS {
 
+static HashMap<Object const*, HashMap<FlyString, Object::IntrinsicAccessor>> s_intrinsics;
+
 // 10.1.12 OrdinaryObjectCreate ( proto [ , additionalInternalSlotsList ] ), https://tc39.es/ecma262/#sec-ordinaryobjectcreate
-Object* Object::create(Realm& realm, Object* prototype)
+NonnullGCPtr<Object> Object::create(Realm& realm, Object* prototype)
 {
     if (!prototype)
         return realm.heap().allocate<Object>(realm, *realm.intrinsics().empty_object_shape());
     else if (prototype == realm.intrinsics().object_prototype())
         return realm.heap().allocate<Object>(realm, *realm.intrinsics().new_object_shape());
     else
-        return realm.heap().allocate<Object>(realm, *prototype);
+        return realm.heap().allocate<Object>(realm, ConstructWithPrototypeTag::Tag, *prototype);
 }
 
 Object::Object(GlobalObjectTag, Realm& realm)
@@ -53,7 +56,7 @@ Object::Object(Realm& realm, Object* prototype)
         set_prototype(prototype);
 }
 
-Object::Object(Object& prototype)
+Object::Object(ConstructWithPrototypeTag, Object& prototype)
 {
     m_shape = prototype.shape().realm().intrinsics().empty_object_shape();
     VERIFY(m_shape);
@@ -64,6 +67,11 @@ Object::Object(Shape& shape)
     : m_shape(&shape)
 {
     m_storage.resize(shape.property_count());
+}
+
+Object::~Object()
+{
+    s_intrinsics.remove(this);
 }
 
 void Object::initialize(Realm&)
@@ -598,6 +606,27 @@ ThrowCompletionOr<void> Object::define_field(ClassFieldDefinition const& field)
     return {};
 }
 
+// 7.3.33 InitializeInstanceElements ( O, constructor ), https://tc39.es/ecma262/#sec-initializeinstanceelements
+ThrowCompletionOr<void> Object::initialize_instance_elements(ECMAScriptFunctionObject& constructor)
+{
+    // 1. Let methods be the value of constructor.[[PrivateMethods]].
+    // 2. For each PrivateElement method of methods, do
+    for (auto const& method : constructor.private_methods()) {
+        // a. Perform ? PrivateMethodOrAccessorAdd(O, method).
+        TRY(private_method_or_accessor_add(method));
+    }
+
+    // 3. Let fields be the value of constructor.[[Fields]].
+    // 4. For each element fieldRecord of fields, do
+    for (auto const& field : constructor.fields()) {
+        // a. Perform ? DefineField(O, fieldRecord).
+        TRY(define_field(field));
+    }
+
+    // 5. Return unused.
+    return {};
+}
+
 // 10.1 Ordinary Object Internal Methods and Internal Slots, https://tc39.es/ecma262/#sec-ordinary-object-internal-methods-and-internal-slots
 
 // 10.1.1 [[GetPrototypeOf]] ( ), https://tc39.es/ecma262/#sec-ordinary-object-internal-methods-and-internal-slots-getprototypeof
@@ -932,7 +961,7 @@ ThrowCompletionOr<MarkedVector<Value>> Object::internal_own_property_keys() cons
     // 2. For each own property key P of O such that P is an array index, in ascending numeric index order, do
     for (auto& entry : m_indexed_properties) {
         // a. Add P as the last element of keys.
-        keys.append(js_string(vm, String::number(entry.index())));
+        keys.append(PrimitiveString::create(vm, DeprecatedString::number(entry.index())));
     }
 
     // 3. For each own property key P of O such that Type(P) is String and P is not an array index, in ascending chronological order of property creation, do
@@ -969,6 +998,23 @@ ThrowCompletionOr<bool> Object::set_immutable_prototype(Object* prototype)
     return false;
 }
 
+static Optional<Object::IntrinsicAccessor> find_intrinsic_accessor(Object const* object, PropertyKey const& property_key)
+{
+    if (!property_key.is_string())
+        return {};
+
+    auto intrinsics = s_intrinsics.find(object);
+    if (intrinsics == s_intrinsics.end())
+        return {};
+
+    auto accessor = intrinsics->value.find(property_key.as_string());
+    if (accessor == intrinsics->value.end())
+        return {};
+
+    intrinsics->value.remove(accessor);
+    return move(accessor->value);
+}
+
 Optional<ValueAndAttributes> Object::storage_get(PropertyKey const& property_key) const
 {
     VERIFY(property_key.is_valid());
@@ -986,9 +1032,14 @@ Optional<ValueAndAttributes> Object::storage_get(PropertyKey const& property_key
         auto metadata = shape().lookup(property_key.to_string_or_symbol());
         if (!metadata.has_value())
             return {};
+
+        if (auto accessor = find_intrinsic_accessor(this, property_key); accessor.has_value())
+            const_cast<Object&>(*this).m_storage[metadata->offset] = (*accessor)(shape().realm());
+
         value = m_storage[metadata->offset];
         attributes = metadata->attributes;
     }
+
     return ValueAndAttributes { .value = value, .attributes = attributes };
 }
 
@@ -1010,6 +1061,11 @@ void Object::storage_set(PropertyKey const& property_key, ValueAndAttributes con
         auto index = property_key.as_number();
         m_indexed_properties.put(index, value, attributes);
         return;
+    }
+
+    if (property_key.is_string()) {
+        if (auto intrinsics = s_intrinsics.find(this); intrinsics != s_intrinsics.end())
+            intrinsics->value.remove(property_key.as_string());
     }
 
     auto property_key_string_or_symbol = property_key.to_string_or_symbol();
@@ -1048,6 +1104,11 @@ void Object::storage_delete(PropertyKey const& property_key)
 
     if (property_key.is_number())
         return m_indexed_properties.remove(property_key.as_number());
+
+    if (property_key.is_string()) {
+        if (auto intrinsics = s_intrinsics.find(this); intrinsics != s_intrinsics.end())
+            intrinsics->value.remove(property_key.as_string());
+    }
 
     auto metadata = shape().lookup(property_key.to_string_or_symbol());
     VERIFY(metadata.has_value());
@@ -1097,6 +1158,16 @@ void Object::define_direct_accessor(PropertyKey const& property_key, FunctionObj
     }
 }
 
+void Object::define_intrinsic_accessor(PropertyKey const& property_key, PropertyAttributes attributes, IntrinsicAccessor accessor)
+{
+    VERIFY(property_key.is_string());
+
+    storage_set(property_key, { {}, attributes });
+
+    auto& intrinsics = s_intrinsics.ensure(this);
+    intrinsics.set(property_key.as_string(), move(accessor));
+}
+
 void Object::ensure_shape_is_unique()
 {
     if (shape().is_unique())
@@ -1120,7 +1191,7 @@ Value Object::get_without_side_effects(PropertyKey const& property_key) const
 
 void Object::define_native_function(Realm& realm, PropertyKey const& property_key, SafeFunction<ThrowCompletionOr<Value>(VM&)> native_function, i32 length, PropertyAttributes attribute)
 {
-    auto* function = NativeFunction::create(realm, move(native_function), length, property_key, &realm);
+    auto function = NativeFunction::create(realm, move(native_function), length, property_key, &realm);
     define_direct_property(property_key, function, attribute);
 }
 
@@ -1196,7 +1267,7 @@ Optional<Completion> Object::enumerate_object_properties(Function<Optional<Compl
         for (auto& key : own_keys) {
             if (!key.is_string())
                 continue;
-            FlyString property_key = key.as_string().string();
+            FlyString property_key = key.as_string().deprecated_string();
             if (visited.contains(property_key))
                 continue;
             auto descriptor = TRY(target->internal_get_own_property(property_key));

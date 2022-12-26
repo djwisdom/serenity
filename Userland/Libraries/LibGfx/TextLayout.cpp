@@ -40,7 +40,7 @@ IntRect TextLayout::bounding_rect(TextWrapping wrapping, int line_spacing) const
     return bounding_rect;
 }
 
-Vector<String, 32> TextLayout::wrap_lines(TextElision elision, TextWrapping wrapping, int line_spacing, FitWithinRect fit_within_rect) const
+Vector<DeprecatedString, 32> TextLayout::wrap_lines(TextElision elision, TextWrapping wrapping, int line_spacing, FitWithinRect fit_within_rect) const
 {
     Vector<Block> blocks;
 
@@ -117,7 +117,7 @@ Vector<String, 32> TextLayout::wrap_lines(TextElision elision, TextWrapping wrap
     if (max_lines_that_can_fit == 0)
         return {};
 
-    Vector<String> lines;
+    Vector<DeprecatedString> lines;
     StringBuilder builder;
     size_t line_width = 0;
     size_t current_block = 0;
@@ -125,7 +125,7 @@ Vector<String, 32> TextLayout::wrap_lines(TextElision elision, TextWrapping wrap
     for (Block& block : blocks) {
         switch (block.type) {
         case BlockType::Newline: {
-            lines.append(builder.to_string());
+            lines.append(builder.to_deprecated_string());
             builder.clear();
             line_width = 0;
 
@@ -147,7 +147,7 @@ Vector<String, 32> TextLayout::wrap_lines(TextElision elision, TextWrapping wrap
             }
 
             if (wrapping == TextWrapping::Wrap && line_width + block_width > static_cast<unsigned>(m_rect.width())) {
-                lines.append(builder.to_string());
+                lines.append(builder.to_deprecated_string());
                 builder.clear();
                 line_width = 0;
             }
@@ -166,7 +166,7 @@ Vector<String, 32> TextLayout::wrap_lines(TextElision elision, TextWrapping wrap
 
 blocks_processed:
     if (!did_not_finish) {
-        auto last_line = builder.to_string();
+        auto last_line = builder.to_deprecated_string();
         if (!last_line.is_empty())
             lines.append(last_line);
     }
@@ -183,7 +183,7 @@ blocks_processed:
     return lines;
 }
 
-String TextLayout::elide_text_from_right(Utf8View text, bool force_elision) const
+DeprecatedString TextLayout::elide_text_from_right(Utf8View text, bool force_elision) const
 {
     size_t text_width = m_font->width(text);
     if (force_elision || text_width > static_cast<unsigned>(m_rect.width())) {
@@ -212,7 +212,7 @@ String TextLayout::elide_text_from_right(Utf8View text, bool force_elision) cons
             StringBuilder builder;
             builder.append(text.substring_view(0, offset).as_string());
             builder.append("..."sv);
-            return builder.to_string();
+            return builder.to_deprecated_string();
         }
     }
 

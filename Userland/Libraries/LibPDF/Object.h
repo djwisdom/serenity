@@ -43,7 +43,8 @@ public:
     ALWAYS_INLINE void set_generation_index(u32 generation_index) { m_generation_index = generation_index; }
 
     template<IsObject T>
-    bool is() const requires(!IsSame<T, Object>)
+    bool is() const
+    requires(!IsSame<T, Object>)
     {
 #define ENUMERATE_TYPE(class_name, snake_name) \
     if constexpr (IsSame<class_name, T>) {     \
@@ -60,7 +61,8 @@ public:
 #ifdef PDF_DEBUG
         SourceLocation loc = SourceLocation::current()
 #endif
-    ) const requires(!IsSame<T, Object>)
+    ) const
+    requires(!IsSame<T, Object>)
     {
 #ifdef PDF_DEBUG
         if (!is<T>()) {
@@ -73,11 +75,14 @@ public:
     }
 
     virtual char const* type_name() const = 0;
-    virtual String to_string(int indent) const = 0;
+    virtual DeprecatedString to_deprecated_string(int indent) const = 0;
 
 protected:
-#define ENUMERATE_TYPE(_, name) \
-    virtual bool is_##name() const { return false; }
+#define ENUMERATE_TYPE(_, name)    \
+    virtual bool is_##name() const \
+    {                              \
+        return false;              \
+    }
     ENUMERATE_OBJECT_TYPES(ENUMERATE_TYPE)
 #undef ENUMERATE_TYPE
 
@@ -93,7 +98,7 @@ template<PDF::IsObject T>
 struct Formatter<T> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, T const& object)
     {
-        return Formatter<StringView>::format(builder, object.to_string(0));
+        return Formatter<StringView>::format(builder, object.to_deprecated_string(0));
     }
 };
 

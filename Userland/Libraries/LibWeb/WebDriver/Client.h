@@ -8,9 +8,9 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/Error.h>
 #include <AK/NonnullOwnPtrVector.h>
-#include <AK/String.h>
 #include <AK/Variant.h>
 #include <LibCore/Object.h>
 #include <LibCore/Stream.h>
@@ -49,6 +49,7 @@ public:
     // 11. Contexts, https://w3c.github.io/webdriver/#contexts
     virtual Response get_window_handle(Parameters parameters, JsonValue payload) = 0;
     virtual Response close_window(Parameters parameters, JsonValue payload) = 0;
+    virtual Response switch_to_window(Parameters parameters, JsonValue payload) = 0;
     virtual Response get_window_handles(Parameters parameters, JsonValue payload) = 0;
     virtual Response get_window_rect(Parameters parameters, JsonValue payload) = 0;
     virtual Response set_window_rect(Parameters parameters, JsonValue payload) = 0;
@@ -61,6 +62,10 @@ public:
     virtual Response find_elements(Parameters parameters, JsonValue payload) = 0;
     virtual Response find_element_from_element(Parameters parameters, JsonValue payload) = 0;
     virtual Response find_elements_from_element(Parameters parameters, JsonValue payload) = 0;
+    virtual Response find_element_from_shadow_root(Parameters parameters, JsonValue payload) = 0;
+    virtual Response find_elements_from_shadow_root(Parameters parameters, JsonValue payload) = 0;
+    virtual Response get_active_element(Parameters parameters, JsonValue payload) = 0;
+    virtual Response get_element_shadow_root(Parameters parameters, JsonValue payload) = 0;
     virtual Response is_element_selected(Parameters parameters, JsonValue payload) = 0;
     virtual Response get_element_attribute(Parameters parameters, JsonValue payload) = 0;
     virtual Response get_element_property(Parameters parameters, JsonValue payload) = 0;
@@ -69,8 +74,9 @@ public:
     virtual Response get_element_tag_name(Parameters parameters, JsonValue payload) = 0;
     virtual Response get_element_rect(Parameters parameters, JsonValue payload) = 0;
     virtual Response is_element_enabled(Parameters parameters, JsonValue payload) = 0;
+    virtual Response click(Parameters parameters, JsonValue payload) = 0;
 
-    // 13. https://w3c.github.io/webdriver/#document, https://w3c.github.io/webdriver/#get-page-source
+    // 13. Document, https://w3c.github.io/webdriver/#document
     virtual Response get_source(Parameters parameters, JsonValue payload) = 0;
     virtual Response execute_script(Parameters parameters, JsonValue payload) = 0;
     virtual Response execute_async_script(Parameters parameters, JsonValue payload) = 0;
@@ -82,9 +88,18 @@ public:
     virtual Response delete_cookie(Parameters parameters, JsonValue payload) = 0;
     virtual Response delete_all_cookies(Parameters parameters, JsonValue payload) = 0;
 
+    // 16. User prompts, https://w3c.github.io/webdriver/#user-prompts
+    virtual Response dismiss_alert(Parameters parameters, JsonValue payload) = 0;
+    virtual Response accept_alert(Parameters parameters, JsonValue payload) = 0;
+    virtual Response get_alert_text(Parameters parameters, JsonValue payload) = 0;
+    virtual Response send_alert_text(Parameters parameters, JsonValue payload) = 0;
+
     // 17. Screen capture, https://w3c.github.io/webdriver/#screen-capture
     virtual Response take_screenshot(Parameters parameters, JsonValue payload) = 0;
     virtual Response take_element_screenshot(Parameters parameters, JsonValue payload) = 0;
+
+    // 18. Print, https://w3c.github.io/webdriver/#print
+    virtual Response print_page(Parameters parameters, JsonValue payload) = 0;
 
 protected:
     Client(NonnullOwnPtr<Core::Stream::BufferedTCPSocket>, Core::Object* parent);

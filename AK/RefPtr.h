@@ -12,15 +12,13 @@
 #include <AK/Atomic.h>
 #include <AK/Error.h>
 #include <AK/Format.h>
+#include <AK/Forward.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/StdLibExtras.h>
 #include <AK/Traits.h>
 #include <AK/Types.h>
 
 namespace AK {
-
-template<typename T>
-class OwnPtr;
 
 template<typename T>
 class [[nodiscard]] RefPtr {
@@ -66,20 +64,23 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE RefPtr(NonnullRefPtr<U> const& other) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE RefPtr(NonnullRefPtr<U> const& other)
+    requires(IsConvertible<U*, T*>)
         : m_ptr(const_cast<T*>(static_cast<T const*>(other.ptr())))
     {
         m_ptr->ref();
     }
 
     template<typename U>
-    ALWAYS_INLINE RefPtr(NonnullRefPtr<U>&& other) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE RefPtr(NonnullRefPtr<U>&& other)
+    requires(IsConvertible<U*, T*>)
         : m_ptr(static_cast<T*>(&other.leak_ref()))
     {
     }
 
     template<typename U>
-    RefPtr(RefPtr<U>&& other) requires(IsConvertible<U*, T*>)
+    RefPtr(RefPtr<U>&& other)
+    requires(IsConvertible<U*, T*>)
         : m_ptr(static_cast<T*>(other.leak_ref()))
     {
     }
@@ -91,7 +92,8 @@ public:
     }
 
     template<typename U>
-    RefPtr(RefPtr<U> const& other) requires(IsConvertible<U*, T*>)
+    RefPtr(RefPtr<U> const& other)
+    requires(IsConvertible<U*, T*>)
         : m_ptr(const_cast<T*>(static_cast<T const*>(other.ptr())))
     {
         ref_if_not_null(m_ptr);
@@ -116,7 +118,8 @@ public:
     }
 
     template<typename U>
-    void swap(RefPtr<U>& other) requires(IsConvertible<U*, T*>)
+    void swap(RefPtr<U>& other)
+    requires(IsConvertible<U*, T*>)
     {
         AK::swap(m_ptr, other.m_ptr);
     }
@@ -129,7 +132,8 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE RefPtr& operator=(RefPtr<U>&& other) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE RefPtr& operator=(RefPtr<U>&& other)
+    requires(IsConvertible<U*, T*>)
     {
         RefPtr tmp { move(other) };
         swap(tmp);
@@ -137,7 +141,8 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE RefPtr& operator=(NonnullRefPtr<U>&& other) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE RefPtr& operator=(NonnullRefPtr<U>&& other)
+    requires(IsConvertible<U*, T*>)
     {
         RefPtr tmp { move(other) };
         swap(tmp);
@@ -152,7 +157,8 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE RefPtr& operator=(NonnullRefPtr<U> const& other) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE RefPtr& operator=(NonnullRefPtr<U> const& other)
+    requires(IsConvertible<U*, T*>)
     {
         RefPtr tmp { other };
         swap(tmp);
@@ -167,7 +173,8 @@ public:
     }
 
     template<typename U>
-    ALWAYS_INLINE RefPtr& operator=(RefPtr<U> const& other) requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE RefPtr& operator=(RefPtr<U> const& other)
+    requires(IsConvertible<U*, T*>)
     {
         RefPtr tmp { other };
         swap(tmp);
@@ -188,7 +195,7 @@ public:
         return *this;
     }
 
-    RefPtr& operator=(std::nullptr_t)
+    RefPtr& operator=(nullptr_t)
     {
         clear();
         return *this;
@@ -231,49 +238,35 @@ public:
         return NonnullRefPtr<T>(NonnullRefPtr<T>::Adopt, *ptr);
     }
 
-    ALWAYS_INLINE T* ptr() { return as_ptr(); }
-    ALWAYS_INLINE T const* ptr() const { return as_ptr(); }
+    ALWAYS_INLINE T* ptr() const { return as_ptr(); }
 
-    ALWAYS_INLINE T* operator->()
+    ALWAYS_INLINE T* operator->() const
     {
         return as_nonnull_ptr();
     }
 
-    ALWAYS_INLINE T const* operator->() const
-    {
-        return as_nonnull_ptr();
-    }
-
-    ALWAYS_INLINE T& operator*()
+    ALWAYS_INLINE T& operator*() const
     {
         return *as_nonnull_ptr();
     }
 
-    ALWAYS_INLINE T const& operator*() const
-    {
-        return *as_nonnull_ptr();
-    }
-
-    ALWAYS_INLINE operator T const*() const { return as_ptr(); }
-    ALWAYS_INLINE operator T*() { return as_ptr(); }
+    ALWAYS_INLINE operator T*() const { return as_ptr(); }
 
     ALWAYS_INLINE operator bool() { return !is_null(); }
 
-    bool operator==(std::nullptr_t) const { return is_null(); }
+    bool operator==(nullptr_t) const { return is_null(); }
 
     bool operator==(RefPtr const& other) const { return as_ptr() == other.as_ptr(); }
-
-    bool operator==(RefPtr& other) { return as_ptr() == other.as_ptr(); }
 
     template<typename U>
     bool operator==(NonnullRefPtr<U> const& other) const { return as_ptr() == other.m_ptr; }
 
-    template<typename U>
-    bool operator==(NonnullRefPtr<U>& other) { return as_ptr() == other.m_ptr; }
-
-    bool operator==(T const* other) const { return as_ptr() == other; }
-
-    bool operator==(T* other) { return as_ptr() == other; }
+    template<typename RawPtr>
+    bool operator==(RawPtr other) const
+    requires(IsPointer<RawPtr>)
+    {
+        return as_ptr() == other;
+    }
 
     ALWAYS_INLINE bool is_null() const { return !m_ptr; }
 
@@ -321,7 +314,8 @@ inline RefPtr<T> static_ptr_cast(RefPtr<U> const& ptr)
 }
 
 template<typename T, typename U>
-inline void swap(RefPtr<T>& a, RefPtr<U>& b) requires(IsConvertible<U*, T*>)
+inline void swap(RefPtr<T>& a, RefPtr<U>& b)
+requires(IsConvertible<U*, T*>)
 {
     a.swap(b);
 }
@@ -358,7 +352,9 @@ inline ErrorOr<NonnullRefPtr<T>> adopt_nonnull_ref_or_enomem(T* object)
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::adopt_ref_if_nonnull;
 using AK::RefPtr;
 using AK::static_ptr_cast;
 using AK::try_make_ref_counted;
+#endif

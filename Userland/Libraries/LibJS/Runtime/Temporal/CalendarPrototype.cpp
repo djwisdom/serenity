@@ -36,7 +36,7 @@ void CalendarPrototype::initialize(Realm& realm)
     auto& vm = this->vm();
 
     // 12.4.2 Temporal.Calendar.prototype[ @@toStringTag ], https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, "Temporal.Calendar"), Attribute::Configurable);
+    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Temporal.Calendar"), Attribute::Configurable);
 
     define_native_accessor(realm, vm.names.id, id_getter, {}, Attribute::Configurable);
 
@@ -53,6 +53,7 @@ void CalendarPrototype::initialize(Realm& realm)
     define_native_function(realm, vm.names.dayOfWeek, day_of_week, 1, attr);
     define_native_function(realm, vm.names.dayOfYear, day_of_year, 1, attr);
     define_native_function(realm, vm.names.weekOfYear, week_of_year, 1, attr);
+    define_native_function(realm, vm.names.yearOfWeek, year_of_week, 1, attr);
     define_native_function(realm, vm.names.daysInWeek, days_in_week, 1, attr);
     define_native_function(realm, vm.names.daysInMonth, days_in_month, 1, attr);
     define_native_function(realm, vm.names.daysInYear, days_in_year, 1, attr);
@@ -73,8 +74,8 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::id_getter)
     // 2. Perform ? RequireInternalSlot(calendar, [[InitializedTemporalCalendar]]).
     auto* calendar = TRY(typed_this_object(vm));
 
-    // 3. Return ? ToString(calendar).
-    return { js_string(vm, TRY(Value(calendar).to_string(vm))) };
+    // 3. Return calendar.[[Identifier]].
+    return { PrimitiveString::create(vm, calendar->identifier()) };
 }
 
 // 12.4.4 Temporal.Calendar.prototype.dateFromFields ( fields [ , options ] ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.datefromfields
@@ -300,7 +301,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::month_code)
     // NOTE: The assertion happens in iso_month() call.
 
     // 6. Return ISOMonthCode(temporalDateLike.[[ISOMonth]]).
-    return js_string(vm, iso_month_code(iso_month(temporal_date_like.as_object())));
+    return PrimitiveString::create(vm, iso_month_code(iso_month(temporal_date_like.as_object())));
 }
 
 // 12.4.12 Temporal.Calendar.prototype.day ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.day
@@ -377,11 +378,35 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::week_of_year)
     // 4. Let temporalDate be ? ToTemporalDate(temporalDateLike).
     auto* temporal_date = TRY(to_temporal_date(vm, vm.argument(0)));
 
-    // 5. Return 𝔽(ToISODayOfYear(temporalDate.[[ISOYear]], temporalDate.[[ISOMonth]], temporalDate.[[ISODay]])).
-    return Value(to_iso_week_of_year(temporal_date->iso_year(), temporal_date->iso_month(), temporal_date->iso_day()));
+    // 5. Let isoYearWeek be ToISOWeekOfYear(temporalDate.[[ISOYear]], temporalDate.[[ISOMonth]], temporalDate.[[ISODay]]).
+    auto iso_year_week = to_iso_week_of_year(temporal_date->iso_year(), temporal_date->iso_month(), temporal_date->iso_day());
+
+    // 6. Return 𝔽(isoYearWeek.[[Week]]).
+    return Value(iso_year_week.week);
 }
 
-// 12.4.16 Temporal.Calendar.prototype.daysInWeek ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.daysinweek
+// 12.5.16 Temporal.Calendar.prototype.yearOfWeek ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.yearofweek
+// NOTE: This is the minimum yearOfWeek implementation for engines without ECMA-402.
+JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::year_of_week)
+{
+    // 1. Let calendar be the this value.
+    // 2. Perform ? RequireInternalSlot(calendar, [[InitializedTemporalCalendar]]).
+    auto* calendar = TRY(typed_this_object(vm));
+
+    // 3. Assert: calendar.[[Identifier]] is "iso8601".
+    VERIFY(calendar->identifier() == "iso8601"sv);
+
+    // 4. Let temporalDate be ? ToTemporalDate(temporalDateLike).
+    auto* temporal_date = TRY(to_temporal_date(vm, vm.argument(0)));
+
+    // 5. Let isoYearWeek be ToISOWeekOfYear(temporalDate.[[ISOYear]], temporalDate.[[ISOMonth]], temporalDate.[[ISODay]]).
+    auto iso_year_week = to_iso_week_of_year(temporal_date->iso_year(), temporal_date->iso_month(), temporal_date->iso_day());
+
+    // 6. Return 𝔽(isoYearWeek.[[Year]]).
+    return Value(iso_year_week.year);
+}
+
+// 12.4.17 Temporal.Calendar.prototype.daysInWeek ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.daysinweek
 // NOTE: This is the minimum daysInWeek implementation for engines without ECMA-402.
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::days_in_week)
 {
@@ -399,7 +424,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::days_in_week)
     return Value(7);
 }
 
-// 12.4.16 Temporal.Calendar.prototype.daysInMonth ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.daysinweek
+// 12.4.18 Temporal.Calendar.prototype.daysInMonth ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.daysinweek
 // NOTE: This is the minimum daysInMonth implementation for engines without ECMA-402.
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::days_in_month)
 {
@@ -421,7 +446,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::days_in_month)
     return Value(iso_days_in_month(iso_year(temporal_date_like.as_object()), iso_month(temporal_date_like.as_object())));
 }
 
-// 12.4.18 Temporal.Calendar.prototype.daysInYear ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.daysinyear
+// 12.4.19 Temporal.Calendar.prototype.daysInYear ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.daysinyear
 // NOTE: This is the minimum daysInYear implementation for engines without ECMA-402.
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::days_in_year)
 {
@@ -443,7 +468,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::days_in_year)
     return Value(JS::days_in_year(iso_year(temporal_date_like.as_object())));
 }
 
-// 12.4.19 Temporal.Calendar.prototype.monthsInYear ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.monthsinyear
+// 12.4.20 Temporal.Calendar.prototype.monthsInYear ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.monthsinyear
 // NOTE: This is the minimum monthsInYear implementation for engines without ECMA-402.
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::months_in_year)
 {
@@ -465,7 +490,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::months_in_year)
     return Value(12);
 }
 
-// 12.4.20 Temporal.Calendar.prototype.inLeapYear ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.inleapyear
+// 12.4.21 Temporal.Calendar.prototype.inLeapYear ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.inleapyear
 // NOTE: This is the minimum inLeapYear implementation for engines without ECMA-402.
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::in_leap_year)
 {
@@ -491,7 +516,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::in_leap_year)
     return Value(false);
 }
 
-// 12.4.21 Temporal.Calendar.prototype.fields ( fields ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.fields
+// 12.4.22 Temporal.Calendar.prototype.fields ( fields ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.fields
 // NOTE: This is the minimum fields implementation for engines without ECMA-402.
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::fields)
 {
@@ -537,16 +562,16 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::fields)
         // iii. If fieldNames contains nextValue, then
         if (field_names.contains_slow(next_value)) {
             // 1. Let completion be ThrowCompletion(a newly created RangeError object).
-            auto completion = vm.throw_completion<RangeError>(ErrorType::TemporalDuplicateCalendarField, next_value.as_string().string());
+            auto completion = vm.throw_completion<RangeError>(ErrorType::TemporalDuplicateCalendarField, next_value.as_string().deprecated_string());
 
             // 2. Return ? IteratorClose(iteratorRecord, completion).
             return TRY(iterator_close(vm, iterator_record, move(completion)));
         }
 
         // iv. If nextValue is not one of "year", "month", "monthCode", "day", "hour", "minute", "second", "millisecond", "microsecond", "nanosecond", then
-        if (!next_value.as_string().string().is_one_of("year"sv, "month"sv, "monthCode"sv, "day"sv, "hour"sv, "minute"sv, "second"sv, "millisecond"sv, "microsecond"sv, "nanosecond"sv)) {
+        if (!next_value.as_string().deprecated_string().is_one_of("year"sv, "month"sv, "monthCode"sv, "day"sv, "hour"sv, "minute"sv, "second"sv, "millisecond"sv, "microsecond"sv, "nanosecond"sv)) {
             // 1. Let completion be ThrowCompletion(a newly created RangeError object).
-            auto completion = vm.throw_completion<RangeError>(ErrorType::TemporalInvalidCalendarFieldName, next_value.as_string().string());
+            auto completion = vm.throw_completion<RangeError>(ErrorType::TemporalInvalidCalendarFieldName, next_value.as_string().deprecated_string());
 
             // 2. Return ? IteratorClose(iteratorRecord, completion).
             return TRY(iterator_close(vm, iterator_record, move(completion)));
@@ -560,7 +585,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::fields)
     return Array::create_from(realm, field_names);
 }
 
-// 12.4.22 Temporal.Calendar.prototype.mergeFields ( fields, additionalFields ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.mergefields
+// 12.4.23 Temporal.Calendar.prototype.mergeFields ( fields, additionalFields ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.mergefields
 // NOTE: This is the minimum mergeFields implementation for engines without ECMA-402.
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::merge_fields)
 {
@@ -581,7 +606,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::merge_fields)
     return TRY(default_merge_calendar_fields(vm, *fields, *additional_fields));
 }
 
-// 12.4.23 Temporal.Calendar.prototype.toString ( ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.tostring
+// 12.4.24 Temporal.Calendar.prototype.toString ( ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.tostring
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::to_string)
 {
     // 1. Let calendar be the this value.
@@ -589,10 +614,10 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::to_string)
     auto* calendar = TRY(typed_this_object(vm));
 
     // 3. Return calendar.[[Identifier]].
-    return js_string(vm, calendar->identifier());
+    return PrimitiveString::create(vm, calendar->identifier());
 }
 
-// 12.4.24 Temporal.Calendar.prototype.toJSON ( ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.tojson
+// 12.4.25 Temporal.Calendar.prototype.toJSON ( ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.tojson
 JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::to_json)
 {
     // 1. Let calendar be the this value.
@@ -600,7 +625,7 @@ JS_DEFINE_NATIVE_FUNCTION(CalendarPrototype::to_json)
     auto* calendar = TRY(typed_this_object(vm));
 
     // 3. Return ? ToString(calendar).
-    return js_string(vm, TRY(Value(calendar).to_string(vm)));
+    return PrimitiveString::create(vm, TRY(Value(calendar).to_string(vm)));
 }
 
 // 15.6.2.6 Temporal.Calendar.prototype.era ( temporalDateLike ), https://tc39.es/proposal-temporal/#sec-temporal.calendar.prototype.era

@@ -5,9 +5,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-// FIXME: LibIPC Decoder and Encoder are sensitive to include order here
-#include <LibImageDecoderClient/Client.h>
-
 #include "AlbumCoverVisualizationWidget.h"
 #include "BarsVisualizationWidget.h"
 #include "Player.h"
@@ -24,6 +21,7 @@
 #include <LibGUI/Menubar.h>
 #include <LibGUI/Window.h>
 #include <LibGfx/CharacterBitmap.h>
+#include <LibImageDecoderClient/Client.h>
 #include <LibMain/Main.h>
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
@@ -53,7 +51,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto file_menu = TRY(window->try_add_menu("&File"));
     TRY(file_menu->try_add_action(GUI::CommonActions::make_open_action([&](auto&) {
-        Optional<String> path = GUI::FilePicker::get_open_filepath(window, "Open sound file...");
+        Optional<DeprecatedString> path = GUI::FilePicker::get_open_filepath(window, "Open sound file...");
         if (path.has_value()) {
             player->play_file_path(path.value());
         }

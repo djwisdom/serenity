@@ -85,7 +85,7 @@ void WebSocket::send(Message const& message)
         send_frame(WebSocket::OpCode::Binary, message.data(), true);
 }
 
-void WebSocket::close(u16 code, String const& message)
+void WebSocket::close(u16 code, DeprecatedString const& message)
 {
     VERIFY(m_impl);
 
@@ -180,7 +180,8 @@ void WebSocket::send_client_handshake()
     // 7. 16-byte nonce encoded as Base64
     u8 nonce_data[16];
     fill_with_random(nonce_data, 16);
-    m_websocket_key = encode_base64(ReadonlyBytes(nonce_data, 16));
+    // FIXME: change to TRY() and make method fallible
+    m_websocket_key = MUST(encode_base64({ nonce_data, 16 })).to_deprecated_string();
     builder.appendff("Sec-WebSocket-Key: {}\r\n", m_websocket_key);
 
     // 8. Origin (optional field)
@@ -213,7 +214,7 @@ void WebSocket::send_client_handshake()
     builder.append("\r\n"sv);
 
     m_state = WebSocket::InternalState::WaitingForServerHandshake;
-    auto success = m_impl->send(builder.to_string().bytes());
+    auto success = m_impl->send(builder.to_deprecated_string().bytes());
     VERIFY(success);
 }
 
@@ -316,13 +317,14 @@ void WebSocket::read_server_handshake()
 
         if (header_name.equals_ignoring_case("Sec-WebSocket-Accept"sv)) {
             // 4. |Sec-WebSocket-Accept| should be base64(SHA1(|Sec-WebSocket-Key| + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
-            auto expected_content = String::formatted("{}258EAFA5-E914-47DA-95CA-C5AB0DC85B11", m_websocket_key);
+            auto expected_content = DeprecatedString::formatted("{}258EAFA5-E914-47DA-95CA-C5AB0DC85B11", m_websocket_key);
 
             Crypto::Hash::Manager hash;
             hash.initialize(Crypto::Hash::HashKind::SHA1);
             hash.update(expected_content);
             auto expected_sha1 = hash.digest();
-            auto expected_sha1_string = encode_base64(ReadonlyBytes(expected_sha1.immutable_data(), expected_sha1.data_length()));
+            // FIXME: change to TRY() and make method fallible
+            auto expected_sha1_string = MUST(encode_base64({ expected_sha1.immutable_data(), expected_sha1.data_length() }));
             if (!parts[1].trim_whitespace().equals_ignoring_case(expected_sha1_string)) {
                 dbgln("WebSocket: Server HTTP Handshake Header |Sec-Websocket-Accept| should be '{}', got '{}'. Failing connection.", expected_sha1_string, parts[1]);
                 fatal_error(WebSocket::Error::ConnectionUpgradeFailed);
@@ -484,7 +486,7 @@ void WebSocket::read_frame()
     if (op_code == WebSocket::OpCode::ConnectionClose) {
         if (payload.size() > 1) {
             m_last_close_code = (((u16)(payload[0] & 0xff) << 8) | ((u16)(payload[1] & 0xff)));
-            m_last_close_message = String(ReadonlyBytes(payload.offset_pointer(2), payload.size() - 2));
+            m_last_close_message = DeprecatedString(ReadonlyBytes(payload.offset_pointer(2), payload.size() - 2));
         }
         m_state = WebSocket::InternalState::Closing;
         return;
@@ -618,7 +620,7 @@ void WebSocket::notify_open()
     on_open();
 }
 
-void WebSocket::notify_close(u16 code, String reason, bool was_clean)
+void WebSocket::notify_close(u16 code, DeprecatedString reason, bool was_clean)
 {
     if (!on_close)
         return;

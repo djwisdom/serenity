@@ -105,7 +105,10 @@ ErrorOr<void> ConnectionBase::post_message(MessageBuffer buffer)
         dbgln("LibIPC::Connection FIXME Warning, needed {} writes needed to send message of size {}B, this is pretty bad, as it spins on the EventLoop", writes_done, initial_size);
     }
 
-    m_responsiveness_timer->start();
+    // Note: This disables responsiveness detection when an event loop is absent.
+    //       There are no users which both need this feature but don't have an event loop.
+    if (Core::EventLoop::has_been_instantiated())
+        m_responsiveness_timer->start();
     return {};
 }
 
@@ -157,11 +160,25 @@ ErrorOr<Vector<u8>> ConnectionBase::read_as_much_as_possible_from_socket_without
     }
 
     u8 buffer[4096];
+
+    bool should_shut_down = false;
+    auto schedule_shutdown = [this, &should_shut_down]() {
+        should_shut_down = true;
+        m_deferred_invoker->schedule([strong_this = NonnullRefPtr(*this)] {
+            strong_this->shutdown();
+        });
+    };
+
     while (m_socket->is_open()) {
         auto maybe_bytes_read = m_socket->read_without_waiting({ buffer, 4096 });
         if (maybe_bytes_read.is_error()) {
             auto error = maybe_bytes_read.release_error();
             if (error.is_syscall() && error.code() == EAGAIN) {
+                break;
+            }
+
+            if (error.is_syscall() && error.code() == ECONNRESET) {
+                schedule_shutdown();
                 break;
             }
 
@@ -172,12 +189,8 @@ ErrorOr<Vector<u8>> ConnectionBase::read_as_much_as_possible_from_socket_without
 
         auto bytes_read = maybe_bytes_read.release_value();
         if (bytes_read.is_empty()) {
-            m_deferred_invoker->schedule([strong_this = NonnullRefPtr(*this)]() mutable {
-                strong_this->shutdown();
-            });
-            if (!bytes.is_empty())
-                break;
-            return Error::from_string_literal("IPC connection EOF");
+            schedule_shutdown();
+            break;
         }
 
         bytes.append(bytes_read.data(), bytes_read.size());
@@ -186,6 +199,8 @@ ErrorOr<Vector<u8>> ConnectionBase::read_as_much_as_possible_from_socket_without
     if (!bytes.is_empty()) {
         m_responsiveness_timer->stop();
         did_become_responsive();
+    } else if (should_shut_down) {
+        return Error::from_string_literal("IPC connection EOF");
     }
 
     return bytes;
@@ -211,7 +226,7 @@ ErrorOr<void> ConnectionBase::drain_messages_from_peer()
     }
 
     if (!m_unprocessed_messages.is_empty()) {
-        m_deferred_invoker->schedule([strong_this = NonnullRefPtr(*this)]() mutable {
+        m_deferred_invoker->schedule([strong_this = NonnullRefPtr(*this)] {
             strong_this->handle_messages();
         });
     }

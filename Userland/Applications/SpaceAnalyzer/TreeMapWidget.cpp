@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021-2022, the SerenityOS developers.
+ * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -94,7 +95,7 @@ void TreeMapWidget::paint_cell_frame(GUI::Painter& painter, TreeMapNode const& n
             text_rect.take_from_top(font().presentation_size() + 1);
             painter.draw_text(text_rect, human_readable_size(node.area()), font(), Gfx::TextAlignment::TopLeft, Color::Black);
         } else {
-            painter.draw_text(text_rect, String::formatted("{} - {}", node.name(), human_readable_size(node.area())), font(), Gfx::TextAlignment::TopLeft, Color::Black);
+            painter.draw_text(text_rect, DeprecatedString::formatted("{} - {}", node.name(), human_readable_size(node.area())), font(), Gfx::TextAlignment::TopLeft, Color::Black);
         }
         painter.clear_clip_rect();
     }
@@ -258,7 +259,7 @@ void TreeMapWidget::paint_event(GUI::PaintEvent& event)
     }
 }
 
-Vector<int> TreeMapWidget::path_to_position(Gfx::IntPoint const& position)
+Vector<int> TreeMapWidget::path_to_position(Gfx::IntPoint position)
 {
     TreeMapNode const* node = path_node(m_viewpoint);
     if (!node) {
@@ -271,6 +272,24 @@ Vector<int> TreeMapWidget::path_to_position(Gfx::IntPoint const& position)
         }
     });
     return path;
+}
+
+void TreeMapWidget::mousemove_event(GUI::MouseEvent& event)
+{
+    auto* node = path_node(m_viewpoint);
+    if (!node) {
+        set_tooltip({});
+        return;
+    }
+
+    auto* hovered_node = node;
+    lay_out_children(*node, frame_inner_rect(), m_viewpoint, [&](TreeMapNode const&, int index, Gfx::IntRect const& rect, Gfx::IntRect const&, int, HasLabel, IsRemainder is_remainder) {
+        if (is_remainder == IsRemainder::No && rect.contains(event.position())) {
+            hovered_node = &hovered_node->child_at(index);
+        }
+    });
+
+    set_tooltip(DeprecatedString::formatted("{}\n{}", hovered_node->name(), human_readable_size(hovered_node->area())));
 }
 
 void TreeMapWidget::mousedown_event(GUI::MouseEvent& event)
@@ -312,20 +331,20 @@ void TreeMapWidget::keydown_event(GUI::KeyEvent& event)
         set_viewpoint(m_viewpoint == 0 ? m_path.size() : m_viewpoint - 1);
     else if (event.key() == KeyCode::Key_Right)
         set_viewpoint(m_viewpoint == m_path.size() ? 0 : m_viewpoint + 1);
+    else
+        event.ignore();
 }
 
 void TreeMapWidget::mousewheel_event(GUI::MouseEvent& event)
 {
-    int delta = event.wheel_delta_y();
-    // FIXME: The wheel_delta_y is premultiplied in the window server, we actually want a raw value here.
-    int step_size = GUI::ConnectionToWindowServer::the().get_scroll_step_size();
+    int delta = event.wheel_raw_delta_y();
     if (delta > 0) {
-        size_t step_back = delta / step_size;
+        size_t step_back = delta;
         if (step_back > m_viewpoint)
             step_back = m_viewpoint;
         set_viewpoint(m_viewpoint - step_back);
     } else {
-        size_t step_up = (-delta) / step_size;
+        size_t step_up = -delta;
         set_viewpoint(m_viewpoint + step_up);
     }
 }

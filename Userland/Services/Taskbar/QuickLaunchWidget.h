@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <AK/Error.h>
+#include <AK/RefPtr.h>
 #include <LibConfig/Listener.h>
 #include <LibCore/FileWatcher.h>
 #include <LibDesktop/AppFile.h>
@@ -19,8 +21,8 @@ public:
     virtual ~QuickLaunchEntry() = default;
     virtual ErrorOr<void> launch() const = 0;
     virtual GUI::Icon icon() const = 0;
-    virtual String name() const = 0;
-    virtual String file_name_to_watch() const = 0;
+    virtual DeprecatedString name() const = 0;
+    virtual DeprecatedString file_name_to_watch() const = 0;
 
     static OwnPtr<QuickLaunchEntry> create_from_config_value(StringView path);
     static OwnPtr<QuickLaunchEntry> create_from_path(StringView path);
@@ -35,8 +37,8 @@ public:
 
     virtual ErrorOr<void> launch() const override;
     virtual GUI::Icon icon() const override { return m_app_file->icon(); }
-    virtual String name() const override { return m_app_file->name(); }
-    virtual String file_name_to_watch() const override { return {}; }
+    virtual DeprecatedString name() const override { return m_app_file->name(); }
+    virtual DeprecatedString file_name_to_watch() const override { return {}; }
 
 private:
     NonnullRefPtr<Desktop::AppFile> m_app_file;
@@ -44,33 +46,33 @@ private:
 
 class QuickLaunchEntryExecutable : public QuickLaunchEntry {
 public:
-    explicit QuickLaunchEntryExecutable(String path)
+    explicit QuickLaunchEntryExecutable(DeprecatedString path)
         : m_path(move(path))
     {
     }
 
     virtual ErrorOr<void> launch() const override;
     virtual GUI::Icon icon() const override;
-    virtual String name() const override;
-    virtual String file_name_to_watch() const override { return m_path; }
+    virtual DeprecatedString name() const override;
+    virtual DeprecatedString file_name_to_watch() const override { return m_path; }
 
 private:
-    String m_path;
+    DeprecatedString m_path;
 };
 class QuickLaunchEntryFile : public QuickLaunchEntry {
 public:
-    explicit QuickLaunchEntryFile(String path)
+    explicit QuickLaunchEntryFile(DeprecatedString path)
         : m_path(move(path))
     {
     }
 
     virtual ErrorOr<void> launch() const override;
     virtual GUI::Icon icon() const override;
-    virtual String name() const override;
-    virtual String file_name_to_watch() const override { return m_path; }
+    virtual DeprecatedString name() const override;
+    virtual DeprecatedString file_name_to_watch() const override { return m_path; }
 
 private:
-    String m_path;
+    DeprecatedString m_path;
 };
 
 class QuickLaunchWidget : public GUI::Frame
@@ -78,20 +80,24 @@ class QuickLaunchWidget : public GUI::Frame
     C_OBJECT(QuickLaunchWidget);
 
 public:
+    static ErrorOr<NonnullRefPtr<QuickLaunchWidget>> create();
     virtual ~QuickLaunchWidget() override = default;
 
-    virtual void config_key_was_removed(String const&, String const&, String const&) override;
-    virtual void config_string_did_change(String const&, String const&, String const&, String const&) override;
+    virtual void config_key_was_removed(DeprecatedString const&, DeprecatedString const&, DeprecatedString const&) override;
+    virtual void config_string_did_change(DeprecatedString const&, DeprecatedString const&, DeprecatedString const&, DeprecatedString const&) override;
 
     virtual void drag_enter_event(GUI::DragEvent&) override;
     virtual void drop_event(GUI::DropEvent&) override;
 
 private:
-    QuickLaunchWidget();
-    void add_or_adjust_button(String const&, NonnullOwnPtr<QuickLaunchEntry>&&);
+    explicit QuickLaunchWidget();
+    ErrorOr<void> add_or_adjust_button(DeprecatedString const&, NonnullOwnPtr<QuickLaunchEntry>&&);
+    ErrorOr<void> create_context_menu();
+    ErrorOr<void> add_quick_launch_buttons(Vector<NonnullOwnPtr<QuickLaunchEntry>> entries);
+
     RefPtr<GUI::Menu> m_context_menu;
     RefPtr<GUI::Action> m_context_menu_default_action;
-    String m_context_menu_app_name;
+    DeprecatedString m_context_menu_app_name;
     RefPtr<Core::FileWatcher> m_watcher;
 };
 

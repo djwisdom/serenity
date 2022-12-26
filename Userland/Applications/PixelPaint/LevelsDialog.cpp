@@ -42,7 +42,7 @@ LevelsDialog::LevelsDialog(GUI::Window* parent_window, ImageEditor* editor)
     VERIFY(cancel_button);
     VERIFY(m_editor->active_layer());
 
-    context_label->set_text(String::formatted("Working on layer: {}", m_editor->active_layer()->name()));
+    context_label->set_text(DeprecatedString::formatted("Working on layer: {}", m_editor->active_layer()->name()));
     m_gamma_slider->set_value(100);
 
     m_brightness_slider->on_change = [this](auto) {
@@ -58,10 +58,8 @@ LevelsDialog::LevelsDialog(GUI::Window* parent_window, ImageEditor* editor)
     };
 
     apply_button->on_click = [this](auto) {
-        if (m_did_change) {
-            m_editor->on_modified_change(true);
+        if (m_did_change)
             m_editor->did_complete_action("Levels"sv);
-        }
 
         cleanup_resources();
         done(ExecResult::OK);

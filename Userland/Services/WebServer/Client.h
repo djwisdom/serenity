@@ -1,11 +1,13 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Thomas Keppler <serenity@tkeppler.de>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
+#include <AK/String.h>
 #include <LibCore/Object.h>
 #include <LibCore/Stream.h>
 #include <LibHTTP/Forward.h>

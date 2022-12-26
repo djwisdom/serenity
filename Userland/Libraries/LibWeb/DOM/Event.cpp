@@ -16,7 +16,7 @@ namespace Web::DOM {
 
 JS::NonnullGCPtr<Event> Event::create(JS::Realm& realm, FlyString const& event_name, EventInit const& event_init)
 {
-    return *realm.heap().allocate<Event>(realm, realm, event_name, event_init);
+    return realm.heap().allocate<Event>(realm, realm, event_name, event_init);
 }
 
 JS::NonnullGCPtr<Event> Event::construct_impl(JS::Realm& realm, FlyString const& event_name, EventInit const& event_init)
@@ -92,7 +92,7 @@ void Event::set_cancelled_flag()
 }
 
 // https://dom.spec.whatwg.org/#concept-event-initialize
-void Event::initialize_event(String const& type, bool bubbles, bool cancelable)
+void Event::initialize_event(DeprecatedString const& type, bool bubbles, bool cancelable)
 {
     // 1. Set event’s initialized flag.
     m_initialized = true;
@@ -119,7 +119,7 @@ void Event::initialize_event(String const& type, bool bubbles, bool cancelable)
 }
 
 // https://dom.spec.whatwg.org/#dom-event-initevent
-void Event::init_event(String const& type, bool bubbles, bool cancelable)
+void Event::init_event(DeprecatedString const& type, bool bubbles, bool cancelable)
 {
     // 1. If this’s dispatch flag is set, then return.
     if (m_dispatch)

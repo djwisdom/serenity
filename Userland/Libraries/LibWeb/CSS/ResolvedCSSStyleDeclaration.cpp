@@ -7,6 +7,7 @@
  */
 
 #include <AK/Debug.h>
+#include <AK/Format.h>
 #include <AK/NonnullRefPtr.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/ResolvedCSSStyleDeclaration.h>
@@ -41,7 +42,7 @@ size_t ResolvedCSSStyleDeclaration::length() const
     return 0;
 }
 
-String ResolvedCSSStyleDeclaration::item(size_t index) const
+DeprecatedString ResolvedCSSStyleDeclaration::item(size_t index) const
 {
     (void)index;
     return {};
@@ -531,7 +532,13 @@ Optional<StyleProperty> ResolvedCSSStyleDeclaration::property(PropertyID propert
     }
 
     if (!m_element->layout_node()) {
-        auto style = m_element->document().style_computer().compute_style(const_cast<DOM::Element&>(*m_element));
+        auto style_or_error = m_element->document().style_computer().compute_style(const_cast<DOM::Element&>(*m_element));
+        if (style_or_error.is_error()) {
+            dbgln("ResolvedCSSStyleDeclaration::property style computer failed");
+            return {};
+        }
+        auto style = style_or_error.release_value();
+
         // FIXME: This is a stopgap until we implement shorthand -> longhand conversion.
         auto value = style->maybe_null_property(property_id);
         if (!value) {
@@ -562,20 +569,20 @@ WebIDL::ExceptionOr<void> ResolvedCSSStyleDeclaration::set_property(PropertyID, 
 }
 
 // https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-removeproperty
-WebIDL::ExceptionOr<String> ResolvedCSSStyleDeclaration::remove_property(PropertyID)
+WebIDL::ExceptionOr<DeprecatedString> ResolvedCSSStyleDeclaration::remove_property(PropertyID)
 {
     // 1. If the computed flag is set, then throw a NoModificationAllowedError exception.
     return WebIDL::NoModificationAllowedError::create(realm(), "Cannot remove properties from result of getComputedStyle()");
 }
 
-String ResolvedCSSStyleDeclaration::serialized() const
+DeprecatedString ResolvedCSSStyleDeclaration::serialized() const
 {
     // https://www.w3.org/TR/cssom/#dom-cssstyledeclaration-csstext
     // If the computed flag is set, then return the empty string.
 
     // NOTE: ResolvedCSSStyleDeclaration is something you would only get from window.getComputedStyle(),
     //       which returns what the spec calls "resolved style". The "computed flag" is always set here.
-    return String::empty();
+    return DeprecatedString::empty();
 }
 
 // https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-csstext

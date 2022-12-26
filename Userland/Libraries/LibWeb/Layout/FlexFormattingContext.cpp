@@ -42,6 +42,14 @@ float FlexFormattingContext::get_pixel_width(Box const& box, Optional<CSS::Size>
     if (!size.has_value())
         return 0;
     auto inner_width = CSS::Length::make_px(containing_block_width_for(box));
+    float border_left = box.computed_values().border_left().width;
+    float border_right = box.computed_values().border_right().width;
+    float padding_left = box.computed_values().padding().left().resolved(box, inner_width).to_px(box);
+    float padding_right = box.computed_values().padding().right().resolved(box, inner_width).to_px(box);
+    if (box.computed_values().box_sizing() == CSS::BoxSizing::BorderBox) {
+        return size->resolved(box, inner_width).to_px(box) - border_left - border_right - padding_left - padding_right;
+    }
+
     return size->resolved(box, inner_width).to_px(box);
 }
 
@@ -50,6 +58,14 @@ float FlexFormattingContext::get_pixel_height(Box const& box, Optional<CSS::Size
     if (!length_percentage.has_value())
         return 0;
     auto inner_height = CSS::Length::make_px(containing_block_height_for(box));
+    float border_top = box.computed_values().border_top().width;
+    float border_bottom = box.computed_values().border_bottom().width;
+    float padding_top = box.computed_values().padding().top().resolved(box, inner_height).to_px(box);
+    float padding_bottom = box.computed_values().padding().bottom().resolved(box, inner_height).to_px(box);
+    if (box.computed_values().box_sizing() == CSS::BoxSizing::BorderBox) {
+        return length_percentage->resolved(box, inner_height).to_px(box) - border_top - border_bottom - padding_top - padding_bottom;
+    }
+
     return length_percentage->resolved(box, inner_height).to_px(box);
 }
 
@@ -1057,7 +1073,21 @@ void FlexFormattingContext::determine_hypothetical_cross_size_of_item(FlexItem& 
 
     // If we have a definite cross size, this is easy! No need to perform layout, we can just use it as-is.
     if (has_definite_cross_size(item.box)) {
-        item.hypothetical_cross_size = css_clamp(resolved_definite_cross_size(item), clamp_min, clamp_max);
+        // To avoid subtracting padding and border twice for `box-sizing: border-box` only min and max clamp should happen on a second pass
+        if (resolve_percentage_min_max_sizes) {
+            item.hypothetical_cross_size = css_clamp(item.hypothetical_cross_size, clamp_min, clamp_max);
+            return;
+        }
+
+        float cross_size = [&]() {
+            if (item.box.computed_values().box_sizing() == CSS::BoxSizing::BorderBox) {
+                return max(0.0f, resolved_definite_cross_size(item) - item.padding.cross_before - item.padding.cross_after - item.borders.cross_before - item.borders.cross_after);
+            }
+
+            return resolved_definite_cross_size(item);
+        }();
+
+        item.hypothetical_cross_size = css_clamp(cross_size, clamp_min, clamp_max);
         return;
     }
 
@@ -1421,6 +1451,7 @@ void FlexFormattingContext::align_all_flex_lines()
             sum_of_flex_line_cross_sizes += line.cross_size;
 
         float start_of_current_line = 0;
+        float gap_size = 0;
         switch (flex_container().computed_values().align_content()) {
         case CSS::AlignContent::FlexStart:
             start_of_current_line = 0;
@@ -1431,12 +1462,30 @@ void FlexFormattingContext::align_all_flex_lines()
         case CSS::AlignContent::Center:
             start_of_current_line = (cross_size_of_flex_container / 2) - (sum_of_flex_line_cross_sizes / 2);
             break;
-        case CSS::AlignContent::SpaceBetween:
-            dbgln("FIXME: align-content: space-between");
+        case CSS::AlignContent::SpaceBetween: {
+            start_of_current_line = 0;
+
+            float leftover_free_space = cross_size_of_flex_container - sum_of_flex_line_cross_sizes;
+            if (leftover_free_space >= 0) {
+                int gap_count = m_flex_lines.size() - 1;
+                gap_size = leftover_free_space / gap_count;
+            }
             break;
-        case CSS::AlignContent::SpaceAround:
-            dbgln("FIXME: align-content: space-around");
+        }
+        case CSS::AlignContent::SpaceAround: {
+            float leftover_free_space = cross_size_of_flex_container - sum_of_flex_line_cross_sizes;
+            if (leftover_free_space < 0) {
+                // If the leftover free-space is negative this value is identical to center.
+                start_of_current_line = (cross_size_of_flex_container / 2) - (sum_of_flex_line_cross_sizes / 2);
+                break;
+            }
+
+            gap_size = leftover_free_space / m_flex_lines.size();
+
+            // The spacing between the first/last lines and the flex container edges is half the size of the spacing between flex lines.
+            start_of_current_line = gap_size / 2;
             break;
+        }
         case CSS::AlignContent::Stretch:
             start_of_current_line = 0;
             break;
@@ -1447,7 +1496,7 @@ void FlexFormattingContext::align_all_flex_lines()
             for (auto* flex_item : flex_line.items) {
                 flex_item->cross_offset += center_of_current_line;
             }
-            start_of_current_line += flex_line.cross_size;
+            start_of_current_line += flex_line.cross_size + gap_size;
         }
     }
 }

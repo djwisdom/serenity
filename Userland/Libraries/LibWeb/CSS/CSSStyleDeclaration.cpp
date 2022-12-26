@@ -19,32 +19,32 @@ CSSStyleDeclaration::CSSStyleDeclaration(JS::Realm& realm)
 {
 }
 
-PropertyOwningCSSStyleDeclaration* PropertyOwningCSSStyleDeclaration::create(JS::Realm& realm, Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
+PropertyOwningCSSStyleDeclaration* PropertyOwningCSSStyleDeclaration::create(JS::Realm& realm, Vector<StyleProperty> properties, HashMap<DeprecatedString, StyleProperty> custom_properties)
 {
     return realm.heap().allocate<PropertyOwningCSSStyleDeclaration>(realm, realm, move(properties), move(custom_properties));
 }
 
-PropertyOwningCSSStyleDeclaration::PropertyOwningCSSStyleDeclaration(JS::Realm& realm, Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
+PropertyOwningCSSStyleDeclaration::PropertyOwningCSSStyleDeclaration(JS::Realm& realm, Vector<StyleProperty> properties, HashMap<DeprecatedString, StyleProperty> custom_properties)
     : CSSStyleDeclaration(realm)
     , m_properties(move(properties))
     , m_custom_properties(move(custom_properties))
 {
 }
 
-String PropertyOwningCSSStyleDeclaration::item(size_t index) const
+DeprecatedString PropertyOwningCSSStyleDeclaration::item(size_t index) const
 {
     if (index >= m_properties.size())
         return {};
     return CSS::string_from_property_id(m_properties[index].property_id);
 }
 
-ElementInlineCSSStyleDeclaration* ElementInlineCSSStyleDeclaration::create(DOM::Element& element, Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
+ElementInlineCSSStyleDeclaration* ElementInlineCSSStyleDeclaration::create(DOM::Element& element, Vector<StyleProperty> properties, HashMap<DeprecatedString, StyleProperty> custom_properties)
 {
     auto& realm = element.realm();
     return realm.heap().allocate<ElementInlineCSSStyleDeclaration>(realm, element, move(properties), move(custom_properties));
 }
 
-ElementInlineCSSStyleDeclaration::ElementInlineCSSStyleDeclaration(DOM::Element& element, Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
+ElementInlineCSSStyleDeclaration::ElementInlineCSSStyleDeclaration(DOM::Element& element, Vector<StyleProperty> properties, HashMap<DeprecatedString, StyleProperty> custom_properties)
     : PropertyOwningCSSStyleDeclaration(element.realm(), move(properties), move(custom_properties))
     , m_element(element.make_weak_ptr<DOM::Element>())
 {
@@ -119,7 +119,7 @@ WebIDL::ExceptionOr<void> PropertyOwningCSSStyleDeclaration::set_property(Proper
 }
 
 // https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-removeproperty
-WebIDL::ExceptionOr<String> PropertyOwningCSSStyleDeclaration::remove_property(PropertyID property_id)
+WebIDL::ExceptionOr<DeprecatedString> PropertyOwningCSSStyleDeclaration::remove_property(PropertyID property_id)
 {
     // 1. If the computed flag is set, then throw a NoModificationAllowedError exception.
     // NOTE: This is handled by the virtual override in ResolvedCSSStyleDeclaration.
@@ -193,7 +193,7 @@ bool PropertyOwningCSSStyleDeclaration::set_a_css_declaration(PropertyID propert
     return true;
 }
 
-String CSSStyleDeclaration::get_property_value(StringView property_name) const
+DeprecatedString CSSStyleDeclaration::get_property_value(StringView property_name) const
 {
     auto property_id = property_id_from_string(property_name);
     if (property_id == CSS::PropertyID::Invalid)
@@ -201,11 +201,11 @@ String CSSStyleDeclaration::get_property_value(StringView property_name) const
     auto maybe_property = property(property_id);
     if (!maybe_property.has_value())
         return {};
-    return maybe_property->value->to_string();
+    return maybe_property->value->to_deprecated_string();
 }
 
 // https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-getpropertypriority
-String CSSStyleDeclaration::get_property_priority(StringView property_name) const
+DeprecatedString CSSStyleDeclaration::get_property_priority(StringView property_name) const
 {
     auto property_id = property_id_from_string(property_name);
     if (property_id == CSS::PropertyID::Invalid)
@@ -224,16 +224,16 @@ WebIDL::ExceptionOr<void> CSSStyleDeclaration::set_property(StringView property_
     return set_property(property_id, css_text, priority);
 }
 
-WebIDL::ExceptionOr<String> CSSStyleDeclaration::remove_property(StringView property_name)
+WebIDL::ExceptionOr<DeprecatedString> CSSStyleDeclaration::remove_property(StringView property_name)
 {
     auto property_id = property_id_from_string(property_name);
     if (property_id == CSS::PropertyID::Invalid)
-        return String::empty();
+        return DeprecatedString::empty();
     return remove_property(property_id);
 }
 
 // https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-csstext
-String CSSStyleDeclaration::css_text() const
+DeprecatedString CSSStyleDeclaration::css_text() const
 {
     // 1. If the computed flag is set, then return the empty string.
     // NOTE: See ResolvedCSSStyleDeclaration::serialized()
@@ -243,7 +243,7 @@ String CSSStyleDeclaration::css_text() const
 }
 
 // https://www.w3.org/TR/cssom/#serialize-a-css-declaration
-static String serialize_a_css_declaration(CSS::PropertyID property, String value, Important important)
+static DeprecatedString serialize_a_css_declaration(CSS::PropertyID property, DeprecatedString value, Important important)
 {
     StringBuilder builder;
 
@@ -265,14 +265,14 @@ static String serialize_a_css_declaration(CSS::PropertyID property, String value
     builder.append(';');
 
     // 7. Return s.
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 // https://www.w3.org/TR/cssom/#serialize-a-css-declaration-block
-String PropertyOwningCSSStyleDeclaration::serialized() const
+DeprecatedString PropertyOwningCSSStyleDeclaration::serialized() const
 {
     // 1. Let list be an empty array.
-    Vector<String> list;
+    Vector<DeprecatedString> list;
 
     // 2. Let already serialized be an empty array.
     HashTable<PropertyID> already_serialized;
@@ -291,7 +291,7 @@ String PropertyOwningCSSStyleDeclaration::serialized() const
         // FIXME: 4. Shorthand loop: For each shorthand in shorthands, follow these substeps: ...
 
         // 5. Let value be the result of invoking serialize a CSS value of declaration.
-        auto value = declaration.value->to_string();
+        auto value = declaration.value->to_deprecated_string();
 
         // 6. Let serialized declaration be the result of invoking serialize a CSS declaration with property name property, value value,
         //    and the important flag set if declaration has its important flag set.
@@ -307,7 +307,7 @@ String PropertyOwningCSSStyleDeclaration::serialized() const
     // 4. Return list joined with " " (U+0020).
     StringBuilder builder;
     builder.join(' ', list);
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 static CSS::PropertyID property_id_from_name(StringView name)
@@ -340,8 +340,8 @@ JS::ThrowCompletionOr<JS::Value> CSSStyleDeclaration::internal_get(JS::PropertyK
     if (property_id == CSS::PropertyID::Invalid)
         return Base::internal_get(name, receiver);
     if (auto maybe_property = property(property_id); maybe_property.has_value())
-        return { js_string(vm(), maybe_property->value->to_string()) };
-    return { js_string(vm(), String::empty()) };
+        return { JS::PrimitiveString::create(vm(), maybe_property->value->to_deprecated_string()) };
+    return { JS::PrimitiveString::create(vm(), DeprecatedString::empty()) };
 }
 
 JS::ThrowCompletionOr<bool> CSSStyleDeclaration::internal_set(JS::PropertyKey const& name, JS::Value value, JS::Value receiver)
@@ -371,7 +371,7 @@ void PropertyOwningCSSStyleDeclaration::empty_the_declarations()
     m_custom_properties.clear();
 }
 
-void PropertyOwningCSSStyleDeclaration::set_the_declarations(Vector<StyleProperty> properties, HashMap<String, StyleProperty> custom_properties)
+void PropertyOwningCSSStyleDeclaration::set_the_declarations(Vector<StyleProperty> properties, HashMap<DeprecatedString, StyleProperty> custom_properties)
 {
     m_properties = move(properties);
     m_custom_properties = move(custom_properties);

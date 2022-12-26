@@ -93,26 +93,17 @@ public:
         return exchange(m_ptr, nullptr);
     }
 
-    ALWAYS_INLINE RETURNS_NONNULL T* ptr()
+    ALWAYS_INLINE RETURNS_NONNULL T* ptr() const
     {
         VERIFY(m_ptr);
         return m_ptr;
     }
 
-    ALWAYS_INLINE RETURNS_NONNULL const T* ptr() const
-    {
-        VERIFY(m_ptr);
-        return m_ptr;
-    }
+    ALWAYS_INLINE RETURNS_NONNULL T* operator->() const { return ptr(); }
 
-    ALWAYS_INLINE RETURNS_NONNULL T* operator->() { return ptr(); }
-    ALWAYS_INLINE RETURNS_NONNULL const T* operator->() const { return ptr(); }
+    ALWAYS_INLINE T& operator*() const { return *ptr(); }
 
-    ALWAYS_INLINE T& operator*() { return *ptr(); }
-    ALWAYS_INLINE const T& operator*() const { return *ptr(); }
-
-    ALWAYS_INLINE RETURNS_NONNULL operator const T*() const { return ptr(); }
-    ALWAYS_INLINE RETURNS_NONNULL operator T*() { return ptr(); }
+    ALWAYS_INLINE RETURNS_NONNULL operator T*() const { return ptr(); }
 
     operator bool() const = delete;
     bool operator!() const = delete;
@@ -173,7 +164,7 @@ inline NonnullOwnPtr<T> make(Args&&... args)
 template<typename T>
 struct Traits<NonnullOwnPtr<T>> : public GenericTraits<NonnullOwnPtr<T>> {
     using PeekType = T*;
-    using ConstPeekType = const T*;
+    using ConstPeekType = T const*;
     static unsigned hash(NonnullOwnPtr<T> const& p) { return ptr_hash((FlatPtr)p.ptr()); }
     static bool equals(NonnullOwnPtr<T> const& a, NonnullOwnPtr<T> const& b) { return a.ptr() == b.ptr(); }
 };
@@ -185,17 +176,19 @@ inline void swap(NonnullOwnPtr<T>& a, NonnullOwnPtr<U>& b)
 }
 
 template<typename T>
-struct Formatter<NonnullOwnPtr<T>> : Formatter<const T*> {
+struct Formatter<NonnullOwnPtr<T>> : Formatter<T const*> {
     ErrorOr<void> format(FormatBuilder& builder, NonnullOwnPtr<T> const& value)
     {
-        return Formatter<const T*>::format(builder, value.ptr());
+        return Formatter<T const*>::format(builder, value.ptr());
     }
 };
 
 }
 
-#if !defined(KERNEL)
+#if USING_AK_GLOBALLY
+#    if !defined(KERNEL)
 using AK::adopt_own;
 using AK::make;
-#endif
+#    endif
 using AK::NonnullOwnPtr;
+#endif

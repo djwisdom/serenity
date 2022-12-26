@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
-#include <AK/String.h>
 #include <AK/WeakPtr.h>
 #include <LibGPU/Driver.h>
 #include <dlfcn.h>
@@ -13,18 +13,21 @@
 namespace GPU {
 
 // FIXME: Think of a better way to configure these paths. Maybe use ConfigServer?
-static HashMap<String, String> const s_driver_path_map
+// clang-format off
+static HashMap<DeprecatedString, DeprecatedString> const s_driver_path_map
 {
 #if defined(AK_OS_SERENITY)
     { "softgpu", "libsoftgpu.so.serenity" },
+    { "virtgpu", "libvirtgpu.so.serenity" },
 #elif defined(AK_OS_MACOS)
     { "softgpu", "liblagom-softgpu.dylib" },
 #else
     { "softgpu", "liblagom-softgpu.so.0" },
 #endif
 };
+// clang-format on
 
-static HashMap<String, WeakPtr<Driver>> s_loaded_drivers;
+static HashMap<DeprecatedString, WeakPtr<Driver>> s_loaded_drivers;
 
 ErrorOr<NonnullRefPtr<Driver>> Driver::try_create(StringView driver_name)
 {

@@ -73,9 +73,10 @@ public:
     JS_ENUMERATE_WELL_KNOWN_SYMBOLS
 #undef __JS_ENUMERATE
 
-    Symbol* get_global_symbol(String const& description);
-
-    HashMap<String, PrimitiveString*>& string_cache() { return m_string_cache; }
+    HashMap<DeprecatedString, PrimitiveString*>& string_cache()
+    {
+        return m_string_cache;
+    }
     PrimitiveString& empty_string() { return *m_empty_string; }
     PrimitiveString& single_ascii_character_string(u8 character)
     {
@@ -114,8 +115,14 @@ public:
             on_call_stack_emptied();
     }
 
+    // https://tc39.es/ecma262/#running-execution-context
+    // At any point in time, there is at most one execution context per agent that is actually executing code.
+    // This is known as the agent's running execution context.
     ExecutionContext& running_execution_context() { return *m_execution_context_stack.last(); }
     ExecutionContext const& running_execution_context() const { return *m_execution_context_stack.last(); }
+
+    // https://tc39.es/ecma262/#execution-context-stack
+    // The execution context stack is used to track execution contexts.
     Vector<ExecutionContext*> const& execution_context_stack() const { return m_execution_context_stack; }
     Vector<ExecutionContext*>& execution_context_stack() { return m_execution_context_stack; }
 
@@ -162,6 +169,9 @@ public:
 
     StackInfo const& stack_info() const { return m_stack_info; };
 
+    HashMap<DeprecatedString, NonnullGCPtr<Symbol>> const& global_symbol_registry() const { return m_global_symbol_registry; }
+    HashMap<DeprecatedString, NonnullGCPtr<Symbol>>& global_symbol_registry() { return m_global_symbol_registry; }
+
     u32 execution_generation() const { return m_execution_generation; }
     void finish_execution_generation() { ++m_execution_generation; }
 
@@ -179,12 +189,8 @@ public:
     template<typename T, typename... Args>
     Completion throw_completion(ErrorType type, Args&&... args)
     {
-        return throw_completion<T>(String::formatted(type.message(), forward<Args>(args)...));
+        return throw_completion<T>(DeprecatedString::formatted(type.message(), forward<Args>(args)...));
     }
-
-    Value construct(FunctionObject&, FunctionObject& new_target, Optional<MarkedVector<Value>> arguments);
-
-    String join_arguments(size_t start_index = 0) const;
 
     Value get_new_target();
 
@@ -203,8 +209,6 @@ public:
     Function<void()> on_call_stack_emptied;
     Function<void(Promise&)> on_promise_unhandled_rejection;
     Function<void(Promise&)> on_promise_rejection_handled;
-
-    ThrowCompletionOr<void> initialize_instance_elements(Object& object, ECMAScriptFunctionObject& constructor);
 
     CustomData* custom_data() { return m_custom_data; }
 
@@ -229,7 +233,7 @@ public:
     Function<HashMap<PropertyKey, Value>(SourceTextModule const&)> host_get_import_meta_properties;
     Function<void(Object*, SourceTextModule const&)> host_finalize_import_meta;
 
-    Function<Vector<String>()> host_get_supported_import_assertions;
+    Function<Vector<DeprecatedString>()> host_get_supported_import_assertions;
 
     void enable_default_host_import_module_dynamically_hook();
 
@@ -253,7 +257,7 @@ private:
     void import_module_dynamically(ScriptOrModule referencing_script_or_module, ModuleRequest module_request, PromiseCapability const& promise_capability);
     void finish_dynamic_import(ScriptOrModule referencing_script_or_module, ModuleRequest module_request, PromiseCapability const& promise_capability, Promise* inner_promise);
 
-    HashMap<String, PrimitiveString*> m_string_cache;
+    HashMap<DeprecatedString, PrimitiveString*> m_string_cache;
 
     Heap m_heap;
     Vector<Interpreter*> m_interpreters;
@@ -264,7 +268,8 @@ private:
 
     StackInfo m_stack_info;
 
-    HashMap<String, Symbol*> m_global_symbol_map;
+    // GlobalSymbolRegistry, https://tc39.es/ecma262/#table-globalsymbolregistry-record-fields
+    HashMap<DeprecatedString, NonnullGCPtr<Symbol>> m_global_symbol_registry;
 
     Vector<Function<ThrowCompletionOr<Value>()>> m_promise_jobs;
 
@@ -275,13 +280,13 @@ private:
 
     struct StoredModule {
         ScriptOrModule referencing_script_or_module;
-        String filename;
-        String type;
+        DeprecatedString filename;
+        DeprecatedString type;
         Handle<Module> module;
         bool has_once_started_linking { false };
     };
 
-    StoredModule* get_stored_module(ScriptOrModule const& script_or_module, String const& filename, String const& type);
+    StoredModule* get_stored_module(ScriptOrModule const& script_or_module, DeprecatedString const& filename, DeprecatedString const& type);
 
     Vector<StoredModule> m_loaded_modules;
 

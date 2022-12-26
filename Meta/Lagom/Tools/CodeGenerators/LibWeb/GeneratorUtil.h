@@ -7,13 +7,13 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/JsonObject.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/Stream.h>
 #include <ctype.h>
 
-String title_casify(String const& dashy_name)
+DeprecatedString title_casify(DeprecatedString const& dashy_name)
 {
     auto parts = dashy_name.split('-');
     StringBuilder builder;
@@ -25,10 +25,10 @@ String title_casify(String const& dashy_name)
             continue;
         builder.append(part.substring_view(1, part.length() - 1));
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-String camel_casify(StringView dashy_name)
+DeprecatedString camel_casify(StringView dashy_name)
 {
     auto parts = dashy_name.split_view('-');
     StringBuilder builder;
@@ -46,10 +46,10 @@ String camel_casify(StringView dashy_name)
             continue;
         builder.append(part.substring_view(1, part.length() - 1));
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
-String snake_casify(String const& dashy_name)
+DeprecatedString snake_casify(DeprecatedString const& dashy_name)
 {
     return dashy_name.replace("-"sv, "_"sv, ReplaceMode::All);
 }
@@ -59,7 +59,6 @@ ErrorOr<JsonValue> read_entire_file_as_json(StringView filename)
     auto file = TRY(Core::Stream::File::open(filename, Core::Stream::OpenMode::Read));
     auto json_size = TRY(file->size());
     auto json_data = TRY(ByteBuffer::create_uninitialized(json_size));
-    if (!file->read_or_error(json_data.bytes()))
-        return Error::from_string_literal("Failed to read json file.");
+    TRY(file->read_entire_buffer(json_data.bytes()));
     return JsonValue::from_string(json_data);
 }

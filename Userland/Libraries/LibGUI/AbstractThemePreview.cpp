@@ -39,14 +39,14 @@ AbstractThemePreview::AbstractThemePreview(Gfx::Palette const& preview_palette)
 
 void AbstractThemePreview::load_theme_bitmaps()
 {
-    auto load_bitmap = [](String const& path, String& last_path, RefPtr<Gfx::Bitmap>& bitmap) {
+    auto load_bitmap = [](DeprecatedString const& path, DeprecatedString& last_path, RefPtr<Gfx::Bitmap>& bitmap) {
         if (path.is_empty()) {
-            last_path = String::empty();
+            last_path = DeprecatedString::empty();
             bitmap = nullptr;
         } else if (last_path != path) {
             auto bitmap_or_error = Gfx::Bitmap::try_load_from_file(path);
             if (bitmap_or_error.is_error()) {
-                last_path = String::empty();
+                last_path = DeprecatedString::empty();
                 bitmap = nullptr;
             } else {
                 last_path = path;
@@ -85,16 +85,16 @@ void AbstractThemePreview::set_theme(Core::AnonymousBuffer const& theme_buffer)
     set_preview_palette(m_preview_palette);
 }
 
-void AbstractThemePreview::set_theme_from_file(Core::File& file)
+ErrorOr<void> AbstractThemePreview::set_theme_from_file(Core::File& file)
 {
-    auto config_file = Core::ConfigFile::open(file.filename(), file.leak_fd()).release_value_but_fixme_should_propagate_errors();
-    auto theme = Gfx::load_system_theme(config_file);
-    VERIFY(theme.is_valid());
+    auto config_file = TRY(Core::ConfigFile::open(file.filename(), file.leak_fd()));
+    auto theme = TRY(Gfx::load_system_theme(config_file));
 
     m_preview_palette = Gfx::Palette(Gfx::PaletteImpl::create_with_anonymous_buffer(theme));
     set_preview_palette(m_preview_palette);
     if (on_theme_load_from_file)
         on_theme_load_from_file(file.filename());
+    return {};
 }
 
 void AbstractThemePreview::paint_window(StringView title, Gfx::IntRect const& rect, Gfx::WindowTheme::WindowState state, Gfx::Bitmap const& icon, int button_count)

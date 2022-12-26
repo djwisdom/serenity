@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/StringBuilder.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
@@ -41,7 +41,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     utsname uts = TRY(Core::System::uname());
 
-    Vector<String> parts;
+    Vector<DeprecatedString> parts;
     if (flag_system)
         parts.append(uts.sysname);
     if (flag_node)
@@ -54,6 +54,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         parts.append(uts.machine);
     StringBuilder builder;
     builder.join(' ', parts);
-    puts(builder.to_string().characters());
+    puts(builder.to_deprecated_string().characters());
     return 0;
 }

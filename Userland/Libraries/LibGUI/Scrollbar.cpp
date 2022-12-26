@@ -53,7 +53,7 @@ Scrollbar::Scrollbar(Orientation orientation)
 
     m_automatic_scrolling_timer->set_interval(100);
     m_automatic_scrolling_timer->on_timeout = [this] {
-        on_automatic_scrolling_timer_fired();
+        automatic_scrolling_timer_did_fire();
     };
 }
 
@@ -199,11 +199,11 @@ void Scrollbar::paint_event(PaintEvent& event)
         painter.fill_rect_with_dither_pattern(rect_to_fill, palette().button(), palette().button().lightened(0.77f));
     }
 
-    bool decrement_pressed = (m_pressed_component == Component::DecrementButton) && (m_pressed_component == m_hovered_component);
-    bool increment_pressed = (m_pressed_component == Component::IncrementButton) && (m_pressed_component == m_hovered_component);
+    bool decrement_pressed = (m_pressed_component == Component::DecrementButton) && (m_pressed_component == m_hovered_component) && !is_min();
+    bool increment_pressed = (m_pressed_component == Component::IncrementButton) && (m_pressed_component == m_hovered_component) && !is_max();
 
-    Gfx::StylePainter::paint_button(painter, decrement_button_rect(), palette(), Gfx::ButtonStyle::ThickCap, decrement_pressed, hovered_component_for_painting == Component::DecrementButton);
-    Gfx::StylePainter::paint_button(painter, increment_button_rect(), palette(), Gfx::ButtonStyle::ThickCap, increment_pressed, hovered_component_for_painting == Component::IncrementButton);
+    Gfx::StylePainter::paint_button(painter, decrement_button_rect(), palette(), Gfx::ButtonStyle::ThickCap, decrement_pressed, hovered_component_for_painting == Component::DecrementButton && !is_min());
+    Gfx::StylePainter::paint_button(painter, increment_button_rect(), palette(), Gfx::ButtonStyle::ThickCap, increment_pressed, hovered_component_for_painting == Component::IncrementButton && !is_max());
 
     if (length(orientation()) >= default_button_size() * 2) {
         auto decrement_location = decrement_button_rect().location().translated(3, 3);
@@ -211,21 +211,21 @@ void Scrollbar::paint_event(PaintEvent& event)
             decrement_location.translate_by(1, 1);
         if (!has_scrubber() || !is_enabled())
             painter.draw_triangle(decrement_location + Gfx::IntPoint { 1, 1 }, orientation() == Orientation::Vertical ? s_up_arrow_coords : s_left_arrow_coords, palette().threed_highlight());
-        painter.draw_triangle(decrement_location, orientation() == Orientation::Vertical ? s_up_arrow_coords : s_left_arrow_coords, (has_scrubber() && is_enabled()) ? palette().button_text() : palette().threed_shadow1());
+        painter.draw_triangle(decrement_location, orientation() == Orientation::Vertical ? s_up_arrow_coords : s_left_arrow_coords, (has_scrubber() && is_enabled() && !is_min()) ? palette().button_text() : palette().threed_shadow1());
 
         auto increment_location = increment_button_rect().location().translated(3, 3);
         if (increment_pressed)
             increment_location.translate_by(1, 1);
         if (!has_scrubber() || !is_enabled())
             painter.draw_triangle(increment_location + Gfx::IntPoint { 1, 1 }, orientation() == Orientation::Vertical ? s_down_arrow_coords : s_right_arrow_coords, palette().threed_highlight());
-        painter.draw_triangle(increment_location, orientation() == Orientation::Vertical ? s_down_arrow_coords : s_right_arrow_coords, (has_scrubber() && is_enabled()) ? palette().button_text() : palette().threed_shadow1());
+        painter.draw_triangle(increment_location, orientation() == Orientation::Vertical ? s_down_arrow_coords : s_right_arrow_coords, (has_scrubber() && is_enabled() && !is_max()) ? palette().button_text() : palette().threed_shadow1());
     }
 
     if (has_scrubber() && !scrubber_rect().is_null())
         Gfx::StylePainter::paint_button(painter, scrubber_rect(), palette(), Gfx::ButtonStyle::ThickCap, false, hovered_component_for_painting == Component::Scrubber || m_pressed_component == Component::Scrubber);
 }
 
-void Scrollbar::on_automatic_scrolling_timer_fired()
+void Scrollbar::automatic_scrolling_timer_did_fire()
 {
     if (m_pressed_component == Component::DecrementButton && component_at_position(m_last_mouse_position) == Component::DecrementButton) {
         decrease_slider_by_steps(1);
@@ -263,12 +263,16 @@ void Scrollbar::mousedown_event(MouseEvent& event)
     m_pressed_component = component_at_position(m_last_mouse_position);
 
     if (m_pressed_component == Component::DecrementButton) {
-        set_automatic_scrolling_active(true, Component::DecrementButton);
+        if (is_min())
+            return;
+        set_automatic_scrolling_timer_active(true, Component::DecrementButton);
         update();
         return;
     }
     if (m_pressed_component == Component::IncrementButton) {
-        set_automatic_scrolling_active(true, Component::IncrementButton);
+        if (is_max())
+            return;
+        set_automatic_scrolling_timer_active(true, Component::IncrementButton);
         update();
         return;
     }
@@ -287,7 +291,7 @@ void Scrollbar::mousedown_event(MouseEvent& event)
     VERIFY(!event.shift());
 
     VERIFY(m_pressed_component == Component::Gutter);
-    set_automatic_scrolling_active(true, Component::Gutter);
+    set_automatic_scrolling_timer_active(true, Component::Gutter);
     update();
 }
 
@@ -295,7 +299,7 @@ void Scrollbar::mouseup_event(MouseEvent& event)
 {
     if (event.button() != MouseButton::Primary)
         return;
-    set_automatic_scrolling_active(false, Component::None);
+    set_automatic_scrolling_timer_active(false, Component::None);
     update();
 }
 
@@ -307,7 +311,7 @@ void Scrollbar::mousewheel_event(MouseEvent& event)
     Widget::mousewheel_event(event);
 }
 
-void Scrollbar::set_automatic_scrolling_active(bool active, Component pressed_component)
+void Scrollbar::set_automatic_scrolling_timer_active(bool active, Component pressed_component)
 {
     m_pressed_component = pressed_component;
     if (m_pressed_component == Component::Gutter)
@@ -316,7 +320,7 @@ void Scrollbar::set_automatic_scrolling_active(bool active, Component pressed_co
         m_automatic_scrolling_timer->set_interval(100);
 
     if (active) {
-        on_automatic_scrolling_timer_fired();
+        automatic_scrolling_timer_did_fire();
         m_automatic_scrolling_timer->start();
     } else {
         m_automatic_scrolling_timer->stop();
@@ -324,7 +328,7 @@ void Scrollbar::set_automatic_scrolling_active(bool active, Component pressed_co
     }
 }
 
-void Scrollbar::scroll_by_page(Gfx::IntPoint const& click_position)
+void Scrollbar::scroll_by_page(Gfx::IntPoint click_position)
 {
     float range_size = max() - min();
     float available = scrubbable_range_in_pixels();
@@ -340,7 +344,7 @@ void Scrollbar::scroll_by_page(Gfx::IntPoint const& click_position)
     }
 }
 
-void Scrollbar::scroll_to_position(Gfx::IntPoint const& click_position)
+void Scrollbar::scroll_to_position(Gfx::IntPoint click_position)
 {
     float range_size = max() - min();
     float available = scrubbable_range_in_pixels();
@@ -350,7 +354,7 @@ void Scrollbar::scroll_to_position(Gfx::IntPoint const& click_position)
     set_target_value(min() + rel_x_or_y * range_size);
 }
 
-Scrollbar::Component Scrollbar::component_at_position(Gfx::IntPoint const& position)
+Scrollbar::Component Scrollbar::component_at_position(Gfx::IntPoint position)
 {
     if (scrubber_rect().contains(position))
         return Component::Scrubber;
@@ -398,7 +402,7 @@ void Scrollbar::change_event(Event& event)
 {
     if (event.type() == Event::Type::EnabledChange) {
         if (!is_enabled())
-            set_automatic_scrolling_active(false, Component::None);
+            set_automatic_scrolling_timer_active(false, Component::None);
     }
     return Widget::change_event(event);
 }

@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <AK/Concepts.h>
 #include <AK/Span.h>
 #include <LibCrypto/BigInt/UnsignedBigInteger.h>
 
@@ -16,9 +17,9 @@ struct SignedDivisionResult;
 
 class SignedBigInteger {
 public:
-    template<typename T>
-    requires(IsSigned<T> && sizeof(T) <= sizeof(i32))
-        SignedBigInteger(T value)
+    template<Signed T>
+    requires(sizeof(T) <= sizeof(i32))
+    SignedBigInteger(T value)
         : m_sign(value < 0)
         , m_unsigned_data(abs(static_cast<i32>(value)))
     {
@@ -62,7 +63,7 @@ public:
     size_t export_data(Bytes, bool remove_leading_zeros = false) const;
 
     [[nodiscard]] static SignedBigInteger from_base(u16 N, StringView str);
-    [[nodiscard]] String to_base(u16 N) const;
+    [[nodiscard]] DeprecatedString to_base(u16 N) const;
 
     [[nodiscard]] u64 to_u64() const;
     [[nodiscard]] double to_double(UnsignedBigInteger::RoundingMode rounding_mode = UnsignedBigInteger::RoundingMode::IEEERoundAndTiesToEvenMantissa) const;

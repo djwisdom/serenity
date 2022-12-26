@@ -28,10 +28,10 @@
 
 namespace Web {
 
-static String s_default_favicon_path = "/res/icons/16x16/app-browser.png";
+static DeprecatedString s_default_favicon_path = "/res/icons/16x16/app-browser.png";
 static RefPtr<Gfx::Bitmap> s_default_favicon_bitmap;
 
-void FrameLoader::set_default_favicon_path(String path)
+void FrameLoader::set_default_favicon_path(DeprecatedString path)
 {
     s_default_favicon_path = move(path);
 }
@@ -120,7 +120,7 @@ static bool build_text_document(DOM::Document& document, ByteBuffer const& data)
     auto pre_element = document.create_element("pre").release_value();
     MUST(body_element->append_child(pre_element));
 
-    MUST(pre_element->append_child(document.create_text_node(String::copy(data))));
+    MUST(pre_element->append_child(document.create_text_node(DeprecatedString::copy(data))));
     return true;
 }
 
@@ -143,14 +143,14 @@ static bool build_image_document(DOM::Document& document, ByteBuffer const& data
     MUST(head_element->append_child(title_element));
 
     auto basename = LexicalPath::basename(document.url().path());
-    auto title_text = document.heap().allocate<DOM::Text>(document.realm(), document, String::formatted("{} [{}x{}]", basename, bitmap->width(), bitmap->height()));
+    auto title_text = document.heap().allocate<DOM::Text>(document.realm(), document, DeprecatedString::formatted("{} [{}x{}]", basename, bitmap->width(), bitmap->height()));
     MUST(title_element->append_child(*title_text));
 
     auto body_element = document.create_element("body").release_value();
     MUST(html_element->append_child(body_element));
 
     auto image_element = document.create_element("img").release_value();
-    MUST(image_element->set_attribute(HTML::AttributeNames::src, document.url().to_string()));
+    MUST(image_element->set_attribute(HTML::AttributeNames::src, document.url().to_deprecated_string()));
     MUST(body_element->append_child(image_element));
 
     return true;
@@ -160,7 +160,7 @@ static bool build_gemini_document(DOM::Document& document, ByteBuffer const& dat
 {
     StringView gemini_data { data };
     auto gemini_document = Gemini::Document::parse(gemini_data, document.url());
-    String html_data = gemini_document->render_to_html();
+    DeprecatedString html_data = gemini_document->render_to_html();
 
     dbgln_if(GEMINI_DEBUG, "Gemini data:\n\"\"\"{}\"\"\"", gemini_data);
     dbgln_if(GEMINI_DEBUG, "Converted to HTML:\n\"\"\"{}\"\"\"", html_data);
@@ -215,10 +215,10 @@ bool FrameLoader::load(LoadRequest& request, Type type)
 
     auto& url = request.url();
 
-    if (type == Type::Navigation || type == Type::Reload) {
+    if (type == Type::Navigation || type == Type::Reload || type == Type::Redirect) {
         if (auto* page = browsing_context().page()) {
             if (&page->top_level_browsing_context() == &m_browsing_context)
-                page->client().page_did_start_loading(url);
+                page->client().page_did_start_loading(url, type == Type::Redirect);
         }
     }
 
@@ -324,9 +324,9 @@ void FrameLoader::load_html(StringView html, const AK::URL& url)
     parser->run(url);
 }
 
-static String s_error_page_url = "file:///res/html/error.html";
+static DeprecatedString s_error_page_url = "file:///res/html/error.html";
 
-void FrameLoader::set_error_page_url(String error_page_url)
+void FrameLoader::set_error_page_url(DeprecatedString error_page_url)
 {
     s_error_page_url = error_page_url;
 }
@@ -334,7 +334,7 @@ void FrameLoader::set_error_page_url(String error_page_url)
 // FIXME: Use an actual templating engine (our own one when it's built, preferably
 // with a way to check these usages at compile time)
 
-void FrameLoader::load_error_page(const AK::URL& failed_url, String const& error)
+void FrameLoader::load_error_page(const AK::URL& failed_url, DeprecatedString const& error)
 {
     ResourceLoader::the().load(
         s_error_page_url,
@@ -342,7 +342,7 @@ void FrameLoader::load_error_page(const AK::URL& failed_url, String const& error
             VERIFY(!data.is_null());
             StringBuilder builder;
             SourceGenerator generator { builder };
-            generator.set("failed_url", escape_html_entities(failed_url.to_string()));
+            generator.set("failed_url", escape_html_entities(failed_url.to_deprecated_string()));
             generator.set("error", escape_html_entities(error));
             generator.append(data);
             load_html(generator.as_string_view(), failed_url);
@@ -363,7 +363,7 @@ void FrameLoader::load_favicon(RefPtr<Gfx::Bitmap> bitmap)
     }
 }
 
-void FrameLoader::store_response_cookies(AK::URL const& url, String const& cookies)
+void FrameLoader::store_response_cookies(AK::URL const& url, DeprecatedString const& cookies)
 {
     auto* page = browsing_context().page();
     if (!page)
@@ -401,7 +401,7 @@ void FrameLoader::resource_did_load()
                 return;
             }
             m_redirects_count++;
-            load(url.complete_url(location.value()), FrameLoader::Type::Navigation);
+            load(url.complete_url(location.value()), Type::Redirect);
             return;
         }
     }

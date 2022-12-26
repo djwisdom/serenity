@@ -28,7 +28,7 @@ static void on_http_only_attribute(ParsedCookie& parsed_cookie);
 static void on_same_site_attribute(ParsedCookie& parsed_cookie, StringView attribute_value);
 static Optional<Core::DateTime> parse_date_time(StringView date_string);
 
-Optional<ParsedCookie> parse_cookie(String const& cookie_string)
+Optional<ParsedCookie> parse_cookie(DeprecatedString const& cookie_string)
 {
     // https://tools.ietf.org/html/rfc6265#section-5.2
 
@@ -197,7 +197,7 @@ void on_domain_attribute(ParsedCookie& parsed_cookie, StringView attribute_value
     }
 
     // Convert the cookie-domain to lower case.
-    parsed_cookie.domain = String(cookie_domain).to_lowercase();
+    parsed_cookie.domain = DeprecatedString(cookie_domain).to_lowercase();
 }
 
 void on_path_attribute(ParsedCookie& parsed_cookie, StringView attribute_value)
@@ -347,6 +347,7 @@ Optional<Core::DateTime> parse_date_time(StringView date_string)
 
 }
 
+template<>
 bool IPC::encode(Encoder& encoder, Web::Cookie::ParsedCookie const& cookie)
 {
     encoder << cookie.name;
@@ -362,16 +363,18 @@ bool IPC::encode(Encoder& encoder, Web::Cookie::ParsedCookie const& cookie)
     return true;
 }
 
-ErrorOr<void> IPC::decode(Decoder& decoder, Web::Cookie::ParsedCookie& cookie)
+template<>
+ErrorOr<Web::Cookie::ParsedCookie> IPC::decode(Decoder& decoder)
 {
-    TRY(decoder.decode(cookie.name));
-    TRY(decoder.decode(cookie.value));
-    TRY(decoder.decode(cookie.expiry_time_from_expires_attribute));
-    TRY(decoder.decode(cookie.expiry_time_from_max_age_attribute));
-    TRY(decoder.decode(cookie.domain));
-    TRY(decoder.decode(cookie.path));
-    TRY(decoder.decode(cookie.secure_attribute_present));
-    TRY(decoder.decode(cookie.http_only_attribute_present));
-    TRY(decoder.decode(cookie.same_site_attribute));
-    return {};
+    auto name = TRY(decoder.decode<DeprecatedString>());
+    auto value = TRY(decoder.decode<DeprecatedString>());
+    auto expiry_time_from_expires_attribute = TRY(decoder.decode<Optional<Core::DateTime>>());
+    auto expiry_time_from_max_age_attribute = TRY(decoder.decode<Optional<Core::DateTime>>());
+    auto domain = TRY(decoder.decode<Optional<DeprecatedString>>());
+    auto path = TRY(decoder.decode<Optional<DeprecatedString>>());
+    auto secure_attribute_present = TRY(decoder.decode<bool>());
+    auto http_only_attribute_present = TRY(decoder.decode<bool>());
+    auto same_site_attribute = TRY(decoder.decode<Web::Cookie::SameSite>());
+
+    return Web::Cookie::ParsedCookie { move(name), move(value), same_site_attribute, move(expiry_time_from_expires_attribute), move(expiry_time_from_max_age_attribute), move(domain), move(path), secure_attribute_present, http_only_attribute_present };
 }

@@ -33,7 +33,7 @@ JS::ThrowCompletionOr<JS::Value> ImageConstructor::call()
 }
 
 // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-image
-JS::ThrowCompletionOr<JS::Object*> ImageConstructor::construct(FunctionObject&)
+JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Object>> ImageConstructor::construct(FunctionObject&)
 {
     auto& vm = this->vm();
 
@@ -47,17 +47,17 @@ JS::ThrowCompletionOr<JS::Object*> ImageConstructor::construct(FunctionObject&)
     // 3. If width is given, then set an attribute value for img using "width" and width.
     if (vm.argument_count() > 0) {
         u32 width = TRY(vm.argument(0).to_u32(vm));
-        MUST(image_element->set_attribute(HTML::AttributeNames::width, String::formatted("{}", width)));
+        MUST(image_element->set_attribute(HTML::AttributeNames::width, DeprecatedString::formatted("{}", width)));
     }
 
     // 4. If height is given, then set an attribute value for img using "height" and height.
     if (vm.argument_count() > 1) {
         u32 height = TRY(vm.argument(1).to_u32(vm));
-        MUST(image_element->set_attribute(HTML::AttributeNames::height, String::formatted("{}", height)));
+        MUST(image_element->set_attribute(HTML::AttributeNames::height, DeprecatedString::formatted("{}", height)));
     }
 
     // 5. Return img.
-    return image_element.ptr();
+    return image_element;
 }
 
 }

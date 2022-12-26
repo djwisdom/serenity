@@ -16,7 +16,7 @@ namespace Web::Crypto {
 
 JS::NonnullGCPtr<SubtleCrypto> SubtleCrypto::create(JS::Realm& realm)
 {
-    return *realm.heap().allocate<SubtleCrypto>(realm, realm);
+    return realm.heap().allocate<SubtleCrypto>(realm, realm);
 }
 
 SubtleCrypto::SubtleCrypto(JS::Realm& realm)
@@ -28,7 +28,7 @@ SubtleCrypto::SubtleCrypto(JS::Realm& realm)
 SubtleCrypto::~SubtleCrypto() = default;
 
 // https://w3c.github.io/webcrypto/#dfn-SubtleCrypto-method-digest
-JS::Promise* SubtleCrypto::digest(String const& algorithm, JS::Handle<JS::Object> const& data)
+JS::Promise* SubtleCrypto::digest(DeprecatedString const& algorithm, JS::Handle<JS::Object> const& data)
 {
     auto& realm = this->realm();
 
@@ -38,7 +38,7 @@ JS::Promise* SubtleCrypto::digest(String const& algorithm, JS::Handle<JS::Object
     auto data_buffer_or_error = WebIDL::get_buffer_source_copy(*data.cell());
     if (data_buffer_or_error.is_error()) {
         auto error = WebIDL::OperationError::create(realm, "Failed to copy bytes from ArrayBuffer");
-        auto* promise = JS::Promise::create(realm);
+        auto promise = JS::Promise::create(realm);
         promise->reject(error.ptr());
         return promise;
     }
@@ -58,14 +58,14 @@ JS::Promise* SubtleCrypto::digest(String const& algorithm, JS::Handle<JS::Object
     }
     // 4. If an error occurred, return a Promise rejected with normalizedAlgorithm.
     else {
-        auto error = WebIDL::NotSupportedError::create(realm, String::formatted("Invalid hash function '{}'", algorithm));
-        auto* promise = JS::Promise::create(realm);
+        auto error = WebIDL::NotSupportedError::create(realm, DeprecatedString::formatted("Invalid hash function '{}'", algorithm));
+        auto promise = JS::Promise::create(realm);
         promise->reject(error.ptr());
         return promise;
     }
 
     // 5. Let promise be a new Promise.
-    auto* promise = JS::Promise::create(realm);
+    auto promise = JS::Promise::create(realm);
 
     // 6. Return promise and perform the remaining steps in parallel.
     // FIXME: We don't have a good abstraction for this yet, so we do it in sync.
@@ -84,7 +84,7 @@ JS::Promise* SubtleCrypto::digest(String const& algorithm, JS::Handle<JS::Object
         return promise;
     }
 
-    auto* result = JS::ArrayBuffer::create(realm, result_buffer.release_value());
+    auto result = JS::ArrayBuffer::create(realm, result_buffer.release_value());
 
     // 9. Resolve promise with result.
     promise->fulfill(result);

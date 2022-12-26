@@ -15,4 +15,10 @@ class Message;
 class File;
 class Stub;
 
+template<typename T>
+bool encode(Encoder&, T const&);
+
+template<typename T>
+ErrorOr<T> decode(Decoder&);
+
 }

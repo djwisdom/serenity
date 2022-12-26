@@ -12,7 +12,7 @@
 
 namespace GUI {
 
-DropEvent::DropEvent(Gfx::IntPoint const& position, String const& text, NonnullRefPtr<Core::MimeData> mime_data)
+DropEvent::DropEvent(Gfx::IntPoint position, DeprecatedString const& text, NonnullRefPtr<Core::MimeData> mime_data)
     : Event(Event::Drop)
     , m_position(position)
     , m_text(text)
@@ -20,9 +20,9 @@ DropEvent::DropEvent(Gfx::IntPoint const& position, String const& text, NonnullR
 {
 }
 
-String KeyEvent::to_string() const
+DeprecatedString KeyEvent::to_deprecated_string() const
 {
-    Vector<String, 8> parts;
+    Vector<DeprecatedString, 8> parts;
 
     if (m_modifiers & Mod_Ctrl)
         parts.append("Ctrl");
@@ -44,7 +44,7 @@ String KeyEvent::to_string() const
         if (i != parts.size() - 1)
             builder.append('+');
     }
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 ActionEvent::ActionEvent(Type type, Action& action)

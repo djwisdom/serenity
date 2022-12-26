@@ -42,6 +42,9 @@ Yak Emoji (limited cross-platform support)
 􌴡 - U+10CD21 YAKMANDO
 􌴢 - U+10CD22 NINJYAK
 􌴣 - U+10CD23 YOWL
+􌴤 - U+10CD24 YAKSLOW
+􌴥 - U+10CD25 BUFFYAK
+􌴦 - U+10CD26 YAKTRAP
 􌵠 - U+10CD60 PARTYAK
 􌵡 - U+10CD61 YAKKISS
 􌵢 - U+10CD62 THOUSANDYAKSTARE
@@ -52,6 +55,8 @@ Yak Emoji (limited cross-platform support)
 􌵧 - U+10CD67 BABYAK
 􌵨 - U+10CD68 YAKKETYSAX
 􌵩 - U+10CD69 YAKBANE
+􌵪 - U+10CD6A YAKTHINK
+􌵫 - U+10CD6B HYPERYAKKIE
 􌶐 - U+10CD90 YAKSTACK
 􌶑 - U+10CD91 YAKCHAIN
 􌶒 - U+10CD92 YAKRING
@@ -106,9 +111,62 @@ Emoji Tag Sequence Flags (limited cross-platform support)
 🏴󠁦󠁩󠀱󠀶󠁿 - U+1F3F4 U+E0066 U+E0069 U+E0031 U+E0036 U+E007F FI-16 Päijänne Tavastia
 🏴󠁦󠁩󠀱󠀷󠁿 - U+1F3F4 U+E0066 U+E0069 U+E0031 U+E0037 U+E007F FI-17 Satakunta
 🏴󠁦󠁩󠀱󠀸󠁿 - U+1F3F4 U+E0066 U+E0069 U+E0031 U+E0038 U+E007F FI-18 Uusimaa
+🏴󠁦󠁲󠁡󠁲󠁡󠁿 - U+1F3F4 U+E0066 U+E0072 U+E0061 U+E0072 U+E0061 U+E007F FR-ARA Auvergne-Rhône-Alpes
+🏴󠁦󠁲󠁢󠁦󠁣󠁿 - U+1F3F4 U+E0066 U+E0072 U+E0062 U+E0066 U+E0063 U+E007F FR-BFC Bourgogne-Franche-Comté
+🏴󠁦󠁲󠁢󠁲󠁥󠁿 - U+1F3F4 U+E0066 U+E0072 U+E0062 U+E0072 U+E0065 U+E007F FR-BRE Bretagne
+🏴󠁦󠁲󠁣󠁯󠁲󠁿 - U+1F3F4 U+E0066 U+E0072 U+E0063 U+E006F U+E0072 U+E007F FR-COR Corse
+🏴󠁦󠁲󠁣󠁶󠁬󠁿 - U+1F3F4 U+E0066 U+E0072 U+E0063 U+E0076 U+E006C U+E007F FR-CVL Centre-Val de Loire
+🏴󠁦󠁲󠁯󠁣󠁣󠁿 - U+1F3F4 U+E0066 U+E0072 U+E006F U+E0063 U+E0063 U+E007F FR-OCC Occitanie 
+🏴󠁦󠁲󠁮󠁡󠁱󠁿 - U+1F3F4 U+E0066 U+E0072 U+E006E U+E0061 U+E0071 U+E007F FR-NAQ Nouvelle-Aquitaine
+🏴󠁦󠁲󠁮󠁯󠁲󠁿 - U+1F3F4 U+E0066 U+E0072 U+E006E U+E006F U+E0072 U+E007F FR-NOR Normandie
+🏴󠁦󠁲󠁰󠁡󠁣󠁿 - U+1F3F4 U+E0066 U+E0072 U+E0070 U+E0061 U+E0063 U+E007F FR-PAC Provence-Alpes-Côte-d’Azur
+🏴󠁦󠁲󠁰󠁤󠁬󠁿 - U+1F3F4 U+E0066 U+E0072 U+E0070 U+E0064 U+E006C U+E007F FR-PDL Pays-de-la-Loire
 🏴󠁩󠁥󠁬󠁿 - U+1F3F4 U+E0069 U+E0065 U+E006C U+E007F         IE-L Leinster
 🏴󠁩󠁥󠁭󠁿 - U+1F3F4 U+E0069 U+E0065 U+E006D U+E007F         IE-M Munster
 🏴󠁩󠁥󠁵󠁿 - U+1F3F4 U+E0069 U+E0065 U+E0075 U+E007F         IE-U Ulster
+🏴󠁬󠁲󠁢󠁭󠁿 - U+1F3F4 U+E006C U+E0072 U+E0062 U+E006D U+E007F LR-BM Bomi
+🏴󠁬󠁲󠁢󠁧󠁿 - U+1F3F4 U+E006C U+E0072 U+E0062 U+E0067 U+E007F LR-BG Bong
+🏴󠁬󠁲󠁧󠁰󠁿 - U+1F3F4 U+E006C U+E0072 U+E0067 U+E0070 U+E007F LR-GP Gbarpolu
+🏴󠁬󠁲󠁧󠁢󠁿 - U+1F3F4 U+E006C U+E0072 U+E0067 U+E0062 U+E007F LR-GB Grand Bassa
+🏴󠁬󠁲󠁣󠁭󠁿 - U+1F3F4 U+E006C U+E0072 U+E0063 U+E006D U+E007F LR-CM Grand Cape Mount
+🏴󠁬󠁲󠁧󠁧󠁿 - U+1F3F4 U+E006C U+E0072 U+E0067 U+E0067 U+E007F LR-GG Grand Gedeh
+🏴󠁬󠁲󠁧󠁫󠁿 - U+1F3F4 U+E006C U+E0072 U+E0067 U+E006B U+E007F LR-GK Grand Kru
+🏴󠁬󠁲󠁬󠁯󠁿 - U+1F3F4 U+E006C U+E0072 U+E006C U+E006F U+E007F LR-LO Lofa
+🏴󠁬󠁲󠁭󠁧󠁿 - U+1F3F4 U+E006C U+E0072 U+E006D U+E0067 U+E007F LR-MG Margibi
+🏴󠁬󠁲󠁭󠁯󠁿 - U+1F3F4 U+E006C U+E0072 U+E006D U+E006F U+E007F LR-MO Montserrado
+🏴󠁬󠁲󠁭󠁹󠁿 - U+1F3F4 U+E006C U+E0072 U+E006D U+E0079 U+E007F LR-MY Maryland
+🏴󠁬󠁲󠁮󠁩󠁿 - U+1F3F4 U+E006C U+E0072 U+E006E U+E0069 U+E007F LR-NI Nimba
+🏴󠁬󠁲󠁲󠁩󠁿 - U+1F3F4 U+E006C U+E0072 U+E0072 U+E0069 U+E007F LR-RI Rivercess
+🏴󠁬󠁲󠁲󠁧󠁿 - U+1F3F4 U+E006C U+E0072 U+E0072 U+E0067 U+E007F LR-RG River Gee
+🏴󠁬󠁲󠁳󠁩󠁿 - U+1F3F4 U+E006C U+E0072 U+E0073 U+E0069 U+E007F LR-SI Sinoe
+🏴󠁮󠁯󠀰󠀱󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0031 U+E007F NO-01 Østfold
+🏴󠁮󠁯󠀰󠀲󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0032 U+E007F NO-02 Akershus
+🏴󠁮󠁯󠀰󠀳󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0033 U+E007F NO-03 Oslo
+🏴󠁮󠁯󠀰󠀴󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0034 U+E007F NO-04 Hedmark
+🏴󠁮󠁯󠀰󠀵󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0035 U+E007F NO-05 Oppland
+🏴󠁮󠁯󠀰󠀶󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0036 U+E007F NO-06 Buskerud
+🏴󠁮󠁯󠀰󠀷󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0037 U+E007F NO-07 Vestfold
+🏴󠁮󠁯󠀰󠀸󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0038 U+E007F NO-08 Telemark
+🏴󠁮󠁯󠀰󠀹󠁿 - U+1F3F4 U+E006E U+E006F U+E0030 U+E0039 U+E007F NO-09 Aust-Agder
+🏴󠁮󠁯󠀱󠀰󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0030 U+E007F NO-10 Vest-Agder
+🏴󠁮󠁯󠀱󠀱󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0031 U+E007F NO-11 Rogaland
+🏴󠁮󠁯󠀱󠀲󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0032 U+E007F NO-12 Hordaland
+🏴󠁮󠁯󠀱󠀴󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0034 U+E007F NO-14 Fjordane
+🏴󠁮󠁯󠀱󠀵󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0035 U+E007F NO-15 Møre og Romsdal
+🏴󠁮󠁯󠀱󠀶󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0036 U+E007F NO-16 Sør-Trøndelag
+🏴󠁮󠁯󠀱󠀷󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0037 U+E007F NO-17 Nord-Trøndelag
+🏴󠁮󠁯󠀱󠀸󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0038 U+E007F NO-18 Nordland
+🏴󠁮󠁯󠀱󠀹󠁿 - U+1F3F4 U+E006E U+E006F U+E0031 U+E0039 U+E007F NO-19 Troms
+🏴󠁮󠁯󠀲󠀰󠁿 - U+1F3F4 U+E006E U+E006F U+E0032 U+E0030 U+E007F NO-20 Finnmark
+🏴󠁮󠁯󠀲󠀱󠁿 - U+1F3F4 U+E006E U+E006F U+E0032 U+E0031 U+E007F NO-21 Svalbard
+🏴󠁮󠁯󠀲󠀲󠁿 - U+1F3F4 U+E006E U+E006F U+E0032 U+E0032 U+E007F NO-22 Jan Mayen
+🏴󠁮󠁯󠀳󠀰󠁿 - U+1F3F4 U+E006E U+E006F U+E0033 U+E0030 U+E007F NO-30 Viken
+🏴󠁮󠁯󠀳󠀴󠁿 - U+1F3F4 U+E006E U+E006F U+E0033 U+E0034 U+E007F NO-34 Innlandet
+🏴󠁮󠁯󠀳󠀸󠁿 - U+1F3F4 U+E006E U+E006F U+E0033 U+E0038 U+E007F NO-38 Vestfold og Telemark
+🏴󠁮󠁯󠀴󠀲󠁿 - U+1F3F4 U+E006E U+E006F U+E0034 U+E0032 U+E007F NO-42 Agder
+🏴󠁮󠁯󠀴󠀶󠁿 - U+1F3F4 U+E006E U+E006F U+E0034 U+E0036 U+E007F NO-46 Vestland
+🏴󠁮󠁯󠀵󠀰󠁿 - U+1F3F4 U+E006E U+E006F U+E0035 U+E0030 U+E007F NO-50 Trøndelag
+🏴󠁮󠁯󠀵󠀴󠁿 - U+1F3F4 U+E006E U+E006F U+E0035 U+E0034 U+E007F NO-54 Troms og Finnmark
 🏴󠁳󠁥󠁭󠁿 - U+1F3F4 U+E0073 U+E0065 U+E006D U+E007F         SE-M  Skåne
 🏴󠁳󠁫󠁢󠁣󠁿 - U+1F3F4 U+E0073 U+E006B U+E0062 U+E0063 U+E007F SK-BC Banská Bystrica
 🏴󠁳󠁫󠁢󠁬󠁿 - U+1F3F4 U+E0073 U+E006B U+E0062 U+E006C U+E007F SK-BL Bratislava
@@ -145,3 +203,4 @@ Emoji Tag Sequence Flags (limited cross-platform support)
 🏴󠁵󠁡󠀷󠀱󠁿 - U+1F3F4 U+E0075 U+E0061 U+E0037 U+E0031 U+E007F UA-71 Cherkashchyna
 🏴󠁵󠁡󠀷󠀴󠁿 - U+1F3F4 U+E0075 U+E0061 U+E0037 U+E0034 U+E007F UA-74 Chernihivshchyna
 🏴󠁵󠁡󠀷󠀷󠁿 - U+1F3F4 U+E0075 U+E0061 U+E0037 U+E0037 U+E007F UA-77 Chernivtsi Oblast
+🏴󠁺󠁷󠁨󠁡󠁿 - U+1F3F4 U+E007A U+E0077 U+E0068 U+E0061 U+E007F ZW-HA Harare

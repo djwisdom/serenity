@@ -11,11 +11,11 @@
 #include <AK/Assertions.h>
 #include <AK/BitCast.h>
 #include <AK/Concepts.h>
+#include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/Forward.h>
 #include <AK/Function.h>
 #include <AK/Result.h>
-#include <AK/String.h>
 #include <AK/Types.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/GCPtr.h>
@@ -292,7 +292,7 @@ public:
     {
         VERIFY(is_number());
         if (is_int32())
-            return static_cast<i32>(m_value.encoded);
+            return as_i32();
         return m_value.as_double;
     }
 
@@ -368,7 +368,7 @@ public:
 
     u64 encoded() const { return m_value.encoded; }
 
-    ThrowCompletionOr<String> to_string(VM&) const;
+    ThrowCompletionOr<DeprecatedString> to_string(VM&) const;
     ThrowCompletionOr<Utf16String> to_utf16_string(VM&) const;
     ThrowCompletionOr<PrimitiveString*> to_primitive_string(VM&);
     ThrowCompletionOr<Value> to_primitive(VM&, PreferredType preferred_type = PreferredType::Default) const;
@@ -395,7 +395,7 @@ public:
     ThrowCompletionOr<Value> get(VM&, PropertyKey const&) const;
     ThrowCompletionOr<FunctionObject*> get_method(VM&, PropertyKey const&) const;
 
-    String to_string_without_side_effects() const;
+    DeprecatedString to_string_without_side_effects() const;
 
     Value value_or(Value fallback) const
     {
@@ -404,7 +404,7 @@ public:
         return *this;
     }
 
-    String typeof() const;
+    DeprecatedString typeof() const;
 
     bool operator==(Value const&) const;
 
@@ -498,7 +498,7 @@ private:
     friend ThrowCompletionOr<Value> less_than(VM&, Value lhs, Value rhs);
     friend ThrowCompletionOr<Value> less_than_equals(VM&, Value lhs, Value rhs);
     friend ThrowCompletionOr<Value> add(VM&, Value lhs, Value rhs);
-    friend bool same_value_non_numeric(Value lhs, Value rhs);
+    friend bool same_value_non_number(Value lhs, Value rhs);
 };
 
 inline Value js_undefined()
@@ -559,7 +559,7 @@ ThrowCompletionOr<bool> is_loosely_equal(VM&, Value lhs, Value rhs);
 bool is_strictly_equal(Value lhs, Value rhs);
 bool same_value(Value lhs, Value rhs);
 bool same_value_zero(Value lhs, Value rhs);
-bool same_value_non_numeric(Value lhs, Value rhs);
+bool same_value_non_number(Value lhs, Value rhs);
 ThrowCompletionOr<TriState> is_less_than(VM&, Value lhs, Value rhs, bool left_first);
 
 double to_integer_or_infinity(double);
@@ -568,7 +568,7 @@ enum class NumberToStringMode {
     WithExponent,
     WithoutExponent,
 };
-String number_to_string(double, NumberToStringMode = NumberToStringMode::WithExponent);
+DeprecatedString number_to_string(double, NumberToStringMode = NumberToStringMode::WithExponent);
 Optional<Value> string_to_number(StringView);
 
 inline bool Value::operator==(Value const& value) const { return same_value(*this, value); }
@@ -601,7 +601,8 @@ public:
     }
 
     template<typename U = JS::Value>
-    explicit(!IsConvertible<U&&, JS::Value>) Optional(U&& value) requires(!IsSame<RemoveCVReference<U>, Optional<JS::Value>> && IsConstructible<JS::Value, U&&>)
+    explicit(!IsConvertible<U&&, JS::Value>) Optional(U&& value)
+    requires(!IsSame<RemoveCVReference<U>, Optional<JS::Value>> && IsConstructible<JS::Value, U &&>)
         : m_value(forward<U>(value))
     {
     }

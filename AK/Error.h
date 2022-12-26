@@ -37,6 +37,13 @@ public:
         return from_string_view(StringView { string_literal, N - 1 });
     }
 
+    // Note: Don't call this from C++; it's here for Jakt interop (as the name suggests).
+    template<SameAs<StringView> T>
+    ALWAYS_INLINE static Error __jakt_from_string_literal(T string)
+    {
+        return from_string_view(string);
+    }
+
     bool operator==(Error const& other) const
     {
         return m_code == other.m_code && m_string_literal == other.m_string_literal && m_syscall == other.m_syscall;
@@ -61,27 +68,56 @@ private:
     }
 
     Error(StringView syscall_name, int rc)
-        : m_code(-rc)
-        , m_string_literal(syscall_name)
+        : m_string_literal(syscall_name)
+        , m_code(-rc)
         , m_syscall(true)
     {
     }
 
-    int m_code { 0 };
     StringView m_string_literal;
+    int m_code { 0 };
     bool m_syscall { false };
 };
 
-template<typename T, typename ErrorType>
+template<typename T, typename E>
 class [[nodiscard]] ErrorOr {
 public:
-    ErrorOr() requires(IsSame<T, Empty>)
+    using ResultType = T;
+    using ErrorType = E;
+
+    ErrorOr()
+    requires(IsSame<T, Empty>)
         : m_value_or_error(Empty {})
     {
     }
 
+    ALWAYS_INLINE ErrorOr(ErrorOr&&) = default;
+    ALWAYS_INLINE ErrorOr(ErrorOr const&) = default;
+    ALWAYS_INLINE ErrorOr& operator=(ErrorOr&&) = default;
+    ALWAYS_INLINE ErrorOr& operator=(ErrorOr const&) = default;
+
     template<typename U>
-    ALWAYS_INLINE ErrorOr(U&& value) requires(!IsSame<RemoveCVReference<U>, ErrorOr<T, ErrorType>>)
+    ALWAYS_INLINE ErrorOr(ErrorOr<U, ErrorType> const& value)
+        : m_value_or_error(value.m_value_or_error.visit([](U const& v) -> Variant<T, ErrorType> { return v; }, [](ErrorType const& error) -> Variant<T, ErrorType> { return error; }))
+    {
+    }
+
+    template<typename U>
+    ALWAYS_INLINE ErrorOr(ErrorOr<U, ErrorType>& value)
+        : m_value_or_error(value.m_value_or_error.visit([](U& v) { return Variant<T, ErrorType>(move(v)); }, [](ErrorType& error) { return Variant<T, ErrorType>(move(error)); }))
+    {
+    }
+
+    template<typename U>
+    ALWAYS_INLINE ErrorOr(ErrorOr<U, ErrorType>&& value)
+        : m_value_or_error(value.visit([](U& v) { return Variant<T, ErrorType>(move(v)); }, [](ErrorType& error) { return Variant<T, ErrorType>(move(error)); }))
+    {
+    }
+
+    template<typename U>
+    ALWAYS_INLINE ErrorOr(U&& value)
+    requires(
+        requires { T(declval<U>()); } || requires { ErrorType(declval<RemoveCVReference<U>>()); })
         : m_value_or_error(forward<U>(value))
     {
     }
@@ -120,10 +156,13 @@ private:
 template<typename ErrorType>
 class [[nodiscard]] ErrorOr<void, ErrorType> : public ErrorOr<Empty, ErrorType> {
 public:
+    using ResultType = void;
     using ErrorOr<Empty, ErrorType>::ErrorOr;
 };
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::Error;
 using AK::ErrorOr;
+#endif

@@ -33,6 +33,7 @@ HTMLFormElement::~HTMLFormElement() = default;
 void HTMLFormElement::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
+    visitor.visit(m_elements);
     for (auto& element : m_associated_elements)
         visitor.visit(element.ptr());
 }
@@ -151,13 +152,13 @@ void HTMLFormElement::remove_associated_element(Badge<FormAssociatedElement>, HT
 }
 
 // https://html.spec.whatwg.org/#dom-fs-action
-String HTMLFormElement::action() const
+DeprecatedString HTMLFormElement::action() const
 {
     auto value = attribute(HTML::AttributeNames::action);
 
     // Return the current URL if the action attribute is null or an empty string
     if (value.is_null() || value.is_empty()) {
-        return document().url().to_string();
+        return document().url().to_deprecated_string();
     }
 
     return value;
@@ -185,11 +186,12 @@ static bool is_form_control(DOM::Element const& element)
 // https://html.spec.whatwg.org/multipage/forms.html#dom-form-elements
 JS::NonnullGCPtr<DOM::HTMLCollection> HTMLFormElement::elements() const
 {
-    // FIXME: This should return the same HTMLFormControlsCollection object every time,
-    //        but that would cause a reference cycle since HTMLCollection refs the root.
-    return DOM::HTMLCollection::create(const_cast<HTMLFormElement&>(*this), [](Element const& element) {
-        return is_form_control(element);
-    });
+    if (!m_elements) {
+        m_elements = DOM::HTMLCollection::create(const_cast<HTMLFormElement&>(*this), [](Element const& element) {
+            return is_form_control(element);
+        });
+    }
+    return *m_elements;
 }
 
 // https://html.spec.whatwg.org/multipage/forms.html#dom-form-length

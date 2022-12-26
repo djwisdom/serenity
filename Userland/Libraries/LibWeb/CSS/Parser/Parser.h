@@ -43,7 +43,7 @@ public:
 
     bool in_quirks_mode() const;
     DOM::Document const* document() const { return m_document; }
-    AK::URL complete_url(String const&) const;
+    AK::URL complete_url(DeprecatedString const&) const;
 
     PropertyID current_property_id() const { return m_current_property_id; }
     void set_current_property_id(PropertyID property_id) { m_current_property_id = property_id; }
@@ -59,7 +59,7 @@ private:
 
 class Parser {
 public:
-    Parser(ParsingContext const&, StringView input, String const& encoding = "utf-8");
+    Parser(ParsingContext const&, StringView input, DeprecatedString const& encoding = "utf-8");
     ~Parser() = default;
 
     CSSStyleSheet* parse_as_css_stylesheet(Optional<AK::URL> location);
@@ -255,7 +255,7 @@ private:
     Optional<GridMinMax> parse_min_max(Vector<ComponentValue> const&);
     Optional<GridRepeat> parse_repeat(Vector<ComponentValue> const&);
     Optional<ExplicitGridTrack> parse_track_sizing_function(ComponentValue const&);
-    Optional<PositionValue> parse_position(TokenStream<ComponentValue>&);
+    Optional<PositionValue> parse_position(TokenStream<ComponentValue>&, PositionValue initial_value = PositionValue::center());
 
     enum class AllowedDataUrlType {
         None,
@@ -264,8 +264,12 @@ private:
     };
     Optional<AK::URL> parse_url_function(ComponentValue const&, AllowedDataUrlType = AllowedDataUrlType::None);
 
+    Optional<Vector<LinearColorStopListElement>> parse_linear_color_stop_list(TokenStream<ComponentValue>&);
+    Optional<Vector<AngularColorStopListElement>> parse_angular_color_stop_list(TokenStream<ComponentValue>&);
+
     RefPtr<StyleValue> parse_linear_gradient_function(ComponentValue const&);
     RefPtr<StyleValue> parse_conic_gradient_function(ComponentValue const&);
+    RefPtr<StyleValue> parse_radial_gradient_function(ComponentValue const&);
 
     ParseErrorOr<NonnullRefPtr<StyleValue>> parse_css_value(PropertyID, TokenStream<ComponentValue>&);
     RefPtr<StyleValue> parse_css_value(ComponentValue const&);
@@ -349,7 +353,7 @@ private:
 
     struct PropertiesAndCustomProperties {
         Vector<StyleProperty> properties;
-        HashMap<String, StyleProperty> custom_properties;
+        HashMap<DeprecatedString, StyleProperty> custom_properties;
     };
 
     PropertiesAndCustomProperties extract_properties(Vector<DeclarationOrAtRule> const&);

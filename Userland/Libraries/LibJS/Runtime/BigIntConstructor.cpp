@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/BigIntConstructor.h>
@@ -56,7 +56,7 @@ ThrowCompletionOr<Value> BigIntConstructor::call()
 }
 
 // 21.2.1.1 BigInt ( value ), https://tc39.es/ecma262/#sec-bigint-constructor-number-value
-ThrowCompletionOr<Object*> BigIntConstructor::construct(FunctionObject&)
+ThrowCompletionOr<NonnullGCPtr<Object>> BigIntConstructor::construct(FunctionObject&)
 {
     return vm().throw_completion<TypeError>(ErrorType::NotAConstructor, "BigInt");
 }
@@ -80,11 +80,11 @@ JS_DEFINE_NATIVE_FUNCTION(BigIntConstructor::as_int_n)
     // NOTE: Some of the below conditionals are non-standard, but are to protect SignedBigInteger from
     //       allocating an absurd amount of memory if `bits - 1` overflows to NumericLimits<size_t>::max.
     if ((bits == 0) && (mod >= BIGINT_ONE))
-        return js_bigint(vm, mod.minus(bits_shift_left));
+        return BigInt::create(vm, mod.minus(bits_shift_left));
     if ((bits > 0) && (mod >= BIGINT_ONE.shift_left(bits - 1)))
-        return js_bigint(vm, mod.minus(bits_shift_left));
+        return BigInt::create(vm, mod.minus(bits_shift_left));
 
-    return js_bigint(vm, mod);
+    return BigInt::create(vm, mod);
 }
 
 // 21.2.2.2 BigInt.asUintN ( bits, bigint ), https://tc39.es/ecma262/#sec-bigint.asuintn
@@ -99,7 +99,7 @@ JS_DEFINE_NATIVE_FUNCTION(BigIntConstructor::as_uint_n)
     // 3. Return the BigInt value that represents ℝ(bigint) modulo 2bits.
     // FIXME: For large values of `bits`, this can likely be improved with a SignedBigInteger API to
     //        drop the most significant bits.
-    return js_bigint(vm, modulo(bigint->big_integer(), BIGINT_ONE.shift_left(bits)));
+    return BigInt::create(vm, modulo(bigint->big_integer(), BIGINT_ONE.shift_left(bits)));
 }
 
 }

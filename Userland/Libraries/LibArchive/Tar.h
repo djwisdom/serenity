@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <AK/StringView.h>
 #include <string.h>
 #include <sys/types.h>
@@ -84,7 +84,7 @@ static void set_field(char (&field)[N], TSource&& source)
 template<class TSource, size_t N>
 static void set_octal_field(char (&field)[N], TSource&& source)
 {
-    set_field(field, String::formatted("{:o}", forward<TSource>(source)));
+    set_field(field, DeprecatedString::formatted("{:o}", forward<TSource>(source)));
 }
 
 class [[gnu::packed]] TarFileHeader {
@@ -129,6 +129,7 @@ public:
     unsigned expected_checksum() const;
     void calculate_checksum();
 
+    bool is_zero_block() const;
     bool content_is_like_extended_header() const;
 
     void set_filename_and_prefix(StringView filename);

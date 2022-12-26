@@ -23,7 +23,7 @@ struct Environment {
     virtual ~Environment() = default;
 
     // An id https://html.spec.whatwg.org/multipage/webappapis.html#concept-environment-id
-    String id;
+    DeprecatedString id;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#concept-environment-creation-url
     AK::URL creation_url;
@@ -71,7 +71,7 @@ struct EnvironmentSettingsObject
     virtual JS::GCPtr<DOM::Document> responsible_document() = 0;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#api-url-character-encoding
-    virtual String api_url_character_encoding() = 0;
+    virtual DeprecatedString api_url_character_encoding() = 0;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#api-base-url
     virtual AK::URL api_base_url() = 0;
@@ -84,6 +84,8 @@ struct EnvironmentSettingsObject
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#concept-settings-object-cross-origin-isolated-capability
     virtual CanUseCrossOriginIsolatedAPIs cross_origin_isolated_capability() = 0;
+
+    AK::URL parse_url(StringView);
 
     JS::Realm& realm();
     JS::Object& global_object();
@@ -111,7 +113,7 @@ struct EnvironmentSettingsObject
     bool is_scripting_enabled() const;
     bool is_scripting_disabled() const;
 
-    bool module_type_allowed(String const& module_type) const;
+    bool module_type_allowed(DeprecatedString const& module_type) const;
 
     void disallow_further_import_maps();
 
@@ -131,7 +133,7 @@ private:
     Vector<JS::Promise*> m_outstanding_rejected_promises_weak_set;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#about-to-be-notified-rejected-promises-list
-    Vector<JS::NonnullGCPtr<JS::Promise>> m_about_to_be_notified_rejected_promises_list;
+    Vector<JS::Handle<JS::Promise>> m_about_to_be_notified_rejected_promises_list;
 };
 
 EnvironmentSettingsObject& incumbent_settings_object();
@@ -143,6 +145,9 @@ JS::Realm& relevant_realm(JS::Object const&);
 EnvironmentSettingsObject& relevant_settings_object(JS::Object const&);
 EnvironmentSettingsObject& relevant_settings_object(DOM::Node const&);
 JS::Object& relevant_global_object(JS::Object const&);
+JS::Realm& entry_realm();
+EnvironmentSettingsObject& entry_settings_object();
+JS::Object& entry_global_object();
 [[nodiscard]] bool is_secure_context(Environment const&);
 [[nodiscard]] bool is_non_secure_context(Environment const&);
 

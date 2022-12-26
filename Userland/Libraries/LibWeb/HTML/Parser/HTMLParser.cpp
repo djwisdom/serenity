@@ -121,14 +121,13 @@ static bool is_html_integration_point(DOM::Element const& element)
     return false;
 }
 
-HTMLParser::HTMLParser(DOM::Document& document, StringView input, String const& encoding)
+HTMLParser::HTMLParser(DOM::Document& document, StringView input, DeprecatedString const& encoding)
     : m_tokenizer(input, encoding)
     , m_scripting_enabled(document.is_scripting_enabled())
     , m_document(JS::make_handle(document))
 {
     m_tokenizer.set_parser({}, *this);
     m_document->set_parser({}, *this);
-    m_document->set_should_invalidate_styles_on_attribute_changes(false);
     auto standardized_encoding = TextCodec::get_standardized_encoding(encoding);
     VERIFY(standardized_encoding.has_value());
     m_document->set_encoding(standardized_encoding.value());
@@ -144,7 +143,6 @@ HTMLParser::HTMLParser(DOM::Document& document)
 
 HTMLParser::~HTMLParser()
 {
-    m_document->set_should_invalidate_styles_on_attribute_changes(true);
 }
 
 void HTMLParser::visit_edges(Cell::Visitor& visitor)
@@ -172,7 +170,7 @@ void HTMLParser::run()
             break;
         auto& token = optional_token.value();
 
-        dbgln_if(HTML_PARSER_DEBUG, "[{}] {}", insertion_mode_name(), token.to_string());
+        dbgln_if(HTML_PARSER_DEBUG, "[{}] {}", insertion_mode_name(), token.to_deprecated_string());
 
         // https://html.spec.whatwg.org/multipage/parsing.html#tree-construction-dispatcher
         // As each token is emitted from the tokenizer, the user agent must follow the appropriate steps from the following list, known as the tree construction dispatcher:
@@ -250,7 +248,7 @@ void HTMLParser::the_end()
     }
 
     // 6. Queue a global task on the DOM manipulation task source given the Document's relevant global object to run the following substeps:
-    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, *m_document, [document = m_document]() mutable {
+    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, *m_document, [document = m_document] {
         // 1. Set the Document's load timing info's DOM content loaded event start time to the current high resolution time given the Document's relevant global object.
         document->load_timing_info().dom_content_loaded_event_start_time = HighResolutionTime::unsafe_shared_current_time();
 
@@ -279,7 +277,7 @@ void HTMLParser::the_end()
     });
 
     // 9. Queue a global task on the DOM manipulation task source given the Document's relevant global object to run the following steps:
-    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, *m_document, [document = m_document]() mutable {
+    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, *m_document, [document = m_document] {
         // 1. Update the current document readiness to "complete".
         document->update_readiness(HTML::DocumentReadyState::Complete);
 
@@ -486,45 +484,63 @@ void HTMLParser::handle_initial(HTMLToken& token)
     process_using_the_rules_for(InsertionMode::BeforeHTML, token);
 }
 
+// https://html.spec.whatwg.org/multipage/parsing.html#the-before-html-insertion-mode
 void HTMLParser::handle_before_html(HTMLToken& token)
 {
+    // -> A DOCTYPE token
     if (token.is_doctype()) {
+        // Parse error. Ignore the token.
         log_parse_error();
         return;
     }
 
+    // -> A comment token
     if (token.is_comment()) {
+        // Insert a comment as the last child of the Document object.
         auto comment = realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment());
         MUST(document().append_child(*comment));
         return;
     }
 
+    // -> A character token that is one of U+0009 CHARACTER TABULATION, U+000A LINE FEED (LF), U+000C FORM FEED (FF), U+000D CARRIAGE RETURN (CR), or U+0020 SPACE
     if (token.is_character() && token.is_parser_whitespace()) {
+        // Ignore the token.
         return;
     }
 
+    // -> A start tag whose tag name is "html"
     if (token.is_start_tag() && token.tag_name() == HTML::TagNames::html) {
+        // Create an element for the token in the HTML namespace, with the Document as the intended parent. Append it to the Document object. Put this element in the stack of open elements.
         auto element = create_element_for(token, Namespace::HTML, document());
         MUST(document().append_child(*element));
         m_stack_of_open_elements.push(move(element));
+
+        // Switch the insertion mode to "before head".
         m_insertion_mode = InsertionMode::BeforeHead;
         return;
     }
 
+    // -> An end tag whose tag name is one of: "head", "body", "html", "br"
     if (token.is_end_tag() && token.tag_name().is_one_of(HTML::TagNames::head, HTML::TagNames::body, HTML::TagNames::html, HTML::TagNames::br)) {
+        // Act as described in the "anything else" entry below.
         goto AnythingElse;
     }
 
+    // -> Any other end tag
     if (token.is_end_tag()) {
+        // Parse error. Ignore the token.
         log_parse_error();
         return;
     }
 
+    // -> Anything else
 AnythingElse:
+    // Create an html element whose node document is the Document object. Append it to the Document object. Put this element in the stack of open elements.
     auto element = create_element(document(), HTML::TagNames::html, Namespace::HTML);
     MUST(document().append_child(*element));
     m_stack_of_open_elements.push(element);
-    // FIXME: If the Document is being loaded as part of navigation of a browsing context, then: run the application cache selection algorithm with no manifest, passing it the Document object.
+
+    // Switch the insertion mode to "before head", then reprocess the token.
     m_insertion_mode = InsertionMode::BeforeHead;
     process_using_the_rules_for(InsertionMode::BeforeHead, token);
     return;
@@ -743,7 +759,7 @@ AnythingElse:
 void HTMLParser::insert_comment(HTMLToken& token)
 {
     auto adjusted_insertion_location = find_appropriate_place_for_inserting_node();
-    adjusted_insertion_location.parent->insert_before(*realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment()), adjusted_insertion_location.insert_before_sibling);
+    adjusted_insertion_location.parent->insert_before(realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment()), adjusted_insertion_location.insert_before_sibling);
 }
 
 void HTMLParser::handle_in_head(HTMLToken& token)
@@ -806,7 +822,7 @@ void HTMLParser::handle_in_head(HTMLToken& token)
         auto element = create_element_for(token, Namespace::HTML, *adjusted_insertion_location.parent);
         auto& script_element = verify_cast<HTMLScriptElement>(*element);
         script_element.set_parser_document(Badge<HTMLParser> {}, document());
-        script_element.set_non_blocking(Badge<HTMLParser> {}, false);
+        script_element.set_force_async(Badge<HTMLParser> {}, false);
         script_element.set_source_line_number({}, token.start_position().line + 1); // FIXME: This +1 is incorrect for script tags whose script does not start on a new line
 
         if (m_parsing_fragment) {
@@ -938,7 +954,7 @@ void HTMLParser::flush_character_insertions()
 {
     if (m_character_insertion_builder.is_empty())
         return;
-    m_character_insertion_node->set_data(m_character_insertion_builder.to_string());
+    m_character_insertion_node->set_data(m_character_insertion_builder.to_deprecated_string());
     m_character_insertion_node->parent()->children_changed();
     m_character_insertion_builder.clear();
 }
@@ -1055,7 +1071,7 @@ void HTMLParser::handle_after_body(HTMLToken& token)
 
     if (token.is_comment()) {
         auto& insertion_location = m_stack_of_open_elements.first();
-        MUST(insertion_location.append_child(*realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment())));
+        MUST(insertion_location.append_child(realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment())));
         return;
     }
 
@@ -1158,7 +1174,7 @@ Create:
     auto new_element = insert_html_element(HTMLToken::make_start_tag(entry->element->local_name()));
 
     // 9. Replace the entry for entry in the list with an entry for new element.
-    m_list_of_active_formatting_elements.entries().at(index).element = JS::make_handle(new_element.ptr());
+    m_list_of_active_formatting_elements.entries().at(index).element = JS::make_handle(new_element);
 
     // 10. If the entry for new element in the list of active formatting elements is not the last entry in the list, return to the step labeled advance.
     if (index != m_list_of_active_formatting_elements.entries().size() - 1)
@@ -2131,6 +2147,7 @@ void HTMLParser::adjust_svg_tag_names(HTMLToken& token)
     token.adjust_tag_name("fepointlight", "fePointLight");
     token.adjust_tag_name("fespecularlighting", "feSpecularLighting");
     token.adjust_tag_name("fespotlight", "feSpotlight");
+    token.adjust_tag_name("foreignobject", "foreignObject");
     token.adjust_tag_name("glyphref", "glyphRef");
     token.adjust_tag_name("lineargradient", "linearGradient");
     token.adjust_tag_name("radialgradient", "radialGradient");
@@ -2243,75 +2260,114 @@ void HTMLParser::handle_text(HTMLToken& token)
         process_using_the_rules_for(m_insertion_mode, token);
         return;
     }
+
+    // -> An end tag whose tag name is "script"
     if (token.is_end_tag() && token.tag_name() == HTML::TagNames::script) {
-        // Make sure the <script> element has up-to-date text content before preparing the script.
+        // FIXME: If the active speculative HTML parser is null and the JavaScript execution context stack is empty, then perform a microtask checkpoint.
+
+        // Non-standard: Make sure the <script> element has up-to-date text content before preparing the script.
         flush_character_insertions();
 
+        // Let script be the current node (which will be a script element).
         JS::NonnullGCPtr<HTMLScriptElement> script = verify_cast<HTMLScriptElement>(current_node());
 
+        // Pop the current node off the stack of open elements.
         (void)m_stack_of_open_elements.pop();
+
+        // Switch the insertion mode to the original insertion mode.
         m_insertion_mode = m_original_insertion_mode;
+
         // Let the old insertion point have the same value as the current insertion point.
         m_tokenizer.store_insertion_point();
+
         // Let the insertion point be just before the next input character.
         m_tokenizer.update_insertion_point();
+
+        // Increment the parser's script nesting level by one.
         increment_script_nesting_level();
+
+        // If the active speculative HTML parser is null, then prepare the script element script.
+        // This might cause some script to execute, which might cause new characters to be inserted into the tokenizer,
+        // and might cause the tokenizer to output more tokens, resulting in a reentrant invocation of the parser.
         // FIXME: Check if active speculative HTML parser is null.
         script->prepare_script(Badge<HTMLParser> {});
+
+        // Decrement the parser's script nesting level by one.
         decrement_script_nesting_level();
+
+        // If the parser's script nesting level is zero, then set the parser pause flag to false.
         if (script_nesting_level() == 0)
             m_parser_pause_flag = false;
+
         // Let the insertion point have the value of the old insertion point.
         m_tokenizer.restore_insertion_point();
 
-        while (document().pending_parsing_blocking_script()) {
+        // At this stage, if the pending parsing-blocking script is not null, then:
+        if (document().pending_parsing_blocking_script()) {
+            // -> If the script nesting level is not zero:
             if (script_nesting_level() != 0) {
+                // Set the parser pause flag to true,
                 m_parser_pause_flag = true;
-                // FIXME: Abort the processing of any nested invocations of the tokenizer,
-                //        yielding control back to the caller. (Tokenization will resume when
-                //        the caller returns to the "outer" tree construction stage.)
+                // FIXME: and abort the processing of any nested invocations of the tokenizer, yielding control back to the caller.
+                //        (Tokenization will resume when the caller returns to the "outer" tree construction stage.)
                 TODO();
-            } else {
-                auto the_script = document().take_pending_parsing_blocking_script({});
-                m_tokenizer.set_blocked(true);
+            }
 
-                // If the parser's Document has a style sheet that is blocking scripts
-                // or the script's "ready to be parser-executed" flag is not set:
-                // spin the event loop until the parser's Document has no style sheet
-                // that is blocking scripts and the script's "ready to be parser-executed"
-                // flag is set.
-                if (m_document->has_a_style_sheet_that_is_blocking_scripts() || !script->is_ready_to_be_parser_executed()) {
-                    main_thread_event_loop().spin_until([&] {
-                        return !m_document->has_a_style_sheet_that_is_blocking_scripts() && script->is_ready_to_be_parser_executed();
-                    });
+            // Otherwise:
+            else {
+                // While the pending parsing-blocking script is not null:
+                while (document().pending_parsing_blocking_script()) {
+                    // 1. Let the script be the pending parsing-blocking script.
+                    // 2. Set the pending parsing-blocking script to null.
+                    auto the_script = document().take_pending_parsing_blocking_script({});
+
+                    // FIXME: 3. Start the speculative HTML parser for this instance of the HTML parser.
+
+                    // 4. Block the tokenizer for this instance of the HTML parser, such that the event loop will not run tasks that invoke the tokenizer.
+                    m_tokenizer.set_blocked(true);
+
+                    // 5. If the parser's Document has a style sheet that is blocking scripts
+                    //    or the script's ready to be parser-executed is false:
+                    if (m_document->has_a_style_sheet_that_is_blocking_scripts() || script->is_ready_to_be_parser_executed() == false) {
+                        // spin the event loop until the parser's Document has no style sheet that is blocking scripts
+                        // and the script's ready to be parser-executed becomes true.
+                        main_thread_event_loop().spin_until([&] {
+                            return !m_document->has_a_style_sheet_that_is_blocking_scripts() && script->is_ready_to_be_parser_executed();
+                        });
+                    }
+
+                    // 6. If this parser has been aborted in the meantime, return.
+                    if (m_aborted)
+                        return;
+
+                    // FIXME: 7. Stop the speculative HTML parser for this instance of the HTML parser.
+
+                    // 8. Unblock the tokenizer for this instance of the HTML parser, such that tasks that invoke the tokenizer can again be run.
+                    m_tokenizer.set_blocked(false);
+
+                    // 9. Let the insertion point be just before the next input character.
+                    m_tokenizer.update_insertion_point();
+
+                    // 10. Increment the parser's script nesting level by one (it should be zero before this step, so this sets it to one).
+                    VERIFY(script_nesting_level() == 0);
+                    increment_script_nesting_level();
+
+                    // 11. Execute the script element the script.
+                    the_script->execute_script();
+
+                    // 12. Decrement the parser's script nesting level by one.
+                    decrement_script_nesting_level();
+
+                    // If the parser's script nesting level is zero (which it always should be at this point), then set the parser pause flag to false.
+                    VERIFY(script_nesting_level() == 0);
+                    m_parser_pause_flag = false;
+
+                    // 13. Let the insertion point be undefined again.
+                    m_tokenizer.undefine_insertion_point();
                 }
-
-                if (the_script->failed_to_load())
-                    return;
-
-                VERIFY(the_script->is_ready_to_be_parser_executed());
-
-                if (m_aborted)
-                    return;
-
-                m_tokenizer.set_blocked(false);
-
-                // Let the insertion point be just before the next input character.
-                m_tokenizer.update_insertion_point();
-
-                VERIFY(script_nesting_level() == 0);
-                increment_script_nesting_level();
-
-                the_script->execute_script();
-
-                decrement_script_nesting_level();
-                VERIFY(script_nesting_level() == 0);
-                m_parser_pause_flag = false;
-
-                // Let the insertion point be undefined again.
-                m_tokenizer.undefine_insertion_point();
             }
         }
+
         return;
     }
 
@@ -3125,8 +3181,8 @@ void HTMLParser::handle_after_frameset(HTMLToken& token)
 void HTMLParser::handle_after_after_frameset(HTMLToken& token)
 {
     if (token.is_comment()) {
-        auto* comment = document().heap().allocate<DOM::Comment>(document().realm(), document(), token.comment());
-        MUST(document().append_child(*comment));
+        auto comment = document().heap().allocate<DOM::Comment>(document().realm(), document(), token.comment());
+        MUST(document().append_child(comment));
         return;
     }
 
@@ -3484,25 +3540,25 @@ Vector<JS::Handle<DOM::Node>> HTMLParser::parse_html_fragment(DOM::Element& cont
 
 JS::NonnullGCPtr<HTMLParser> HTMLParser::create_for_scripting(DOM::Document& document)
 {
-    return *document.heap().allocate_without_realm<HTMLParser>(document);
+    return document.heap().allocate_without_realm<HTMLParser>(document);
 }
 
 JS::NonnullGCPtr<HTMLParser> HTMLParser::create_with_uncertain_encoding(DOM::Document& document, ByteBuffer const& input)
 {
     if (document.has_encoding())
-        return *document.heap().allocate_without_realm<HTMLParser>(document, input, document.encoding().value());
+        return document.heap().allocate_without_realm<HTMLParser>(document, input, document.encoding().value());
     auto encoding = run_encoding_sniffing_algorithm(document, input);
     dbgln_if(HTML_PARSER_DEBUG, "The encoding sniffing algorithm returned encoding '{}'", encoding);
-    return *document.heap().allocate_without_realm<HTMLParser>(document, input, encoding);
+    return document.heap().allocate_without_realm<HTMLParser>(document, input, encoding);
 }
 
-JS::NonnullGCPtr<HTMLParser> HTMLParser::create(DOM::Document& document, StringView input, String const& encoding)
+JS::NonnullGCPtr<HTMLParser> HTMLParser::create(DOM::Document& document, StringView input, DeprecatedString const& encoding)
 {
-    return *document.heap().allocate_without_realm<HTMLParser>(document, input, encoding);
+    return document.heap().allocate_without_realm<HTMLParser>(document, input, encoding);
 }
 
 // https://html.spec.whatwg.org/multipage/parsing.html#html-fragment-serialisation-algorithm
-String HTMLParser::serialize_html_fragment(DOM::Node const& node)
+DeprecatedString HTMLParser::serialize_html_fragment(DOM::Node const& node)
 {
     // The algorithm takes as input a DOM Element, Document, or DocumentFragment referred to as the node.
     VERIFY(node.is_element() || node.is_document() || node.is_document_fragment());
@@ -3514,7 +3570,7 @@ String HTMLParser::serialize_html_fragment(DOM::Node const& node)
         // 1. If the node serializes as void, then return the empty string.
         //    (NOTE: serializes as void is defined only on elements in the spec)
         if (element.serializes_as_void())
-            return String::empty();
+            return DeprecatedString::empty();
 
         // 3. If the node is a template element, then let the node instead be the template element's template contents (a DocumentFragment node).
         //    (NOTE: This is out of order of the spec to avoid another dynamic cast. The second step just creates a string builder, so it shouldn't matter)
@@ -3527,7 +3583,7 @@ String HTMLParser::serialize_html_fragment(DOM::Node const& node)
         Yes,
     };
 
-    auto escape_string = [](StringView string, AttributeMode attribute_mode) -> String {
+    auto escape_string = [](StringView string, AttributeMode attribute_mode) -> DeprecatedString {
         // https://html.spec.whatwg.org/multipage/parsing.html#escapingString
         StringBuilder builder;
         for (auto& ch : string) {
@@ -3548,7 +3604,7 @@ String HTMLParser::serialize_html_fragment(DOM::Node const& node)
             else
                 builder.append(ch);
         }
-        return builder.to_string();
+        return builder.to_deprecated_string();
     };
 
     // 2. Let s be a string, and initialize it to the empty string.
@@ -3566,7 +3622,7 @@ String HTMLParser::serialize_html_fragment(DOM::Node const& node)
 
             // 1. If current node is an element in the HTML namespace, the MathML namespace, or the SVG namespace, then let tagname be current node's local name.
             //    Otherwise, let tagname be current node's qualified name.
-            String tag_name;
+            DeprecatedString tag_name;
 
             if (element.namespace_().is_one_of(Namespace::HTML, Namespace::MathML, Namespace::SVG))
                 tag_name = element.local_name();
@@ -3696,7 +3752,7 @@ String HTMLParser::serialize_html_fragment(DOM::Node const& node)
     });
 
     // 5. Return s.
-    return builder.to_string();
+    return builder.to_deprecated_string();
 }
 
 // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#current-dimension-value

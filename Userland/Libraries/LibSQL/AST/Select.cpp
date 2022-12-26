@@ -24,8 +24,6 @@ ResultOr<ResultSet> Select::execute(ExecutionContext& context) const
             return Result { SQLCommand::Select, SQLErrorCode::NotYetImplemented, "Sub-selects are not yet implemented"sv };
 
         auto table_def = TRY(context.database->get_table(table_descriptor.schema_name(), table_descriptor.table_name()));
-        if (!table_def)
-            return Result { SQLCommand::Select, SQLErrorCode::TableDoesNotExist, table_descriptor.table_name() };
 
         if (result_column_list.size() == 1 && result_column_list[0].type() == ResultType::All) {
             for (auto& col : table_def->columns()) {
@@ -121,7 +119,7 @@ ResultOr<ResultSet> Select::execute(ExecutionContext& context) const
 
         auto limit = TRY(m_limit_clause->limit_expression()->evaluate(context));
         if (!limit.is_null()) {
-            auto limit_value_maybe = limit.to_u32();
+            auto limit_value_maybe = limit.to_int<size_t>();
             if (!limit_value_maybe.has_value())
                 return Result { SQLCommand::Select, SQLErrorCode::SyntaxError, "LIMIT clause must evaluate to an integer value"sv };
 
@@ -131,7 +129,7 @@ ResultOr<ResultSet> Select::execute(ExecutionContext& context) const
         if (m_limit_clause->offset_expression() != nullptr) {
             auto offset = TRY(m_limit_clause->offset_expression()->evaluate(context));
             if (!offset.is_null()) {
-                auto offset_value_maybe = offset.to_u32();
+                auto offset_value_maybe = offset.to_int<size_t>();
                 if (!offset_value_maybe.has_value())
                     return Result { SQLCommand::Select, SQLErrorCode::SyntaxError, "OFFSET clause must evaluate to an integer value"sv };
 

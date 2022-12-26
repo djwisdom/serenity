@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/Date.h>
@@ -23,7 +24,7 @@ namespace JS::Temporal {
 
 // 3 Temporal.PlainDate Objects, https://tc39.es/proposal-temporal/#sec-temporal-plaindate-objects
 PlainDate::PlainDate(i32 year, u8 month, u8 day, Object& calendar, Object& prototype)
-    : Object(prototype)
+    : Object(ConstructWithPrototypeTag::Tag, prototype)
     , m_iso_year(year)
     , m_iso_month(month)
     , m_iso_day(day)
@@ -74,9 +75,9 @@ ThrowCompletionOr<PlainDate*> create_temporal_date(VM& vm, i32 iso_year, u8 iso_
     // 10. Set object.[[ISOMonth]] to isoMonth.
     // 11. Set object.[[ISODay]] to isoDay.
     // 12. Set object.[[Calendar]] to calendar.
-    auto* object = TRY(ordinary_create_from_constructor<PlainDate>(vm, *new_target, &Intrinsics::temporal_plain_date_prototype, iso_year, iso_month, iso_day, calendar));
+    auto object = TRY(ordinary_create_from_constructor<PlainDate>(vm, *new_target, &Intrinsics::temporal_plain_date_prototype, iso_year, iso_month, iso_day, calendar));
 
-    return object;
+    return object.ptr();
 }
 
 // 3.5.2 ToTemporalDate ( item [ , options ] ), https://tc39.es/proposal-temporal/#sec-temporal-totemporaldate
@@ -148,7 +149,7 @@ ThrowCompletionOr<PlainDate*> to_temporal_date(VM& vm, Value item, Object const*
     VERIFY(is_valid_iso_date(result.year, result.month, result.day));
 
     // 8. Let calendar be ? ToTemporalCalendarWithISODefault(result.[[Calendar]]).
-    auto* calendar = TRY(to_temporal_calendar_with_iso_default(vm, result.calendar.has_value() ? js_string(vm, *result.calendar) : js_undefined()));
+    auto* calendar = TRY(to_temporal_calendar_with_iso_default(vm, result.calendar.has_value() ? PrimitiveString::create(vm, *result.calendar) : js_undefined()));
 
     // 9. Return ? CreateTemporalDate(result.[[Year]], result.[[Month]], result.[[Day]], calendar).
     return create_temporal_date(vm, result.year, result.month, result.day, *calendar);
@@ -394,14 +395,14 @@ ISODateRecord balance_iso_date(double year, double month, double day)
 }
 
 // 3.5.7 PadISOYear ( y ), https://tc39.es/proposal-temporal/#sec-temporal-padisoyear
-String pad_iso_year(i32 y)
+DeprecatedString pad_iso_year(i32 y)
 {
     // 1. Assert: y is an integer.
 
     // 2. If y ≥ 0 and y ≤ 9999, then
     if (y >= 0 && y <= 9999) {
         // a. Return ToZeroPaddedDecimalString(y, 4).
-        return String::formatted("{:04}", y);
+        return DeprecatedString::formatted("{:04}", y);
     }
 
     // 3. If y > 0, let yearSign be "+"; otherwise, let yearSign be "-".
@@ -409,11 +410,11 @@ String pad_iso_year(i32 y)
 
     // 4. Let year be ToZeroPaddedDecimalString(abs(y), 6).
     // 5. Return the string-concatenation of yearSign and year.
-    return String::formatted("{}{:06}", year_sign, abs(y));
+    return DeprecatedString::formatted("{}{:06}", year_sign, abs(y));
 }
 
 // 3.5.8 TemporalDateToString ( temporalDate, showCalendar ), https://tc39.es/proposal-temporal/#sec-temporal-temporaldatetostring
-ThrowCompletionOr<String> temporal_date_to_string(VM& vm, PlainDate& temporal_date, StringView show_calendar)
+ThrowCompletionOr<DeprecatedString> temporal_date_to_string(VM& vm, PlainDate& temporal_date, StringView show_calendar)
 {
     // 1. Assert: Type(temporalDate) is Object.
     // 2. Assert: temporalDate has an [[InitializedTemporalDate]] internal slot.
@@ -422,16 +423,16 @@ ThrowCompletionOr<String> temporal_date_to_string(VM& vm, PlainDate& temporal_da
     auto year = pad_iso_year(temporal_date.iso_year());
 
     // 4. Let month be ToZeroPaddedDecimalString(monthDay.[[ISOMonth]], 2).
-    auto month = String::formatted("{:02}", temporal_date.iso_month());
+    auto month = DeprecatedString::formatted("{:02}", temporal_date.iso_month());
 
     // 5. Let day be ToZeroPaddedDecimalString(monthDay.[[ISODay]], 2).
-    auto day = String::formatted("{:02}", temporal_date.iso_day());
+    auto day = DeprecatedString::formatted("{:02}", temporal_date.iso_day());
 
     // 6. Let calendar be ? MaybeFormatCalendarAnnotation(temporalDate.[[Calendar]], showCalendar).
     auto calendar = TRY(maybe_format_calendar_annotation(vm, &temporal_date.calendar(), show_calendar));
 
     // 7. Return the string-concatenation of year, the code unit 0x002D (HYPHEN-MINUS), month, the code unit 0x002D (HYPHEN-MINUS), day, and calendar.
-    return String::formatted("{}-{}-{}{}", year, month, day, calendar);
+    return DeprecatedString::formatted("{}-{}-{}{}", year, month, day, calendar);
 }
 
 // 3.5.9 AddISODate ( year, month, day, years, months, weeks, days, overflow ), https://tc39.es/proposal-temporal/#sec-temporal-addisodate

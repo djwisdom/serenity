@@ -26,7 +26,7 @@ class MainWidget final : public GUI::Widget {
 public:
     virtual ~MainWidget() override = default;
     bool read_file(Core::File&);
-    void open_nonexistent_file(String const& path);
+    void open_nonexistent_file(DeprecatedString const& path);
     bool request_close();
 
     GUI::TextEditor& editor() { return *m_editor; }
@@ -64,13 +64,14 @@ private:
     void find_text(GUI::TextEditor::SearchDirection, ShowMessageIfNoResults);
 
     RefPtr<GUI::TextEditor> m_editor;
-    String m_path;
-    String m_name;
-    String m_extension;
+    DeprecatedString m_path;
+    DeprecatedString m_name;
+    DeprecatedString m_extension;
     RefPtr<GUI::Action> m_new_action;
     RefPtr<GUI::Action> m_open_action;
     RefPtr<GUI::Action> m_save_action;
     RefPtr<GUI::Action> m_save_as_action;
+    RefPtr<GUI::Action> m_open_folder_action;
     RefPtr<GUI::Action> m_find_replace_action;
     RefPtr<GUI::Action> m_vim_emulation_setting_action;
 
@@ -116,6 +117,7 @@ private:
     RefPtr<GUI::Action> m_visualize_trailing_whitespace_action;
     RefPtr<GUI::Action> m_visualize_leading_whitespace_action;
     RefPtr<GUI::Action> m_cursor_line_highlighting_action;
+    RefPtr<GUI::Action> m_relative_line_number_action;
 
     GUI::ActionGroup m_soft_tab_width_actions;
     RefPtr<GUI::Action> m_soft_tab_1_width_action;

@@ -61,11 +61,12 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
         pushed_execution_context = true;
     }
 
-    m_current_block = entry_point ?: &executable.basic_blocks.first();
+    TemporaryChange restore_current_block { m_current_block, entry_point ?: &executable.basic_blocks.first() };
+
     if (in_frame)
         m_register_windows.append(in_frame);
     else
-        m_register_windows.append(make<RegisterWindow>(MarkedVector<Value>(vm().heap()), MarkedVector<Environment*>(vm().heap()), MarkedVector<Environment*>(vm().heap())));
+        m_register_windows.append(make<RegisterWindow>(MarkedVector<Value>(vm().heap()), MarkedVector<Environment*>(vm().heap()), MarkedVector<Environment*>(vm().heap()), Vector<UnwindInfo> {}));
 
     registers().resize(executable.number_of_registers);
 
@@ -81,18 +82,14 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
             if (ran_or_error.is_error()) {
                 auto exception_value = *ran_or_error.throw_completion().value();
                 m_saved_exception = make_handle(exception_value);
-                if (m_unwind_contexts.is_empty())
+                if (unwind_contexts().is_empty())
                     break;
-                auto& unwind_context = m_unwind_contexts.last();
+                auto& unwind_context = unwind_contexts().last();
                 if (unwind_context.executable != m_current_executable)
                     break;
                 if (unwind_context.handler) {
                     m_current_block = unwind_context.handler;
                     unwind_context.handler = nullptr;
-
-                    // If there's no finalizer, there's nowhere for the handler block to unwind to, so the unwind context is no longer needed.
-                    if (!unwind_context.finalizer)
-                        m_unwind_contexts.take_last();
 
                     accumulator() = exception_value;
                     m_saved_exception = {};
@@ -101,7 +98,6 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
                 }
                 if (unwind_context.finalizer) {
                     m_current_block = unwind_context.finalizer;
-                    m_unwind_contexts.take_last();
                     will_jump = true;
                     break;
                 }
@@ -121,13 +117,27 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
             ++pc;
         }
 
-        if (will_return)
-            break;
+        if (will_jump)
+            continue;
 
-        if (pc.at_end() && !will_jump)
+        if (!unwind_contexts().is_empty()) {
+            auto& unwind_context = unwind_contexts().last();
+            if (unwind_context.executable == m_current_executable && unwind_context.finalizer) {
+                m_saved_return_value = make_handle(m_return_value);
+                m_return_value = {};
+                m_current_block = unwind_context.finalizer;
+                // the unwind_context will be pop'ed when entering the finally block
+                continue;
+            }
+        }
+
+        if (pc.at_end())
             break;
 
         if (!m_saved_exception.is_null())
+            break;
+
+        if (will_return)
             break;
     }
 
@@ -135,7 +145,7 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
 
     if constexpr (JS_BYTECODE_DEBUG) {
         for (size_t i = 0; i < registers().size(); ++i) {
-            String value_string;
+            DeprecatedString value_string;
             if (registers()[i].is_empty())
                 value_string = "(empty)";
             else
@@ -146,8 +156,14 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
 
     auto frame = m_register_windows.take_last();
 
-    auto return_value = m_return_value.value_or(js_undefined());
-    m_return_value = {};
+    Value return_value = js_undefined();
+    if (!m_return_value.is_empty()) {
+        return_value = m_return_value;
+        m_return_value = {};
+    } else if (!m_saved_return_value.is_null()) {
+        return_value = m_saved_return_value.value();
+        m_saved_return_value = {};
+    }
 
     // NOTE: The return value from a called function is put into $0 in the caller context.
     if (!m_register_windows.is_empty())
@@ -172,19 +188,19 @@ Interpreter::ValueAndFrame Interpreter::run_and_return_frame(Executable const& e
         return { throw_completion(thrown_value), nullptr };
     }
 
-    if (auto register_window = frame.get_pointer<NonnullOwnPtr<RegisterWindow>>())
+    if (auto* register_window = frame.get_pointer<NonnullOwnPtr<RegisterWindow>>())
         return { return_value, move(*register_window) };
     return { return_value, nullptr };
 }
 
 void Interpreter::enter_unwind_context(Optional<Label> handler_target, Optional<Label> finalizer_target)
 {
-    m_unwind_contexts.empend(m_current_executable, handler_target.has_value() ? &handler_target->block() : nullptr, finalizer_target.has_value() ? &finalizer_target->block() : nullptr);
+    unwind_contexts().empend(m_current_executable, handler_target.has_value() ? &handler_target->block() : nullptr, finalizer_target.has_value() ? &finalizer_target->block() : nullptr);
 }
 
 void Interpreter::leave_unwind_context()
 {
-    m_unwind_contexts.take_last();
+    unwind_contexts().take_last();
 }
 
 ThrowCompletionOr<void> Interpreter::continue_pending_unwind(Label const& resume_label)
@@ -193,6 +209,12 @@ ThrowCompletionOr<void> Interpreter::continue_pending_unwind(Label const& resume
         auto result = throw_completion(m_saved_exception.value());
         m_saved_exception = {};
         return result;
+    }
+
+    if (!m_saved_return_value.is_null()) {
+        do_return(m_saved_return_value.value());
+        m_saved_return_value = {};
+        return {};
     }
 
     jump(resume_label);
@@ -232,6 +254,7 @@ Bytecode::PassManager& Interpreter::optimization_pipeline(Interpreter::Optimizat
         pm->add<Passes::MergeBlocks>();
         pm->add<Passes::GenerateCFG>();
         pm->add<Passes::PlaceBlocks>();
+        pm->add<Passes::EliminateLoads>();
     } else {
         VERIFY_NOT_REACHED();
     }

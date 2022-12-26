@@ -31,7 +31,7 @@ struct MatchingRule {
 
 class PropertyDependencyNode : public RefCounted<PropertyDependencyNode> {
 public:
-    static NonnullRefPtr<PropertyDependencyNode> create(String name)
+    static NonnullRefPtr<PropertyDependencyNode> create(DeprecatedString name)
     {
         return adopt_ref(*new PropertyDependencyNode(move(name)));
     }
@@ -40,9 +40,9 @@ public:
     bool has_cycles();
 
 private:
-    explicit PropertyDependencyNode(String name);
+    explicit PropertyDependencyNode(DeprecatedString name);
 
-    String m_name;
+    DeprecatedString m_name;
     NonnullRefPtrVector<PropertyDependencyNode> m_children;
     bool m_marked { false };
 };
@@ -56,7 +56,7 @@ public:
     DOM::Document const& document() const { return m_document; }
 
     NonnullRefPtr<StyleProperties> create_document_style() const;
-    NonnullRefPtr<StyleProperties> compute_style(DOM::Element&, Optional<CSS::Selector::PseudoElement> = {}) const;
+    ErrorOr<NonnullRefPtr<StyleProperties>> compute_style(DOM::Element&, Optional<CSS::Selector::PseudoElement> = {}) const;
 
     // https://www.w3.org/TR/css-cascade/#origin
     enum class CascadeOrigin {
@@ -78,7 +78,7 @@ public:
     void load_fonts_from_sheet(CSSStyleSheet const&);
 
 private:
-    void compute_cascaded_values(StyleProperties&, DOM::Element&, Optional<CSS::Selector::PseudoElement>) const;
+    ErrorOr<void> compute_cascaded_values(StyleProperties&, DOM::Element&, Optional<CSS::Selector::PseudoElement>) const;
     void compute_font(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
     void compute_defaulted_values(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
     void absolutize_values(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
@@ -118,7 +118,7 @@ private:
     OwnPtr<RuleCache> m_rule_cache;
 
     class FontLoader;
-    HashMap<String, NonnullOwnPtr<FontLoader>> m_loaded_fonts;
+    HashMap<DeprecatedString, NonnullOwnPtr<FontLoader>> m_loaded_fonts;
 };
 
 }

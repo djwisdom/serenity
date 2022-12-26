@@ -6,6 +6,7 @@
  */
 
 #include <AK/Checked.h>
+#include <AK/TypeCasts.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/ArrayBufferConstructor.h>
@@ -320,12 +321,12 @@ ThrowCompletionOr<TypedArrayBase*> typed_array_create(VM& vm, FunctionObject& co
     if (!arguments.is_empty())
         first_argument = arguments[0];
     // 1. Let newTypedArray be ? Construct(constructor, argumentList).
-    auto* new_typed_array = TRY(construct(vm, constructor, move(arguments)));
+    auto new_typed_array = TRY(construct(vm, constructor, move(arguments)));
 
     // 2. Perform ? ValidateTypedArray(newTypedArray).
     if (!new_typed_array->is_typed_array())
         return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOfType, "TypedArray");
-    auto& typed_array = *static_cast<TypedArrayBase*>(new_typed_array);
+    auto& typed_array = *static_cast<TypedArrayBase*>(new_typed_array.ptr());
     TRY(validate_typed_array(vm, typed_array));
 
     // 3. If argumentList is a List of a single Number, then
@@ -357,10 +358,10 @@ ThrowCompletionOr<TypedArrayBase*> typed_array_create_same_type(VM& vm, TypedArr
     return result;
 }
 
-// 1.2.2.1.2 CompareTypedArrayElements ( x, y, comparefn, buffer ), https://tc39.es/proposal-change-array-by-copy/#sec-comparetypedarrayelements
-ThrowCompletionOr<double> compare_typed_array_elements(VM& vm, Value x, Value y, FunctionObject* comparefn, ArrayBuffer& buffer)
+// 1.2.2.1.2 CompareTypedArrayElements ( x, y, comparefn ), https://tc39.es/proposal-change-array-by-copy/#sec-comparetypedarrayelements
+ThrowCompletionOr<double> compare_typed_array_elements(VM& vm, Value x, Value y, FunctionObject* comparefn)
 {
-    // 1. Assert: Both Type(x) and Type(y) are Number or both are BigInt.
+    // 1. Assert: x is a Number and y is a Number, or x is a BigInt and y is a BigInt.
     VERIFY(((x.is_number() && y.is_number()) || (x.is_bigint() && y.is_bigint())));
 
     // 2. If comparefn is not undefined, then
@@ -369,15 +370,11 @@ ThrowCompletionOr<double> compare_typed_array_elements(VM& vm, Value x, Value y,
         auto value = TRY(call(vm, comparefn, js_undefined(), x, y));
         auto value_number = TRY(value.to_number(vm));
 
-        // b. If IsDetachedBuffer(buffer) is true, throw a TypeError exception.
-        if (buffer.is_detached())
-            return vm.throw_completion<TypeError>(ErrorType::DetachedArrayBuffer);
-
-        //  c. If v is NaN, return +0𝔽.
+        // b. If v is NaN, return +0𝔽.
         if (value_number.is_nan())
             return 0;
 
-        // d. Return v.
+        // c. Return v.
         return value_number.as_double();
     }
 
@@ -424,20 +421,20 @@ void TypedArrayBase::visit_edges(Visitor& visitor)
 }
 
 #define JS_DEFINE_TYPED_ARRAY(ClassName, snake_name, PrototypeName, ConstructorName, Type)                                       \
-    ThrowCompletionOr<ClassName*> ClassName::create(Realm& realm, u32 length, FunctionObject& new_target)                        \
+    ThrowCompletionOr<NonnullGCPtr<ClassName>> ClassName::create(Realm& realm, u32 length, FunctionObject& new_target)           \
     {                                                                                                                            \
         auto* prototype = TRY(get_prototype_from_constructor(realm.vm(), new_target, &Intrinsics::snake_name##_prototype));      \
-        auto* array_buffer = TRY(ArrayBuffer::create(realm, length * sizeof(UnderlyingBufferDataType)));                         \
+        auto array_buffer = TRY(ArrayBuffer::create(realm, length * sizeof(UnderlyingBufferDataType)));                          \
         return realm.heap().allocate<ClassName>(realm, *prototype, length, *array_buffer);                                       \
     }                                                                                                                            \
                                                                                                                                  \
-    ThrowCompletionOr<ClassName*> ClassName::create(Realm& realm, u32 length)                                                    \
+    ThrowCompletionOr<NonnullGCPtr<ClassName>> ClassName::create(Realm& realm, u32 length)                                       \
     {                                                                                                                            \
-        auto* array_buffer = TRY(ArrayBuffer::create(realm, length * sizeof(UnderlyingBufferDataType)));                         \
+        auto array_buffer = TRY(ArrayBuffer::create(realm, length * sizeof(UnderlyingBufferDataType)));                          \
         return create(realm, length, *array_buffer);                                                                             \
     }                                                                                                                            \
                                                                                                                                  \
-    ClassName* ClassName::create(Realm& realm, u32 length, ArrayBuffer& array_buffer)                                            \
+    NonnullGCPtr<ClassName> ClassName::create(Realm& realm, u32 length, ArrayBuffer& array_buffer)                               \
     {                                                                                                                            \
         return realm.heap().allocate<ClassName>(realm, *realm.intrinsics().snake_name##_prototype(), length, array_buffer);      \
     }                                                                                                                            \
@@ -461,8 +458,8 @@ void TypedArrayBase::visit_edges(Visitor& visitor)
         return vm().names.ClassName.as_string();                                                                                 \
     }                                                                                                                            \
                                                                                                                                  \
-    PrototypeName::PrototypeName(Realm& realm)                                                                                   \
-        : Object(*realm.intrinsics().typed_array_prototype())                                                                    \
+    PrototypeName::PrototypeName(Object& prototype)                                                                              \
+        : Object(ConstructWithPrototypeTag::Tag, prototype)                                                                      \
     {                                                                                                                            \
     }                                                                                                                            \
                                                                                                                                  \
@@ -477,8 +474,8 @@ void TypedArrayBase::visit_edges(Visitor& visitor)
         define_direct_property(vm.names.BYTES_PER_ELEMENT, Value((i32)sizeof(Type)), 0);                                         \
     }                                                                                                                            \
                                                                                                                                  \
-    ConstructorName::ConstructorName(Realm& realm)                                                                               \
-        : TypedArrayConstructor(realm.vm().names.ClassName.as_string(), *realm.intrinsics().typed_array_constructor())           \
+    ConstructorName::ConstructorName(Realm& realm, Object& prototype)                                                            \
+        : TypedArrayConstructor(realm.vm().names.ClassName.as_string(), prototype)                                               \
     {                                                                                                                            \
     }                                                                                                                            \
                                                                                                                                  \
@@ -508,7 +505,7 @@ void TypedArrayBase::visit_edges(Visitor& visitor)
     }                                                                                                                            \
                                                                                                                                  \
     /* 23.2.5.1 TypedArray ( ...args ), https://tc39.es/ecma262/#sec-typedarray */                                               \
-    ThrowCompletionOr<Object*> ConstructorName::construct(FunctionObject& new_target)                                            \
+    ThrowCompletionOr<NonnullGCPtr<Object>> ConstructorName::construct(FunctionObject& new_target)                               \
     {                                                                                                                            \
         auto& vm = this->vm();                                                                                                   \
         auto& realm = *vm.current_realm();                                                                                       \
@@ -518,7 +515,7 @@ void TypedArrayBase::visit_edges(Visitor& visitor)
                                                                                                                                  \
         auto first_argument = vm.argument(0);                                                                                    \
         if (first_argument.is_object()) {                                                                                        \
-            auto* typed_array = TRY(ClassName::create(realm, 0, new_target));                                                    \
+            auto typed_array = TRY(ClassName::create(realm, 0, new_target));                                                     \
             if (first_argument.as_object().is_typed_array()) {                                                                   \
                 auto& arg_typed_array = static_cast<TypedArrayBase&>(first_argument.as_object());                                \
                 TRY(initialize_typed_array_from_typed_array(vm, *typed_array, arg_typed_array));                                 \

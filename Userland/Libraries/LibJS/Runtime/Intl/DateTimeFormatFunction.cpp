@@ -14,7 +14,7 @@
 namespace JS::Intl {
 
 // 11.5.5 DateTime Format Functions, https://tc39.es/ecma402/#sec-datetime-format-functions
-DateTimeFormatFunction* DateTimeFormatFunction::create(Realm& realm, DateTimeFormat& date_time_format)
+NonnullGCPtr<DateTimeFormatFunction> DateTimeFormatFunction::create(Realm& realm, DateTimeFormat& date_time_format)
 {
     return realm.heap().allocate<DateTimeFormatFunction>(realm, date_time_format, *realm.intrinsics().function_prototype());
 }
@@ -31,7 +31,7 @@ void DateTimeFormatFunction::initialize(Realm& realm)
 
     Base::initialize(realm);
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
-    define_direct_property(vm.names.name, js_string(vm, String::empty()), Attribute::Configurable);
+    define_direct_property(vm.names.name, PrimitiveString::create(vm, DeprecatedString::empty()), Attribute::Configurable);
 }
 
 ThrowCompletionOr<Value> DateTimeFormatFunction::call()
@@ -59,7 +59,7 @@ ThrowCompletionOr<Value> DateTimeFormatFunction::call()
 
     // 5. Return ? FormatDateTime(dtf, x).
     auto formatted = TRY(format_date_time(vm, m_date_time_format, date_value));
-    return js_string(vm, move(formatted));
+    return PrimitiveString::create(vm, move(formatted));
 }
 
 void DateTimeFormatFunction::visit_edges(Cell::Visitor& visitor)

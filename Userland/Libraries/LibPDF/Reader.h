@@ -7,10 +7,10 @@
 #pragma once
 
 #include <AK/Debug.h>
+#include <AK/DeprecatedString.h>
 #include <AK/Function.h>
 #include <AK/ScopeGuard.h>
 #include <AK/Span.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
 
 namespace PDF {
@@ -38,7 +38,7 @@ public:
             return 0;
 
         if (m_forwards)
-            return bytes().size() - offset() - 1;
+            return bytes().size() - offset();
         return offset() + 1;
     }
 
@@ -54,7 +54,7 @@ public:
     template<typename T = char>
     T read()
     {
-        T value = reinterpret_cast<const T*>(m_bytes.offset(m_offset))[0];
+        T value = reinterpret_cast<T const*>(m_bytes.offset(m_offset))[0];
         move_by(sizeof(T));
         return value;
     }
@@ -81,7 +81,7 @@ public:
 
     bool matches(char const* chars) const
     {
-        String string(chars);
+        DeprecatedString string(chars);
         if (remaining() < string.length())
             return false;
 
@@ -149,7 +149,7 @@ public:
 
         for (auto i = from; i <= to; i++) {
             char value = static_cast<char>(bytes().at(i));
-            auto line = String::formatted("  {}: '{}' (value={:3d}) ", i, value, static_cast<u8>(value));
+            auto line = DeprecatedString::formatted("  {}: '{}' (value={:3d}) ", i, value, static_cast<u8>(value));
             if (i == offset()) {
                 dbgln("{} <<< current location, forwards={}", line, m_forwards);
             } else {

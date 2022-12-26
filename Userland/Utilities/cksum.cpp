@@ -5,7 +5,8 @@
  */
 
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
+#include <LibCore/Stream.h>
+#include <LibCore/System.h>
 #include <LibCrypto/Checksum/Adler32.h>
 #include <LibCrypto/Checksum/CRC32.h>
 #include <LibMain/Main.h>
@@ -13,7 +14,7 @@
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    Vector<String> paths;
+    Vector<DeprecatedString> paths;
     char const* opt_algorithm = nullptr;
 
     Core::ArgsParser args_parser;
@@ -21,9 +22,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_positional_argument(paths, "File", "file", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
-    auto algorithm = (opt_algorithm == nullptr) ? "crc32" : String(opt_algorithm).to_lowercase();
+    auto algorithm = (opt_algorithm == nullptr) ? "crc32" : DeprecatedString(opt_algorithm).to_lowercase();
 
-    auto available_algorithms = Vector<String> { "crc32", "adler32" };
+    auto available_algorithms = Vector<DeprecatedString> { "crc32", "adler32" };
 
     if (algorithm == "list") {
         outln("Available algorithms:");
@@ -42,40 +43,45 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         paths.append("-");
 
     bool fail = false;
+    Array<u8, PAGE_SIZE> buffer;
+
     for (auto& path : paths) {
+        auto file_or_error = Core::Stream::File::open_file_or_standard_stream(path, Core::Stream::OpenMode::Read);
         auto filepath = (path == "-") ? "/dev/stdin" : path;
-        auto file = Core::File::construct(filepath);
-        if (!file->open(Core::OpenMode::ReadOnly)) {
-            warnln("{}: {}: {}", arguments.strings[0], path, file->error_string());
+        if (file_or_error.is_error()) {
+            warnln("{}: {}: {}", arguments.strings[0], filepath, file_or_error.error());
             fail = true;
             continue;
         }
-        struct stat st;
-        if (fstat(file->fd(), &st) < 0) {
-            warnln("{}: Failed to fstat {}: {}", arguments.strings[0], filepath, strerror(errno));
-            fail = true;
-            continue;
-        }
+        auto file = file_or_error.release_value();
+        size_t file_size = 0;
+
         if (algorithm == "crc32") {
             Crypto::Checksum::CRC32 crc32;
-            while (!file->eof() && !file->has_error())
-                crc32.update(file->read(PAGE_SIZE));
-            if (file->has_error()) {
-                warnln("{}: Failed to read {}: {}", arguments.strings[0], filepath, file->error_string());
-                fail = true;
-                continue;
+            while (!file->is_eof()) {
+                auto data_or_error = file->read(buffer);
+                if (data_or_error.is_error()) {
+                    warnln("{}: Failed to read {}: {}", arguments.strings[0], filepath, data_or_error.error());
+                    fail = true;
+                    continue;
+                }
+                file_size += data_or_error.value().size();
+                crc32.update(data_or_error.value());
             }
-            outln("{:08x} {} {}", crc32.digest(), st.st_size, path);
+            outln("{:08x} {} {}", crc32.digest(), file_size, path);
         } else if (algorithm == "adler32") {
             Crypto::Checksum::Adler32 adler32;
-            while (!file->eof() && !file->has_error())
-                adler32.update(file->read(PAGE_SIZE));
-            if (file->has_error()) {
-                warnln("{}: Failed to read {}: {}", arguments.strings[0], filepath, file->error_string());
-                fail = true;
-                continue;
+            while (!file->is_eof()) {
+                auto data_or_error = file->read(buffer);
+                if (data_or_error.is_error()) {
+                    warnln("{}: Failed to read {}: {}", arguments.strings[0], filepath, data_or_error.error());
+                    fail = true;
+                    continue;
+                }
+                file_size += data_or_error.value().size();
+                adler32.update(data_or_error.value());
             }
-            outln("{:08x} {} {}", adler32.digest(), st.st_size, path);
+            outln("{:08x} {} {}", adler32.digest(), file_size, path);
         } else {
             warnln("{}: Unknown checksum algorithm: {}", arguments.strings[0], algorithm);
             exit(1);

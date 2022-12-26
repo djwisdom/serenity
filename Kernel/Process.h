@@ -84,6 +84,7 @@ enum class VeilState {
     None,
     Dropped,
     Locked,
+    LockedInherited,
 };
 
 static constexpr FlatPtr futex_key_private_flag = 0b1;
@@ -316,9 +317,10 @@ public:
     ErrorOr<FlatPtr> sys$pread(int fd, Userspace<u8*>, size_t, Userspace<off_t const*>);
     ErrorOr<FlatPtr> sys$readv(int fd, Userspace<const struct iovec*> iov, int iov_count);
     ErrorOr<FlatPtr> sys$write(int fd, Userspace<u8 const*>, size_t);
-    ErrorOr<FlatPtr> sys$writev(int fd, Userspace<const struct iovec*> iov, int iov_count);
+    ErrorOr<FlatPtr> sys$pwritev(int fd, Userspace<const struct iovec*> iov, int iov_count, Userspace<off_t const*>);
     ErrorOr<FlatPtr> sys$fstat(int fd, Userspace<stat*>);
     ErrorOr<FlatPtr> sys$stat(Userspace<Syscall::SC_stat_params const*>);
+    ErrorOr<FlatPtr> sys$annotate_mapping(Userspace<void*>, int flags);
     ErrorOr<FlatPtr> sys$lseek(int fd, Userspace<off_t*>, int whence);
     ErrorOr<FlatPtr> sys$ftruncate(int fd, Userspace<off_t const*>);
     ErrorOr<FlatPtr> sys$posix_fallocate(int fd, Userspace<off_t const*>, Userspace<off_t const*>);
@@ -332,7 +334,6 @@ public:
     ErrorOr<FlatPtr> sys$set_mmap_name(Userspace<Syscall::SC_set_mmap_name_params const*>);
     ErrorOr<FlatPtr> sys$mprotect(Userspace<void*>, size_t, int prot);
     ErrorOr<FlatPtr> sys$madvise(Userspace<void*>, size_t, int advice);
-    ErrorOr<FlatPtr> sys$msyscall(Userspace<void*>);
     ErrorOr<FlatPtr> sys$msync(Userspace<void*>, size_t, int flags);
     ErrorOr<FlatPtr> sys$purge(int mode);
     ErrorOr<FlatPtr> sys$poll(Userspace<Syscall::SC_poll_params const*>);
@@ -368,12 +369,13 @@ public:
     ErrorOr<FlatPtr> sys$setgid(GroupID);
     ErrorOr<FlatPtr> sys$setreuid(UserID, UserID);
     ErrorOr<FlatPtr> sys$setresuid(UserID, UserID, UserID);
+    ErrorOr<FlatPtr> sys$setregid(GroupID, GroupID);
     ErrorOr<FlatPtr> sys$setresgid(GroupID, GroupID, GroupID);
     ErrorOr<FlatPtr> sys$alarm(unsigned seconds);
-    ErrorOr<FlatPtr> sys$access(Userspace<char const*> pathname, size_t path_length, int mode);
+    ErrorOr<FlatPtr> sys$faccessat(Userspace<Syscall::SC_faccessat_params const*>);
     ErrorOr<FlatPtr> sys$fcntl(int fd, int cmd, uintptr_t extra_arg);
     ErrorOr<FlatPtr> sys$ioctl(int fd, unsigned request, FlatPtr arg);
-    ErrorOr<FlatPtr> sys$mkdir(Userspace<char const*> pathname, size_t path_length, mode_t mode);
+    ErrorOr<FlatPtr> sys$mkdir(int dirfd, Userspace<char const*> pathname, size_t path_length, mode_t mode);
     ErrorOr<FlatPtr> sys$times(Userspace<tms*>);
     ErrorOr<FlatPtr> sys$utime(Userspace<char const*> pathname, size_t path_length, Userspace<const struct utimbuf*>);
     ErrorOr<FlatPtr> sys$utimensat(Userspace<Syscall::SC_utimensat_params const*>);
@@ -464,6 +466,7 @@ public:
 
     static constexpr size_t max_arguments_size = Thread::default_userspace_stack_size / 8;
     static constexpr size_t max_environment_size = Thread::default_userspace_stack_size / 8;
+    static constexpr size_t max_auxiliary_size = Thread::default_userspace_stack_size / 8;
     NonnullOwnPtrVector<KString> const& arguments() const { return m_arguments; };
     NonnullOwnPtrVector<KString> const& environment() const { return m_environment; };
 
@@ -522,6 +525,9 @@ public:
 
     auto& unveil_data() { return m_unveil_data; }
     auto const& unveil_data() const { return m_unveil_data; }
+
+    auto& exec_unveil_data() { return m_exec_unveil_data; }
+    auto const& exec_unveil_data() const { return m_exec_unveil_data; }
 
     bool wait_for_tracer_at_next_execve() const
     {
@@ -584,7 +590,7 @@ private:
     bool add_thread(Thread&);
     bool remove_thread(Thread&);
 
-    Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials>, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree);
+    Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials>, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree, UnveilNode exec_unveil_tree);
     static ErrorOr<NonnullLockRefPtr<Process>> try_create(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, UserID, GroupID, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory = nullptr, RefPtr<Custody> executable = nullptr, TTY* = nullptr, Process* fork_parent = nullptr);
     ErrorOr<void> attach_resources(NonnullOwnPtr<Memory::AddressSpace>&&, LockRefPtr<Thread>& first_thread, Process* fork_parent);
     static ProcessID allocate_pid();
@@ -597,7 +603,7 @@ private:
     void delete_perf_events_buffer();
 
     ErrorOr<void> do_exec(NonnullLockRefPtr<OpenFileDescription> main_program_description, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment, LockRefPtr<OpenFileDescription> interpreter_description, Thread*& new_main_thread, u32& prev_flags, const ElfW(Ehdr) & main_program_header);
-    ErrorOr<FlatPtr> do_write(OpenFileDescription&, UserOrKernelBuffer const&, size_t);
+    ErrorOr<FlatPtr> do_write(OpenFileDescription&, UserOrKernelBuffer const&, size_t, Optional<off_t> = {});
 
     ErrorOr<FlatPtr> do_statvfs(FileSystem const& path, Custody const*, statvfs* buf);
 
@@ -840,6 +846,8 @@ public:
     }
 
 private:
+    ErrorOr<NonnullRefPtr<Custody>> custody_for_dirfd(int dirfd);
+
     SpinlockProtected<Thread::ListInProcess>& thread_list() { return m_thread_list; }
     SpinlockProtected<Thread::ListInProcess> const& thread_list() const { return m_thread_list; }
 
@@ -878,6 +886,7 @@ private:
     LockRefPtr<Timer> m_alarm_timer;
 
     SpinlockProtected<UnveilData> m_unveil_data;
+    SpinlockProtected<UnveilData> m_exec_unveil_data;
 
     OwnPtr<PerformanceEventBuffer> m_perf_event_buffer;
 

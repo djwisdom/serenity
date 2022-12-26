@@ -11,6 +11,7 @@
 #include <AK/ScopeGuard.h>
 #include <AK/Time.h>
 #include <AK/Variant.h>
+#include <LibJS/Parser.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
@@ -94,7 +95,7 @@ static ErrorOr<JsonValue, ExecuteScriptResultType> internal_json_clone_algorithm
     if (value.is_number())
         return JsonValue { value.as_double() };
     if (value.is_string())
-        return JsonValue { value.as_string().string() };
+        return JsonValue { value.as_string().deprecated_string() };
 
     // NOTE: BigInt and Symbol not mentioned anywhere in the WebDriver spec, as it references ES5.
     //       It assumes that all primitives are handled above, and the value is an object for the remaining steps.
@@ -113,7 +114,7 @@ static ErrorOr<JsonValue, ExecuteScriptResultType> internal_json_clone_algorithm
         auto to_json_result = TRY_OR_JS_ERROR(to_json.as_function().internal_call(value, JS::MarkedVector<JS::Value> { vm.heap() }));
         if (!to_json_result.is_string())
             return ExecuteScriptResultType::JavaScriptError;
-        return to_json_result.as_string().string();
+        return to_json_result.as_string().deprecated_string();
     }
 
     // -> Otherwise
@@ -203,7 +204,7 @@ static ErrorOr<JsonValue, ExecuteScriptResultType> clone_an_object(JS::Realm& re
 }
 
 // https://w3c.github.io/webdriver/#dfn-execute-a-function-body
-static JS::ThrowCompletionOr<JS::Value> execute_a_function_body(Web::Page& page, String const& body, JS::MarkedVector<JS::Value> parameters)
+static JS::ThrowCompletionOr<JS::Value> execute_a_function_body(Web::Page& page, DeprecatedString const& body, JS::MarkedVector<JS::Value> parameters)
 {
     // FIXME: If at any point during the algorithm a user prompt appears, immediately return Completion { [[Type]]: normal, [[Value]]: null, [[Target]]: empty }, but continue to run the other steps of this algorithm in parallel.
 
@@ -220,7 +221,7 @@ static JS::ThrowCompletionOr<JS::Value> execute_a_function_body(Web::Page& page,
     auto& realm = window.realm();
 
     bool contains_direct_call_to_eval = false;
-    auto source_text = String::formatted("function() {{ {} }}", body);
+    auto source_text = DeprecatedString::formatted("function() {{ {} }}", body);
     auto parser = JS::Parser { JS::Lexer { source_text } };
     auto function_expression = parser.parse_function_node<JS::FunctionExpression>();
 
@@ -248,7 +249,7 @@ static JS::ThrowCompletionOr<JS::Value> execute_a_function_body(Web::Page& page,
     //    The result of parsing global scope above.
     // strict
     //    The result of parsing strict above.
-    auto* function = JS::ECMAScriptFunctionObject::create(realm, "", move(source_text), function_expression->body(), function_expression->parameters(), function_expression->function_length(), &global_scope, nullptr, function_expression->kind(), function_expression->is_strict_mode(), function_expression->might_need_arguments_object(), contains_direct_call_to_eval);
+    auto function = JS::ECMAScriptFunctionObject::create(realm, "", move(source_text), function_expression->body(), function_expression->parameters(), function_expression->function_length(), &global_scope, nullptr, function_expression->kind(), function_expression->is_strict_mode(), function_expression->might_need_arguments_object(), contains_direct_call_to_eval);
 
     // 9. Let completion be Function.[[Call]](window, parameters) with function as the this value.
     // NOTE: This is not entirely clear, but I don't think they mean actually passing `function` as
@@ -265,7 +266,7 @@ static JS::ThrowCompletionOr<JS::Value> execute_a_function_body(Web::Page& page,
     return completion;
 }
 
-ExecuteScriptResultSerialized execute_script(Web::Page& page, String const& body, JS::MarkedVector<JS::Value> arguments, Optional<u64> const& timeout)
+ExecuteScriptResultSerialized execute_script(Web::Page& page, DeprecatedString const& body, JS::MarkedVector<JS::Value> arguments, Optional<u64> const& timeout)
 {
     // FIXME: Use timeout.
     (void)timeout;
@@ -306,7 +307,7 @@ ExecuteScriptResultSerialized execute_script(Web::Page& page, String const& body
     return { result.type, json_value_or_error.release_value() };
 }
 
-ExecuteScriptResultSerialized execute_async_script(Web::Page& page, String const& body, JS::MarkedVector<JS::Value> arguments, Optional<u64> const& timeout)
+ExecuteScriptResultSerialized execute_async_script(Web::Page& page, DeprecatedString const& body, JS::MarkedVector<JS::Value> arguments, Optional<u64> const& timeout)
 {
     auto* window = page.top_level_browsing_context().active_window();
     auto& realm = window->realm();
@@ -314,7 +315,7 @@ ExecuteScriptResultSerialized execute_async_script(Web::Page& page, String const
     auto start = Time::now_monotonic();
 
     // 4. Let promise be a new Promise.
-    auto* promise = JS::Promise::create(realm);
+    auto promise = JS::Promise::create(realm);
 
     // FIXME: 5 Run the following substeps in parallel:
     auto result = [&] {

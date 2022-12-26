@@ -112,9 +112,13 @@ Dialog::ExecResult Dialog::exec()
 
 void Dialog::done(ExecResult result)
 {
+    Window::close();
+
     if (!m_event_loop)
         return;
     m_result = result;
+    on_done(m_result);
+
     dbgln("{}: Quit event loop with result {}", *this, to_underlying(result));
     m_event_loop->quit(to_underlying(result));
 }
@@ -135,7 +139,6 @@ void Dialog::event(Core::Event& event)
 
 void Dialog::close()
 {
-    Window::close();
     done(ExecResult::Cancel);
 }
 

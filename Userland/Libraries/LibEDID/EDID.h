@@ -8,6 +8,7 @@
 
 #include <AK/ByteBuffer.h>
 #include <AK/ByteReader.h>
+#include <AK/Concepts.h>
 #include <AK/Endian.h>
 #include <AK/Error.h>
 #include <AK/FixedPoint.h>
@@ -21,7 +22,7 @@
 #ifdef KERNEL
 #    include <Kernel/KString.h>
 #else
-#    include <AK/String.h>
+#    include <AK/DeprecatedString.h>
 #endif
 
 namespace EDID {
@@ -86,12 +87,12 @@ public:
 
 #ifndef KERNEL
     static ErrorOr<Parser> from_display_connector_device(int);
-    static ErrorOr<Parser> from_display_connector_device(String const&);
+    static ErrorOr<Parser> from_display_connector_device(DeprecatedString const&);
 #endif
 
     StringView legacy_manufacturer_id() const;
 #ifndef KERNEL
-    String manufacturer_name() const;
+    DeprecatedString manufacturer_name() const;
 #endif
 
     u16 product_code() const;
@@ -366,8 +367,8 @@ public:
     Optional<DetailedTiming> detailed_timing(size_t) const;
 
 #ifndef KERNEL
-    String display_product_name() const;
-    String display_product_serial_number() const;
+    DeprecatedString display_product_name() const;
+    DeprecatedString display_product_serial_number() const;
 #endif
 
     ErrorOr<IterationDecision> for_each_short_video_descriptor(Function<IterationDecision(unsigned, bool, VIC::Details const&)>) const;
@@ -437,13 +438,13 @@ private:
     template<typename T>
     T read_host(T const*) const;
 
-    template<typename T>
-    requires(IsIntegral<T> && sizeof(T) > 1) T read_le(T const*)
-    const;
+    template<Integral T>
+    requires(sizeof(T) > 1)
+    T read_le(T const*) const;
 
-    template<typename T>
-    requires(IsIntegral<T> && sizeof(T) > 1) T read_be(T const*)
-    const;
+    template<Integral T>
+    requires(sizeof(T) > 1)
+    T read_be(T const*) const;
 
     Definitions::EDID const& raw_edid() const;
     ErrorOr<IterationDecision> for_each_display_descriptor(Function<IterationDecision(u8, Definitions::DisplayDescriptor const&)>) const;
@@ -454,7 +455,7 @@ private:
 #ifdef KERNEL
     OwnPtr<Kernel::KString> m_version;
 #else
-    String m_version;
+    DeprecatedString m_version;
 #endif
     char m_legacy_manufacturer_id[4] {};
     bool m_legacy_manufacturer_id_valid { false };

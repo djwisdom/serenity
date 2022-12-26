@@ -20,7 +20,7 @@ struct GenericTraits {
     using PeekType = T&;
     using ConstPeekType = T const&;
     static constexpr bool is_trivial() { return false; }
-    static constexpr bool equals(const T& a, const T& b) { return a == b; }
+    static constexpr bool equals(T const& a, T const& b) { return a == b; }
     template<Concepts::HashCompatible<T> U>
     static bool equals(U const& a, T const& b) { return a == b; }
 };
@@ -29,8 +29,8 @@ template<typename T>
 struct Traits : public GenericTraits<T> {
 };
 
-template<typename T>
-requires(IsIntegral<T>) struct Traits<T> : public GenericTraits<T> {
+template<Integral T>
+struct Traits<T> : public GenericTraits<T> {
     static constexpr bool is_trivial() { return true; }
     static constexpr unsigned hash(T value)
     {
@@ -42,8 +42,8 @@ requires(IsIntegral<T>) struct Traits<T> : public GenericTraits<T> {
 };
 
 #ifndef KERNEL
-template<typename T>
-requires(IsFloatingPoint<T>) struct Traits<T> : public GenericTraits<T> {
+template<FloatingPoint T>
+struct Traits<T> : public GenericTraits<T> {
     static constexpr bool is_trivial() { return true; }
     static constexpr unsigned hash(T value)
     {
@@ -76,5 +76,7 @@ requires(Detail::IsPointerOfType<char, T>) struct Traits<T> : public GenericTrai
 
 }
 
+#if USING_AK_GLOBALLY
 using AK::GenericTraits;
 using AK::Traits;
+#endif

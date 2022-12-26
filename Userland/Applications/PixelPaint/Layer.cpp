@@ -16,7 +16,7 @@
 
 namespace PixelPaint {
 
-ErrorOr<NonnullRefPtr<Layer>> Layer::try_create_with_size(Image& image, Gfx::IntSize const& size, String name)
+ErrorOr<NonnullRefPtr<Layer>> Layer::try_create_with_size(Image& image, Gfx::IntSize size, DeprecatedString name)
 {
     VERIFY(!size.is_empty());
 
@@ -27,7 +27,7 @@ ErrorOr<NonnullRefPtr<Layer>> Layer::try_create_with_size(Image& image, Gfx::Int
     return adopt_nonnull_ref_or_enomem(new (nothrow) Layer(image, move(bitmap), move(name)));
 }
 
-ErrorOr<NonnullRefPtr<Layer>> Layer::try_create_with_bitmap(Image& image, NonnullRefPtr<Gfx::Bitmap> bitmap, String name)
+ErrorOr<NonnullRefPtr<Layer>> Layer::try_create_with_bitmap(Image& image, NonnullRefPtr<Gfx::Bitmap> bitmap, DeprecatedString name)
 {
     VERIFY(!bitmap->size().is_empty());
 
@@ -56,7 +56,7 @@ ErrorOr<NonnullRefPtr<Layer>> Layer::try_create_snapshot(Image& image, Layer con
     return snapshot;
 }
 
-Layer::Layer(Image& image, NonnullRefPtr<Gfx::Bitmap> bitmap, String name)
+Layer::Layer(Image& image, NonnullRefPtr<Gfx::Bitmap> bitmap, DeprecatedString name)
     : m_image(image)
     , m_name(move(name))
     , m_content_bitmap(move(bitmap))
@@ -101,7 +101,7 @@ void Layer::set_opacity_percent(int opacity_percent)
     m_image.layer_did_modify_properties({}, *this);
 }
 
-void Layer::set_name(String name)
+void Layer::set_name(DeprecatedString name)
 {
     if (m_name == name)
         return;
@@ -221,7 +221,7 @@ void Layer::crop(Gfx::IntRect const& rect)
     did_modify_bitmap();
 }
 
-void Layer::resize(Gfx::IntSize const& new_size, Gfx::IntPoint const& new_location, Gfx::Painter::ScalingMode scaling_mode)
+void Layer::resize(Gfx::IntSize new_size, Gfx::IntPoint new_location, Gfx::Painter::ScalingMode scaling_mode)
 {
     auto src_rect = Gfx::IntRect(Gfx::IntPoint(0, 0), size());
     auto dst_rect = Gfx::IntRect(Gfx::IntPoint(0, 0), new_size);
@@ -261,7 +261,7 @@ void Layer::resize(Gfx::IntRect const& new_rect, Gfx::Painter::ScalingMode scali
     resize(new_rect.size(), new_rect.location(), scaling_mode);
 }
 
-void Layer::resize(Gfx::IntSize const& new_size, Gfx::Painter::ScalingMode scaling_mode)
+void Layer::resize(Gfx::IntSize new_size, Gfx::Painter::ScalingMode scaling_mode)
 {
     resize(new_size, location(), scaling_mode);
 }

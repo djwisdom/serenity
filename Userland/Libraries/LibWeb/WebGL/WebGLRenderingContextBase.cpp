@@ -52,9 +52,14 @@ void WebGLRenderingContextBase::present()
     // This default behavior can be changed by setting the preserveDrawingBuffer attribute of the WebGLContextAttributes object.
     // If this flag is true, the contents of the drawing buffer shall be preserved until the author either clears or overwrites them."
     if (!m_context_creation_parameters.preserve_drawing_buffer) {
-        auto current_clear_color = m_context->current_clear_color();
-        auto current_clear_depth = m_context->current_clear_depth();
-        auto current_clear_stencil = m_context->current_clear_stencil();
+        Array<GLdouble, 4> current_clear_color;
+        m_context->gl_get_doublev(GL_COLOR_CLEAR_VALUE, current_clear_color.data());
+
+        GLdouble current_clear_depth;
+        m_context->gl_get_doublev(GL_DEPTH_CLEAR_VALUE, &current_clear_depth);
+
+        GLint current_clear_stencil;
+        m_context->gl_get_integerv(GL_STENCIL_CLEAR_VALUE, &current_clear_stencil);
 
         // The implicit clear value for the color buffer is (0, 0, 0, 0)
         m_context->gl_clear_color(0, 0, 0, 0);
@@ -113,18 +118,18 @@ bool WebGLRenderingContextBase::is_context_lost() const
     return m_context_lost;
 }
 
-Optional<Vector<String>> WebGLRenderingContextBase::get_supported_extensions() const
+Optional<Vector<DeprecatedString>> WebGLRenderingContextBase::get_supported_extensions() const
 {
     if (m_context_lost)
-        return Optional<Vector<String>> {};
+        return Optional<Vector<DeprecatedString>> {};
 
     dbgln_if(WEBGL_CONTEXT_DEBUG, "WebGLRenderingContextBase::get_supported_extensions()");
 
     // FIXME: We don't currently support any extensions.
-    return Vector<String> {};
+    return Vector<DeprecatedString> {};
 }
 
-JS::Object* WebGLRenderingContextBase::get_extension(String const& name) const
+JS::Object* WebGLRenderingContextBase::get_extension(DeprecatedString const& name) const
 {
     if (m_context_lost)
         return nullptr;

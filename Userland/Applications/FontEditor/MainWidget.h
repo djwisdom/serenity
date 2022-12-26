@@ -34,15 +34,15 @@ public:
 
     virtual ~MainWidget() override = default;
 
-    ErrorOr<void> initialize(String const& path, RefPtr<Gfx::BitmapFont>&&);
+    ErrorOr<void> initialize(DeprecatedString const& path, RefPtr<Gfx::BitmapFont>&&);
     ErrorOr<void> initialize_menubar(GUI::Window&);
 
-    ErrorOr<void> open_file(String const&);
-    ErrorOr<void> save_file(String const&);
+    ErrorOr<void> open_file(DeprecatedString const&);
+    ErrorOr<void> save_file(DeprecatedString const&);
     bool request_close();
     void update_title();
 
-    String const& path() { return m_path; }
+    DeprecatedString const& path() { return m_path; }
     Gfx::BitmapFont const& edited_font() { return *m_edited_font; }
 
     bool is_showing_font_metadata() { return m_font_metadata; }
@@ -51,7 +51,11 @@ public:
     bool is_showing_unicode_blocks() { return m_unicode_blocks; }
     void set_show_unicode_blocks(bool);
 
+    void set_show_toolbar(bool);
+    void set_show_statusbar(bool);
+
     void set_highlight_modifications(bool);
+    void set_show_system_emoji(bool);
 
 private:
     MainWidget();
@@ -70,7 +74,6 @@ private:
     void did_modify_font();
     void update_statusbar();
     void update_preview();
-    void set_scale(i32);
     void set_scale_and_save(i32);
 
     ErrorOr<void> copy_selected_glyphs();
@@ -81,7 +84,7 @@ private:
     void push_undo();
     void reset_selection_and_push_undo();
 
-    void show_error(StringView preface, Error);
+    void show_error(Error, StringView action, StringView basename = {});
 
     RefPtr<Gfx::BitmapFont> m_edited_font;
 
@@ -113,7 +116,10 @@ private:
     RefPtr<GUI::Action> m_open_preview_action;
     RefPtr<GUI::Action> m_show_metadata_action;
     RefPtr<GUI::Action> m_show_unicode_blocks_action;
+    RefPtr<GUI::Action> m_show_toolbar_action;
+    RefPtr<GUI::Action> m_show_statusbar_action;
     RefPtr<GUI::Action> m_highlight_modifications_action;
+    RefPtr<GUI::Action> m_show_system_emoji_action;
 
     GUI::ActionGroup m_glyph_editor_scale_actions;
     RefPtr<GUI::Action> m_scale_five_action;
@@ -130,6 +136,7 @@ private:
     RefPtr<GUI::Action> m_rotate_counterclockwise_action;
 
     RefPtr<GUI::Statusbar> m_statusbar;
+    RefPtr<GUI::ToolbarContainer> m_toolbar_container;
     RefPtr<GUI::Widget> m_unicode_block_container;
     RefPtr<GUI::ComboBox> m_weight_combobox;
     RefPtr<GUI::ComboBox> m_slope_combobox;
@@ -153,10 +160,10 @@ private:
     RefPtr<GUI::TextBox> m_preview_textbox;
     RefPtr<GUI::Window> m_font_preview_window;
 
-    String m_path;
-    Vector<String> m_font_weight_list;
-    Vector<String> m_font_slope_list;
-    Vector<String> m_unicode_block_list;
+    DeprecatedString m_path;
+    Vector<DeprecatedString> m_font_weight_list;
+    Vector<DeprecatedString> m_font_slope_list;
+    Vector<DeprecatedString> m_unicode_block_list;
     bool m_font_metadata { true };
     bool m_unicode_blocks { true };
     Unicode::CodePointRange m_range { 0x0000, 0x10FFFF };

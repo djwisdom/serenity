@@ -9,9 +9,9 @@
 
 #pragma once
 
+#include <AK/DeprecatedString.h>
 #include <AK/Noncopyable.h>
 #include <AK/RefCounted.h>
-#include <AK/String.h>
 #include <AK/Weakable.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Painter.h>
@@ -29,14 +29,14 @@ class Layer
     AK_MAKE_NONMOVABLE(Layer);
 
 public:
-    static ErrorOr<NonnullRefPtr<Layer>> try_create_with_size(Image&, Gfx::IntSize const&, String name);
-    static ErrorOr<NonnullRefPtr<Layer>> try_create_with_bitmap(Image&, NonnullRefPtr<Gfx::Bitmap>, String name);
+    static ErrorOr<NonnullRefPtr<Layer>> try_create_with_size(Image&, Gfx::IntSize, DeprecatedString name);
+    static ErrorOr<NonnullRefPtr<Layer>> try_create_with_bitmap(Image&, NonnullRefPtr<Gfx::Bitmap>, DeprecatedString name);
     static ErrorOr<NonnullRefPtr<Layer>> try_create_snapshot(Image&, Layer const&);
 
     ~Layer() = default;
 
-    Gfx::IntPoint const& location() const { return m_location; }
-    void set_location(Gfx::IntPoint const& location) { m_location = location; }
+    Gfx::IntPoint location() const { return m_location; }
+    void set_location(Gfx::IntPoint location) { m_location = location; }
 
     Gfx::Bitmap const& display_bitmap() const { return m_cached_display_bitmap; }
     Gfx::Bitmap const& content_bitmap() const { return m_content_bitmap; }
@@ -53,15 +53,15 @@ public:
     Gfx::IntRect relative_rect() const { return { location(), size() }; }
     Gfx::IntRect rect() const { return { {}, size() }; }
 
-    String const& name() const { return m_name; }
-    void set_name(String);
+    DeprecatedString const& name() const { return m_name; }
+    void set_name(DeprecatedString);
 
     void flip(Gfx::Orientation orientation);
     void rotate(Gfx::RotationDirection direction);
     void crop(Gfx::IntRect const& rect);
-    void resize(Gfx::IntSize const& new_size, Gfx::Painter::ScalingMode scaling_mode);
+    void resize(Gfx::IntSize new_size, Gfx::Painter::ScalingMode scaling_mode);
     void resize(Gfx::IntRect const& new_rect, Gfx::Painter::ScalingMode scaling_mode);
-    void resize(Gfx::IntSize const& new_size, Gfx::IntPoint const& new_location, Gfx::Painter::ScalingMode scaling_mode);
+    void resize(Gfx::IntSize new_size, Gfx::IntPoint new_location, Gfx::Painter::ScalingMode scaling_mode);
 
     Optional<Gfx::IntRect> nonempty_content_bounding_rect() const;
 
@@ -97,11 +97,11 @@ public:
     Gfx::Bitmap& currently_edited_bitmap();
 
 private:
-    Layer(Image&, NonnullRefPtr<Gfx::Bitmap>, String name);
+    Layer(Image&, NonnullRefPtr<Gfx::Bitmap>, DeprecatedString name);
 
     Image& m_image;
 
-    String m_name;
+    DeprecatedString m_name;
     Gfx::IntPoint m_location;
     NonnullRefPtr<Gfx::Bitmap> m_content_bitmap;
     RefPtr<Gfx::Bitmap> m_scratch_edited_bitmap { nullptr };

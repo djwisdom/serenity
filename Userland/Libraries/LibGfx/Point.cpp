@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/Rect.h>
 #include <LibIPC/Decoder.h>
@@ -36,35 +36,34 @@ template<typename T>
 }
 
 template<>
-String IntPoint::to_string() const
+DeprecatedString IntPoint::to_deprecated_string() const
 {
-    return String::formatted("[{},{}]", x(), y());
+    return DeprecatedString::formatted("[{},{}]", x(), y());
 }
 
 template<>
-String FloatPoint::to_string() const
+DeprecatedString FloatPoint::to_deprecated_string() const
 {
-    return String::formatted("[{},{}]", x(), y());
+    return DeprecatedString::formatted("[{},{}]", x(), y());
 }
 
 }
 
 namespace IPC {
 
+template<>
 bool encode(Encoder& encoder, Gfx::IntPoint const& point)
 {
     encoder << point.x() << point.y();
     return true;
 }
 
-ErrorOr<void> decode(Decoder& decoder, Gfx::IntPoint& point)
+template<>
+ErrorOr<Gfx::IntPoint> decode(Decoder& decoder)
 {
-    int x = 0;
-    int y = 0;
-    TRY(decoder.decode(x));
-    TRY(decoder.decode(y));
-    point = { x, y };
-    return {};
+    auto x = TRY(decoder.decode<int>());
+    auto y = TRY(decoder.decode<int>());
+    return Gfx::IntPoint { x, y };
 }
 
 }

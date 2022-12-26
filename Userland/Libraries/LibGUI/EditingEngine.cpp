@@ -106,6 +106,7 @@ bool EditingEngine::on_key(KeyEvent const& event)
         }
 
         move_one_helper(event, direction);
+        return true;
     }
 
     if (event.key() == KeyCode::Key_Home) {
@@ -452,7 +453,7 @@ bool MoveLineUpOrDownCommand::merge_with(GUI::Command const&)
     return false;
 }
 
-String MoveLineUpOrDownCommand::action_text() const
+DeprecatedString MoveLineUpOrDownCommand::action_text() const
 {
     return "Move a line";
 }

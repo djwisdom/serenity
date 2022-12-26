@@ -28,7 +28,7 @@ void ArrayBufferPrototype::initialize(Realm& realm)
     define_native_accessor(realm, vm.names.byteLength, byte_length_getter, {}, Attribute::Configurable);
 
     // 25.1.5.4 ArrayBuffer.prototype [ @@toStringTag ], https://tc39.es/ecma262/#sec-arraybuffer.prototype-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(vm, vm.names.ArrayBuffer.as_string()), Attribute::Configurable);
+    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, vm.names.ArrayBuffer.as_string()), Attribute::Configurable);
 }
 
 // 25.1.5.3 ArrayBuffer.prototype.slice ( start, end ), https://tc39.es/ecma262/#sec-arraybuffer.prototype.slice
@@ -85,12 +85,12 @@ JS_DEFINE_NATIVE_FUNCTION(ArrayBufferPrototype::slice)
     auto* constructor = TRY(species_constructor(vm, *array_buffer_object, *realm.intrinsics().array_buffer_constructor()));
 
     // 16. Let new be ? Construct(ctor, « 𝔽(newLen) »).
-    auto* new_array_buffer = TRY(construct(vm, *constructor, Value(new_length)));
+    auto new_array_buffer = TRY(construct(vm, *constructor, Value(new_length)));
 
     // 17. Perform ? RequireInternalSlot(new, [[ArrayBufferData]]).
-    if (!is<ArrayBuffer>(new_array_buffer))
+    if (!is<ArrayBuffer>(new_array_buffer.ptr()))
         return vm.throw_completion<TypeError>(ErrorType::SpeciesConstructorDidNotCreate, "an ArrayBuffer");
-    auto* new_array_buffer_object = static_cast<ArrayBuffer*>(new_array_buffer);
+    auto* new_array_buffer_object = static_cast<ArrayBuffer*>(new_array_buffer.ptr());
 
     // 18. If IsSharedArrayBuffer(new) is true, throw a TypeError exception.
     // FIXME: Check for shared buffer

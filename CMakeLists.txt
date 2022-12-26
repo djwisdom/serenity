@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.25)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/Meta/CMake")
 
@@ -39,13 +39,9 @@ if(NOT COMMAND serenity_option)
         set(${ARGV})
     endmacro()
 endif()
-include(serenity_options)
+include(serenity_options NO_POLICY_SCOPE)
 
-find_program(CCACHE_PROGRAM ccache)
-if(CCACHE_PROGRAM)
-    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE FILEPATH "Path to a compiler launcher program, e.g. ccache")
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE FILEPATH "Path to a compiler launcher program, e.g. ccache")
-endif()
+include(setup_ccache)
 
 if (NOT HACKSTUDIO_BUILD)
 
@@ -212,7 +208,6 @@ add_custom_target(components ALL)
 option(BUILD_EVERYTHING "Build all optional components" ON)
 
 include(utils)
-include(wasm_spec_tests)
 include(flac_spec_tests)
 
 serenity_component(

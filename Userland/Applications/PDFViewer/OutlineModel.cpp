@@ -5,18 +5,30 @@
  */
 
 #include "OutlineModel.h"
+#include <AK/Assertions.h>
+#include <AK/NonnullRefPtrVector.h>
+#include <LibGUI/ModelRole.h>
 #include <LibGfx/Font/FontDatabase.h>
+#include <LibGfx/TextAlignment.h>
+#include <LibPDF/Document.h>
 
-NonnullRefPtr<OutlineModel> OutlineModel::create(NonnullRefPtr<PDF::OutlineDict> const& outline)
+enum Columns {
+    Page,
+    Title,
+    _Count
+};
+
+ErrorOr<NonnullRefPtr<OutlineModel>> OutlineModel::create(NonnullRefPtr<PDF::OutlineDict> const& outline)
 {
-    return adopt_ref(*new OutlineModel(outline));
+    auto outline_model = adopt_ref(*new OutlineModel(outline));
+    outline_model->m_closed_item_icon.set_bitmap_for_size(16, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/book.png"sv)));
+    outline_model->m_open_item_icon.set_bitmap_for_size(16, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/book-open.png"sv)));
+    return outline_model;
 }
 
 OutlineModel::OutlineModel(NonnullRefPtr<PDF::OutlineDict> const& outline)
     : m_outline(outline)
 {
-    m_closed_item_icon.set_bitmap_for_size(16, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/book.png"sv).release_value_but_fixme_should_propagate_errors());
-    m_open_item_icon.set_bitmap_for_size(16, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/book-open.png"sv).release_value_but_fixme_should_propagate_errors());
 }
 
 void OutlineModel::set_index_open_state(const GUI::ModelIndex& index, bool is_open)
@@ -39,9 +51,20 @@ int OutlineModel::row_count(const GUI::ModelIndex& index) const
     return static_cast<int>(outline_item->children.size());
 }
 
+int OutlineModel::tree_column() const
+{
+    return Columns::Title;
+}
+
 int OutlineModel::column_count(const GUI::ModelIndex&) const
 {
-    return 1;
+    return Columns::_Count;
+}
+
+PDF::Destination const& OutlineModel::get_destination(GUI::ModelIndex const& index)
+{
+    auto* outline_item = static_cast<PDF::OutlineItem*>(index.internal_data());
+    return outline_item->dest;
 }
 
 GUI::Variant OutlineModel::data(const GUI::ModelIndex& index, GUI::ModelRole role) const
@@ -51,13 +74,36 @@ GUI::Variant OutlineModel::data(const GUI::ModelIndex& index, GUI::ModelRole rol
 
     switch (role) {
     case GUI::ModelRole::Display:
-        return outline_item->title;
+        switch (index.column()) {
+        case Columns::Title:
+            return outline_item->title;
+        case Columns::Page: {
+            auto maybe_page_number = outline_item->dest.page;
+            if (maybe_page_number.has_value()) {
+                return maybe_page_number.release_value();
+            }
+            return {};
+        }
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
     case GUI::ModelRole::Icon:
         if (m_open_outline_items.contains(outline_item))
             return m_open_item_icon;
         return m_closed_item_icon;
     default:
         return {};
+
+    case GUI::ModelRole::TextAlignment:
+        switch (index.column()) {
+        case Columns::Title:
+            return Gfx::TextAlignment::CenterLeft;
+        case Columns::Page:
+            return Gfx::TextAlignment::CenterRight;
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
 }
 
@@ -72,19 +118,11 @@ GUI::ModelIndex OutlineModel::parent_index(const GUI::ModelIndex& index) const
     if (!parent)
         return {};
 
-    if (parent->parent) {
-        auto& grandparent = parent->parent;
-        for (size_t i = 0; i < grandparent->children.size(); i++) {
-            auto* sibling = &grandparent->children[i];
-            if (sibling == index.internal_data())
-                return create_index(static_cast<int>(i), 0, sibling);
-        }
-    } else {
-        for (size_t i = 0; i < m_outline->children.size(); i++) {
-            auto* sibling = &m_outline->children[i];
-            if (sibling == index.internal_data())
-                return create_index(static_cast<int>(i), 0, sibling);
-        }
+    NonnullRefPtrVector<PDF::OutlineItem> parent_siblings = (parent->parent ? parent->parent->children : m_outline->children);
+    for (size_t i = 0; i < parent_siblings.size(); i++) {
+        auto* parent_sibling = &parent_siblings[i];
+        if (parent_sibling == parent.ptr())
+            return create_index(static_cast<int>(i), index.column(), parent.ptr());
     }
 
     VERIFY_NOT_REACHED();

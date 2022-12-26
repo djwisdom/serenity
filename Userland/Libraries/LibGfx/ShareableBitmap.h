@@ -9,6 +9,7 @@
 #include <AK/RefPtr.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Size.h>
+#include <LibIPC/Forward.h>
 
 namespace Gfx {
 
@@ -34,7 +35,10 @@ private:
 
 namespace IPC {
 
+template<>
 bool encode(Encoder&, Gfx::ShareableBitmap const&);
-ErrorOr<void> decode(Decoder&, Gfx::ShareableBitmap&);
+
+template<>
+ErrorOr<Gfx::ShareableBitmap> decode(Decoder&);
 
 }

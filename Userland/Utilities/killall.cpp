@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/String.h>
+#include <AK/DeprecatedString.h>
 #include <LibCore/ProcessStatisticsReader.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
@@ -19,13 +19,11 @@ static void print_usage_and_exit()
     exit(1);
 }
 
-static ErrorOr<int> kill_all(String const& process_name, unsigned const signum)
+static ErrorOr<int> kill_all(DeprecatedString const& process_name, unsigned const signum)
 {
-    auto all_processes = Core::ProcessStatisticsReader::get_all();
-    if (!all_processes.has_value())
-        return 1;
+    auto all_processes = TRY(Core::ProcessStatisticsReader::get_all());
 
-    for (auto& process : all_processes.value().processes) {
+    for (auto& process : all_processes.processes) {
         if (process.name == process_name) {
             TRY(Core::System::kill(process.pid, signum));
         }
@@ -57,7 +55,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
 
         if (!number.has_value())
-            number = String(&arguments.argv[1][1]).to_uint();
+            number = DeprecatedString(&arguments.argv[1][1]).to_uint();
 
         if (!number.has_value()) {
             warnln("'{}' is not a valid signal name or number", &arguments.argv[1][1]);

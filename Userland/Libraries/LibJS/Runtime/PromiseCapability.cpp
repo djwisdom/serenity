@@ -13,7 +13,7 @@ namespace JS {
 
 NonnullGCPtr<PromiseCapability> PromiseCapability::create(VM& vm, GCPtr<Object> promise, GCPtr<FunctionObject> resolve, GCPtr<FunctionObject> reject)
 {
-    return NonnullGCPtr { *vm.heap().allocate_without_realm<PromiseCapability>(promise, resolve, reject) };
+    return vm.heap().allocate_without_realm<PromiseCapability>(promise, resolve, reject);
 }
 
 PromiseCapability::PromiseCapability(GCPtr<Object> promise, GCPtr<FunctionObject> resolve, GCPtr<FunctionObject> reject)
@@ -75,10 +75,10 @@ ThrowCompletionOr<NonnullGCPtr<PromiseCapability>> new_promise_capability(VM& vm
     };
 
     // 5. Let executor be CreateBuiltinFunction(executorClosure, 2, "", « »).
-    auto* executor = NativeFunction::create(realm, move(executor_closure), 2, "");
+    auto executor = NativeFunction::create(realm, move(executor_closure), 2, "");
 
     // 6. Let promise be ? Construct(C, « executor »).
-    auto* promise = TRY(construct(vm, constructor.as_function(), executor));
+    auto promise = TRY(construct(vm, constructor.as_function(), executor));
 
     // 7. If IsCallable(promiseCapability.[[Resolve]]) is false, throw a TypeError exception.
     // NOTE: We only assign a value in the executor closure if it is a function.
