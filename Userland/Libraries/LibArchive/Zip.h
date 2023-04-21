@@ -8,10 +8,12 @@
 #pragma once
 
 #include <AK/Array.h>
-#include <AK/DeprecatedString.h>
+#include <AK/DOSPackedTime.h>
 #include <AK/Function.h>
 #include <AK/IterationDecision.h>
+#include <AK/NonnullOwnPtr.h>
 #include <AK/Stream.h>
+#include <AK/String.h>
 #include <AK/Vector.h>
 #include <string.h>
 
@@ -55,18 +57,23 @@ struct [[gnu::packed]] EndOfCentralDirectory {
         return true;
     }
 
-    void write(OutputStream& stream) const
+    ErrorOr<void> write(Stream& stream) const
     {
-        stream.write_or_error(signature);
-        stream << disk_number;
-        stream << central_directory_start_disk;
-        stream << disk_records_count;
-        stream << total_records_count;
-        stream << central_directory_size;
-        stream << central_directory_offset;
-        stream << comment_length;
+        auto write_value = [&stream](auto value) {
+            return stream.write_until_depleted({ &value, sizeof(value) });
+        };
+
+        TRY(stream.write_until_depleted(signature));
+        TRY(write_value(disk_number));
+        TRY(write_value(central_directory_start_disk));
+        TRY(write_value(disk_records_count));
+        TRY(write_value(total_records_count));
+        TRY(write_value(central_directory_size));
+        TRY(write_value(central_directory_offset));
+        TRY(write_value(comment_length));
         if (comment_length > 0)
-            stream.write_or_error({ comment, comment_length });
+            TRY(stream.write_until_depleted({ comment, comment_length }));
+        return {};
     }
 };
 
@@ -100,8 +107,6 @@ union ZipGeneralPurposeFlags {
 };
 static_assert(sizeof(ZipGeneralPurposeFlags) == sizeof(u16));
 
-OutputStream& operator<<(OutputStream& stream, ZipCompressionMethod method);
-
 struct [[gnu::packed]] CentralDirectoryRecord {
     static constexpr Array<u8, signature_length> signature = { 0x50, 0x4b, 0x01, 0x02 }; // 'PK\x01\x02'
 
@@ -109,8 +114,8 @@ struct [[gnu::packed]] CentralDirectoryRecord {
     u16 minimum_version;
     ZipGeneralPurposeFlags general_purpose_flags;
     ZipCompressionMethod compression_method;
-    u16 modification_time;
-    u16 modification_date;
+    DOSPackedTime modification_time;
+    DOSPackedDate modification_date;
     u32 crc32;
     u32 compressed_size;
     u32 uncompressed_size;
@@ -138,31 +143,36 @@ struct [[gnu::packed]] CentralDirectoryRecord {
         return true;
     }
 
-    void write(OutputStream& stream) const
+    ErrorOr<void> write(Stream& stream) const
     {
-        stream.write_or_error(signature);
-        stream << made_by_version;
-        stream << minimum_version;
-        stream << general_purpose_flags.flags;
-        stream << compression_method;
-        stream << modification_time;
-        stream << modification_date;
-        stream << crc32;
-        stream << compressed_size;
-        stream << uncompressed_size;
-        stream << name_length;
-        stream << extra_data_length;
-        stream << comment_length;
-        stream << start_disk;
-        stream << internal_attributes;
-        stream << external_attributes;
-        stream << local_file_header_offset;
+        auto write_value = [&stream](auto value) {
+            return stream.write_until_depleted({ &value, sizeof(value) });
+        };
+
+        TRY(stream.write_until_depleted(signature));
+        TRY(write_value(made_by_version));
+        TRY(write_value(minimum_version));
+        TRY(write_value(general_purpose_flags.flags));
+        TRY(write_value(compression_method));
+        TRY(write_value(modification_time));
+        TRY(write_value(modification_date));
+        TRY(write_value(crc32));
+        TRY(write_value(compressed_size));
+        TRY(write_value(uncompressed_size));
+        TRY(write_value(name_length));
+        TRY(write_value(extra_data_length));
+        TRY(write_value(comment_length));
+        TRY(write_value(start_disk));
+        TRY(write_value(internal_attributes));
+        TRY(write_value(external_attributes));
+        TRY(write_value(local_file_header_offset));
         if (name_length > 0)
-            stream.write_or_error({ name, name_length });
+            TRY(stream.write_until_depleted({ name, name_length }));
         if (extra_data_length > 0)
-            stream.write_or_error({ extra_data, extra_data_length });
+            TRY(stream.write_until_depleted({ extra_data, extra_data_length }));
         if (comment_length > 0)
-            stream.write_or_error({ comment, comment_length });
+            TRY(stream.write_until_depleted({ comment, comment_length }));
+        return {};
     }
 
     [[nodiscard]] size_t size() const
@@ -178,8 +188,8 @@ struct [[gnu::packed]] LocalFileHeader {
     u16 minimum_version;
     ZipGeneralPurposeFlags general_purpose_flags;
     u16 compression_method;
-    u16 modification_time;
-    u16 modification_date;
+    DOSPackedTime modification_time;
+    DOSPackedDate modification_date;
     u32 crc32;
     u32 compressed_size;
     u32 uncompressed_size;
@@ -202,41 +212,48 @@ struct [[gnu::packed]] LocalFileHeader {
         return true;
     }
 
-    void write(OutputStream& stream) const
+    ErrorOr<void> write(Stream& stream) const
     {
-        stream.write_or_error(signature);
-        stream << minimum_version;
-        stream << general_purpose_flags.flags;
-        stream << compression_method;
-        stream << modification_time;
-        stream << modification_date;
-        stream << crc32;
-        stream << compressed_size;
-        stream << uncompressed_size;
-        stream << name_length;
-        stream << extra_data_length;
+        auto write_value = [&stream](auto value) {
+            return stream.write_until_depleted({ &value, sizeof(value) });
+        };
+
+        TRY(stream.write_until_depleted(signature));
+        TRY(write_value(minimum_version));
+        TRY(write_value(general_purpose_flags.flags));
+        TRY(write_value(compression_method));
+        TRY(write_value(modification_time));
+        TRY(write_value(modification_date));
+        TRY(write_value(crc32));
+        TRY(write_value(compressed_size));
+        TRY(write_value(uncompressed_size));
+        TRY(write_value(name_length));
+        TRY(write_value(extra_data_length));
         if (name_length > 0)
-            stream.write_or_error({ name, name_length });
+            TRY(stream.write_until_depleted({ name, name_length }));
         if (extra_data_length > 0)
-            stream.write_or_error({ extra_data, extra_data_length });
+            TRY(stream.write_until_depleted({ extra_data, extra_data_length }));
         if (compressed_size > 0)
-            stream.write_or_error({ compressed_data, compressed_size });
+            TRY(stream.write_until_depleted({ compressed_data, compressed_size }));
+        return {};
     }
 };
 
 struct ZipMember {
-    DeprecatedString name;
+    String name;
     ReadonlyBytes compressed_data; // TODO: maybe the decompression/compression should be handled by LibArchive instead of the user?
     ZipCompressionMethod compression_method;
     u32 uncompressed_size;
     u32 crc32;
     bool is_directory;
+    DOSPackedTime modification_time;
+    DOSPackedDate modification_date;
 };
 
 class Zip {
 public:
     static Optional<Zip> try_create(ReadonlyBytes buffer);
-    bool for_each_member(Function<IterationDecision(ZipMember const&)>);
+    ErrorOr<bool> for_each_member(Function<IterationDecision(ZipMember const&)>);
 
 private:
     static bool find_end_of_central_directory_offset(ReadonlyBytes, size_t& offset);
@@ -254,12 +271,13 @@ private:
 
 class ZipOutputStream {
 public:
-    ZipOutputStream(OutputStream&);
-    void add_member(ZipMember const&);
-    void finish();
+    ZipOutputStream(NonnullOwnPtr<Stream>);
+
+    ErrorOr<void> add_member(ZipMember const&);
+    ErrorOr<void> finish();
 
 private:
-    OutputStream& m_stream;
+    NonnullOwnPtr<Stream> m_stream;
     Vector<ZipMember> m_members;
 
     bool m_finished { false };

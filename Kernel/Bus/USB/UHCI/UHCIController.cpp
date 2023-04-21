@@ -75,9 +75,9 @@ ErrorOr<NonnullLockRefPtr<UHCIController>> UHCIController::try_to_initialize(PCI
 
 ErrorOr<void> UHCIController::initialize()
 {
-    dmesgln("UHCI: Controller found {} @ {}", PCI::get_hardware_id(pci_address()), pci_address());
-    dmesgln("UHCI: I/O base {}", m_registers_io_window);
-    dmesgln("UHCI: Interrupt line: {}", interrupt_number());
+    dmesgln_pci(*this, "Controller found {} @ {}", PCI::get_hardware_id(device_identifier()), device_identifier().address());
+    dmesgln_pci(*this, "I/O base {}", m_registers_io_window);
+    dmesgln_pci(*this, "Interrupt line: {}", interrupt_number());
 
     TRY(spawn_async_poll_process());
     TRY(spawn_port_process());
@@ -87,11 +87,9 @@ ErrorOr<void> UHCIController::initialize()
 }
 
 UNMAP_AFTER_INIT UHCIController::UHCIController(PCI::DeviceIdentifier const& pci_device_identifier, NonnullOwnPtr<IOWindow> registers_io_window)
-    : PCI::Device(pci_device_identifier.address())
+    : PCI::Device(const_cast<PCI::DeviceIdentifier&>(pci_device_identifier))
     , IRQHandler(pci_device_identifier.interrupt_line().value())
     , m_registers_io_window(move(registers_io_window))
-    , m_async_lock(LockRank::None)
-    , m_schedule_lock(LockRank::None)
 {
 }
 
@@ -587,22 +585,20 @@ size_t UHCIController::poll_transfer_queue(QueueHead& transfer_queue)
 
 ErrorOr<void> UHCIController::spawn_port_process()
 {
-    LockRefPtr<Thread> usb_hotplug_thread;
-    (void)Process::create_kernel_process(usb_hotplug_thread, TRY(KString::try_create("UHCI Hot Plug Task"sv)), [&] {
+    TRY(Process::create_kernel_process(TRY(KString::try_create("UHCI Hot Plug Task"sv)), [&] {
         for (;;) {
             if (m_root_hub)
                 m_root_hub->check_for_port_updates();
 
             (void)Thread::current()->sleep(Time::from_seconds(1));
         }
-    });
+    }));
     return {};
 }
 
 ErrorOr<void> UHCIController::spawn_async_poll_process()
 {
-    LockRefPtr<Thread> async_poll_thread;
-    (void)Process::create_kernel_process(async_poll_thread, TRY(KString::try_create("UHCI Async Poll Task"sv)), [&] {
+    TRY(Process::create_kernel_process(TRY(KString::try_create("UHCI Async Poll Task"sv)), [&] {
         u16 poll_interval_ms = 1024;
         for (;;) {
             {
@@ -622,7 +618,7 @@ ErrorOr<void> UHCIController::spawn_async_poll_process()
             }
             (void)Thread::current()->sleep(Time::from_milliseconds(poll_interval_ms));
         }
-    });
+    }));
     return {};
 }
 

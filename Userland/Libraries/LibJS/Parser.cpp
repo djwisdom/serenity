@@ -4,6 +4,7 @@
  * Copyright (c) 2021-2022, David Tuin <davidot@serenityos.org>
  * Copyright (c) 2021, Ali Mohammad Pur <mpfard@serenityos.org>
  * Copyright (c) 2021, Idan Horowitz <idan.horowitz@serenityos.org>
+ * Copyright (c) 2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -65,13 +66,14 @@ public:
         scope_pusher.m_function_parameters = parameters;
         for (auto& parameter : parameters) {
             parameter.binding.visit(
-                [&](FlyString const& name) {
+                [&](DeprecatedFlyString const& name) {
                     scope_pusher.m_forbidden_lexical_names.set(name);
                 },
-                [&](NonnullRefPtr<BindingPattern> const& binding_pattern) {
-                    binding_pattern->for_each_bound_name([&](auto const& name) {
+                [&](NonnullRefPtr<BindingPattern const> const& binding_pattern) {
+                    // NOTE: Nothing in the callback throws an exception.
+                    MUST(binding_pattern->for_each_bound_name([&](auto const& name) {
                         scope_pusher.m_forbidden_lexical_names.set(name);
-                    });
+                    }));
                 });
         }
         return scope_pusher;
@@ -87,28 +89,30 @@ public:
         return ScopePusher(parser, &node, ScopeLevel::NotTopLevel);
     }
 
-    static ScopePusher for_loop_scope(Parser& parser, RefPtr<ASTNode> const& init)
+    static ScopePusher for_loop_scope(Parser& parser, RefPtr<ASTNode const> const& init)
     {
         ScopePusher scope_pusher(parser, nullptr, ScopeLevel::NotTopLevel);
         if (init && is<VariableDeclaration>(*init)) {
             auto& variable_declaration = static_cast<VariableDeclaration const&>(*init);
             if (variable_declaration.declaration_kind() != DeclarationKind::Var) {
-                variable_declaration.for_each_bound_name([&](auto const& name) {
+                // NOTE: Nothing in the callback throws an exception.
+                MUST(variable_declaration.for_each_bound_name([&](auto const& name) {
                     scope_pusher.m_forbidden_var_names.set(name);
-                });
+                }));
             }
         }
 
         return scope_pusher;
     }
 
-    static ScopePusher catch_scope(Parser& parser, RefPtr<BindingPattern> const& pattern, FlyString const& parameter)
+    static ScopePusher catch_scope(Parser& parser, RefPtr<BindingPattern const> const& pattern, DeprecatedFlyString const& parameter)
     {
         ScopePusher scope_pusher(parser, nullptr, ScopeLevel::NotTopLevel);
         if (pattern) {
-            pattern->for_each_bound_name([&](auto const& name) {
+            // NOTE: Nothing in the callback throws an exception.
+            MUST(pattern->for_each_bound_name([&](auto const& name) {
                 scope_pusher.m_forbidden_var_names.set(name);
-            });
+            }));
         } else if (!parameter.is_empty()) {
             scope_pusher.m_var_names.set(parameter);
         }
@@ -125,20 +129,22 @@ public:
         return ScopePusher(parser, nullptr, ScopeLevel::NotTopLevel);
     }
 
-    void add_declaration(NonnullRefPtr<Declaration> declaration)
+    void add_declaration(NonnullRefPtr<Declaration const> declaration)
     {
         if (declaration->is_lexical_declaration()) {
-            declaration->for_each_bound_name([&](auto const& name) {
+            // NOTE: Nothing in the callback throws an exception.
+            MUST(declaration->for_each_bound_name([&](auto const& name) {
                 if (m_var_names.contains(name) || m_forbidden_lexical_names.contains(name) || m_function_names.contains(name))
                     throw_identifier_declared(name, declaration);
 
                 if (m_lexical_names.set(name) != AK::HashSetResult::InsertedNewEntry)
                     throw_identifier_declared(name, declaration);
-            });
+            }));
 
             m_node->add_lexical_declaration(move(declaration));
         } else if (!declaration->is_function_declaration()) {
-            declaration->for_each_bound_name([&](auto const& name) {
+            // NOTE: Nothing in the callback throws an exception.
+            MUST(declaration->for_each_bound_name([&](auto const& name) {
                 ScopePusher* pusher = this;
                 while (true) {
                     if (pusher->m_lexical_names.contains(name)
@@ -155,16 +161,17 @@ public:
                 }
                 VERIFY(pusher->is_top_level() && pusher->m_node);
                 pusher->m_node->add_var_scoped_declaration(declaration);
-            });
+            }));
 
             VERIFY(m_top_level_scope);
             m_top_level_scope->m_node->add_var_scoped_declaration(move(declaration));
         } else {
             if (m_scope_level != ScopeLevel::NotTopLevel && m_scope_level != ScopeLevel::ModuleTopLevel) {
                 // Only non-top levels and Module don't var declare the top functions
-                declaration->for_each_bound_name([&](auto const& name) {
+                // NOTE: Nothing in the callback throws an exception.
+                MUST(declaration->for_each_bound_name([&](auto const& name) {
                     m_var_names.set(name);
-                });
+                }));
                 m_node->add_var_scoped_declaration(move(declaration));
             } else {
                 VERIFY(is<FunctionDeclaration>(*declaration));
@@ -184,7 +191,7 @@ public:
 
                 m_function_names.set(function_name);
                 if (!m_lexical_names.contains(function_name))
-                    m_functions_to_hoist.append(static_ptr_cast<FunctionDeclaration>(declaration));
+                    m_functions_to_hoist.append(static_ptr_cast<FunctionDeclaration const>(declaration));
 
                 m_node->add_lexical_declaration(move(declaration));
             }
@@ -208,7 +215,7 @@ public:
     ScopePusher* parent_scope() { return m_parent_scope; }
     ScopePusher const* parent_scope() const { return m_parent_scope; }
 
-    [[nodiscard]] bool has_declaration(FlyString const& name) const
+    [[nodiscard]] bool has_declaration(DeprecatedFlyString const& name) const
     {
         return m_lexical_names.contains(name) || m_var_names.contains(name) || !m_functions_to_hoist.find_if([&name](auto& function) { return function->name() == name; }).is_end();
     }
@@ -224,12 +231,12 @@ public:
 
         for (size_t i = 0; i < m_functions_to_hoist.size(); i++) {
             auto const& function_declaration = m_functions_to_hoist[i];
-            if (m_lexical_names.contains(function_declaration.name()) || m_forbidden_var_names.contains(function_declaration.name()))
+            if (m_lexical_names.contains(function_declaration->name()) || m_forbidden_var_names.contains(function_declaration->name()))
                 continue;
             if (is_top_level()) {
                 m_node->add_hoisted_function(move(m_functions_to_hoist[i]));
             } else {
-                if (!m_parent_scope->m_lexical_names.contains(function_declaration.name()) && !m_parent_scope->m_function_names.contains(function_declaration.name()))
+                if (!m_parent_scope->m_lexical_names.contains(function_declaration->name()) && !m_parent_scope->m_function_names.contains(function_declaration->name()))
                     m_parent_scope->m_functions_to_hoist.append(move(m_functions_to_hoist[i]));
             }
         }
@@ -253,8 +260,13 @@ public:
         return m_contains_await_expression;
     }
 
+    bool can_have_using_declaration() const
+    {
+        return m_scope_level != ScopeLevel::ScriptTopLevel;
+    }
+
 private:
-    void throw_identifier_declared(FlyString const& name, NonnullRefPtr<Declaration> const& declaration)
+    void throw_identifier_declared(DeprecatedFlyString const& name, NonnullRefPtr<Declaration const> const& declaration)
     {
         m_parser.syntax_error(DeprecatedString::formatted("Identifier '{}' already declared", name), declaration->source_range().start);
     }
@@ -266,13 +278,13 @@ private:
     ScopePusher* m_parent_scope { nullptr };
     ScopePusher* m_top_level_scope { nullptr };
 
-    HashTable<FlyString> m_lexical_names;
-    HashTable<FlyString> m_var_names;
-    HashTable<FlyString> m_function_names;
+    HashTable<DeprecatedFlyString> m_lexical_names;
+    HashTable<DeprecatedFlyString> m_var_names;
+    HashTable<DeprecatedFlyString> m_function_names;
 
-    HashTable<FlyString> m_forbidden_lexical_names;
-    HashTable<FlyString> m_forbidden_var_names;
-    NonnullRefPtrVector<FunctionDeclaration> m_functions_to_hoist;
+    HashTable<DeprecatedFlyString> m_forbidden_lexical_names;
+    HashTable<DeprecatedFlyString> m_forbidden_var_names;
+    Vector<NonnullRefPtr<FunctionDeclaration const>> m_functions_to_hoist;
 
     Optional<Vector<FunctionParameter>> m_function_parameters;
 
@@ -404,7 +416,7 @@ Parser::ParserState::ParserState(Lexer l, Program::Type program_type)
 }
 
 Parser::Parser(Lexer lexer, Program::Type program_type, Optional<EvalInitialState> initial_state_for_eval)
-    : m_source_code(SourceCode::create(lexer.filename(), lexer.source()))
+    : m_source_code(SourceCode::create(lexer.filename(), String::from_deprecated_string(lexer.source()).release_value_but_fixme_should_propagate_errors()))
     , m_state(move(lexer), program_type)
     , m_program_type(program_type)
 {
@@ -553,38 +565,40 @@ void Parser::parse_module(Program& program)
         program.set_has_top_level_await();
 
     for (auto& export_statement : program.exports()) {
-        if (export_statement.has_statement())
+        if (export_statement->has_statement())
             continue;
-        for (auto& entry : export_statement.entries()) {
+        for (auto& entry : export_statement->entries()) {
             if (entry.is_module_request() || entry.kind == ExportEntry::Kind::EmptyNamedExport)
                 return;
 
             auto const& exported_name = entry.local_or_import_name;
             bool found = false;
-            program.for_each_lexically_declared_name([&](auto const& name) {
+            // NOTE: Nothing in the callback throws an exception.
+            MUST(program.for_each_lexically_declared_name([&](auto const& name) {
                 if (name == exported_name)
                     found = true;
-            });
+            }));
             if (found)
                 continue;
-            program.for_each_var_declared_name([&](auto const& name) {
+            // NOTE: Nothing in the callback throws an exception.
+            MUST(program.for_each_var_declared_name([&](auto const& name) {
                 if (name == exported_name)
                     found = true;
-            });
+            }));
             for (auto& import : program.imports()) {
-                if (import.has_bound_name(exported_name)) {
+                if (import->has_bound_name(exported_name)) {
                     found = true;
                     break;
                 }
             }
 
             if (!found)
-                syntax_error(DeprecatedString::formatted("'{}' in export is not declared", exported_name), export_statement.source_range().start);
+                syntax_error(DeprecatedString::formatted("'{}' in export is not declared", exported_name), export_statement->source_range().start);
         }
     }
 }
 
-NonnullRefPtr<Declaration> Parser::parse_declaration()
+NonnullRefPtr<Declaration const> Parser::parse_declaration()
 {
     auto rule_start = push_start();
     if (m_state.current_token.type() == TokenType::Async && next_token().type() == TokenType::Function)
@@ -597,6 +611,14 @@ NonnullRefPtr<Declaration> Parser::parse_declaration()
     case TokenType::Let:
     case TokenType::Const:
         return parse_variable_declaration();
+    case TokenType::Identifier:
+        if (m_state.current_token.original_value() == "using"sv) {
+            if (!m_state.current_scope_pusher->can_have_using_declaration())
+                syntax_error("'using' not allowed outside of block, for loop or function");
+
+            return parse_using_declaration();
+        }
+        [[fallthrough]];
     default:
         expected("declaration");
         consume();
@@ -604,7 +626,7 @@ NonnullRefPtr<Declaration> Parser::parse_declaration()
     }
 }
 
-NonnullRefPtr<Statement> Parser::parse_statement(AllowLabelledFunction allow_labelled_function)
+NonnullRefPtr<Statement const> Parser::parse_statement(AllowLabelledFunction allow_labelled_function)
 {
     auto rule_start = push_start();
     auto type = m_state.current_token.type();
@@ -707,11 +729,11 @@ static bool is_strict_reserved_word(StringView str)
 static bool is_simple_parameter_list(Vector<FunctionParameter> const& parameters)
 {
     return all_of(parameters, [](FunctionParameter const& parameter) {
-        return !parameter.is_rest && parameter.default_value.is_null() && parameter.binding.has<FlyString>();
+        return !parameter.is_rest && parameter.default_value.is_null() && parameter.binding.has<DeprecatedFlyString>();
     });
 }
 
-RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expect_parens, bool is_async)
+RefPtr<FunctionExpression const> Parser::try_parse_arrow_function_expression(bool expect_parens, bool is_async)
 {
     if (is_async)
         VERIFY(match(TokenType::Async));
@@ -782,7 +804,7 @@ RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expe
             syntax_error("BindingIdentifier may not be 'arguments' or 'eval' in strict mode");
         if (is_async && token.value() == "await"sv)
             syntax_error("'await' is a reserved identifier in async functions");
-        parameters.append({ FlyString { token.value() }, {} });
+        parameters.append({ DeprecatedFlyString { token.value() }, {} });
     }
     // If there's a newline between the closing paren and arrow it's not a valid arrow function,
     // ASI should kick in instead (it'll then fail with "Unexpected token Arrow")
@@ -802,7 +824,7 @@ RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expe
 
     bool contains_direct_call_to_eval = false;
 
-    auto function_body_result = [&]() -> RefPtr<FunctionBody> {
+    auto function_body_result = [&]() -> RefPtr<FunctionBody const> {
         TemporaryChange change(m_state.in_arrow_function_context, true);
         TemporaryChange async_context_change(m_state.await_expression_is_valid, is_async);
         TemporaryChange in_class_static_init_block_change(m_state.in_class_static_init_block, false);
@@ -824,9 +846,9 @@ RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expe
             auto return_block = create_ast_node<FunctionBody>({ m_source_code, rule_start.position(), position() });
             ScopePusher function_scope = ScopePusher::function_scope(*this, return_block, parameters);
             auto return_expression = parse_expression(2);
-            return_block->append<ReturnStatement>({ m_source_code, rule_start.position(), position() }, move(return_expression));
+            return_block->append<ReturnStatement const>({ m_source_code, rule_start.position(), position() }, move(return_expression));
             if (m_state.strict_mode)
-                return_block->set_strict_mode();
+                const_cast<FunctionBody&>(*return_block).set_strict_mode();
             contains_direct_call_to_eval = function_scope.contains_direct_call_to_eval();
             return return_block;
         }
@@ -844,7 +866,7 @@ RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expe
     if (body->in_strict_mode()) {
         for (auto& parameter : parameters) {
             parameter.binding.visit(
-                [&](FlyString const& name) {
+                [&](DeprecatedFlyString const& name) {
                     check_identifier_name_for_assignment_validity(name, true);
                 },
                 [&](auto const&) {});
@@ -860,7 +882,7 @@ RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expe
         /* might_need_arguments_object */ false, contains_direct_call_to_eval, /* is_arrow_function */ true);
 }
 
-RefPtr<LabelledStatement> Parser::try_parse_labelled_statement(AllowLabelledFunction allow_function)
+RefPtr<LabelledStatement const> Parser::try_parse_labelled_statement(AllowLabelledFunction allow_function)
 {
     {
         // NOTE: This is a fast path where we try to fail early to avoid the expensive save_state+load_state.
@@ -911,7 +933,7 @@ RefPtr<LabelledStatement> Parser::try_parse_labelled_statement(AllowLabelledFunc
     if (m_state.labels_in_scope.contains(identifier))
         syntax_error(DeprecatedString::formatted("Label '{}' has already been declared", identifier));
 
-    RefPtr<Statement> labelled_item;
+    RefPtr<Statement const> labelled_item;
 
     auto is_iteration_statement = false;
 
@@ -932,7 +954,7 @@ RefPtr<LabelledStatement> Parser::try_parse_labelled_statement(AllowLabelledFunc
         // Extract the innermost statement from a potentially nested chain of LabelledStatements.
         auto statement = labelled_item;
         while (is<LabelledStatement>(*statement))
-            statement = static_cast<LabelledStatement&>(*statement).labelled_item();
+            statement = static_cast<LabelledStatement const&>(*statement).labelled_item();
         if (is<IterationStatement>(*statement))
             is_iteration_statement = true;
     }
@@ -947,7 +969,7 @@ RefPtr<LabelledStatement> Parser::try_parse_labelled_statement(AllowLabelledFunc
     return create_ast_node<LabelledStatement>({ m_source_code, rule_start.position(), position() }, identifier, labelled_item.release_nonnull());
 }
 
-RefPtr<MetaProperty> Parser::try_parse_new_target_expression()
+RefPtr<MetaProperty const> Parser::try_parse_new_target_expression()
 {
     // Optimization which skips the save/load state.
     if (next_token().type() != TokenType::Period)
@@ -972,7 +994,7 @@ RefPtr<MetaProperty> Parser::try_parse_new_target_expression()
     return create_ast_node<MetaProperty>({ m_source_code, rule_start.position(), position() }, MetaProperty::Type::NewTarget);
 }
 
-RefPtr<MetaProperty> Parser::try_parse_import_meta_expression()
+RefPtr<MetaProperty const> Parser::try_parse_import_meta_expression()
 {
     // Optimization which skips the save/load state.
     if (next_token().type() != TokenType::Period)
@@ -997,7 +1019,7 @@ RefPtr<MetaProperty> Parser::try_parse_import_meta_expression()
     return create_ast_node<MetaProperty>({ m_source_code, rule_start.position(), position() }, MetaProperty::Type::ImportMeta);
 }
 
-NonnullRefPtr<ImportCall> Parser::parse_import_call()
+NonnullRefPtr<ImportCall const> Parser::parse_import_call()
 {
     auto rule_start = push_start();
 
@@ -1011,7 +1033,7 @@ NonnullRefPtr<ImportCall> Parser::parse_import_call()
     consume(TokenType::ParenOpen);
     auto argument = parse_expression(2);
 
-    RefPtr<Expression> options;
+    RefPtr<Expression const> options;
     if (match(TokenType::Comma)) {
         consume(TokenType::Comma);
 
@@ -1029,13 +1051,13 @@ NonnullRefPtr<ImportCall> Parser::parse_import_call()
     return create_ast_node<ImportCall>({ m_source_code, rule_start.position(), position() }, move(argument), move(options));
 }
 
-NonnullRefPtr<ClassDeclaration> Parser::parse_class_declaration()
+NonnullRefPtr<ClassDeclaration const> Parser::parse_class_declaration()
 {
     auto rule_start = push_start();
     return create_ast_node<ClassDeclaration>({ m_source_code, rule_start.position(), position() }, parse_class_expression(true));
 }
 
-NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_name)
+NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_class_name)
 {
     auto rule_start = push_start();
     // Classes are always in strict mode.
@@ -1043,13 +1065,13 @@ NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_
 
     consume(TokenType::Class);
 
-    NonnullRefPtrVector<ClassElement> elements;
-    RefPtr<Expression> super_class;
-    RefPtr<FunctionExpression> constructor;
-    HashTable<FlyString> found_private_names;
+    Vector<NonnullRefPtr<ClassElement const>> elements;
+    RefPtr<Expression const> super_class;
+    RefPtr<FunctionExpression const> constructor;
+    HashTable<DeprecatedFlyString> found_private_names;
 
-    FlyString class_name = expect_class_name || match_identifier() || match(TokenType::Yield) || match(TokenType::Await)
-        ? consume_identifier_reference().flystring_value()
+    DeprecatedFlyString class_name = expect_class_name || match_identifier() || match(TokenType::Yield) || match(TokenType::Await)
+        ? consume_identifier_reference().DeprecatedFlyString_value()
         : "";
 
     check_identifier_name_for_assignment_validity(class_name, true);
@@ -1089,7 +1111,7 @@ NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_
     };
 
     while (!done() && !match(TokenType::CurlyClose)) {
-        RefPtr<Expression> property_key;
+        RefPtr<Expression const> property_key;
         bool is_static = false;
         bool is_constructor = false;
         bool is_generator = false;
@@ -1166,18 +1188,18 @@ NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_
                         //   and the getter and setter are either both static or both non-static.
 
                         for (auto& element : elements) {
-                            auto private_name = element.private_bound_identifier();
+                            auto private_name = element->private_bound_identifier();
                             if (!private_name.has_value() || private_name.value() != name)
                                 continue;
 
-                            if (element.class_element_kind() != ClassElement::ElementKind::Method
-                                || element.is_static() != is_static) {
+                            if (element->class_element_kind() != ClassElement::ElementKind::Method
+                                || element->is_static() != is_static) {
                                 syntax_error(DeprecatedString::formatted("Duplicate private field or method named '{}'", name));
                                 break;
                             }
 
-                            VERIFY(is<ClassMethod>(element));
-                            auto& class_method_element = static_cast<ClassMethod const&>(element);
+                            VERIFY(is<ClassMethod>(*element));
+                            auto& class_method_element = static_cast<ClassMethod const&>(*element);
 
                             if (class_method_element.kind() == ClassMethod::Kind::Method || class_method_element.kind() == method_kind) {
                                 syntax_error(DeprecatedString::formatted("Duplicate private field or method named '{}'", name));
@@ -1300,7 +1322,7 @@ NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_
             if (name == "constructor"sv)
                 syntax_error("Class cannot have field named 'constructor'");
 
-            RefPtr<Expression> initializer;
+            RefPtr<Expression const> initializer;
             bool contains_direct_call_to_eval = false;
 
             if (match(TokenType::Equals)) {
@@ -1331,7 +1353,7 @@ NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_
             //          this function does not.
             //          So we use a custom version of SuperCall which doesn't use the @@iterator
             //          method on %Array.prototype% visibly.
-            FlyString argument_name = "args";
+            DeprecatedFlyString argument_name = "args";
             auto super_call = create_ast_node<SuperCall>(
                 { m_source_code, rule_start.position(), position() },
                 SuperCall::IsPartOfSyntheticConstructor::Yes,
@@ -1376,7 +1398,7 @@ Parser::PrimaryExpressionParseResult Parser::parse_primary_expression()
     if (match_unary_prefixed_expression())
         return { parse_unary_prefixed_expression() };
 
-    auto try_arrow_function_parse_or_fail = [this](Position const& position, bool expect_paren, bool is_async = false) -> RefPtr<FunctionExpression> {
+    auto try_arrow_function_parse_or_fail = [this](Position const& position, bool expect_paren, bool is_async = false) -> RefPtr<FunctionExpression const> {
         if (try_parse_arrow_function_expression_failed_at_position(position))
             return nullptr;
         auto arrow_function = try_parse_arrow_function_expression(expect_paren, is_async);
@@ -1398,7 +1420,7 @@ Parser::PrimaryExpressionParseResult Parser::parse_primary_expression()
         auto expression = parse_expression(0);
         consume(TokenType::ParenClose);
         if (is<FunctionExpression>(*expression)) {
-            auto& function = static_cast<FunctionExpression&>(*expression);
+            auto& function = static_cast<FunctionExpression const&>(*expression);
             if (function.kind() == FunctionKind::Generator && function.name() == "yield"sv)
                 syntax_error("function is not allowed to be called 'yield' in this context", function.source_range().start);
             if (function.kind() == FunctionKind::Async && function.name() == "await"sv)
@@ -1521,7 +1543,7 @@ Parser::PrimaryExpressionParseResult Parser::parse_primary_expression()
     return { create_ast_node<ErrorExpression>({ m_source_code, rule_start.position(), position() }) };
 }
 
-NonnullRefPtr<RegExpLiteral> Parser::parse_regexp_literal()
+NonnullRefPtr<RegExpLiteral const> Parser::parse_regexp_literal()
 {
     auto rule_start = push_start();
     auto pattern = consume().value();
@@ -1564,7 +1586,7 @@ static bool is_simple_assignment_target(Expression const& expression, bool allow
     return is<Identifier>(expression) || is<MemberExpression>(expression) || (allow_web_reality_call_expression && is<CallExpression>(expression));
 }
 
-NonnullRefPtr<Expression> Parser::parse_unary_prefixed_expression()
+NonnullRefPtr<Expression const> Parser::parse_unary_prefixed_expression()
 {
     auto rule_start = push_start();
     auto precedence = g_operator_precedence.get(m_state.current_token.type());
@@ -1578,7 +1600,7 @@ NonnullRefPtr<Expression> Parser::parse_unary_prefixed_expression()
             syntax_error(DeprecatedString::formatted("Right-hand side of prefix increment operator must be identifier or member expression, got {}", rhs->class_name()), rhs_start);
 
         if (m_state.strict_mode && is<Identifier>(*rhs)) {
-            auto& identifier = static_cast<Identifier&>(*rhs);
+            auto& identifier = static_cast<Identifier const&>(*rhs);
             auto& name = identifier.string();
             check_identifier_name_for_assignment_validity(name);
         }
@@ -1593,7 +1615,7 @@ NonnullRefPtr<Expression> Parser::parse_unary_prefixed_expression()
             syntax_error(DeprecatedString::formatted("Right-hand side of prefix decrement operator must be identifier or member expression, got {}", rhs->class_name()), rhs_start);
 
         if (m_state.strict_mode && is<Identifier>(*rhs)) {
-            auto& identifier = static_cast<Identifier&>(*rhs);
+            auto& identifier = static_cast<Identifier const&>(*rhs);
             auto& name = identifier.string();
             check_identifier_name_for_assignment_validity(name);
         }
@@ -1642,7 +1664,7 @@ NonnullRefPtr<Expression> Parser::parse_unary_prefixed_expression()
     }
 }
 
-NonnullRefPtr<Expression> Parser::parse_property_key()
+NonnullRefPtr<Expression const> Parser::parse_property_key()
 {
     auto rule_start = push_start();
     if (match(TokenType::StringLiteral)) {
@@ -1663,12 +1685,12 @@ NonnullRefPtr<Expression> Parser::parse_property_key()
     }
 }
 
-NonnullRefPtr<ObjectExpression> Parser::parse_object_expression()
+NonnullRefPtr<ObjectExpression const> Parser::parse_object_expression()
 {
     auto rule_start = push_start();
     consume(TokenType::CurlyOpen);
 
-    NonnullRefPtrVector<ObjectProperty> properties;
+    Vector<NonnullRefPtr<ObjectProperty>> properties;
     ObjectProperty::Type property_type;
     Optional<SourceRange> invalid_object_literal_property_range;
 
@@ -1684,8 +1706,8 @@ NonnullRefPtr<ObjectExpression> Parser::parse_object_expression()
 
     while (!done() && !match(TokenType::CurlyClose)) {
         property_type = ObjectProperty::Type::KeyValue;
-        RefPtr<Expression> property_key;
-        RefPtr<Expression> property_value;
+        RefPtr<Expression const> property_key;
+        RefPtr<Expression const> property_value;
         FunctionKind function_kind { FunctionKind::Normal };
 
         if (match(TokenType::TripleDot)) {
@@ -1728,7 +1750,7 @@ NonnullRefPtr<ObjectExpression> Parser::parse_object_expression()
                 property_key = parse_property_key();
             } else {
                 property_key = create_ast_node<StringLiteral>({ m_source_code, rule_start.position(), position() }, identifier.value());
-                property_value = create_ast_node<Identifier>({ m_source_code, rule_start.position(), position() }, identifier.flystring_value());
+                property_value = create_ast_node<Identifier>({ m_source_code, rule_start.position(), position() }, identifier.DeprecatedFlyString_value());
             }
         } else {
             property_key = parse_property_key();
@@ -1816,14 +1838,14 @@ NonnullRefPtr<ObjectExpression> Parser::parse_object_expression()
         move(properties));
 }
 
-NonnullRefPtr<ArrayExpression> Parser::parse_array_expression()
+NonnullRefPtr<ArrayExpression const> Parser::parse_array_expression()
 {
     auto rule_start = push_start();
     consume(TokenType::BracketOpen);
 
-    Vector<RefPtr<Expression>> elements;
+    Vector<RefPtr<Expression const>> elements;
     while (match_expression() || match(TokenType::TripleDot) || match(TokenType::Comma)) {
-        RefPtr<Expression> expression;
+        RefPtr<Expression const> expression;
 
         if (match(TokenType::TripleDot)) {
             consume(TokenType::TripleDot);
@@ -1844,7 +1866,7 @@ NonnullRefPtr<ArrayExpression> Parser::parse_array_expression()
     return create_ast_node<ArrayExpression>({ m_source_code, rule_start.position(), position() }, move(elements));
 }
 
-NonnullRefPtr<StringLiteral> Parser::parse_string_literal(Token const& token, StringLiteralType string_literal_type, bool* contains_invalid_escape)
+NonnullRefPtr<StringLiteral const> Parser::parse_string_literal(Token const& token, StringLiteralType string_literal_type, bool* contains_invalid_escape)
 {
     auto rule_start = push_start();
     auto status = Token::StringValueStatus::Ok;
@@ -1881,13 +1903,13 @@ NonnullRefPtr<StringLiteral> Parser::parse_string_literal(Token const& token, St
     return create_ast_node<StringLiteral>({ m_source_code, rule_start.position(), position() }, string);
 }
 
-NonnullRefPtr<TemplateLiteral> Parser::parse_template_literal(bool is_tagged)
+NonnullRefPtr<TemplateLiteral const> Parser::parse_template_literal(bool is_tagged)
 {
     auto rule_start = push_start();
     consume(TokenType::TemplateLiteralStart);
 
-    NonnullRefPtrVector<Expression> expressions;
-    NonnullRefPtrVector<Expression> raw_strings;
+    Vector<NonnullRefPtr<Expression const>> expressions;
+    Vector<NonnullRefPtr<Expression const>> raw_strings;
 
     auto append_empty_string = [this, &rule_start, &expressions, &raw_strings, is_tagged]() {
         auto string_literal = create_ast_node<StringLiteral>({ m_source_code, rule_start.position(), position() }, "");
@@ -1946,7 +1968,7 @@ NonnullRefPtr<TemplateLiteral> Parser::parse_template_literal(bool is_tagged)
     return create_ast_node<TemplateLiteral>({ m_source_code, rule_start.position(), position() }, expressions);
 }
 
-NonnullRefPtr<Expression> Parser::parse_expression(int min_precedence, Associativity associativity, ForbiddenTokens forbidden)
+NonnullRefPtr<Expression const> Parser::parse_expression(int min_precedence, Associativity associativity, ForbiddenTokens forbidden)
 {
     auto rule_start = push_start();
     auto [expression, should_continue_parsing] = parse_primary_expression();
@@ -1957,7 +1979,7 @@ NonnullRefPtr<Expression> Parser::parse_expression(int min_precedence, Associati
         }
     };
     if (is<Identifier>(*expression) && m_state.current_scope_pusher) {
-        auto identifier_instance = static_ptr_cast<Identifier>(expression);
+        auto identifier_instance = static_ptr_cast<Identifier const>(expression);
         auto function_scope = m_state.current_scope_pusher->last_function_scope();
         auto function_parent_scope = function_scope ? function_scope->parent_scope() : nullptr;
         bool has_not_been_declared_as_variable = true;
@@ -1979,6 +2001,7 @@ NonnullRefPtr<Expression> Parser::parse_expression(int min_precedence, Associati
         expression = create_ast_node<TaggedTemplateLiteral>({ m_source_code, rule_start.position(), position() }, move(expression), move(template_literal));
     }
     if (should_continue_parsing) {
+        auto original_forbidden = forbidden;
         while (match_secondary_expression(forbidden)) {
             int new_precedence = g_operator_precedence.get(m_state.current_token.type());
             if (new_precedence < min_precedence)
@@ -1988,7 +2011,7 @@ NonnullRefPtr<Expression> Parser::parse_expression(int min_precedence, Associati
             check_for_invalid_object_property(expression);
 
             Associativity new_associativity = operator_associativity(m_state.current_token.type());
-            auto result = parse_secondary_expression(move(expression), new_precedence, new_associativity, forbidden);
+            auto result = parse_secondary_expression(move(expression), new_precedence, new_associativity, original_forbidden);
             expression = result.expression;
             forbidden = forbidden.merge(result.forbidden);
             while (match(TokenType::TemplateLiteralStart) && !is<UpdateExpression>(*expression)) {
@@ -2004,7 +2027,7 @@ NonnullRefPtr<Expression> Parser::parse_expression(int min_precedence, Associati
     check_for_invalid_object_property(expression);
 
     if (is<CallExpression>(*expression) && m_state.current_scope_pusher) {
-        auto& callee = static_ptr_cast<CallExpression>(expression)->callee();
+        auto& callee = static_ptr_cast<CallExpression const>(expression)->callee();
         if (is<Identifier>(callee)) {
             auto& identifier_instance = static_cast<Identifier const&>(callee);
             if (identifier_instance.string() == "eval"sv) {
@@ -2022,7 +2045,7 @@ NonnullRefPtr<Expression> Parser::parse_expression(int min_precedence, Associati
     }
 
     if (match(TokenType::Comma) && min_precedence <= 1) {
-        NonnullRefPtrVector<Expression> expressions;
+        Vector<NonnullRefPtr<Expression const>> expressions;
         expressions.append(expression);
         while (match(TokenType::Comma)) {
             consume();
@@ -2034,7 +2057,7 @@ NonnullRefPtr<Expression> Parser::parse_expression(int min_precedence, Associati
     return expression;
 }
 
-Parser::ExpressionResult Parser::parse_secondary_expression(NonnullRefPtr<Expression> lhs, int min_precedence, Associativity associativity, ForbiddenTokens forbidden)
+Parser::ExpressionResult Parser::parse_secondary_expression(NonnullRefPtr<Expression const> lhs, int min_precedence, Associativity associativity, ForbiddenTokens forbidden)
 {
     auto rule_start = push_start();
     switch (m_state.current_token.type()) {
@@ -2145,7 +2168,7 @@ Parser::ExpressionResult Parser::parse_secondary_expression(NonnullRefPtr<Expres
             expected("IdentifierName");
         }
 
-        return create_ast_node<MemberExpression>({ m_source_code, rule_start.position(), position() }, move(lhs), create_ast_node<Identifier>({ m_source_code, rule_start.position(), position() }, consume().flystring_value()));
+        return create_ast_node<MemberExpression>({ m_source_code, rule_start.position(), position() }, move(lhs), create_ast_node<Identifier>({ m_source_code, rule_start.position(), position() }, consume().DeprecatedFlyString_value()));
     case TokenType::BracketOpen: {
         consume(TokenType::BracketOpen);
         auto expression = create_ast_node<MemberExpression>({ m_source_code, rule_start.position(), position() }, move(lhs), parse_expression(0), true);
@@ -2157,7 +2180,7 @@ Parser::ExpressionResult Parser::parse_secondary_expression(NonnullRefPtr<Expres
             syntax_error(DeprecatedString::formatted("Left-hand side of postfix increment operator must be identifier or member expression, got {}", lhs->class_name()));
 
         if (m_state.strict_mode && is<Identifier>(*lhs)) {
-            auto& identifier = static_cast<Identifier&>(*lhs);
+            auto& identifier = static_cast<Identifier const&>(*lhs);
             auto& name = identifier.string();
             check_identifier_name_for_assignment_validity(name);
         }
@@ -2169,7 +2192,7 @@ Parser::ExpressionResult Parser::parse_secondary_expression(NonnullRefPtr<Expres
             syntax_error(DeprecatedString::formatted("Left-hand side of postfix increment operator must be identifier or member expression, got {}", lhs->class_name()));
 
         if (m_state.strict_mode && is<Identifier>(*lhs)) {
-            auto& identifier = static_cast<Identifier&>(*lhs);
+            auto& identifier = static_cast<Identifier const&>(*lhs);
             auto& name = identifier.string();
             check_identifier_name_for_assignment_validity(name);
         }
@@ -2225,7 +2248,7 @@ bool Parser::is_private_identifier_valid() const
     return true;
 }
 
-RefPtr<BindingPattern> Parser::synthesize_binding_pattern(Expression const& expression)
+RefPtr<BindingPattern const> Parser::synthesize_binding_pattern(Expression const& expression)
 {
     VERIFY(is<ArrayExpression>(expression) || is<ObjectExpression>(expression));
     // Clear any syntax error that has occurred in the range that 'expression' spans.
@@ -2263,7 +2286,7 @@ RefPtr<BindingPattern> Parser::synthesize_binding_pattern(Expression const& expr
     return result;
 }
 
-NonnullRefPtr<AssignmentExpression> Parser::parse_assignment_expression(AssignmentOp assignment_op, NonnullRefPtr<Expression> lhs, int min_precedence, Associativity associativity, ForbiddenTokens forbidden)
+NonnullRefPtr<AssignmentExpression const> Parser::parse_assignment_expression(AssignmentOp assignment_op, NonnullRefPtr<Expression const> lhs, int min_precedence, Associativity associativity, ForbiddenTokens forbidden)
 {
     auto rule_start = push_start();
     VERIFY(match(TokenType::Equals)
@@ -2314,7 +2337,7 @@ NonnullRefPtr<AssignmentExpression> Parser::parse_assignment_expression(Assignme
     return create_ast_node<AssignmentExpression>({ m_source_code, rule_start.position(), position() }, assignment_op, move(lhs), move(rhs));
 }
 
-NonnullRefPtr<Identifier> Parser::parse_identifier()
+NonnullRefPtr<Identifier const> Parser::parse_identifier()
 {
     auto identifier_start = position();
     auto token = consume_identifier();
@@ -2322,7 +2345,7 @@ NonnullRefPtr<Identifier> Parser::parse_identifier()
         syntax_error("'arguments' is not allowed in class field initializer");
     return create_ast_node<Identifier>(
         { m_source_code, identifier_start, position() },
-        token.flystring_value());
+        token.DeprecatedFlyString_value());
 }
 
 Vector<CallExpression::Argument> Parser::parse_arguments()
@@ -2346,7 +2369,7 @@ Vector<CallExpression::Argument> Parser::parse_arguments()
     return arguments;
 }
 
-NonnullRefPtr<Expression> Parser::parse_call_expression(NonnullRefPtr<Expression> lhs)
+NonnullRefPtr<Expression const> Parser::parse_call_expression(NonnullRefPtr<Expression const> lhs)
 {
     auto rule_start = push_start();
     if (!m_state.allow_super_constructor_call && is<SuperExpression>(*lhs))
@@ -2360,7 +2383,7 @@ NonnullRefPtr<Expression> Parser::parse_call_expression(NonnullRefPtr<Expression
     return CallExpression::create({ m_source_code, rule_start.position(), position() }, move(lhs), arguments.span());
 }
 
-NonnullRefPtr<NewExpression> Parser::parse_new_expression()
+NonnullRefPtr<NewExpression const> Parser::parse_new_expression()
 {
     auto rule_start = push_start();
     consume(TokenType::New);
@@ -2390,7 +2413,7 @@ NonnullRefPtr<NewExpression> Parser::parse_new_expression()
     return NewExpression::create({ m_source_code, rule_start.position(), position() }, move(callee), move(arguments));
 }
 
-NonnullRefPtr<YieldExpression> Parser::parse_yield_expression()
+NonnullRefPtr<YieldExpression const> Parser::parse_yield_expression()
 {
     auto rule_start = push_start();
 
@@ -2398,7 +2421,7 @@ NonnullRefPtr<YieldExpression> Parser::parse_yield_expression()
         syntax_error("'Yield' expression is not allowed in formal parameters of generator function");
 
     consume(TokenType::Yield);
-    RefPtr<Expression> argument;
+    RefPtr<Expression const> argument;
     bool yield_from = false;
 
     if (!m_state.current_token.trivia_contains_line_terminator()) {
@@ -2414,7 +2437,7 @@ NonnullRefPtr<YieldExpression> Parser::parse_yield_expression()
     return create_ast_node<YieldExpression>({ m_source_code, rule_start.position(), position() }, move(argument), yield_from);
 }
 
-NonnullRefPtr<AwaitExpression> Parser::parse_await_expression()
+NonnullRefPtr<AwaitExpression const> Parser::parse_await_expression()
 {
     auto rule_start = push_start();
 
@@ -2432,7 +2455,7 @@ NonnullRefPtr<AwaitExpression> Parser::parse_await_expression()
     return create_ast_node<AwaitExpression>({ m_source_code, rule_start.position(), position() }, move(argument));
 }
 
-NonnullRefPtr<ReturnStatement> Parser::parse_return_statement()
+NonnullRefPtr<ReturnStatement const> Parser::parse_return_statement()
 {
     auto rule_start = push_start();
     if (!m_state.in_function_context && !m_state.in_arrow_function_context)
@@ -2457,7 +2480,7 @@ NonnullRefPtr<ReturnStatement> Parser::parse_return_statement()
 void Parser::parse_statement_list(ScopeNode& output_node, AllowLabelledFunction allow_labelled_functions)
 {
     while (!done()) {
-        if (match_declaration()) {
+        if (match_declaration(AllowUsingDeclaration::Yes)) {
             auto declaration = parse_declaration();
             VERIFY(m_state.current_scope_pusher);
             m_state.current_scope_pusher->add_declaration(declaration);
@@ -2473,7 +2496,7 @@ void Parser::parse_statement_list(ScopeNode& output_node, AllowLabelledFunction 
 }
 
 // FunctionBody, https://tc39.es/ecma262/#prod-FunctionBody
-NonnullRefPtr<FunctionBody> Parser::parse_function_body(Vector<FunctionParameter> const& parameters, FunctionKind function_kind, bool& contains_direct_call_to_eval)
+NonnullRefPtr<FunctionBody const> Parser::parse_function_body(Vector<FunctionParameter> const& parameters, FunctionKind function_kind, bool& contains_direct_call_to_eval)
 {
     auto rule_start = push_start();
     auto function_body = create_ast_node<FunctionBody>({ m_source_code, rule_start.position(), position() });
@@ -2501,7 +2524,7 @@ NonnullRefPtr<FunctionBody> Parser::parse_function_body(Vector<FunctionParameter
         Vector<StringView> parameter_names;
         for (auto& parameter : parameters) {
             parameter.binding.visit(
-                [&](FlyString const& parameter_name) {
+                [&](DeprecatedFlyString const& parameter_name) {
                     check_identifier_name_for_assignment_validity(parameter_name, function_body->in_strict_mode());
                     if (function_kind == FunctionKind::Generator && parameter_name == "yield"sv)
                         syntax_error("Parameter name 'yield' not allowed in this context");
@@ -2517,8 +2540,9 @@ NonnullRefPtr<FunctionBody> Parser::parse_function_body(Vector<FunctionParameter
 
                     parameter_names.append(parameter_name);
                 },
-                [&](NonnullRefPtr<BindingPattern> const& binding) {
-                    binding->for_each_bound_name([&](auto& bound_name) {
+                [&](NonnullRefPtr<BindingPattern const> const& binding) {
+                    // NOTE: Nothing in the callback throws an exception.
+                    MUST(binding->for_each_bound_name([&](auto& bound_name) {
                         if (function_kind == FunctionKind::Generator && bound_name == "yield"sv)
                             syntax_error("Parameter name 'yield' not allowed in this context");
 
@@ -2532,7 +2556,7 @@ NonnullRefPtr<FunctionBody> Parser::parse_function_body(Vector<FunctionParameter
                             }
                         }
                         parameter_names.append(bound_name);
-                    });
+                    }));
                 });
         }
     }
@@ -2542,7 +2566,7 @@ NonnullRefPtr<FunctionBody> Parser::parse_function_body(Vector<FunctionParameter
     return function_body;
 }
 
-NonnullRefPtr<BlockStatement> Parser::parse_block_statement()
+NonnullRefPtr<BlockStatement const> Parser::parse_block_statement()
 {
     auto rule_start = push_start();
     auto block = create_ast_node<BlockStatement>({ m_source_code, rule_start.position(), position() });
@@ -2579,7 +2603,7 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u16 parse_options, O
         function_kind = FunctionKind::Async;
     else
         function_kind = FunctionKind::Normal;
-    FlyString name;
+    DeprecatedFlyString name;
     if (parse_options & FunctionNodeParseOptions::CheckForFunctionAndName) {
         if (function_kind == FunctionKind::Normal && match(TokenType::Async) && !next_token().trivia_contains_line_terminator()) {
             function_kind = FunctionKind::Async;
@@ -2596,9 +2620,9 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u16 parse_options, O
         if (parse_options & FunctionNodeParseOptions::HasDefaultExportName)
             name = ExportStatement::local_name_for_default;
         else if (FunctionNodeType::must_have_name() || match_identifier())
-            name = consume_identifier().flystring_value();
+            name = consume_identifier().DeprecatedFlyString_value();
         else if (is_function_expression && (match(TokenType::Yield) || match(TokenType::Await)))
-            name = consume().flystring_value();
+            name = consume().DeprecatedFlyString_value();
 
         check_identifier_name_for_assignment_validity(name);
 
@@ -2656,26 +2680,27 @@ Vector<FunctionParameter> Parser::parse_formal_parameters(int& function_length, 
 
     Vector<FunctionParameter> parameters;
 
-    auto consume_identifier_or_binding_pattern = [&]() -> Variant<FlyString, NonnullRefPtr<BindingPattern>> {
+    auto consume_identifier_or_binding_pattern = [&]() -> Variant<DeprecatedFlyString, NonnullRefPtr<BindingPattern const>> {
         if (auto pattern = parse_binding_pattern(AllowDuplicates::No, AllowMemberExpressions::No))
             return pattern.release_nonnull();
 
         auto token = consume_identifier();
-        auto parameter_name = token.flystring_value();
+        auto parameter_name = token.DeprecatedFlyString_value();
 
         check_identifier_name_for_assignment_validity(parameter_name);
 
         for (auto& parameter : parameters) {
             bool has_same_name = parameter.binding.visit(
-                [&](FlyString const& name) {
+                [&](DeprecatedFlyString const& name) {
                     return name == parameter_name;
                 },
-                [&](NonnullRefPtr<BindingPattern> const& bindings) {
+                [&](NonnullRefPtr<BindingPattern const> const& bindings) {
                     bool found_duplicate = false;
-                    bindings->for_each_bound_name([&](auto& bound_name) {
+                    // NOTE: Nothing in the callback throws an exception.
+                    MUST(bindings->for_each_bound_name([&](auto& bound_name) {
                         if (bound_name == parameter_name)
                             found_duplicate = true;
-                    });
+                    }));
                     return found_duplicate;
                 });
 
@@ -2695,7 +2720,7 @@ Vector<FunctionParameter> Parser::parse_formal_parameters(int& function_length, 
                 syntax_error(message, Position { token.line_number(), token.line_column() });
             break;
         }
-        return FlyString { token.value() };
+        return DeprecatedFlyString { token.value() };
     };
 
     while (match(TokenType::CurlyOpen) || match(TokenType::BracketOpen) || match_identifier() || match(TokenType::TripleDot)) {
@@ -2711,7 +2736,7 @@ Vector<FunctionParameter> Parser::parse_formal_parameters(int& function_length, 
             is_rest = true;
         }
         auto parameter = consume_identifier_or_binding_pattern();
-        RefPtr<Expression> default_value;
+        RefPtr<Expression const> default_value;
         if (match(TokenType::Equals)) {
             consume();
 
@@ -2724,7 +2749,7 @@ Vector<FunctionParameter> Parser::parse_formal_parameters(int& function_length, 
             default_value = parse_expression(2);
 
             bool is_generator = parse_options & FunctionNodeParseOptions::IsGeneratorFunction;
-            if ((is_generator || m_state.strict_mode) && default_value && default_value->fast_is<Identifier>() && static_cast<Identifier&>(*default_value).string() == "yield"sv)
+            if ((is_generator || m_state.strict_mode) && default_value && default_value->fast_is<Identifier>() && static_cast<Identifier const&>(*default_value).string() == "yield"sv)
                 syntax_error("Generator function parameter initializer cannot contain a reference to an identifier named \"yield\"");
         }
         parameters.append({ move(parameter), default_value, is_rest });
@@ -2743,9 +2768,9 @@ Vector<FunctionParameter> Parser::parse_formal_parameters(int& function_length, 
     return parameters;
 }
 
-static AK::Array<FlyString, 36> s_reserved_words = { "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null", "return", "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with" };
+static AK::Array<DeprecatedFlyString, 36> s_reserved_words = { "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null", "return", "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with" };
 
-RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates allow_duplicates, Parser::AllowMemberExpressions allow_member_expressions)
+RefPtr<BindingPattern const> Parser::parse_binding_pattern(Parser::AllowDuplicates allow_duplicates, Parser::AllowMemberExpressions allow_member_expressions)
 {
     auto rule_start = push_start();
 
@@ -2781,7 +2806,7 @@ RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates all
 
         decltype(BindingPattern::BindingEntry::name) name = Empty {};
         decltype(BindingPattern::BindingEntry::alias) alias = Empty {};
-        RefPtr<Expression> initializer = {};
+        RefPtr<Expression const> initializer = {};
 
         if (is_object) {
             bool needs_alias = false;
@@ -2789,9 +2814,9 @@ RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates all
                 auto expression_position = position();
                 auto expression = parse_expression(2, Associativity::Right, { TokenType::Equals });
                 if (is<MemberExpression>(*expression))
-                    alias = static_ptr_cast<MemberExpression>(expression);
+                    alias = static_ptr_cast<MemberExpression const>(expression);
                 else if (is<Identifier>(*expression))
-                    name = static_ptr_cast<Identifier>(expression);
+                    name = static_ptr_cast<Identifier const>(expression);
                 else
                     syntax_error("Invalid destructuring assignment target", expression_position);
             } else if (match_identifier_name() || match(TokenType::StringLiteral) || match(TokenType::NumericLiteral) || match(TokenType::BigIntLiteral)) {
@@ -2802,19 +2827,19 @@ RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates all
                     auto token = consume(TokenType::StringLiteral);
                     auto string_literal = parse_string_literal(token);
 
-                    name = create_ast_node<Identifier>(
+                    name = create_ast_node<Identifier const>(
                         { m_source_code, rule_start.position(), position() },
                         string_literal->value());
                 } else if (match(TokenType::BigIntLiteral)) {
-                    auto string_value = consume().flystring_value();
+                    auto string_value = consume().DeprecatedFlyString_value();
                     VERIFY(string_value.ends_with("n"sv));
-                    name = create_ast_node<Identifier>(
+                    name = create_ast_node<Identifier const>(
                         { m_source_code, rule_start.position(), position() },
-                        FlyString(string_value.view().substring_view(0, string_value.length() - 1)));
+                        DeprecatedFlyString(string_value.view().substring_view(0, string_value.length() - 1)));
                 } else {
-                    name = create_ast_node<Identifier>(
+                    name = create_ast_node<Identifier const>(
                         { m_source_code, rule_start.position(), position() },
-                        consume().flystring_value());
+                        consume().DeprecatedFlyString_value());
                 }
             } else if (match(TokenType::BracketOpen)) {
                 consume();
@@ -2838,9 +2863,9 @@ RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates all
                         else
                             syntax_error("Invalid destructuring assignment target", expression_position);
                     } else if (is<MemberExpression>(*expression)) {
-                        alias = static_ptr_cast<MemberExpression>(expression);
+                        alias = static_ptr_cast<MemberExpression const>(expression);
                     } else if (is<Identifier>(*expression)) {
-                        alias = static_ptr_cast<Identifier>(expression);
+                        alias = static_ptr_cast<Identifier const>(expression);
                     } else {
                         syntax_error("Invalid destructuring assignment target", expression_position);
                     }
@@ -2850,9 +2875,9 @@ RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates all
                         return {};
                     alias = binding_pattern.release_nonnull();
                 } else if (match_identifier_name()) {
-                    alias = create_ast_node<Identifier>(
+                    alias = create_ast_node<Identifier const>(
                         { m_source_code, rule_start.position(), position() },
-                        consume().flystring_value());
+                        consume().DeprecatedFlyString_value());
 
                 } else {
                     expected("identifier or binding pattern");
@@ -2873,9 +2898,9 @@ RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates all
                     else
                         syntax_error("Invalid destructuring assignment target", expression_position);
                 } else if (is<MemberExpression>(*expression)) {
-                    alias = static_ptr_cast<MemberExpression>(expression);
+                    alias = static_ptr_cast<MemberExpression const>(expression);
                 } else if (is<Identifier>(*expression)) {
-                    alias = static_ptr_cast<Identifier>(expression);
+                    alias = static_ptr_cast<Identifier const>(expression);
                 } else {
                     syntax_error("Invalid destructuring assignment target", expression_position);
                 }
@@ -2888,8 +2913,8 @@ RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates all
                 alias = pattern.release_nonnull();
             } else if (match_identifier_name()) {
                 // BindingElement must always have an Empty name field
-                auto identifier_name = consume_identifier().flystring_value();
-                alias = create_ast_node<Identifier>(
+                auto identifier_name = consume_identifier().DeprecatedFlyString_value();
+                alias = create_ast_node<Identifier const>(
                     { m_source_code, rule_start.position(), position() },
                     identifier_name);
             } else {
@@ -2937,19 +2962,50 @@ RefPtr<BindingPattern> Parser::parse_binding_pattern(Parser::AllowDuplicates all
     pattern->kind = kind;
 
     Vector<StringView> bound_names;
-    pattern->for_each_bound_name([&](auto& name) {
+    // NOTE: Nothing in the callback throws an exception.
+    MUST(pattern->for_each_bound_name([&](auto& name) {
         if (allow_duplicates == AllowDuplicates::No) {
             if (bound_names.contains_slow(name))
                 syntax_error("Duplicate parameter names in bindings");
             bound_names.append(name);
         }
         check_identifier_name_for_assignment_validity(name);
-    });
+    }));
 
     return pattern;
 }
 
-NonnullRefPtr<VariableDeclaration> Parser::parse_variable_declaration(bool for_loop_variable_declaration)
+RefPtr<Identifier const> Parser::parse_lexical_binding()
+{
+    auto binding_start = push_start();
+
+    if (match_identifier()) {
+        auto name = consume_identifier().DeprecatedFlyString_value();
+        return create_ast_node<Identifier>(
+            { m_source_code, binding_start.position(), position() },
+            name);
+    }
+    if (!m_state.in_generator_function_context && match(TokenType::Yield)) {
+        if (m_state.strict_mode)
+            syntax_error("Identifier must not be a reserved word in strict mode ('yield')");
+
+        return create_ast_node<Identifier>(
+            { m_source_code, binding_start.position(), position() },
+            consume().DeprecatedFlyString_value());
+    }
+    if (!m_state.await_expression_is_valid && match(TokenType::Async)) {
+        if (m_program_type == Program::Type::Module)
+            syntax_error("Identifier must not be a reserved word in modules ('async')");
+
+        return create_ast_node<Identifier>(
+            { m_source_code, binding_start.position(), position() },
+            consume().DeprecatedFlyString_value());
+    }
+
+    return {};
+}
+
+NonnullRefPtr<VariableDeclaration const> Parser::parse_variable_declaration(IsForLoopVariableDeclaration is_for_loop_variable_declaration)
 {
     auto rule_start = push_start();
     DeclarationKind declaration_kind;
@@ -2969,41 +3025,25 @@ NonnullRefPtr<VariableDeclaration> Parser::parse_variable_declaration(bool for_l
     }
     consume();
 
-    NonnullRefPtrVector<VariableDeclarator> declarations;
+    Vector<NonnullRefPtr<VariableDeclarator const>> declarations;
     for (;;) {
-        Variant<NonnullRefPtr<Identifier>, NonnullRefPtr<BindingPattern>, Empty> target {};
-        if (match_identifier()) {
-            auto identifier_start = push_start();
-            auto name = consume_identifier().flystring_value();
-            target = create_ast_node<Identifier>(
-                { m_source_code, rule_start.position(), position() },
-                name);
-            check_identifier_name_for_assignment_validity(name);
-            if ((declaration_kind == DeclarationKind::Let || declaration_kind == DeclarationKind::Const) && name == "let"sv)
-                syntax_error("Lexical binding may not be called 'let'");
-        } else if (auto pattern = parse_binding_pattern(declaration_kind != DeclarationKind::Var ? AllowDuplicates::No : AllowDuplicates::Yes, AllowMemberExpressions::No)) {
-            target = pattern.release_nonnull();
-
+        Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>, Empty> target {};
+        if (auto pattern = parse_binding_pattern(declaration_kind != DeclarationKind::Var ? AllowDuplicates::No : AllowDuplicates::Yes, AllowMemberExpressions::No)) {
             if ((declaration_kind == DeclarationKind::Let || declaration_kind == DeclarationKind::Const)) {
-                target.get<NonnullRefPtr<BindingPattern>>()->for_each_bound_name([this](auto& name) {
+                // NOTE: Nothing in the callback throws an exception.
+                MUST(pattern->for_each_bound_name([this](auto& name) {
                     if (name == "let"sv)
                         syntax_error("Lexical binding may not be called 'let'");
-                });
+                }));
             }
-        } else if (!m_state.in_generator_function_context && match(TokenType::Yield)) {
-            if (m_state.strict_mode)
-                syntax_error("Identifier must not be a reserved word in strict mode ('yield')");
 
-            target = create_ast_node<Identifier>(
-                { m_source_code, rule_start.position(), position() },
-                consume().flystring_value());
-        } else if (!m_state.await_expression_is_valid && match(TokenType::Async)) {
-            if (m_program_type == Program::Type::Module)
-                syntax_error("Identifier must not be a reserved word in modules ('async')");
+            target = pattern.release_nonnull();
+        } else if (auto lexical_binding = parse_lexical_binding()) {
+            check_identifier_name_for_assignment_validity(lexical_binding->string());
+            if ((declaration_kind == DeclarationKind::Let || declaration_kind == DeclarationKind::Const) && lexical_binding->string() == "let"sv)
+                syntax_error("Lexical binding may not be called 'let'");
 
-            target = create_ast_node<Identifier>(
-                { m_source_code, rule_start.position(), position() },
-                consume().flystring_value());
+            target = lexical_binding.release_nonnull();
         }
 
         if (target.has<Empty>()) {
@@ -3015,24 +3055,24 @@ NonnullRefPtr<VariableDeclaration> Parser::parse_variable_declaration(bool for_l
             break;
         }
 
-        RefPtr<Expression> init;
+        RefPtr<Expression const> init;
         if (match(TokenType::Equals)) {
             consume();
             // In a for loop 'in' can be ambiguous so we do not allow it
             // 14.7.4 The for Statement, https://tc39.es/ecma262/#prod-ForStatement and 14.7.5 The for-in, for-of, and for-await-of Statements, https://tc39.es/ecma262/#prod-ForInOfStatement
-            if (for_loop_variable_declaration)
+            if (is_for_loop_variable_declaration == IsForLoopVariableDeclaration::Yes)
                 init = parse_expression(2, Associativity::Right, { TokenType::In });
             else
                 init = parse_expression(2);
-        } else if (!for_loop_variable_declaration && declaration_kind == DeclarationKind::Const) {
+        } else if (is_for_loop_variable_declaration == IsForLoopVariableDeclaration::No && declaration_kind == DeclarationKind::Const) {
             syntax_error("Missing initializer in 'const' variable declaration");
-        } else if (!for_loop_variable_declaration && target.has<NonnullRefPtr<BindingPattern>>()) {
+        } else if (is_for_loop_variable_declaration == IsForLoopVariableDeclaration::No && target.has<NonnullRefPtr<BindingPattern const>>()) {
             syntax_error("Missing initializer in destructuring assignment");
         }
 
         declarations.append(create_ast_node<VariableDeclarator>(
             { m_source_code, rule_start.position(), position() },
-            move(target).downcast<NonnullRefPtr<Identifier>, NonnullRefPtr<BindingPattern>>(),
+            move(target).downcast<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>>(),
             move(init)));
 
         if (match(TokenType::Comma)) {
@@ -3041,7 +3081,7 @@ NonnullRefPtr<VariableDeclaration> Parser::parse_variable_declaration(bool for_l
         }
         break;
     }
-    if (!for_loop_variable_declaration)
+    if (is_for_loop_variable_declaration == IsForLoopVariableDeclaration::No)
         consume_or_insert_semicolon();
 
     declarations.shrink_to_fit();
@@ -3050,7 +3090,56 @@ NonnullRefPtr<VariableDeclaration> Parser::parse_variable_declaration(bool for_l
     return declaration;
 }
 
-NonnullRefPtr<ThrowStatement> Parser::parse_throw_statement()
+NonnullRefPtr<UsingDeclaration const> Parser::parse_using_declaration(IsForLoopVariableDeclaration is_for_loop_variable_declaration)
+{
+    //  using [no LineTerminator here] BindingList[?In, ?Yield, ?Await, +Using] ;
+    auto rule_start = push_start();
+    VERIFY(m_state.current_token.original_value() == "using"sv);
+    consume(TokenType::Identifier);
+    VERIFY(!m_state.current_token.trivia_contains_line_terminator());
+    Vector<NonnullRefPtr<VariableDeclarator const>> declarations;
+
+    for (;;) {
+        auto lexical_binding = parse_lexical_binding();
+        if (!lexical_binding) {
+            expected("lexical binding");
+            break;
+        }
+
+        check_identifier_name_for_assignment_validity(lexical_binding->string());
+        if (lexical_binding->string() == "let"sv)
+            syntax_error("Lexical binding may not be called 'let'");
+
+        RefPtr<Expression const> initializer;
+        if (match(TokenType::Equals)) {
+            consume();
+
+            if (is_for_loop_variable_declaration == IsForLoopVariableDeclaration::Yes)
+                initializer = parse_expression(2, Associativity::Right, { TokenType::In });
+            else
+                initializer = parse_expression(2);
+        } else if (is_for_loop_variable_declaration == IsForLoopVariableDeclaration::No) {
+            consume(TokenType::Equals);
+        }
+
+        declarations.append(create_ast_node<VariableDeclarator>(
+            { m_source_code, rule_start.position(), position() },
+            lexical_binding.release_nonnull(),
+            move(initializer)));
+
+        if (match(TokenType::Comma)) {
+            consume();
+            continue;
+        }
+        break;
+    }
+    if (is_for_loop_variable_declaration == IsForLoopVariableDeclaration::No)
+        consume_or_insert_semicolon();
+
+    return create_ast_node<UsingDeclaration>({ m_source_code, rule_start.position(), position() }, move(declarations));
+}
+
+NonnullRefPtr<ThrowStatement const> Parser::parse_throw_statement()
 {
     auto rule_start = push_start();
     consume(TokenType::Throw);
@@ -3066,11 +3155,11 @@ NonnullRefPtr<ThrowStatement> Parser::parse_throw_statement()
     return create_ast_node<ThrowStatement>({ m_source_code, rule_start.position(), position() }, move(expression));
 }
 
-NonnullRefPtr<BreakStatement> Parser::parse_break_statement()
+NonnullRefPtr<BreakStatement const> Parser::parse_break_statement()
 {
     auto rule_start = push_start();
     consume(TokenType::Break);
-    FlyString target_label;
+    DeprecatedFlyString target_label;
     if (match(TokenType::Semicolon)) {
         consume();
     } else {
@@ -3090,14 +3179,14 @@ NonnullRefPtr<BreakStatement> Parser::parse_break_statement()
     return create_ast_node<BreakStatement>({ m_source_code, rule_start.position(), position() }, target_label);
 }
 
-NonnullRefPtr<ContinueStatement> Parser::parse_continue_statement()
+NonnullRefPtr<ContinueStatement const> Parser::parse_continue_statement()
 {
     auto rule_start = push_start();
     if (!m_state.in_continue_context)
         syntax_error("'continue' not allow outside of a loop");
 
     consume(TokenType::Continue);
-    FlyString target_label;
+    DeprecatedFlyString target_label;
     if (match(TokenType::Semicolon)) {
         consume();
         return create_ast_node<ContinueStatement>({ m_source_code, rule_start.position(), position() }, target_label);
@@ -3116,7 +3205,7 @@ NonnullRefPtr<ContinueStatement> Parser::parse_continue_statement()
     return create_ast_node<ContinueStatement>({ m_source_code, rule_start.position(), position() }, target_label);
 }
 
-NonnullRefPtr<ConditionalExpression> Parser::parse_conditional_expression(NonnullRefPtr<Expression> test, ForbiddenTokens forbidden)
+NonnullRefPtr<ConditionalExpression const> Parser::parse_conditional_expression(NonnullRefPtr<Expression const> test, ForbiddenTokens forbidden)
 {
     auto rule_start = push_start();
     consume(TokenType::QuestionMark);
@@ -3126,7 +3215,7 @@ NonnullRefPtr<ConditionalExpression> Parser::parse_conditional_expression(Nonnul
     return create_ast_node<ConditionalExpression>({ m_source_code, rule_start.position(), position() }, move(test), move(consequent), move(alternate));
 }
 
-NonnullRefPtr<OptionalChain> Parser::parse_optional_chain(NonnullRefPtr<Expression> base)
+NonnullRefPtr<OptionalChain const> Parser::parse_optional_chain(NonnullRefPtr<Expression const> base)
 {
     auto rule_start = push_start();
     Vector<OptionalChain::Reference> chain;
@@ -3166,7 +3255,7 @@ NonnullRefPtr<OptionalChain> Parser::parse_optional_chain(NonnullRefPtr<Expressi
                     auto start = position();
                     auto identifier = consume();
                     chain.append(OptionalChain::MemberReference {
-                        create_ast_node<Identifier>({ m_source_code, start, position() }, identifier.flystring_value()),
+                        create_ast_node<Identifier>({ m_source_code, start, position() }, identifier.DeprecatedFlyString_value()),
                         OptionalChain::Mode::Optional,
                     });
                 } else {
@@ -3192,7 +3281,7 @@ NonnullRefPtr<OptionalChain> Parser::parse_optional_chain(NonnullRefPtr<Expressi
                 auto start = position();
                 auto identifier = consume();
                 chain.append(OptionalChain::MemberReference {
-                    create_ast_node<Identifier>({ m_source_code, start, position() }, identifier.flystring_value()),
+                    create_ast_node<Identifier>({ m_source_code, start, position() }, identifier.DeprecatedFlyString_value()),
                     OptionalChain::Mode::NotOptional,
                 });
             } else {
@@ -3221,18 +3310,18 @@ NonnullRefPtr<OptionalChain> Parser::parse_optional_chain(NonnullRefPtr<Expressi
         move(chain));
 }
 
-NonnullRefPtr<TryStatement> Parser::parse_try_statement()
+NonnullRefPtr<TryStatement const> Parser::parse_try_statement()
 {
     auto rule_start = push_start();
     consume(TokenType::Try);
 
     auto block = parse_block_statement();
 
-    RefPtr<CatchClause> handler;
+    RefPtr<CatchClause const> handler;
     if (match(TokenType::Catch))
         handler = parse_catch_clause();
 
-    RefPtr<BlockStatement> finalizer;
+    RefPtr<BlockStatement const> finalizer;
     if (match(TokenType::Finally)) {
         consume();
         finalizer = parse_block_statement();
@@ -3244,12 +3333,12 @@ NonnullRefPtr<TryStatement> Parser::parse_try_statement()
     return create_ast_node<TryStatement>({ m_source_code, rule_start.position(), position() }, move(block), move(handler), move(finalizer));
 }
 
-NonnullRefPtr<DoWhileStatement> Parser::parse_do_while_statement()
+NonnullRefPtr<DoWhileStatement const> Parser::parse_do_while_statement()
 {
     auto rule_start = push_start();
     consume(TokenType::Do);
 
-    auto body = [&]() -> NonnullRefPtr<Statement> {
+    auto body = [&]() -> NonnullRefPtr<Statement const> {
         TemporaryChange break_change(m_state.in_break_context, true);
         TemporaryChange continue_change(m_state.in_continue_context, true);
         return parse_statement();
@@ -3269,7 +3358,7 @@ NonnullRefPtr<DoWhileStatement> Parser::parse_do_while_statement()
     return create_ast_node<DoWhileStatement>({ m_source_code, rule_start.position(), position() }, move(test), move(body));
 }
 
-NonnullRefPtr<WhileStatement> Parser::parse_while_statement()
+NonnullRefPtr<WhileStatement const> Parser::parse_while_statement()
 {
     auto rule_start = push_start();
     consume(TokenType::While);
@@ -3286,7 +3375,7 @@ NonnullRefPtr<WhileStatement> Parser::parse_while_statement()
     return create_ast_node<WhileStatement>({ m_source_code, rule_start.position(), position() }, move(test), move(body));
 }
 
-NonnullRefPtr<SwitchStatement> Parser::parse_switch_statement()
+NonnullRefPtr<SwitchStatement const> Parser::parse_switch_statement()
 {
     auto rule_start = push_start();
     consume(TokenType::Switch);
@@ -3297,7 +3386,7 @@ NonnullRefPtr<SwitchStatement> Parser::parse_switch_statement()
 
     consume(TokenType::CurlyOpen);
 
-    NonnullRefPtrVector<SwitchCase> cases;
+    Vector<NonnullRefPtr<SwitchCase>> cases;
 
     auto switch_statement = create_ast_node<SwitchStatement>({ m_source_code, rule_start.position(), position() }, move(determinant));
 
@@ -3318,7 +3407,7 @@ NonnullRefPtr<SwitchStatement> Parser::parse_switch_statement()
     return switch_statement;
 }
 
-NonnullRefPtr<WithStatement> Parser::parse_with_statement()
+NonnullRefPtr<WithStatement const> Parser::parse_with_statement()
 {
     auto rule_start = push_start();
     consume(TokenType::With);
@@ -3332,10 +3421,10 @@ NonnullRefPtr<WithStatement> Parser::parse_with_statement()
     return create_ast_node<WithStatement>({ m_source_code, rule_start.position(), position() }, move(object), move(body));
 }
 
-NonnullRefPtr<SwitchCase> Parser::parse_switch_case()
+NonnullRefPtr<SwitchCase const> Parser::parse_switch_case()
 {
     auto rule_start = push_start();
-    RefPtr<Expression> test;
+    RefPtr<Expression const> test;
 
     if (consume().type() == TokenType::Case) {
         test = parse_expression(0);
@@ -3343,7 +3432,7 @@ NonnullRefPtr<SwitchCase> Parser::parse_switch_case()
 
     consume(TokenType::Colon);
 
-    NonnullRefPtrVector<Statement> consequent;
+    Vector<NonnullRefPtr<Statement>> consequent;
     TemporaryChange break_change(m_state.in_break_context, true);
     auto switch_case = create_ast_node<SwitchCase>({ m_source_code, rule_start.position(), position() }, move(test));
     parse_statement_list(switch_case);
@@ -3351,13 +3440,13 @@ NonnullRefPtr<SwitchCase> Parser::parse_switch_case()
     return switch_case;
 }
 
-NonnullRefPtr<CatchClause> Parser::parse_catch_clause()
+NonnullRefPtr<CatchClause const> Parser::parse_catch_clause()
 {
     auto rule_start = push_start();
     consume(TokenType::Catch);
 
-    FlyString parameter;
-    RefPtr<BindingPattern> pattern_parameter;
+    DeprecatedFlyString parameter;
+    RefPtr<BindingPattern const> pattern_parameter;
     auto should_expect_parameter = false;
     if (match(TokenType::ParenOpen)) {
         should_expect_parameter = true;
@@ -3375,14 +3464,15 @@ NonnullRefPtr<CatchClause> Parser::parse_catch_clause()
     if (should_expect_parameter && parameter.is_empty() && !pattern_parameter)
         expected("an identifier or a binding pattern");
 
-    HashTable<FlyString> bound_names;
+    HashTable<DeprecatedFlyString> bound_names;
 
     if (pattern_parameter) {
-        pattern_parameter->for_each_bound_name(
+        // NOTE: Nothing in the callback throws an exception.
+        MUST(pattern_parameter->for_each_bound_name(
             [&](auto& name) {
                 check_identifier_name_for_assignment_validity(name);
                 bound_names.set(name);
-            });
+            }));
     }
 
     if (!parameter.is_empty()) {
@@ -3393,10 +3483,11 @@ NonnullRefPtr<CatchClause> Parser::parse_catch_clause()
     ScopePusher catch_scope = ScopePusher::catch_scope(*this, pattern_parameter, parameter);
     auto body = parse_block_statement();
 
-    body->for_each_lexically_declared_name([&](auto const& name) {
+    // NOTE: Nothing in the callback throws an exception.
+    MUST(body->for_each_lexically_declared_name([&](auto const& name) {
         if (bound_names.contains(name))
             syntax_error(DeprecatedString::formatted("Identifier '{}' already declared as catch parameter", name));
-    });
+    }));
 
     if (pattern_parameter) {
         return create_ast_node<CatchClause>(
@@ -3411,7 +3502,7 @@ NonnullRefPtr<CatchClause> Parser::parse_catch_clause()
         move(body));
 }
 
-NonnullRefPtr<IfStatement> Parser::parse_if_statement()
+NonnullRefPtr<IfStatement const> Parser::parse_if_statement()
 {
     auto rule_start = push_start();
     auto parse_function_declaration_as_block_statement = [&] {
@@ -3444,13 +3535,13 @@ NonnullRefPtr<IfStatement> Parser::parse_if_statement()
     auto predicate = parse_expression(0);
     consume(TokenType::ParenClose);
 
-    RefPtr<Statement> consequent;
+    RefPtr<Statement const> consequent;
     if (!m_state.strict_mode && match(TokenType::Function))
         consequent = parse_function_declaration_as_block_statement();
     else
         consequent = parse_statement();
 
-    RefPtr<Statement> alternate;
+    RefPtr<Statement const> alternate;
     if (match(TokenType::Else)) {
         consume();
         if (!m_state.strict_mode && match(TokenType::Function))
@@ -3461,7 +3552,7 @@ NonnullRefPtr<IfStatement> Parser::parse_if_statement()
     return create_ast_node<IfStatement>({ m_source_code, rule_start.position(), position() }, move(predicate), move(*consequent), move(alternate));
 }
 
-NonnullRefPtr<Statement> Parser::parse_for_statement()
+NonnullRefPtr<Statement const> Parser::parse_for_statement()
 {
     auto rule_start = push_start();
     auto is_await_loop = IsForAwaitLoop::No;
@@ -3496,30 +3587,69 @@ NonnullRefPtr<Statement> Parser::parse_for_statement()
 
     Optional<ScopePusher> scope_pusher;
 
-    RefPtr<ASTNode> init;
+    RefPtr<ASTNode const> init;
     if (!match(TokenType::Semicolon)) {
-        if (match_variable_declaration()) {
-            auto declaration = parse_variable_declaration(true);
+
+        auto match_for_using_declaration = [&] {
+            if (!match(TokenType::Identifier) || m_state.current_token.original_value() != "using"sv)
+                return false;
+
+            auto lookahead = next_token();
+            if (lookahead.trivia_contains_line_terminator())
+                return false;
+
+            if (lookahead.original_value() == "of"sv)
+                return false;
+
+            return token_is_identifier(lookahead);
+        };
+
+        if (match_for_using_declaration()) {
+            auto declaration = parse_using_declaration(IsForLoopVariableDeclaration::Yes);
+
+            if (match_of(m_state.current_token)) {
+                if (declaration->declarations().size() != 1)
+                    syntax_error("Must have exactly one declaration in for using of");
+                else if (declaration->declarations().first()->init())
+                    syntax_error("Using declaration cannot have initializer");
+
+                return parse_for_in_of_statement(move(declaration), is_await_loop);
+            }
+
+            if (match(TokenType::In))
+                syntax_error("Using declaration not allowed in for-in loop");
+
+            init = move(declaration);
+        } else if (match_variable_declaration()) {
+            auto declaration = parse_variable_declaration(IsForLoopVariableDeclaration::Yes);
             if (declaration->declaration_kind() == DeclarationKind::Var) {
                 m_state.current_scope_pusher->add_declaration(declaration);
             } else {
                 // This does not follow the normal declaration structure so we need additional checks.
-                HashTable<FlyString> bound_names;
-                declaration->for_each_bound_name([&](auto const& name) {
+                HashTable<DeprecatedFlyString> bound_names;
+                // NOTE: Nothing in the callback throws an exception.
+                MUST(declaration->for_each_bound_name([&](auto const& name) {
                     if (bound_names.set(name) != AK::HashSetResult::InsertedNewEntry)
                         syntax_error(DeprecatedString::formatted("Identifier '{}' already declared in for loop initializer", name), declaration->source_range().start);
-                });
+                }));
             }
 
-            init = move(declaration);
-            if (match_for_in_of())
-                return parse_for_in_of_statement(*init, is_await_loop);
-            if (static_cast<VariableDeclaration&>(*init).declaration_kind() == DeclarationKind::Const) {
-                for (auto& variable : static_cast<VariableDeclaration&>(*init).declarations()) {
-                    if (!variable.init())
+            if (match_for_in_of()) {
+                if (declaration->declarations().size() > 1)
+                    syntax_error("Multiple declarations not allowed in for..in/of");
+                else if (declaration->declarations().size() < 1)
+                    syntax_error("Need exactly one variable declaration in for..in/of");
+
+                return parse_for_in_of_statement(move(declaration), is_await_loop);
+            }
+            if (declaration->declaration_kind() == DeclarationKind::Const) {
+                for (auto const& variable : declaration->declarations()) {
+                    if (!variable->init())
                         syntax_error("Missing initializer in 'const' variable declaration");
                 }
             }
+
+            init = move(declaration);
         } else if (match_expression()) {
             auto lookahead_token = next_token();
             bool starts_with_async_of = match(TokenType::Async) && match_of(lookahead_token);
@@ -3537,13 +3667,13 @@ NonnullRefPtr<Statement> Parser::parse_for_statement()
     }
     consume(TokenType::Semicolon);
 
-    RefPtr<Expression> test;
+    RefPtr<Expression const> test;
     if (!match(TokenType::Semicolon))
         test = parse_expression(0);
 
     consume(TokenType::Semicolon);
 
-    RefPtr<Expression> update;
+    RefPtr<Expression const> update;
     if (!match(TokenType::ParenClose))
         update = parse_expression(0);
 
@@ -3557,30 +3687,27 @@ NonnullRefPtr<Statement> Parser::parse_for_statement()
     return create_ast_node<ForStatement>({ m_source_code, rule_start.position(), position() }, move(init), move(test), move(update), move(body));
 }
 
-NonnullRefPtr<Statement> Parser::parse_for_in_of_statement(NonnullRefPtr<ASTNode> lhs, IsForAwaitLoop is_for_await_loop)
+NonnullRefPtr<Statement const> Parser::parse_for_in_of_statement(NonnullRefPtr<ASTNode const> lhs, IsForAwaitLoop is_for_await_loop)
 {
-    Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> for_declaration = lhs;
+    Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> for_declaration = lhs;
     auto rule_start = push_start();
 
     auto has_annexB_for_in_init_extension = false;
 
     if (is<VariableDeclaration>(*lhs)) {
-        auto& declaration = static_cast<VariableDeclaration&>(*lhs);
-        if (declaration.declarations().size() > 1) {
-            syntax_error("Multiple declarations not allowed in for..in/of");
-        } else if (declaration.declarations().size() < 1) {
-            syntax_error("Need exactly one variable declaration in for..in/of");
-        } else {
+        auto& declaration = static_cast<VariableDeclaration const&>(*lhs);
+        // Syntax errors for wrong amounts of declaration should have already been hit.
+        if (!declaration.declarations().is_empty()) {
             // AnnexB extension B.3.5 Initializers in ForIn Statement Heads, https://tc39.es/ecma262/#sec-initializers-in-forin-statement-heads
             auto& variable = declaration.declarations().first();
-            if (variable.init()) {
-                if (m_state.strict_mode || declaration.declaration_kind() != DeclarationKind::Var || !variable.target().has<NonnullRefPtr<Identifier>>())
+            if (variable->init()) {
+                if (m_state.strict_mode || declaration.declaration_kind() != DeclarationKind::Var || !variable->target().has<NonnullRefPtr<Identifier const>>())
                     syntax_error("Variable initializer not allowed in for..in/of");
                 else
                     has_annexB_for_in_init_extension = true;
             }
         }
-    } else if (!lhs->is_identifier() && !is<MemberExpression>(*lhs) && !is<CallExpression>(*lhs)) {
+    } else if (!lhs->is_identifier() && !is<MemberExpression>(*lhs) && !is<CallExpression>(*lhs) && !is<UsingDeclaration>(*lhs)) {
         bool valid = false;
         if (is<ObjectExpression>(*lhs) || is<ArrayExpression>(*lhs)) {
             auto synthesized_binding_pattern = synthesize_binding_pattern(static_cast<Expression const&>(*lhs));
@@ -3619,7 +3746,7 @@ NonnullRefPtr<Statement> Parser::parse_for_in_of_statement(NonnullRefPtr<ASTNode
     return create_ast_node<ForOfStatement>({ m_source_code, rule_start.position(), position() }, move(for_declaration), move(rhs), move(body));
 }
 
-NonnullRefPtr<DebuggerStatement> Parser::parse_debugger_statement()
+NonnullRefPtr<DebuggerStatement const> Parser::parse_debugger_statement()
 {
     auto rule_start = push_start();
     consume(TokenType::Debugger);
@@ -3763,7 +3890,7 @@ bool Parser::match_export_or_import() const
         || type == TokenType::Import;
 }
 
-bool Parser::match_declaration() const
+bool Parser::match_declaration(AllowUsingDeclaration allow_using) const
 {
     auto type = m_state.current_token.type();
 
@@ -3775,6 +3902,9 @@ bool Parser::match_declaration() const
         auto lookahead_token = next_token();
         return lookahead_token.type() == TokenType::Function && !lookahead_token.trivia_contains_line_terminator();
     }
+
+    if (allow_using == AllowUsingDeclaration::Yes && type == TokenType::Identifier && m_state.current_token.original_value() == "using"sv)
+        return try_match_using_declaration();
 
     return type == TokenType::Function
         || type == TokenType::Class
@@ -3810,6 +3940,18 @@ bool Parser::try_match_let_declaration() const
     return false;
 }
 
+bool Parser::try_match_using_declaration() const
+{
+    VERIFY(m_state.current_token.type() == TokenType::Identifier);
+    VERIFY(m_state.current_token.original_value() == "using"sv);
+
+    auto token_after = next_token();
+    if (token_after.trivia_contains_line_terminator())
+        return false;
+
+    return token_after.is_identifier_name();
+}
+
 bool Parser::match_variable_declaration() const
 {
     auto type = m_state.current_token.type();
@@ -3825,21 +3967,26 @@ bool Parser::match_variable_declaration() const
 
 bool Parser::match_identifier() const
 {
-    if (m_state.current_token.type() == TokenType::EscapedKeyword) {
-        if (m_state.current_token.value() == "let"sv)
+    return token_is_identifier(m_state.current_token);
+}
+
+bool Parser::token_is_identifier(Token const& token) const
+{
+    if (token.type() == TokenType::EscapedKeyword) {
+        if (token.value() == "let"sv)
             return !m_state.strict_mode;
-        if (m_state.current_token.value() == "yield"sv)
+        if (token.value() == "yield"sv)
             return !m_state.strict_mode && !m_state.in_generator_function_context;
-        if (m_state.current_token.value() == "await"sv)
+        if (token.value() == "await"sv)
             return m_program_type != Program::Type::Module && !m_state.await_expression_is_valid && !m_state.in_class_static_init_block;
         return true;
     }
 
-    return m_state.current_token.type() == TokenType::Identifier
-        || m_state.current_token.type() == TokenType::Async
-        || (m_state.current_token.type() == TokenType::Let && !m_state.strict_mode)
-        || (m_state.current_token.type() == TokenType::Await && m_program_type != Program::Type::Module && !m_state.await_expression_is_valid && !m_state.in_class_static_init_block)
-        || (m_state.current_token.type() == TokenType::Yield && !m_state.in_generator_function_context && !m_state.strict_mode); // See note in Parser::parse_identifier().
+    return token.type() == TokenType::Identifier
+        || token.type() == TokenType::Async
+        || (token.type() == TokenType::Let && !m_state.strict_mode)
+        || (token.type() == TokenType::Await && m_program_type != Program::Type::Module && !m_state.await_expression_is_valid && !m_state.in_class_static_init_block)
+        || (token.type() == TokenType::Yield && !m_state.in_generator_function_context && !m_state.strict_mode); // See note in Parser::parse_identifier().
 }
 
 bool Parser::match_identifier_name() const
@@ -4003,7 +4150,7 @@ Token Parser::consume_and_validate_numeric_literal()
 
 void Parser::expected(char const* what)
 {
-    auto message = m_state.current_token.message();
+    auto message = m_state.current_token.message().to_deprecated_string();
     if (message.is_empty())
         message = DeprecatedString::formatted("Unexpected token {}. Expected {}", m_state.current_token.name(), what);
     syntax_error(message);
@@ -4055,7 +4202,7 @@ void Parser::discard_saved_state()
     m_saved_state.take_last();
 }
 
-void Parser::check_identifier_name_for_assignment_validity(FlyString const& name, bool force_strict)
+void Parser::check_identifier_name_for_assignment_validity(DeprecatedFlyString const& name, bool force_strict)
 {
     // FIXME: this is now called from multiple places maybe the error message should be dynamic?
     if (any_of(s_reserved_words, [&](auto& value) { return name == value; })) {
@@ -4073,11 +4220,11 @@ bool Parser::match_assert_clause() const
     return !m_state.current_token.trivia_contains_line_terminator() && m_state.current_token.original_value() == "assert"sv;
 }
 
-FlyString Parser::consume_string_value()
+DeprecatedFlyString Parser::consume_string_value()
 {
     VERIFY(match(TokenType::StringLiteral));
     auto string_token = consume();
-    FlyString value = parse_string_literal(string_token)->value();
+    DeprecatedFlyString value = parse_string_literal(string_token)->value();
 
     // This also checks IsStringWellFormedUnicode which makes sure there is no unpaired surrogate
     // Surrogates are at least 3 bytes
@@ -4148,9 +4295,9 @@ ModuleRequest Parser::parse_module_request()
     return request;
 }
 
-static FlyString default_string_value = "default";
+static DeprecatedFlyString default_string_value = "default";
 
-NonnullRefPtr<ImportStatement> Parser::parse_import_statement(Program& program)
+NonnullRefPtr<ImportStatement const> Parser::parse_import_statement(Program& program)
 {
     // We use the extended syntax which adds:
     //  ImportDeclaration:
@@ -4237,13 +4384,13 @@ NonnullRefPtr<ImportStatement> Parser::parse_import_statement(Program& program)
                 // ImportSpecifier :  ImportedBinding
                 auto require_as = !match_imported_binding();
                 auto name_position = position();
-                auto name = consume().flystring_value();
+                auto name = consume().DeprecatedFlyString_value();
 
                 if (match_as()) {
                     consume(TokenType::Identifier);
 
                     auto alias_position = position();
-                    auto alias = consume_identifier().flystring_value();
+                    auto alias = consume_identifier().DeprecatedFlyString_value();
                     check_identifier_name_for_assignment_validity(alias);
 
                     entries_with_location.append({ { name, alias }, alias_position });
@@ -4264,7 +4411,7 @@ NonnullRefPtr<ImportStatement> Parser::parse_import_statement(Program& program)
                 consume(TokenType::Identifier);
 
                 auto alias_position = position();
-                auto alias = consume_identifier().flystring_value();
+                auto alias = consume_identifier().DeprecatedFlyString_value();
                 check_identifier_name_for_assignment_validity(alias);
 
                 entries_with_location.append({ { move(name), alias }, alias_position });
@@ -4295,7 +4442,7 @@ NonnullRefPtr<ImportStatement> Parser::parse_import_statement(Program& program)
 
     for (auto& entry : entries_with_location) {
         for (auto& import_statement : program.imports()) {
-            if (import_statement.has_bound_name(entry.entry.local_name))
+            if (import_statement->has_bound_name(entry.entry.local_name))
                 syntax_error(DeprecatedString::formatted("Identifier '{}' already declared", entry.entry.local_name), entry.position);
         }
 
@@ -4310,7 +4457,7 @@ NonnullRefPtr<ImportStatement> Parser::parse_import_statement(Program& program)
     return create_ast_node<ImportStatement>({ m_source_code, rule_start.position(), position() }, move(module_request), move(entries));
 }
 
-NonnullRefPtr<ExportStatement> Parser::parse_export_statement(Program& program)
+NonnullRefPtr<ExportStatement const> Parser::parse_export_statement(Program& program)
 {
     // We use the extended syntax which adds:
     //  ExportDeclaration:
@@ -4342,7 +4489,7 @@ NonnullRefPtr<ExportStatement> Parser::parse_export_statement(Program& program)
 
     Vector<EntryAndLocation> entries_with_location;
 
-    RefPtr<ASTNode> expression = {};
+    RefPtr<ASTNode const> expression = {};
     bool is_default = false;
     ModuleRequest from_specifier;
 
@@ -4351,7 +4498,7 @@ NonnullRefPtr<ExportStatement> Parser::parse_export_statement(Program& program)
         auto default_position = position();
         consume(TokenType::Default);
 
-        FlyString local_name;
+        DeprecatedFlyString local_name;
 
         auto lookahead_token = next_token();
 
@@ -4445,7 +4592,7 @@ NonnullRefPtr<ExportStatement> Parser::parse_export_statement(Program& program)
                 consume_or_insert_semicolon();
 
             if (is<ClassExpression>(*expression)) {
-                auto const& class_expression = static_cast<ClassExpression&>(*expression);
+                auto const& class_expression = static_cast<ClassExpression const&>(*expression);
                 if (class_expression.has_name())
                     local_name = class_expression.name();
             }
@@ -4466,7 +4613,7 @@ NonnullRefPtr<ExportStatement> Parser::parse_export_statement(Program& program)
             Required
         } check_for_from { FromSpecifier::NotAllowed };
 
-        auto parse_module_export_name = [&](bool lhs) -> FlyString {
+        auto parse_module_export_name = [&](bool lhs) -> DeprecatedFlyString {
             // https://tc39.es/ecma262/#prod-ModuleExportName
             //  ModuleExportName :
             //      IdentifierName
@@ -4504,24 +4651,25 @@ NonnullRefPtr<ExportStatement> Parser::parse_export_statement(Program& program)
             auto declaration = parse_declaration();
             m_state.current_scope_pusher->add_declaration(declaration);
             if (is<FunctionDeclaration>(*declaration)) {
-                auto& func = static_cast<FunctionDeclaration&>(*declaration);
+                auto& func = static_cast<FunctionDeclaration const&>(*declaration);
                 entries_with_location.append({ ExportEntry::named_export(func.name(), func.name()), func.source_range().start });
             } else if (is<ClassDeclaration>(*declaration)) {
-                auto& class_declaration = static_cast<ClassDeclaration&>(*declaration);
+                auto& class_declaration = static_cast<ClassDeclaration const&>(*declaration);
                 entries_with_location.append({ ExportEntry::named_export(class_declaration.name(), class_declaration.name()), class_declaration.source_range().start });
             } else {
                 VERIFY(is<VariableDeclaration>(*declaration));
-                auto& variables = static_cast<VariableDeclaration&>(*declaration);
+                auto& variables = static_cast<VariableDeclaration const&>(*declaration);
                 VERIFY(variables.is_lexical_declaration());
                 for (auto& decl : variables.declarations()) {
-                    decl.target().visit(
-                        [&](NonnullRefPtr<Identifier> const& identifier) {
+                    decl->target().visit(
+                        [&](NonnullRefPtr<Identifier const> const& identifier) {
                             entries_with_location.append({ ExportEntry::named_export(identifier->string(), identifier->string()), identifier->source_range().start });
                         },
-                        [&](NonnullRefPtr<BindingPattern> const& binding) {
-                            binding->for_each_bound_name([&](auto& name) {
+                        [&](NonnullRefPtr<BindingPattern const> const& binding) {
+                            // NOTE: Nothing in the callback throws an exception.
+                            MUST(binding->for_each_bound_name([&](auto& name) {
                                 entries_with_location.append({ ExportEntry::named_export(name, name), decl_position });
-                            });
+                            }));
                         });
                 }
             }
@@ -4531,14 +4679,15 @@ NonnullRefPtr<ExportStatement> Parser::parse_export_statement(Program& program)
             auto variable_declaration = parse_variable_declaration();
             m_state.current_scope_pusher->add_declaration(variable_declaration);
             for (auto& decl : variable_declaration->declarations()) {
-                decl.target().visit(
-                    [&](NonnullRefPtr<Identifier> const& identifier) {
+                decl->target().visit(
+                    [&](NonnullRefPtr<Identifier const> const& identifier) {
                         entries_with_location.append({ ExportEntry::named_export(identifier->string(), identifier->string()), identifier->source_range().start });
                     },
-                    [&](NonnullRefPtr<BindingPattern> const& binding) {
-                        binding->for_each_bound_name([&](auto& name) {
+                    [&](NonnullRefPtr<BindingPattern const> const& binding) {
+                        // NOTE: Nothing in the callback throws an exception.
+                        MUST(binding->for_each_bound_name([&](auto& name) {
                             entries_with_location.append({ ExportEntry::named_export(name, name), variable_position });
-                        });
+                        }));
                     });
             }
             expression = variable_declaration;
@@ -4594,7 +4743,7 @@ NonnullRefPtr<ExportStatement> Parser::parse_export_statement(Program& program)
 
     for (auto& entry : entries_with_location) {
         for (auto& export_statement : program.exports()) {
-            if (export_statement.has_export(entry.entry.export_name))
+            if (export_statement->has_export(entry.entry.export_name))
                 syntax_error(DeprecatedString::formatted("Duplicate export with name: '{}'", entry.entry.export_name), entry.position);
         }
 

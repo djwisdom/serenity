@@ -13,7 +13,6 @@
 #include <AK/StdLibExtras.h>
 #include <AK/Types.h>
 #include <AK/Utf8View.h>
-#include <LibELF/AuxiliaryVector.h>
 #include <alloca.h>
 #include <assert.h>
 #include <bits/pthread_cancel.h>
@@ -26,9 +25,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/auxv.h>
 #include <sys/internals.h>
 #include <sys/ioctl.h>
-#include <sys/ioctl_numbers.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -473,16 +472,19 @@ int clearenv()
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/setenv.html
 int setenv(char const* name, char const* value, int overwrite)
 {
-    return serenity_setenv(name, strlen(name), value, strlen(value), overwrite);
-}
-
-int serenity_setenv(char const* name, ssize_t name_length, char const* value, ssize_t value_length, int overwrite)
-{
     if (!overwrite && getenv(name))
         return 0;
-    auto const total_length = name_length + value_length + 2;
+    auto const total_length = strlen(name) + strlen(value) + 2;
     auto* var = (char*)malloc(total_length);
     snprintf(var, total_length, "%s=%s", name, value);
+    s_malloced_environment_variables.set((FlatPtr)var);
+    return putenv(var);
+}
+
+// A non-evil version of putenv that will strdup the env (and free it later)
+int serenity_putenv(char const* new_var, size_t length)
+{
+    auto* var = strndup(new_var, length);
     s_malloced_environment_variables.set((FlatPtr)var);
     return putenv(var);
 }
@@ -642,7 +644,7 @@ int ptsname_r(int fd, char* buffer, size_t size)
         return -1;
     }
     memset(buffer, 0, devpts_path_builder.length() + 1);
-    auto full_devpts_path_string = devpts_path_builder.build();
+    auto full_devpts_path_string = devpts_path_builder.to_deprecated_string();
     if (!full_devpts_path_string.copy_characters_to_buffer(buffer, size)) {
         errno = ERANGE;
         return -1;

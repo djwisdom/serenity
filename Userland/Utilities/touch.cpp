@@ -9,8 +9,8 @@
 #include <AK/GenericLexer.h>
 #include <AK/Time.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <LibTimeZone/TimeZone.h>
 #include <ctype.h>
@@ -31,7 +31,7 @@ template<typename... Parameters>
     exit(1);
 }
 
-inline static bool validate_timestamp(unsigned year, unsigned month, unsigned day, unsigned hour, unsigned minute, unsigned second)
+inline bool validate_timestamp(unsigned year, unsigned month, unsigned day, unsigned hour, unsigned minute, unsigned second)
 {
     return (year >= 1970) && (month >= 1 && month <= 12) && (day >= 1 && day <= static_cast<unsigned>(days_in_month(year, month))) && (hour <= 23) && (minute <= 59) && (second <= 59);
 }
@@ -239,7 +239,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         atime.tv_nsec = UTIME_OMIT;
 
     for (auto path : paths) {
-        if (Core::File::exists(path)) {
+        if (FileSystem::exists(path)) {
             if (utimensat(AT_FDCWD, path.characters(), times, 0) == -1)
                 err("failed to touch '{}': {}", path, strerror(errno));
         } else if (!no_create_file) {

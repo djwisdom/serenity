@@ -6,7 +6,7 @@
 
 #include <AK/LexicalPath.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibCrypto/Hash/HashManager.h>
 #include <LibMain/Main.h>
@@ -55,7 +55,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     int failed_verification_count = 0;
 
     for (auto const& path : paths) {
-        auto file_or_error = Core::Stream::File::open_file_or_standard_stream(path, Core::Stream::OpenMode::Read);
+        auto file_or_error = Core::File::open_file_or_standard_stream(path, Core::File::OpenMode::Read);
         if (file_or_error.is_error()) {
             ++read_fail_count;
             has_error = true;
@@ -66,13 +66,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         Array<u8, PAGE_SIZE> buffer;
         if (!verify_from_paths) {
             while (!file->is_eof())
-                hash.update(TRY(file->read(buffer)));
+                hash.update(TRY(file->read_some(buffer)));
             outln("{:hex-dump}  {}", hash.digest().bytes(), path);
         } else {
             StringBuilder checksum_list_contents;
             Array<u8, 1> checksum_list_buffer;
             while (!file->is_eof())
-                checksum_list_contents.append(TRY(file->read(checksum_list_buffer)).data()[0]);
+                checksum_list_contents.append(TRY(file->read_some(checksum_list_buffer)).data()[0]);
             Vector<StringView> const lines = checksum_list_contents.string_view().split_view("\n"sv);
 
             for (size_t i = 0; i < lines.size(); ++i) {
@@ -87,7 +87,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 // line[0] = checksum
                 // line[1] = filename
                 StringView const filename = line[1];
-                auto file_from_filename_or_error = Core::Stream::File::open_file_or_standard_stream(filename, Core::Stream::OpenMode::Read);
+                auto file_from_filename_or_error = Core::File::open_file_or_standard_stream(filename, Core::File::OpenMode::Read);
                 if (file_from_filename_or_error.is_error()) {
                     ++read_fail_count;
                     warnln("{}: {}", filename, file_from_filename_or_error.release_error());
@@ -96,7 +96,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 auto file_from_filename = file_from_filename_or_error.release_value();
                 hash.reset();
                 while (!file_from_filename->is_eof())
-                    hash.update(TRY(file_from_filename->read(buffer)));
+                    hash.update(TRY(file_from_filename->read_some(buffer)));
                 if (DeprecatedString::formatted("{:hex-dump}", hash.digest().bytes()) == line[0])
                     outln("{}: OK", filename);
                 else {

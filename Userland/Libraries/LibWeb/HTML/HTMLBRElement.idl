@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLBRElement : HTMLElement {
 
-    [Reflect] attribute DOMString clear;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString clear;
 
 };

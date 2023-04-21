@@ -8,13 +8,13 @@
 
 namespace Web::DOM {
 
-JS::NonnullGCPtr<IDLEventListener> IDLEventListener::create(JS::Realm& realm, JS::NonnullGCPtr<WebIDL::CallbackType> callback)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<IDLEventListener>> IDLEventListener::create(JS::Realm& realm, JS::NonnullGCPtr<WebIDL::CallbackType> callback)
 {
-    return realm.heap().allocate<IDLEventListener>(realm, realm, move(callback));
+    return MUST_OR_THROW_OOM(realm.heap().allocate<IDLEventListener>(realm, realm, move(callback)));
 }
 
 IDLEventListener::IDLEventListener(JS::Realm& realm, JS::NonnullGCPtr<WebIDL::CallbackType> callback)
-    : JS::Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
+    : JS::Object(ConstructWithPrototypeTag::Tag, realm.intrinsics().object_prototype())
     , m_callback(move(callback))
 {
 }

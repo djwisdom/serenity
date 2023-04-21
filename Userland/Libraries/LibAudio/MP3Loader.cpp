@@ -7,21 +7,23 @@
 #include "MP3Loader.h"
 #include "MP3HuffmanTables.h"
 #include "MP3Tables.h"
+#include "MP3Types.h"
 #include <AK/FixedArray.h>
+#include <LibCore/File.h>
 
 namespace Audio {
 
 DSP::MDCT<12> MP3LoaderPlugin::s_mdct_12;
 DSP::MDCT<36> MP3LoaderPlugin::s_mdct_36;
 
-MP3LoaderPlugin::MP3LoaderPlugin(NonnullOwnPtr<Core::Stream::SeekableStream> stream)
+MP3LoaderPlugin::MP3LoaderPlugin(NonnullOwnPtr<SeekableStream> stream)
     : LoaderPlugin(move(stream))
 {
 }
 
-Result<NonnullOwnPtr<MP3LoaderPlugin>, LoaderError> MP3LoaderPlugin::try_create(StringView path)
+Result<NonnullOwnPtr<MP3LoaderPlugin>, LoaderError> MP3LoaderPlugin::create(StringView path)
 {
-    auto stream = LOADER_TRY(Core::Stream::BufferedFile::create(LOADER_TRY(Core::Stream::File::open(path, Core::Stream::OpenMode::Read))));
+    auto stream = LOADER_TRY(Core::BufferedFile::create(LOADER_TRY(Core::File::open(path, Core::File::OpenMode::Read))));
     auto loader = make<MP3LoaderPlugin>(move(stream));
 
     LOADER_TRY(loader->initialize());
@@ -29,9 +31,9 @@ Result<NonnullOwnPtr<MP3LoaderPlugin>, LoaderError> MP3LoaderPlugin::try_create(
     return loader;
 }
 
-Result<NonnullOwnPtr<MP3LoaderPlugin>, LoaderError> MP3LoaderPlugin::try_create(Bytes buffer)
+Result<NonnullOwnPtr<MP3LoaderPlugin>, LoaderError> MP3LoaderPlugin::create(Bytes buffer)
 {
-    auto stream = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(buffer));
+    auto stream = LOADER_TRY(try_make<FixedMemoryStream>(buffer));
     auto loader = make<MP3LoaderPlugin>(move(stream));
 
     LOADER_TRY(loader->initialize());
@@ -41,7 +43,7 @@ Result<NonnullOwnPtr<MP3LoaderPlugin>, LoaderError> MP3LoaderPlugin::try_create(
 
 MaybeLoaderError MP3LoaderPlugin::initialize()
 {
-    m_bitstream = LOADER_TRY(Core::Stream::BigEndianInputBitStream::construct(Core::Stream::Handle<Core::Stream::Stream>(*m_stream)));
+    m_bitstream = LOADER_TRY(try_make<BigEndianInputBitStream>(MaybeOwned<Stream>(*m_stream)));
 
     TRY(synchronize());
 
@@ -55,7 +57,7 @@ MaybeLoaderError MP3LoaderPlugin::initialize()
 
     TRY(build_seek_table());
 
-    LOADER_TRY(m_stream->seek(0, Core::Stream::SeekMode::SetPosition));
+    LOADER_TRY(m_stream->seek(0, SeekMode::SetPosition));
 
     return {};
 }
@@ -64,96 +66,91 @@ MaybeLoaderError MP3LoaderPlugin::reset()
 {
     TRY(seek(0));
     m_current_frame = {};
-    m_current_frame_read = 0;
     m_synthesis_buffer = {};
     m_loaded_samples = 0;
-    m_bit_reservoir.discard_or_error(m_bit_reservoir.size());
+    LOADER_TRY(m_bit_reservoir.discard(m_bit_reservoir.used_buffer_size()));
+    m_bitstream->align_to_byte_boundary();
     return {};
 }
 
 MaybeLoaderError MP3LoaderPlugin::seek(int const position)
 {
-    for (auto const& seek_entry : m_seek_table) {
-        if (seek_entry.get<1>() >= position) {
-            LOADER_TRY(m_stream->seek(seek_entry.get<0>(), Core::Stream::SeekMode::SetPosition));
-            m_loaded_samples = seek_entry.get<1>();
-            break;
-        }
+    auto seek_entry = m_seek_table.seek_point_before(position);
+    if (seek_entry.has_value()) {
+        LOADER_TRY(m_stream->seek(seek_entry->byte_offset, SeekMode::SetPosition));
+        m_loaded_samples = seek_entry->sample_index;
     }
     m_current_frame = {};
-    m_current_frame_read = 0;
     m_synthesis_buffer = {};
-    m_bit_reservoir.discard_or_error(m_bit_reservoir.size());
-    m_bit_reservoir.handle_any_error();
-    m_is_first_frame = true;
+    LOADER_TRY(m_bit_reservoir.discard(m_bit_reservoir.used_buffer_size()));
+    m_bitstream->align_to_byte_boundary();
     return {};
 }
 
-LoaderSamples MP3LoaderPlugin::get_more_samples(size_t max_samples_to_read_from_input)
+ErrorOr<Vector<FixedArray<Sample>>, LoaderError> MP3LoaderPlugin::load_chunks(size_t samples_to_read_from_input)
 {
-    FixedArray<Sample> samples = LOADER_TRY(FixedArray<Sample>::try_create(max_samples_to_read_from_input));
-
-    size_t samples_to_read = max_samples_to_read_from_input;
+    int samples_to_read = samples_to_read_from_input;
+    Vector<FixedArray<Sample>> frames;
     while (samples_to_read > 0) {
+        FixedArray<Sample> samples = LOADER_TRY(FixedArray<Sample>::create(MP3::frame_size));
+
         if (!m_current_frame.has_value()) {
             auto maybe_frame = read_next_frame();
             if (maybe_frame.is_error()) {
                 if (m_stream->is_eof()) {
-                    return FixedArray<Sample> {};
+                    return Vector<FixedArray<Sample>> {};
                 }
                 return maybe_frame.release_error();
             }
             m_current_frame = maybe_frame.release_value();
             if (!m_current_frame.has_value())
                 break;
-            m_is_first_frame = false;
-            m_current_frame_read = 0;
         }
 
         bool const is_stereo = m_current_frame->header.channel_count() == 2;
-        for (; m_current_frame_read < 576 && samples_to_read > 0; m_current_frame_read++) {
-            auto const left_sample = m_current_frame->channels[0].granules[0].pcm[m_current_frame_read / 32][m_current_frame_read % 32];
-            auto const right_sample = is_stereo ? m_current_frame->channels[1].granules[0].pcm[m_current_frame_read / 32][m_current_frame_read % 32] : left_sample;
-            samples[samples.size() - samples_to_read] = Sample { left_sample, right_sample };
+        size_t current_frame_read = 0;
+        for (; current_frame_read < MP3::granule_size; current_frame_read++) {
+            auto const left_sample = m_current_frame->channels[0].granules[0].pcm[current_frame_read / 32][current_frame_read % 32];
+            auto const right_sample = is_stereo ? m_current_frame->channels[1].granules[0].pcm[current_frame_read / 32][current_frame_read % 32] : left_sample;
+            samples[current_frame_read] = Sample { left_sample, right_sample };
             samples_to_read--;
         }
-        for (; m_current_frame_read < 1152 && samples_to_read > 0; m_current_frame_read++) {
-            auto const left_sample = m_current_frame->channels[0].granules[1].pcm[(m_current_frame_read - 576) / 32][(m_current_frame_read - 576) % 32];
-            auto const right_sample = is_stereo ? m_current_frame->channels[1].granules[1].pcm[(m_current_frame_read - 576) / 32][(m_current_frame_read - 576) % 32] : left_sample;
-            samples[samples.size() - samples_to_read] = Sample { left_sample, right_sample };
+        for (; current_frame_read < MP3::frame_size; current_frame_read++) {
+            auto const left_sample = m_current_frame->channels[0].granules[1].pcm[(current_frame_read - MP3::granule_size) / 32][(current_frame_read - MP3::granule_size) % 32];
+            auto const right_sample = is_stereo ? m_current_frame->channels[1].granules[1].pcm[(current_frame_read - MP3::granule_size) / 32][(current_frame_read - MP3::granule_size) % 32] : left_sample;
+            samples[current_frame_read] = Sample { left_sample, right_sample };
             samples_to_read--;
         }
-        if (m_current_frame_read == 1152) {
-            m_current_frame = {};
-        }
+        m_loaded_samples += samples.size();
+        TRY(frames.try_append(move(samples)));
+        m_current_frame = {};
     }
 
-    m_loaded_samples += samples.size();
-    return samples;
+    return frames;
 }
 
 MaybeLoaderError MP3LoaderPlugin::build_seek_table()
 {
     int sample_count = 0;
     size_t frame_count = 0;
-    m_seek_table.clear();
+    m_seek_table = {};
 
     m_bitstream->align_to_byte_boundary();
 
     while (!synchronize().is_error()) {
-        auto const frame_pos = -2 + LOADER_TRY(m_stream->seek(0, Core::Stream::SeekMode::FromCurrentPosition));
+        auto const frame_pos = -2 + LOADER_TRY(m_stream->seek(0, SeekMode::FromCurrentPosition));
 
         auto error_or_header = read_header();
         if (error_or_header.is_error() || error_or_header.value().id != 1 || error_or_header.value().layer != 3) {
             continue;
         }
         frame_count++;
-        sample_count += 1152;
+        sample_count += MP3::frame_size;
 
         if (frame_count % 10 == 0)
-            m_seek_table.append({ frame_pos, sample_count });
+            LOADER_TRY(m_seek_table.insert_seek_point({ static_cast<u64>(sample_count), frame_pos }));
 
-        LOADER_TRY(m_stream->seek(error_or_header.value().frame_size - 6, Core::Stream::SeekMode::FromCurrentPosition));
+        LOADER_TRY(m_stream->seek(error_or_header.value().frame_size - 6, SeekMode::FromCurrentPosition));
 
         // TODO: This is just here to clear the bitstream buffer.
         // Bitstream should have a method to sync its state to the underlying stream.
@@ -217,11 +214,11 @@ ErrorOr<MP3::MP3Frame, LoaderError> MP3LoaderPlugin::read_next_frame()
             continue;
         }
 
-        return read_frame_data(header, m_is_first_frame);
+        return read_frame_data(header);
     }
 }
 
-ErrorOr<MP3::MP3Frame, LoaderError> MP3LoaderPlugin::read_frame_data(MP3::Header const& header, bool is_first_frame)
+ErrorOr<MP3::MP3Frame, LoaderError> MP3LoaderPlugin::read_frame_data(MP3::Header const& header)
 {
     MP3::MP3Frame frame { header };
 
@@ -232,23 +229,17 @@ ErrorOr<MP3::MP3Frame, LoaderError> MP3LoaderPlugin::read_frame_data(MP3::Header
         return LoaderError { LoaderError::Category::IO, m_loaded_samples, "Out of memory" };
     auto& buffer = maybe_buffer.value();
 
-    size_t old_reservoir_size = m_bit_reservoir.size();
-    if (LOADER_TRY(m_bitstream->read(buffer)).size() != buffer.size())
-        return LoaderError { LoaderError::Category::IO, m_loaded_samples, "Could not find another whole frame." };
-    if (m_bit_reservoir.write(buffer) != header.slot_count)
-        return LoaderError { LoaderError::Category::IO, m_loaded_samples, "Could not write frame into bit reservoir." };
+    size_t old_reservoir_size = m_bit_reservoir.used_buffer_size();
+    LOADER_TRY(m_bitstream->read_until_filled(buffer));
+    LOADER_TRY(m_bit_reservoir.write_until_depleted(buffer));
 
-    if (frame.main_data_begin > 0 && is_first_frame)
+    // If we don't have enough data in the reservoir to process this frame, skip it (but keep the data).
+    if (old_reservoir_size < static_cast<size_t>(frame.main_data_begin))
         return frame;
-    if (!m_bit_reservoir.discard_or_error(old_reservoir_size - frame.main_data_begin))
-        return LoaderError { LoaderError::Category::IO, m_loaded_samples, "Could not discard old frame data." };
 
-    InputBitStream reservoir_stream(m_bit_reservoir);
-    ScopeGuard reservoir_guard([&reservoir_stream]() {
-        if (reservoir_stream.has_any_error()) {
-            reservoir_stream.handle_any_error();
-        }
-    });
+    TRY(m_bit_reservoir.discard(old_reservoir_size - frame.main_data_begin));
+
+    BigEndianInputBitStream reservoir_stream { MaybeOwned<Stream>(m_bit_reservoir) };
 
     for (size_t granule_index = 0; granule_index < 2; granule_index++) {
         for (size_t channel_index = 0; channel_index < header.channel_count(); channel_index++) {
@@ -276,7 +267,7 @@ ErrorOr<MP3::MP3Frame, LoaderError> MP3LoaderPlugin::read_frame_data(MP3::Header
         for (size_t channel_index = 0; channel_index < header.channel_count(); channel_index++) {
             auto& granule = frame.channels[channel_index].granules[granule_index];
 
-            for (size_t i = 0; i < 576; i += 18) {
+            for (size_t i = 0; i < MP3::granule_size; i += 18) {
                 MP3::BlockType block_type = granule.block_type;
                 if (i < 36 && granule.mixed_block_flag) {
                     // ISO/IEC 11172-3: if mixed_block_flag is set, the lowest two subbands are transformed with normal window.
@@ -364,9 +355,9 @@ MaybeLoaderError MP3LoaderPlugin::read_side_information(MP3::MP3Frame& frame)
 }
 
 // From ISO/IEC 11172-3 (2.4.3.4.7.1)
-Array<float, 576> MP3LoaderPlugin::calculate_frame_exponents(MP3::MP3Frame const& frame, size_t granule_index, size_t channel_index)
+Array<float, MP3::granule_size> MP3LoaderPlugin::calculate_frame_exponents(MP3::MP3Frame const& frame, size_t granule_index, size_t channel_index)
 {
-    Array<float, 576> exponents;
+    Array<float, MP3::granule_size> exponents;
 
     auto fill_band = [&exponents](float exponent, size_t start, size_t end) {
         for (size_t j = start; j <= end; j++) {
@@ -403,7 +394,7 @@ Array<float, 576> MP3LoaderPlugin::calculate_frame_exponents(MP3::MP3Frame const
         float const gain1 = (gain - 8 * granule.sub_block_gain[1]) / 4.0;
         float const gain2 = (gain - 8 * granule.sub_block_gain[2]) / 4.0;
 
-        while (sample_count < 576 && band_index < scale_factor_bands.size()) {
+        while (sample_count < MP3::granule_size && band_index < scale_factor_bands.size()) {
             float const exponent0 = gain0 - (scale_factor_multiplier * channel.scale_factors[band_index + 0]);
             float const exponent1 = gain1 - (scale_factor_multiplier * channel.scale_factors[band_index + 1]);
             float const exponent2 = gain2 - (scale_factor_multiplier * channel.scale_factors[band_index + 2]);
@@ -418,13 +409,13 @@ Array<float, 576> MP3LoaderPlugin::calculate_frame_exponents(MP3::MP3Frame const
             band_index += 3;
         }
 
-        while (sample_count < 576)
+        while (sample_count < MP3::granule_size)
             exponents[sample_count++] = 0;
     }
     return exponents;
 }
 
-ErrorOr<size_t, LoaderError> MP3LoaderPlugin::read_scale_factors(MP3::MP3Frame& frame, InputBitStream& reservoir, size_t granule_index, size_t channel_index)
+ErrorOr<size_t, LoaderError> MP3LoaderPlugin::read_scale_factors(MP3::MP3Frame& frame, BigEndianInputBitStream& reservoir, size_t granule_index, size_t channel_index)
 {
     auto& channel = frame.channels[channel_index];
     auto const& granule = channel.granules[granule_index];
@@ -435,22 +426,22 @@ ErrorOr<size_t, LoaderError> MP3LoaderPlugin::read_scale_factors(MP3::MP3Frame& 
         if (granule.mixed_block_flag) {
             for (size_t i = 0; i < 8; i++) {
                 auto const bits = MP3::Tables::ScalefacCompressSlen1[granule.scalefac_compress];
-                channel.scale_factors[band_index++] = reservoir.read_bits_big_endian(bits);
+                channel.scale_factors[band_index++] = TRY(reservoir.read_bits(bits));
                 bits_read += bits;
             }
             for (size_t i = 3; i < 12; i++) {
                 auto const bits = i <= 5 ? MP3::Tables::ScalefacCompressSlen1[granule.scalefac_compress] : MP3::Tables::ScalefacCompressSlen2[granule.scalefac_compress];
-                channel.scale_factors[band_index++] = reservoir.read_bits_big_endian(bits);
-                channel.scale_factors[band_index++] = reservoir.read_bits_big_endian(bits);
-                channel.scale_factors[band_index++] = reservoir.read_bits_big_endian(bits);
+                channel.scale_factors[band_index++] = TRY(reservoir.read_bits(bits));
+                channel.scale_factors[band_index++] = TRY(reservoir.read_bits(bits));
+                channel.scale_factors[band_index++] = TRY(reservoir.read_bits(bits));
                 bits_read += 3 * bits;
             }
         } else {
             for (size_t i = 0; i < 12; i++) {
                 auto const bits = i <= 5 ? MP3::Tables::ScalefacCompressSlen1[granule.scalefac_compress] : MP3::Tables::ScalefacCompressSlen2[granule.scalefac_compress];
-                channel.scale_factors[band_index++] = reservoir.read_bits_big_endian(bits);
-                channel.scale_factors[band_index++] = reservoir.read_bits_big_endian(bits);
-                channel.scale_factors[band_index++] = reservoir.read_bits_big_endian(bits);
+                channel.scale_factors[band_index++] = TRY(reservoir.read_bits(bits));
+                channel.scale_factors[band_index++] = TRY(reservoir.read_bits(bits));
+                channel.scale_factors[band_index++] = TRY(reservoir.read_bits(bits));
                 bits_read += 3 * bits;
             }
         }
@@ -461,40 +452,38 @@ ErrorOr<size_t, LoaderError> MP3LoaderPlugin::read_scale_factors(MP3::MP3Frame& 
         if ((channel.scale_factor_selection_info[0] == 0) || (granule_index == 0)) {
             for (band_index = 0; band_index < 6; band_index++) {
                 auto const bits = MP3::Tables::ScalefacCompressSlen1[granule.scalefac_compress];
-                channel.scale_factors[band_index] = reservoir.read_bits_big_endian(bits);
+                channel.scale_factors[band_index] = TRY(reservoir.read_bits(bits));
                 bits_read += bits;
             }
         }
         if ((channel.scale_factor_selection_info[1] == 0) || (granule_index == 0)) {
             for (band_index = 6; band_index < 11; band_index++) {
                 auto const bits = MP3::Tables::ScalefacCompressSlen1[granule.scalefac_compress];
-                channel.scale_factors[band_index] = reservoir.read_bits_big_endian(bits);
+                channel.scale_factors[band_index] = TRY(reservoir.read_bits(bits));
                 bits_read += bits;
             }
         }
         if ((channel.scale_factor_selection_info[2] == 0) || (granule_index == 0)) {
             for (band_index = 11; band_index < 16; band_index++) {
                 auto const bits = MP3::Tables::ScalefacCompressSlen2[granule.scalefac_compress];
-                channel.scale_factors[band_index] = reservoir.read_bits_big_endian(bits);
+                channel.scale_factors[band_index] = TRY(reservoir.read_bits(bits));
                 bits_read += bits;
             }
         }
         if ((channel.scale_factor_selection_info[3] == 0) || (granule_index == 0)) {
             for (band_index = 16; band_index < 21; band_index++) {
                 auto const bits = MP3::Tables::ScalefacCompressSlen2[granule.scalefac_compress];
-                channel.scale_factors[band_index] = reservoir.read_bits_big_endian(bits);
+                channel.scale_factors[band_index] = TRY(reservoir.read_bits(bits));
                 bits_read += bits;
             }
         }
         channel.scale_factors[21] = 0;
     }
 
-    if (reservoir.has_any_error())
-        return LoaderError { LoaderError::Category::IO, m_loaded_samples, "Read error" };
     return bits_read;
 }
 
-MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputBitStream& reservoir, size_t granule_index, size_t channel_index, size_t granule_bits_read)
+MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, BigEndianInputBitStream& reservoir, size_t granule_index, size_t channel_index, size_t granule_bits_read)
 {
     auto const exponents = calculate_frame_exponents(frame, granule_index, channel_index);
     auto& granule = frame.channels[channel_index].granules[granule_index];
@@ -505,7 +494,7 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
 
     bool const is_short_granule = granule.window_switching_flag && granule.block_type == MP3::BlockType::Short;
     size_t const region1_start = is_short_granule ? 36 : scale_factor_bands[scale_factor_band_index1].start;
-    size_t const region2_start = is_short_granule ? 576 : scale_factor_bands[scale_factor_band_index2].start;
+    size_t const region2_start = is_short_granule ? MP3::granule_size : scale_factor_bands[scale_factor_band_index2].start;
 
     auto requantize = [](int const sample, float const exponent) -> float {
         int const sign = sample < 0 ? -1 : 1;
@@ -540,21 +529,21 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
         int y = entry.code->symbol.y;
 
         if (x == 15 && tree->linbits > 0) {
-            x += reservoir.read_bits_big_endian(tree->linbits);
+            x += LOADER_TRY(reservoir.read_bits(tree->linbits));
             granule_bits_read += tree->linbits;
         }
         if (x != 0) {
-            if (reservoir.read_bit_big_endian())
+            if (LOADER_TRY(reservoir.read_bit()))
                 x = -x;
             granule_bits_read++;
         }
 
         if (y == 15 && tree->linbits > 0) {
-            y += reservoir.read_bits_big_endian(tree->linbits);
+            y += LOADER_TRY(reservoir.read_bits(tree->linbits));
             granule_bits_read += tree->linbits;
         }
         if (y != 0) {
-            if (reservoir.read_bit_big_endian())
+            if (LOADER_TRY(reservoir.read_bit()))
                 y = -y;
             granule_bits_read++;
         }
@@ -563,13 +552,13 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
         granule.samples[count + 1] = requantize(y, exponents[count + 1]);
     }
 
-    Span<MP3::Tables::Huffman::HuffmanNode<MP3::Tables::Huffman::HuffmanVWXY> const> count1table = granule.count1table_select ? MP3::Tables::Huffman::TreeB : MP3::Tables::Huffman::TreeA;
+    ReadonlySpan<MP3::Tables::Huffman::HuffmanNode<MP3::Tables::Huffman::HuffmanVWXY>> count1table = granule.count1table_select ? MP3::Tables::Huffman::TreeB : MP3::Tables::Huffman::TreeA;
 
     // count1 is not known. We have to read huffman encoded values
     // until we've exhausted the granule's bits. We know the size of
     // the granule from part2_3_length, which is the number of bits
     // used for scaleactors and huffman data (in the granule).
-    while (granule_bits_read < granule.part_2_3_length && count <= 576 - 4) {
+    while (granule_bits_read < granule.part_2_3_length && count <= MP3::granule_size - 4) {
         auto const entry = MP3::Tables::Huffman::huffman_decode(reservoir, count1table, granule.part_2_3_length - granule_bits_read);
         granule_bits_read += entry.bits_read;
         if (!entry.code.has_value())
@@ -578,7 +567,7 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
         if (v != 0) {
             if (granule_bits_read >= granule.part_2_3_length)
                 break;
-            if (reservoir.read_bit_big_endian())
+            if (LOADER_TRY(reservoir.read_bit()))
                 v = -v;
             granule_bits_read++;
         }
@@ -586,7 +575,7 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
         if (w != 0) {
             if (granule_bits_read >= granule.part_2_3_length)
                 break;
-            if (reservoir.read_bit_big_endian())
+            if (LOADER_TRY(reservoir.read_bit()))
                 w = -w;
             granule_bits_read++;
         }
@@ -594,7 +583,7 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
         if (x != 0) {
             if (granule_bits_read >= granule.part_2_3_length)
                 break;
-            if (reservoir.read_bit_big_endian())
+            if (LOADER_TRY(reservoir.read_bit()))
                 x = -x;
             granule_bits_read++;
         }
@@ -602,7 +591,7 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
         if (y != 0) {
             if (granule_bits_read >= granule.part_2_3_length)
                 break;
-            if (reservoir.read_bit_big_endian())
+            if (LOADER_TRY(reservoir.read_bit()))
                 y = -y;
             granule_bits_read++;
         }
@@ -620,7 +609,7 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
     }
 
     for (size_t i = granule_bits_read; i < granule.part_2_3_length; i++) {
-        reservoir.read_bit_big_endian();
+        LOADER_TRY(reservoir.read_bit());
     }
 
     return {};
@@ -628,7 +617,7 @@ MaybeLoaderError MP3LoaderPlugin::read_huffman_data(MP3::MP3Frame& frame, InputB
 
 void MP3LoaderPlugin::reorder_samples(MP3::Granule& granule, u32 sample_rate)
 {
-    float tmp[576] = {};
+    float tmp[MP3::granule_size] = {};
     size_t band_index = 0;
     size_t subband_index = 0;
 
@@ -644,7 +633,7 @@ void MP3LoaderPlugin::reorder_samples(MP3::Granule& granule, u32 sample_rate)
         }
     }
 
-    while (subband_index < 576 && band_index <= 36) {
+    while (subband_index < MP3::granule_size && band_index <= 36) {
         for (size_t frequency_line_index = 0; frequency_line_index < scale_factor_bands[band_index].width; frequency_line_index++) {
             tmp[subband_index++] = granule.samples[scale_factor_bands[band_index + 0].start + frequency_line_index];
             tmp[subband_index++] = granule.samples[scale_factor_bands[band_index + 1].start + frequency_line_index];
@@ -653,7 +642,7 @@ void MP3LoaderPlugin::reorder_samples(MP3::Granule& granule, u32 sample_rate)
         band_index += 3;
     }
 
-    for (size_t i = 0; i < 576; i++)
+    for (size_t i = 0; i < MP3::granule_size; i++)
         granule.samples[i] = tmp[i];
 }
 
@@ -680,7 +669,7 @@ void MP3LoaderPlugin::process_stereo(MP3::MP3Frame& frame, size_t granule_index)
     auto& granule_left = frame.channels[0].granules[granule_index];
     auto& granule_right = frame.channels[1].granules[granule_index];
 
-    auto get_last_nonempty_band = [](Span<float> samples, Span<MP3::Tables::ScaleFactorBand const> bands) -> size_t {
+    auto get_last_nonempty_band = [](Span<float> samples, ReadonlySpan<MP3::Tables::ScaleFactorBand> bands) -> size_t {
         size_t last_nonempty_band = 0;
 
         for (size_t i = 0; i < bands.size(); i++) {
@@ -747,7 +736,7 @@ void MP3LoaderPlugin::process_stereo(MP3::MP3Frame& frame, size_t granule_index)
     }
 }
 
-void MP3LoaderPlugin::transform_samples_to_time(Array<float, 576> const& input, size_t input_offset, Array<float, 36>& output, MP3::BlockType block_type)
+void MP3LoaderPlugin::transform_samples_to_time(Array<float, MP3::granule_size> const& input, size_t input_offset, Array<float, 36>& output, MP3::BlockType block_type)
 {
     if (block_type == MP3::BlockType::Short) {
         size_t const N = 12;
@@ -789,7 +778,7 @@ void MP3LoaderPlugin::transform_samples_to_time(Array<float, 576> const& input, 
             output[i] = 0;
 
     } else {
-        s_mdct_36.transform(Span<float const>(input).slice(input_offset, 18), output);
+        s_mdct_36.transform(ReadonlySpan<float>(input).slice(input_offset, 18), output);
         for (size_t i = 0; i < 36; i++) {
             switch (block_type) {
             case MP3::BlockType::Normal:
@@ -845,7 +834,7 @@ void MP3LoaderPlugin::synthesis(Array<float, 1024>& V, Array<float, 32>& samples
     }
 }
 
-Span<MP3::Tables::ScaleFactorBand const> MP3LoaderPlugin::get_scalefactor_bands(MP3::Granule const& granule, int samplerate)
+ReadonlySpan<MP3::Tables::ScaleFactorBand> MP3LoaderPlugin::get_scalefactor_bands(MP3::Granule const& granule, int samplerate)
 {
     switch (granule.block_type) {
     case MP3::BlockType::Short:

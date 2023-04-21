@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, the SerenityOS developers.
- * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -19,11 +19,34 @@
 #include <LibGfx/Font/VectorFont.h>
 #include <LibGfx/Font/WOFF/Font.h>
 #include <LibWeb/CSS/CSSFontFaceRule.h>
+#include <LibWeb/CSS/CSSImportRule.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/SelectorEngine.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleSheet.h>
+#include <LibWeb/CSS/StyleValues/BackgroundStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BorderRadiusShorthandStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BorderStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FlexFlowStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FlexStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FontStyleValue.h>
+#include <LibWeb/CSS/StyleValues/GridAreaShorthandStyleValue.h>
+#include <LibWeb/CSS/StyleValues/GridTrackPlacementShorthandStyleValue.h>
+#include <LibWeb/CSS/StyleValues/GridTrackPlacementStyleValue.h>
+#include <LibWeb/CSS/StyleValues/IdentifierStyleValue.h>
+#include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ListStyleStyleValue.h>
+#include <LibWeb/CSS/StyleValues/NumericStyleValue.h>
+#include <LibWeb/CSS/StyleValues/OverflowStyleValue.h>
+#include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
+#include <LibWeb/CSS/StyleValues/StyleValueList.h>
+#include <LibWeb/CSS/StyleValues/TextDecorationStyleValue.h>
+#include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/FontCache.h>
@@ -43,13 +66,12 @@ StyleComputer::~StyleComputer() = default;
 
 class StyleComputer::FontLoader : public ResourceClient {
 public:
-    explicit FontLoader(StyleComputer& style_computer, FlyString family_name, AK::URL url)
+    explicit FontLoader(StyleComputer& style_computer, FlyString family_name, Vector<AK::URL> urls)
         : m_style_computer(style_computer)
         , m_family_name(move(family_name))
+        , m_urls(move(urls))
     {
-        LoadRequest request;
-        request.set_url(move(url));
-        set_resource(ResourceLoader::the().load_resource(Resource::Type::Generic, request));
+        start_loading_next_url();
     }
 
     virtual ~FontLoader() override { }
@@ -58,7 +80,7 @@ public:
     {
         auto result = try_load_font();
         if (result.is_error())
-            return;
+            return start_loading_next_url();
         m_vector_font = result.release_value();
         m_style_computer.did_load_font(m_family_name);
     }
@@ -87,13 +109,22 @@ public:
     }
 
 private:
+    void start_loading_next_url()
+    {
+        if (m_urls.is_empty())
+            return;
+        LoadRequest request;
+        request.set_url(m_urls.take_first());
+        set_resource(ResourceLoader::the().load_resource(Resource::Type::Generic, request));
+    }
+
     ErrorOr<NonnullRefPtr<Gfx::VectorFont>> try_load_font()
     {
         // FIXME: This could maybe use the format() provided in @font-face as well, since often the mime type is just application/octet-stream and we have to try every format
         auto mime_type = resource()->mime_type();
         if (mime_type == "font/ttf"sv || mime_type == "application/x-font-ttf"sv)
             return TRY(OpenType::Font::try_load_from_externally_owned_memory(resource()->encoded_data()));
-        if (mime_type == "font/woff"sv)
+        if (mime_type == "font/woff"sv || mime_type == "application/font-woff"sv)
             return TRY(WOFF::Font::try_load_from_externally_owned_memory(resource()->encoded_data()));
         auto ttf = OpenType::Font::try_load_from_externally_owned_memory(resource()->encoded_data());
         if (!ttf.is_error())
@@ -107,28 +138,27 @@ private:
     StyleComputer& m_style_computer;
     FlyString m_family_name;
     RefPtr<Gfx::VectorFont> m_vector_font;
+    Vector<AK::URL> m_urls;
 
     HashMap<float, NonnullRefPtr<Gfx::ScaledFont>> mutable m_cached_fonts;
 };
 
-static CSSStyleSheet& default_stylesheet()
+static CSSStyleSheet& default_stylesheet(DOM::Document const& document)
 {
     static JS::Handle<CSSStyleSheet> sheet;
     if (!sheet.cell()) {
-        extern char const default_stylesheet_source[];
-        DeprecatedString css = default_stylesheet_source;
-        sheet = JS::make_handle(parse_css_stylesheet(CSS::Parser::ParsingContext(), css));
+        extern StringView default_stylesheet_source;
+        sheet = JS::make_handle(parse_css_stylesheet(CSS::Parser::ParsingContext(document), default_stylesheet_source));
     }
     return *sheet;
 }
 
-static CSSStyleSheet& quirks_mode_stylesheet()
+static CSSStyleSheet& quirks_mode_stylesheet(DOM::Document const& document)
 {
     static JS::Handle<CSSStyleSheet> sheet;
     if (!sheet.cell()) {
-        extern char const quirks_mode_stylesheet_source[];
-        DeprecatedString css = quirks_mode_stylesheet_source;
-        sheet = JS::make_handle(parse_css_stylesheet(CSS::Parser::ParsingContext(), css));
+        extern StringView quirks_mode_stylesheet_source;
+        sheet = JS::make_handle(parse_css_stylesheet(CSS::Parser::ParsingContext(document), quirks_mode_stylesheet_source));
     }
     return *sheet;
 }
@@ -137,66 +167,63 @@ template<typename Callback>
 void StyleComputer::for_each_stylesheet(CascadeOrigin cascade_origin, Callback callback) const
 {
     if (cascade_origin == CascadeOrigin::UserAgent) {
-        callback(default_stylesheet());
+        callback(default_stylesheet(document()));
         if (document().in_quirks_mode())
-            callback(quirks_mode_stylesheet());
+            callback(quirks_mode_stylesheet(document()));
     }
     if (cascade_origin == CascadeOrigin::Author) {
-        for (auto const& sheet : document().style_sheets().sheets()) {
+        for (auto const& sheet : document().style_sheets().sheets())
             callback(*sheet);
-        }
+    }
+}
+
+StyleComputer::RuleCache const& StyleComputer::rule_cache_for_cascade_origin(CascadeOrigin cascade_origin) const
+{
+    switch (cascade_origin) {
+    case CascadeOrigin::Author:
+        return *m_author_rule_cache;
+    case CascadeOrigin::UserAgent:
+        return *m_user_agent_rule_cache;
+    default:
+        TODO();
     }
 }
 
 Vector<MatchingRule> StyleComputer::collect_matching_rules(DOM::Element const& element, CascadeOrigin cascade_origin, Optional<CSS::Selector::PseudoElement> pseudo_element) const
 {
-    if (cascade_origin == CascadeOrigin::Author) {
-        Vector<MatchingRule> rules_to_run;
-        if (pseudo_element.has_value()) {
-            if (auto it = m_rule_cache->rules_by_pseudo_element.find(pseudo_element.value()); it != m_rule_cache->rules_by_pseudo_element.end())
-                rules_to_run.extend(it->value);
-        } else {
-            for (auto const& class_name : element.class_names()) {
-                if (auto it = m_rule_cache->rules_by_class.find(class_name); it != m_rule_cache->rules_by_class.end())
-                    rules_to_run.extend(it->value);
-            }
-            if (auto id = element.get_attribute(HTML::AttributeNames::id); !id.is_null()) {
-                if (auto it = m_rule_cache->rules_by_id.find(id); it != m_rule_cache->rules_by_id.end())
-                    rules_to_run.extend(it->value);
-            }
-            if (auto it = m_rule_cache->rules_by_tag_name.find(element.local_name()); it != m_rule_cache->rules_by_tag_name.end())
-                rules_to_run.extend(it->value);
-            rules_to_run.extend(m_rule_cache->other_rules);
-        }
+    auto const& rule_cache = rule_cache_for_cascade_origin(cascade_origin);
 
-        Vector<MatchingRule> matching_rules;
-        matching_rules.ensure_capacity(rules_to_run.size());
-        for (auto const& rule_to_run : rules_to_run) {
-            auto const& selector = rule_to_run.rule->selectors()[rule_to_run.selector_index];
-            if (SelectorEngine::matches(selector, element, pseudo_element))
-                matching_rules.append(rule_to_run);
+    Vector<MatchingRule> rules_to_run;
+    auto add_rules_to_run = [&](Vector<MatchingRule> const& rules) {
+        if (pseudo_element.has_value()) {
+            for (auto& rule : rules) {
+                if (rule.contains_pseudo_element)
+                    rules_to_run.append(rule);
+            }
+        } else {
+            rules_to_run.extend(rules);
         }
-        return matching_rules;
+    };
+
+    for (auto const& class_name : element.class_names()) {
+        if (auto it = rule_cache.rules_by_class.find(class_name); it != rule_cache.rules_by_class.end())
+            add_rules_to_run(it->value);
     }
+    if (auto id = element.get_attribute(HTML::AttributeNames::id); !id.is_null()) {
+        if (auto it = rule_cache.rules_by_id.find(FlyString::from_deprecated_fly_string(id).release_value_but_fixme_should_propagate_errors()); it != rule_cache.rules_by_id.end())
+            add_rules_to_run(it->value);
+    }
+    if (auto it = rule_cache.rules_by_tag_name.find(FlyString::from_deprecated_fly_string(element.local_name()).release_value_but_fixme_should_propagate_errors()); it != rule_cache.rules_by_tag_name.end())
+        add_rules_to_run(it->value);
+    add_rules_to_run(rule_cache.other_rules);
 
     Vector<MatchingRule> matching_rules;
-    size_t style_sheet_index = 0;
-    for_each_stylesheet(cascade_origin, [&](auto& sheet) {
-        size_t rule_index = 0;
-        sheet.for_each_effective_style_rule([&](auto const& rule) {
-            size_t selector_index = 0;
-            for (auto& selector : rule.selectors()) {
-                if (SelectorEngine::matches(selector, element, pseudo_element)) {
-                    matching_rules.append({ &rule, style_sheet_index, rule_index, selector_index, selector.specificity() });
-                    break;
-                }
-                ++selector_index;
-            }
-            ++rule_index;
-        });
-        ++style_sheet_index;
-    });
-
+    matching_rules.ensure_capacity(rules_to_run.size());
+    for (auto const& rule_to_run : rules_to_run) {
+        auto const& selector = rule_to_run.rule->selectors()[rule_to_run.selector_index];
+        if (SelectorEngine::matches(selector, element, pseudo_element))
+            matching_rules.append(rule_to_run);
+    }
     return matching_rules;
 }
 
@@ -205,9 +232,9 @@ static void sort_matching_rules(Vector<MatchingRule>& matching_rules)
     quick_sort(matching_rules, [&](MatchingRule& a, MatchingRule& b) {
         auto const& a_selector = a.rule->selectors()[a.selector_index];
         auto const& b_selector = b.rule->selectors()[b.selector_index];
-        auto a_specificity = a_selector.specificity();
-        auto b_specificity = b_selector.specificity();
-        if (a_selector.specificity() == b_selector.specificity()) {
+        auto a_specificity = a_selector->specificity();
+        auto b_specificity = b_selector->specificity();
+        if (a_selector->specificity() == b_selector->specificity()) {
             if (a.style_sheet_index == b.style_sheet_index)
                 return a.rule_index < b.rule_index;
             return a.style_sheet_index < b.style_sheet_index;
@@ -428,6 +455,38 @@ static void set_property_expanding_shorthands(StyleProperties& style, CSS::Prope
         return;
     }
 
+    if (property_id == CSS::PropertyID::BackgroundPosition) {
+        if (value.is_position()) {
+            auto const& position = value.as_position();
+            style.set_property(CSS::PropertyID::BackgroundPositionX, position.edge_x());
+            style.set_property(CSS::PropertyID::BackgroundPositionY, position.edge_y());
+        } else if (value.is_value_list()) {
+            // Expand background-position layer list into separate lists for x and y positions:
+            auto const& values_list = value.as_value_list();
+            StyleValueVector x_positions {};
+            StyleValueVector y_positions {};
+            x_positions.ensure_capacity(values_list.size());
+            y_positions.ensure_capacity(values_list.size());
+            for (auto& layer : values_list.values()) {
+                if (layer->is_position()) {
+                    auto const& position = layer->as_position();
+                    x_positions.unchecked_append(position.edge_x());
+                    y_positions.unchecked_append(position.edge_y());
+                } else {
+                    x_positions.unchecked_append(layer);
+                    y_positions.unchecked_append(layer);
+                }
+            }
+            style.set_property(CSS::PropertyID::BackgroundPositionX, StyleValueList::create(move(x_positions), values_list.separator()));
+            style.set_property(CSS::PropertyID::BackgroundPositionY, StyleValueList::create(move(y_positions), values_list.separator()));
+        } else {
+            style.set_property(CSS::PropertyID::BackgroundPositionX, value);
+            style.set_property(CSS::PropertyID::BackgroundPositionY, value);
+        }
+
+        return;
+    }
+
     if (property_id == CSS::PropertyID::Margin) {
         if (value.is_value_list()) {
             auto const& values_list = value.as_value_list();
@@ -476,19 +535,21 @@ static void set_property_expanding_shorthands(StyleProperties& style, CSS::Prope
             auto const& font_shorthand = value.as_font();
             style.set_property(CSS::PropertyID::FontSize, font_shorthand.font_size());
             style.set_property(CSS::PropertyID::FontFamily, font_shorthand.font_families());
+            style.set_property(CSS::PropertyID::FontStretch, font_shorthand.font_stretch());
             style.set_property(CSS::PropertyID::FontStyle, font_shorthand.font_style());
             style.set_property(CSS::PropertyID::FontWeight, font_shorthand.font_weight());
             style.set_property(CSS::PropertyID::LineHeight, font_shorthand.line_height());
-            // FIXME: Implement font-stretch and font-variant
+            // FIXME: Implement font-variant
             return;
         }
 
+        style.set_property(CSS::PropertyID::FontStretch, value);
         style.set_property(CSS::PropertyID::FontSize, value);
         style.set_property(CSS::PropertyID::FontFamily, value);
         style.set_property(CSS::PropertyID::FontStyle, value);
         style.set_property(CSS::PropertyID::FontWeight, value);
         style.set_property(CSS::PropertyID::LineHeight, value);
-        // FIXME: Implement font-stretch and font-variant
+        // FIXME: Implement font-variant
         return;
     }
 
@@ -517,6 +578,22 @@ static void set_property_expanding_shorthands(StyleProperties& style, CSS::Prope
 
         style.set_property(CSS::PropertyID::FlexDirection, value);
         style.set_property(CSS::PropertyID::FlexWrap, value);
+        return;
+    }
+
+    if (property_id == CSS::PropertyID::GridArea) {
+        if (value.is_grid_area_shorthand()) {
+            auto const& shorthand = value.as_grid_area_shorthand();
+            style.set_property(CSS::PropertyID::GridRowStart, shorthand.row_start());
+            style.set_property(CSS::PropertyID::GridColumnStart, shorthand.column_start());
+            style.set_property(CSS::PropertyID::GridRowEnd, shorthand.row_end());
+            style.set_property(CSS::PropertyID::GridColumnEnd, shorthand.column_end());
+            return;
+        }
+        style.set_property(CSS::PropertyID::GridRowStart, value);
+        style.set_property(CSS::PropertyID::GridColumnStart, value);
+        style.set_property(CSS::PropertyID::GridRowEnd, value);
+        style.set_property(CSS::PropertyID::GridColumnEnd, value);
         return;
     }
 
@@ -571,10 +648,10 @@ static void set_property_expanding_shorthands(StyleProperties& style, CSS::Prope
     style.set_property(property_id, value);
 }
 
-static RefPtr<StyleValue> get_custom_property(DOM::Element const& element, FlyString const& custom_property_name)
+static RefPtr<StyleValue const> get_custom_property(DOM::Element const& element, FlyString const& custom_property_name)
 {
     for (auto const* current_element = &element; current_element; current_element = current_element->parent_element()) {
-        if (auto it = current_element->custom_properties().find(custom_property_name); it != current_element->custom_properties().end())
+        if (auto it = current_element->custom_properties().find(custom_property_name.to_string().to_deprecated_string()); it != current_element->custom_properties().end())
             return it->value.value;
     }
     return nullptr;
@@ -590,10 +667,10 @@ bool StyleComputer::expand_variables(DOM::Element& element, StringView property_
         return false;
     }
 
-    auto get_dependency_node = [&](auto name) -> NonnullRefPtr<PropertyDependencyNode> {
+    auto get_dependency_node = [&](FlyString name) -> NonnullRefPtr<PropertyDependencyNode> {
         if (auto existing = dependencies.get(name); existing.has_value())
             return *existing.value();
-        auto new_node = PropertyDependencyNode::create(name);
+        auto new_node = PropertyDependencyNode::create(name.to_string());
         dependencies.set(name, new_node);
         return new_node;
     };
@@ -604,13 +681,13 @@ bool StyleComputer::expand_variables(DOM::Element& element, StringView property_
             dest.empend(value);
             continue;
         }
-        if (!value.function().name().equals_ignoring_case("var"sv)) {
+        if (!value.function().name().equals_ignoring_ascii_case("var"sv)) {
             auto const& source_function = value.function();
             Vector<Parser::ComponentValue> function_values;
             Parser::TokenStream source_function_contents { source_function.values() };
             if (!expand_variables(element, property_name, dependencies, source_function_contents, function_values))
                 return false;
-            NonnullRefPtr<Parser::Function> function = Parser::Function::create(source_function.name(), move(function_values));
+            NonnullRefPtr<Parser::Function> function = Parser::Function::create(FlyString::from_utf8(source_function.name()).release_value_but_fixme_should_propagate_errors(), move(function_values));
             dest.empend(function);
             continue;
         }
@@ -632,13 +709,13 @@ bool StyleComputer::expand_variables(DOM::Element& element, StringView property_
         // but rebuilding it every time.
         if (custom_property_name == property_name)
             return false;
-        auto parent = get_dependency_node(property_name);
-        auto child = get_dependency_node(custom_property_name);
+        auto parent = get_dependency_node(FlyString::from_utf8(property_name).release_value_but_fixme_should_propagate_errors());
+        auto child = get_dependency_node(FlyString::from_utf8(custom_property_name).release_value_but_fixme_should_propagate_errors());
         parent->add_child(child);
         if (parent->has_cycles())
             return false;
 
-        if (auto custom_property_value = get_custom_property(element, custom_property_name)) {
+        if (auto custom_property_value = get_custom_property(element, FlyString::from_utf8(custom_property_name).release_value_but_fixme_should_propagate_errors())) {
             VERIFY(custom_property_value->is_unresolved());
             Parser::TokenStream custom_property_tokens { custom_property_value->as_unresolved().values() };
             if (!expand_variables(element, custom_property_name, dependencies, custom_property_tokens, dest))
@@ -669,7 +746,7 @@ bool StyleComputer::expand_unresolved_values(DOM::Element& element, StringView p
     while (source.has_next_token()) {
         auto const& value = source.next_token();
         if (value.is_function()) {
-            if (value.function().name().equals_ignoring_case("attr"sv)) {
+            if (value.function().name().equals_ignoring_ascii_case("attr"sv)) {
                 // https://drafts.csswg.org/css-values-5/#attr-substitution
                 Parser::TokenStream attr_contents { value.function().values() };
                 attr_contents.skip_whitespace();
@@ -685,7 +762,7 @@ bool StyleComputer::expand_unresolved_values(DOM::Element& element, StringView p
                 // 1. If the attr() function has a substitution value, replace the attr() function by the substitution value.
                 if (!attr_value.is_null()) {
                     // FIXME: attr() should also accept an optional type argument, not just strings.
-                    dest.empend(Parser::Token::of_string(attr_value));
+                    dest.empend(Parser::Token::of_string(FlyString::from_deprecated_fly_string(attr_value).release_value_but_fixme_should_propagate_errors()));
                     continue;
                 }
 
@@ -706,7 +783,7 @@ bool StyleComputer::expand_unresolved_values(DOM::Element& element, StringView p
                 return false;
             }
 
-            if (value.function().name().equals_ignoring_case("calc"sv)) {
+            if (value.function().name().equals_ignoring_ascii_case("calc"sv)) {
                 auto const& calc_function = value.function();
                 if (auto calc_value = CSS::Parser::Parser::parse_calculated_value({}, Parser::ParsingContext { document() }, calc_function.values())) {
                     switch (calc_value->resolved_type()) {
@@ -721,7 +798,7 @@ bool StyleComputer::expand_unresolved_values(DOM::Element& element, StringView p
                         continue;
                     }
                     default:
-                        dbgln("FIXME: Unimplement calc() expansion in StyleComputer");
+                        dbgln("FIXME: Unimplemented calc() expansion: {}", calc_value->to_string());
                         break;
                     }
                 }
@@ -732,7 +809,8 @@ bool StyleComputer::expand_unresolved_values(DOM::Element& element, StringView p
             Parser::TokenStream source_function_contents { source_function.values() };
             if (!expand_unresolved_values(element, property_name, source_function_contents, function_values))
                 return false;
-            NonnullRefPtr<Parser::Function> function = Parser::Function::create(source_function.name(), move(function_values));
+            // FIXME: This would be much nicer if we could access the source_function's FlyString value directly.
+            NonnullRefPtr<Parser::Function> function = Parser::Function::create(FlyString::from_utf8(source_function.name()).release_value_but_fixme_should_propagate_errors(), move(function_values));
             dest.empend(function);
             continue;
         }
@@ -776,7 +854,7 @@ RefPtr<StyleValue> StyleComputer::resolve_unresolved_style_value(DOM::Element& e
     return {};
 }
 
-void StyleComputer::cascade_declarations(StyleProperties& style, DOM::Element& element, Vector<MatchingRule> const& matching_rules, CascadeOrigin cascade_origin, Important important) const
+void StyleComputer::cascade_declarations(StyleProperties& style, DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element, Vector<MatchingRule> const& matching_rules, CascadeOrigin cascade_origin, Important important) const
 {
     for (auto const& match : matching_rules) {
         for (auto const& property : verify_cast<PropertyOwningCSSStyleDeclaration>(match.rule->declaration()).properties()) {
@@ -787,11 +865,12 @@ void StyleComputer::cascade_declarations(StyleProperties& style, DOM::Element& e
                 if (auto resolved = resolve_unresolved_style_value(element, property.property_id, property.value->as_unresolved()))
                     property_value = resolved.release_nonnull();
             }
-            set_property_expanding_shorthands(style, property.property_id, property_value, m_document);
+            if (!property_value->is_unresolved())
+                set_property_expanding_shorthands(style, property.property_id, property_value, m_document);
         }
     }
 
-    if (cascade_origin == CascadeOrigin::Author) {
+    if (cascade_origin == CascadeOrigin::Author && !pseudo_element.has_value()) {
         if (auto const* inline_style = verify_cast<ElementInlineCSSStyleDeclaration>(element.inline_style())) {
             for (auto const& property : inline_style->properties()) {
                 if (important != property.important)
@@ -801,7 +880,8 @@ void StyleComputer::cascade_declarations(StyleProperties& style, DOM::Element& e
                     if (auto resolved = resolve_unresolved_style_value(element, property.property_id, property.value->as_unresolved()))
                         property_value = resolved.release_nonnull();
                 }
-                set_property_expanding_shorthands(style, property.property_id, property_value, m_document);
+                if (!property_value->is_unresolved())
+                    set_property_expanding_shorthands(style, property.property_id, property_value, m_document);
             }
         }
     }
@@ -815,7 +895,7 @@ static ErrorOr<void> cascade_custom_properties(DOM::Element& element, Vector<Mat
     if (auto const* inline_style = verify_cast<PropertyOwningCSSStyleDeclaration>(element.inline_style()))
         needed_capacity += inline_style->custom_properties().size();
 
-    HashMap<FlyString, StyleProperty> custom_properties;
+    HashMap<DeprecatedFlyString, StyleProperty> custom_properties;
     TRY(custom_properties.try_ensure_capacity(needed_capacity));
 
     for (auto const& matching_rule : matching_rules) {
@@ -834,7 +914,7 @@ static ErrorOr<void> cascade_custom_properties(DOM::Element& element, Vector<Mat
 }
 
 // https://www.w3.org/TR/css-cascade/#cascading
-ErrorOr<void> StyleComputer::compute_cascaded_values(StyleProperties& style, DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
+ErrorOr<void> StyleComputer::compute_cascaded_values(StyleProperties& style, DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element, bool& did_match_any_pseudo_element_rules, ComputeStyleMode mode) const
 {
     // First, we collect all the CSS rules whose selectors match `element`:
     MatchingRuleSet matching_rule_set;
@@ -842,6 +922,15 @@ ErrorOr<void> StyleComputer::compute_cascaded_values(StyleProperties& style, DOM
     sort_matching_rules(matching_rule_set.user_agent_rules);
     matching_rule_set.author_rules = collect_matching_rules(element, CascadeOrigin::Author, pseudo_element);
     sort_matching_rules(matching_rule_set.author_rules);
+
+    if (mode == ComputeStyleMode::CreatePseudoElementStyleIfNeeded) {
+        VERIFY(pseudo_element.has_value());
+        if (matching_rule_set.author_rules.is_empty() && matching_rule_set.user_agent_rules.is_empty()) {
+            did_match_any_pseudo_element_rules = false;
+            return {};
+        }
+        did_match_any_pseudo_element_rules = true;
+    }
 
     // Then we resolve all the CSS custom properties ("variables") for this element:
     // FIXME: Look into how custom properties should interact with pseudo elements and support that properly.
@@ -851,25 +940,26 @@ ErrorOr<void> StyleComputer::compute_cascaded_values(StyleProperties& style, DOM
     // Then we apply the declarations from the matched rules in cascade order:
 
     // Normal user agent declarations
-    cascade_declarations(style, element, matching_rule_set.user_agent_rules, CascadeOrigin::UserAgent, Important::No);
+    cascade_declarations(style, element, pseudo_element, matching_rule_set.user_agent_rules, CascadeOrigin::UserAgent, Important::No);
 
     // FIXME: Normal user declarations
 
     // Author presentational hints (NOTE: The spec doesn't say exactly how to prioritize these.)
-    element.apply_presentational_hints(style);
+    if (!pseudo_element.has_value())
+        element.apply_presentational_hints(style);
 
     // Normal author declarations
-    cascade_declarations(style, element, matching_rule_set.author_rules, CascadeOrigin::Author, Important::No);
+    cascade_declarations(style, element, pseudo_element, matching_rule_set.author_rules, CascadeOrigin::Author, Important::No);
 
     // FIXME: Animation declarations [css-animations-1]
 
     // Important author declarations
-    cascade_declarations(style, element, matching_rule_set.author_rules, CascadeOrigin::Author, Important::Yes);
+    cascade_declarations(style, element, pseudo_element, matching_rule_set.author_rules, CascadeOrigin::Author, Important::Yes);
 
     // FIXME: Important user declarations
 
     // Important user agent declarations
-    cascade_declarations(style, element, matching_rule_set.user_agent_rules, CascadeOrigin::UserAgent, Important::Yes);
+    cascade_declarations(style, element, pseudo_element, matching_rule_set.user_agent_rules, CascadeOrigin::UserAgent, Important::Yes);
 
     // FIXME: Transition declarations [css-transitions-1]
 
@@ -888,12 +978,12 @@ static DOM::Element const* element_to_inherit_style_from(DOM::Element const* ele
     return parent_element;
 }
 
-static NonnullRefPtr<StyleValue> get_inherit_value(CSS::PropertyID property_id, DOM::Element const* element, Optional<CSS::Selector::PseudoElement> pseudo_element)
+static NonnullRefPtr<StyleValue const> get_inherit_value(JS::Realm& initial_value_context_realm, CSS::PropertyID property_id, DOM::Element const* element, Optional<CSS::Selector::PseudoElement> pseudo_element)
 {
     auto* parent_element = element_to_inherit_style_from(element, pseudo_element);
 
     if (!parent_element || !parent_element->computed_css_values())
-        return property_initial_value(property_id);
+        return property_initial_value(initial_value_context_realm, property_id);
     return parent_element->computed_css_values()->property(property_id);
 };
 
@@ -904,19 +994,19 @@ void StyleComputer::compute_defaulted_property_value(StyleProperties& style, DOM
     auto& value_slot = style.m_property_values[to_underlying(property_id)];
     if (!value_slot) {
         if (is_inherited_property(property_id))
-            style.m_property_values[to_underlying(property_id)] = get_inherit_value(property_id, element, pseudo_element);
+            style.m_property_values[to_underlying(property_id)] = get_inherit_value(document().realm(), property_id, element, pseudo_element);
         else
-            style.m_property_values[to_underlying(property_id)] = property_initial_value(property_id);
+            style.m_property_values[to_underlying(property_id)] = property_initial_value(document().realm(), property_id);
         return;
     }
 
     if (value_slot->is_initial()) {
-        value_slot = property_initial_value(property_id);
+        value_slot = property_initial_value(document().realm(), property_id);
         return;
     }
 
     if (value_slot->is_inherit()) {
-        value_slot = get_inherit_value(property_id, element, pseudo_element);
+        value_slot = get_inherit_value(document().realm(), property_id, element, pseudo_element);
         return;
     }
 
@@ -925,10 +1015,10 @@ void StyleComputer::compute_defaulted_property_value(StyleProperties& style, DOM
     if (value_slot->is_unset()) {
         if (is_inherited_property(property_id)) {
             // then if it is an inherited property, this is treated as inherit,
-            value_slot = get_inherit_value(property_id, element, pseudo_element);
+            value_slot = get_inherit_value(document().realm(), property_id, element, pseudo_element);
         } else {
             // and if it is not, this is treated as initial.
-            value_slot = property_initial_value(property_id);
+            value_slot = property_initial_value(document().realm(), property_id);
         }
     }
 }
@@ -945,11 +1035,11 @@ void StyleComputer::compute_defaulted_values(StyleProperties& style, DOM::Elemen
     }
 }
 
-float StyleComputer::root_element_font_size() const
+CSSPixels StyleComputer::root_element_font_size() const
 {
     constexpr float default_root_element_font_size = 16;
 
-    auto const* root_element = m_document.first_child_of_type<HTML::HTMLHtmlElement>();
+    auto const* root_element = m_document->first_child_of_type<HTML::HTMLHtmlElement>();
     if (!root_element)
         return default_root_element_font_size;
 
@@ -959,7 +1049,27 @@ float StyleComputer::root_element_font_size() const
 
     auto root_value = computed_root_style->property(CSS::PropertyID::FontSize);
 
-    return root_value->to_length().to_px(viewport_rect(), computed_root_style->computed_font().pixel_metrics(), default_root_element_font_size, default_root_element_font_size);
+    auto font_metrics = computed_root_style->computed_font().pixel_metrics();
+    auto line_height = font_metrics.line_spacing();
+    return root_value->to_length().to_px(viewport_rect(), font_metrics, default_root_element_font_size, default_root_element_font_size, line_height, line_height);
+}
+
+CSSPixels StyleComputer::root_element_line_height() const
+{
+    constexpr float default_root_element_line_height = 16;
+
+    auto const* root_element = m_document->first_child_of_type<HTML::HTMLHtmlElement>();
+    if (!root_element)
+        return default_root_element_line_height;
+
+    auto const* computed_root_style = root_element->computed_css_values();
+    if (!computed_root_style)
+        return default_root_element_line_height;
+
+    auto font_metrics = computed_root_style->computed_font().pixel_metrics();
+    auto font_size = root_element_font_size();
+    auto line_height = font_metrics.line_spacing();
+    return computed_root_style->line_height(viewport_rect(), font_metrics, font_size, font_size, line_height, line_height);
 }
 
 void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
@@ -968,14 +1078,73 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
     // FIXME: This should be more sophisticated.
     compute_defaulted_property_value(style, element, CSS::PropertyID::FontFamily, pseudo_element);
     compute_defaulted_property_value(style, element, CSS::PropertyID::FontSize, pseudo_element);
+    compute_defaulted_property_value(style, element, CSS::PropertyID::FontStretch, pseudo_element);
     compute_defaulted_property_value(style, element, CSS::PropertyID::FontStyle, pseudo_element);
     compute_defaulted_property_value(style, element, CSS::PropertyID::FontWeight, pseudo_element);
+    compute_defaulted_property_value(style, element, CSS::PropertyID::LineHeight, pseudo_element);
 
     auto* parent_element = element_to_inherit_style_from(element, pseudo_element);
 
     auto font_size = style.property(CSS::PropertyID::FontSize);
     auto font_style = style.property(CSS::PropertyID::FontStyle);
     auto font_weight = style.property(CSS::PropertyID::FontWeight);
+    auto font_stretch = style.property(CSS::PropertyID::FontStretch);
+
+    int width = Gfx::FontWidth::Normal;
+    if (font_stretch->is_identifier()) {
+        switch (static_cast<IdentifierStyleValue const&>(*font_stretch).id()) {
+        case CSS::ValueID::UltraCondensed:
+            width = Gfx::FontWidth::UltraCondensed;
+            break;
+        case CSS::ValueID::ExtraCondensed:
+            width = Gfx::FontWidth::ExtraCondensed;
+            break;
+        case CSS::ValueID::Condensed:
+            width = Gfx::FontWidth::Condensed;
+            break;
+        case CSS::ValueID::SemiCondensed:
+            width = Gfx::FontWidth::SemiCondensed;
+            break;
+        case CSS::ValueID::Normal:
+            width = Gfx::FontWidth::Normal;
+            break;
+        case CSS::ValueID::SemiExpanded:
+            width = Gfx::FontWidth::SemiExpanded;
+            break;
+        case CSS::ValueID::Expanded:
+            width = Gfx::FontWidth::Expanded;
+            break;
+        case CSS::ValueID::ExtraExpanded:
+            width = Gfx::FontWidth::ExtraExpanded;
+            break;
+        case CSS::ValueID::UltraExpanded:
+            width = Gfx::FontWidth::UltraExpanded;
+            break;
+        default:
+            break;
+        }
+    } else if (font_stretch->is_percentage()) {
+        float percentage = font_stretch->as_percentage().percentage().value();
+        if (percentage <= 50) {
+            width = Gfx::FontWidth::UltraCondensed;
+        } else if (percentage <= 62.5f) {
+            width = Gfx::FontWidth::ExtraCondensed;
+        } else if (percentage <= 75.0f) {
+            width = Gfx::FontWidth::Condensed;
+        } else if (percentage <= 87.5f) {
+            width = Gfx::FontWidth::SemiCondensed;
+        } else if (percentage <= 100.0f) {
+            width = Gfx::FontWidth::Normal;
+        } else if (percentage <= 112.5f) {
+            width = Gfx::FontWidth::SemiExpanded;
+        } else if (percentage <= 125.0f) {
+            width = Gfx::FontWidth::Expanded;
+        } else if (percentage <= 150.0f) {
+            width = Gfx::FontWidth::ExtraExpanded;
+        } else {
+            width = Gfx::FontWidth::UltraExpanded;
+        }
+    }
 
     int weight = Gfx::FontWeight::Regular;
     if (font_weight->is_identifier()) {
@@ -1006,7 +1175,7 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
         else
             weight = Gfx::FontWeight::Black;
     } else if (font_weight->is_calculated()) {
-        auto maybe_weight = font_weight->as_calculated().resolve_integer();
+        auto maybe_weight = const_cast<CalculatedStyleValue&>(font_weight->as_calculated()).resolve_integer();
         if (maybe_weight.has_value())
             weight = maybe_weight.value();
     }
@@ -1046,7 +1215,8 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
         font_size_in_px *= multiplier;
 
     } else {
-        float root_font_size = root_element_font_size();
+        auto root_font_size = root_element_font_size();
+        auto root_line_height = root_element_line_height();
 
         Gfx::FontPixelMetrics font_metrics;
         if (parent_element && parent_element->computed_css_values())
@@ -1054,14 +1224,15 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
         else
             font_metrics = Platform::FontPlugin::the().default_font().pixel_metrics();
 
-        auto parent_font_size = [&]() -> float {
+        auto parent_font_size = [&]() -> CSSPixels {
             if (!parent_element || !parent_element->computed_css_values())
                 return font_size_in_px;
             auto value = parent_element->computed_css_values()->property(CSS::PropertyID::FontSize);
             if (value->is_length()) {
                 auto length = static_cast<LengthStyleValue const&>(*value).to_length();
+                auto parent_line_height = parent_or_root_element_line_height(parent_element, {});
                 if (length.is_absolute() || length.is_relative())
-                    return length.to_px(viewport_rect(), font_metrics, font_size_in_px, root_font_size);
+                    return length.to_px(viewport_rect(), font_metrics, font_size_in_px, root_font_size, parent_line_height, root_line_height);
             }
             return font_size_in_px;
         };
@@ -1075,16 +1246,14 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
             maybe_length = font_size->to_length();
 
         } else if (font_size->is_calculated()) {
-            maybe_length = Length::make_calculated(font_size->as_calculated());
-        }
-        if (maybe_length.has_value()) {
             // FIXME: Support font-size: calc(...)
             //        Theoretically we can do this now, but to resolve it we need a layout_node which we might not have. :^(
-            if (!maybe_length->is_calculated()) {
-                auto px = maybe_length.value().to_px(viewport_rect(), font_metrics, parent_font_size(), root_font_size);
-                if (px != 0)
-                    font_size_in_px = px;
-            }
+        }
+        if (maybe_length.has_value()) {
+            auto parent_line_height = parent_or_root_element_line_height(element, pseudo_element);
+            auto px = maybe_length.value().to_px(viewport_rect(), font_metrics, parent_font_size(), root_font_size, parent_line_height, root_line_height).value();
+            if (px != 0)
+                font_size_in_px = px;
         }
     }
 
@@ -1110,9 +1279,9 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
     FontSelector font_selector;
     bool monospace = false;
 
-    auto find_font = [&](DeprecatedString const& family) -> RefPtr<Gfx::Font> {
+    auto find_font = [&](String const& family) -> RefPtr<Gfx::Font const> {
         float font_size_in_pt = font_size_in_px * 0.75f;
-        font_selector = { family, font_size_in_pt, weight, slope };
+        font_selector = { family, font_size_in_pt, weight, width, slope };
 
         if (auto it = m_loaded_fonts.find(family); it != m_loaded_fonts.end()) {
             auto& loader = *it->value;
@@ -1123,13 +1292,13 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
         if (auto found_font = FontCache::the().get(font_selector))
             return found_font;
 
-        if (auto found_font = Gfx::FontDatabase::the().get(family, font_size_in_pt, weight, slope, Gfx::Font::AllowInexactSizeMatch::Yes))
+        if (auto found_font = Gfx::FontDatabase::the().get(family.to_deprecated_string(), font_size_in_pt, weight, width, slope, Gfx::Font::AllowInexactSizeMatch::Yes))
             return found_font;
 
         return {};
     };
 
-    auto find_generic_font = [&](ValueID font_id) -> RefPtr<Gfx::Font> {
+    auto find_generic_font = [&](ValueID font_id) -> RefPtr<Gfx::Font const> {
         Platform::GenericFont generic_font {};
         switch (font_id) {
         case ValueID::Monospace:
@@ -1161,19 +1330,19 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
         default:
             return {};
         }
-        return find_font(Platform::FontPlugin::the().generic_font_name(generic_font));
+        return find_font(String::from_utf8(Platform::FontPlugin::the().generic_font_name(generic_font)).release_value_but_fixme_should_propagate_errors());
     };
 
-    RefPtr<Gfx::Font> found_font;
+    RefPtr<Gfx::Font const> found_font;
 
     auto family_value = style.property(PropertyID::FontFamily);
     if (family_value->is_value_list()) {
         auto const& family_list = static_cast<StyleValueList const&>(*family_value).values();
         for (auto const& family : family_list) {
-            if (family.is_identifier()) {
-                found_font = find_generic_font(family.to_identifier());
-            } else if (family.is_string()) {
-                found_font = find_font(family.to_deprecated_string());
+            if (family->is_identifier()) {
+                found_font = find_generic_font(family->to_identifier());
+            } else if (family->is_string()) {
+                found_font = find_font(family->to_string().release_value_but_fixme_should_propagate_errors());
             }
             if (found_font)
                 break;
@@ -1181,7 +1350,7 @@ void StyleComputer::compute_font(StyleProperties& style, DOM::Element const* ele
     } else if (family_value->is_identifier()) {
         found_font = find_generic_font(family_value->to_identifier());
     } else if (family_value->is_string()) {
-        found_font = find_font(family_value->to_deprecated_string());
+        found_font = find_font(family_value->to_string().release_value_but_fixme_should_propagate_errors());
     }
 
     if (!found_font) {
@@ -1202,17 +1371,51 @@ Gfx::Font const& StyleComputer::initial_font() const
     return StyleProperties::font_fallback(false, false);
 }
 
-void StyleComputer::absolutize_values(StyleProperties& style, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const
+CSSPixels StyleComputer::parent_or_root_element_line_height(DOM::Element const* element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
 {
+    auto* parent_element = element_to_inherit_style_from(element, pseudo_element);
+    if (!parent_element)
+        return root_element_line_height();
+    auto root_font_size = root_element_font_size();
+    auto root_line_height = root_element_line_height();
+    auto* computed_values = parent_element->computed_css_values();
+    auto parent_font_size = computed_values->property(CSS::PropertyID::FontSize)->to_length();
+    // FIXME: Can the parent font size be non-absolute here?
+    auto parent_font_size_value = parent_font_size.is_absolute() ? parent_font_size.absolute_length_to_px() : root_font_size;
+    auto parent_parent_line_height = parent_or_root_element_line_height(parent_element, {});
+    return computed_values->line_height(viewport_rect(), computed_values->computed_font().pixel_metrics(), parent_font_size_value, root_font_size, parent_parent_line_height, root_line_height);
+}
+
+void StyleComputer::absolutize_values(StyleProperties& style, DOM::Element const* element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
+{
+    auto root_line_height = root_element_line_height();
+    auto parent_or_root_line_height = parent_or_root_element_line_height(element, pseudo_element);
+
     auto font_metrics = style.computed_font().pixel_metrics();
-    float root_font_size = root_element_font_size();
-    float font_size = style.property(CSS::PropertyID::FontSize)->to_length().to_px(viewport_rect(), font_metrics, root_font_size, root_font_size);
+    auto root_font_size = root_element_font_size();
+    auto font_size = style.property(CSS::PropertyID::FontSize)->to_length().to_px(viewport_rect(), font_metrics, root_font_size, root_font_size, parent_or_root_line_height, root_line_height);
+
+    // NOTE: Percentage line-height values are relative to the font-size of the element.
+    //       We have to resolve them right away, so that the *computed* line-height is ready for inheritance.
+    //       We can't simply absolutize *all* percentage values against the font size,
+    //       because most percentages are relative to containing block metrics.
+    auto& line_height_value_slot = style.m_property_values[to_underlying(CSS::PropertyID::LineHeight)];
+    if (line_height_value_slot && line_height_value_slot->is_percentage()) {
+        line_height_value_slot = LengthStyleValue::create(
+            Length::make_px(font_size * line_height_value_slot->as_percentage().percentage().as_fraction()));
+    }
+
+    auto line_height = style.line_height(viewport_rect(), font_metrics, font_size.value(), root_font_size.value(), parent_or_root_line_height, root_line_height);
+
+    // NOTE: line-height might be using lh which should be resolved against the parent line height (like we did here already)
+    if (line_height_value_slot && line_height_value_slot->is_length())
+        line_height_value_slot = LengthStyleValue::create(Length::make_px(line_height));
 
     for (size_t i = 0; i < style.m_property_values.size(); ++i) {
         auto& value_slot = style.m_property_values[i];
         if (!value_slot)
             continue;
-        value_slot = value_slot->absolutized(viewport_rect(), font_metrics, font_size, root_font_size);
+        value_slot = value_slot->absolutized(viewport_rect(), font_metrics, font_size.value(), root_font_size.value(), line_height, root_line_height);
     }
 }
 
@@ -1300,11 +1503,26 @@ NonnullRefPtr<StyleProperties> StyleComputer::create_document_style() const
 
 ErrorOr<NonnullRefPtr<StyleProperties>> StyleComputer::compute_style(DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
 {
+    auto style = TRY(compute_style_impl(element, move(pseudo_element), ComputeStyleMode::Normal));
+    return style.release_nonnull();
+}
+
+ErrorOr<RefPtr<StyleProperties>> StyleComputer::compute_pseudo_element_style_if_needed(DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element) const
+{
+    return compute_style_impl(element, move(pseudo_element), ComputeStyleMode::CreatePseudoElementStyleIfNeeded);
+}
+
+ErrorOr<RefPtr<StyleProperties>> StyleComputer::compute_style_impl(DOM::Element& element, Optional<CSS::Selector::PseudoElement> pseudo_element, ComputeStyleMode mode) const
+{
     build_rule_cache_if_needed();
 
     auto style = StyleProperties::create();
     // 1. Perform the cascade. This produces the "specified style"
-    TRY(compute_cascaded_values(style, element, pseudo_element));
+    bool did_match_any_pseudo_element_rules = false;
+    TRY(compute_cascaded_values(style, element, pseudo_element, did_match_any_pseudo_element_rules, mode));
+
+    if (mode == ComputeStyleMode::CreatePseudoElementStyleIfNeeded && !did_match_any_pseudo_element_rules)
+        return nullptr;
 
     // 2. Compute the font, since that may be needed for font-relative CSS units
     compute_font(style, &element, pseudo_element);
@@ -1321,7 +1539,7 @@ ErrorOr<NonnullRefPtr<StyleProperties>> StyleComputer::compute_style(DOM::Elemen
     return style;
 }
 
-PropertyDependencyNode::PropertyDependencyNode(DeprecatedString name)
+PropertyDependencyNode::PropertyDependencyNode(String name)
     : m_name(move(name))
 {
 }
@@ -1329,7 +1547,7 @@ PropertyDependencyNode::PropertyDependencyNode(DeprecatedString name)
 void PropertyDependencyNode::add_child(NonnullRefPtr<PropertyDependencyNode> new_child)
 {
     for (auto const& child : m_children) {
-        if (child.m_name == new_child->m_name)
+        if (child->m_name == new_child->m_name)
             return;
     }
 
@@ -1345,7 +1563,7 @@ bool PropertyDependencyNode::has_cycles()
 
     TemporaryChange change { m_marked, true };
     for (auto& child : m_children) {
-        if (child.has_cycles())
+        if (child->has_cycles())
             return true;
     }
     return false;
@@ -1353,16 +1571,14 @@ bool PropertyDependencyNode::has_cycles()
 
 void StyleComputer::build_rule_cache_if_needed() const
 {
-    if (m_rule_cache)
+    if (m_author_rule_cache && m_user_agent_rule_cache)
         return;
     const_cast<StyleComputer&>(*this).build_rule_cache();
 }
 
-void StyleComputer::build_rule_cache()
+NonnullOwnPtr<StyleComputer::RuleCache> StyleComputer::make_rule_cache_for_cascade_origin(CascadeOrigin cascade_origin)
 {
-    // FIXME: Make a rule cache for UA style as well.
-
-    m_rule_cache = make<RuleCache>();
+    auto rule_cache = make<RuleCache>();
 
     size_t num_class_rules = 0;
     size_t num_id_rules = 0;
@@ -1371,46 +1587,50 @@ void StyleComputer::build_rule_cache()
 
     Vector<MatchingRule> matching_rules;
     size_t style_sheet_index = 0;
-    for_each_stylesheet(CascadeOrigin::Author, [&](auto& sheet) {
+    for_each_stylesheet(cascade_origin, [&](auto& sheet) {
         size_t rule_index = 0;
         sheet.for_each_effective_style_rule([&](auto const& rule) {
             size_t selector_index = 0;
             for (CSS::Selector const& selector : rule.selectors()) {
-                MatchingRule matching_rule { &rule, style_sheet_index, rule_index, selector_index, selector.specificity() };
+                MatchingRule matching_rule {
+                    &rule,
+                    style_sheet_index,
+                    rule_index,
+                    selector_index,
+                    selector.specificity(),
+                };
+
+                for (auto const& simple_selector : selector.compound_selectors().last().simple_selectors) {
+                    if (simple_selector.type == CSS::Selector::SimpleSelector::Type::PseudoElement) {
+                        matching_rule.contains_pseudo_element = true;
+                        ++num_pseudo_element_rules;
+                        break;
+                    }
+                }
 
                 bool added_to_bucket = false;
                 for (auto const& simple_selector : selector.compound_selectors().last().simple_selectors) {
-                    if (simple_selector.type == CSS::Selector::SimpleSelector::Type::PseudoElement) {
-                        m_rule_cache->rules_by_pseudo_element.ensure(simple_selector.pseudo_element()).append(move(matching_rule));
-                        ++num_pseudo_element_rules;
+                    if (simple_selector.type == CSS::Selector::SimpleSelector::Type::Id) {
+                        rule_cache->rules_by_id.ensure(simple_selector.name()).append(move(matching_rule));
+                        ++num_id_rules;
+                        added_to_bucket = true;
+                        break;
+                    }
+                    if (simple_selector.type == CSS::Selector::SimpleSelector::Type::Class) {
+                        rule_cache->rules_by_class.ensure(simple_selector.name()).append(move(matching_rule));
+                        ++num_class_rules;
+                        added_to_bucket = true;
+                        break;
+                    }
+                    if (simple_selector.type == CSS::Selector::SimpleSelector::Type::TagName) {
+                        rule_cache->rules_by_tag_name.ensure(simple_selector.name()).append(move(matching_rule));
+                        ++num_tag_name_rules;
                         added_to_bucket = true;
                         break;
                     }
                 }
-                if (!added_to_bucket) {
-                    for (auto const& simple_selector : selector.compound_selectors().last().simple_selectors) {
-                        if (simple_selector.type == CSS::Selector::SimpleSelector::Type::Id) {
-                            m_rule_cache->rules_by_id.ensure(simple_selector.name()).append(move(matching_rule));
-                            ++num_id_rules;
-                            added_to_bucket = true;
-                            break;
-                        }
-                        if (simple_selector.type == CSS::Selector::SimpleSelector::Type::Class) {
-                            m_rule_cache->rules_by_class.ensure(simple_selector.name()).append(move(matching_rule));
-                            ++num_class_rules;
-                            added_to_bucket = true;
-                            break;
-                        }
-                        if (simple_selector.type == CSS::Selector::SimpleSelector::Type::TagName) {
-                            m_rule_cache->rules_by_tag_name.ensure(simple_selector.name()).append(move(matching_rule));
-                            ++num_tag_name_rules;
-                            added_to_bucket = true;
-                            break;
-                        }
-                    }
-                }
                 if (!added_to_bucket)
-                    m_rule_cache->other_rules.append(move(matching_rule));
+                    rule_cache->other_rules.append(move(matching_rule));
 
                 ++selector_index;
             }
@@ -1425,17 +1645,28 @@ void StyleComputer::build_rule_cache()
         dbgln("        Class: {}", num_class_rules);
         dbgln("      TagName: {}", num_tag_name_rules);
         dbgln("PseudoElement: {}", num_pseudo_element_rules);
-        dbgln("        Other: {}", m_rule_cache->other_rules.size());
-        dbgln("        Total: {}", num_class_rules + num_id_rules + num_tag_name_rules + m_rule_cache->other_rules.size());
+        dbgln("        Other: {}", rule_cache->other_rules.size());
+        dbgln("        Total: {}", num_class_rules + num_id_rules + num_tag_name_rules + rule_cache->other_rules.size());
     }
+    return rule_cache;
+}
+
+void StyleComputer::build_rule_cache()
+{
+    m_author_rule_cache = make_rule_cache_for_cascade_origin(CascadeOrigin::Author);
+    m_user_agent_rule_cache = make_rule_cache_for_cascade_origin(CascadeOrigin::UserAgent);
 }
 
 void StyleComputer::invalidate_rule_cache()
 {
-    m_rule_cache = nullptr;
+    m_author_rule_cache = nullptr;
+
+    // NOTE: It might not be necessary to throw away the UA rule cache.
+    //       If we are sure that it's safe, we could keep it as an optimization.
+    m_user_agent_rule_cache = nullptr;
 }
 
-Gfx::IntRect StyleComputer::viewport_rect() const
+CSSPixelRect StyleComputer::viewport_rect() const
 {
     if (auto const* browsing_context = document().browsing_context())
         return browsing_context->viewport_rect();
@@ -1444,47 +1675,31 @@ Gfx::IntRect StyleComputer::viewport_rect() const
 
 void StyleComputer::did_load_font([[maybe_unused]] FlyString const& family_name)
 {
-    document().invalidate_layout();
+    document().invalidate_style();
 }
 
 void StyleComputer::load_fonts_from_sheet(CSSStyleSheet const& sheet)
 {
     for (auto const& rule : static_cast<CSSStyleSheet const&>(sheet).rules()) {
-        if (!is<CSSFontFaceRule>(rule))
+        if (!is<CSSFontFaceRule>(*rule))
             continue;
-        auto const& font_face = static_cast<CSSFontFaceRule const&>(rule).font_face();
+        auto const& font_face = static_cast<CSSFontFaceRule const&>(*rule).font_face();
         if (font_face.sources().is_empty())
             continue;
         if (m_loaded_fonts.contains(font_face.font_family()))
             continue;
 
-        // NOTE: This is rather ad-hoc, we just look for the first valid
-        //       source URL that's either a WOFF or OpenType file and try loading that.
-        // FIXME: Find out exactly which resources we need to load and how.
-        Optional<AK::URL> candidate_url;
+        Vector<AK::URL> urls;
         for (auto& source : font_face.sources()) {
-            if (!source.url.is_valid())
-                continue;
-
-            if (source.url.scheme() != "data") {
-                auto path = source.url.path();
-                if (!path.ends_with(".woff"sv, AK::CaseSensitivity::CaseInsensitive)
-                    && !path.ends_with(".ttf"sv, AK::CaseSensitivity::CaseInsensitive)) {
-                    continue;
-                }
-            }
-
-            candidate_url = source.url;
-            break;
+            // FIXME: These should be loaded relative to the stylesheet URL instead of the document URL.
+            urls.append(m_document->parse_url(source.url.to_deprecated_string()));
         }
 
-        if (!candidate_url.has_value())
+        if (urls.is_empty())
             continue;
 
-        LoadRequest request;
-        auto url = m_document.parse_url(candidate_url.value().to_deprecated_string());
-        auto loader = make<FontLoader>(const_cast<StyleComputer&>(*this), font_face.font_family(), move(url));
-        const_cast<StyleComputer&>(*this).m_loaded_fonts.set(font_face.font_family(), move(loader));
+        auto loader = make<FontLoader>(const_cast<StyleComputer&>(*this), font_face.font_family(), move(urls));
+        const_cast<StyleComputer&>(*this).m_loaded_fonts.set(font_face.font_family().to_string(), move(loader));
     }
 }
 

@@ -15,6 +15,8 @@
 
 namespace Web::HTML {
 
+struct UniqueTaskSource;
+
 class Task {
 public:
     // https://html.spec.whatwg.org/multipage/webappapis.html#generic-task-sources
@@ -29,9 +31,13 @@ public:
         Microtask,
         TimerTask,
         JavaScriptEngine,
+
+        // Some elements, such as the HTMLMediaElement, must have a unique task source per instance.
+        // Keep this field last, to serve as the base value of all unique task sources.
+        UniqueTaskSourceStart,
     };
 
-    static NonnullOwnPtr<Task> create(Source source, DOM::Document* document, JS::SafeFunction<void()> steps)
+    static NonnullOwnPtr<Task> create(Source source, DOM::Document const* document, JS::SafeFunction<void()> steps)
     {
         return adopt_own(*new Task(source, document, move(steps)));
     }
@@ -40,17 +46,23 @@ public:
     Source source() const { return m_source; }
     void execute();
 
-    DOM::Document* document();
     DOM::Document const* document() const;
 
     bool is_runnable() const;
 
 private:
-    Task(Source, DOM::Document*, JS::SafeFunction<void()> steps);
+    Task(Source, DOM::Document const*, JS::SafeFunction<void()> steps);
 
     Source m_source { Source::Unspecified };
     JS::SafeFunction<void()> m_steps;
-    JS::Handle<DOM::Document> m_document;
+    JS::Handle<DOM::Document const> m_document;
+};
+
+struct UniqueTaskSource {
+    UniqueTaskSource();
+    ~UniqueTaskSource();
+
+    Task::Source const source;
 };
 
 }

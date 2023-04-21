@@ -14,18 +14,25 @@
 
 namespace Web::HTML {
 
-JS::NonnullGCPtr<MessagePort> MessagePort::create(JS::Realm& realm)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<MessagePort>> MessagePort::create(JS::Realm& realm)
 {
-    return realm.heap().allocate<MessagePort>(realm, realm);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<MessagePort>(realm, realm));
 }
 
 MessagePort::MessagePort(JS::Realm& realm)
     : DOM::EventTarget(realm)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "MessagePort"));
 }
 
 MessagePort::~MessagePort() = default;
+
+JS::ThrowCompletionOr<void> MessagePort::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::MessagePortPrototype>(realm, "MessagePort"));
+
+    return {};
+}
 
 void MessagePort::visit_edges(Cell::Visitor& visitor)
 {
@@ -91,8 +98,8 @@ void MessagePort::post_message(JS::Value message)
     main_thread_event_loop().task_queue().add(HTML::Task::create(HTML::Task::Source::PostedMessage, nullptr, [target_port, message] {
         MessageEventInit event_init {};
         event_init.data = message;
-        event_init.origin = "<origin>";
-        target_port->dispatch_event(*MessageEvent::create(target_port->realm(), HTML::EventNames::message, event_init));
+        event_init.origin = "<origin>"_string.release_value_but_fixme_should_propagate_errors();
+        target_port->dispatch_event(MessageEvent::create(target_port->realm(), HTML::EventNames::message, event_init).release_value_but_fixme_should_propagate_errors());
     }));
 }
 

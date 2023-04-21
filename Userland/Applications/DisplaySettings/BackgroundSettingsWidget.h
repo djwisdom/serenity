@@ -9,6 +9,7 @@
 #pragma once
 
 #include "MonitorWidget.h"
+#include <AK/String.h>
 #include <LibCore/Timer.h>
 #include <LibGUI/ColorInput.h>
 #include <LibGUI/ComboBox.h>
@@ -19,9 +20,10 @@
 namespace DisplaySettings {
 
 class BackgroundSettingsWidget : public GUI::SettingsWindow::Tab {
-    C_OBJECT(BackgroundSettingsWidget);
+    C_OBJECT_ABSTRACT(BackgroundSettingsWidget);
 
 public:
+    static ErrorOr<NonnullRefPtr<BackgroundSettingsWidget>> try_create(bool& background_settings_changed);
     virtual ~BackgroundSettingsWidget() override = default;
 
     virtual void apply_settings() override;
@@ -29,10 +31,10 @@ public:
 private:
     BackgroundSettingsWidget(bool& background_settings_changed);
 
-    void create_frame();
-    void load_current_settings();
+    ErrorOr<void> create_frame();
+    ErrorOr<void> load_current_settings();
 
-    Vector<DeprecatedString> m_modes;
+    Vector<String> m_modes;
 
     bool& m_background_settings_changed;
 

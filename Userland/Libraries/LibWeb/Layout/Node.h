@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,9 +10,11 @@
 #include <AK/TypeCasts.h>
 #include <AK/Vector.h>
 #include <LibGfx/Rect.h>
+#include <LibJS/Heap/Cell.h>
 #include <LibJS/Heap/Handle.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/StyleProperties.h>
+#include <LibWeb/FontCache.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Layout/BoxModelMetrics.h>
 #include <LibWeb/Painting/PaintContext.h>
@@ -51,9 +53,9 @@ public:
 
     Painting::Paintable* paintable() { return m_paintable; }
     Painting::Paintable const* paintable() const { return m_paintable; }
-    void set_paintable(RefPtr<Painting::Paintable>);
+    void set_paintable(JS::GCPtr<Painting::Paintable>);
 
-    virtual RefPtr<Painting::Paintable> create_paintable() const;
+    virtual JS::GCPtr<Painting::Paintable> create_paintable() const;
 
     DOM::Document& document();
     DOM::Document const& document() const;
@@ -61,8 +63,8 @@ public:
     HTML::BrowsingContext const& browsing_context() const;
     HTML::BrowsingContext& browsing_context();
 
-    InitialContainingBlock const& root() const;
-    InitialContainingBlock& root();
+    Viewport const& root() const;
+    Viewport& root();
 
     bool is_root_element() const;
 
@@ -76,6 +78,7 @@ public:
 
     bool is_inline() const;
     bool is_inline_block() const;
+    bool is_inline_table() const;
 
     bool is_out_of_flow(FormattingContext const&) const;
 
@@ -84,12 +87,17 @@ public:
     virtual bool is_block_container() const { return false; }
     virtual bool is_break_node() const { return false; }
     virtual bool is_text_node() const { return false; }
-    virtual bool is_initial_containing_block_box() const { return false; }
+    virtual bool is_viewport() const { return false; }
     virtual bool is_svg_box() const { return false; }
     virtual bool is_svg_geometry_box() const { return false; }
+    virtual bool is_svg_svg_box() const { return false; }
     virtual bool is_label() const { return false; }
     virtual bool is_replaced_box() const { return false; }
+    virtual bool is_list_item_box() const { return false; }
     virtual bool is_list_item_marker_box() const { return false; }
+    virtual bool is_table_wrapper() const { return false; }
+    virtual bool is_table() const { return false; }
+    virtual bool is_node_with_style_and_box_model_metrics() const { return false; }
 
     template<typename T>
     bool fast_is() const = delete;
@@ -102,16 +110,18 @@ public:
     bool is_flex_item() const { return m_is_flex_item; }
     void set_flex_item(bool b) { m_is_flex_item = b; }
 
-    BlockContainer const* containing_block() const;
-    BlockContainer* containing_block() { return const_cast<BlockContainer*>(const_cast<Node const*>(this)->containing_block()); }
+    Box const* containing_block() const;
+    Box* containing_block() { return const_cast<Box*>(const_cast<Node const*>(this)->containing_block()); }
 
     bool establishes_stacking_context() const;
 
     bool can_contain_boxes_with_position_absolute() const;
 
     Gfx::Font const& font() const;
-    const CSS::ImmutableComputedValues& computed_values() const;
-    float line_height() const;
+    Gfx::Font const& scaled_font(PaintContext&) const;
+
+    CSS::ImmutableComputedValues const& computed_values() const;
+    CSSPixels line_height() const;
 
     NodeWithStyle* parent();
     NodeWithStyle const* parent() const;
@@ -128,7 +138,7 @@ public:
     bool children_are_inline() const { return m_children_are_inline; }
     void set_children_are_inline(bool value) { m_children_are_inline = value; }
 
-    Gfx::FloatPoint box_type_agnostic_position() const;
+    CSSPixelPoint box_type_agnostic_position() const;
 
     enum class SelectionState {
         None,        // No selection
@@ -150,7 +160,7 @@ private:
     friend class NodeWithStyle;
 
     JS::NonnullGCPtr<DOM::Node> m_dom_node;
-    RefPtr<Painting::Paintable> m_paintable;
+    JS::GCPtr<Painting::Paintable> m_paintable;
 
     JS::NonnullGCPtr<HTML::BrowsingContext> m_browsing_context;
 
@@ -177,11 +187,13 @@ public:
     void apply_style(const CSS::StyleProperties&);
 
     Gfx::Font const& font() const { return *m_font; }
-    float line_height() const { return m_line_height; }
+    CSSPixels line_height() const { return m_line_height; }
     Vector<CSS::BackgroundLayerData> const& background_layers() const { return computed_values().background_layers(); }
     const CSS::AbstractImageStyleValue* list_style_image() const { return m_list_style_image; }
 
     JS::NonnullGCPtr<NodeWithStyle> create_anonymous_wrapper() const;
+
+    void reset_table_box_computed_values_used_by_wrapper_to_init_values();
 
 protected:
     NodeWithStyle(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::StyleProperties>);
@@ -189,9 +201,9 @@ protected:
 
 private:
     CSS::ComputedValues m_computed_values;
-    RefPtr<Gfx::Font> m_font;
-    float m_line_height { 0 };
-    RefPtr<CSS::AbstractImageStyleValue> m_list_style_image;
+    RefPtr<Gfx::Font const> m_font;
+    CSSPixels m_line_height { 0 };
+    RefPtr<CSS::AbstractImageStyleValue const> m_list_style_image;
 };
 
 class NodeWithStyleAndBoxModelMetrics : public NodeWithStyle {
@@ -213,14 +225,24 @@ protected:
     }
 
 private:
+    virtual bool is_node_with_style_and_box_model_metrics() const final { return true; }
+
     BoxModelMetrics m_box_model;
 };
+
+template<>
+inline bool Node::fast_is<NodeWithStyleAndBoxModelMetrics>() const { return is_node_with_style_and_box_model_metrics(); }
 
 inline Gfx::Font const& Node::font() const
 {
     if (m_has_style)
         return static_cast<NodeWithStyle const*>(this)->font();
     return parent()->font();
+}
+
+inline Gfx::Font const& Node::scaled_font(PaintContext& context) const
+{
+    return *FontCache::the().scaled_font(font(), context.device_pixels_per_css_pixel());
 }
 
 inline const CSS::ImmutableComputedValues& Node::computed_values() const
@@ -230,7 +252,7 @@ inline const CSS::ImmutableComputedValues& Node::computed_values() const
     return parent()->computed_values();
 }
 
-inline float Node::line_height() const
+inline CSSPixels Node::line_height() const
 {
     if (m_has_style)
         return static_cast<NodeWithStyle const*>(this)->line_height();

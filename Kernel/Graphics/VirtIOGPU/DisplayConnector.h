@@ -37,10 +37,9 @@ public:
     Graphics::VirtIOGPU::ScanoutID scanout_id() const { return m_scanout_id; }
     Graphics::VirtIOGPU::Protocol::DisplayInfoResponse::Display display_information(Badge<VirtIOGraphicsAdapter>) const;
 
-    void draw_ntsc_test_pattern(Badge<VirtIOGraphicsAdapter>);
+    void initialize_console(Badge<VirtIOGraphicsAdapter>);
 
 private:
-    void initialize_console();
     virtual bool mutable_mode_setting_capable() const override { return true; }
     virtual bool double_framebuffering_capable() const override { return false; }
     virtual bool partial_flush_support() const override { return true; }
@@ -71,10 +70,6 @@ private:
     ErrorOr<void> flush_displayed_image(Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect, bool main_buffer);
     void set_dirty_displayed_rect(Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect, bool main_buffer);
 
-    void query_display_information();
-    ErrorOr<void> query_edid_from_virtio_adapter();
-    void query_display_edid();
-
     void clear_to_black();
 
     // Member data
@@ -82,7 +77,7 @@ private:
     Graphics::VirtIOGPU::ContextID m_kernel_context_id;
 
     NonnullLockRefPtr<VirtIOGraphicsAdapter> m_graphics_adapter;
-    LockRefPtr<Graphics::Console> m_console;
+    LockRefPtr<Graphics::VirtIOGPU::Console> m_console;
     Graphics::VirtIOGPU::Protocol::DisplayInfoResponse::Display m_display_info {};
     Graphics::VirtIOGPU::ScanoutID m_scanout_id;
 

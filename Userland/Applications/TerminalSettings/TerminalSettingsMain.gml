@@ -6,17 +6,11 @@
     }
 
     @GUI::GroupBox {
-        title: "Bell Mode"
+        title: "Bell mode"
         preferred_height: "fit"
-        fixed_height: 160
         layout: @GUI::VerticalBoxLayout {
-            margins: [16, 8, 8]
-            spacing: 16
-        }
-
-        @GUI::Label {
-            text: "This setting controls the terminal's indication of an ANSI 0x07 bell (\\a)."
-            text_alignment: "TopLeft"
+            margins: [8]
+            spacing: 8
         }
 
         @GUI::Widget {
@@ -27,12 +21,12 @@
 
             @GUI::RadioButton {
                 name: "beep_bell_radio"
-                text: "System beep"
+                text: "Audible bell"
             }
 
             @GUI::RadioButton {
                 name: "visual_bell_radio"
-                text: "Visual bell"
+                text: "Visible bell"
             }
 
             @GUI::RadioButton {
@@ -43,35 +37,15 @@
     }
 
     @GUI::GroupBox {
-        title: "Scrollback Size (Lines)"
+        title: "Exit behavior"
         preferred_height: "fit"
         layout: @GUI::VerticalBoxLayout {
-            margins: [16, 8, 8]
-        }
-
-        @GUI::CheckBox {
-            name: "terminal_show_scrollbar"
-            text: "Show scrollbar"
-        }
-
-        @GUI::SpinBox {
-            name: "history_size_spinbox"
-            min: 0
-            max: 40960
-            orientation: "Horizontal"
-        }
-    }
-
-    @GUI::GroupBox {
-        title: "Exit Behaviour"
-        preferred_height: "fit"
-        layout: @GUI::VerticalBoxLayout {
-            margins: [16, 8, 8]
+            margins: [8]
         }
 
         @GUI::CheckBox {
             name: "terminal_confirm_close"
-            text: "Ask before closing if processes are running in the terminal"
+            text: "Confirm exit when process is active"
         }
     }
 }

@@ -8,29 +8,34 @@
 #include <AK/Random.h>
 #include <AK/StringBuilder.h>
 #include <LibJS/Runtime/TypedArray.h>
+#include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Crypto/Crypto.h>
 #include <LibWeb/Crypto/SubtleCrypto.h>
 
 namespace Web::Crypto {
 
-JS::NonnullGCPtr<Crypto> Crypto::create(JS::Realm& realm)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Crypto>> Crypto::create(JS::Realm& realm)
 {
-    return realm.heap().allocate<Crypto>(realm, realm);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<Crypto>(realm, realm));
 }
 
 Crypto::Crypto(JS::Realm& realm)
     : PlatformObject(realm)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "Crypto"));
 }
 
 Crypto::~Crypto() = default;
 
-void Crypto::initialize(JS::Realm& realm)
+JS::ThrowCompletionOr<void> Crypto::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
-    m_subtle = SubtleCrypto::create(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::CryptoPrototype>(realm, "Crypto"));
+    m_subtle = TRY(Bindings::throw_dom_exception_if_needed(realm.vm(), [&]() {
+        return SubtleCrypto::create(realm);
+    }));
+
+    return {};
 }
 
 JS::NonnullGCPtr<SubtleCrypto> Crypto::subtle() const
@@ -56,20 +61,34 @@ WebIDL::ExceptionOr<JS::Value> Crypto::get_random_values(JS::Value array) const
     // FIXME: Handle SharedArrayBuffers
 
     // 3. Overwrite all elements of array with cryptographically strong random values of the appropriate type.
-    fill_with_random(typed_array.viewed_array_buffer()->buffer().data(), typed_array.viewed_array_buffer()->buffer().size());
+    fill_with_random(typed_array.viewed_array_buffer()->buffer());
 
     // 4. Return array.
     return array;
 }
 
 // https://w3c.github.io/webcrypto/#dfn-Crypto-method-randomUUID
-DeprecatedString Crypto::random_uuid() const
+WebIDL::ExceptionOr<String> Crypto::random_uuid() const
+{
+    auto& vm = realm().vm();
+
+    return TRY_OR_THROW_OOM(vm, generate_random_uuid());
+}
+
+void Crypto::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_subtle.ptr());
+}
+
+// https://w3c.github.io/webcrypto/#dfn-generate-a-random-uuid
+ErrorOr<String> generate_random_uuid()
 {
     // 1. Let bytes be a byte sequence of length 16.
     u8 bytes[16];
 
     // 2. Fill bytes with cryptographically secure random bytes.
-    fill_with_random(bytes, 16);
+    fill_with_random(bytes);
 
     // 3. Set the 4 most significant bits of bytes[6], which represent the UUID version, to 0100.
     bytes[6] &= ~(1 << 7);
@@ -106,18 +125,13 @@ DeprecatedString Crypto::random_uuid() const
         ».
         */
     StringBuilder builder;
-    builder.appendff("{:02x}{:02x}{:02x}{:02x}-", bytes[0], bytes[1], bytes[2], bytes[3]);
-    builder.appendff("{:02x}{:02x}-", bytes[4], bytes[5]);
-    builder.appendff("{:02x}{:02x}-", bytes[6], bytes[7]);
-    builder.appendff("{:02x}{:02x}-", bytes[8], bytes[9]);
-    builder.appendff("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}", bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
-    return builder.to_deprecated_string();
-}
+    TRY(builder.try_appendff("{:02x}{:02x}{:02x}{:02x}-", bytes[0], bytes[1], bytes[2], bytes[3]));
+    TRY(builder.try_appendff("{:02x}{:02x}-", bytes[4], bytes[5]));
+    TRY(builder.try_appendff("{:02x}{:02x}-", bytes[6], bytes[7]));
+    TRY(builder.try_appendff("{:02x}{:02x}-", bytes[8], bytes[9]));
+    TRY(builder.try_appendff("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}", bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]));
 
-void Crypto::visit_edges(Cell::Visitor& visitor)
-{
-    Base::visit_edges(visitor);
-    visitor.visit(m_subtle.ptr());
-}
+    return builder.to_string();
+};
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, MacDue <macdue@dueutil.tech>
+ * Copyright (c) 2023, MacDue <macdue@dueutil.tech>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,18 +9,13 @@
 #include <AK/Span.h>
 #include <AK/Vector.h>
 #include <LibGfx/Color.h>
+#include <LibGfx/Gradients.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Painting/PaintContext.h>
 
 namespace Web::Painting {
 
-struct ColorStop {
-    Gfx::Color color;
-    float position = AK::NaN<float>;
-    Optional<float> transition_hint = {};
-};
-
-using ColorStopList = Vector<ColorStop, 4>;
+using ColorStopList = Vector<Gfx::ColorStop, 4>;
 
 struct ColorStopData {
     ColorStopList list;

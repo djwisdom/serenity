@@ -76,7 +76,6 @@ public:
     [[nodiscard]] ALWAYS_INLINE Point<T> const& location() const { return m_location; }
     [[nodiscard]] ALWAYS_INLINE Size<T> const& size() const { return m_size; }
 
-    [[nodiscard]] ALWAYS_INLINE bool is_null() const { return width() == 0 && height() == 0; }
     [[nodiscard]] ALWAYS_INLINE bool is_empty() const { return width() <= 0 || height() <= 0; }
 
     ALWAYS_INLINE void translate_by(T dx, T dy) { m_location.translate_by(dx, dy); }
@@ -166,6 +165,13 @@ public:
     {
         Rect<T> rect = *this;
         rect.translate_by(dx, dy);
+        return rect;
+    }
+
+    [[nodiscard]] Rect<T> translated(T dboth) const
+    {
+        Rect<T> rect = *this;
+        rect.translate_by(dboth);
         return rect;
     }
 
@@ -551,6 +557,24 @@ public:
         return points;
     }
 
+    template<typename U = T>
+    [[nodiscard]] Gfx::Rect<U> interpolated_to(Gfx::Rect<T> const& to, float factor) const
+    {
+        VERIFY(factor >= 0.0f);
+        VERIFY(factor <= 1.0f);
+        if (factor == 0.0f)
+            return *this;
+        if (factor == 1.0f)
+            return to;
+        if (this == &to)
+            return *this;
+        auto interpolated_left = round_to<U>(mix<float>(x(), to.x(), factor));
+        auto interpolated_top = round_to<U>(mix<float>(y(), to.y(), factor));
+        auto interpolated_right = round_to<U>(mix<float>(right(), to.right(), factor));
+        auto interpolated_bottom = round_to<U>(mix<float>(bottom(), to.bottom(), factor));
+        return { interpolated_left, interpolated_top, interpolated_right - interpolated_left + 1, interpolated_bottom - interpolated_top + 1 };
+    }
+
     [[nodiscard]] float center_point_distance_to(Rect<T> const& other) const
     {
         return Line { center(), other.center() }.length();
@@ -831,7 +855,7 @@ public:
             deltas.clear_with_capacity();
             for (auto& rect : rects) {
                 auto delta = calc_delta(rect);
-                if (!delta.is_null())
+                if (!delta.is_zero())
                     changes = true;
                 deltas.append(delta);
             }
@@ -868,9 +892,9 @@ public:
 
     [[nodiscard]] Rect<T> united(Rect<T> const& other) const
     {
-        if (is_null())
+        if (is_empty())
             return other;
-        if (other.is_null())
+        if (other.is_empty())
             return *this;
         Rect<T> rect;
         rect.set_left(min(left(), other.left()));
@@ -892,7 +916,8 @@ public:
             center_within(other);
             return;
         case TextAlignment::TopCenter:
-            set_x(other.x() + other.width() / 2);
+            center_horizontally_within(other);
+            set_y(other.y());
             return;
         case TextAlignment::TopLeft:
             set_location(other.location());
@@ -910,7 +935,7 @@ public:
             center_vertically_within(other);
             return;
         case TextAlignment::BottomCenter:
-            set_x(other.x() + other.width() / 2);
+            center_horizontally_within(other);
             set_y(other.y() + other.height() - height());
             return;
         case TextAlignment::BottomLeft:
@@ -1033,7 +1058,7 @@ struct Formatter<Gfx::Rect<T>> : Formatter<FormatString> {
 namespace IPC {
 
 template<>
-bool encode(Encoder&, Gfx::IntRect const&);
+ErrorOr<void> encode(Encoder&, Gfx::IntRect const&);
 
 template<>
 ErrorOr<Gfx::IntRect> decode(Decoder&);

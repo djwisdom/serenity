@@ -15,8 +15,8 @@
 #include <LibCore/ArgsParser.h>
 #include <LibCore/File.h>
 #include <LibCore/Process.h>
-#include <LibCore/Stream.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <LibTest/TestRunnerUtil.h>
 #include <spawn.h>
@@ -131,16 +131,16 @@ public:
         TRY(Core::System::close(write_pipe_fds[0]));
         TRY(Core::System::close(read_pipe_fds[1]));
 
-        auto infile = TRY(Core::Stream::File::adopt_fd(read_pipe_fds[0], Core::Stream::OpenMode::Read));
+        auto infile = TRY(Core::File::adopt_fd(read_pipe_fds[0], Core::File::OpenMode::Read));
 
-        auto outfile = TRY(Core::Stream::File::adopt_fd(write_pipe_fds[1], Core::Stream::OpenMode::Write));
+        auto outfile = TRY(Core::File::adopt_fd(write_pipe_fds[1], Core::File::OpenMode::Write));
 
         runner_kill.disarm();
 
         return make<Test262RunnerHandler>(pid, move(infile), move(outfile));
     }
 
-    Test262RunnerHandler(pid_t pid, NonnullOwnPtr<Core::Stream::File> in_file, NonnullOwnPtr<Core::Stream::File> out_file)
+    Test262RunnerHandler(pid_t pid, NonnullOwnPtr<Core::File> in_file, NonnullOwnPtr<Core::File> out_file)
         : m_pid(pid)
         , m_input(move(in_file))
         , m_output(move(out_file))
@@ -161,7 +161,7 @@ public:
         }
 
         for (DeprecatedString const& line : lines) {
-            if (m_output->write_entire_buffer(DeprecatedString::formatted("{}\n", line).bytes()).is_error())
+            if (m_output->write_until_depleted(DeprecatedString::formatted("{}\n", line).bytes()).is_error())
                 break;
         }
 
@@ -218,8 +218,8 @@ public:
 
 public:
     pid_t m_pid;
-    NonnullOwnPtr<Core::Stream::File> m_input;
-    NonnullOwnPtr<Core::Stream::File> m_output;
+    NonnullOwnPtr<Core::File> m_input;
+    NonnullOwnPtr<Core::File> m_output;
 };
 
 static ErrorOr<HashMap<size_t, TestResult>> run_test_files(Span<DeprecatedString> files, size_t offset, StringView command, char const* const arguments[])
@@ -269,8 +269,8 @@ static ErrorOr<HashMap<size_t, TestResult>> run_test_files(Span<DeprecatedString
             auto result_object_or_error = parser.parse();
             if (!result_object_or_error.is_error() && result_object_or_error.value().is_object()) {
                 auto& result_object = result_object_or_error.value().as_object();
-                if (auto result_string = result_object.get_ptr("result"sv); result_string && result_string->is_string()) {
-                    auto const& view = result_string->as_string();
+                if (auto result_string = result_object.get_deprecated_string("result"sv); result_string.has_value()) {
+                    auto const& view = result_string.value();
                     // Timeout and assert fail already are the result of the stopping test
                     if (view == "timeout"sv || view == "assert_fail"sv) {
                         failed = false;
@@ -305,7 +305,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     StringView per_file_location;
     StringView pass_through_parameters;
     StringView runner_command = "test262-runner"sv;
-    char const* test_directory = nullptr;
+    StringView test_directory;
     bool dont_print_progress = false;
     bool dont_disable_core_dump = false;
 
@@ -322,7 +322,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     // Normalize the path to ensure filenames are consistent
     Vector<DeprecatedString> paths;
 
-    if (!Core::File::is_directory(test_directory)) {
+    if (!FileSystem::is_directory(test_directory)) {
         paths.append(test_directory);
     } else {
         Test::iterate_directory_recursively(LexicalPath::canonicalized_path(test_directory), [&](DeprecatedString const& file_path) {
@@ -411,7 +411,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 void write_per_file(HashMap<size_t, TestResult> const& result_map, Vector<DeprecatedString> const& paths, StringView per_file_name, double time_taken_in_ms)
 {
 
-    auto file_or_error = Core::Stream::File::open(per_file_name, Core::Stream::OpenMode::Write);
+    auto file_or_error = Core::File::open(per_file_name, Core::File::OpenMode::Write);
     if (file_or_error.is_error()) {
         warnln("Failed to open per file for writing at {}: {}", per_file_name, file_or_error.error().string_literal());
         return;
@@ -427,7 +427,7 @@ void write_per_file(HashMap<size_t, TestResult> const& result_map, Vector<Deprec
     complete_results.set("duration", time_taken_in_ms / 1000.);
     complete_results.set("results", result_object);
 
-    if (file->write_entire_buffer(complete_results.to_deprecated_string().bytes()).is_error())
+    if (file->write_until_depleted(complete_results.to_deprecated_string().bytes()).is_error())
         warnln("Failed to write per-file");
     file->close();
 }

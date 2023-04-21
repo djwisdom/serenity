@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2023, Luke Wilde <lukew@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,6 +8,7 @@
 #include <AK/Base64.h>
 #include <AK/Debug.h>
 #include <AK/ScopeGuard.h>
+#include <LibJS/Runtime/Completion.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/DOM/Document.h>
@@ -41,12 +43,14 @@
 
 namespace Web::Fetch::Fetching {
 
-#define TRY_OR_IGNORE(expression)              \
-    ({                                         \
-        auto _temporary_result = (expression); \
-        if (_temporary_result.is_error())      \
-            return;                            \
-        _temporary_result.release_value();     \
+#define TRY_OR_IGNORE(expression)                                                                    \
+    ({                                                                                               \
+        auto&& _temporary_result = (expression);                                                     \
+        if (_temporary_result.is_error())                                                            \
+            return;                                                                                  \
+        static_assert(!::AK::Detail::IsLvalueReference<decltype(_temporary_result.release_value())>, \
+            "Do not return a reference from a fallible expression");                                 \
+        _temporary_result.release_value();                                                           \
     })
 
 // https://fetch.spec.whatwg.org/#concept-fetch
@@ -93,7 +97,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Infrastructure::FetchController>> fetch(JS:
     //    response consume body is processResponseConsumeBody, process response end-of-body is processResponseEndOfBody,
     //    task destination is taskDestination, and cross-origin isolated capability is crossOriginIsolatedCapability.
     auto fetch_params = Infrastructure::FetchParams::create(vm, request, timing_info);
-    fetch_params->set_algorithms(move(algorithms));
+    fetch_params->set_algorithms(algorithms);
     if (task_destination)
         fetch_params->set_task_destination({ *task_destination });
     fetch_params->set_cross_origin_isolated_capability(cross_origin_isolated_capability);
@@ -165,15 +169,15 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Infrastructure::FetchController>> fetch(JS:
         }
 
         // 3. Append (`Accept`, value) to request’s header list.
-        auto header = TRY_OR_RETURN_OOM(realm, Infrastructure::Header::from_string_pair("Accept"sv, value.bytes()));
-        TRY_OR_RETURN_OOM(realm, request.header_list()->append(move(header)));
+        auto header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Accept"sv, value.bytes()));
+        TRY_OR_THROW_OOM(vm, request.header_list()->append(move(header)));
     }
 
     // 14. If request’s header list does not contain `Accept-Language`, then user agents should append
     //     (`Accept-Language, an appropriate header value) to request’s header list.
     if (!request.header_list()->contains("Accept-Language"sv.bytes())) {
         auto header = MUST(Infrastructure::Header::from_string_pair("Accept-Language"sv, "*"sv));
-        TRY_OR_RETURN_OOM(realm, request.header_list()->append(move(header)));
+        TRY_OR_THROW_OOM(vm, request.header_list()->append(move(header)));
     }
 
     // 15. If request’s priority is null, then use request’s initiator, destination, and render-blocking appropriately
@@ -325,7 +329,7 @@ WebIDL::ExceptionOr<Optional<JS::NonnullGCPtr<PendingResponse>>> main_fetch(JS::
             request->use_cors_preflight()
             || (request->unsafe_request()
                 && (!Infrastructure::is_cors_safelisted_method(request->method())
-                    || !TRY_OR_RETURN_OOM(realm, Infrastructure::get_cors_unsafe_header_names(request->header_list())).is_empty()))) {
+                    || !TRY_OR_THROW_OOM(vm, Infrastructure::get_cors_unsafe_header_names(request->header_list())).is_empty()))) {
             // 1. Set request’s response tainting to "cors".
             request->set_response_tainting(Infrastructure::Request::ResponseTainting::CORS);
 
@@ -359,7 +363,7 @@ WebIDL::ExceptionOr<Optional<JS::NonnullGCPtr<PendingResponse>>> main_fetch(JS::
     if (recursive == Recursive::Yes) {
         // 11. If response is null, then set response to the result of running the steps corresponding to the first
         //     matching statement:
-        auto pending_response = response
+        auto pending_response = !response
             ? TRY(get_response())
             : PendingResponse::create(vm, request, *response);
 
@@ -402,11 +406,11 @@ WebIDL::ExceptionOr<Optional<JS::NonnullGCPtr<PendingResponse>>> main_fetch(JS::
                     // -> "basic"
                     case Infrastructure::Request::ResponseTainting::Basic:
                         // basic filtered response
-                        return TRY_OR_RETURN_OOM(realm, Infrastructure::BasicFilteredResponse::create(vm, *response));
+                        return TRY_OR_THROW_OOM(vm, Infrastructure::BasicFilteredResponse::create(vm, *response));
                     // -> "cors"
                     case Infrastructure::Request::ResponseTainting::CORS:
                         // CORS filtered response
-                        return TRY_OR_RETURN_OOM(realm, Infrastructure::CORSFilteredResponse::create(vm, *response));
+                        return TRY_OR_THROW_OOM(vm, Infrastructure::CORSFilteredResponse::create(vm, *response));
                     // -> "opaque"
                     case Infrastructure::Request::ResponseTainting::Opaque:
                         // opaque filtered response
@@ -443,11 +447,11 @@ WebIDL::ExceptionOr<Optional<JS::NonnullGCPtr<PendingResponse>>> main_fetch(JS::
                     // FIXME: - should internalResponse to request be blocked by Content Security Policy
                     || false
                     // - should internalResponse to request be blocked due to its MIME type
-                    || Infrastructure::should_response_to_request_be_blocked_due_to_its_mime_type(internal_response, request) == Infrastructure::RequestOrResponseBlocking::Blocked
+                    || TRY_OR_IGNORE(Infrastructure::should_response_to_request_be_blocked_due_to_its_mime_type(internal_response, request)) == Infrastructure::RequestOrResponseBlocking::Blocked
                     // - should internalResponse to request be blocked due to nosniff
                     || TRY_OR_IGNORE(Infrastructure::should_response_to_request_be_blocked_due_to_nosniff(internal_response, request)) == Infrastructure::RequestOrResponseBlocking::Blocked)) {
                 // then set response and internalResponse to a network error.
-                response = internal_response = Infrastructure::Response::network_error(vm, "Response was blocked"sv);
+                response = internal_response = Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("Response was blocked"_string));
             }
 
             // 19. If response’s type is "opaque", internalResponse’s status is 206, internalResponse’s range-requested
@@ -460,7 +464,7 @@ WebIDL::ExceptionOr<Optional<JS::NonnullGCPtr<PendingResponse>>> main_fetch(JS::
                 && internal_response->status() == 206
                 && internal_response->range_requested()
                 && !request->header_list()->contains("Range"sv.bytes())) {
-                response = internal_response = Infrastructure::Response::network_error(vm, "Response has status 206 and 'range-requested' flag set, but request has no 'Range' header"sv);
+                response = internal_response = Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("Response has status 206 and 'range-requested' flag set, but request has no 'Range' header"_string));
             }
 
             // 20. If response is not a network error and either request’s method is `HEAD` or `CONNECT`, or
@@ -474,7 +478,7 @@ WebIDL::ExceptionOr<Optional<JS::NonnullGCPtr<PendingResponse>>> main_fetch(JS::
             if (!request->integrity_metadata().is_empty()) {
                 // 1. Let processBodyError be this step: run fetch response handover given fetchParams and a network
                 //    error.
-                auto process_body_error = [&] {
+                auto process_body_error = [&]() -> WebIDL::ExceptionOr<void> {
                     return fetch_response_handover(realm, fetch_params, Infrastructure::Response::network_error(vm, "Response body could not be processed"sv));
                 };
 
@@ -502,7 +506,7 @@ WebIDL::ExceptionOr<Optional<JS::NonnullGCPtr<PendingResponse>>> main_fetch(JS::
 }
 
 // https://fetch.spec.whatwg.org/#fetch-finale
-WebIDL::ExceptionOr<void> fetch_response_handover(JS::Realm& realm, Infrastructure::FetchParams const& fetch_params, Infrastructure::Response const& response)
+WebIDL::ExceptionOr<void> fetch_response_handover(JS::Realm& realm, Infrastructure::FetchParams const& fetch_params, Infrastructure::Response& response)
 {
     dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'fetch response handover' with: fetch_params @ {}, response @ {}", &fetch_params, &response);
 
@@ -515,9 +519,9 @@ WebIDL::ExceptionOr<void> fetch_response_handover(JS::Realm& realm, Infrastructu
     //    timingInfo’s server-timing headers to the result of getting, decoding, and splitting `Server-Timing` from
     //    response’s header list.
     //    The user agent may decide to expose `Server-Timing` headers to non-secure contexts requests as well.
-    auto* client = fetch_params.request()->client();
+    auto client = fetch_params.request()->client();
     if (!response.is_network_error() && client != nullptr && HTML::is_secure_context(*client)) {
-        auto server_timing_headers = TRY_OR_RETURN_OOM(realm, response.header_list()->get_decode_and_split("Server-Timing"sv.bytes()));
+        auto server_timing_headers = TRY_OR_THROW_OOM(vm, response.header_list()->get_decode_and_split("Server-Timing"sv.bytes()));
         if (server_timing_headers.has_value())
             timing_info->set_server_timing_headers(server_timing_headers.release_value());
     }
@@ -584,7 +588,7 @@ WebIDL::ExceptionOr<void> fetch_response_handover(JS::Realm& realm, Infrastructu
             // 3. If fetchParams’s request’s initiator type is non-null and fetchParams’s request’s client’s global
             //    object is fetchParams’s task destination, then run fetchParams’s controller’s report timing steps
             //    given fetchParams’s request’s client’s global object.
-            auto* client = fetch_params.request()->client();
+            auto client = fetch_params.request()->client();
             auto const* task_destination_global_object = fetch_params.task_destination().get_pointer<JS::NonnullGCPtr<JS::Object>>();
             if (client != nullptr && task_destination_global_object != nullptr) {
                 if (fetch_params.request()->initiator_type().has_value() && &client->global_object() == task_destination_global_object->ptr())
@@ -633,7 +637,7 @@ WebIDL::ExceptionOr<void> fetch_response_handover(JS::Realm& realm, Infrastructu
 
         // 2. Let processBodyError be this step: run fetchParams’s process response consume body given response and
         //    failure.
-        auto process_body_error = [&fetch_params, &response] {
+        auto process_body_error = [&fetch_params, &response](auto&) {
             (*fetch_params.algorithms()->process_response_consume_body())(response, Infrastructure::FetchAlgorithms::ConsumeBodyFailureTag {});
         };
 
@@ -644,11 +648,10 @@ WebIDL::ExceptionOr<void> fetch_response_handover(JS::Realm& realm, Infrastructu
                 process_body({});
             });
         }
-        // FIXME: 4. Otherwise, fully read response’s body given processBody, processBodyError, and fetchParams’s task
-        //        destination.
+        // 4. Otherwise, fully read response’s body given processBody, processBodyError, and fetchParams’s task
+        //    destination.
         else {
-            // NOTE: This branch is not taken for JS fetch(), which supplies no 'process response consume body' function.
-            (void)process_body_error;
+            TRY(response.body()->fully_read(realm, move(process_body), move(process_body_error), fetch_params.task_destination()));
         }
     }
 
@@ -677,11 +680,11 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> scheme_fetch(JS::Realm& r
         // a body.
         // NOTE: URLs such as "about:config" are handled during navigation and result in a network error in the context
         //       of fetching.
-        if (request->current_url().path() == "blank"sv) {
+        if (request->current_url().serialize_path() == "blank"sv) {
             auto response = Infrastructure::Response::create(vm);
             response->set_status_message(MUST(ByteBuffer::copy("OK"sv.bytes())));
             auto header = MUST(Infrastructure::Header::from_string_pair("Content-Type"sv, "text/html;charset=utf-8"sv));
-            TRY_OR_RETURN_OOM(realm, response->header_list()->append(move(header)));
+            TRY_OR_THROW_OOM(vm, response->header_list()->append(move(header)));
             response->set_body(MUST(Infrastructure::byte_sequence_as_body(realm, ""sv.bytes())));
             return PendingResponse::create(vm, request, response);
         }
@@ -697,7 +700,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> scheme_fetch(JS::Realm& r
         auto const& url = request->current_url();
         auto data_or_error = url.data_payload_is_base64()
             ? decode_base64(url.data_payload())
-            : TRY_OR_RETURN_OOM(realm, ByteBuffer::copy(url.data_payload().bytes()));
+            : TRY_OR_THROW_OOM(vm, ByteBuffer::copy(url.data_payload().bytes()));
 
         // 2. If dataURLStruct is failure, then return a network error.
         if (data_or_error.is_error())
@@ -710,8 +713,8 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> scheme_fetch(JS::Realm& r
         //    body is dataURLStruct’s body as a body.
         auto response = Infrastructure::Response::create(vm);
         response->set_status_message(MUST(ByteBuffer::copy("OK"sv.bytes())));
-        auto header = TRY_OR_RETURN_OOM(realm, Infrastructure::Header::from_string_pair("Content-Type"sv, mime_type));
-        TRY_OR_RETURN_OOM(realm, response->header_list()->append(move(header)));
+        auto header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Content-Type"sv, mime_type));
+        TRY_OR_THROW_OOM(vm, response->header_list()->append(move(header)));
         response->set_body(TRY(Infrastructure::byte_sequence_as_body(realm, data_or_error.value().span())));
         return PendingResponse::create(vm, request, response);
     }
@@ -719,8 +722,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> scheme_fetch(JS::Realm& r
     else if (request->current_url().scheme() == "file"sv) {
         // For now, unfortunate as it is, file: URLs are left as an exercise for the reader.
         // When in doubt, return a network error.
-        // FIXME: Support 'file://' URLs
-        return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request has 'file:' URL which is currently unsupported"sv));
+        return TRY(nonstandard_resource_loader_file_or_http_network_fetch(realm, fetch_params));
     }
     // -> HTTP(S) scheme
     else if (Infrastructure::is_http_or_https_scheme(request->current_url().scheme())) {
@@ -730,9 +732,9 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> scheme_fetch(JS::Realm& r
 
     // 4. Return a network error.
     auto message = request->current_url().scheme() == "about"sv
-        ? "Request has invalid 'about:' URL, only 'about:blank' can be fetched"sv
-        : "Request URL has invalid scheme, must be one of 'about', 'blob', 'data', 'file', 'http', or 'https'"sv;
-    return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, message));
+        ? TRY_OR_THROW_OOM(vm, "Request has invalid 'about:' URL, only 'about:blank' can be fetched"_string)
+        : TRY_OR_THROW_OOM(vm, "Request URL has invalid scheme, must be one of 'about', 'blob', 'data', 'file', 'http', or 'https'"_string);
+    return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, move(message)));
 }
 
 // https://fetch.spec.whatwg.org/#concept-http-fetch
@@ -755,7 +757,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_fetch(JS::Realm& rea
     // 4. If request’s service-workers mode is "all", then:
     if (request->service_workers_mode() == Infrastructure::Request::ServiceWorkersMode::All) {
         // 1. Let requestForServiceWorker be a clone of request.
-        auto request_for_service_worker = TRY(request->clone(vm));
+        auto request_for_service_worker = TRY(request->clone(realm));
 
         // 2. If requestForServiceWorker’s body is non-null, then:
         if (!request_for_service_worker->body().has<Empty>()) {
@@ -809,6 +811,8 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_fetch(JS::Realm& rea
 
     JS::GCPtr<PendingResponse> pending_actual_response;
 
+    auto returned_pending_response = PendingResponse::create(vm, request);
+
     // 5. If response is null, then:
     if (!response) {
         // 1. If makeCORSPreflight is true and one of these conditions is true:
@@ -816,30 +820,56 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_fetch(JS::Realm& rea
         //       CORS-preflight fetch which, if successful, populates the cache. The purpose of the CORS-preflight
         //       fetch is to ensure the fetched resource is familiar with the CORS protocol. The cache is there to
         //       minimize the number of CORS-preflight fetches.
+        JS::GCPtr<PendingResponse> pending_preflight_response;
         if (make_cors_preflight == MakeCORSPreflight::Yes && (
-                // FIXME: - There is no method cache entry match for request’s method using request, and either request’s
-                //          method is not a CORS-safelisted method or request’s use-CORS-preflight flag is set.
-                false
-                // FIXME: - There is at least one item in the CORS-unsafe request-header names with request’s header list for
-                //          which there is no header-name cache entry match using request.
-                || false)) {
-            // FIXME: 1. Let preflightResponse be the result of running CORS-preflight fetch given request.
-            // FIXME: 2. If preflightResponse is a network error, then return preflightResponse.
+                // - There is no method cache entry match for request’s method using request, and either request’s
+                //   method is not a CORS-safelisted method or request’s use-CORS-preflight flag is set.
+                //   FIXME: We currently have no cache, so there will always be no method cache entry.
+                (!Infrastructure::is_cors_safelisted_method(request->method()) || request->use_cors_preflight())
+                // - There is at least one item in the CORS-unsafe request-header names with request’s header list for
+                //   which there is no header-name cache entry match using request.
+                //   FIXME: We currently have no cache, so there will always be no header-name cache entry.
+                || !TRY_OR_THROW_OOM(vm, Infrastructure::get_cors_unsafe_header_names(request->header_list())).is_empty())) {
+            // 1. Let preflightResponse be the result of running CORS-preflight fetch given request.
+            pending_preflight_response = TRY(cors_preflight_fetch(realm, request));
+
+            // NOTE: Step 2 is performed in pending_preflight_response's load callback below.
         }
 
-        // 2. If request’s redirect mode is "follow", then set request’s service-workers mode to "none".
-        // NOTE: Redirects coming from the network (as opposed to from a service worker) are not to be exposed to a
-        //       service worker.
-        if (request->redirect_mode() == Infrastructure::Request::RedirectMode::Follow)
-            request->set_service_workers_mode(Infrastructure::Request::ServiceWorkersMode::None);
+        auto fetch_main_content = [request = JS::make_handle(request), realm = JS::make_handle(realm), fetch_params = JS::make_handle(fetch_params)]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> {
+            // 2. If request’s redirect mode is "follow", then set request’s service-workers mode to "none".
+            // NOTE: Redirects coming from the network (as opposed to from a service worker) are not to be exposed to a
+            //       service worker.
+            if (request->redirect_mode() == Infrastructure::Request::RedirectMode::Follow)
+                request->set_service_workers_mode(Infrastructure::Request::ServiceWorkersMode::None);
 
-        // 3. Set response and actualResponse to the result of running HTTP-network-or-cache fetch given fetchParams.
-        pending_actual_response = TRY(http_network_or_cache_fetch(realm, fetch_params));
+            // 3. Set response and actualResponse to the result of running HTTP-network-or-cache fetch given fetchParams.
+            return http_network_or_cache_fetch(*realm, *fetch_params);
+        };
+
+        if (pending_preflight_response) {
+            pending_actual_response = PendingResponse::create(vm, request);
+            pending_preflight_response->when_loaded([returned_pending_response, pending_actual_response, fetch_main_content = move(fetch_main_content)](JS::NonnullGCPtr<Infrastructure::Response> preflight_response) {
+                dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'HTTP fetch' pending_preflight_response load callback");
+
+                // 2. If preflightResponse is a network error, then return preflightResponse.
+                if (preflight_response->is_network_error()) {
+                    returned_pending_response->resolve(preflight_response);
+                    return;
+                }
+
+                auto pending_main_content_response = TRY_OR_IGNORE(fetch_main_content());
+                pending_main_content_response->when_loaded([pending_actual_response](JS::NonnullGCPtr<Infrastructure::Response> main_content_response) {
+                    dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'HTTP fetch' pending_main_content_response load callback");
+                    pending_actual_response->resolve(main_content_response);
+                });
+            });
+        } else {
+            pending_actual_response = TRY(fetch_main_content());
+        }
     } else {
         pending_actual_response = PendingResponse::create(vm, request, Infrastructure::Response::create(vm));
     }
-
-    auto returned_pending_response = PendingResponse::create(vm, request);
 
     pending_actual_response->when_loaded([&realm, &vm, &fetch_params, request, response, actual_response, returned_pending_response, response_was_null = !response](JS::NonnullGCPtr<Infrastructure::Response> resolved_actual_response) mutable {
         dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'HTTP fetch' pending_actual_response load callback");
@@ -851,7 +881,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_fetch(JS::Realm& rea
             //       a service worker for that matter, it is applied here.
             if (request->response_tainting() == Infrastructure::Request::ResponseTainting::CORS
                 && !TRY_OR_IGNORE(cors_check(request, *response))) {
-                returned_pending_response->resolve(Infrastructure::Response::network_error(vm, "Request with 'cors' response tainting failed CORS check"sv));
+                returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("Request with 'cors' response tainting failed CORS check"_string)));
                 return;
             }
 
@@ -869,7 +899,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_fetch(JS::Realm& rea
         if ((request->response_tainting() == Infrastructure::Request::ResponseTainting::Opaque || response->type() == Infrastructure::Response::Type::Opaque)
             && false // FIXME: "and the cross-origin resource policy check with request’s origin, request’s client, request’s destination, and actualResponse returns blocked"
         ) {
-            returned_pending_response->resolve(Infrastructure::Response::network_error(vm, "Response was blocked by cross-origin resource policy check"sv));
+            returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("Response was blocked by cross-origin resource policy check"_string)));
             return;
         }
 
@@ -886,18 +916,21 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_fetch(JS::Realm& rea
             // -> "error"
             case Infrastructure::Request::RedirectMode::Error:
                 // Set response to a network error.
-                response = Infrastructure::Response::network_error(vm, "Request with 'error' redirect mode received redirect response"sv);
+                response = Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("Request with 'error' redirect mode received redirect response"_string));
                 break;
             // -> "manual"
             case Infrastructure::Request::RedirectMode::Manual:
-                // Set response to an opaque-redirect filtered response whose internal response is actualResponse. If
-                // request’s mode is "navigate", then set fetchParams’s controller’s next manual redirect steps to run
-                // HTTP-redirect fetch given fetchParams and response.
-                response = Infrastructure::OpaqueRedirectFilteredResponse::create(vm, *actual_response);
+                // 1. If request’s mode is "navigate", then set fetchParams’s controller’s next manual redirect steps
+                //    to run HTTP-redirect fetch given fetchParams and response.
                 if (request->mode() == Infrastructure::Request::Mode::Navigate) {
                     fetch_params.controller()->set_next_manual_redirect_steps([&realm, &fetch_params, response] {
                         (void)http_redirect_fetch(realm, fetch_params, *response);
                     });
+                }
+                // 2. Otherwise, set response to an opaque-redirect filtered response whose internal response is
+                //    actualResponse.
+                else {
+                    response = Infrastructure::OpaqueRedirectFilteredResponse::create(vm, *actual_response);
                 }
                 break;
             // -> "follow"
@@ -926,7 +959,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_fetch(JS::Realm& rea
 }
 
 // https://fetch.spec.whatwg.org/#concept-http-redirect-fetch
-WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_redirect_fetch(JS::Realm& realm, Infrastructure::FetchParams const& fetch_params, Infrastructure::Response const& response)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_redirect_fetch(JS::Realm& realm, Infrastructure::FetchParams const& fetch_params, Infrastructure::Response& response)
 {
     dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'HTTP-redirect fetch' with: fetch_params @ {}, response = {}", &fetch_params, &response);
 
@@ -942,7 +975,9 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_redirect_fetch(JS::R
         : static_cast<Infrastructure::FilteredResponse const&>(response).internal_response();
 
     // 3. Let locationURL be actualResponse’s location URL given request’s current URL’s fragment.
-    auto location_url_or_error = actual_response->location_url(request->current_url().fragment());
+    auto const& fragment = request->current_url().fragment();
+    auto fragment_string = fragment.is_null() ? Optional<String> {} : TRY_OR_THROW_OOM(vm, String::from_deprecated_string(fragment));
+    auto location_url_or_error = actual_response->location_url(fragment_string);
 
     // 4. If locationURL is null, then return response.
     if (!location_url_or_error.is_error() && !location_url_or_error.value().has_value())
@@ -1069,7 +1104,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
     auto request = fetch_params.request();
 
     // 2. Let httpFetchParams be null.
-    JS::GCPtr<Infrastructure::FetchParams> http_fetch_params;
+    JS::GCPtr<Infrastructure::FetchParams const> http_fetch_params;
 
     // 3. Let httpRequest be null.
     JS::GCPtr<Infrastructure::Request> http_request;
@@ -1113,15 +1148,16 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
             // NOTE: Implementations are encouraged to avoid teeing request’s body’s stream when request’s body’s
             //       source is null as only a single body is needed in that case. E.g., when request’s body’s source
             //       is null, redirects and authentication will end up failing the fetch.
-            http_request = TRY(request->clone(vm));
+            http_request = TRY(request->clone(realm));
 
             // 2. Set httpFetchParams to a copy of fetchParams.
             // 3. Set httpFetchParams’s request to httpRequest.
-            http_fetch_params = Infrastructure::FetchParams::create(vm, *http_request, fetch_params.timing_info());
-            http_fetch_params->set_algorithms(fetch_params.algorithms());
-            http_fetch_params->set_task_destination(fetch_params.task_destination());
-            http_fetch_params->set_cross_origin_isolated_capability(fetch_params.cross_origin_isolated_capability());
-            http_fetch_params->set_preloaded_response_candidate(fetch_params.preloaded_response_candidate());
+            auto new_http_fetch_params = Infrastructure::FetchParams::create(vm, *http_request, fetch_params.timing_info());
+            new_http_fetch_params->set_algorithms(fetch_params.algorithms());
+            new_http_fetch_params->set_task_destination(fetch_params.task_destination());
+            new_http_fetch_params->set_cross_origin_isolated_capability(fetch_params.cross_origin_isolated_capability());
+            new_http_fetch_params->set_preloaded_response_candidate(fetch_params.preloaded_response_candidate());
+            http_fetch_params = new_http_fetch_params;
         }
 
         // 3. Let includeCredentials be true if one of
@@ -1159,7 +1195,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
         // 8. If contentLength is non-null, then set contentLengthHeaderValue to contentLength, serialized and
         //    isomorphic encoded.
         if (content_length.has_value())
-            content_length_header_value = MUST(ByteBuffer::copy(DeprecatedString::number(*content_length).bytes()));
+            content_length_header_value = MUST(ByteBuffer::copy(TRY_OR_THROW_OOM(vm, String::number(*content_length)).bytes()));
 
         // 9. If contentLengthHeaderValue is non-null, then append (`Content-Length`, contentLengthHeaderValue) to
         //    httpRequest’s header list.
@@ -1168,7 +1204,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
                 .name = MUST(ByteBuffer::copy("Content-Length"sv.bytes())),
                 .value = content_length_header_value.release_value(),
             };
-            TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+            TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
         }
 
         // FIXME: 10. If contentLength is non-null and httpRequest’s keepalive is true, then:
@@ -1181,18 +1217,18 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
         // 11. If httpRequest’s referrer is a URL, then:
         if (http_request->referrer().has<AK::URL>()) {
             // 1. Let referrerValue be httpRequest’s referrer, serialized and isomorphic encoded.
-            auto referrer_value = TRY_OR_RETURN_OOM(realm, ByteBuffer::copy(http_request->referrer().get<AK::URL>().serialize().bytes()));
+            auto referrer_value = TRY_OR_THROW_OOM(vm, ByteBuffer::copy(http_request->referrer().get<AK::URL>().serialize().bytes()));
 
             // 2. Append (`Referer`, referrerValue) to httpRequest’s header list.
             auto header = Infrastructure::Header {
                 .name = MUST(ByteBuffer::copy("Referer"sv.bytes())),
                 .value = move(referrer_value),
             };
-            TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+            TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
         }
 
         // 12. Append a request `Origin` header for httpRequest.
-        TRY_OR_RETURN_OOM(realm, http_request->add_origin_header());
+        TRY_OR_THROW_OOM(vm, http_request->add_origin_header());
 
         // FIXME: 13. Append the Fetch metadata headers for httpRequest.
 
@@ -1201,9 +1237,9 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
         if (!http_request->header_list()->contains("User-Agent"sv.bytes())) {
             auto header = Infrastructure::Header {
                 .name = MUST(ByteBuffer::copy("User-Agent"sv.bytes())),
-                .value = TRY_OR_RETURN_OOM(realm, Infrastructure::default_user_agent_value()),
+                .value = TRY_OR_THROW_OOM(vm, Infrastructure::default_user_agent_value()),
             };
-            TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+            TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
         }
 
         // 15. If httpRequest’s cache mode is "default" and httpRequest’s header list contains `If-Modified-Since`,
@@ -1225,7 +1261,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
             && !http_request->prevent_no_cache_cache_control_header_modification()
             && !http_request->header_list()->contains("Cache-Control"sv.bytes())) {
             auto header = MUST(Infrastructure::Header::from_string_pair("Cache-Control"sv, "max-age=0"sv));
-            TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+            TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
         }
 
         // 17. If httpRequest’s cache mode is "no-store" or "reload", then:
@@ -1235,14 +1271,14 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
             //    httpRequest’s header list.
             if (!http_request->header_list()->contains("Pragma"sv.bytes())) {
                 auto header = MUST(Infrastructure::Header::from_string_pair("Pragma"sv, "no-cache"sv));
-                TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+                TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
             }
 
             // 2. If httpRequest’s header list does not contain `Cache-Control`, then append
             //    (`Cache-Control`, `no-cache`) to httpRequest’s header list.
             if (!http_request->header_list()->contains("Cache-Control"sv.bytes())) {
                 auto header = MUST(Infrastructure::Header::from_string_pair("Cache-Control"sv, "no-cache"sv));
-                TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+                TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
             }
         }
 
@@ -1252,7 +1288,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
         //       Additionally, many servers mistakenly ignore `Range` headers if a non-identity encoding is accepted.
         if (http_request->header_list()->contains("Range"sv.bytes())) {
             auto header = MUST(Infrastructure::Header::from_string_pair("Accept-Encoding"sv, "identity"sv));
-            TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+            TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
         }
 
         // 19. Modify httpRequest’s header list per HTTP. Do not append a given header if httpRequest’s header list
@@ -1284,15 +1320,15 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
 
                 // 2. If cookies is not the empty string, then append (`Cookie`, cookies) to httpRequest’s header list.
                 if (!cookies.is_empty()) {
-                    auto header = TRY_OR_RETURN_OOM(realm, Infrastructure::Header::from_string_pair("Cookie"sv, cookies));
-                    TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+                    auto header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Cookie"sv, cookies));
+                    TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
                 }
             }
 
             // 2. If httpRequest’s header list does not contain `Authorization`, then:
             if (!http_request->header_list()->contains("Authorization"sv.bytes())) {
                 // 1. Let authorizationValue be null.
-                auto authorization_value = Optional<DeprecatedString> {};
+                auto authorization_value = Optional<String> {};
 
                 // 2. If there’s an authentication entry for httpRequest and either httpRequest’s use-URL-credentials
                 //    flag is unset or httpRequest’s current URL does not include credentials, then set
@@ -1305,15 +1341,15 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
                 //    true, set authorizationValue to httpRequest’s current URL, converted to an `Authorization` value.
                 else if (http_request->current_url().includes_credentials() && is_authentication_fetch == IsAuthenticationFetch::Yes) {
                     auto const& url = http_request->current_url();
-                    auto payload = DeprecatedString::formatted("{}:{}", url.username(), url.password());
-                    authorization_value = TRY_OR_RETURN_OOM(realm, encode_base64(payload.bytes())).to_deprecated_string();
+                    auto payload = TRY_OR_THROW_OOM(vm, String::formatted("{}:{}", url.username(), url.password()));
+                    authorization_value = TRY_OR_THROW_OOM(vm, encode_base64(payload.bytes()));
                 }
 
                 // 4. If authorizationValue is non-null, then append (`Authorization`, authorizationValue) to
                 //    httpRequest’s header list.
                 if (authorization_value.has_value()) {
-                    auto header = TRY_OR_RETURN_OOM(realm, Infrastructure::Header::from_string_pair("Authorization"sv, *authorization_value));
-                    TRY_OR_RETURN_OOM(realm, http_request->header_list()->append(move(header)));
+                    auto header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Authorization"sv, *authorization_value));
+                    TRY_OR_THROW_OOM(vm, http_request->header_list()->append(move(header)));
                 }
             }
         }
@@ -1358,7 +1394,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
 
         // 2. Let forwardResponse be the result of running HTTP-network fetch given httpFetchParams, includeCredentials,
         //    and isNewConnectionFetch.
-        pending_forward_response = TRY(nonstandard_resource_loader_http_network_fetch(realm, *http_fetch_params, include_credentials, is_new_connection_fetch));
+        pending_forward_response = TRY(nonstandard_resource_loader_file_or_http_network_fetch(realm, *http_fetch_params, include_credentials, is_new_connection_fetch));
     } else {
         pending_forward_response = PendingResponse::create(vm, request, Infrastructure::Response::create(vm));
     }
@@ -1425,7 +1461,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
         if (response->status() == 401
             && http_request->response_tainting() != Infrastructure::Request::ResponseTainting::CORS
             && include_credentials == IncludeCredentials::Yes
-            && request->window().has<HTML::EnvironmentSettingsObject*>()) {
+            && request->window().has<JS::GCPtr<HTML::EnvironmentSettingsObject>>()) {
             // 1. Needs testing: multiple `WWW-Authenticate` headers, missing, parsing issues.
             // (Red box in the spec, no-op)
 
@@ -1433,7 +1469,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
             if (!request->body().has<Empty>()) {
                 // 1. If request’s body’s source is null, then return a network error.
                 if (request->body().get<Infrastructure::Body>().source().has<Empty>()) {
-                    returned_pending_response->resolve(Infrastructure::Response::network_error(vm, "Request has body but no body source"sv));
+                    returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("Request has body but no body source"_string)));
                     return;
                 }
 
@@ -1479,7 +1515,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
                 // 1. If request’s window is "no-window", then return a network error.
                 if (request->window().has<Infrastructure::Request::Window>()
                     && request->window().get<Infrastructure::Request::Window>() == Infrastructure::Request::Window::NoWindow) {
-                    returned_pending_response->resolve(Infrastructure::Response::network_error(vm, "Request requires proxy authentication but has 'no-window' set"sv));
+                    returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("Request requires proxy authentication but has 'no-window' set"_string)));
                     return;
                 }
 
@@ -1564,7 +1600,8 @@ static void log_response(auto const& status_code, auto const& headers, auto cons
 
 // https://fetch.spec.whatwg.org/#concept-http-network-fetch
 // Drop-in replacement for 'HTTP-network fetch', but obviously non-standard :^)
-WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> nonstandard_resource_loader_http_network_fetch(JS::Realm& realm, Infrastructure::FetchParams const& fetch_params, IncludeCredentials include_credentials, IsNewConnectionFetch is_new_connection_fetch)
+// It also handles file:// URLs since those can also go through ResourceLoader.
+WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> nonstandard_resource_loader_file_or_http_network_fetch(JS::Realm& realm, Infrastructure::FetchParams const& fetch_params, IncludeCredentials include_credentials, IsNewConnectionFetch is_new_connection_fetch)
 {
     dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'non-standard HTTP-network fetch' with: fetch_params @ {}", &fetch_params);
 
@@ -1575,18 +1612,28 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> nonstandard_resource_load
 
     auto request = fetch_params.request();
 
-    auto load_request = LoadRequest::create_for_url_on_page(request->current_url(), nullptr);
+    Page* page = nullptr;
+    auto& global_object = realm.global_object();
+    if (is<HTML::Window>(global_object))
+        page = static_cast<HTML::Window&>(global_object).page();
+
+    // NOTE: Using LoadRequest::create_for_url_on_page here will unconditionally add cookies as long as there's a page available.
+    //       However, it is up to http_network_or_cache_fetch to determine if cookies should be added to the request.
+    LoadRequest load_request;
+    load_request.set_url(request->current_url());
+    if (page)
+        load_request.set_page(*page);
     load_request.set_method(DeprecatedString::copy(request->method()));
     for (auto const& header : *request->header_list())
         load_request.set_header(DeprecatedString::copy(header.name), DeprecatedString::copy(header.value));
     if (auto const* body = request->body().get_pointer<Infrastructure::Body>()) {
         TRY(body->source().visit(
             [&](ByteBuffer const& byte_buffer) -> WebIDL::ExceptionOr<void> {
-                load_request.set_body(TRY_OR_RETURN_OOM(realm, ByteBuffer::copy(byte_buffer)));
+                load_request.set_body(TRY_OR_THROW_OOM(vm, ByteBuffer::copy(byte_buffer)));
                 return {};
             },
             [&](JS::Handle<FileAPI::Blob> const& blob_handle) -> WebIDL::ExceptionOr<void> {
-                load_request.set_body(TRY_OR_RETURN_OOM(realm, ByteBuffer::copy(blob_handle->bytes())));
+                load_request.set_body(TRY_OR_THROW_OOM(vm, ByteBuffer::copy(blob_handle->bytes())));
                 return {};
             },
             [](Empty) -> WebIDL::ExceptionOr<void> {
@@ -1606,13 +1653,13 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> nonstandard_resource_load
             dbgln_if(WEB_FETCH_DEBUG, "Fetch: ResourceLoader load for '{}' complete", request->url());
             if constexpr (WEB_FETCH_DEBUG)
                 log_response(status_code, response_headers, data);
-            auto [body, _] = MUST(extract_body(realm, data));
+            auto [body, _] = TRY_OR_IGNORE(extract_body(realm, data));
             auto response = Infrastructure::Response::create(vm);
             response->set_status(status_code.value_or(200));
             response->set_body(move(body));
             for (auto const& [name, value] : response_headers) {
-                auto header = Infrastructure::Header::from_string_pair(name, value).release_value_but_fixme_should_propagate_errors();
-                response->header_list()->append(header).release_value_but_fixme_should_propagate_errors();
+                auto header = TRY_OR_IGNORE(Infrastructure::Header::from_string_pair(name, value));
+                TRY_OR_IGNORE(response->header_list()->append(header));
             }
             // FIXME: Set response status message
             pending_response->resolve(response);
@@ -1622,15 +1669,235 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> nonstandard_resource_load
             auto response = Infrastructure::Response::create(vm);
             // FIXME: This is ugly, ResourceLoader should tell us.
             if (status_code.value_or(0) == 0) {
-                response = Infrastructure::Response::network_error(vm, "HTTP request failed"sv);
+                response = Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("HTTP request failed"_string));
             } else {
-                response->set_status(status_code.value_or(200));
+                response->set_type(Infrastructure::Response::Type::Error);
+                response->set_status(status_code.value_or(400));
                 // FIXME: Set response status message and body
             }
             pending_response->resolve(response);
         });
 
     return pending_response;
+}
+
+// https://fetch.spec.whatwg.org/#cors-preflight-fetch-0
+WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> cors_preflight_fetch(JS::Realm& realm, Infrastructure::Request& request)
+{
+    dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'CORS-preflight fetch' with request @ {}", &request);
+
+    auto& vm = realm.vm();
+
+    // 1. Let preflight be a new request whose method is `OPTIONS`, URL list is a clone of request’s URL list, initiator is
+    //    request’s initiator, destination is request’s destination, origin is request’s origin, referrer is request’s referrer,
+    //    referrer policy is request’s referrer policy, mode is "cors", and response tainting is "cors".
+    auto preflight = Fetch::Infrastructure::Request::create(vm);
+    preflight->set_method(TRY_OR_THROW_OOM(vm, ByteBuffer::copy("OPTIONS"sv.bytes())));
+    preflight->set_url_list(request.url_list());
+    preflight->set_initiator(request.initiator());
+    preflight->set_destination(request.destination());
+    preflight->set_origin(request.origin());
+    preflight->set_referrer(request.referrer());
+    preflight->set_referrer_policy(request.referrer_policy());
+    preflight->set_mode(Infrastructure::Request::Mode::CORS);
+    preflight->set_response_tainting(Infrastructure::Request::ResponseTainting::CORS);
+
+    // 2. Append (`Accept`, `*/*`) to preflight’s header list.
+    auto temp_header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Accept"sv, "*/*"sv));
+    TRY_OR_THROW_OOM(vm, preflight->header_list()->append(move(temp_header)));
+
+    // 3. Append (`Access-Control-Request-Method`, request’s method) to preflight’s header list.
+    temp_header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Access-Control-Request-Method"sv, request.method()));
+    TRY_OR_THROW_OOM(vm, preflight->header_list()->append(move(temp_header)));
+
+    // 4. Let headers be the CORS-unsafe request-header names with request’s header list.
+    auto headers = TRY_OR_THROW_OOM(vm, Infrastructure::get_cors_unsafe_header_names(request.header_list()));
+
+    // 5. If headers is not empty, then:
+    if (!headers.is_empty()) {
+        // 1. Let value be the items in headers separated from each other by `,`.
+        // NOTE: This intentionally does not use combine, as 0x20 following 0x2C is not the way this was implemented,
+        //       for better or worse.
+        ByteBuffer value;
+
+        bool first = true;
+        for (auto const& header : headers) {
+            if (!first)
+                TRY_OR_THROW_OOM(vm, value.try_append(','));
+            TRY_OR_THROW_OOM(vm, value.try_append(header));
+            first = false;
+        }
+
+        // 2. Append (`Access-Control-Request-Headers`, value) to preflight’s header list.
+        temp_header = Infrastructure::Header {
+            .name = TRY_OR_THROW_OOM(vm, ByteBuffer::copy("Access-Control-Request-Headers"sv.bytes())),
+            .value = move(value),
+        };
+        TRY_OR_THROW_OOM(vm, preflight->header_list()->append(move(temp_header)));
+    }
+
+    // 6. Let response be the result of running HTTP-network-or-cache fetch given a new fetch params whose request is preflight.
+    // FIXME: The spec doesn't say anything about timing_info here, but FetchParams requires a non-null FetchTimingInfo object.
+    auto timing_info = Infrastructure::FetchTimingInfo::create(vm);
+    auto fetch_params = Infrastructure::FetchParams::create(vm, preflight, timing_info);
+
+    auto returned_pending_response = PendingResponse::create(vm, request);
+
+    auto preflight_response = TRY(http_network_or_cache_fetch(realm, fetch_params));
+
+    preflight_response->when_loaded([&vm, &request, returned_pending_response](JS::NonnullGCPtr<Infrastructure::Response> response) {
+        dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'CORS-preflight fetch' preflight_response load callback");
+
+        // 7. If a CORS check for request and response returns success and response’s status is an ok status, then:
+        // NOTE: The CORS check is done on request rather than preflight to ensure the correct credentials mode is used.
+        if (TRY_OR_IGNORE(cors_check(request, response)) && Infrastructure::is_ok_status(response->status())) {
+            // 1. Let methods be the result of extracting header list values given `Access-Control-Allow-Methods` and response’s header list.
+            auto methods_or_failure = TRY_OR_IGNORE(Infrastructure::extract_header_list_values("Access-Control-Allow-Methods"sv.bytes(), response->header_list()));
+
+            // 2. Let headerNames be the result of extracting header list values given `Access-Control-Allow-Headers` and
+            //    response’s header list.
+            auto header_names_or_failure = TRY_OR_IGNORE(Infrastructure::extract_header_list_values("Access-Control-Allow-Headers"sv.bytes(), response->header_list()));
+
+            // 3. If either methods or headerNames is failure, return a network error.
+            if (methods_or_failure.has<Infrastructure::ExtractHeaderParseFailure>()) {
+                returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("The Access-Control-Allow-Methods in the CORS-preflight response is syntactically invalid"_string)));
+                return;
+            }
+
+            if (header_names_or_failure.has<Infrastructure::ExtractHeaderParseFailure>()) {
+                returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("The Access-Control-Allow-Headers in the CORS-preflight response is syntactically invalid"_string)));
+                return;
+            }
+
+            // NOTE: We treat "methods_or_failure" being `Empty` as empty Vector here.
+            auto methods = methods_or_failure.has<Vector<ByteBuffer>>() ? methods_or_failure.get<Vector<ByteBuffer>>() : Vector<ByteBuffer> {};
+
+            // NOTE: We treat "header_names_or_failure" being `Empty` as empty Vector here.
+            auto header_names = header_names_or_failure.has<Vector<ByteBuffer>>() ? header_names_or_failure.get<Vector<ByteBuffer>>() : Vector<ByteBuffer> {};
+
+            // FIXME: Remove this once extract_header_list_values validates the header and returns multiple values.
+            if (!methods.is_empty()) {
+                VERIFY(methods.size() == 1);
+
+                auto split_methods = StringView { methods.first() }.split_view(',');
+                Vector<ByteBuffer> trimmed_methods;
+
+                for (auto const& method : split_methods) {
+                    auto trimmed_method = method.trim(" \t"sv);
+                    auto trimmed_method_as_byte_buffer = TRY_OR_IGNORE(ByteBuffer::copy(trimmed_method.bytes()));
+                    TRY_OR_IGNORE(trimmed_methods.try_append(move(trimmed_method_as_byte_buffer)));
+                }
+
+                methods = move(trimmed_methods);
+            }
+
+            // FIXME: Remove this once extract_header_list_values validates the header and returns multiple values.
+            if (!header_names.is_empty()) {
+                VERIFY(header_names.size() == 1);
+
+                auto split_header_names = StringView { header_names.first() }.split_view(',');
+                Vector<ByteBuffer> trimmed_header_names;
+
+                for (auto const& header_name : split_header_names) {
+                    auto trimmed_header_name = header_name.trim(" \t"sv);
+                    auto trimmed_header_name_as_byte_buffer = TRY_OR_IGNORE(ByteBuffer::copy(trimmed_header_name.bytes()));
+                    TRY_OR_IGNORE(trimmed_header_names.try_append(move(trimmed_header_name_as_byte_buffer)));
+                }
+
+                header_names = move(trimmed_header_names);
+            }
+
+            // 4. If methods is null and request’s use-CORS-preflight flag is set, then set methods to a new list containing request’s method.
+            // NOTE: This ensures that a CORS-preflight fetch that happened due to request’s use-CORS-preflight flag being set is cached.
+            if (methods.is_empty() && request.use_cors_preflight())
+                methods = Vector { TRY_OR_IGNORE(ByteBuffer::copy(request.method())) };
+
+            // 5. If request’s method is not in methods, request’s method is not a CORS-safelisted method, and request’s credentials mode
+            //    is "include" or methods does not contain `*`, then return a network error.
+            if (!methods.contains_slow(request.method()) && !Infrastructure::is_cors_safelisted_method(request.method())) {
+                if (request.credentials_mode() == Infrastructure::Request::CredentialsMode::Include) {
+                    returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE(String::formatted("Non-CORS-safelisted method '{}' not found in the CORS-preflight response's Access-Control-Allow-Methods header (the header may be missing). '*' is not allowed as the main request includes credentials."sv, StringView { request.method() }))));
+                    return;
+                }
+
+                if (!methods.contains_slow("*"sv.bytes())) {
+                    returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE(String::formatted("Non-CORS-safelisted method '{}' not found in the CORS-preflight response's Access-Control-Allow-Methods header and there was no '*' entry. The header may be missing."sv, StringView { request.method() }))));
+                    return;
+                }
+            }
+
+            // 6. If one of request’s header list’s names is a CORS non-wildcard request-header name and is not a byte-case-insensitive match
+            //    for an item in headerNames, then return a network error.
+            for (auto const& header : *request.header_list()) {
+                if (Infrastructure::is_cors_non_wildcard_request_header_name(header.name)) {
+                    bool is_in_header_names = false;
+
+                    for (auto const& allowed_header_name : header_names) {
+                        if (StringView { allowed_header_name }.equals_ignoring_ascii_case(header.name)) {
+                            is_in_header_names = true;
+                            break;
+                        }
+                    }
+
+                    if (!is_in_header_names) {
+                        returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE(String::formatted("Main request contains the header '{}' that is not specified in the CORS-preflight response's Access-Control-Allow-Headers header (the header may be missing). '*' does not capture this header."sv, StringView { header.name }))));
+                        return;
+                    }
+                }
+            }
+
+            // 7. For each unsafeName of the CORS-unsafe request-header names with request’s header list, if unsafeName is not a
+            //    byte-case-insensitive match for an item in headerNames and request’s credentials mode is "include" or headerNames
+            //    does not contain `*`, return a network error.
+            auto unsafe_names = TRY_OR_IGNORE(Infrastructure::get_cors_unsafe_header_names(request.header_list()));
+            for (auto const& unsafe_name : unsafe_names) {
+                bool is_in_header_names = false;
+
+                for (auto const& header_name : header_names) {
+                    if (StringView { unsafe_name }.equals_ignoring_ascii_case(header_name)) {
+                        is_in_header_names = true;
+                        break;
+                    }
+                }
+
+                if (!is_in_header_names) {
+                    if (request.credentials_mode() == Infrastructure::Request::CredentialsMode::Include) {
+                        returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE(String::formatted("CORS-unsafe request-header '{}' not found in the CORS-preflight response's Access-Control-Allow-Headers header (the header may be missing). '*' is not allowed as the main request includes credentials."sv, StringView { unsafe_name }))));
+                        return;
+                    }
+
+                    if (!header_names.contains_slow("*"sv.bytes())) {
+                        returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE(String::formatted("CORS-unsafe request-header '{}' not found in the CORS-preflight response's Access-Control-Allow-Headers header and there was no '*' entry. The header may be missing."sv, StringView { unsafe_name }))));
+                        return;
+                    }
+                }
+            }
+
+            // FIXME: 8. Let max-age be the result of extracting header list values given `Access-Control-Max-Age` and response’s header list.
+            // FIXME: 9. If max-age is failure or null, then set max-age to 5.
+            // FIXME: 10. If max-age is greater than an imposed limit on max-age, then set max-age to the imposed limit.
+
+            // 11. If the user agent does not provide for a cache, then return response.
+            // NOTE: Since we don't currently have a cache, this is always true.
+            returned_pending_response->resolve(response);
+            return;
+
+            // FIXME: 12. For each method in methods for which there is a method cache entry match using request, set matching entry’s max-age
+            //            to max-age.
+            // FIXME: 13. For each method in methods for which there is no method cache entry match using request, create a new cache entry
+            //            with request, max-age, method, and null.
+            // FIXME: 14. For each headerName in headerNames for which there is a header-name cache entry match using request, set matching
+            //            entry’s max-age to max-age.
+            // FIXME: 15. For each headerName in headerNames for which there is no header-name cache entry match using request, create a
+            //            new cache entry with request, max-age, null, and headerName.
+            // FIXME: 16. Return response.
+        }
+
+        // 8. Otherwise, return a network error.
+        returned_pending_response->resolve(Infrastructure::Response::network_error(vm, TRY_OR_IGNORE("CORS-preflight check failed"_string)));
+    });
+
+    return returned_pending_response;
 }
 
 }

@@ -34,7 +34,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -122,16 +121,16 @@ TerminalWidget::TerminalWidget(int ptm_fd, bool automatic_size_policy)
     else
         set_font(Gfx::FontDatabase::the().get_by_name(font_entry));
 
-    m_line_height = font().glyph_height() + m_line_spacing;
+    update_cached_font_metrics();
 
     m_terminal.set_size(Config::read_i32("Terminal"sv, "Window"sv, "Width"sv, 80), Config::read_i32("Terminal"sv, "Window"sv, "Height"sv, 25));
 
-    m_copy_action = GUI::Action::create("&Copy", { Mod_Ctrl | Mod_Shift, Key_C }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-copy.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+    m_copy_action = GUI::Action::create("&Copy", { Mod_Ctrl | Mod_Shift, Key_C }, Gfx::Bitmap::load_from_file("/res/icons/16x16/edit-copy.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
         copy();
     });
     m_copy_action->set_swallow_key_event_when_disabled(true);
 
-    m_paste_action = GUI::Action::create("&Paste", { Mod_Ctrl | Mod_Shift, Key_V }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/paste.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+    m_paste_action = GUI::Action::create("&Paste", { Mod_Ctrl | Mod_Shift, Key_V }, Gfx::Bitmap::load_from_file("/res/icons/16x16/paste.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
         paste();
     });
     m_paste_action->set_swallow_key_event_when_disabled(true);
@@ -148,21 +147,20 @@ TerminalWidget::TerminalWidget(int ptm_fd, bool automatic_size_policy)
 
     update_copy_action();
     update_paste_action();
-
-    set_color_scheme(Config::read_string("Terminal"sv, "Window"sv, "ColorScheme"sv, "Default"sv));
+    update_color_scheme();
 }
 
 Gfx::IntRect TerminalWidget::glyph_rect(u16 row, u16 column)
 {
     int y = row * m_line_height;
-    int x = column * font().glyph_width('x');
-    return { x + frame_thickness() + m_inset, y + frame_thickness() + m_inset, font().glyph_width('x'), font().glyph_height() };
+    int x = column * m_column_width;
+    return { x + frame_thickness() + m_inset, y + frame_thickness() + m_inset, m_column_width, m_cell_height };
 }
 
 Gfx::IntRect TerminalWidget::row_rect(u16 row)
 {
     int y = row * m_line_height;
-    Gfx::IntRect rect = { frame_thickness() + m_inset, y + frame_thickness() + m_inset, font().glyph_width('x') * m_terminal.columns(), font().glyph_height() };
+    Gfx::IntRect rect = { frame_thickness() + m_inset, y + frame_thickness() + m_inset, m_column_width * m_terminal.columns(), m_cell_height };
     rect.inflate(0, m_line_spacing);
     return rect;
 }
@@ -197,7 +195,9 @@ void TerminalWidget::focusout_event(GUI::FocusEvent& event)
 
 void TerminalWidget::event(Core::Event& event)
 {
-    if (event.type() == GUI::Event::WindowBecameActive)
+    if (event.type() == GUI::Event::ThemeChange)
+        update_color_scheme();
+    else if (event.type() == GUI::Event::WindowBecameActive)
         set_logical_focus(true);
     else if (event.type() == GUI::Event::WindowBecameInactive)
         set_logical_focus(false);
@@ -208,7 +208,7 @@ void TerminalWidget::keydown_event(GUI::KeyEvent& event)
 {
     // We specifically need to process shortcuts before input to the Terminal is done
     // since otherwise escape sequences will eat all our shortcuts for dinner.
-    window()->propagate_shortcuts_up_to_application(event, this);
+    window()->propagate_shortcuts(event, this);
     if (event.is_accepted())
         return;
 
@@ -511,7 +511,7 @@ void TerminalWidget::relayout(Gfx::IntSize size)
     TemporaryChange change(m_in_relayout, true);
 
     auto base_size = compute_base_size();
-    int new_columns = (size.width() - base_size.width()) / font().glyph_width('x');
+    int new_columns = (size.width() - base_size.width()) / m_column_width;
     int new_rows = (size.height() - base_size.height()) / m_line_height;
     m_terminal.set_size(new_columns, new_rows);
 
@@ -534,7 +534,7 @@ Gfx::IntSize TerminalWidget::compute_base_size() const
 
 void TerminalWidget::apply_size_increments_to_window(GUI::Window& window)
 {
-    window.set_size_increment({ font().glyph_width('x'), m_line_height });
+    window.set_size_increment({ m_column_width, m_line_height });
     window.set_base_size(compute_base_size());
 }
 
@@ -595,7 +595,7 @@ VT::Position TerminalWidget::buffer_position_at(Gfx::IntPoint position) const
 {
     auto adjusted_position = position.translated(-(frame_thickness() + m_inset), -(frame_thickness() + m_inset));
     int row = adjusted_position.y() / m_line_height;
-    int column = adjusted_position.x() / font().glyph_width('x');
+    int column = adjusted_position.x() / m_column_width;
     if (row < 0)
         row = 0;
     if (column < 0)
@@ -671,15 +671,27 @@ VT::Range TerminalWidget::find_next(StringView needle, const VT::Position& start
     VT::Position start_of_potential_match;
     size_t needle_index = 0;
 
+    Utf8View unicode_needle(needle);
+    Vector<u32> needle_code_points;
+    for (u32 code_point : unicode_needle)
+        needle_code_points.append(code_point);
+
     do {
         auto ch = code_point_at(position);
-        // FIXME: This is not the right way to use a Unicode needle!
-        auto needle_ch = (u32)needle[needle_index];
-        if (case_sensitivity ? ch == needle_ch : to_lowercase_code_point(ch) == to_lowercase_code_point(needle_ch)) {
+
+        bool code_point_matches = false;
+        if (needle_index >= needle_code_points.size())
+            code_point_matches = false;
+        else if (case_sensitivity)
+            code_point_matches = ch == needle_code_points[needle_index];
+        else
+            code_point_matches = to_lowercase_code_point(ch) == to_lowercase_code_point(needle_code_points[needle_index]);
+
+        if (code_point_matches) {
             if (needle_index == 0)
                 start_of_potential_match = position;
             ++needle_index;
-            if (needle_index >= needle.length())
+            if (needle_index >= needle_code_points.size())
                 return { start_of_potential_match, position };
         } else {
             if (needle_index > 0)
@@ -700,23 +712,35 @@ VT::Range TerminalWidget::find_previous(StringView needle, const VT::Position& s
     VT::Position position = start.is_valid() ? start : VT::Position(m_terminal.line_count() - 1, m_terminal.line(m_terminal.line_count() - 1).length() - 1);
     VT::Position original_position = position;
 
+    Utf8View unicode_needle(needle);
+    Vector<u32> needle_code_points;
+    for (u32 code_point : unicode_needle)
+        needle_code_points.append(code_point);
+
     VT::Position end_of_potential_match;
-    size_t needle_index = needle.length() - 1;
+    size_t needle_index = needle_code_points.size() - 1;
 
     do {
         auto ch = code_point_at(position);
-        // FIXME: This is not the right way to use a Unicode needle!
-        auto needle_ch = (u32)needle[needle_index];
-        if (case_sensitivity ? ch == needle_ch : to_lowercase_code_point(ch) == to_lowercase_code_point(needle_ch)) {
-            if (needle_index == needle.length() - 1)
+
+        bool code_point_matches = false;
+        if (needle_index >= needle_code_points.size())
+            code_point_matches = false;
+        else if (case_sensitivity)
+            code_point_matches = ch == needle_code_points[needle_index];
+        else
+            code_point_matches = to_lowercase_code_point(ch) == to_lowercase_code_point(needle_code_points[needle_index]);
+
+        if (code_point_matches) {
+            if (needle_index == needle_code_points.size() - 1)
                 end_of_potential_match = position;
             if (needle_index == 0)
                 return { position, end_of_potential_match };
             --needle_index;
         } else {
-            if (needle_index < needle.length() - 1)
+            if (needle_index < needle_code_points.size() - 1)
                 position = end_of_potential_match;
-            needle_index = needle.length() - 1;
+            needle_index = needle_code_points.size() - 1;
         }
         position = previous_position_before(position, should_wrap);
     } while (position.is_valid() && position != original_position);
@@ -795,6 +819,8 @@ void TerminalWidget::mouseup_event(GUI::MouseEvent& event)
 
 void TerminalWidget::mousedown_event(GUI::MouseEvent& event)
 {
+    using namespace AK::TimeLiterals;
+
     if (event.button() == GUI::MouseButton::Primary) {
         m_left_mousedown_position = event.position();
         m_left_mousedown_position_buffer = buffer_position_at(m_left_mousedown_position);
@@ -809,7 +835,7 @@ void TerminalWidget::mousedown_event(GUI::MouseEvent& event)
         m_active_href = {};
         m_active_href_id = {};
 
-        if (m_triple_click_timer.is_valid() && m_triple_click_timer.elapsed() < 250) {
+        if (m_triple_click_timer.is_valid() && m_triple_click_timer.elapsed_time() < 250_ms) {
             int start_column = 0;
             int end_column = m_terminal.columns() - 1;
 
@@ -841,7 +867,7 @@ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
             auto handlers = Desktop::Launcher::get_handlers_for_url(attribute.href);
             if (!handlers.is_empty()) {
                 auto url = URL(attribute.href);
-                auto path = url.path();
+                auto path = url.serialize_path();
 
                 auto app_file = Desktop::AppFile::get_for_app(LexicalPath::basename(handlers[0]));
                 auto app_name = app_file->is_valid() ? app_file->name() : LexicalPath::basename(handlers[0]);
@@ -1041,7 +1067,7 @@ void TerminalWidget::beep()
         return;
     }
     if (m_bell_mode == BellMode::AudibleBeep) {
-        sysbeep();
+        sysbeep(440);
         return;
     }
     m_visual_beep_timer->restart(200);
@@ -1120,7 +1146,7 @@ void TerminalWidget::context_menu_event(GUI::ContextMenuEvent& event)
         }));
         m_context_menu_for_hyperlink->add_action(GUI::Action::create("Copy &Name", [&](auto&) {
             // file://courage/home/anon/something -> /home/anon/something
-            auto path = URL(m_context_menu_href).path();
+            auto path = URL(m_context_menu_href).serialize_path();
             // /home/anon/something -> something
             auto name = LexicalPath::basename(path);
             GUI::Clipboard::the().set_plain_text(name);
@@ -1151,7 +1177,7 @@ void TerminalWidget::drop_event(GUI::DropEvent& event)
                 send_non_user_input(" "sv.bytes());
 
             if (url.scheme() == "file")
-                send_non_user_input(url.path().bytes());
+                send_non_user_input(url.serialize_path().bytes());
             else
                 send_non_user_input(url.to_deprecated_string().bytes());
 
@@ -1167,9 +1193,22 @@ void TerminalWidget::drop_event(GUI::DropEvent& event)
 void TerminalWidget::did_change_font()
 {
     GUI::Frame::did_change_font();
-    m_line_height = font().glyph_height() + m_line_spacing;
+    update_cached_font_metrics();
     if (!size().is_empty())
         relayout(size());
+}
+
+static void collect_font_metrics(Gfx::Font const& font, int& column_width, int& cell_height, int& line_height, int& line_spacing)
+{
+    line_spacing = 4;
+    column_width = static_cast<int>(ceilf(font.glyph_width('x')));
+    cell_height = font.pixel_size_rounded_up();
+    line_height = cell_height + line_spacing;
+}
+
+void TerminalWidget::update_cached_font_metrics()
+{
+    collect_font_metrics(font(), m_column_width, m_cell_height, m_line_height, m_line_spacing);
 }
 
 void TerminalWidget::clear_including_history()
@@ -1198,67 +1237,46 @@ void TerminalWidget::update_paste_action()
     m_paste_action->set_enabled(mime_type.starts_with("text/"sv) && !data.is_empty());
 }
 
-void TerminalWidget::set_color_scheme(StringView name)
+void TerminalWidget::update_color_scheme()
 {
-    if (name.contains('/')) {
-        dbgln("Shenanigans! Color scheme names can't contain slashes.");
-        return;
-    }
+    auto const& palette = GUI::Widget::palette();
 
-    m_color_scheme_name = name;
+    m_show_bold_text_as_bright = palette.bold_text_as_bright();
 
-    constexpr StringView color_names[] = {
-        "Black"sv,
-        "Red"sv,
-        "Green"sv,
-        "Yellow"sv,
-        "Blue"sv,
-        "Magenta"sv,
-        "Cyan"sv,
-        "White"sv
-    };
+    m_default_background_color = palette.background();
+    m_default_foreground_color = palette.foreground();
 
-    auto path = DeprecatedString::formatted("/res/terminal-colors/{}.ini", name);
-    auto color_config_or_error = Core::ConfigFile::open(path);
-    if (color_config_or_error.is_error()) {
-        dbgln("Unable to read color scheme file '{}': {}", path, color_config_or_error.error());
-        return;
-    }
-    auto color_config = color_config_or_error.release_value();
+    m_colors[0] = palette.black();
+    m_colors[1] = palette.red();
+    m_colors[2] = palette.green();
+    m_colors[3] = palette.yellow();
+    m_colors[4] = palette.blue();
+    m_colors[5] = palette.magenta();
+    m_colors[6] = palette.cyan();
+    m_colors[7] = palette.white();
+    m_colors[8] = palette.bright_black();
+    m_colors[9] = palette.bright_red();
+    m_colors[10] = palette.bright_green();
+    m_colors[11] = palette.bright_yellow();
+    m_colors[12] = palette.bright_blue();
+    m_colors[13] = palette.bright_magenta();
+    m_colors[14] = palette.bright_cyan();
+    m_colors[15] = palette.bright_white();
 
-    m_show_bold_text_as_bright = color_config->read_bool_entry("Options", "ShowBoldTextAsBright", true);
-
-    auto default_background = Gfx::Color::from_string(color_config->read_entry("Primary", "Background"));
-    if (default_background.has_value())
-        m_default_background_color = default_background.value();
-    else
-        m_default_background_color = Gfx::Color::from_rgb(m_colors[(u8)VT::Color::ANSIColor::Black]);
-
-    auto default_foreground = Gfx::Color::from_string(color_config->read_entry("Primary", "Foreground"));
-    if (default_foreground.has_value())
-        m_default_foreground_color = default_foreground.value();
-    else
-        m_default_foreground_color = Gfx::Color::from_rgb(m_colors[(u8)VT::Color::ANSIColor::White]);
-
-    for (u8 color_idx = 0; color_idx < 8; ++color_idx) {
-        auto rgb = Gfx::Color::from_string(color_config->read_entry("Normal", color_names[color_idx]));
-        if (rgb.has_value())
-            m_colors[color_idx] = rgb.value().value();
-    }
-
-    for (u8 color_idx = 0; color_idx < 8; ++color_idx) {
-        auto rgb = Gfx::Color::from_string(color_config->read_entry("Bright", color_names[color_idx]));
-        if (rgb.has_value())
-            m_colors[color_idx + 8] = rgb.value().value();
-    }
     update();
 }
 
 Gfx::IntSize TerminalWidget::widget_size_for_font(Gfx::Font const& font) const
 {
+    int column_width = 0;
+    int line_height = 0;
+    int cell_height = 0;
+    int line_spacing = 0;
+    collect_font_metrics(font, column_width, cell_height, line_height, line_spacing);
+    auto base_size = compute_base_size();
     return {
-        (frame_thickness() * 2) + (m_inset * 2) + (m_terminal.columns() * font.glyph_width('x')) + m_scrollbar->width(),
-        (frame_thickness() * 2) + (m_inset * 2) + (m_terminal.rows() * (font.glyph_height() + m_line_spacing))
+        base_size.width() + (m_terminal.columns() * column_width),
+        base_size.height() + (m_terminal.rows() * line_height),
     };
 }
 
@@ -1268,11 +1286,11 @@ constexpr Gfx::Color TerminalWidget::terminal_color_to_rgb(VT::Color color) cons
     case VT::Color::Kind::RGB:
         return Gfx::Color::from_rgb(color.as_rgb());
     case VT::Color::Kind::Indexed:
-        return Gfx::Color::from_rgb(m_colors[color.as_indexed()]);
+        return m_colors[color.as_indexed()];
     case VT::Color::Kind::Named: {
         auto ansi = color.as_named();
         if ((u16)ansi < 256)
-            return Gfx::Color::from_rgb(m_colors[(u16)ansi]);
+            return m_colors[(u16)ansi];
         else if (ansi == VT::Color::ANSIColor::DefaultForeground)
             return m_default_foreground_color;
         else if (ansi == VT::Color::ANSIColor::DefaultBackground)
@@ -1287,8 +1305,8 @@ constexpr Gfx::Color TerminalWidget::terminal_color_to_rgb(VT::Color color) cons
 
 void TerminalWidget::set_font_and_resize_to_fit(Gfx::Font const& font)
 {
-    set_font(font);
     resize(widget_size_for_font(font));
+    set_font(font);
 }
 
 // Used for sending data that was not directly typed by the user.

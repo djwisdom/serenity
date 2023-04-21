@@ -6,6 +6,7 @@
  */
 
 #include "CatDog.h"
+#include <LibCore/File.h>
 #include <LibCore/ProcessStatisticsReader.h>
 #include <LibGUI/Painter.h>
 #include <LibGUI/Window.h>
@@ -49,13 +50,13 @@ ErrorOr<NonnullRefPtr<CatDog>> CatDog::create()
 
     auto catdog = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) CatDog));
     for (auto const& image_source : image_sources)
-        TRY(catdog->m_images.try_append({ image_source.state, *TRY(Gfx::Bitmap::try_load_from_file(image_source.path)) }));
+        TRY(catdog->m_images.try_append({ image_source.state, *TRY(Gfx::Bitmap::load_from_file(image_source.path)) }));
 
     return catdog;
 }
 
 CatDog::CatDog()
-    : m_proc_all(MUST(Core::Stream::File::open("/sys/kernel/processes"sv, Core::Stream::OpenMode::Read)))
+    : m_proc_all(MUST(Core::File::open("/sys/kernel/processes"sv, Core::File::OpenMode::Read)))
 {
     m_idle_sleep_timer.start();
 }
@@ -74,13 +75,13 @@ CatDog::State CatDog::special_application_states() const
 
     auto proc_info = maybe_proc_info.release_value();
     auto maybe_paint_program = proc_info.processes.first_matching([](auto& process) {
-        return process.name.equals_ignoring_case("pixelpaint"sv) || process.name.equals_ignoring_case("fonteditor"sv);
+        return process.name.equals_ignoring_ascii_case("pixelpaint"sv) || process.name.equals_ignoring_ascii_case("fonteditor"sv);
     });
     if (maybe_paint_program.has_value())
         return State::Artist;
 
     auto maybe_inspector_program = proc_info.processes.first_matching([](auto& process) {
-        return process.name.equals_ignoring_case("inspector"sv) || process.name.equals_ignoring_case("systemmonitor"sv) || process.name.equals_ignoring_case("profiler"sv);
+        return process.name.equals_ignoring_ascii_case("inspector"sv) || process.name.equals_ignoring_ascii_case("systemmonitor"sv) || process.name.equals_ignoring_ascii_case("profiler"sv);
     });
     if (maybe_inspector_program.has_value())
         return State::Inspector;
@@ -100,6 +101,8 @@ bool CatDog::is_inspector() const
 
 void CatDog::timer_event(Core::TimerEvent&)
 {
+    using namespace AK::TimeLiterals;
+
     if (has_flag(m_state, State::Alert))
         return;
 
@@ -127,7 +130,7 @@ void CatDog::timer_event(Core::TimerEvent&)
     if (has_any_flag(m_state, State::Directions)) {
         m_idle_sleep_timer.start();
     } else {
-        if (m_idle_sleep_timer.elapsed() > 5'000)
+        if (m_idle_sleep_timer.elapsed_time() > 5_sec)
             m_state |= State::Sleeping;
         else
             m_state |= State::Idle;

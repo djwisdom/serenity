@@ -12,10 +12,10 @@
 #include <AK/Random.h>
 #include <AK/StringBuilder.h>
 #include <LibCore/ConfigFile.h>
-#include <LibCore/File.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/LocalServer.h>
-#include <LibCore/Stream.h>
 #include <LibDNS/Packet.h>
+#include <limits.h>
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
@@ -82,7 +82,7 @@ void LookupServer::load_etc_hosts()
         m_etc_hosts.ensure(name).empend(name, record_type, RecordClass::IN, s_static_ttl, move(data), false);
     };
 
-    auto file = Core::File::construct("/etc/hosts");
+    auto file = Core::DeprecatedFile::construct("/etc/hosts");
     if (!file->open(Core::OpenMode::ReadOnly)) {
         dbgln("Failed to open '/etc/hosts'");
         return;
@@ -204,8 +204,10 @@ ErrorOr<Vector<Answer>> LookupServer::lookup(Name const& name, RecordType record
                 break;
         } while (--retries);
         if (!upstream_answers.is_empty()) {
-            for (auto& answer : upstream_answers)
+            for (auto& answer : upstream_answers) {
                 add_answer(answer);
+                put_in_cache(answer);
+            }
             break;
         } else {
             if (!did_get_response)
@@ -234,15 +236,15 @@ ErrorOr<Vector<Answer>> LookupServer::lookup(Name const& name, DeprecatedString 
         name_in_question.randomize_case();
     request.add_question({ name_in_question, record_type, RecordClass::IN, false });
 
-    auto buffer = request.to_byte_buffer();
+    auto buffer = TRY(request.to_byte_buffer());
 
-    auto udp_socket = TRY(Core::Stream::UDPSocket::connect(nameserver, 53, Time::from_seconds(1)));
+    auto udp_socket = TRY(Core::UDPSocket::connect(nameserver, 53, Time::from_seconds(1)));
     TRY(udp_socket->set_blocking(true));
 
-    TRY(udp_socket->write(buffer));
+    TRY(udp_socket->write_until_depleted(buffer));
 
     u8 response_buffer[4096];
-    int nrecv = TRY(udp_socket->read({ response_buffer, sizeof(response_buffer) })).size();
+    int nrecv = TRY(udp_socket->read_some({ response_buffer, sizeof(response_buffer) })).size();
     if (udp_socket->is_eof())
         return Vector<Answer> {};
 
@@ -278,7 +280,7 @@ ErrorOr<Vector<Answer>> LookupServer::lookup(Name const& name, DeprecatedString 
         auto& response_question = response.questions()[i];
         bool match = request_question.class_code() == response_question.class_code()
             && request_question.record_type() == response_question.record_type()
-            && request_question.name().as_string().equals_ignoring_case(response_question.name().as_string());
+            && request_question.name().as_string().equals_ignoring_ascii_case(response_question.name().as_string());
         if (!match) {
             dbgln("Request and response questions do not match");
             dbgln("   Request: name=_{}_, type={}, class={}", request_question.name().as_string(), response_question.record_type(), response_question.class_code());

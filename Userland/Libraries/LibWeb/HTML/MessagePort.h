@@ -17,12 +17,17 @@ namespace Web::HTML {
     E(onmessage, HTML::EventNames::message)      \
     E(onmessageerror, HTML::EventNames::messageerror)
 
+// https://html.spec.whatwg.org/multipage/web-messaging.html#structuredserializeoptions
+struct StructuredSerializeOptions {
+    Vector<JS::Handle<JS::Object>> transfer;
+};
+
 // https://html.spec.whatwg.org/multipage/web-messaging.html#message-ports
 class MessagePort final : public DOM::EventTarget {
     WEB_PLATFORM_OBJECT(MessagePort, DOM::EventTarget);
 
 public:
-    static JS::NonnullGCPtr<MessagePort> create(JS::Realm&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<MessagePort>> create(JS::Realm&);
 
     virtual ~MessagePort() override;
 
@@ -46,6 +51,7 @@ public:
 private:
     explicit MessagePort(JS::Realm&);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     bool is_entangled() const { return m_remote_port; }

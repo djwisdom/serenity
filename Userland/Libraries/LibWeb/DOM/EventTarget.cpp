@@ -162,7 +162,7 @@ void EventTarget::add_an_event_listener(DOMEventListener& listener)
     //    and capture is listener’s capture, then append listener to eventTarget’s event listener list.
     auto it = m_event_listener_list.find_if([&](auto& entry) {
         return entry->type == listener.type
-            && &entry->callback->callback().callback == &listener.callback->callback().callback
+            && entry->callback->callback().callback == listener.callback->callback().callback
             && entry->capture == listener.capture;
     });
     if (it == m_event_listener_list.end())
@@ -191,7 +191,7 @@ void EventTarget::remove_event_listener(FlyString const& type, IDLEventListener*
             return true;
         if (!entry.callback || !callback)
             return false;
-        return &entry.callback->callback().callback == &callback->callback().callback;
+        return entry.callback->callback().callback == callback->callback().callback;
     };
     auto it = m_event_listener_list.find_if([&](auto& entry) {
         return entry->type == type
@@ -454,7 +454,7 @@ WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(FlyString 
 
         //  6. Return scope. (NOTE: Not necessary)
 
-        auto function = JS::ECMAScriptFunctionObject::create(realm, name, builder.to_deprecated_string(), program->body(), program->parameters(), program->function_length(), scope, nullptr, JS::FunctionKind::Normal, program->is_strict_mode(), program->might_need_arguments_object(), is_arrow_function);
+        auto function = JS::ECMAScriptFunctionObject::create(realm, name.to_deprecated_fly_string(), builder.to_deprecated_string(), program->body(), program->parameters(), program->function_length(), scope, nullptr, JS::FunctionKind::Normal, program->is_strict_mode(), program->might_need_arguments_object(), is_arrow_function);
 
         // 10. Remove settings object's realm execution context from the JavaScript execution context stack.
         VERIFY(vm.execution_context_stack().last() == &settings_object.realm_execution_context());
@@ -464,12 +464,12 @@ WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(FlyString 
         function->set_script_or_module({});
 
         // 12. Set eventHandler's value to the result of creating a Web IDL EventHandler callback function object whose object reference is function and whose callback context is settings object.
-        event_handler->value = realm.heap().allocate_without_realm<WebIDL::CallbackType>(*function, settings_object).ptr();
+        event_handler->value = JS::GCPtr(realm.heap().allocate_without_realm<WebIDL::CallbackType>(*function, settings_object));
     }
 
     // 4. Return eventHandler's value.
-    VERIFY(event_handler->value.has<WebIDL::CallbackType*>());
-    return *event_handler->value.get_pointer<WebIDL::CallbackType*>();
+    VERIFY(event_handler->value.has<JS::GCPtr<WebIDL::CallbackType>>());
+    return *event_handler->value.get_pointer<JS::GCPtr<WebIDL::CallbackType>>();
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-attributes:event-handler-idl-attributes-3
@@ -512,7 +512,7 @@ void EventTarget::set_event_handler_attribute(FlyString const& name, WebIDL::Cal
 
     auto& event_handler = event_handler_iterator->value;
 
-    event_handler->value = value;
+    event_handler->value = JS::GCPtr(value);
 
     //  4. Activate an event handler given eventTarget and name.
     //  NOTE: See the optimization comment above.
@@ -561,7 +561,7 @@ void EventTarget::activate_event_handler(FlyString const& name, HTML::EventHandl
     // 5. Let listener be a new event listener whose type is the event handler event type corresponding to eventHandler and callback is callback.
     auto listener = realm.heap().allocate_without_realm<DOMEventListener>();
     listener->type = name;
-    listener->callback = IDLEventListener::create(realm, *callback).ptr();
+    listener->callback = IDLEventListener::create(realm, *callback).release_value_but_fixme_should_propagate_errors();
 
     // 6. Add an event listener with eventTarget and listener.
     add_an_event_listener(*listener);
@@ -679,7 +679,7 @@ JS::ThrowCompletionOr<void> EventTarget::process_event_handler_for_event(FlyStri
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-attributes:concept-element-attributes-change-ext
-void EventTarget::element_event_handler_attribute_changed(FlyString const& local_name, DeprecatedString const& value)
+void EventTarget::element_event_handler_attribute_changed(FlyString const& local_name, Optional<String> const& value)
 {
     // NOTE: Step 1 of this algorithm was handled in HTMLElement::parse_attribute.
 
@@ -692,7 +692,7 @@ void EventTarget::element_event_handler_attribute_changed(FlyString const& local
         return;
 
     // 4. If value is null, then deactivate an event handler given eventTarget and localName.
-    if (value.is_null()) {
+    if (!value.has_value()) {
         event_target->deactivate_event_handler(local_name);
         return;
     }
@@ -714,7 +714,7 @@ void EventTarget::element_event_handler_attribute_changed(FlyString const& local
     // NOTE: See the optimization comments in set_event_handler_attribute.
 
     if (event_handler_iterator == handler_map.end()) {
-        auto new_event_handler = heap().allocate_without_realm<HTML::EventHandler>(value);
+        auto new_event_handler = heap().allocate_without_realm<HTML::EventHandler>(value->to_deprecated_string());
 
         //  6. Activate an event handler given eventTarget and name.
         event_target->activate_event_handler(local_name, *new_event_handler);
@@ -726,7 +726,7 @@ void EventTarget::element_event_handler_attribute_changed(FlyString const& local
     auto& event_handler = event_handler_iterator->value;
 
     //  6. Activate an event handler given eventTarget and name.
-    event_handler->value = value;
+    event_handler->value = value->to_deprecated_string();
     event_target->activate_event_handler(local_name, *event_handler);
 }
 
@@ -742,6 +742,11 @@ bool EventTarget::has_event_listener(FlyString const& type) const
             return true;
     }
     return false;
+}
+
+bool EventTarget::has_event_listeners() const
+{
+    return !m_event_listener_list.is_empty();
 }
 
 }

@@ -17,13 +17,12 @@ namespace Web::DOM {
 StaticRange::StaticRange(Node& start_container, u32 start_offset, Node& end_container, u32 end_offset)
     : AbstractRange(start_container, start_offset, end_container, end_offset)
 {
-    set_prototype(&Bindings::cached_web_prototype(start_container.realm(), "StaticRange"));
 }
 
 StaticRange::~StaticRange() = default;
 
 // https://dom.spec.whatwg.org/#dom-staticrange-staticrange
-WebIDL::ExceptionOr<StaticRange*> StaticRange::construct_impl(JS::Realm& realm, StaticRangeInit& init)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<StaticRange>> StaticRange::construct_impl(JS::Realm& realm, StaticRangeInit& init)
 {
     // 1. If init["startContainer"] or init["endContainer"] is a DocumentType or Attr node, then throw an "InvalidNodeTypeError" DOMException.
     if (is<DocumentType>(*init.start_container) || is<Attr>(*init.start_container))
@@ -33,7 +32,15 @@ WebIDL::ExceptionOr<StaticRange*> StaticRange::construct_impl(JS::Realm& realm, 
         return WebIDL::InvalidNodeTypeError::create(realm, "endContainer cannot be a DocumentType or Attribute node.");
 
     // 2. Set this’s start to (init["startContainer"], init["startOffset"]) and end to (init["endContainer"], init["endOffset"]).
-    return realm.heap().allocate<StaticRange>(realm, *init.start_container, init.start_offset, *init.end_container, init.end_offset).ptr();
+    return MUST_OR_THROW_OOM(realm.heap().allocate<StaticRange>(realm, *init.start_container, init.start_offset, *init.end_container, init.end_offset));
+}
+
+JS::ThrowCompletionOr<void> StaticRange::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::StaticRangePrototype>(realm, "StaticRange"));
+
+    return {};
 }
 
 }

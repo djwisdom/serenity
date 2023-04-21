@@ -14,23 +14,25 @@ namespace JS::Intl {
 
 // 13.3 Properties of the Intl.ListFormat Prototype Object, https://tc39.es/ecma402/#sec-properties-of-intl-listformat-prototype-object
 ListFormatPrototype::ListFormatPrototype(Realm& realm)
-    : PrototypeObject(*realm.intrinsics().object_prototype())
+    : PrototypeObject(realm.intrinsics().object_prototype())
 {
 }
 
-void ListFormatPrototype::initialize(Realm& realm)
+ThrowCompletionOr<void> ListFormatPrototype::initialize(Realm& realm)
 {
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
     auto& vm = this->vm();
 
     // 13.3.2 Intl.ListFormat.prototype [ @@toStringTag ], https://tc39.es/ecma402/#sec-Intl.ListFormat.prototype-toStringTag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Intl.ListFormat"), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), MUST_OR_THROW_OOM(PrimitiveString::create(vm, "Intl.ListFormat"sv)), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, vm.names.format, format, 1, attr);
     define_native_function(realm, vm.names.formatToParts, format_to_parts, 1, attr);
     define_native_function(realm, vm.names.resolvedOptions, resolved_options, 0, attr);
+
+    return {};
 }
 
 // 13.3.3 Intl.ListFormat.prototype.format ( list ), https://tc39.es/ecma402/#sec-Intl.ListFormat.prototype.format
@@ -40,13 +42,13 @@ JS_DEFINE_NATIVE_FUNCTION(ListFormatPrototype::format)
 
     // 1. Let lf be the this value.
     // 2. Perform ? RequireInternalSlot(lf, [[InitializedListFormat]]).
-    auto* list_format = TRY(typed_this_object(vm));
+    auto list_format = TRY(typed_this_object(vm));
 
     // 3. Let stringList be ? StringListFromIterable(list).
     auto string_list = TRY(string_list_from_iterable(vm, list));
 
     // 4. Return ! FormatList(lf, stringList).
-    auto formatted = format_list(*list_format, string_list);
+    auto formatted = MUST_OR_THROW_OOM(format_list(vm, list_format, string_list));
     return PrimitiveString::create(vm, move(formatted));
 }
 
@@ -57,13 +59,13 @@ JS_DEFINE_NATIVE_FUNCTION(ListFormatPrototype::format_to_parts)
 
     // 1. Let lf be the this value.
     // 2. Perform ? RequireInternalSlot(lf, [[InitializedListFormat]]).
-    auto* list_format = TRY(typed_this_object(vm));
+    auto list_format = TRY(typed_this_object(vm));
 
     // 3. Let stringList be ? StringListFromIterable(list).
     auto string_list = TRY(string_list_from_iterable(vm, list));
 
     // 4. Return ! FormatListToParts(lf, stringList).
-    return format_list_to_parts(vm, *list_format, string_list);
+    return MUST_OR_THROW_OOM(format_list_to_parts(vm, list_format, string_list));
 }
 
 // 13.3.5 Intl.ListFormat.prototype.resolvedOptions ( ), https://tc39.es/ecma402/#sec-Intl.ListFormat.prototype.resolvedoptions
@@ -73,7 +75,7 @@ JS_DEFINE_NATIVE_FUNCTION(ListFormatPrototype::resolved_options)
 
     // 1. Let lf be the this value.
     // 2. Perform ? RequireInternalSlot(lf, [[InitializedListFormat]]).
-    auto* list_format = TRY(typed_this_object(vm));
+    auto list_format = TRY(typed_this_object(vm));
 
     // 3. Let options be OrdinaryObjectCreate(%Object.prototype%).
     auto options = Object::create(realm, realm.intrinsics().object_prototype());
@@ -84,8 +86,8 @@ JS_DEFINE_NATIVE_FUNCTION(ListFormatPrototype::resolved_options)
     //     c. Assert: v is not undefined.
     //     d. Perform ! CreateDataPropertyOrThrow(options, p, v).
     MUST(options->create_data_property_or_throw(vm.names.locale, PrimitiveString::create(vm, list_format->locale())));
-    MUST(options->create_data_property_or_throw(vm.names.type, PrimitiveString::create(vm, list_format->type_string())));
-    MUST(options->create_data_property_or_throw(vm.names.style, PrimitiveString::create(vm, list_format->style_string())));
+    MUST(options->create_data_property_or_throw(vm.names.type, MUST_OR_THROW_OOM(PrimitiveString::create(vm, list_format->type_string()))));
+    MUST(options->create_data_property_or_throw(vm.names.style, MUST_OR_THROW_OOM(PrimitiveString::create(vm, list_format->style_string()))));
 
     // 5. Return options.
     return options;

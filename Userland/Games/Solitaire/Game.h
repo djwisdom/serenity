@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Till Mayer <till.mayer@web.de>
- * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -10,6 +10,7 @@
 
 #include <AK/Array.h>
 #include <LibCards/CardGame.h>
+#include <LibCards/CardPainter.h>
 #include <LibCards/CardStack.h>
 
 using Cards::Card;
@@ -29,11 +30,12 @@ enum class GameOverReason {
 };
 
 class Game final : public Cards::CardGame {
-    C_OBJECT(Game)
+    C_OBJECT_ABSTRACT(Game)
 public:
     static constexpr int width = 640;
     static constexpr int height = 480;
 
+    static ErrorOr<NonnullRefPtr<Game>> try_create();
     virtual ~Game() override = default;
 
     Mode mode() const { return m_mode; }
@@ -57,20 +59,29 @@ private:
         {
         }
 
-        Animation(RefPtr<Card> animation_card, float gravity, int x_vel, float bouncyness)
-            : m_animation_card(animation_card)
+        Animation(Cards::Suit suit, Cards::Rank rank, Gfx::IntPoint start_position, float gravity, int x_vel, float bouncyness)
+            : m_suit(suit)
+            , m_rank(rank)
+            , m_position(start_position)
             , m_gravity(gravity)
             , m_x_velocity(x_vel)
             , m_bouncyness(bouncyness)
         {
         }
 
-        RefPtr<Card> card() { return m_animation_card; }
+        Gfx::IntRect card_rect() const
+        {
+            return {
+                m_position.x(), m_position.y(), Card::width, Card::height
+            };
+        }
+
+        Gfx::IntPoint position() const { return m_position; }
 
         void draw(GUI::Painter& painter)
         {
-            VERIFY(!m_animation_card.is_null());
-            m_animation_card->paint(painter);
+            auto bitmap = Cards::CardPainter::the().card_front(m_suit, m_rank);
+            painter.blit(m_position, bitmap, bitmap->rect());
             m_dirty = false;
         }
 
@@ -80,15 +91,14 @@ private:
             if (m_dirty)
                 return false;
 
-            VERIFY(!m_animation_card.is_null());
             m_y_velocity += m_gravity;
 
-            if (m_animation_card->position().y() + Card::height + m_y_velocity > Game::height + 1 && m_y_velocity > 0) {
+            if (m_position.y() + Card::height + m_y_velocity > Game::height + 1 && m_y_velocity > 0) {
                 m_y_velocity = min((m_y_velocity * -m_bouncyness), -8.f);
-                m_animation_card->rect().set_y(Game::height - Card::height);
-                m_animation_card->rect().translate_by(m_x_velocity, 0);
+                m_position.set_y(Game::height - Card::height);
+                m_position.translate_by(m_x_velocity, 0);
             } else {
-                m_animation_card->rect().translate_by(m_x_velocity, m_y_velocity);
+                m_position.translate_by(m_x_velocity, m_y_velocity);
             }
 
             m_dirty = true;
@@ -96,7 +106,9 @@ private:
         }
 
     private:
-        RefPtr<Card> m_animation_card;
+        Cards::Suit m_suit { Cards::Suit::Spades };
+        Cards::Rank m_rank { Cards::Rank::Ace };
+        Gfx::IntPoint m_position { 0, 0 };
         float m_gravity { 0 };
         int m_x_velocity { 0 };
         float m_y_velocity { 0 };
@@ -118,7 +130,7 @@ private:
 
         Type type { Type::Invalid };
         CardStack* from { nullptr };
-        NonnullRefPtrVector<Card> cards;
+        Vector<NonnullRefPtr<Card>> cards;
         CardStack* to { nullptr };
     };
 
@@ -161,7 +173,7 @@ private:
 
     void score_move(CardStack& from, CardStack& to, bool inverse = false);
     void score_flip(bool inverse = false);
-    void remember_move_for_undo(CardStack& from, CardStack& to, NonnullRefPtrVector<Card> moved_cards);
+    void remember_move_for_undo(CardStack& from, CardStack& to, Vector<NonnullRefPtr<Card>> moved_cards);
     void remember_flip_for_undo(Card& card);
     void update_score(int to_add);
     void draw_cards();
@@ -174,6 +186,8 @@ private:
     void create_new_animation_card();
     void set_background_fill_enabled(bool);
     void check_for_game_over();
+    void clear_hovered_stack();
+    void deal_next_card();
 
     virtual void paint_event(GUI::PaintEvent&) override;
     virtual void mousedown_event(GUI::MouseEvent&) override;
@@ -186,16 +200,21 @@ private:
     Mode m_mode { Mode::SingleCardDraw };
 
     LastMove m_last_move;
-    NonnullRefPtrVector<Card> m_new_deck;
+    Vector<NonnullRefPtr<Card>> m_new_deck;
     Gfx::IntPoint m_mouse_down_location;
 
     bool m_mouse_down { false };
 
+    enum class State {
+        WaitingForNewGame,
+        NewGameAnimation,
+        GameInProgress,
+        StartGameOverAnimationNextFrame,
+        GameOverAnimation,
+    };
+    State m_state { State::WaitingForNewGame };
+
     Animation m_animation;
-    bool m_start_game_over_animation_next_frame { false };
-    bool m_game_over_animation { false };
-    bool m_waiting_for_new_game { true };
-    bool m_new_game_animation { false };
     uint8_t m_new_game_animation_pile { 0 };
     uint8_t m_new_game_animation_delay { 0 };
 
@@ -203,6 +222,8 @@ private:
     uint8_t m_passes_left_before_punishment { 0 };
 
     bool m_auto_collect { false };
+
+    RefPtr<CardStack> m_hovered_stack;
 };
 
 }

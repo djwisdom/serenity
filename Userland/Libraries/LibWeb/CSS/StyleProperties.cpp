@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,6 +9,17 @@
 #include <LibCore/DirIterator.h>
 #include <LibWeb/CSS/Clip.h>
 #include <LibWeb/CSS/StyleProperties.h>
+#include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
+#include <LibWeb/CSS/StyleValues/GridTemplateAreaStyleValue.h>
+#include <LibWeb/CSS/StyleValues/GridTrackPlacementStyleValue.h>
+#include <LibWeb/CSS/StyleValues/GridTrackSizeStyleValue.h>
+#include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RectStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
+#include <LibWeb/CSS/StyleValues/StringStyleValue.h>
+#include <LibWeb/CSS/StyleValues/StyleValueList.h>
+#include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/FontCache.h>
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/Node.h>
@@ -31,12 +42,12 @@ NonnullRefPtr<StyleProperties> StyleProperties::clone() const
     return adopt_ref(*new StyleProperties(*this));
 }
 
-void StyleProperties::set_property(CSS::PropertyID id, NonnullRefPtr<StyleValue> value)
+void StyleProperties::set_property(CSS::PropertyID id, NonnullRefPtr<StyleValue const> value)
 {
     m_property_values[to_underlying(id)] = move(value);
 }
 
-NonnullRefPtr<StyleValue> StyleProperties::property(CSS::PropertyID property_id) const
+NonnullRefPtr<StyleValue const> StyleProperties::property(CSS::PropertyID property_id) const
 {
     auto value = m_property_values[to_underlying(property_id)];
     // By the time we call this method, all properties have values assigned.
@@ -44,7 +55,7 @@ NonnullRefPtr<StyleValue> StyleProperties::property(CSS::PropertyID property_id)
     return value.release_nonnull();
 }
 
-RefPtr<StyleValue> StyleProperties::maybe_null_property(CSS::PropertyID property_id) const
+RefPtr<StyleValue const> StyleProperties::maybe_null_property(CSS::PropertyID property_id) const
 {
     return m_property_values[to_underlying(property_id)];
 }
@@ -68,7 +79,7 @@ CSS::Size StyleProperties::size_value(CSS::PropertyID id) const
     }
 
     if (value->is_calculated())
-        return CSS::Size::make_length(CSS::Length::make_calculated(value->as_calculated()));
+        return CSS::Size::make_calculated(const_cast<CalculatedStyleValue&>(value->as_calculated()));
 
     if (value->is_percentage())
         return CSS::Size::make_percentage(value->as_percentage().percentage());
@@ -81,7 +92,7 @@ CSS::Size StyleProperties::size_value(CSS::PropertyID id) const
     }
 
     // FIXME: Support `fit-content(<length>)`
-    dbgln("FIXME: Unsupported size value: `{}`, treating as `auto`", value->to_deprecated_string());
+    dbgln("FIXME: Unsupported size value: `{}`, treating as `auto`", value->to_string());
     return CSS::Size::make_auto();
 }
 
@@ -95,13 +106,16 @@ Optional<LengthPercentage> StyleProperties::length_percentage(CSS::PropertyID id
     auto value = property(id);
 
     if (value->is_calculated())
-        return LengthPercentage { value->as_calculated() };
+        return LengthPercentage { const_cast<CalculatedStyleValue&>(value->as_calculated()) };
 
     if (value->is_percentage())
         return value->as_percentage().percentage();
 
     if (value->has_length())
         return value->to_length();
+
+    if (value->has_auto())
+        return LengthPercentage { Length::make_auto() };
 
     return {};
 }
@@ -124,7 +138,7 @@ Color StyleProperties::color_or_fallback(CSS::PropertyID id, Layout::NodeWithSty
     return value->to_color(node);
 }
 
-NonnullRefPtr<Gfx::Font> StyleProperties::font_fallback(bool monospace, bool bold)
+NonnullRefPtr<Gfx::Font const> StyleProperties::font_fallback(bool monospace, bool bold)
 {
     if (monospace && bold)
         return Platform::FontPlugin::the().default_fixed_width_font().bold_variant();
@@ -138,7 +152,38 @@ NonnullRefPtr<Gfx::Font> StyleProperties::font_fallback(bool monospace, bool bol
     return Platform::FontPlugin::the().default_font();
 }
 
-float StyleProperties::line_height(Layout::Node const& layout_node) const
+// FIXME: This implementation is almost identical to line_height(Layout::Node) below. Maybe they can be combined somehow.
+CSSPixels StyleProperties::line_height(CSSPixelRect const& viewport_rect, Gfx::FontPixelMetrics const& font_metrics, CSSPixels font_size, CSSPixels root_font_size, CSSPixels parent_line_height, CSSPixels root_line_height) const
+{
+    auto line_height = property(CSS::PropertyID::LineHeight);
+
+    if (line_height->is_identifier() && line_height->to_identifier() == ValueID::Normal)
+        return font_metrics.line_spacing();
+
+    if (line_height->is_length()) {
+        auto line_height_length = line_height->to_length();
+        if (!line_height_length.is_auto())
+            return line_height_length.to_px(viewport_rect, font_metrics, font_size, root_font_size, parent_line_height, root_line_height);
+    }
+
+    if (line_height->is_numeric())
+        return Length(line_height->to_number(), Length::Type::Em).to_px(viewport_rect, font_metrics, font_size, root_font_size, parent_line_height, root_line_height);
+
+    if (line_height->is_percentage()) {
+        // Percentages are relative to 1em. https://www.w3.org/TR/css-inline-3/#valdef-line-height-percentage
+        auto& percentage = line_height->as_percentage().percentage();
+        return Length(percentage.as_fraction(), Length::Type::Em).to_px(viewport_rect, font_metrics, font_size, root_font_size, parent_line_height, root_line_height);
+    }
+
+    if (line_height->is_calculated()) {
+        // FIXME: Handle `line-height: calc(...)` despite not having a LayoutNode here.
+        return font_metrics.line_spacing();
+    }
+
+    return font_metrics.line_spacing();
+}
+
+CSSPixels StyleProperties::line_height(Layout::Node const& layout_node) const
 {
     auto line_height = property(CSS::PropertyID::LineHeight);
 
@@ -159,6 +204,9 @@ float StyleProperties::line_height(Layout::Node const& layout_node) const
         auto& percentage = line_height->as_percentage().percentage();
         return Length(percentage.as_fraction(), Length::Type::Em).to_px(layout_node);
     }
+
+    if (line_height->is_calculated())
+        return line_height->as_calculated().resolve_length(layout_node)->to_px(layout_node);
 
     return layout_node.font().pixel_metrics().line_spacing();
 }
@@ -188,13 +236,13 @@ float StyleProperties::opacity() const
             if (maybe_percentage.has_value())
                 unclamped_opacity = maybe_percentage->as_fraction();
             else
-                dbgln("Unable to resolve calc() as opacity (percentage): {}", value->to_deprecated_string());
+                dbgln("Unable to resolve calc() as opacity (percentage): {}", value->to_string());
         } else {
-            auto maybe_number = value->as_calculated().resolve_number();
+            auto maybe_number = const_cast<CalculatedStyleValue&>(value->as_calculated()).resolve_number();
             if (maybe_number.has_value())
                 unclamped_opacity = maybe_number.value();
             else
-                dbgln("Unable to resolve calc() as opacity (number): {}", value->to_deprecated_string());
+                dbgln("Unable to resolve calc() as opacity (number): {}", value->to_string());
         }
     } else if (value->is_percentage()) {
         unclamped_opacity = value->as_percentage().percentage().as_fraction();
@@ -293,21 +341,21 @@ Vector<CSS::Transformation> StyleProperties::transformations() const
     Vector<CSS::Transformation> transformations;
 
     for (auto& it : list.values()) {
-        if (!it.is_transformation())
+        if (!it->is_transformation())
             return {};
-        auto& transformation_style_value = it.as_transformation();
+        auto& transformation_style_value = it->as_transformation();
         CSS::Transformation transformation;
         transformation.function = transformation_style_value.transform_function();
         Vector<TransformValue> values;
         for (auto& transformation_value : transformation_style_value.values()) {
-            if (transformation_value.is_length()) {
-                values.append({ transformation_value.to_length() });
-            } else if (transformation_value.is_percentage()) {
-                values.append({ transformation_value.as_percentage().percentage() });
-            } else if (transformation_value.is_numeric()) {
-                values.append({ transformation_value.to_number() });
-            } else if (transformation_value.is_angle()) {
-                values.append({ transformation_value.as_angle().angle() });
+            if (transformation_value->is_length()) {
+                values.append({ transformation_value->to_length() });
+            } else if (transformation_value->is_percentage()) {
+                values.append({ transformation_value->as_percentage().percentage() });
+            } else if (transformation_value->is_numeric()) {
+                values.append({ transformation_value->to_number() });
+            } else if (transformation_value->is_angle()) {
+                values.append({ transformation_value->as_angle().angle() });
             } else {
                 dbgln("FIXME: Unsupported value in transform!");
             }
@@ -339,6 +387,14 @@ CSS::TransformOrigin StyleProperties::transform_origin() const
         return {};
     }
     return { x_value.value(), y_value.value() };
+}
+
+Optional<Color> StyleProperties::accent_color(Layout::NodeWithStyle const& node) const
+{
+    auto value = property(CSS::PropertyID::AccentColor);
+    if (value->has_color())
+        return value->to_color(node);
+    return {};
 }
 
 Optional<CSS::AlignContent> StyleProperties::align_content() const
@@ -484,25 +540,25 @@ CSS::ContentData StyleProperties::content() const
         //        For now, we'll just assume strings since that is easiest.
         StringBuilder builder;
         for (auto const& item : content_style_value.content().values()) {
-            if (item.is_string()) {
-                builder.append(item.to_deprecated_string());
+            if (item->is_string()) {
+                builder.append(item->to_string().release_value_but_fixme_should_propagate_errors());
             } else {
                 // TODO: Implement quotes, counters, images, and other things.
             }
         }
         content_data.type = ContentData::Type::String;
-        content_data.data = builder.to_deprecated_string();
+        content_data.data = builder.to_string().release_value_but_fixme_should_propagate_errors();
 
         if (content_style_value.has_alt_text()) {
             StringBuilder alt_text_builder;
             for (auto const& item : content_style_value.alt_text()->values()) {
-                if (item.is_string()) {
-                    alt_text_builder.append(item.to_deprecated_string());
+                if (item->is_string()) {
+                    alt_text_builder.append(item->to_string().release_value_but_fixme_should_propagate_errors());
                 } else {
                     // TODO: Implement counters
                 }
             }
-            content_data.alt_text = alt_text_builder.to_deprecated_string();
+            content_data.alt_text = alt_text_builder.to_string().release_value_but_fixme_should_propagate_errors();
         }
 
         return content_data;
@@ -552,6 +608,8 @@ CSS::Display StyleProperties::display() const
         return CSS::Display::from_short(CSS::Display::Short::ListItem);
     case CSS::ValueID::Table:
         return CSS::Display::from_short(CSS::Display::Short::Table);
+    case CSS::ValueID::InlineTable:
+        return CSS::Display::from_short(CSS::Display::Short::InlineTable);
     case CSS::ValueID::TableRow:
         return CSS::Display { CSS::Display::Internal::TableRow };
     case CSS::ValueID::TableCell:
@@ -587,7 +645,7 @@ Vector<CSS::TextDecorationLine> StyleProperties::text_decoration_line() const
         Vector<CSS::TextDecorationLine> lines;
         auto& values = value->as_value_list().values();
         for (auto const& item : values) {
-            lines.append(value_id_to_text_decoration_line(item.to_identifier()).value());
+            lines.append(value_id_to_text_decoration_line(item->to_identifier()).value());
         }
         return lines;
     }
@@ -595,7 +653,7 @@ Vector<CSS::TextDecorationLine> StyleProperties::text_decoration_line() const
     if (value->is_identifier() && value->to_identifier() == ValueID::None)
         return {};
 
-    dbgln("FIXME: Unsupported value for text-decoration-line: {}", value->to_deprecated_string());
+    dbgln("FIXME: Unsupported value for text-decoration-line: {}", value->to_string());
     return {};
 }
 
@@ -647,7 +705,7 @@ Vector<ShadowData> StyleProperties::shadow(PropertyID property_id) const
         Vector<ShadowData> shadow_data;
         shadow_data.ensure_capacity(value_list.size());
         for (auto const& layer_value : value_list.values())
-            shadow_data.append(make_shadow_data(layer_value.as_shadow()));
+            shadow_data.append(make_shadow_data(layer_value->as_shadow()));
 
         return shadow_data;
     }
@@ -732,6 +790,24 @@ CSS::GridTrackPlacement StyleProperties::grid_row_start() const
 {
     auto value = property(CSS::PropertyID::GridRowStart);
     return value->as_grid_track_placement().grid_track_placement();
+}
+
+Optional<CSS::BorderCollapse> StyleProperties::border_collapse() const
+{
+    auto value = property(CSS::PropertyID::BorderCollapse);
+    return value_id_to_border_collapse(value->to_identifier());
+}
+
+Vector<Vector<String>> StyleProperties::grid_template_areas() const
+{
+    auto value = property(CSS::PropertyID::GridTemplateAreas);
+    return value->as_grid_template_area().grid_template_area();
+}
+
+String StyleProperties::grid_area() const
+{
+    auto value = property(CSS::PropertyID::GridArea);
+    return value->as_string().to_string().release_value_but_fixme_should_propagate_errors();
 }
 
 }

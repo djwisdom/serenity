@@ -13,12 +13,12 @@
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
-#include <LibC/sys/arch/i386/regs.h>
 #include <LibCore/MappedFile.h>
 #include <LibDebug/DebugInfo.h>
 #include <LibDebug/ProcessInspector.h>
 #include <signal.h>
 #include <stdio.h>
+#include <sys/arch/regs.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -27,7 +27,8 @@ namespace Debug {
 
 class DebugSession : public ProcessInspector {
 public:
-    static OwnPtr<DebugSession> exec_and_attach(DeprecatedString const& command, DeprecatedString source_root = {}, Function<ErrorOr<void>()> setup_child = {});
+    static OwnPtr<DebugSession> exec_and_attach(DeprecatedString const& command, DeprecatedString source_root = {}, Function<ErrorOr<void>()> setup_child = {}, Function<void(float)> on_initialization_progress = {});
+    static OwnPtr<DebugSession> attach(pid_t pid, DeprecatedString source_root = {}, Function<void(float)> on_initialization_progress = {});
 
     virtual ~DebugSession() override;
 
@@ -99,6 +100,7 @@ public:
         Syscall,
     };
     void continue_debuggee(ContinueType type = ContinueType::FreeRun);
+    void stop_debuggee();
 
     // Returns the wstatus result of waitpid()
     int continue_debuggee_and_wait(ContinueType type = ContinueType::FreeRun);
@@ -130,7 +132,7 @@ public:
     };
 
 private:
-    explicit DebugSession(pid_t, DeprecatedString source_root);
+    explicit DebugSession(pid_t, DeprecatedString source_root, Function<void(float)> on_initialization_progress = {});
 
     // x86 breakpoint instruction "int3"
     static constexpr u8 BREAKPOINT_INSTRUCTION = 0xcc;
@@ -146,6 +148,8 @@ private:
 
     // Maps from library name to LoadedLibrary object
     HashMap<DeprecatedString, NonnullOwnPtr<LoadedLibrary>> m_loaded_libraries;
+
+    Function<void(float)> m_on_initialization_progress;
 };
 
 template<typename Callback>
@@ -166,7 +170,7 @@ void DebugSession::run(DesiredInitialDebugeeState initial_debugee_state, Callbac
 
         // FIXME: This check actually only checks whether the debuggee
         // stopped because it hit a breakpoint/syscall/is in single stepping mode or not
-        if (WSTOPSIG(wstatus) != SIGTRAP) {
+        if (WSTOPSIG(wstatus) != SIGTRAP && WSTOPSIG(wstatus) != SIGSTOP) {
             callback(DebugBreakReason::Exited, Optional<PtraceRegisters>());
             m_is_debuggee_dead = true;
             return true;
@@ -184,9 +188,7 @@ void DebugSession::run(DesiredInitialDebugeeState initial_debugee_state, Callbac
 
         auto regs = get_registers();
 
-#if ARCH(I386)
-        FlatPtr current_instruction = regs.eip;
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
         FlatPtr current_instruction = regs.rip;
 #elif ARCH(AARCH64)
         FlatPtr current_instruction;
@@ -210,9 +212,7 @@ void DebugSession::run(DesiredInitialDebugeeState initial_debugee_state, Callbac
                 auto required_ebp = watchpoint.value().ebp;
                 auto found_ebp = false;
 
-#if ARCH(I386)
-                FlatPtr current_ebp = regs.ebp;
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
                 FlatPtr current_ebp = regs.rbp;
 #elif ARCH(AARCH64)
                 FlatPtr current_ebp;
@@ -261,9 +261,7 @@ void DebugSession::run(DesiredInitialDebugeeState initial_debugee_state, Callbac
             // 2. We restore the original first byte of the instruction,
             //    because it was patched with INT3.
             auto breakpoint_addr = bit_cast<FlatPtr>(current_breakpoint.value().address);
-#if ARCH(I386)
-            regs.eip = breakpoint_addr;
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
             regs.rip = breakpoint_addr;
 #elif ARCH(AARCH64)
             (void)breakpoint_addr;

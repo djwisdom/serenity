@@ -89,19 +89,19 @@ Optional<SQL::ExecutionID> SQLStatement::execute(Vector<SQL::Value> placeholder_
         auto result = execution_result.release_value();
 
         if (should_send_result_rows(result)) {
-            client_connection->async_execution_success(statement_id(), execution_id, true, 0, 0, 0);
+            client_connection->async_execution_success(statement_id(), execution_id, result.column_names(), true, 0, 0, 0);
 
             auto result_size = result.size();
             next(execution_id, move(result), result_size);
         } else {
             if (result.command() == SQL::SQLCommand::Insert)
-                client_connection->async_execution_success(statement_id(), execution_id, false, result.size(), 0, 0);
+                client_connection->async_execution_success(statement_id(), execution_id, result.column_names(), false, result.size(), 0, 0);
             else if (result.command() == SQL::SQLCommand::Update)
-                client_connection->async_execution_success(statement_id(), execution_id, false, 0, result.size(), 0);
+                client_connection->async_execution_success(statement_id(), execution_id, result.column_names(), false, 0, result.size(), 0);
             else if (result.command() == SQL::SQLCommand::Delete)
-                client_connection->async_execution_success(statement_id(), execution_id, false, 0, 0, result.size());
+                client_connection->async_execution_success(statement_id(), execution_id, result.column_names(), false, 0, 0, result.size());
             else
-                client_connection->async_execution_success(statement_id(), execution_id, false, 0, 0, 0);
+                client_connection->async_execution_success(statement_id(), execution_id, result.column_names(), false, 0, 0, 0);
         }
     });
 
@@ -134,7 +134,7 @@ void SQLStatement::next(SQL::ExecutionID execution_id, SQL::ResultSet result, si
         auto result_row = result.take_first();
         client_connection->async_next_result(statement_id(), execution_id, result_row.row.take_data());
 
-        deferred_invoke([this, execution_id, result = move(result), result_size]() {
+        deferred_invoke([this, execution_id, result = move(result), result_size]() mutable {
             next(execution_id, move(result), result_size);
         });
     } else {

@@ -15,19 +15,21 @@
 namespace JS {
 
 ArrayIteratorPrototype::ArrayIteratorPrototype(Realm& realm)
-    : PrototypeObject(*realm.intrinsics().iterator_prototype())
+    : PrototypeObject(realm.intrinsics().iterator_prototype())
 {
 }
 
-void ArrayIteratorPrototype::initialize(Realm& realm)
+ThrowCompletionOr<void> ArrayIteratorPrototype::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
     define_native_function(realm, vm.names.next, next, 0, Attribute::Configurable | Attribute::Writable);
 
     // 23.1.5.2.2 %ArrayIteratorPrototype% [ @@toStringTag ], https://tc39.es/ecma262/#sec-%arrayiteratorprototype%-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Array Iterator"), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), MUST_OR_THROW_OOM(PrimitiveString::create(vm, "Array Iterator"sv)), Attribute::Configurable);
+
+    return {};
 }
 
 // 23.1.5.2.1 %ArrayIteratorPrototype%.next ( ), https://tc39.es/ecma262/#sec-%arrayiteratorprototype%.next
@@ -36,7 +38,7 @@ JS_DEFINE_NATIVE_FUNCTION(ArrayIteratorPrototype::next)
 {
     auto& realm = *vm.current_realm();
 
-    auto* iterator = TRY(typed_this_value(vm));
+    auto iterator = TRY(typed_this_value(vm));
     auto target_array = iterator->array();
     if (target_array.is_undefined())
         return create_iterator_result_object(vm, js_undefined(), true);

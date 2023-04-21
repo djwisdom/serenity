@@ -29,9 +29,9 @@ class Layer
     AK_MAKE_NONMOVABLE(Layer);
 
 public:
-    static ErrorOr<NonnullRefPtr<Layer>> try_create_with_size(Image&, Gfx::IntSize, DeprecatedString name);
-    static ErrorOr<NonnullRefPtr<Layer>> try_create_with_bitmap(Image&, NonnullRefPtr<Gfx::Bitmap>, DeprecatedString name);
-    static ErrorOr<NonnullRefPtr<Layer>> try_create_snapshot(Image&, Layer const&);
+    static ErrorOr<NonnullRefPtr<Layer>> create_with_size(Image&, Gfx::IntSize, DeprecatedString name);
+    static ErrorOr<NonnullRefPtr<Layer>> create_with_bitmap(Image&, NonnullRefPtr<Gfx::Bitmap>, DeprecatedString name);
+    static ErrorOr<NonnullRefPtr<Layer>> create_snapshot(Image&, Layer const&);
 
     ~Layer() = default;
 
@@ -45,7 +45,10 @@ public:
     Gfx::Bitmap const* mask_bitmap() const { return m_mask_bitmap; }
     Gfx::Bitmap* mask_bitmap() { return m_mask_bitmap; }
 
-    void create_mask();
+    ErrorOr<void> create_mask();
+    void delete_mask();
+    void apply_mask();
+
     Gfx::Bitmap& get_scratch_edited_bitmap();
 
     Gfx::IntSize size() const { return content_bitmap().size(); }
@@ -56,18 +59,21 @@ public:
     DeprecatedString const& name() const { return m_name; }
     void set_name(DeprecatedString);
 
-    void flip(Gfx::Orientation orientation);
-    void rotate(Gfx::RotationDirection direction);
-    void crop(Gfx::IntRect const& rect);
-    void resize(Gfx::IntSize new_size, Gfx::Painter::ScalingMode scaling_mode);
-    void resize(Gfx::IntRect const& new_rect, Gfx::Painter::ScalingMode scaling_mode);
-    void resize(Gfx::IntSize new_size, Gfx::IntPoint new_location, Gfx::Painter::ScalingMode scaling_mode);
+    enum class NotifyClients {
+        Yes,
+        No
+    };
+
+    ErrorOr<void> flip(Gfx::Orientation orientation, NotifyClients notify_clients = NotifyClients::Yes);
+    ErrorOr<void> rotate(Gfx::RotationDirection direction, NotifyClients notify_clients = NotifyClients::Yes);
+    ErrorOr<void> crop(Gfx::IntRect const& rect, NotifyClients notify_clients = NotifyClients::Yes);
+    ErrorOr<void> scale(Gfx::IntRect const& new_rect, Gfx::Painter::ScalingMode scaling_mode, NotifyClients notify_clients = NotifyClients::Yes);
 
     Optional<Gfx::IntRect> nonempty_content_bounding_rect() const;
 
-    ErrorOr<void> try_set_bitmaps(NonnullRefPtr<Gfx::Bitmap> content, RefPtr<Gfx::Bitmap> mask);
+    ErrorOr<void> set_bitmaps(NonnullRefPtr<Gfx::Bitmap> content, RefPtr<Gfx::Bitmap> mask);
 
-    void did_modify_bitmap(Gfx::IntRect const& = {});
+    void did_modify_bitmap(Gfx::IntRect const& = {}, NotifyClients notify_clients = NotifyClients::Yes);
 
     void set_selected(bool selected) { m_selected = selected; }
     bool is_selected() const { return m_selected; }
@@ -78,7 +84,7 @@ public:
     int opacity_percent() const { return m_opacity_percent; }
     void set_opacity_percent(int);
 
-    RefPtr<Gfx::Bitmap> try_copy_bitmap(Selection const&) const;
+    RefPtr<Gfx::Bitmap> copy_bitmap(Selection const&) const;
 
     Image const& image() const { return m_image; }
 
@@ -95,6 +101,8 @@ public:
     void set_edit_mode(EditMode mode);
 
     Gfx::Bitmap& currently_edited_bitmap();
+
+    ErrorOr<NonnullRefPtr<Layer>> duplicate(DeprecatedString name);
 
 private:
     Layer(Image&, NonnullRefPtr<Gfx::Bitmap>, DeprecatedString name);

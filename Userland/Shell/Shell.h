@@ -12,7 +12,6 @@
 #include <AK/CircularQueue.h>
 #include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/StackInfo.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
@@ -21,10 +20,12 @@
 #include <LibCore/Notifier.h>
 #include <LibCore/Object.h>
 #include <LibLine/Editor.h>
+#include <LibMain/Main.h>
 #include <termios.h>
 
 #define ENUMERATE_SHELL_BUILTINS()     \
     __ENUMERATE_SHELL_BUILTIN(alias)   \
+    __ENUMERATE_SHELL_BUILTIN(where)   \
     __ENUMERATE_SHELL_BUILTIN(cd)      \
     __ENUMERATE_SHELL_BUILTIN(cdh)     \
     __ENUMERATE_SHELL_BUILTIN(pwd)     \
@@ -60,16 +61,27 @@
     __ENUMERATE_SHELL_OPTION(verbose, false, "Announce every command that is about to be executed")                  \
     __ENUMERATE_SHELL_OPTION(invoke_program_for_autocomplete, false, "Attempt to use the program being completed itself for autocompletion via --complete")
 
-#define ENUMERATE_SHELL_IMMEDIATE_FUNCTIONS()           \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(concat_lists)  \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(length)        \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(length_across) \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(remove_suffix) \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(remove_prefix) \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(regex_replace) \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(filter_glob)   \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(split)         \
-    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(join)
+#define ENUMERATE_SHELL_IMMEDIATE_FUNCTIONS()                          \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(concat_lists)                 \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(length)                       \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(length_across)                \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(remove_suffix)                \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(remove_prefix)                \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(regex_replace)                \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(filter_glob)                  \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(split)                        \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(join)                         \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(value_or_default)             \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(assign_default)               \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(error_if_empty)               \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(null_or_alternative)          \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(defined_value_or_default)     \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(assign_defined_default)       \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(error_if_unset)               \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(null_if_unset_or_alternative) \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(length_of_variable)           \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(reexpand)                     \
+    __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(math)
 
 namespace Shell {
 
@@ -81,6 +93,8 @@ class Shell : public Core::Object {
 public:
     constexpr static auto local_init_file_path = "~/.shellrc";
     constexpr static auto global_init_file_path = "/etc/shellrc";
+    constexpr static auto local_posix_init_file_path = "~/.posixshrc";
+    constexpr static auto global_posix_init_file_path = "/etc/posixshrc";
 
     bool should_format_live() const { return m_should_format_live; }
     void set_live_formatting(bool value) { m_should_format_live = value; }
@@ -140,11 +154,11 @@ public:
     Optional<RunnablePath> runnable_path_for(StringView);
     Optional<DeprecatedString> help_path_for(Vector<RunnablePath> visited, RunnablePath const& runnable_path);
     ErrorOr<RefPtr<Job>> run_command(const AST::Command&);
-    NonnullRefPtrVector<Job> run_commands(Vector<AST::Command>&);
+    Vector<NonnullRefPtr<Job>> run_commands(Vector<AST::Command>&);
     bool run_file(DeprecatedString const&, bool explicitly_invoked = true);
-    bool run_builtin(const AST::Command&, NonnullRefPtrVector<AST::Rewiring> const&, int& retval);
+    ErrorOr<bool> run_builtin(const AST::Command&, Vector<NonnullRefPtr<AST::Rewiring>> const&, int& retval);
     bool has_builtin(StringView) const;
-    RefPtr<AST::Node> run_immediate_function(StringView name, AST::ImmediateExpression& invoking_node, NonnullRefPtrVector<AST::Node> const&);
+    ErrorOr<RefPtr<AST::Node>> run_immediate_function(StringView name, AST::ImmediateExpression& invoking_node, Vector<NonnullRefPtr<AST::Node>> const&);
     static bool has_immediate_function(StringView);
     void block_on_job(RefPtr<Job>);
     void block_on_pipeline(RefPtr<AST::Pipeline>);
@@ -153,15 +167,15 @@ public:
     static DeprecatedString expand_tilde(StringView expression);
     static Vector<DeprecatedString> expand_globs(StringView path, StringView base);
     static Vector<DeprecatedString> expand_globs(Vector<StringView> path_segments, StringView base);
-    Vector<AST::Command> expand_aliases(Vector<AST::Command>);
+    ErrorOr<Vector<AST::Command>> expand_aliases(Vector<AST::Command>);
     DeprecatedString resolve_path(DeprecatedString) const;
     DeprecatedString resolve_alias(StringView) const;
 
     static bool has_history_event(StringView);
 
-    RefPtr<AST::Value> get_argument(size_t) const;
-    RefPtr<AST::Value> lookup_local_variable(StringView) const;
-    DeprecatedString local_variable_or(StringView, DeprecatedString const&) const;
+    ErrorOr<RefPtr<AST::Value const>> get_argument(size_t) const;
+    ErrorOr<RefPtr<AST::Value const>> lookup_local_variable(StringView) const;
+    ErrorOr<DeprecatedString> local_variable_or(StringView, DeprecatedString const&) const;
     void set_local_variable(DeprecatedString const&, RefPtr<AST::Value>, bool only_in_current_frame = false);
     void unset_local_variable(StringView, bool only_in_current_frame = false);
 
@@ -185,7 +199,7 @@ public:
     };
 
     struct Frame {
-        Frame(NonnullOwnPtrVector<LocalFrame>& frames, LocalFrame const& frame)
+        Frame(Vector<NonnullOwnPtr<LocalFrame>>& frames, LocalFrame const& frame)
             : frames(frames)
             , frame(frame)
         {
@@ -195,7 +209,7 @@ public:
         void leak_frame() { should_destroy_frame = false; }
 
     private:
-        NonnullOwnPtrVector<LocalFrame>& frames;
+        Vector<NonnullOwnPtr<LocalFrame>>& frames;
         LocalFrame const& frame;
         bool should_destroy_frame { true };
     };
@@ -264,7 +278,7 @@ public:
         No
     };
 
-    void highlight(Line::Editor&) const;
+    ErrorOr<void> highlight(Line::Editor&) const;
     Vector<Line::CompletionSuggestion> complete();
     Vector<Line::CompletionSuggestion> complete(StringView);
     Vector<Line::CompletionSuggestion> complete_program_name(StringView, size_t offset, EscapeMode = EscapeMode::Bareword);
@@ -279,8 +293,8 @@ public:
     void restore_ios();
 
     u64 find_last_job_id() const;
-    Job const* find_job(u64 id, bool is_pid = false);
-    Job const* current_job() const { return m_current_job; }
+    Job* find_job(u64 id, bool is_pid = false);
+    Job* current_job() const { return m_current_job; }
     void kill_job(Job const*, int sig);
 
     DeprecatedString get_history_path();
@@ -332,6 +346,8 @@ public:
         OpenFailure,
         OutOfMemory,
         LaunchError,
+        PipeFailure,
+        WriteFailure,
     };
 
     void raise_error(ShellError kind, DeprecatedString description, Optional<AST::Position> position = {})
@@ -375,9 +391,11 @@ public:
 #undef __ENUMERATE_SHELL_OPTION
 
 private:
-    Shell(Line::Editor&, bool attempt_interactive);
+    Shell(Line::Editor&, bool attempt_interactive, bool posix_mode = false);
     Shell();
     virtual ~Shell() override;
+
+    RefPtr<AST::Node> parse(StringView, bool interactive = false, bool as_command = true) const;
 
     void timer_event(Core::TimerEvent&) override;
 
@@ -391,7 +409,7 @@ private:
     void add_entry_to_cache(RunnablePath const&);
     void remove_entry_from_cache(StringView);
     void stop_all_jobs();
-    Job const* m_current_job { nullptr };
+    Job* m_current_job { nullptr };
     LocalFrame* find_frame_containing_local_variable(StringView name);
     LocalFrame const* find_frame_containing_local_variable(StringView name) const
     {
@@ -402,20 +420,21 @@ private:
     void run_tail(const AST::Command&, const AST::NodeWithAction&, int head_exit_code);
 
     [[noreturn]] void execute_process(Vector<char const*>&& argv);
+    ErrorOr<void> execute_process(Span<StringView> argv);
 
     virtual void custom_event(Core::CustomEvent&) override;
 
 #define __ENUMERATE_SHELL_IMMEDIATE_FUNCTION(name) \
-    RefPtr<AST::Node> immediate_##name(AST::ImmediateExpression& invoking_node, NonnullRefPtrVector<AST::Node> const&);
+    ErrorOr<RefPtr<AST::Node>> immediate_##name(AST::ImmediateExpression& invoking_node, Vector<NonnullRefPtr<AST::Node>> const&);
 
     ENUMERATE_SHELL_IMMEDIATE_FUNCTIONS();
 
 #undef __ENUMERATE_SHELL_IMMEDIATE_FUNCTION
 
-    RefPtr<AST::Node> immediate_length_impl(AST::ImmediateExpression& invoking_node, NonnullRefPtrVector<AST::Node> const&, bool across);
+    ErrorOr<RefPtr<AST::Node>> immediate_length_impl(AST::ImmediateExpression& invoking_node, Vector<NonnullRefPtr<AST::Node>> const&, bool across);
 
 #define __ENUMERATE_SHELL_BUILTIN(builtin) \
-    int builtin_##builtin(int argc, char const** argv);
+    ErrorOr<int> builtin_##builtin(Main::Arguments);
 
     ENUMERATE_SHELL_BUILTINS();
 
@@ -441,14 +460,15 @@ private:
     };
 
     HashMap<DeprecatedString, ShellFunction> m_functions;
-    NonnullOwnPtrVector<LocalFrame> m_local_frames;
+    Vector<NonnullOwnPtr<LocalFrame>> m_local_frames;
     Promise::List m_active_promises;
-    NonnullRefPtrVector<AST::Redirection> m_global_redirections;
+    Vector<NonnullRefPtr<AST::Redirection>> m_global_redirections;
 
     HashMap<DeprecatedString, DeprecatedString> m_aliases;
     bool m_is_interactive { true };
     bool m_is_subshell { false };
     bool m_should_reinstall_signal_handlers { true };
+    bool m_in_posix_mode { false };
 
     ShellError m_error { ShellError::None };
     DeprecatedString m_error_description;

@@ -1,12 +1,14 @@
 # SerenityOS
 
-Graphical Unix-like operating system for x86 computers.
+Graphical Unix-like operating system for x86-64 computers.
 
 [![GitHub Actions Status](https://github.com/SerenityOS/serenity/workflows/Build,%20lint,%20and%20test/badge.svg)](https://github.com/SerenityOS/serenity/actions?query=workflow%3A"Build%2C%20lint%2C%20and%20test")
 [![Azure DevOps Status](https://dev.azure.com/SerenityOS/SerenityOS/_apis/build/status/CI?branchName=master)](https://dev.azure.com/SerenityOS/SerenityOS/_build/latest?definitionId=1&branchName=master)
 [![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/serenity.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:serenity)
 [![Sonar Cube Static Analysis](https://sonarcloud.io/api/project_badges/measure?project=SerenityOS_serenity&metric=ncloc)](https://sonarcloud.io/dashboard?id=SerenityOS_serenity)
 [![Discord](https://img.shields.io/discord/830522505605283862.svg?logo=discord&logoColor=white&logoWidth=20&labelColor=7289DA&label=Discord&color=17cf48)](https://discord.gg/serenityos)
+
+[FAQ](Documentation/FAQ.md) | [Documentation](#how-do-i-read-the-documentation) | [Build Instructions](#how-do-i-build-and-run-this)
 
 ## About
 
@@ -20,16 +22,14 @@ You can watch videos of the system being developed on YouTube:
 * [Linus Groh's channel](https://youtube.com/linusgroh)
 * [kleines Filmröllchen's channel](https://www.youtube.com/c/kleinesfilmroellchen)
 
-**FAQ**: [Frequently Asked Questions](https://github.com/SerenityOS/serenity/blob/master/Documentation/FAQ.md)
-
 ## Screenshot
 
 ![Screenshot as of b36968c.png](https://raw.githubusercontent.com/SerenityOS/serenity/master/Meta/Screenshots/screenshot-b36968c.png)
 
 ## Features
 
-* Modern x86 32-bit and 64-bit kernel with pre-emptive multi-threading
-* [Browser](Userland/Applications/Browser/) with JavaScript, WebAssembly, and more (check the spec compliance for [JS](https://libjs.dev/test262/), [CSS](https://css.tobyase.de/), and [WASM](https://libjs.dev/wasm/))
+* Modern x86 64-bit kernel with pre-emptive multi-threading
+* [Browser](Userland/Applications/Browser/) with JavaScript, WebAssembly, and more (check the spec compliance for [JS](https://libjs.dev/test262/), [CSS](https://css.tobyase.de/), and [Wasm](https://libjs.dev/wasm/))
 * Security features (hardware protections, limited userland capabilities, W^X memory, `pledge` & `unveil`, (K)ASLR, OOM-resistance, web-content isolation, state-of-the-art TLS algorithms, ...)
 * [System services](Userland/Services/) (WindowServer, LoginServer, AudioServer, WebServer, RequestServer, CrashServer, ...) and modern IPC
 * Good POSIX compatibility ([LibC](Userland/Libraries/LibC/), Shell, syscalls, signals, pseudoterminals, filesystem notifications, standard Unix [utilities](Userland/Utilities/), ...)
@@ -120,7 +120,10 @@ A general guide for contributing can be found in [`CONTRIBUTING.md`](CONTRIBUTIN
 * **Brandon Jordan** - [electrikmilk](https://github.com/electrikmilk)
 * **Lucas Chollet** - [LucasChollet](https://github.com/LucasChollet)
 * **Timon Kruiper** - [FireFox317](https://github.com/FireFox317)
+* **Martin Falisse** - [martinfalisse](https://github.com/martinfalisse)
 * **Gregory Bertilson** - [Zaggy1024](https://github.com/Zaggy1024)
+* **Erik Wouters** - [EWouters](https://github.com/EWouters)
+* **Rodrigo Tobar** - [rtobar](https://github.com/rtobar)
 
 And many more! [See here](https://github.com/SerenityOS/serenity/graphs/contributors) for a full contributor list. The people listed above have landed more than 100 commits in the project. :^)
 

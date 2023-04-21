@@ -9,12 +9,12 @@
 
 namespace Web::HTML {
 
-PageTransitionEvent* PageTransitionEvent::create(JS::Realm& realm, FlyString const& event_name, PageTransitionEventInit const& event_init)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<PageTransitionEvent>> PageTransitionEvent::create(JS::Realm& realm, FlyString const& event_name, PageTransitionEventInit const& event_init)
 {
-    return realm.heap().allocate<PageTransitionEvent>(realm, realm, event_name, event_init);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<PageTransitionEvent>(realm, realm, event_name, event_init));
 }
 
-PageTransitionEvent* PageTransitionEvent::construct_impl(JS::Realm& realm, FlyString const& event_name, PageTransitionEventInit const& event_init)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<PageTransitionEvent>> PageTransitionEvent::construct_impl(JS::Realm& realm, FlyString const& event_name, PageTransitionEventInit const& event_init)
 {
     return create(realm, event_name, event_init);
 }
@@ -23,9 +23,16 @@ PageTransitionEvent::PageTransitionEvent(JS::Realm& realm, FlyString const& even
     : DOM::Event(realm, event_name, event_init)
     , m_persisted(event_init.persisted)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "PageTransitionEvent"));
 }
 
 PageTransitionEvent::~PageTransitionEvent() = default;
+
+JS::ThrowCompletionOr<void> PageTransitionEvent::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::PageTransitionEventPrototype>(realm, "PageTransitionEvent"));
+
+    return {};
+}
 
 }

@@ -17,19 +17,29 @@
 
 namespace Web::DOM {
 
+// https://dom.spec.whatwg.org/#dom-parentnode-queryselector
 WebIDL::ExceptionOr<JS::GCPtr<Element>> ParentNode::query_selector(StringView selector_text)
 {
+    // The querySelector(selectors) method steps are to return the first result of running scope-match a selectors string selectors against this,
+    // if the result is not an empty list; otherwise null.
+
+    // https://dom.spec.whatwg.org/#scope-match-a-selectors-string
+    // To scope-match a selectors string selectors against a node, run these steps:
+    // 1. Let s be the result of parse a selector selectors.
     auto maybe_selectors = parse_selector(CSS::Parser::ParsingContext(*this), selector_text);
+
+    // 2. If s is failure, then throw a "SyntaxError" DOMException.
     if (!maybe_selectors.has_value())
         return WebIDL::SyntaxError::create(realm(), "Failed to parse selector");
 
     auto selectors = maybe_selectors.value();
 
+    // 3. Return the result of match a selector against a tree with s and node’s root using scoping root node.
     JS::GCPtr<Element> result;
     // FIXME: This should be shadow-including. https://drafts.csswg.org/selectors-4/#match-a-selector-against-a-tree
     for_each_in_subtree_of_type<Element>([&](auto& element) {
         for (auto& selector : selectors) {
-            if (SelectorEngine::matches(selector, element)) {
+            if (SelectorEngine::matches(selector, element, {}, this)) {
                 result = &element;
                 return IterationDecision::Break;
             }
@@ -40,19 +50,28 @@ WebIDL::ExceptionOr<JS::GCPtr<Element>> ParentNode::query_selector(StringView se
     return result;
 }
 
+// https://dom.spec.whatwg.org/#dom-parentnode-queryselectorall
 WebIDL::ExceptionOr<JS::NonnullGCPtr<NodeList>> ParentNode::query_selector_all(StringView selector_text)
 {
+    // The querySelectorAll(selectors) method steps are to return the static result of running scope-match a selectors string selectors against this.
+
+    // https://dom.spec.whatwg.org/#scope-match-a-selectors-string
+    // To scope-match a selectors string selectors against a node, run these steps:
+    // 1. Let s be the result of parse a selector selectors.
     auto maybe_selectors = parse_selector(CSS::Parser::ParsingContext(*this), selector_text);
+
+    // 2. If s is failure, then throw a "SyntaxError" DOMException.
     if (!maybe_selectors.has_value())
         return WebIDL::SyntaxError::create(realm(), "Failed to parse selector");
 
     auto selectors = maybe_selectors.value();
 
+    // 3. Return the result of match a selector against a tree with s and node’s root using scoping root node.
     Vector<JS::Handle<Node>> elements;
     // FIXME: This should be shadow-including. https://drafts.csswg.org/selectors-4/#match-a-selector-against-a-tree
     for_each_in_subtree_of_type<Element>([&](auto& element) {
         for (auto& selector : selectors) {
-            if (SelectorEngine::matches(selector, element)) {
+            if (SelectorEngine::matches(selector, element, {}, this)) {
                 elements.append(&element);
             }
         }
@@ -96,20 +115,20 @@ JS::NonnullGCPtr<HTMLCollection> ParentNode::children()
     if (!m_children) {
         m_children = HTMLCollection::create(*this, [this](Element const& element) {
             return is_parent_of(element);
-        });
+        }).release_value_but_fixme_should_propagate_errors();
     }
     return *m_children;
 }
 
 // https://dom.spec.whatwg.org/#concept-getelementsbytagname
 // NOTE: This method is only exposed on Document and Element, but is in ParentNode to prevent code duplication.
-JS::NonnullGCPtr<HTMLCollection> ParentNode::get_elements_by_tag_name(FlyString const& qualified_name)
+JS::NonnullGCPtr<HTMLCollection> ParentNode::get_elements_by_tag_name(DeprecatedFlyString const& qualified_name)
 {
     // 1. If qualifiedName is "*" (U+002A), return a HTMLCollection rooted at root, whose filter matches only descendant elements.
     if (qualified_name == "*") {
         return HTMLCollection::create(*this, [](Element const&) {
             return true;
-        });
+        }).release_value_but_fixme_should_propagate_errors();
     }
 
     // 2. Otherwise, if root’s node document is an HTML document, return a HTMLCollection rooted at root, whose filter matches the following descendant elements:
@@ -121,18 +140,18 @@ JS::NonnullGCPtr<HTMLCollection> ParentNode::get_elements_by_tag_name(FlyString 
 
             // - Whose namespace is not the HTML namespace and whose qualified name is qualifiedName.
             return element.qualified_name() == qualified_name;
-        });
+        }).release_value_but_fixme_should_propagate_errors();
     }
 
     // 3. Otherwise, return a HTMLCollection rooted at root, whose filter matches descendant elements whose qualified name is qualifiedName.
     return HTMLCollection::create(*this, [qualified_name](Element const& element) {
         return element.qualified_name() == qualified_name;
-    });
+    }).release_value_but_fixme_should_propagate_errors();
 }
 
 // https://dom.spec.whatwg.org/#concept-getelementsbytagnamens
 // NOTE: This method is only exposed on Document and Element, but is in ParentNode to prevent code duplication.
-JS::NonnullGCPtr<HTMLCollection> ParentNode::get_elements_by_tag_name_ns(FlyString const& nullable_namespace, FlyString const& local_name)
+JS::NonnullGCPtr<HTMLCollection> ParentNode::get_elements_by_tag_name_ns(DeprecatedFlyString const& nullable_namespace, DeprecatedFlyString const& local_name)
 {
     // 1. If namespace is the empty string, set it to null.
     DeprecatedString namespace_ = nullable_namespace;
@@ -143,27 +162,27 @@ JS::NonnullGCPtr<HTMLCollection> ParentNode::get_elements_by_tag_name_ns(FlyStri
     if (namespace_ == "*" && local_name == "*") {
         return HTMLCollection::create(*this, [](Element const&) {
             return true;
-        });
+        }).release_value_but_fixme_should_propagate_errors();
     }
 
     // 3. Otherwise, if namespace is "*" (U+002A), return a HTMLCollection rooted at root, whose filter matches descendant elements whose local name is localName.
     if (namespace_ == "*") {
         return HTMLCollection::create(*this, [local_name](Element const& element) {
             return element.local_name() == local_name;
-        });
+        }).release_value_but_fixme_should_propagate_errors();
     }
 
     // 4. Otherwise, if localName is "*" (U+002A), return a HTMLCollection rooted at root, whose filter matches descendant elements whose namespace is namespace.
     if (local_name == "*") {
         return HTMLCollection::create(*this, [namespace_](Element const& element) {
             return element.namespace_() == namespace_;
-        });
+        }).release_value_but_fixme_should_propagate_errors();
     }
 
     // 5. Otherwise, return a HTMLCollection rooted at root, whose filter matches descendant elements whose namespace is namespace and local name is localName.
     return HTMLCollection::create(*this, [namespace_, local_name](Element const& element) {
         return element.namespace_() == namespace_ && element.local_name() == local_name;
-    });
+    }).release_value_but_fixme_should_propagate_errors();
 }
 
 // https://dom.spec.whatwg.org/#dom-parentnode-prepend

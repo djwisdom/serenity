@@ -1,44 +1,56 @@
 set(SOURCES
     AffineTransform.cpp
     AntiAliasingPainter.cpp
-    BMPLoader.cpp
-    BMPWriter.cpp
     Bitmap.cpp
     BitmapMixer.cpp
     ClassicStylePainter.cpp
     ClassicWindowTheme.cpp
     Color.cpp
     CursorParams.cpp
-    DDSLoader.cpp
+    FillPathImplementation.cpp
     Filters/ColorBlindnessFilter.cpp
     Filters/FastBoxBlurFilter.cpp
     Filters/LumaFilter.cpp
     Filters/StackBlurFilter.cpp
     Font/BitmapFont.cpp
     Font/Emoji.cpp
+    Font/Font.cpp
     Font/FontDatabase.cpp
     Font/OpenType/Cmap.cpp
     Font/OpenType/Font.cpp
     Font/OpenType/Glyf.cpp
+    Font/OpenType/Hinting/Opcodes.cpp
     Font/PathRasterizer.cpp
     Font/ScaledFont.cpp
     Font/Typeface.cpp
     Font/WOFF/Font.cpp
-    GIFLoader.cpp
-    ICOLoader.cpp
-    ImageDecoder.cpp
-    JPGLoader.cpp
-    PBMLoader.cpp
-    PGMLoader.cpp
-    PNGLoader.cpp
-    PNGWriter.cpp
-    PPMLoader.cpp
+    GradientPainting.cpp
+    ICC/BinaryWriter.cpp
+    ICC/Profile.cpp
+    ICC/Tags.cpp
+    ICC/TagTypes.cpp
+    ICC/WellKnownProfiles.cpp
+    ImageFormats/BMPLoader.cpp
+    ImageFormats/BMPWriter.cpp
+    ImageFormats/DDSLoader.cpp
+    ImageFormats/GIFLoader.cpp
+    ImageFormats/ICOLoader.cpp
+    ImageFormats/ImageDecoder.cpp
+    ImageFormats/JPEGLoader.cpp
+    ImageFormats/PBMLoader.cpp
+    ImageFormats/PGMLoader.cpp
+    ImageFormats/PNGLoader.cpp
+    ImageFormats/PNGWriter.cpp
+    ImageFormats/PortableFormatWriter.cpp
+    ImageFormats/PPMLoader.cpp
+    ImageFormats/QOILoader.cpp
+    ImageFormats/QOIWriter.cpp
+    ImageFormats/TGALoader.cpp
+    ImageFormats/WebPLoader.cpp
     Painter.cpp
     Palette.cpp
     Path.cpp
     Point.cpp
-    QOILoader.cpp
-    QOIWriter.cpp
     Rect.cpp
     ShareableBitmap.cpp
     Size.cpp
@@ -51,4 +63,4 @@ set(SOURCES
 )
 
 serenity_lib(LibGfx gfx)
-target_link_libraries(LibGfx PRIVATE LibCompress LibCore LibCrypto LibTextCodec LibIPC)
+target_link_libraries(LibGfx PRIVATE LibCompress LibCore LibCrypto LibFileSystem LibTextCodec LibIPC LibUnicode)

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -19,8 +19,10 @@
 #include <LibWeb/HTML/HTMLInputElement.h>
 #include <LibWeb/HTML/HTMLOptGroupElement.h>
 #include <LibWeb/HTML/HTMLOptionElement.h>
+#include <LibWeb/HTML/HTMLProgressElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
+#include <LibWeb/Infra/Strings.h>
 
 namespace Web::SelectorEngine {
 
@@ -31,11 +33,11 @@ static inline bool matches_lang_pseudo_class(DOM::Element const& element, Vector
     for (auto const* e = &element; e; e = e->parent_element()) {
         auto lang = e->attribute(HTML::AttributeNames::lang);
         if (!lang.is_null()) {
-            element_language = lang;
+            element_language = FlyString::from_deprecated_fly_string(lang).release_value_but_fixme_should_propagate_errors();
             break;
         }
     }
-    if (element_language.is_null())
+    if (element_language.is_empty())
         return false;
 
     // FIXME: This is ad-hoc. Implement a proper language range matching algorithm as recommended by BCP47.
@@ -44,10 +46,10 @@ static inline bool matches_lang_pseudo_class(DOM::Element const& element, Vector
             return false;
         if (language == "*"sv)
             return true;
-        if (!element_language.view().contains('-'))
-            return element_language.equals_ignoring_case(language);
-        auto parts = element_language.view().split_view('-');
-        return parts[0].equals_ignoring_case(language);
+        if (!element_language.to_string().contains('-'))
+            return Infra::is_ascii_case_insensitive_match(element_language, language);
+        auto parts = element_language.to_string().split_limit('-', 2).release_value_but_fixme_should_propagate_errors();
+        return Infra::is_ascii_case_insensitive_match(parts[0], language);
     }
     return false;
 }
@@ -88,8 +90,32 @@ static inline bool matches_checked_pseudo_class(DOM::Element const& element)
         }
     }
 
-    // FIXME: - option elements whose selectedness is true
+    // - option elements whose selectedness is true
+    if (is<HTML::HTMLOptionElement>(element)) {
+        return static_cast<HTML::HTMLOptionElement const&>(element).selected();
+    }
+    return false;
+}
 
+// https://html.spec.whatwg.org/multipage/semantics-other.html#selector-indeterminate
+static inline bool matches_indeterminate_pseudo_class(DOM::Element const& element)
+{
+    // The :indeterminate pseudo-class must match any element falling into one of the following categories:
+    // - input elements whose type attribute is in the Checkbox state and whose indeterminate IDL attribute is set to true
+    // FIXME: - input elements whose type attribute is in the Radio Button state and whose radio button group contains no input elements whose checkedness state is true.
+    if (is<HTML::HTMLInputElement>(element)) {
+        auto const& input_element = static_cast<HTML::HTMLInputElement const&>(element);
+        switch (input_element.type_state()) {
+        case HTML::HTMLInputElement::TypeAttributeState::Checkbox:
+            return input_element.indeterminate();
+        default:
+            return false;
+        }
+    }
+    // - progress elements with no value content attribute
+    if (is<HTML::HTMLProgressElement>(element)) {
+        return !element.has_attribute(HTML::AttributeNames::value);
+    }
     return false;
 }
 
@@ -97,7 +123,7 @@ static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute co
 {
     if (attribute.match_type == CSS::Selector::SimpleSelector::Attribute::MatchType::HasAttribute) {
         // Early way out in case of an attribute existence selector.
-        return element.has_attribute(attribute.name);
+        return element.has_attribute(attribute.name.to_string().to_deprecated_string());
     }
 
     auto const case_insensitive_match = (attribute.case_type == CSS::Selector::SimpleSelector::Attribute::CaseType::CaseInsensitiveMatch);
@@ -108,19 +134,19 @@ static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute co
     switch (attribute.match_type) {
     case CSS::Selector::SimpleSelector::Attribute::MatchType::ExactValueMatch:
         return case_insensitive_match
-            ? element.attribute(attribute.name).equals_ignoring_case(attribute.value)
-            : element.attribute(attribute.name) == attribute.value;
+            ? Infra::is_ascii_case_insensitive_match(element.attribute(attribute.name.to_string().to_deprecated_string()), attribute.value)
+            : element.attribute(attribute.name.to_string().to_deprecated_string()) == attribute.value.to_deprecated_string();
     case CSS::Selector::SimpleSelector::Attribute::MatchType::ContainsWord: {
         if (attribute.value.is_empty()) {
             // This selector is always false is match value is empty.
             return false;
         }
-        auto const view = element.attribute(attribute.name).split_view(' ');
+        auto const view = element.attribute(attribute.name.to_string().to_deprecated_string()).split_view(' ');
         auto const size = view.size();
         for (size_t i = 0; i < size; ++i) {
             auto const value = view.at(i);
             if (case_insensitive_match
-                    ? value.equals_ignoring_case(attribute.value)
+                    ? Infra::is_ascii_case_insensitive_match(value, attribute.value)
                     : value == attribute.value) {
                 return true;
             }
@@ -129,9 +155,9 @@ static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute co
     }
     case CSS::Selector::SimpleSelector::Attribute::MatchType::ContainsString:
         return !attribute.value.is_empty()
-            && element.attribute(attribute.name).contains(attribute.value, case_sensitivity);
+            && element.attribute(attribute.name.to_string().to_deprecated_string()).contains(attribute.value, case_sensitivity);
     case CSS::Selector::SimpleSelector::Attribute::MatchType::StartsWithSegment: {
-        auto const element_attr_value = element.attribute(attribute.name);
+        auto const element_attr_value = element.attribute(attribute.name.to_string().to_deprecated_string());
         if (element_attr_value.is_empty()) {
             // If the attribute value on element is empty, the selector is true
             // if the match value is also empty and false otherwise.
@@ -142,15 +168,15 @@ static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute co
         }
         auto segments = element_attr_value.split_view('-');
         return case_insensitive_match
-            ? segments.first().equals_ignoring_case(attribute.value)
+            ? Infra::is_ascii_case_insensitive_match(segments.first(), attribute.value)
             : segments.first() == attribute.value;
     }
     case CSS::Selector::SimpleSelector::Attribute::MatchType::StartsWithString:
         return !attribute.value.is_empty()
-            && element.attribute(attribute.name).starts_with(attribute.value, case_sensitivity);
+            && element.attribute(attribute.name.to_string().to_deprecated_string()).starts_with(attribute.value, case_sensitivity);
     case CSS::Selector::SimpleSelector::Attribute::MatchType::EndsWithString:
         return !attribute.value.is_empty()
-            && element.attribute(attribute.name).ends_with(attribute.value, case_sensitivity);
+            && element.attribute(attribute.name.to_string().to_deprecated_string()).ends_with(attribute.value, case_sensitivity);
     default:
         break;
     }
@@ -176,7 +202,7 @@ static inline DOM::Element const* next_sibling_with_same_tag_name(DOM::Element c
     return nullptr;
 }
 
-static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoClass const& pseudo_class, DOM::Element const& element)
+static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoClass const& pseudo_class, DOM::Element const& element, JS::GCPtr<DOM::ParentNode const> scope)
 {
     switch (pseudo_class.type) {
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Link:
@@ -219,6 +245,8 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
     }
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Root:
         return is<HTML::HTMLHtmlElement>(element);
+    case CSS::Selector::SimpleSelector::PseudoClass::Type::Scope:
+        return scope ? &element == scope : is<HTML::HTMLHtmlElement>(element);
     case CSS::Selector::SimpleSelector::PseudoClass::Type::FirstOfType:
         return !previous_sibling_with_same_tag_name(element);
     case CSS::Selector::SimpleSelector::PseudoClass::Type::LastOfType:
@@ -238,6 +266,10 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
             && !element.is_actually_disabled();
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Checked:
         return matches_checked_pseudo_class(element);
+    case CSS::Selector::SimpleSelector::PseudoClass::Type::Indeterminate:
+        return matches_indeterminate_pseudo_class(element);
+    case CSS::Selector::SimpleSelector::PseudoClass::Type::Defined:
+        return element.is_defined();
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Is:
     case CSS::Selector::SimpleSelector::PseudoClass::Type::Where:
         for (auto& selector : pseudo_class.argument_selector_list) {
@@ -345,24 +377,24 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
     return false;
 }
 
-static inline bool matches(CSS::Selector::SimpleSelector const& component, DOM::Element const& element)
+static inline bool matches(CSS::Selector::SimpleSelector const& component, DOM::Element const& element, JS::GCPtr<DOM::ParentNode const> scope)
 {
     switch (component.type) {
     case CSS::Selector::SimpleSelector::Type::Universal:
         return true;
     case CSS::Selector::SimpleSelector::Type::Id:
-        return component.name() == element.attribute(HTML::AttributeNames::id);
+        return component.name() == element.attribute(HTML::AttributeNames::id).view();
     case CSS::Selector::SimpleSelector::Type::Class:
         return element.has_class(component.name());
     case CSS::Selector::SimpleSelector::Type::TagName:
         // See https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
         if (element.document().document_type() == DOM::Document::Type::HTML)
-            return component.lowercase_name() == element.local_name();
-        return component.name().equals_ignoring_case(element.local_name());
+            return component.lowercase_name() == element.local_name().view();
+        return Infra::is_ascii_case_insensitive_match(component.name(), element.local_name());
     case CSS::Selector::SimpleSelector::Type::Attribute:
         return matches_attribute(component.attribute(), element);
     case CSS::Selector::SimpleSelector::Type::PseudoClass:
-        return matches_pseudo_class(component.pseudo_class(), element);
+        return matches_pseudo_class(component.pseudo_class(), element, scope);
     case CSS::Selector::SimpleSelector::Type::PseudoElement:
         // Pseudo-element matching/not-matching is handled in the top level matches().
         return true;
@@ -371,11 +403,11 @@ static inline bool matches(CSS::Selector::SimpleSelector const& component, DOM::
     }
 }
 
-static inline bool matches(CSS::Selector const& selector, int component_list_index, DOM::Element const& element)
+static inline bool matches(CSS::Selector const& selector, int component_list_index, DOM::Element const& element, JS::GCPtr<DOM::ParentNode const> scope)
 {
     auto& relative_selector = selector.compound_selectors()[component_list_index];
     for (auto& simple_selector : relative_selector.simple_selectors) {
-        if (!matches(simple_selector, element))
+        if (!matches(simple_selector, element, scope))
             return false;
     }
     switch (relative_selector.combinator) {
@@ -386,7 +418,7 @@ static inline bool matches(CSS::Selector const& selector, int component_list_ind
         for (auto* ancestor = element.parent(); ancestor; ancestor = ancestor->parent()) {
             if (!is<DOM::Element>(*ancestor))
                 continue;
-            if (matches(selector, component_list_index - 1, static_cast<DOM::Element const&>(*ancestor)))
+            if (matches(selector, component_list_index - 1, static_cast<DOM::Element const&>(*ancestor), scope))
                 return true;
         }
         return false;
@@ -394,16 +426,16 @@ static inline bool matches(CSS::Selector const& selector, int component_list_ind
         VERIFY(component_list_index != 0);
         if (!element.parent() || !is<DOM::Element>(*element.parent()))
             return false;
-        return matches(selector, component_list_index - 1, static_cast<DOM::Element const&>(*element.parent()));
+        return matches(selector, component_list_index - 1, static_cast<DOM::Element const&>(*element.parent()), scope);
     case CSS::Selector::Combinator::NextSibling:
         VERIFY(component_list_index != 0);
         if (auto* sibling = element.previous_element_sibling())
-            return matches(selector, component_list_index - 1, *sibling);
+            return matches(selector, component_list_index - 1, *sibling, scope);
         return false;
     case CSS::Selector::Combinator::SubsequentSibling:
         VERIFY(component_list_index != 0);
         for (auto* sibling = element.previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
-            if (matches(selector, component_list_index - 1, *sibling))
+            if (matches(selector, component_list_index - 1, *sibling, scope))
                 return true;
         }
         return false;
@@ -413,14 +445,14 @@ static inline bool matches(CSS::Selector const& selector, int component_list_ind
     VERIFY_NOT_REACHED();
 }
 
-bool matches(CSS::Selector const& selector, DOM::Element const& element, Optional<CSS::Selector::PseudoElement> pseudo_element)
+bool matches(CSS::Selector const& selector, DOM::Element const& element, Optional<CSS::Selector::PseudoElement> pseudo_element, JS::GCPtr<DOM::ParentNode const> scope)
 {
     VERIFY(!selector.compound_selectors().is_empty());
     if (pseudo_element.has_value() && selector.pseudo_element() != pseudo_element)
         return false;
     if (!pseudo_element.has_value() && selector.pseudo_element().has_value())
         return false;
-    return matches(selector, selector.compound_selectors().size() - 1, element);
+    return matches(selector, selector.compound_selectors().size() - 1, element, scope);
 }
 
 }

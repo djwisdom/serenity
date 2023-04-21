@@ -1,19 +1,26 @@
 /*
- * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/Demangle.h>
+#include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BackgroundRepeatStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
+#include <LibWeb/CSS/StyleValues/EdgeStyleValue.h>
+#include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/FormattingContext.h>
-#include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/TableBox.h>
 #include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Platform/FontPlugin.h>
 
 namespace Web::Layout {
@@ -35,6 +42,7 @@ void Node::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_dom_node);
+    visitor.visit(m_paintable);
     visitor.visit(m_browsing_context);
     TreeNode::visit_edges(visitor);
 }
@@ -57,29 +65,53 @@ bool Node::is_out_of_flow(FormattingContext const& formatting_context) const
 
 bool Node::can_contain_boxes_with_position_absolute() const
 {
-    return computed_values().position() != CSS::Position::Static || is<InitialContainingBlock>(*this);
+    if (computed_values().position() != CSS::Position::Static)
+        return true;
+
+    if (is<Viewport>(*this))
+        return true;
+
+    // https://w3c.github.io/csswg-drafts/css-transforms-1/#propdef-transform
+    // Any computed value other than none for the transform affects containing block and stacking context
+    if (!computed_values().transformations().is_empty())
+        return true;
+
+    return false;
 }
 
-BlockContainer const* Node::containing_block() const
+static Box const* nearest_ancestor_capable_of_forming_a_containing_block(Node const& node)
+{
+    for (auto const* ancestor = node.parent(); ancestor; ancestor = ancestor->parent()) {
+        if (ancestor->is_block_container()
+            || ancestor->display().is_flex_inside()
+            || ancestor->display().is_grid_inside()) {
+            return verify_cast<Box>(ancestor);
+        }
+    }
+    return nullptr;
+}
+
+Box const* Node::containing_block() const
 {
     if (is<TextNode>(*this))
-        return first_ancestor_of_type<BlockContainer>();
+        return nearest_ancestor_capable_of_forming_a_containing_block(*this);
 
     auto position = computed_values().position();
 
+    // https://drafts.csswg.org/css-position-3/#absolute-cb
     if (position == CSS::Position::Absolute) {
-        auto* ancestor = parent();
+        auto const* ancestor = parent();
         while (ancestor && !ancestor->can_contain_boxes_with_position_absolute())
             ancestor = ancestor->parent();
-        while (ancestor && (!is<BlockContainer>(*ancestor) || ancestor->is_anonymous()))
-            ancestor = ancestor->containing_block();
-        return static_cast<BlockContainer const*>(ancestor);
+        while (ancestor && ancestor->is_anonymous())
+            ancestor = nearest_ancestor_capable_of_forming_a_containing_block(*ancestor);
+        return static_cast<Box const*>(ancestor);
     }
 
     if (position == CSS::Position::Fixed)
         return &root();
 
-    return first_ancestor_of_type<BlockContainer>();
+    return nearest_ancestor_capable_of_forming_a_containing_block(*this);
 }
 
 // https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Positioning/Understanding_z_index/The_stacking_context
@@ -91,8 +123,15 @@ bool Node::establishes_stacking_context() const
 
     if (!has_style())
         return false;
-    if (dom_node() == &document().root())
+
+    // We make a stacking context for the viewport. Painting and hit testing starts from here.
+    if (is_viewport())
         return true;
+
+    // Root element of the document (<html>).
+    if (is_root_element())
+        return true;
+
     auto position = computed_values().position();
 
     // Element with a position value absolute or relative and z-index value other than auto.
@@ -137,13 +176,13 @@ HTML::BrowsingContext& Node::browsing_context()
     return *m_browsing_context;
 }
 
-InitialContainingBlock const& Node::root() const
+Viewport const& Node::root() const
 {
     VERIFY(document().layout_node());
     return *document().layout_node();
 }
 
-InitialContainingBlock& Node::root()
+Viewport& Node::root()
 {
     VERIFY(document().layout_node());
     return *document().layout_node();
@@ -154,30 +193,34 @@ void Node::set_needs_display()
     auto* containing_block = this->containing_block();
     if (!containing_block)
         return;
-    if (!containing_block->paint_box())
+    if (!containing_block->paintable_box())
         return;
-    containing_block->paint_box()->for_each_fragment([&](auto& fragment) {
+    if (!is<Painting::PaintableWithLines>(*containing_block->paintable_box()))
+        return;
+    static_cast<Painting::PaintableWithLines const&>(*containing_block->paintable_box()).for_each_fragment([&](auto& fragment) {
         if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
-            browsing_context().set_needs_display(fragment.absolute_rect().template to_type<float>().template to_type<int>());
+            browsing_context().set_needs_display(fragment.absolute_rect());
         }
         return IterationDecision::Continue;
     });
 }
 
-Gfx::FloatPoint Node::box_type_agnostic_position() const
+CSSPixelPoint Node::box_type_agnostic_position() const
 {
     if (is<Box>(*this))
-        return verify_cast<Box>(*this).paint_box()->absolute_position().to_type<float>();
+        return verify_cast<Box>(*this).paintable_box()->absolute_position();
     VERIFY(is_inline());
-    Gfx::FloatPoint position;
+    CSSPixelPoint position;
     if (auto* block = containing_block()) {
-        block->paint_box()->for_each_fragment([&](auto& fragment) {
-            if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
-                position = fragment.absolute_rect().location().template to_type<float>();
-                return IterationDecision::Break;
-            }
-            return IterationDecision::Continue;
-        });
+        if (is<Painting::PaintableWithLines>(*block)) {
+            static_cast<Painting::PaintableWithLines const&>(*block->paintable_box()).for_each_fragment([&](auto& fragment) {
+                if (&fragment.layout_node() == this || is_ancestor_of(fragment.layout_node())) {
+                    position = fragment.absolute_rect().location();
+                    return IterationDecision::Break;
+                }
+                return IterationDecision::Continue;
+            });
+        }
     }
     return position;
 }
@@ -232,11 +275,14 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
 {
     auto& computed_values = static_cast<CSS::MutableComputedValues&>(m_computed_values);
 
+    // NOTE: color must be set first to ensure currentColor can be resolved in other properties (e.g. background-color).
+    computed_values.set_color(computed_style.color_or_fallback(CSS::PropertyID::Color, *this, CSS::InitialValues::color()));
+
     // NOTE: We have to be careful that font-related properties get set in the right order.
     //       m_font is used by Length::to_px() when resolving sizes against this layout node.
     //       That's why it has to be set before everything else.
     m_font = computed_style.computed_font();
-    computed_values.set_font_size(computed_style.property(CSS::PropertyID::FontSize)->to_length().to_px(*this));
+    computed_values.set_font_size(computed_style.property(CSS::PropertyID::FontSize)->to_length().to_px(*this).value());
     computed_values.set_font_weight(computed_style.property(CSS::PropertyID::FontWeight)->to_integer());
     m_line_height = computed_style.line_height(*this);
 
@@ -247,7 +293,8 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
         auto clips = computed_style.property(CSS::PropertyID::BackgroundClip);
         auto images = computed_style.property(CSS::PropertyID::BackgroundImage);
         auto origins = computed_style.property(CSS::PropertyID::BackgroundOrigin);
-        auto positions = computed_style.property(CSS::PropertyID::BackgroundPosition);
+        auto x_positions = computed_style.property(CSS::PropertyID::BackgroundPositionX);
+        auto y_positions = computed_style.property(CSS::PropertyID::BackgroundPositionY);
         auto repeats = computed_style.property(CSS::PropertyID::BackgroundRepeat);
         auto sizes = computed_style.property(CSS::PropertyID::BackgroundSize);
 
@@ -258,7 +305,7 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
                 return 1;
         };
 
-        auto value_for_layer = [](auto& style_value, size_t layer_index) -> RefPtr<CSS::StyleValue> {
+        auto value_for_layer = [](auto& style_value, size_t layer_index) -> RefPtr<CSS::StyleValue const> {
             if (style_value->is_value_list())
                 return style_value->as_value_list().value_at(layer_index, true);
             return style_value;
@@ -269,7 +316,8 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
         layer_count = max(layer_count, count_layers(clips));
         layer_count = max(layer_count, count_layers(images));
         layer_count = max(layer_count, count_layers(origins));
-        layer_count = max(layer_count, count_layers(positions));
+        layer_count = max(layer_count, count_layers(x_positions));
+        layer_count = max(layer_count, count_layers(y_positions));
         layer_count = max(layer_count, count_layers(repeats));
         layer_count = max(layer_count, count_layers(sizes));
 
@@ -282,11 +330,11 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
             if (auto image_value = value_for_layer(images, layer_index); image_value) {
                 if (image_value->is_abstract_image()) {
                     layer.background_image = image_value->as_abstract_image();
-                    layer.background_image->load_any_resources(document());
+                    const_cast<CSS::AbstractImageStyleValue&>(*layer.background_image).load_any_resources(document());
                 }
             }
 
-            if (auto attachment_value = value_for_layer(attachments, layer_index); attachment_value && attachment_value->has_identifier()) {
+            if (auto attachment_value = value_for_layer(attachments, layer_index); attachment_value && attachment_value->is_identifier()) {
                 switch (attachment_value->to_identifier()) {
                 case CSS::ValueID::Fixed:
                     layer.attachment = CSS::BackgroundAttachment::Fixed;
@@ -315,21 +363,25 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
                 }
             };
 
-            if (auto origin_value = value_for_layer(origins, layer_index); origin_value && origin_value->has_identifier()) {
+            if (auto origin_value = value_for_layer(origins, layer_index); origin_value && origin_value->is_identifier()) {
                 layer.origin = as_box(origin_value->to_identifier());
             }
 
-            if (auto clip_value = value_for_layer(clips, layer_index); clip_value && clip_value->has_identifier()) {
+            if (auto clip_value = value_for_layer(clips, layer_index); clip_value && clip_value->is_identifier()) {
                 layer.clip = as_box(clip_value->to_identifier());
             }
 
-            if (auto position_value = value_for_layer(positions, layer_index); position_value && position_value->is_position()) {
-                auto& position = position_value->as_position();
-                layer.position_edge_x = position.edge_x();
-                layer.position_edge_y = position.edge_y();
-                layer.position_offset_x = position.offset_x();
-                layer.position_offset_y = position.offset_y();
+            if (auto position_value = value_for_layer(x_positions, layer_index); position_value && position_value->is_edge()) {
+                auto& position = position_value->as_edge();
+                layer.position_edge_x = position.edge();
+                layer.position_offset_x = position.offset();
             }
+
+            if (auto position_value = value_for_layer(y_positions, layer_index); position_value && position_value->is_edge()) {
+                auto& position = position_value->as_edge();
+                layer.position_edge_y = position.edge();
+                layer.position_offset_y = position.offset();
+            };
 
             if (auto size_value = value_for_layer(sizes, layer_index); size_value) {
                 if (size_value->is_background_size()) {
@@ -337,7 +389,7 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
                     layer.size_type = CSS::BackgroundSize::LengthPercentage;
                     layer.size_x = size.size_x();
                     layer.size_y = size.size_y();
-                } else if (size_value->has_identifier()) {
+                } else if (size_value->is_identifier()) {
                     switch (size_value->to_identifier()) {
                     case CSS::ValueID::Contain:
                         layer.size_type = CSS::BackgroundSize::Contain;
@@ -422,6 +474,10 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     if (justify_content.has_value())
         computed_values.set_justify_content(justify_content.value());
 
+    auto accent_color = computed_style.accent_color(*this);
+    if (accent_color.has_value())
+        computed_values.set_accent_color(accent_color.value());
+
     auto align_content = computed_style.align_content();
     if (align_content.has_value())
         computed_values.set_align_content(align_content.value());
@@ -498,10 +554,8 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     auto list_style_image = computed_style.property(CSS::PropertyID::ListStyleImage);
     if (list_style_image->is_abstract_image()) {
         m_list_style_image = list_style_image->as_abstract_image();
-        m_list_style_image->load_any_resources(document());
+        const_cast<CSS::AbstractImageStyleValue&>(*m_list_style_image).load_any_resources(document());
     }
-
-    computed_values.set_color(computed_style.color_or_fallback(CSS::PropertyID::Color, *this, CSS::InitialValues::color()));
 
     // FIXME: The default text decoration color value is `currentcolor`, but since we can't resolve that easily,
     //        we just manually grab the value from `color`. This makes it dependent on `color` being
@@ -543,17 +597,23 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
         //        specified first, so it's far from ideal.
         border.color = computed_style.color_or_fallback(color_property, *this, computed_values.color());
         border.line_style = computed_style.line_style(style_property).value_or(CSS::LineStyle::None);
-        if (border.line_style == CSS::LineStyle::None) {
+
+        // https://w3c.github.io/csswg-drafts/css-backgrounds/#border-style
+        // none
+        //    No border. Color and width are ignored (i.e., the border has width 0). Note this means that the initial value of border-image-width will also resolve to zero.
+        // hidden
+        //    Same as none, but has different behavior in the border conflict resolution rules for border-collapsed tables [CSS2].
+        if (border.line_style == CSS::LineStyle::None || border.line_style == CSS::LineStyle::Hidden) {
             border.width = 0;
         } else {
             auto resolve_border_width = [&]() {
                 auto value = computed_style.property(width_property);
                 if (value->is_calculated())
-                    return CSS::Length::make_calculated(value->as_calculated()).to_px(*this);
+                    return value->as_calculated().resolve_length(*this)->to_px(*this).value();
                 if (value->has_length())
-                    return value->to_length().to_px(*this);
+                    return value->to_length().to_px(*this).value();
                 if (value->is_identifier()) {
-                    // FIXME: These values should depend on something, e.g. a font size.
+                    // https://www.w3.org/TR/css-backgrounds-3/#valdef-line-width-thin
                     switch (value->to_identifier()) {
                     case CSS::ValueID::Thin:
                         return 1.0f;
@@ -584,6 +644,7 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
     computed_values.set_grid_column_start(computed_style.grid_column_start());
     computed_values.set_grid_row_end(computed_style.grid_row_end());
     computed_values.set_grid_row_start(computed_style.grid_row_start());
+    computed_values.set_grid_template_areas(computed_style.grid_template_areas());
 
     if (auto fill = computed_style.property(CSS::PropertyID::Fill); fill->has_color())
         computed_values.set_fill(fill->to_color(*this));
@@ -599,6 +660,9 @@ void NodeWithStyle::apply_style(const CSS::StyleProperties& computed_style)
 
     computed_values.set_column_gap(computed_style.size_value(CSS::PropertyID::ColumnGap));
     computed_values.set_row_gap(computed_style.size_value(CSS::PropertyID::RowGap));
+
+    if (auto border_collapse = computed_style.border_collapse(); border_collapse.has_value())
+        computed_values.set_border_collapse(border_collapse.value());
 }
 
 bool Node::is_root_element() const
@@ -648,6 +712,12 @@ bool Node::is_inline_block() const
     return display.is_inline_outside() && display.is_flow_root_inside();
 }
 
+bool Node::is_inline_table() const
+{
+    auto display = this->display();
+    return display.is_inline_outside() && display.is_table_inside();
+}
+
 JS::NonnullGCPtr<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const
 {
     auto wrapper = heap().allocate_without_realm<BlockContainer>(const_cast<DOM::Document&>(document()), nullptr, m_computed_values.clone_inherited_values());
@@ -657,12 +727,24 @@ JS::NonnullGCPtr<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const
     return *wrapper;
 }
 
-void Node::set_paintable(RefPtr<Painting::Paintable> paintable)
+void NodeWithStyle::reset_table_box_computed_values_used_by_wrapper_to_init_values()
+{
+    VERIFY(is<TableBox>(*this));
+
+    CSS::MutableComputedValues& mutable_computed_values = static_cast<CSS::MutableComputedValues&>(m_computed_values);
+    mutable_computed_values.set_position(CSS::Position::Static);
+    mutable_computed_values.set_float(CSS::Float::None);
+    mutable_computed_values.set_clear(CSS::Clear::None);
+    mutable_computed_values.set_inset({ CSS::Length::make_auto(), CSS::Length::make_auto(), CSS::Length::make_auto(), CSS::Length::make_auto() });
+    mutable_computed_values.set_margin({ CSS::Length::make_px(0), CSS::Length::make_px(0), CSS::Length::make_px(0), CSS::Length::make_px(0) });
+}
+
+void Node::set_paintable(JS::GCPtr<Painting::Paintable> paintable)
 {
     m_paintable = move(paintable);
 }
 
-RefPtr<Painting::Paintable> Node::create_paintable() const
+JS::GCPtr<Painting::Paintable> Node::create_paintable() const
 {
     return nullptr;
 }

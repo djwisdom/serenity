@@ -7,7 +7,6 @@
 #pragma once
 
 #include "InspectorServerClient.h"
-#include <AK/NonnullOwnPtrVector.h>
 
 namespace Inspector {
 
@@ -25,7 +24,7 @@ public:
     DeprecatedString const& process_name() const { return m_process_name; }
 
     RemoteObjectGraphModel& object_graph_model() { return *m_object_graph_model; }
-    NonnullOwnPtrVector<RemoteObject> const& roots() const { return m_roots; }
+    Vector<NonnullOwnPtr<RemoteObject>> const& roots() const { return m_roots; }
 
     void set_inspected_object(FlatPtr);
 
@@ -39,12 +38,10 @@ private:
     void handle_get_all_objects_response(JsonObject const&);
     void handle_identify_response(JsonObject const&);
 
-    void send_request(JsonObject const&);
-
     pid_t m_pid { -1 };
     DeprecatedString m_process_name;
     NonnullRefPtr<RemoteObjectGraphModel> m_object_graph_model;
-    NonnullOwnPtrVector<RemoteObject> m_roots;
+    Vector<NonnullOwnPtr<RemoteObject>> m_roots;
     RefPtr<InspectorServerClient> m_client;
 };
 

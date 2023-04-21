@@ -9,6 +9,7 @@
 #include <AK/Types.h>
 #include <Kernel/Bus/PCI/Device.h>
 #include <Kernel/Graphics/Definitions.h>
+#include <Kernel/Graphics/Intel/DisplayConnectorGroup.h>
 #include <Kernel/Graphics/Intel/NativeDisplayConnector.h>
 #include <Kernel/PhysicalAddress.h>
 #include <LibEDID/EDID.h>
@@ -20,15 +21,18 @@ class IntelNativeGraphicsAdapter final
     , public PCI::Device {
 
 public:
-    static LockRefPtr<IntelNativeGraphicsAdapter> initialize(PCI::DeviceIdentifier const&);
+    static ErrorOr<bool> probe(PCI::DeviceIdentifier const&);
+    static ErrorOr<NonnullLockRefPtr<GenericGraphicsAdapter>> create(PCI::DeviceIdentifier const&);
 
     virtual ~IntelNativeGraphicsAdapter() = default;
+
+    virtual StringView device_name() const override { return "IntelNativeGraphicsAdapter"sv; }
 
 private:
     ErrorOr<void> initialize_adapter();
 
-    explicit IntelNativeGraphicsAdapter(PCI::Address);
+    explicit IntelNativeGraphicsAdapter(PCI::DeviceIdentifier const&);
 
-    LockRefPtr<IntelNativeDisplayConnector> m_display_connector;
+    LockRefPtr<IntelDisplayConnectorGroup> m_connector_group;
 };
 }

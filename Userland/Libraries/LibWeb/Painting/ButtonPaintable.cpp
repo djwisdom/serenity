@@ -5,6 +5,7 @@
  */
 
 #include <LibGUI/Event.h>
+#include <LibWeb/FontCache.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/Layout/ButtonBox.h>
@@ -13,9 +14,9 @@
 
 namespace Web::Painting {
 
-NonnullRefPtr<ButtonPaintable> ButtonPaintable::create(Layout::ButtonBox const& layout_box)
+JS::NonnullGCPtr<ButtonPaintable> ButtonPaintable::create(Layout::ButtonBox const& layout_box)
 {
-    return adopt_ref(*new ButtonPaintable(layout_box));
+    return layout_box.heap().allocate_without_realm<ButtonPaintable>(layout_box);
 }
 
 ButtonPaintable::ButtonPaintable(Layout::ButtonBox const& layout_box)
@@ -47,7 +48,12 @@ void ButtonPaintable::paint(PaintContext& context, PaintPhase phase) const
             auto offset = context.rounded_device_pixels(1);
             text_rect.translate_by(offset, offset);
         }
-        context.painter().draw_text(text_rect.to_type<int>(), static_cast<HTML::HTMLInputElement const&>(dom_node).value(), layout_box().font(), Gfx::TextAlignment::Center, computed_values().color());
+        context.painter().draw_text(
+            text_rect.to_type<int>(),
+            static_cast<HTML::HTMLInputElement const&>(dom_node).value(),
+            FontCache::the().scaled_font(layout_box().font(), context.device_pixels_per_css_pixel()),
+            Gfx::TextAlignment::Center,
+            computed_values().color());
     }
 }
 

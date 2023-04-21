@@ -35,7 +35,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_title("Hex Editor");
     window->resize(640, 400);
 
-    auto hex_editor_widget = TRY(window->try_set_main_widget<HexEditorWidget>());
+    auto hex_editor_widget = TRY(window->set_main_widget<HexEditorWidget>());
 
     window->on_close_request = [&]() -> GUI::Window::CloseRequestDecision {
         if (hex_editor_widget->request_close())
@@ -43,21 +43,20 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return GUI::Window::CloseRequestDecision::StayOpen;
     };
 
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    hex_editor_widget->initialize_menubar(*window);
+    TRY(hex_editor_widget->initialize_menubar(*window));
     window->show();
     window->set_icon(app_icon.bitmap_for_size(16));
 
     if (arguments.argc > 1) {
         // FIXME: Using `try_request_file_read_only_approved` doesn't work here since the file stored in the editor is only readable.
-        auto response = FileSystemAccessClient::Client::the().try_request_file(window, arguments.strings[1], Core::OpenMode::ReadWrite);
+        auto response = FileSystemAccessClient::Client::the().request_file(window, arguments.strings[1], Core::File::OpenMode::ReadWrite);
         if (response.is_error())
             return 1;
-        hex_editor_widget->open_file(response.value());
+        hex_editor_widget->open_file(response.value().filename(), response.value().release_stream());
     }
 
     return app->exec();

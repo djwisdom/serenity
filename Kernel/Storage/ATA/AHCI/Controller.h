@@ -9,6 +9,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/Types.h>
 #include <Kernel/Library/LockRefPtr.h>
+#include <Kernel/Memory/TypedMapping.h>
 #include <Kernel/Sections.h>
 #include <Kernel/Storage/ATA/AHCI/Definitions.h>
 #include <Kernel/Storage/ATA/ATAController.h>
@@ -24,12 +25,14 @@ class AHCIController final : public ATAController
     friend class AHCIInterruptHandler;
 
 public:
-    static NonnullLockRefPtr<AHCIController> initialize(PCI::DeviceIdentifier const& pci_device_identifier);
+    static ErrorOr<NonnullRefPtr<AHCIController>> initialize(PCI::DeviceIdentifier const& pci_device_identifier);
     virtual ~AHCIController() override;
 
+    virtual StringView device_name() const override { return "AHCI"sv; }
+
     virtual LockRefPtr<StorageDevice> device(u32 index) const override;
-    virtual bool reset() override;
-    virtual bool shutdown() override;
+    virtual ErrorOr<void> reset() override;
+    virtual ErrorOr<void> shutdown() override;
     virtual size_t devices_count() const override;
     virtual void start_request(ATADevice const&, AsyncBlockDeviceRequest&) override;
     virtual void complete_current_request(AsyncDeviceRequest::RequestResult) override;
@@ -41,17 +44,17 @@ private:
     void enable_global_interrupts() const;
 
     explicit AHCIController(PCI::DeviceIdentifier const&);
-    void initialize_hba(PCI::DeviceIdentifier const&);
+    ErrorOr<void> initialize_hba(PCI::DeviceIdentifier const&);
 
     AHCI::HBADefinedCapabilities capabilities() const;
     LockRefPtr<StorageDevice> device_by_port(u32 index) const;
 
     volatile AHCI::PortRegisters& port(size_t port_number) const;
-    NonnullOwnPtr<Memory::Region> default_hba_region() const;
+    ErrorOr<Memory::TypedMapping<AHCI::HBA volatile>> map_default_hba_region(PCI::DeviceIdentifier const&);
     volatile AHCI::HBA& hba() const;
 
     Array<LockRefPtr<AHCIPort>, 32> m_ports;
-    NonnullOwnPtr<Memory::Region> m_hba_region;
+    Memory::TypedMapping<AHCI::HBA volatile> m_hba_mapping;
     AHCI::HBADefinedCapabilities m_hba_capabilities;
 
     // FIXME: There could be multiple IRQ (MSI) handlers for AHCI. Find a way to use all of them.
@@ -60,6 +63,6 @@ private:
     // Note: This lock is intended to be locked when doing changes to HBA registers
     // that affect its core functionality in a manner that controls all attached storage devices
     // to the HBA SATA ports.
-    mutable Spinlock m_hba_control_lock { LockRank::None };
+    mutable Spinlock<LockRank::None> m_hba_control_lock {};
 };
 }

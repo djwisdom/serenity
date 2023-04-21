@@ -13,19 +13,27 @@
 
 namespace Web::DOM {
 
-JS::NonnullGCPtr<HTMLCollection> HTMLCollection::create(ParentNode& root, Function<bool(Element const&)> filter)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<HTMLCollection>> HTMLCollection::create(ParentNode& root, Function<bool(Element const&)> filter)
 {
-    return root.heap().allocate<HTMLCollection>(root.realm(), root, move(filter));
+    return MUST_OR_THROW_OOM(root.heap().allocate<HTMLCollection>(root.realm(), root, move(filter)));
 }
 
 HTMLCollection::HTMLCollection(ParentNode& root, Function<bool(Element const&)> filter)
-    : LegacyPlatformObject(Bindings::cached_web_prototype(root.realm(), "HTMLCollection"))
+    : LegacyPlatformObject(root.realm())
     , m_root(root)
     , m_filter(move(filter))
 {
 }
 
 HTMLCollection::~HTMLCollection() = default;
+
+JS::ThrowCompletionOr<void> HTMLCollection::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLCollectionPrototype>(realm, "HTMLCollection"));
+
+    return {};
+}
 
 void HTMLCollection::visit_edges(Cell::Visitor& visitor)
 {
@@ -36,7 +44,7 @@ void HTMLCollection::visit_edges(Cell::Visitor& visitor)
 JS::MarkedVector<Element*> HTMLCollection::collect_matching_elements() const
 {
     JS::MarkedVector<Element*> elements(m_root->heap());
-    m_root->for_each_in_inclusive_subtree_of_type<Element>([&](auto& element) {
+    m_root->for_each_in_subtree_of_type<Element>([&](auto& element) {
         if (m_filter(element))
             elements.append(const_cast<Element*>(&element));
         return IterationDecision::Continue;
@@ -62,7 +70,7 @@ Element* HTMLCollection::item(size_t index) const
 }
 
 // https://dom.spec.whatwg.org/#dom-htmlcollection-nameditem-key
-Element* HTMLCollection::named_item(FlyString const& name) const
+Element* HTMLCollection::named_item(DeprecatedFlyString const& name) const
 {
     // 1. If key is the empty string, return null.
     if (name.is_empty())
@@ -122,7 +130,7 @@ bool HTMLCollection::is_supported_property_index(u32 index) const
     return index < elements.size();
 }
 
-JS::Value HTMLCollection::item_value(size_t index) const
+WebIDL::ExceptionOr<JS::Value> HTMLCollection::item_value(size_t index) const
 {
     auto* element = item(index);
     if (!element)
@@ -130,7 +138,7 @@ JS::Value HTMLCollection::item_value(size_t index) const
     return const_cast<Element*>(element);
 }
 
-JS::Value HTMLCollection::named_item_value(FlyString const& index) const
+WebIDL::ExceptionOr<JS::Value> HTMLCollection::named_item_value(DeprecatedFlyString const& index) const
 {
     auto* element = named_item(index);
     if (!element)

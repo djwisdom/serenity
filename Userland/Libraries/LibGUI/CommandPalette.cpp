@@ -182,15 +182,14 @@ CommandPalette::CommandPalette(GUI::Window& parent_window, ScreenPosition screen
 
     collect_actions(parent_window);
 
-    auto& main_widget = set_main_widget<GUI::Frame>();
-    main_widget.set_frame_shape(Gfx::FrameShape::Window);
-    main_widget.set_fill_with_background_color(true);
+    auto main_widget = set_main_widget<GUI::Frame>().release_value_but_fixme_should_propagate_errors();
+    main_widget->set_frame_shape(Gfx::FrameShape::Window);
+    main_widget->set_fill_with_background_color(true);
 
-    auto& layout = main_widget.set_layout<GUI::VerticalBoxLayout>();
-    layout.set_margins(4);
+    main_widget->set_layout<GUI::VerticalBoxLayout>(4);
 
-    m_text_box = main_widget.add<GUI::TextBox>();
-    m_table_view = main_widget.add<GUI::TableView>();
+    m_text_box = main_widget->add<GUI::TextBox>();
+    m_table_view = main_widget->add<GUI::TableView>();
     m_model = adopt_ref(*new ActionModel(m_actions));
     m_table_view->set_column_headers_visible(false);
 
@@ -233,22 +232,22 @@ void CommandPalette::collect_actions(GUI::Window& parent_window)
 
     auto collect_action_children = [&](Core::Object& action_parent) {
         action_parent.for_each_child_of_type<GUI::Action>([&](GUI::Action& action) {
-            if (action.is_enabled())
+            if (action.is_enabled() && action.is_visible())
                 actions.set(action);
             return IterationDecision::Continue;
         });
     };
 
     Function<bool(GUI::Action*)> should_show_action = [&](GUI::Action* action) {
-        return action && action->is_enabled() && action->shortcut() != Shortcut(Mod_Ctrl | Mod_Shift, Key_A);
+        return action && action->is_enabled() && action->is_visible() && action->shortcut() != Shortcut(Mod_Ctrl | Mod_Shift, Key_A);
     };
 
     Function<void(Menu&)> collect_actions_from_menu = [&](Menu& menu) {
-        for (auto menu_item : menu.items()) {
-            if (menu_item.submenu())
-                collect_actions_from_menu(*menu_item.submenu());
+        for (auto& menu_item : menu.items()) {
+            if (menu_item->submenu())
+                collect_actions_from_menu(*menu_item->submenu());
 
-            auto* action = menu_item.action();
+            auto* action = menu_item->action();
             if (should_show_action(action))
                 actions.set(*action);
         }

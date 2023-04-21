@@ -9,7 +9,6 @@
 #include <AK/CircularQueue.h>
 #include <AK/JsonObject.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/Frame.h>
@@ -144,13 +143,13 @@ private:
         GUI::Process::spawn_or_show_error(window(), "/bin/SystemMonitor"sv, Array { "-t", m_graph_type == GraphType::Network ? "network" : "graphs" });
     }
 
-    ErrorOr<JsonValue> get_data_as_json(OwnPtr<Core::Stream::File>& file, StringView filename)
+    ErrorOr<JsonValue> get_data_as_json(OwnPtr<Core::File>& file, StringView filename)
     {
         if (file) {
             // Seeking to the beginning causes a data refresh!
-            TRY(file->seek(0, Core::Stream::SeekMode::SetPosition));
+            TRY(file->seek(0, SeekMode::SetPosition));
         } else {
-            file = TRY(Core::Stream::File::open(filename, Core::Stream::OpenMode::Read));
+            file = TRY(Core::File::open(filename, Core::File::OpenMode::Read));
         }
 
         auto file_contents = TRY(file->read_until_eof());
@@ -167,8 +166,8 @@ private:
             return false;
 
         auto const& obj = json.value().as_object();
-        total = obj.get("total_time"sv).to_u64();
-        idle = obj.get("idle_time"sv).to_u64();
+        total = obj.get_u64("total_time"sv).value_or(0);
+        idle = obj.get_u64("idle_time"sv).value_or(0);
         return true;
     }
 
@@ -179,11 +178,11 @@ private:
             return false;
 
         auto const& obj = json.value().as_object();
-        unsigned kmalloc_allocated = obj.get("kmalloc_allocated"sv).to_u32();
-        unsigned kmalloc_available = obj.get("kmalloc_available"sv).to_u32();
-        auto physical_allocated = obj.get("physical_allocated"sv).to_u64();
-        auto physical_committed = obj.get("physical_committed"sv).to_u64();
-        auto physical_uncommitted = obj.get("physical_uncommitted"sv).to_u64();
+        unsigned kmalloc_allocated = obj.get_u32("kmalloc_allocated"sv).value_or(0);
+        unsigned kmalloc_available = obj.get_u32("kmalloc_available"sv).value_or(0);
+        auto physical_allocated = obj.get_u64("physical_allocated"sv).value_or(0);
+        auto physical_committed = obj.get_u64("physical_committed"sv).value_or(0);
+        auto physical_uncommitted = obj.get_u64("physical_uncommitted"sv).value_or(0);
         unsigned kmalloc_bytes_total = kmalloc_allocated + kmalloc_available;
         unsigned kmalloc_pages_total = (kmalloc_bytes_total + PAGE_SIZE - 1) / PAGE_SIZE;
         u64 total_userphysical_and_swappable_pages = kmalloc_pages_total + physical_allocated + physical_committed + physical_uncommitted;
@@ -203,13 +202,13 @@ private:
         auto const& array = json.value().as_array();
         for (auto const& adapter_value : array.values()) {
             auto const& adapter_obj = adapter_value.as_object();
-            if (!adapter_obj.has_string("ipv4_address"sv) || !adapter_obj.get("link_up"sv).as_bool())
+            if (!adapter_obj.has_string("ipv4_address"sv) || !adapter_obj.get_bool("link_up"sv).value())
                 continue;
 
-            tx += adapter_obj.get("bytes_in"sv).to_u64();
-            rx += adapter_obj.get("bytes_out"sv).to_u64();
+            tx += adapter_obj.get_u64("bytes_in"sv).value_or(0);
+            rx += adapter_obj.get_u64("bytes_out"sv).value_or(0);
             // Link speed data is given in megabits, but we want all return values to be in bytes.
-            link_speed += adapter_obj.get("link_speed"sv).to_u64() * 8'000'000;
+            link_speed += adapter_obj.get_u64("link_speed"sv).value_or(0) * 8'000'000;
         }
         link_speed /= 8;
         return tx != 0;
@@ -231,9 +230,9 @@ private:
     static constexpr u64 const scale_unit = 8000;
     u64 m_current_scale { scale_unit };
     DeprecatedString m_tooltip;
-    OwnPtr<Core::Stream::File> m_proc_stat;
-    OwnPtr<Core::Stream::File> m_proc_mem;
-    OwnPtr<Core::Stream::File> m_proc_net;
+    OwnPtr<Core::File> m_proc_stat;
+    OwnPtr<Core::File> m_proc_mem;
+    OwnPtr<Core::File> m_proc_net;
 };
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
@@ -258,7 +257,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    NonnullRefPtrVector<GUI::Window> applet_windows;
+    Vector<NonnullRefPtr<GUI::Window>> applet_windows;
 
     auto create_applet = [&](GraphType graph_type, StringView spec) -> ErrorOr<void> {
         auto parts = spec.split_view(',');
@@ -276,7 +275,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         window->set_window_type(GUI::WindowType::Applet);
         window->resize(GraphWidget::history_size + 2, 15);
 
-        auto graph_widget = TRY(window->try_set_main_widget<GraphWidget>(graph_type, graph_color, Optional<Gfx::Color> {}));
+        auto graph_widget = TRY(window->set_main_widget<GraphWidget>(graph_type, graph_color, Optional<Gfx::Color> {}));
         window->show();
         applet_windows.append(move(window));
 

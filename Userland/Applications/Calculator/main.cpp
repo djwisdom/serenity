@@ -5,7 +5,6 @@
  */
 
 #include "CalculatorWidget.h"
-#include "RoundingDialog.h"
 #include <LibCore/System.h>
 #include <LibCrypto/NumberTheory/ModularFunctions.h>
 #include <LibGUI/Action.h>
@@ -13,6 +12,7 @@
 #include <LibGUI/Application.h>
 #include <LibGUI/Clipboard.h>
 #include <LibGUI/Icon.h>
+#include <LibGUI/InputBox.h>
 #include <LibGUI/Menu.h>
 #include <LibGUI/Menubar.h>
 #include <LibGUI/Window.h>
@@ -35,16 +35,16 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_resizable(false);
     window->resize(250, 215);
 
-    auto widget = TRY(window->try_set_main_widget<CalculatorWidget>());
+    auto widget = TRY(window->set_main_widget<CalculatorWidget>());
 
     window->set_icon(app_icon.bitmap_for_size(16));
 
-    auto& file_menu = window->add_menu("&File");
+    auto& file_menu = window->add_menu("&File"_short_string);
     file_menu.add_action(GUI::CommonActions::make_quit_action([](auto&) {
         GUI::Application::the()->quit();
     }));
 
-    auto& edit_menu = window->add_menu("&Edit");
+    auto& edit_menu = window->add_menu("&Edit"_short_string);
     edit_menu.add_action(GUI::CommonActions::make_copy_action([&](auto&) {
         GUI::Clipboard::the().set_plain_text(widget->get_entry());
     }));
@@ -53,25 +53,25 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         if (clipboard.mime_type == "text/plain") {
             if (!clipboard.data.is_empty()) {
                 auto const number = StringView(clipboard.data);
-                widget->set_entry(Crypto::BigFraction(number));
+                widget->set_typed_entry(Crypto::BigFraction(number));
             }
         }
     }));
 
-    auto& constants_menu = window->add_menu("&Constants");
+    auto& constants_menu = window->add_menu(TRY("&Constants"_string));
     auto const power = Crypto::NumberTheory::Power("10"_bigint, "10"_bigint);
 
-    constants_menu.add_action(GUI::Action::create("&Pi", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/calculator/pi.png"sv)), [&](auto&) {
-        widget->set_entry(Crypto::BigFraction { Crypto::SignedBigInteger(31415926535), power });
+    constants_menu.add_action(GUI::Action::create("&Pi", TRY(Gfx::Bitmap::load_from_file("/res/icons/calculator/pi.png"sv)), [&](auto&) {
+        widget->set_typed_entry(Crypto::BigFraction { Crypto::SignedBigInteger(31415926535), power });
     }));
-    constants_menu.add_action(GUI::Action::create("&Euler's Number", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/calculator/eulers_number.png"sv)), [&](auto&) {
-        widget->set_entry(Crypto::BigFraction { Crypto::SignedBigInteger(27182818284), power });
+    constants_menu.add_action(GUI::Action::create("&Euler's Number", TRY(Gfx::Bitmap::load_from_file("/res/icons/calculator/eulers_number.png"sv)), [&](auto&) {
+        widget->set_typed_entry(Crypto::BigFraction { Crypto::SignedBigInteger(27182818284), power });
     }));
-    constants_menu.add_action(GUI::Action::create("&Phi", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/calculator/phi.png"sv)), [&](auto&) {
-        widget->set_entry(Crypto::BigFraction { Crypto::SignedBigInteger(16180339887), power });
+    constants_menu.add_action(GUI::Action::create("&Phi", TRY(Gfx::Bitmap::load_from_file("/res/icons/calculator/phi.png"sv)), [&](auto&) {
+        widget->set_typed_entry(Crypto::BigFraction { Crypto::SignedBigInteger(16180339887), power });
     }));
 
-    auto& round_menu = window->add_menu("&Round");
+    auto& round_menu = window->add_menu("&Round"_short_string);
     GUI::ActionGroup preview_actions;
 
     static constexpr auto rounding_modes = Array { 0, 2, 4 };
@@ -90,22 +90,23 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     constexpr auto format { "&Custom - {} ..."sv };
     auto round_custom = GUI::Action::create_checkable(DeprecatedString::formatted(format, 0), [&](auto& action) {
-        unsigned custom_rounding_length = widget->rounding_length();
-
-        if (RoundingDialog::show(window, "Choose custom rounding"sv, custom_rounding_length) == GUI::Dialog::ExecResult::OK) {
+        int custom_rounding_length = widget->rounding_length();
+        auto result = GUI::InputBox::show_numeric(window, custom_rounding_length, 0, 100, "Round to"sv);
+        if (!result.is_error() && result.value() == GUI::Dialog::ExecResult::OK) {
             action.set_text(DeprecatedString::formatted(format, custom_rounding_length));
             widget->set_rounding_length(custom_rounding_length);
             last_rounding_mode.clear();
         } else if (last_rounding_mode.has_value())
-            round_menu.action_at(last_rounding_mode.value())->activate();
+            round_menu.action_at(last_rounding_mode.value())
+                ->activate();
     });
 
     widget->set_rounding_custom(round_custom, format);
 
-    auto shrink_action = GUI::Action::create("&Shrink...", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-cut.png"sv)), [&](auto&) {
-        unsigned shrink_length = widget->rounding_length();
-
-        if (RoundingDialog::show(window, "Choose shrinking length"sv, shrink_length) == GUI::Dialog::ExecResult::OK) {
+    auto shrink_action = GUI::Action::create("&Shrink...", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/edit-cut.png"sv)), [&](auto&) {
+        int shrink_length = widget->rounding_length();
+        auto result = GUI::InputBox::show_numeric(window, shrink_length, 0, 100, "Shrink to"sv);
+        if (!result.is_error() && result.value() == GUI::Dialog::ExecResult::OK) {
             round_custom->set_checked(true);
             round_custom->set_text(DeprecatedString::formatted(format, shrink_length));
             widget->set_rounding_length(shrink_length);
@@ -120,7 +121,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     round_menu.action_at(last_rounding_mode.value())->activate();
 
-    auto& help_menu = window->add_menu("&Help");
+    auto& help_menu = window->add_menu("&Help"_short_string);
     help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_about_action("Calculator", app_icon, window));
 

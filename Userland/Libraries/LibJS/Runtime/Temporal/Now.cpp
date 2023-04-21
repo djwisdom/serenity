@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -22,18 +22,18 @@ namespace JS::Temporal {
 
 // 2 The Temporal.Now Object, https://tc39.es/proposal-temporal/#sec-temporal-now-object
 Now::Now(Realm& realm)
-    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, realm.intrinsics().object_prototype())
 {
 }
 
-void Now::initialize(Realm& realm)
+ThrowCompletionOr<void> Now::initialize(Realm& realm)
 {
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
     auto& vm = this->vm();
 
     // 2.1.1 Temporal.Now [ @@toStringTag ], https://tc39.es/proposal-temporal/#sec-temporal-now-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Temporal.Now"), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), MUST_OR_THROW_OOM(PrimitiveString::create(vm, "Temporal.Now"sv)), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, vm.names.timeZone, time_zone, 0, attr);
@@ -45,6 +45,8 @@ void Now::initialize(Realm& realm)
     define_native_function(realm, vm.names.plainDate, plain_date, 1, attr);
     define_native_function(realm, vm.names.plainDateISO, plain_date_iso, 0, attr);
     define_native_function(realm, vm.names.plainTimeISO, plain_time_iso, 0, attr);
+
+    return {};
 }
 
 // 2.2.1 Temporal.Now.timeZone ( ), https://tc39.es/proposal-temporal/#sec-temporal.now.timezone
@@ -155,6 +157,7 @@ TimeZone* system_time_zone(VM& vm)
     auto identifier = default_time_zone();
 
     // 2. Return ! CreateTemporalTimeZone(identifier).
+    // FIXME: Propagate possible OOM error
     return MUST(create_temporal_time_zone(vm, identifier));
 }
 

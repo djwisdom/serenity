@@ -15,7 +15,7 @@
 
 namespace GUI {
 
-AbstractButton::AbstractButton(DeprecatedString text)
+AbstractButton::AbstractButton(String text)
 {
     set_text(move(text));
 
@@ -34,7 +34,7 @@ AbstractButton::AbstractButton(DeprecatedString text)
     REGISTER_BOOL_PROPERTY("exclusive", is_exclusive, set_exclusive);
 }
 
-void AbstractButton::set_text(DeprecatedString text)
+void AbstractButton::set_text(String text)
 {
     if (m_text == text)
         return;
@@ -131,12 +131,13 @@ void AbstractButton::mouseup_event(MouseEvent& event)
     if (event.button() == m_pressed_mouse_button && m_being_pressed) {
         bool was_auto_repeating = m_auto_repeat_timer->is_active();
         m_auto_repeat_timer->stop();
-        bool was_being_pressed = m_being_pressed;
+        m_was_being_pressed = m_being_pressed;
+        ScopeGuard update_was_being_pressed { [this] { m_was_being_pressed = m_being_pressed; } };
         m_being_pressed = false;
         m_pressed_mouse_button = MouseButton::None;
         if (!is_checkable() || is_checked())
             repaint();
-        if (was_being_pressed && !was_auto_repeating) {
+        if (m_was_being_pressed && !was_auto_repeating) {
             switch (event.button()) {
             case MouseButton::Primary:
                 click(event.modifiers());
@@ -150,6 +151,12 @@ void AbstractButton::mouseup_event(MouseEvent& event)
         }
     }
     Widget::mouseup_event(event);
+}
+
+void AbstractButton::doubleclick_event(GUI::MouseEvent& event)
+{
+    double_click(event.modifiers());
+    Widget::doubleclick_event(event);
 }
 
 void AbstractButton::enter_event(Core::Event&)

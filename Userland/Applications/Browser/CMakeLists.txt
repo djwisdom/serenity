@@ -7,6 +7,7 @@ serenity_component(
 
 compile_gml(BrowserWindow.gml BrowserWindowGML.h browser_window_gml)
 compile_gml(EditBookmark.gml EditBookmarkGML.h edit_bookmark_gml)
+compile_gml(History/HistoryWidget.gml HistoryWidgetGML.h history_widget_gml)
 compile_gml(StorageWidget.gml StorageWidgetGML.h storage_widget_gml)
 compile_gml(Tab.gml TabGML.h tab_gml)
 
@@ -20,6 +21,8 @@ set(SOURCES
     DownloadWidget.cpp
     ElementSizePreviewWidget.cpp
     History.cpp
+    History/HistoryModel.cpp
+    History/HistoryWidget.cpp
     IconBag.cpp
     InspectorWidget.cpp
     StorageModel.cpp
@@ -32,10 +35,11 @@ set(SOURCES
 set(GENERATED_SOURCES
     BrowserWindowGML.h
     EditBookmarkGML.h
+    HistoryWidgetGML.h
     StorageWidgetGML.h
     TabGML.h
 )
 
 serenity_app(Browser ICON app-browser)
-target_link_libraries(Browser PRIVATE LibCore LibWebView LibWeb LibProtocol LibGUI LibDesktop LibConfig LibGfx LibIPC LibJS LibLocale LibMain LibSyntax LibSQL)
+target_link_libraries(Browser PRIVATE LibCore LibFileSystem LibWebView LibWeb LibProtocol LibGUI LibDesktop LibConfig LibGfx LibIPC LibJS LibLocale LibMain LibSyntax LibSQL)
 link_with_locale_data(Browser)

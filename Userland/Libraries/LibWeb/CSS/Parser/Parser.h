@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, the SerenityOS developers.
- * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,8 +8,6 @@
 #pragma once
 
 #include <AK/Error.h>
-#include <AK/NonnullOwnPtrVector.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/RefPtr.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
@@ -24,9 +22,13 @@
 #include <LibWeb/CSS/Parser/Rule.h>
 #include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/CSS/Parser/Tokenizer.h>
+#include <LibWeb/CSS/Position.h>
+#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/Ratio.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleValue.h>
+#include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/Supports.h>
 #include <LibWeb/CSS/UnicodeRange.h>
 #include <LibWeb/Forward.h>
@@ -35,7 +37,6 @@ namespace Web::CSS::Parser {
 
 class ParsingContext {
 public:
-    ParsingContext();
     explicit ParsingContext(JS::Realm&);
     explicit ParsingContext(DOM::Document const&);
     explicit ParsingContext(DOM::Document const&, AK::URL);
@@ -43,7 +44,7 @@ public:
 
     bool in_quirks_mode() const;
     DOM::Document const* document() const { return m_document; }
-    AK::URL complete_url(DeprecatedString const&) const;
+    AK::URL complete_url(StringView) const;
 
     PropertyID current_property_id() const { return m_current_property_id; }
     void set_current_property_id(PropertyID property_id) { m_current_property_id = property_id; }
@@ -51,16 +52,17 @@ public:
     JS::Realm& realm() const { return m_realm; }
 
 private:
-    JS::Realm& m_realm;
-    DOM::Document const* m_document { nullptr };
+    JS::NonnullGCPtr<JS::Realm> m_realm;
+    JS::GCPtr<DOM::Document const> m_document;
     PropertyID m_current_property_id { PropertyID::Invalid };
     AK::URL m_url;
 };
 
 class Parser {
 public:
-    Parser(ParsingContext const&, StringView input, DeprecatedString const& encoding = "utf-8");
-    ~Parser() = default;
+    static ErrorOr<Parser> create(ParsingContext const&, StringView input, StringView encoding = "utf-8"sv);
+
+    Parser(Parser&&);
 
     CSSStyleSheet* parse_as_css_stylesheet(Optional<AK::URL> location);
     ElementInlineCSSStyleDeclaration* parse_as_style_attribute(DOM::Element&);
@@ -78,7 +80,7 @@ public:
     Optional<SelectorList> parse_as_selector(SelectorParsingMode = SelectorParsingMode::Standard);
     Optional<SelectorList> parse_as_relative_selector(SelectorParsingMode = SelectorParsingMode::Standard);
 
-    NonnullRefPtrVector<MediaQuery> parse_as_media_query_list();
+    Vector<NonnullRefPtr<MediaQuery>> parse_as_media_query_list();
     RefPtr<MediaQuery> parse_as_media_query();
 
     RefPtr<Supports> parse_as_supports();
@@ -89,6 +91,8 @@ public:
     static RefPtr<CalculatedStyleValue> parse_calculated_value(Badge<StyleComputer>, ParsingContext const&, Vector<ComponentValue> const&);
 
 private:
+    Parser(ParsingContext const&, Vector<Token>);
+
     enum class ParseError {
         IncludesIgnoredVendorPrefix,
         SyntaxError,
@@ -99,14 +103,14 @@ private:
     // "Parse a stylesheet" is intended to be the normal parser entry point, for parsing stylesheets.
     struct ParsedStyleSheet {
         Optional<AK::URL> location;
-        NonnullRefPtrVector<Rule> rules;
+        Vector<NonnullRefPtr<Rule>> rules;
     };
     template<typename T>
     ParsedStyleSheet parse_a_stylesheet(TokenStream<T>&, Optional<AK::URL> location);
 
     // "Parse a list of rules" is intended for the content of at-rules such as @media. It differs from "Parse a stylesheet" in the handling of <CDO-token> and <CDC-token>.
     template<typename T>
-    NonnullRefPtrVector<Rule> parse_a_list_of_rules(TokenStream<T>&);
+    Vector<NonnullRefPtr<Rule>> parse_a_list_of_rules(TokenStream<T>&);
 
     // "Parse a rule" is intended for use by the CSSStyleSheet#insertRule method, and similar functions which might exist, which parse text into a single rule.
     template<typename T>
@@ -142,7 +146,7 @@ private:
     ParseErrorOr<SelectorList> parse_a_selector_list(TokenStream<T>&, SelectorType, SelectorParsingMode = SelectorParsingMode::Standard);
 
     template<typename T>
-    NonnullRefPtrVector<MediaQuery> parse_a_media_query_list(TokenStream<T>&);
+    Vector<NonnullRefPtr<MediaQuery>> parse_a_media_query_list(TokenStream<T>&);
     template<typename T>
     RefPtr<Supports> parse_a_supports(TokenStream<T>&);
 
@@ -153,7 +157,7 @@ private:
         Yes
     };
     template<typename T>
-    [[nodiscard]] NonnullRefPtrVector<Rule> consume_a_list_of_rules(TokenStream<T>&, TopLevel);
+    [[nodiscard]] Vector<NonnullRefPtr<Rule>> consume_a_list_of_rules(TokenStream<T>&, TopLevel);
     template<typename T>
     [[nodiscard]] NonnullRefPtr<Rule> consume_an_at_rule(TokenStream<T>&);
     template<typename T>
@@ -290,6 +294,7 @@ private:
     RefPtr<StyleValue> parse_filter_value_list_value(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_background_value(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_single_background_position_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue> parse_single_background_position_x_or_y_value(TokenStream<ComponentValue>&, PropertyID);
     RefPtr<StyleValue> parse_single_background_repeat_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue> parse_single_background_size_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue> parse_border_value(Vector<ComponentValue> const&);
@@ -315,19 +320,10 @@ private:
     RefPtr<StyleValue> parse_grid_track_sizes(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_grid_track_placement(Vector<ComponentValue> const&);
     RefPtr<StyleValue> parse_grid_track_placement_shorthand_value(Vector<ComponentValue> const&);
+    RefPtr<StyleValue> parse_grid_template_areas_value(Vector<ComponentValue> const&);
+    RefPtr<StyleValue> parse_grid_area_shorthand_value(Vector<ComponentValue> const&);
 
-    // calc() parsing, according to https://www.w3.org/TR/css-values-3/#calc-syntax
-    OwnPtr<CalculatedStyleValue::CalcSum> parse_calc_sum(TokenStream<ComponentValue>&);
-    OwnPtr<CalculatedStyleValue::CalcProduct> parse_calc_product(TokenStream<ComponentValue>&);
-    Optional<CalculatedStyleValue::CalcValue> parse_calc_value(TokenStream<ComponentValue>&);
-    OwnPtr<CalculatedStyleValue::CalcNumberSum> parse_calc_number_sum(TokenStream<ComponentValue>&);
-    OwnPtr<CalculatedStyleValue::CalcNumberProduct> parse_calc_number_product(TokenStream<ComponentValue>&);
-    Optional<CalculatedStyleValue::CalcNumberValue> parse_calc_number_value(TokenStream<ComponentValue>&);
-    OwnPtr<CalculatedStyleValue::CalcProductPartWithOperator> parse_calc_product_part_with_operator(TokenStream<ComponentValue>&);
-    OwnPtr<CalculatedStyleValue::CalcSumPartWithOperator> parse_calc_sum_part_with_operator(TokenStream<ComponentValue>&);
-    OwnPtr<CalculatedStyleValue::CalcNumberProductPartWithOperator> parse_calc_number_product_part_with_operator(TokenStream<ComponentValue>& tokens);
-    OwnPtr<CalculatedStyleValue::CalcNumberSumPartWithOperator> parse_calc_number_sum_part_with_operator(TokenStream<ComponentValue>&);
-    OwnPtr<CalculatedStyleValue::CalcSum> parse_calc_expression(Vector<ComponentValue> const&);
+    ErrorOr<OwnPtr<CalculationNode>> parse_a_calculation(Vector<ComponentValue> const&);
 
     ParseErrorOr<NonnullRefPtr<Selector>> parse_complex_selector(TokenStream<ComponentValue>&, SelectorType);
     ParseErrorOr<Optional<Selector::CompoundSelector>> parse_compound_selector(TokenStream<ComponentValue>&);
@@ -360,7 +356,6 @@ private:
 
     ParsingContext m_context;
 
-    Tokenizer m_tokenizer;
     Vector<Token> m_tokens;
     TokenStream<Token> m_token_stream;
 };
@@ -375,7 +370,8 @@ RefPtr<CSS::StyleValue> parse_css_value(CSS::Parser::ParsingContext const&, Stri
 Optional<CSS::SelectorList> parse_selector(CSS::Parser::ParsingContext const&, StringView);
 CSS::CSSRule* parse_css_rule(CSS::Parser::ParsingContext const&, StringView);
 RefPtr<CSS::MediaQuery> parse_media_query(CSS::Parser::ParsingContext const&, StringView);
-NonnullRefPtrVector<CSS::MediaQuery> parse_media_query_list(CSS::Parser::ParsingContext const&, StringView);
+Vector<NonnullRefPtr<CSS::MediaQuery>> parse_media_query_list(CSS::Parser::ParsingContext const&, StringView);
 RefPtr<CSS::Supports> parse_css_supports(CSS::Parser::ParsingContext const&, StringView);
+Optional<CSS::StyleProperty> parse_css_supports_condition(CSS::Parser::ParsingContext const&, StringView);
 
 }

@@ -27,7 +27,7 @@
 
 CharacterMapWidget::CharacterMapWidget()
 {
-    load_from_gml(character_map_window_gml);
+    load_from_gml(character_map_window_gml).release_value_but_fixme_should_propagate_errors();
 
     m_toolbar = find_descendant_of_type_named<GUI::Toolbar>("toolbar");
     m_font_name_label = find_descendant_of_type_named<GUI::Label>("font_name");
@@ -37,7 +37,7 @@ CharacterMapWidget::CharacterMapWidget()
     m_statusbar = find_descendant_of_type_named<GUI::Statusbar>("statusbar");
     m_unicode_block_listview = find_descendant_of_type_named<GUI::ListView>("unicode_block_listview");
 
-    m_choose_font_action = GUI::Action::create("Choose Font...", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-font-editor.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+    m_choose_font_action = GUI::Action::create("Choose Font...", Gfx::Bitmap::load_from_file("/res/icons/16x16/app-font-editor.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
         auto font_picker = GUI::FontPicker::construct(window(), &font(), false);
         if (font_picker->exec() == GUI::Dialog::ExecResult::OK) {
             auto& font = *font_picker->font();
@@ -58,19 +58,19 @@ CharacterMapWidget::CharacterMapWidget()
     });
     m_copy_selection_action->set_status_tip("Copy the highlighted characters to the clipboard");
 
-    m_previous_glyph_action = GUI::Action::create("Previous character", { Mod_Alt, Key_Left }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-back.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+    m_previous_glyph_action = GUI::Action::create("Previous character", { Mod_Alt, Key_Left }, Gfx::Bitmap::load_from_file("/res/icons/16x16/go-back.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
         m_glyph_map->select_previous_existing_glyph();
     });
     m_previous_glyph_action->set_status_tip("Seek the previous visible glyph");
 
-    m_next_glyph_action = GUI::Action::create("&Next Glyph", { Mod_Alt, Key_Right }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-forward.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+    m_next_glyph_action = GUI::Action::create("&Next Glyph", { Mod_Alt, Key_Right }, Gfx::Bitmap::load_from_file("/res/icons/16x16/go-forward.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
         m_glyph_map->select_next_existing_glyph();
     });
     m_next_glyph_action->set_status_tip("Seek the next visible glyph");
 
-    m_go_to_glyph_action = GUI::Action::create("Go to glyph...", { Mod_Ctrl, Key_G }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-to.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
-        DeprecatedString input;
-        if (GUI::InputBox::show(window(), input, "Hexadecimal:"sv, "Go to glyph"sv) == GUI::InputBox::ExecResult::OK && !input.is_empty()) {
+    m_go_to_glyph_action = GUI::Action::create("Go to glyph...", { Mod_Ctrl, Key_G }, Gfx::Bitmap::load_from_file("/res/icons/16x16/go-to.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+        String input;
+        if (GUI::InputBox::show(window(), input, "Hexadecimal:"sv, "Go to glyph"sv, GUI::InputType::NonemptyText) == GUI::InputBox::ExecResult::OK) {
             auto maybe_code_point = AK::StringUtils::convert_to_uint_from_hex(input);
             if (!maybe_code_point.has_value())
                 return;
@@ -83,11 +83,11 @@ CharacterMapWidget::CharacterMapWidget()
     });
     m_go_to_glyph_action->set_status_tip("Go to the specified code point");
 
-    m_find_glyphs_action = GUI::Action::create("&Find glyphs...", { Mod_Ctrl, Key_F }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/find.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+    m_find_glyphs_action = GUI::Action::create("&Find glyphs...", { Mod_Ctrl, Key_F }, Gfx::Bitmap::load_from_file("/res/icons/16x16/find.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
         if (m_find_window.is_null()) {
             m_find_window = GUI::Window::construct(window());
-            auto& search_widget = m_find_window->set_main_widget<CharacterSearchWidget>();
-            search_widget.on_character_selected = [&](auto code_point) {
+            auto search_widget = m_find_window->set_main_widget<CharacterSearchWidget>().release_value_but_fixme_should_propagate_errors();
+            search_widget->on_character_selected = [&](auto code_point) {
                 m_glyph_map->set_active_glyph(code_point);
                 m_glyph_map->scroll_to_glyph(code_point);
             };
@@ -149,19 +149,20 @@ CharacterMapWidget::CharacterMapWidget()
     update_statusbar();
 }
 
-void CharacterMapWidget::initialize_menubar(GUI::Window& window)
+ErrorOr<void> CharacterMapWidget::initialize_menubar(GUI::Window& window)
 {
-    auto& file_menu = window.add_menu("&File");
-    file_menu.add_action(GUI::CommonActions::make_quit_action([](GUI::Action&) {
+    auto file_menu = TRY(window.try_add_menu("&File"_short_string));
+    TRY(file_menu->try_add_action(GUI::CommonActions::make_quit_action([](GUI::Action&) {
         GUI::Application::the()->quit();
-    }));
+    })));
 
-    auto& help_menu = window.add_menu("&Help");
-    help_menu.add_action(GUI::CommonActions::make_command_palette_action(&window));
-    help_menu.add_action(GUI::CommonActions::make_help_action([&](auto&) {
+    auto help_menu = TRY(window.try_add_menu("&Help"_short_string));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(&window)));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([&](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/CharacterMap.md"), "/bin/Help");
-    }));
-    help_menu.add_action(GUI::CommonActions::make_about_action("Character Map", GUI::Icon::default_icon("app-character-map"sv), &window));
+    })));
+    TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Character Map", GUI::Icon::default_icon("app-character-map"sv), &window)));
+    return {};
 }
 
 void CharacterMapWidget::did_change_font()

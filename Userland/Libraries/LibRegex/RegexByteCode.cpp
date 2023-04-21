@@ -5,12 +5,16 @@
  */
 
 #include "RegexByteCode.h"
-#include "AK/StringBuilder.h"
 #include "RegexDebug.h"
 #include <AK/BinarySearch.h>
 #include <AK/CharacterTypes.h>
-#include <AK/Debug.h>
+#include <AK/StringBuilder.h>
 #include <LibUnicode/CharacterTypes.h>
+
+// U+2028 LINE SEPARATOR
+constexpr static u32 const LineSeparator { 0x2028 };
+// U+2029 PARAGRAPH SEPARATOR
+constexpr static u32 const ParagraphSeparator { 0x2029 };
 
 namespace regex {
 
@@ -278,7 +282,7 @@ ALWAYS_INLINE ExecutionResult OpCode_CheckBegin::execute(MatchInput const& input
 
         if (input.regex_options.has_flag_set(AllFlags::Multiline) && input.regex_options.has_flag_set(AllFlags::Internal_ConsiderNewline)) {
             auto input_view = input.view.substring_view(state.string_position - 1, 1)[0];
-            return input_view == '\n';
+            return input_view == '\r' || input_view == '\n' || input_view == LineSeparator || input_view == ParagraphSeparator;
         }
 
         return false;
@@ -331,7 +335,7 @@ ALWAYS_INLINE ExecutionResult OpCode_CheckEnd::execute(MatchInput const& input, 
 
         if (input.regex_options.has_flag_set(AllFlags::Multiline) && input.regex_options.has_flag_set(AllFlags::Internal_ConsiderNewline)) {
             auto input_view = input.view.substring_view(state.string_position, 1)[0];
-            return input_view == '\n';
+            return input_view == '\r' || input_view == '\n' || input_view == LineSeparator || input_view == ParagraphSeparator;
         }
 
         return false;
@@ -501,7 +505,12 @@ ALWAYS_INLINE ExecutionResult OpCode_Compare::execute(MatchInput const& input, M
                 return ExecutionResult::Failed_ExecuteLowPrioForks;
 
             auto input_view = input.view.substring_view(state.string_position, 1)[0];
-            if (input_view != '\n' || (input.regex_options.has_flag_set(AllFlags::SingleLine) && input.regex_options.has_flag_set(AllFlags::Internal_ConsiderNewline))) {
+            auto is_equivalent_to_newline = input_view == '\n'
+                || (input.regex_options.has_flag_set(AllFlags::Internal_ECMA262DotSemantics)
+                        ? (input_view == '\r' || input_view == LineSeparator || input_view == ParagraphSeparator)
+                        : false);
+
+            if (!is_equivalent_to_newline || (input.regex_options.has_flag_set(AllFlags::SingleLine) && input.regex_options.has_flag_set(AllFlags::Internal_ConsiderNewline))) {
                 if (current_inversion_state())
                     inverse_matched = true;
                 else
@@ -518,7 +527,7 @@ ALWAYS_INLINE ExecutionResult OpCode_Compare::execute(MatchInput const& input, M
                 return ExecutionResult::Failed_ExecuteLowPrioForks;
 
             Optional<DeprecatedString> str;
-            Vector<u16, 1> utf16;
+            Utf16Data utf16;
             Vector<u32> data;
             data.ensure_capacity(length);
             for (size_t i = offset; i < offset + length; ++i)

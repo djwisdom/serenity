@@ -29,7 +29,7 @@ public:
         virtual void visit_edges(Cell::Visitor&) { }
     };
 
-    static NonnullGCPtr<Realm> create(VM&);
+    static ThrowCompletionOr<NonnullGCPtr<Realm>> create(VM&);
     static ThrowCompletionOr<NonnullOwnPtr<ExecutionContext>> initialize_host_defined_realm(VM&, Function<Object*(Realm&)> create_global_object, Function<Object*(Realm&)> create_global_this_value);
 
     void set_global_object(Object* global_object, Object* this_value);
@@ -53,10 +53,10 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    Intrinsics* m_intrinsics { nullptr };                // [[Intrinsics]]
-    Object* m_global_object { nullptr };                 // [[GlobalObject]]
-    GlobalEnvironment* m_global_environment { nullptr }; // [[GlobalEnv]]
-    OwnPtr<HostDefined> m_host_defined;                  // [[HostDefined]]
+    GCPtr<Intrinsics> m_intrinsics;                // [[Intrinsics]]
+    GCPtr<Object> m_global_object;                 // [[GlobalObject]]
+    GCPtr<GlobalEnvironment> m_global_environment; // [[GlobalEnv]]
+    OwnPtr<HostDefined> m_host_defined;            // [[HostDefined]]
 };
 
 }

@@ -27,7 +27,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::pledge("stdio rpath recvfd sendfd proc exec"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/bin/keymap", "x"));
+    TRY(Core::System::unveil("/bin/sysctl", "x"));
     TRY(Core::System::unveil("/sys/kernel/keymap", "r"));
+    TRY(Core::System::unveil("/sys/kernel/variables/caps_lock_to_ctrl", "r"));
     TRY(Core::System::unveil("/etc/Keyboard.ini", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
@@ -35,7 +37,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto window = TRY(GUI::SettingsWindow::create("Keyboard Settings"));
     window->set_icon(app_icon.bitmap_for_size(16));
-    auto keyboard_settings_widget = TRY(window->add_tab<KeyboardSettingsWidget>("Keyboard"sv, "keyboard"sv));
+    auto keyboard_settings_widget = TRY(window->add_tab<KeyboardSettingsWidget>(TRY("Keyboard"_string), "keyboard"sv));
     window->set_active_tab(selected_tab);
 
     window->on_active_window_change = [&](bool is_active_window) {

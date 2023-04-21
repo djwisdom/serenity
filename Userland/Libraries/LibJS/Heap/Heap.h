@@ -41,12 +41,12 @@ public:
     }
 
     template<typename T, typename... Args>
-    NonnullGCPtr<T> allocate(Realm& realm, Args&&... args)
+    ThrowCompletionOr<NonnullGCPtr<T>> allocate(Realm& realm, Args&&... args)
     {
         auto* memory = allocate_cell(sizeof(T));
         new (memory) T(forward<Args>(args)...);
         auto* cell = static_cast<T*>(memory);
-        memory->initialize(realm);
+        MUST_OR_THROW_OOM(memory->initialize(realm));
         return *cell;
     }
 
@@ -113,7 +113,7 @@ private:
     MarkedVectorBase::List m_marked_vectors;
     WeakContainer::List m_weak_containers;
 
-    Vector<Cell*> m_uprooted_cells;
+    Vector<GCPtr<Cell>> m_uprooted_cells;
 
     BlockAllocator m_block_allocator;
 

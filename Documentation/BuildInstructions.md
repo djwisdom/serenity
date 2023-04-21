@@ -47,8 +47,15 @@ Serenity-specific patches were upstreamed to CMake in major version 3.25. To avo
 patches to CMake, the minimum required CMake to build Serenity is set to that version.
 If more patches are upstreamed to CMake, the minimum will be bumped again once that version releases.
 
-To accomodate distributions that do not ship bleeding-edge CMake versions, the build scripts will
+To accommodate distributions that do not ship bleeding-edge CMake versions, the build scripts will
 attempt to build CMake from source if the version on your path is older than 3.25.x.
+
+If you have previously compiled SerenityOS with an older or distribution-provided version of CMake,
+you will need to manually remove the CMakeCache.txt files, as these files reference the older CMake version and path.
+```console
+rm Build/*/CMakeCache.txt
+```
+
 
 ### Windows
 
@@ -61,6 +68,20 @@ for details.
 sudo pacman -S --needed base-devel cmake curl mpfr libmpc gmp e2fsprogs ninja qemu-desktop qemu-system-x86 qemu-system-aarch64 ccache rsync unzip
 ```
 Optional: `fuse2fs` for [building images without root](https://github.com/SerenityOS/serenity/pull/11224).
+
+### SerenityOS
+
+The following ports need to be installed:
+
+```console
+bash cmake curl e2fsprogs gawk genext2fs git ninja patch python3 qemu rsync
+```
+
+Additionally, for building using LLVM, install the `llvm` port.
+For building using GCC, install the `gcc`, `gmp` and `mpc` ports.
+
+Due to not-yet-finished POSIX shell support in `Shell`, a symlink from `/bin/sh` to `/usr/local/bin/bash` is required.
+This is best achieved by adding `ln -sf /usr/local/bin/bash mnt/bin/sh` to your [customization script](AdvancedBuildInstructions.md#customizing-the-disk-image).
 
 ### Other systems
 
@@ -88,6 +109,8 @@ Meta/serenity.sh run
 This will compile all of SerenityOS and install the built files into the `Build/x86_64/Root` directory inside your Git
 repository. It will also build a disk image and start SerenityOS using QEMU.
 
+If, during build, an error like `fusermount: failed to open /etc/mtab: No such file or directory` appears, you have installed `fuse2fs` but your system does not provide the mtab symlink for various reasons. Simply create this symlink with `ln -sv /proc/self/mounts /etc/mtab`.
+
 Note that the `anon` user is able to become `root` without a password by default, as a development convenience.
 To prevent this, remove `anon` from the `wheel` group and he will no longer be able to run `/bin/su`.
 
@@ -102,6 +125,19 @@ arguments for a list.
 To add a package from the ports collection to Serenity, for example curl, change into the `Ports/curl` directory and
 run `./package.sh`. The source code for the package will be downloaded and the package will be built. The next time you
 start Serenity, `curl` will be available.
+
+Ports might also have additional dependencies. Most prominently, you may need:
+`autoconf`, `automake`, `bison`, `flex`, `gettext`, `gperf`, `help2man`, `imagemagick` (specifically "convert"),
+`libgpg-error-dev`, `libtool`, `lzip`, `meson`, `nasm` (or another assembler), `qt6-base-dev`, `rename`, `zip`.
+
+For select ports you might need slightly more exotic dependencies such as:
+- ´file` (version 5.44 exactly, for file)
+- ´libpython3-dev` (most prominently for boost)
+- ´lua` (for luarocks)
+- ´openjdk-17-jdk` (to compile OpenJDK)
+- ´rake` (to build mruby).
+
+You may also need a symlink from "/usr/bin/python" to "/usr/bin/python3"; some ports depend on "python" existing, most notably ninja.
 
 ## More information
 

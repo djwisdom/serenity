@@ -1,19 +1,20 @@
 /*
  * Copyright (c) 2022, Florent Castelli <florent.castelli@gmail.com>
  * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
- * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2022-2023, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/DeprecatedString.h>
 #include <AK/Error.h>
-#include <AK/NonnullOwnPtrVector.h>
+#include <AK/NonnullOwnPtr.h>
+#include <AK/String.h>
 #include <AK/Variant.h>
+#include <AK/Vector.h>
 #include <LibCore/Object.h>
-#include <LibCore/Stream.h>
+#include <LibCore/Socket.h>
 #include <LibHTTP/Forward.h>
 #include <LibHTTP/HttpRequest.h>
 #include <LibWeb/WebDriver/Error.h>
@@ -21,7 +22,7 @@
 
 namespace Web::WebDriver {
 
-using Parameters = Span<StringView const>;
+using Parameters = Vector<String>;
 
 class Client : public Core::Object {
     C_OBJECT_ABSTRACT(Client);
@@ -49,6 +50,7 @@ public:
     // 11. Contexts, https://w3c.github.io/webdriver/#contexts
     virtual Response get_window_handle(Parameters parameters, JsonValue payload) = 0;
     virtual Response close_window(Parameters parameters, JsonValue payload) = 0;
+    virtual Response new_window(Parameters parameters, JsonValue payload) = 0;
     virtual Response switch_to_window(Parameters parameters, JsonValue payload) = 0;
     virtual Response get_window_handles(Parameters parameters, JsonValue payload) = 0;
     virtual Response get_window_rect(Parameters parameters, JsonValue payload) = 0;
@@ -74,7 +76,9 @@ public:
     virtual Response get_element_tag_name(Parameters parameters, JsonValue payload) = 0;
     virtual Response get_element_rect(Parameters parameters, JsonValue payload) = 0;
     virtual Response is_element_enabled(Parameters parameters, JsonValue payload) = 0;
-    virtual Response click(Parameters parameters, JsonValue payload) = 0;
+    virtual Response get_computed_role(Parameters parameters, JsonValue payload) = 0;
+    virtual Response get_computed_label(Parameters parameters, JsonValue payload) = 0;
+    virtual Response element_click(Parameters parameters, JsonValue payload) = 0;
 
     // 13. Document, https://w3c.github.io/webdriver/#document
     virtual Response get_source(Parameters parameters, JsonValue payload) = 0;
@@ -102,10 +106,10 @@ public:
     virtual Response print_page(Parameters parameters, JsonValue payload) = 0;
 
 protected:
-    Client(NonnullOwnPtr<Core::Stream::BufferedTCPSocket>, Core::Object* parent);
+    Client(NonnullOwnPtr<Core::BufferedTCPSocket>, Core::Object* parent);
 
 private:
-    using WrappedError = Variant<AK::Error, WebDriver::Error>;
+    using WrappedError = Variant<AK::Error, HTTP::HttpRequest::ParseError, WebDriver::Error>;
 
     void die();
     ErrorOr<void, WrappedError> on_ready_to_read();
@@ -115,8 +119,9 @@ private:
     ErrorOr<void, WrappedError> send_error_response(Error const& error);
     void log_response(unsigned code);
 
-    NonnullOwnPtr<Core::Stream::BufferedTCPSocket> m_socket;
+    NonnullOwnPtr<Core::BufferedTCPSocket> m_socket;
     Optional<HTTP::HttpRequest> m_request;
+    StringBuilder m_remaining_request;
 };
 
 }

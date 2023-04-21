@@ -13,19 +13,26 @@ namespace Web::HTML {
 HTMLFrameSetElement::HTMLFrameSetElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLFrameSetElement"));
 }
 
 HTMLFrameSetElement::~HTMLFrameSetElement() = default;
 
-void HTMLFrameSetElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
+JS::ThrowCompletionOr<void> HTMLFrameSetElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLFrameSetElementPrototype>(realm, "HTMLFrameSetElement"));
+
+    return {};
+}
+
+void HTMLFrameSetElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     HTMLElement::parse_attribute(name, value);
 
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                     \
-    if (name == HTML::AttributeNames::attribute_name) {             \
-        element_event_handler_attribute_changed(event_name, value); \
+#define __ENUMERATE(attribute_name, event_name)                                                                     \
+    if (name == HTML::AttributeNames::attribute_name) {                                                             \
+        element_event_handler_attribute_changed(event_name, String::from_deprecated_string(value).release_value()); \
     }
     ENUMERATE_WINDOW_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE

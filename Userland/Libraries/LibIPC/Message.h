@@ -8,7 +8,6 @@
 #pragma once
 
 #include <AK/Error.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
 #include <unistd.h>
@@ -36,7 +35,7 @@ private:
 
 struct MessageBuffer {
     Vector<u8, 1024> data;
-    NonnullRefPtrVector<AutoCloseFileDescriptor, 1> fds;
+    Vector<NonnullRefPtr<AutoCloseFileDescriptor>, 1> fds;
 };
 
 enum class ErrorCode : u32 {
@@ -54,7 +53,7 @@ public:
     virtual int message_id() const = 0;
     virtual char const* message_name() const = 0;
     virtual bool valid() const = 0;
-    virtual MessageBuffer encode() const = 0;
+    virtual ErrorOr<MessageBuffer> encode() const = 0;
 
 protected:
     Message() = default;

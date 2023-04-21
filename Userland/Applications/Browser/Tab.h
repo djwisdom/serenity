@@ -25,6 +25,7 @@ namespace Browser {
 class BrowserWindow;
 class InspectorWidget;
 class ConsoleWidget;
+class HistoryWidget;
 class StorageWidget;
 
 class Tab final : public GUI::Widget {
@@ -51,6 +52,7 @@ public:
     void did_become_active();
     void context_menu_requested(Gfx::IntPoint screen_position);
     void content_filters_changed();
+    void autoplay_allowlist_changed();
     void proxy_mappings_changed();
 
     void action_entered(GUI::Action&);
@@ -61,6 +63,7 @@ public:
 
     Function<void(DeprecatedString const&)> on_title_change;
     Function<void(const URL&)> on_tab_open_request;
+    Function<void(Tab&)> on_activate_tab_request;
     Function<void(Tab&)> on_tab_close_request;
     Function<void(Tab&)> on_tab_close_other_request;
     Function<void(const URL&)> on_window_open_request;
@@ -86,6 +89,9 @@ public:
 
     void show_console_window();
     void show_storage_inspector();
+    void show_history_inspector();
+
+    void update_reset_zoom_button();
 
     DeprecatedString const& title() const { return m_title; }
     Gfx::Bitmap const* icon() const { return m_icon; }
@@ -121,10 +127,12 @@ private:
     RefPtr<WebView::OutOfProcessWebView> m_web_content_view;
 
     RefPtr<GUI::UrlBox> m_location_box;
+    RefPtr<GUI::Button> m_reset_zoom_button;
     RefPtr<GUI::Button> m_bookmark_button;
     RefPtr<InspectorWidget> m_dom_inspector_widget;
     RefPtr<ConsoleWidget> m_console_widget;
     RefPtr<StorageWidget> m_storage_widget;
+    RefPtr<HistoryWidget> m_history_widget;
     RefPtr<GUI::Statusbar> m_statusbar;
     RefPtr<GUI::ToolbarContainer> m_toolbar_container;
 

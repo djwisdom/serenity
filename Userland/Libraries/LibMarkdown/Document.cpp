@@ -35,7 +35,7 @@ DeprecatedString Document::render_to_html(StringView extra_head_contents) const
 </body>
 </html>)~~~"sv);
 
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 DeprecatedString Document::render_to_inline_html() const
@@ -45,7 +45,13 @@ DeprecatedString Document::render_to_inline_html() const
 
 DeprecatedString Document::render_for_terminal(size_t view_width) const
 {
-    return m_container->render_for_terminal(view_width);
+    StringBuilder builder;
+    for (auto& line : m_container->render_lines_for_terminal(view_width)) {
+        builder.append(line);
+        builder.append("\n"sv);
+    }
+
+    return builder.to_deprecated_string();
 }
 
 RecursionDecision Document::walk(Visitor& visitor) const

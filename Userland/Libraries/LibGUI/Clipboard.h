@@ -43,8 +43,8 @@ public:
     DeprecatedString fetch_mime_type() const { return fetch_data_and_type().mime_type; }
 
     void set_data(ReadonlyBytes data, DeprecatedString const& mime_type = "text/plain", HashMap<DeprecatedString, DeprecatedString> const& metadata = {});
-    void set_plain_text(DeprecatedString const& text) { set_data(text.bytes()); }
-    void set_bitmap(Gfx::Bitmap const&);
+    void set_plain_text(StringView text) { set_data(text.bytes()); }
+    void set_bitmap(Gfx::Bitmap const&, HashMap<DeprecatedString, DeprecatedString> const& additional_metadata = {});
     void clear();
 
     void clipboard_data_changed(Badge<ConnectionToClipboardServer>, DeprecatedString const& mime_type);

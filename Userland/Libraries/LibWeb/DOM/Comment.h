@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <AK/FlyString.h>
+#include <AK/DeprecatedFlyString.h>
 #include <LibWeb/DOM/CharacterData.h>
 
 namespace Web::DOM {
@@ -15,13 +15,15 @@ class Comment final : public CharacterData {
     WEB_PLATFORM_OBJECT(Comment, CharacterData);
 
 public:
-    static JS::NonnullGCPtr<Comment> construct_impl(JS::Realm&, DeprecatedString const& data);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<Comment>> construct_impl(JS::Realm&, DeprecatedString const& data);
     virtual ~Comment() override = default;
 
-    virtual FlyString node_name() const override { return "#comment"; }
+    virtual DeprecatedFlyString node_name() const override { return "#comment"; }
 
 private:
     Comment(Document&, DeprecatedString const&);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 };
 
 template<>

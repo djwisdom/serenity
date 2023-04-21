@@ -72,6 +72,8 @@ char* strdup(char const* str)
 {
     size_t len = strlen(str);
     char* new_str = (char*)malloc(len + 1);
+    if (!new_str)
+        return nullptr;
     memcpy(new_str, str, len);
     new_str[len] = '\0';
     return new_str;
@@ -82,6 +84,8 @@ char* strndup(char const* str, size_t maxlen)
 {
     size_t len = strnlen(str, maxlen);
     char* new_str = (char*)malloc(len + 1);
+    if (!new_str)
+        return nullptr;
     memcpy(new_str, str, len);
     new_str[len] = 0;
     return new_str;
@@ -130,59 +134,32 @@ int timingsafe_memcmp(void const* b1, void const* b2, size_t len)
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/memcpy.html
 void* memcpy(void* dest_ptr, void const* src_ptr, size_t n)
 {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     void* original_dest = dest_ptr;
     asm volatile(
         "rep movsb"
         : "+D"(dest_ptr), "+S"(src_ptr), "+c"(n)::"memory");
     return original_dest;
-#elif ARCH(AARCH64)
-    (void)dest_ptr;
-    (void)src_ptr;
-    (void)n;
-    TODO_AARCH64();
 #else
-#    error Unknown architecture
+    u8* pd = (u8*)dest_ptr;
+    u8 const* ps = (u8 const*)src_ptr;
+    for (; n--;)
+        *pd++ = *ps++;
+    return dest_ptr;
 #endif
 }
 
-#if ARCH(I386)
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/memset.html
+// For x86-64, an optimized ASM implementation is found in ./arch/x86_64/memset.S
+#if ARCH(X86_64)
+#else
 void* memset(void* dest_ptr, int c, size_t n)
 {
-    size_t dest = (size_t)dest_ptr;
-    // FIXME: Support starting at an unaligned address.
-    if (!(dest & 0x3) && n >= 12) {
-        size_t size_ts = n / sizeof(size_t);
-        size_t expanded_c = explode_byte((u8)c);
-        asm volatile(
-            "rep stosl\n"
-            : "=D"(dest)
-            : "D"(dest), "c"(size_ts), "a"(expanded_c)
-            : "memory");
-        n -= size_ts * sizeof(size_t);
-        if (n == 0)
-            return dest_ptr;
-    }
-    asm volatile(
-        "rep stosb\n"
-        : "=D"(dest), "=c"(n)
-        : "0"(dest), "1"(n), "a"(c)
-        : "memory");
+    u8* pd = (u8*)dest_ptr;
+    for (; n--;)
+        *pd++ = c;
     return dest_ptr;
 }
-#elif ARCH(X86_64)
-// For x86-64, an optimized ASM implementation is found in ./arch/x86_64/memset.S
-#elif ARCH(AARCH64)
-void* memset(void* dest_ptr, int c, size_t n)
-{
-    (void)dest_ptr;
-    (void)c;
-    (void)n;
-    TODO_AARCH64();
-}
-#else
-#    error Unknown architecture
 #endif
 
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/memmove.html
@@ -378,6 +355,25 @@ char* strstr(char const* haystack, char const* needle)
                     return nullptr;
             } while (hch != nch);
         } while (strncmp(haystack, needle, len) != 0);
+        --haystack;
+    }
+    return const_cast<char*>(haystack);
+}
+
+// https://linux.die.net/man/3/strcasestr
+char* strcasestr(char const* haystack, char const* needle)
+{
+    char nch;
+    char hch;
+
+    if ((nch = *needle++) != 0) {
+        size_t len = strlen(needle);
+        do {
+            do {
+                if ((hch = *haystack++) == 0)
+                    return nullptr;
+            } while (toupper(hch) != toupper(nch));
+        } while (strncasecmp(haystack, needle, len) != 0);
         --haystack;
     }
     return const_cast<char*>(haystack);

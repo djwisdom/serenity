@@ -17,7 +17,7 @@ DeprecatedString OutlineItem::to_deprecated_string(int indent) const
     StringBuilder child_builder;
     child_builder.append('[');
     for (auto& child : children)
-        child_builder.appendff("{}\n", child.to_deprecated_string(indent + 1));
+        child_builder.appendff("{}\n", child->to_deprecated_string(indent + 1));
     child_builder.appendff("{}]", indent_str);
 
     StringBuilder builder;
@@ -109,26 +109,48 @@ PDFErrorOr<Page> Document::get_page(u32 index)
     auto page_object = TRY(get_or_load_value(page_object_index));
     auto raw_page_object = TRY(resolve_to<DictObject>(page_object));
 
-    auto resources = TRY(get_inheritable_object(CommonNames::Resources, raw_page_object))->cast<DictObject>();
-    auto contents = TRY(raw_page_object->get_object(this, CommonNames::Contents));
+    RefPtr<DictObject> resources;
+    auto maybe_resources_object = TRY(get_inheritable_object(CommonNames::Resources, raw_page_object));
+    if (maybe_resources_object.has_value())
+        resources = maybe_resources_object.value()->cast<DictObject>();
+    else
+        resources = adopt_ref(*new DictObject({}));
 
-    auto media_box_array = TRY(get_inheritable_object(CommonNames::MediaBox, raw_page_object))->cast<ArrayObject>();
-    auto media_box = Rectangle {
-        media_box_array->at(0).to_float(),
-        media_box_array->at(1).to_float(),
-        media_box_array->at(2).to_float(),
-        media_box_array->at(3).to_float(),
-    };
+    RefPtr<Object> contents;
+    if (raw_page_object->contains(CommonNames::Contents))
+        contents = TRY(raw_page_object->get_object(this, CommonNames::Contents));
 
-    auto crop_box = media_box;
-    if (raw_page_object->contains(CommonNames::CropBox)) {
-        auto crop_box_array = TRY(raw_page_object->get_array(this, CommonNames::CropBox));
+    Rectangle media_box;
+    auto maybe_media_box_object = TRY(get_inheritable_object(CommonNames::MediaBox, raw_page_object));
+    if (maybe_media_box_object.has_value()) {
+        auto media_box_array = maybe_media_box_object.value()->cast<ArrayObject>();
+        media_box = Rectangle {
+            media_box_array->at(0).to_float(),
+            media_box_array->at(1).to_float(),
+            media_box_array->at(2).to_float(),
+            media_box_array->at(3).to_float(),
+        };
+    } else {
+        // As most other libraries seem to do, we default to the standard
+        // US letter size of 8.5" x 11" (612 x 792 Postscript units).
+        media_box = Rectangle {
+            0, 0,
+            612, 792
+        };
+    }
+
+    Rectangle crop_box;
+    auto maybe_crop_box_object = TRY(get_inheritable_object(CommonNames::CropBox, raw_page_object));
+    if (maybe_crop_box_object.has_value()) {
+        auto crop_box_array = maybe_crop_box_object.value()->cast<ArrayObject>();
         crop_box = Rectangle {
             crop_box_array->at(0).to_float(),
             crop_box_array->at(1).to_float(),
             crop_box_array->at(2).to_float(),
             crop_box_array->at(3).to_float(),
         };
+    } else {
+        crop_box = media_box;
     }
 
     float user_unit = 1.0f;
@@ -136,12 +158,13 @@ PDFErrorOr<Page> Document::get_page(u32 index)
         user_unit = raw_page_object->get_value(CommonNames::UserUnit).to_float();
 
     int rotate = 0;
-    if (raw_page_object->contains(CommonNames::Rotate)) {
-        rotate = raw_page_object->get_value(CommonNames::Rotate).get<int>();
+    auto maybe_rotate = TRY(get_inheritable_value(CommonNames::Rotate, raw_page_object));
+    if (maybe_rotate.has_value()) {
+        rotate = maybe_rotate.value().to_int();
         VERIFY(rotate % 90 == 0);
     }
 
-    Page page { move(resources), move(contents), media_box, crop_box, user_unit, rotate };
+    Page page { resources.release_nonnull(), move(contents), media_box, crop_box, user_unit, rotate };
     m_pages.set(index, page);
     return page;
 }
@@ -199,6 +222,46 @@ PDFErrorOr<void> Document::add_page_tree_node_to_page_tree(NonnullRefPtr<DictObj
     return {};
 }
 
+PDFErrorOr<NonnullRefPtr<Object>> Document::find_in_name_tree(NonnullRefPtr<DictObject> tree, DeprecatedFlyString name)
+{
+    if (tree->contains(CommonNames::Kids)) {
+        return find_in_name_tree_nodes(tree->get_array(CommonNames::Kids), name);
+    }
+    if (!tree->contains(CommonNames::Names))
+        return Error { Error::Type::MalformedPDF, "name tree has neither Kids nor Names" };
+    auto key_value_names_array = TRY(tree->get_array(this, CommonNames::Names));
+    return find_in_key_value_array(key_value_names_array, name);
+}
+
+PDFErrorOr<NonnullRefPtr<Object>> Document::find_in_name_tree_nodes(NonnullRefPtr<ArrayObject> siblings, DeprecatedFlyString name)
+{
+    for (size_t i = 0; i < siblings->size(); i++) {
+        auto sibling = TRY(resolve_to<DictObject>(siblings->at(i)));
+        auto limits = sibling->get_array(CommonNames::Limits);
+        if (limits->size() != 2)
+            return Error { Error::Type::MalformedPDF, "Expected 2-element Limits array" };
+        auto start = limits->get_string_at(0);
+        auto end = limits->get_string_at(1);
+        if (start->string() <= name && end->string() >= name) {
+            return find_in_name_tree(sibling, name);
+        }
+    }
+    return Error { Error::Type::MalformedPDF, DeprecatedString::formatted("Didn't find node in name tree containing name {}", name) };
+}
+
+PDFErrorOr<NonnullRefPtr<Object>> Document::find_in_key_value_array(NonnullRefPtr<ArrayObject> key_value_array, DeprecatedFlyString name)
+{
+    if (key_value_array->size() % 2 == 1)
+        return Error { Error::Type::MalformedPDF, "key/value array has dangling key" };
+    for (size_t i = 0; i < key_value_array->size() / 2; i++) {
+        auto key = key_value_array->get_string_at(2 * i);
+        if (key->string() == name) {
+            return key_value_array->get_object_at(this, 2 * i + 1);
+        }
+    }
+    return Error { Error::Type::MalformedPDF, DeprecatedString::formatted("Didn't find expected name {} in key/value array", name) };
+}
+
 PDFErrorOr<void> Document::build_outline()
 {
     if (!m_catalog->contains(CommonNames::Outlines))
@@ -232,9 +295,15 @@ PDFErrorOr<Destination> Document::create_destination_from_parameters(NonnullRefP
     auto page_ref = array->at(0);
     auto type_name = TRY(array->get_name_at(this, 1))->name();
 
-    Vector<float> parameters;
-    for (size_t i = 2; i < array->size(); i++)
-        parameters.append(array->at(i).to_float());
+    Vector<Optional<float>> parameters;
+    TRY(parameters.try_ensure_capacity(array->size() - 2));
+    for (size_t i = 2; i < array->size(); i++) {
+        auto& param = array->at(i);
+        if (param.has<nullptr_t>())
+            parameters.unchecked_append({});
+        else
+            parameters.append(param.to_float());
+    }
 
     Destination::Type type;
     if (type_name == CommonNames::XYZ) {
@@ -260,13 +329,37 @@ PDFErrorOr<Destination> Document::create_destination_from_parameters(NonnullRefP
     return Destination { type, page_number_by_index_ref.get(page_ref.as_ref_index()), parameters };
 }
 
-PDFErrorOr<NonnullRefPtr<Object>> Document::get_inheritable_object(FlyString const& name, NonnullRefPtr<DictObject> object)
+PDFErrorOr<Optional<NonnullRefPtr<Object>>> Document::get_inheritable_object(DeprecatedFlyString const& name, NonnullRefPtr<DictObject> object)
 {
     if (!object->contains(name)) {
+        if (!object->contains(CommonNames::Parent))
+            return { OptionalNone() };
         auto parent = TRY(object->get_dict(this, CommonNames::Parent));
         return get_inheritable_object(name, parent);
     }
-    return object->get_object(this, name);
+    return TRY(object->get_object(this, name));
+}
+
+PDFErrorOr<Optional<Value>> Document::get_inheritable_value(DeprecatedFlyString const& name, NonnullRefPtr<DictObject> object)
+{
+    if (!object->contains(name)) {
+        if (!object->contains(CommonNames::Parent))
+            return { OptionalNone() };
+        auto parent = TRY(object->get_dict(this, CommonNames::Parent));
+        return get_inheritable_value(name, parent);
+    }
+    return object->get(name);
+}
+
+PDFErrorOr<Destination> Document::create_destination_from_dictionary_entry(NonnullRefPtr<Object> const& entry, HashMap<u32, u32> const& page_number_by_index_ref)
+{
+    if (entry->is<ArrayObject>()) {
+        auto entry_array = entry->cast<ArrayObject>();
+        return create_destination_from_parameters(entry_array, page_number_by_index_ref);
+    }
+    auto entry_dictionary = entry->cast<DictObject>();
+    auto d_array = MUST(entry_dictionary->get_array(this, CommonNames::D));
+    return create_destination_from_parameters(d_array, page_number_by_index_ref);
 }
 
 PDFErrorOr<NonnullRefPtr<OutlineItem>> Document::build_outline_item(NonnullRefPtr<DictObject> const& outline_item_dict, HashMap<u32, u32> const& page_number_by_index_ref)
@@ -278,7 +371,7 @@ PDFErrorOr<NonnullRefPtr<OutlineItem>> Document::build_outline_item(NonnullRefPt
         auto first_ref = outline_item_dict->get_value(CommonNames::First);
         auto children = TRY(build_outline_item_chain(first_ref, page_number_by_index_ref));
         for (auto& child : children) {
-            child.parent = outline_item;
+            child->parent = outline_item;
         }
         outline_item->children = move(children);
     }
@@ -294,19 +387,22 @@ PDFErrorOr<NonnullRefPtr<OutlineItem>> Document::build_outline_item(NonnullRefPt
         if (dest_obj->is<ArrayObject>()) {
             auto dest_arr = dest_obj->cast<ArrayObject>();
             outline_item->dest = TRY(create_destination_from_parameters(dest_arr, page_number_by_index_ref));
-        } else if (dest_obj->is<NameObject>()) {
-            auto dest_name = dest_obj->cast<NameObject>()->name();
+        } else if (dest_obj->is<NameObject>() || dest_obj->is<StringObject>()) {
+            DeprecatedFlyString dest_name;
+            if (dest_obj->is<NameObject>())
+                dest_name = dest_obj->cast<NameObject>()->name();
+            else
+                dest_name = dest_obj->cast<StringObject>()->string();
             if (auto dests_value = m_catalog->get(CommonNames::Dests); dests_value.has_value()) {
                 auto dests = dests_value.value().get<NonnullRefPtr<Object>>()->cast<DictObject>();
                 auto entry = MUST(dests->get_object(this, dest_name));
-                if (entry->is<ArrayObject>()) {
-                    auto entry_array = entry->cast<ArrayObject>();
-                    outline_item->dest = TRY(create_destination_from_parameters(entry_array, page_number_by_index_ref));
-                } else {
-                    auto entry_dictionary = entry->cast<DictObject>();
-                    auto d_array = MUST(entry_dictionary->get_array(this, CommonNames::D));
-                    outline_item->dest = TRY(create_destination_from_parameters(d_array, page_number_by_index_ref));
-                }
+                outline_item->dest = TRY(create_destination_from_dictionary_entry(entry, page_number_by_index_ref));
+            } else if (auto names_value = m_catalog->get(CommonNames::Names); names_value.has_value()) {
+                auto names = TRY(resolve(names_value.release_value())).get<NonnullRefPtr<Object>>()->cast<DictObject>();
+                if (!names->contains(CommonNames::Dests))
+                    return Error { Error::Type::MalformedPDF, "Missing Dests key in document catalogue's Names dictionary" };
+                auto dest_obj = TRY(find_in_name_tree(TRY(names->get_dict(this, CommonNames::Dests)), dest_name));
+                outline_item->dest = TRY(create_destination_from_dictionary_entry(dest_obj, page_number_by_index_ref));
             } else {
                 return Error { Error::Type::MalformedPDF, "Malformed outline destination" };
             }
@@ -330,7 +426,7 @@ PDFErrorOr<NonnullRefPtr<OutlineItem>> Document::build_outline_item(NonnullRefPt
     return outline_item;
 }
 
-PDFErrorOr<NonnullRefPtrVector<OutlineItem>> Document::build_outline_item_chain(Value const& first_ref, HashMap<u32, u32> const& page_number_by_index_ref)
+PDFErrorOr<Vector<NonnullRefPtr<OutlineItem>>> Document::build_outline_item_chain(Value const& first_ref, HashMap<u32, u32> const& page_number_by_index_ref)
 {
     // We used to receive a last_ref parameter, which was what the parent of this chain
     // thought was this chain's last child. There are documents out there in the wild
@@ -339,7 +435,7 @@ PDFErrorOr<NonnullRefPtrVector<OutlineItem>> Document::build_outline_item_chain(
     // (we already ignore the /Parent attribute too, which can also be out of sync).
     VERIFY(first_ref.has<Reference>());
 
-    NonnullRefPtrVector<OutlineItem> children;
+    Vector<NonnullRefPtr<OutlineItem>> children;
 
     auto first_value = TRY(get_or_load_value(first_ref.as_ref_index())).get<NonnullRefPtr<Object>>();
     auto first_dict = first_value->cast<DictObject>();

@@ -35,7 +35,7 @@ public:
 
     bool is_empty() const { return m_stack.is_empty(); }
     Type type() const { return m_type; }
-    NonnullRefPtrVector<Card> const& stack() const { return m_stack; }
+    Vector<NonnullRefPtr<Card>> const& stack() const { return m_stack; }
     size_t count() const { return m_stack.size(); }
     Card const& peek() const { return m_stack.last(); }
     Card& peek() { return m_stack.last(); }
@@ -43,15 +43,21 @@ public:
 
     bool make_top_card_visible(); // Returns true if the card was flipped.
 
-    void push(NonnullRefPtr<Card> card);
+    ErrorOr<void> push(NonnullRefPtr<Card>);
     NonnullRefPtr<Card> pop();
-    void move_to_stack(CardStack&);
+    ErrorOr<void> take_all(CardStack&);
     void rebound_cards();
 
     bool is_allowed_to_push(Card const&, size_t stack_size = 1, MovementRule movement_rule = MovementRule::Alternating) const;
-    void add_all_grabbed_cards(Gfx::IntPoint click_location, NonnullRefPtrVector<Card>& grabbed, MovementRule movement_rule = MovementRule::Alternating);
+    ErrorOr<void> add_all_grabbed_cards(Gfx::IntPoint click_location, Vector<NonnullRefPtr<Card>>& grabbed, MovementRule movement_rule = MovementRule::Alternating);
+
+    bool preview_card(Gfx::IntPoint click_location);
+    void clear_card_preview();
+
     void paint(GUI::Painter&, Gfx::Color background_color);
     void clear();
+
+    void set_highlighted(bool highlighted) { m_highlighted = highlighted; }
 
 private:
     struct StackRules {
@@ -85,13 +91,14 @@ private:
     // eg, in Solitaire the Play stack is positioned over the Waste stack.
     RefPtr<CardStack> m_covered_stack;
 
-    NonnullRefPtrVector<Card> m_stack;
+    Vector<NonnullRefPtr<Card>> m_stack;
     Vector<Gfx::IntPoint> m_stack_positions;
     Gfx::IntPoint m_position;
     Gfx::IntRect m_bounding_box;
     Type m_type { Type::Invalid };
     StackRules m_rules;
     Gfx::IntRect m_base;
+    bool m_highlighted { false };
 };
 
 }
@@ -130,6 +137,6 @@ struct AK::Formatter<Cards::CardStack> : Formatter<FormatString> {
             first_card = false;
         }
 
-        return Formatter<FormatString>::format(builder, "{:<10} {:>16}: {}"sv, type, stack.bounding_box(), cards.build());
+        return Formatter<FormatString>::format(builder, "{:<10} {:>16}: {}"sv, type, stack.bounding_box(), cards.to_deprecated_string());
     }
 };

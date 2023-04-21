@@ -1,14 +1,17 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2023, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/JsonValue.h>
+#include <AK/NumericLimits.h>
 #include <AK/URL.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibCore/DateTime.h>
 #include <LibCore/Proxy.h>
+#include <LibCore/Socket.h>
 #include <LibIPC/Decoder.h>
 #include <LibIPC/Dictionary.h>
 #include <LibIPC/File.h>
@@ -16,19 +19,31 @@
 
 namespace IPC {
 
+ErrorOr<size_t> Decoder::decode_size()
+{
+    return static_cast<size_t>(TRY(decode<u32>()));
+}
+
+template<>
+ErrorOr<String> decode(Decoder& decoder)
+{
+    auto length = TRY(decoder.decode_size());
+    return String::from_stream(decoder.stream(), length);
+}
+
 template<>
 ErrorOr<DeprecatedString> decode(Decoder& decoder)
 {
-    auto length = TRY(decoder.decode<i32>());
-    if (length < 0)
+    auto length = TRY(decoder.decode_size());
+    if (length == NumericLimits<u32>::max())
         return DeprecatedString {};
     if (length == 0)
         return DeprecatedString::empty();
 
     char* text_buffer = nullptr;
-    auto text_impl = StringImpl::create_uninitialized(static_cast<size_t>(length), text_buffer);
+    auto text_impl = StringImpl::create_uninitialized(length, text_buffer);
 
-    Bytes bytes { text_buffer, static_cast<size_t>(length) };
+    Bytes bytes { text_buffer, length };
     TRY(decoder.decode_into(bytes));
 
     return DeprecatedString { *text_impl };
@@ -37,8 +52,8 @@ ErrorOr<DeprecatedString> decode(Decoder& decoder)
 template<>
 ErrorOr<ByteBuffer> decode(Decoder& decoder)
 {
-    auto length = TRY(decoder.decode<i32>());
-    if (length <= 0)
+    auto length = TRY(decoder.decode_size());
+    if (length == 0)
         return ByteBuffer {};
 
     auto buffer = TRY(ByteBuffer::create_uninitialized(length));
@@ -56,6 +71,13 @@ ErrorOr<JsonValue> decode(Decoder& decoder)
 }
 
 template<>
+ErrorOr<Time> decode(Decoder& decoder)
+{
+    auto nanoseconds = TRY(decoder.decode<i64>());
+    return AK::Time::from_nanoseconds(nanoseconds);
+}
+
+template<>
 ErrorOr<URL> decode(Decoder& decoder)
 {
     auto url = TRY(decoder.decode<DeprecatedString>());
@@ -65,10 +87,7 @@ ErrorOr<URL> decode(Decoder& decoder)
 template<>
 ErrorOr<Dictionary> decode(Decoder& decoder)
 {
-    auto size = TRY(decoder.decode<u64>());
-    if (size >= NumericLimits<i32>::max())
-        VERIFY_NOT_REACHED();
-
+    auto size = TRY(decoder.decode_size());
     Dictionary dictionary {};
 
     for (size_t i = 0; i < size; ++i) {
@@ -99,7 +118,7 @@ ErrorOr<Core::AnonymousBuffer> decode(Decoder& decoder)
     if (auto valid = TRY(decoder.decode<bool>()); !valid)
         return Core::AnonymousBuffer {};
 
-    auto size = TRY(decoder.decode<u32>());
+    auto size = TRY(decoder.decode_size());
     auto anon_file = TRY(decoder.decode<IPC::File>());
 
     return Core::AnonymousBuffer::create_from_anon_fd(anon_file.take_fd(), size);

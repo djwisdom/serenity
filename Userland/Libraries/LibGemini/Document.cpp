@@ -5,6 +5,7 @@
  */
 
 #include <AK/DeprecatedString.h>
+#include <AK/NonnullOwnPtr.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/StringBuilder.h>
 #include <AK/Vector.h>
@@ -17,15 +18,15 @@ DeprecatedString Document::render_to_html() const
     StringBuilder html_builder;
     html_builder.append("<!DOCTYPE html>\n<html>\n"sv);
     html_builder.append("<head>\n<title>"sv);
-    html_builder.append(m_url.path());
+    html_builder.append(m_url.serialize_path());
     html_builder.append("</title>\n</head>\n"sv);
     html_builder.append("<body>\n"sv);
     for (auto& line : m_lines) {
-        html_builder.append(line.render_to_html());
+        html_builder.append(line->render_to_html());
     }
     html_builder.append("</body>"sv);
     html_builder.append("</html>"sv);
-    return html_builder.build();
+    return html_builder.to_deprecated_string();
 }
 
 NonnullRefPtr<Document> Document::parse(StringView lines, const URL& url)

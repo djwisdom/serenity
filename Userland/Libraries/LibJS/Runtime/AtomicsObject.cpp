@@ -125,13 +125,13 @@ static ThrowCompletionOr<Value> perform_atomic_operation(VM& vm, TypedArrayBase&
 }
 
 AtomicsObject::AtomicsObject(Realm& realm)
-    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, realm.intrinsics().object_prototype())
 {
 }
 
-void AtomicsObject::initialize(Realm& realm)
+ThrowCompletionOr<void> AtomicsObject::initialize(Realm& realm)
 {
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     auto& vm = this->vm();
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
@@ -147,7 +147,9 @@ void AtomicsObject::initialize(Realm& realm)
     define_native_function(realm, vm.names.xor_, xor_, 3, attr);
 
     // 25.4.15 Atomics [ @@toStringTag ], https://tc39.es/ecma262/#sec-atomics-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Atomics"), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), MUST_OR_THROW_OOM(PrimitiveString::create(vm, "Atomics"sv)), Attribute::Configurable);
+
+    return {};
 }
 
 // 25.4.3 Atomics.add ( typedArray, index, value ), https://tc39.es/ecma262/#sec-atomics.add

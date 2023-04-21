@@ -19,13 +19,15 @@ class HTMLOptionsCollection final : public DOM::HTMLCollection {
     WEB_PLATFORM_OBJECT(HTMLOptionsCollection, DOM::HTMLCollection);
 
 public:
-    static JS::NonnullGCPtr<HTMLOptionsCollection> create(DOM::ParentNode& root, Function<bool(DOM::Element const&)> filter);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<HTMLOptionsCollection>> create(DOM::ParentNode& root, Function<bool(DOM::Element const&)> filter);
     virtual ~HTMLOptionsCollection() override;
 
     WebIDL::ExceptionOr<void> add(HTMLOptionOrOptGroupElement element, Optional<HTMLElementOrElementIndex> before = {});
 
 private:
     HTMLOptionsCollection(DOM::ParentNode& root, Function<bool(DOM::Element const&)> filter);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 };
 
 }

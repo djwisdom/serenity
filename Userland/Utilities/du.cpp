@@ -11,7 +11,7 @@
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DateTime.h>
 #include <LibCore/DirIterator.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <limits.h>
@@ -26,6 +26,7 @@ struct DuOption {
     };
 
     bool human_readable = false;
+    bool human_readable_si = false;
     bool all = false;
     bool apparent_size = false;
     i64 threshold = 0;
@@ -65,8 +66,7 @@ ErrorOr<void> parse_args(Main::Arguments arguments, Vector<DeprecatedString>& fi
         "time",
         0,
         "time-type",
-        [&du_option](auto const* option_ptr) {
-            StringView option { option_ptr, strlen(option_ptr) };
+        [&du_option](StringView option) {
             if (option == "mtime"sv || option == "modification"sv)
                 du_option.time_type = DuOption::TimeType::Modification;
             else if (option == "ctime"sv || option == "status"sv || option == "use"sv)
@@ -86,7 +86,7 @@ ErrorOr<void> parse_args(Main::Arguments arguments, Vector<DeprecatedString>& fi
         nullptr,
         'k',
         nullptr,
-        [&du_option](auto const*) {
+        [&du_option](StringView) {
             du_option.block_size = 1024;
             return true;
         }
@@ -97,6 +97,7 @@ ErrorOr<void> parse_args(Main::Arguments arguments, Vector<DeprecatedString>& fi
     args_parser.add_option(du_option.all, "Write counts for all files, not just directories", "all", 'a');
     args_parser.add_option(du_option.apparent_size, "Print apparent sizes, rather than disk usage", "apparent-size", 0);
     args_parser.add_option(du_option.human_readable, "Print human-readable sizes", "human-readable", 'h');
+    args_parser.add_option(du_option.human_readable_si, "Print human-readable sizes in SI units", "si", 0);
     args_parser.add_option(du_option.max_depth, "Print the total for a directory or file only if it is N or fewer levels below the command line argument", "max-depth", 'd', "N");
     args_parser.add_option(summarize, "Display only a total for each argument", "summarize", 's');
     args_parser.add_option(du_option.threshold, "Exclude entries smaller than size if positive, or entries greater than size if negative", "threshold", 't', "size");
@@ -114,7 +115,7 @@ ErrorOr<void> parse_args(Main::Arguments arguments, Vector<DeprecatedString>& fi
     if (!pattern.is_empty())
         du_option.excluded_patterns.append(pattern);
     if (!exclude_from.is_empty()) {
-        auto file = TRY(Core::Stream::File::open(exclude_from, Core::Stream::OpenMode::Read));
+        auto file = TRY(Core::File::open(exclude_from, Core::File::OpenMode::Read));
         auto const buff = TRY(file->read_until_eof());
         if (!buff.is_empty()) {
             DeprecatedString patterns = DeprecatedString::copy(buff, Chomp);
@@ -141,8 +142,9 @@ ErrorOr<u64> print_space_usage(DeprecatedString const& path, DuOption const& du_
     if (is_directory) {
         auto di = Core::DirIterator(path, Core::DirIterator::SkipParentAndBaseDir);
         if (di.has_error()) {
-            outln("du: cannot read directory '{}': {}", path, di.error_string());
-            return Error::from_string_literal("An error occurred. See previous error.");
+            auto error = di.error();
+            outln("du: cannot read directory '{}': {}", path, error);
+            return error;
         }
 
         while (di.has_next()) {
@@ -174,6 +176,8 @@ ErrorOr<u64> print_space_usage(DeprecatedString const& path, DuOption const& du_
 
     if (du_option.human_readable) {
         out("{}", human_readable_size(size));
+    } else if (du_option.human_readable_si) {
+        out("{}", human_readable_size(size, AK::HumanReadableBasedOn::Base10));
     } else {
         out("{}", ceil_div(size, du_option.block_size));
     }

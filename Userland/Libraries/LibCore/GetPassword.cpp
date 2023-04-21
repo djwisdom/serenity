@@ -8,7 +8,6 @@
 #include <LibCore/GetPassword.h>
 #include <LibCore/System.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -41,6 +40,6 @@ ErrorOr<SecretString> get_password(StringView prompt)
     // Remove trailing '\n' read by getline().
     password[line_length - 1] = '\0';
 
-    return SecretString::take_ownership(password, line_length);
+    return TRY(SecretString::take_ownership(password, line_length));
 }
 }

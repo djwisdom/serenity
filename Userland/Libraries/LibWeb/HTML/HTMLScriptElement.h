@@ -10,6 +10,7 @@
 #include <LibWeb/DOM/DocumentLoadEventDelayer.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/HTML/Scripting/Script.h>
+#include <LibWeb/Loader/Resource.h>
 
 namespace Web::HTML {
 
@@ -51,12 +52,16 @@ public:
 
     void set_source_line_number(Badge<HTMLParser>, size_t source_line_number) { m_source_line_number = source_line_number; }
 
-public:
+    void unmark_as_already_started(Badge<DOM::Range>);
+    void unmark_as_parser_inserted(Badge<DOM::Range>);
+
+private:
     HTMLScriptElement(DOM::Document&, DOM::QualifiedName);
 
     virtual void resource_did_load() override;
     virtual void resource_did_fail() override;
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     // https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element

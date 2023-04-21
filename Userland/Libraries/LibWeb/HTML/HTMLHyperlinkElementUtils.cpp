@@ -8,6 +8,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/HTMLHyperlinkElementUtils.h>
 #include <LibWeb/Infra/CharacterTypes.h>
+#include <LibWeb/Infra/Strings.h>
 #include <LibWeb/Loader/FrameLoader.h>
 
 namespace Web::HTML {
@@ -79,7 +80,7 @@ void HTMLHyperlinkElementUtils::set_protocol(DeprecatedString protocol)
         return;
 
     // 3. Basic URL parse the given value, followed by ":", with this element's url as url and scheme start state as state override.
-    auto result_url = URLParser::parse(DeprecatedString::formatted("{}:", protocol), nullptr, m_url, URLParser::State::SchemeStart);
+    auto result_url = URLParser::parse(DeprecatedString::formatted("{}:", protocol), {}, m_url, URLParser::State::SchemeStart);
     if (result_url.is_valid())
         m_url = move(result_url);
 
@@ -193,7 +194,7 @@ void HTMLHyperlinkElementUtils::set_host(DeprecatedString host)
         return;
 
     // 4. Basic URL parse the given value, with url as url and host state as state override.
-    auto result_url = URLParser::parse(host, nullptr, url, URLParser::State::Host);
+    auto result_url = URLParser::parse(host, {}, url, URLParser::State::Host);
     if (result_url.is_valid())
         m_url = move(result_url);
 
@@ -226,7 +227,7 @@ void HTMLHyperlinkElementUtils::set_hostname(DeprecatedString hostname)
         return;
 
     // 4. Basic URL parse the given value, with url as url and hostname state as state override.
-    auto result_url = URLParser::parse(hostname, nullptr, m_url, URLParser::State::Hostname);
+    auto result_url = URLParser::parse(hostname, {}, m_url, URLParser::State::Hostname);
     if (result_url.is_valid())
         m_url = move(result_url);
 
@@ -268,7 +269,7 @@ void HTMLHyperlinkElementUtils::set_port(DeprecatedString port)
         m_url->set_port({});
     } else {
         // 5. Otherwise, basic URL parse the given value, with url as url and port state as state override.
-        auto result_url = URLParser::parse(port, nullptr, m_url, URLParser::State::Port);
+        auto result_url = URLParser::parse(port, {}, m_url, URLParser::State::Port);
         if (result_url.is_valid())
             m_url = move(result_url);
     }
@@ -292,7 +293,7 @@ DeprecatedString HTMLHyperlinkElementUtils::pathname() const
     // 4. If url's cannot-be-a-base-URL is true, then return url's path[0].
     // 5. If url's path is empty, then return the empty string.
     // 6. Return "/", followed by the strings in url's path (including empty strings), separated from each other by "/".
-    return m_url->path();
+    return m_url->serialize_path();
 }
 
 // https://html.spec.whatwg.org/multipage/links.html#dom-hyperlink-pathname
@@ -312,7 +313,7 @@ void HTMLHyperlinkElementUtils::set_pathname(DeprecatedString pathname)
     url->set_paths({});
 
     // 5. Basic URL parse the given value, with url as url and path start state as state override.
-    auto result_url = URLParser::parse(pathname, nullptr, move(url), URLParser::State::PathStart);
+    auto result_url = URLParser::parse(pathname, {}, move(url), URLParser::State::PathStart);
     if (result_url.is_valid())
         m_url = move(result_url);
 
@@ -359,7 +360,7 @@ void HTMLHyperlinkElementUtils::set_search(DeprecatedString search)
         url_copy->set_query(DeprecatedString::empty());
 
         //    3. Basic URL parse input, with null, this element's node document's document's character encoding, url as url, and query state as state override.
-        auto result_url = URLParser::parse(input, nullptr, move(url_copy), URLParser::State::Query);
+        auto result_url = URLParser::parse(input, {}, move(url_copy), URLParser::State::Query);
         if (result_url.is_valid())
             m_url = move(result_url);
     }
@@ -407,7 +408,7 @@ void HTMLHyperlinkElementUtils::set_hash(DeprecatedString hash)
         url_copy->set_fragment(DeprecatedString::empty());
 
         //    3. Basic URL parse input, with url as url and fragment state as state override.
-        auto result_url = URLParser::parse(input, nullptr, move(url_copy), URLParser::State::Fragment);
+        auto result_url = URLParser::parse(input, {}, move(url_copy), URLParser::State::Fragment);
         if (result_url.is_valid())
             m_url = move(result_url);
     }
@@ -489,7 +490,7 @@ void HTMLHyperlinkElementUtils::follow_the_hyperlink(Optional<DeprecatedString> 
     DeprecatedString target_attribute_value = get_an_elements_target();
 
     // 6. Let noopener be the result of getting an element's noopener with subject and targetAttributeValue.
-    bool noopener = get_an_elements_noopener(target_attribute_value);
+    auto noopener = get_an_elements_noopener(target_attribute_value);
 
     // 7. Let target be the first return value of applying the rules for
     // choosing a browsing context given targetAttributeValue, source, and
@@ -536,7 +537,7 @@ void HTMLHyperlinkElementUtils::follow_the_hyperlink(Optional<DeprecatedString> 
     // FIXME: "navigate" means implementing the navigation algorithm here:
     //        https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
     hyperlink_element_utils_queue_an_element_task(Task::Source::DOMManipulation, [url_string, target] {
-        target->loader().load(url_string, FrameLoader::Type::Navigation);
+        verify_cast<BrowsingContext>(*target).loader().load(url_string, FrameLoader::Type::Navigation);
     });
 }
 
@@ -557,7 +558,7 @@ DeprecatedString HTMLHyperlinkElementUtils::get_an_elements_target() const
 }
 
 // https://html.spec.whatwg.org/multipage/links.html#get-an-element's-noopener
-bool HTMLHyperlinkElementUtils::get_an_elements_noopener(StringView target) const
+TokenizedFeature::NoOpener HTMLHyperlinkElementUtils::get_an_elements_noopener(StringView target) const
 {
     // To get an element's noopener, given an a, area, or form element element and a string target:
     auto rel = hyperlink_element_utils_rel().to_lowercase();
@@ -565,15 +566,15 @@ bool HTMLHyperlinkElementUtils::get_an_elements_noopener(StringView target) cons
 
     // 1. If element's link types include the noopener or noreferrer keyword, then return true.
     if (link_types.contains_slow("noopener"sv) || link_types.contains_slow("noreferrer"sv))
-        return true;
+        return TokenizedFeature::NoOpener::Yes;
 
     // 2. If element's link types do not include the opener keyword and
     //    target is an ASCII case-insensitive match for "_blank", then return true.
-    if (!link_types.contains_slow("opener"sv) && target.equals_ignoring_case("_blank"sv))
-        return true;
+    if (!link_types.contains_slow("opener"sv) && Infra::is_ascii_case_insensitive_match(target, "_blank"sv))
+        return TokenizedFeature::NoOpener::Yes;
 
     // 3. Return false.
-    return false;
+    return TokenizedFeature::NoOpener::No;
 }
 
 }

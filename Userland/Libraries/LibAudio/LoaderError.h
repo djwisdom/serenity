@@ -6,8 +6,8 @@
 
 #pragma once
 
+#include <AK/DeprecatedFlyString.h>
 #include <AK/Error.h>
-#include <AK/FlyString.h>
 #include <errno.h>
 
 namespace Audio {
@@ -28,20 +28,20 @@ struct LoaderError {
     Category category { Category::Unknown };
     // Binary index: where in the file the error occurred.
     size_t index { 0 };
-    FlyString description { DeprecatedString::empty() };
+    DeprecatedFlyString description { DeprecatedString::empty() };
 
     constexpr LoaderError() = default;
-    LoaderError(Category category, size_t index, FlyString description)
+    LoaderError(Category category, size_t index, DeprecatedFlyString description)
         : category(category)
         , index(index)
         , description(move(description))
     {
     }
-    LoaderError(FlyString description)
+    LoaderError(DeprecatedFlyString description)
         : description(move(description))
     {
     }
-    LoaderError(Category category, FlyString description)
+    LoaderError(Category category, DeprecatedFlyString description)
         : category(category)
         , description(move(description))
     {
@@ -65,11 +65,43 @@ struct LoaderError {
 
 }
 
+namespace AK {
+
+template<>
+struct Formatter<Audio::LoaderError> : Formatter<FormatString> {
+    ErrorOr<void> format(FormatBuilder& builder, Audio::LoaderError const& error)
+    {
+        StringView category;
+        switch (error.category) {
+        case Audio::LoaderError::Category::Unknown:
+            category = "Unknown"sv;
+            break;
+        case Audio::LoaderError::Category::IO:
+            category = "I/O"sv;
+            break;
+        case Audio::LoaderError::Category::Format:
+            category = "Format"sv;
+            break;
+        case Audio::LoaderError::Category::Internal:
+            category = "Internal"sv;
+            break;
+        case Audio::LoaderError::Category::Unimplemented:
+            category = "Unimplemented"sv;
+            break;
+        }
+        return Formatter<FormatString>::format(builder, "{} error: {} (at {})"sv, category, error.description, error.index);
+    }
+};
+
+}
+
 // Convenience TRY-like macro to convert an Error to a LoaderError
-#define LOADER_TRY(expression)                                     \
-    ({                                                             \
-        auto _temporary_result = (expression);                     \
-        if (_temporary_result.is_error())                          \
-            return LoaderError(_temporary_result.release_error()); \
-        _temporary_result.release_value();                         \
+#define LOADER_TRY(expression)                                                                       \
+    ({                                                                                               \
+        auto&& _temporary_result = (expression);                                                     \
+        if (_temporary_result.is_error())                                                            \
+            return LoaderError(_temporary_result.release_error());                                   \
+        static_assert(!::AK::Detail::IsLvalueReference<decltype(_temporary_result.release_value())>, \
+            "Do not return a reference from a fallible expression");                                 \
+        _temporary_result.release_value();                                                           \
     })

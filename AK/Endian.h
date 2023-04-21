@@ -43,11 +43,11 @@ ALWAYS_INLINE constexpr T convert_between_host_and_little_endian(T value)
     return value;
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
     if constexpr (sizeof(T) == 8)
-        return __builtin_bswap64(value);
+        return static_cast<T>(__builtin_bswap64(static_cast<u64>(value)));
     if constexpr (sizeof(T) == 4)
-        return __builtin_bswap32(value);
+        return static_cast<T>(__builtin_bswap32(static_cast<u32>(value)));
     if constexpr (sizeof(T) == 2)
-        return __builtin_bswap16(value);
+        return static_cast<T>(__builtin_bswap16(static_cast<u16>(value)));
     if constexpr (sizeof(T) == 1)
         return value;
 #endif
@@ -58,11 +58,11 @@ ALWAYS_INLINE constexpr T convert_between_host_and_big_endian(T value)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     if constexpr (sizeof(T) == 8)
-        return __builtin_bswap64(value);
+        return static_cast<T>(__builtin_bswap64(static_cast<u64>(value)));
     if constexpr (sizeof(T) == 4)
-        return __builtin_bswap32(value);
+        return static_cast<T>(__builtin_bswap32(static_cast<u32>(value)));
     if constexpr (sizeof(T) == 2)
-        return __builtin_bswap16(value);
+        return static_cast<T>(__builtin_bswap16(static_cast<u16>(value)));
     if constexpr (sizeof(T) == 1)
         return value;
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
@@ -77,20 +77,8 @@ ALWAYS_INLINE T convert_between_host_and_network_endian(T value)
 }
 
 template<typename T>
-class LittleEndian;
-
-template<typename T>
-InputStream& operator>>(InputStream&, LittleEndian<T>&);
-
-template<typename T>
-OutputStream& operator<<(OutputStream&, LittleEndian<T>);
-
-template<typename T>
 class [[gnu::packed]] LittleEndian {
 public:
-    friend InputStream& operator>><T>(InputStream&, LittleEndian<T>&);
-    friend OutputStream& operator<< <T>(OutputStream&, LittleEndian<T>);
-
     constexpr LittleEndian() = default;
 
     constexpr LittleEndian(T value)
@@ -100,29 +88,13 @@ public:
 
     constexpr operator T() const { return convert_between_host_and_little_endian(m_value); }
 
-    // This returns the internal representation. In this case, that is the value stored in little endian format.
-    constexpr Bytes bytes() { return Bytes { &m_value, sizeof(m_value) }; }
-    constexpr ReadonlyBytes bytes() const { return ReadonlyBytes { &m_value, sizeof(m_value) }; }
-
 private:
     T m_value { 0 };
 };
 
 template<typename T>
-class BigEndian;
-
-template<typename T>
-InputStream& operator>>(InputStream&, BigEndian<T>&);
-
-template<typename T>
-OutputStream& operator<<(OutputStream&, BigEndian<T>);
-
-template<typename T>
 class [[gnu::packed]] BigEndian {
 public:
-    friend InputStream& operator>><T>(InputStream&, BigEndian<T>&);
-    friend OutputStream& operator<< <T>(OutputStream&, BigEndian<T>);
-
     constexpr BigEndian() = default;
 
     constexpr BigEndian(T value)
@@ -131,10 +103,6 @@ public:
     }
 
     constexpr operator T() const { return convert_between_host_and_big_endian(m_value); }
-
-    // This returns the internal representation. In this case, that is the value stored in big endian format.
-    constexpr Bytes bytes() { return Bytes { &m_value, sizeof(m_value) }; }
-    constexpr ReadonlyBytes bytes() const { return ReadonlyBytes { &m_value, sizeof(m_value) }; }
 
 private:
     T m_value { 0 };
@@ -149,6 +117,16 @@ requires(HasFormatter<T>) struct Formatter<LittleEndian<T>> : Formatter<T> {
 
 template<typename T>
 requires(HasFormatter<T>) struct Formatter<BigEndian<T>> : Formatter<T> {
+};
+
+template<typename T>
+struct Traits<LittleEndian<T>> : public GenericTraits<LittleEndian<T>> {
+    static constexpr bool is_trivially_serializable() { return Traits<T>::is_trivially_serializable(); }
+};
+
+template<typename T>
+struct Traits<BigEndian<T>> : public GenericTraits<BigEndian<T>> {
+    static constexpr bool is_trivially_serializable() { return Traits<T>::is_trivially_serializable(); }
 };
 
 }

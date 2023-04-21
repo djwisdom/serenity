@@ -32,7 +32,7 @@ ThrowCompletionOr<NonnullGCPtr<Array>> Array::create(Realm& realm, u64 length, O
     // 3. Let A be MakeBasicObject(« [[Prototype]], [[Extensible]] »).
     // 4. Set A.[[Prototype]] to proto.
     // 5. Set A.[[DefineOwnProperty]] as specified in 10.4.2.1.
-    auto array = realm.heap().allocate<Array>(realm, *prototype);
+    auto array = MUST_OR_THROW_OOM(realm.heap().allocate<Array>(realm, *prototype));
 
     // 6. Perform ! OrdinaryDefineOwnProperty(A, "length", PropertyDescriptor { [[Value]]: 𝔽(length), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false }).
     MUST(array->internal_define_own_property(vm.names.length, { .value = Value(length), .writable = true, .enumerable = false, .configurable = false }));
@@ -156,7 +156,60 @@ ThrowCompletionOr<bool> Array::set_length(PropertyDescriptor const& property_des
     return true;
 }
 
-// 1.1.1.2 CompareArrayElements ( x, y, comparefn ), https://tc39.es/proposal-change-array-by-copy/#sec-comparearrayelements
+// 23.1.3.30.1 SortIndexedProperties ( obj, len, SortCompare, holes ), https://tc39.es/ecma262/#sec-sortindexedproperties
+ThrowCompletionOr<MarkedVector<Value>> sort_indexed_properties(VM& vm, Object const& object, size_t length, Function<ThrowCompletionOr<double>(Value, Value)> const& sort_compare, Holes holes)
+{
+    // 1. Let items be a new empty List.
+    auto items = MarkedVector<Value> { vm.heap() };
+
+    // 2. Let k be 0.
+    // 3. Repeat, while k < len,
+    for (size_t k = 0; k < length; ++k) {
+        // a. Let Pk be ! ToString(𝔽(k)).
+        auto property_key = PropertyKey { k };
+
+        bool k_read;
+
+        // b. If holes is skip-holes, then
+        if (holes == Holes::SkipHoles) {
+            // i. Let kRead be ? HasProperty(obj, Pk).
+            k_read = TRY(object.has_property(property_key));
+        }
+        // c. Else,
+        else {
+            // i. Assert: holes is read-through-holes.
+            VERIFY(holes == Holes::ReadThroughHoles);
+
+            // ii. Let kRead be true.
+            k_read = true;
+        }
+
+        // d. If kRead is true, then
+        if (k_read) {
+            // i. Let kValue be ? Get(obj, Pk).
+            auto k_value = TRY(object.get(property_key));
+
+            // ii. Append kValue to items.
+            items.append(k_value);
+        }
+
+        // e. Set k to k + 1.
+    }
+
+    // 4. Sort items using an implementation-defined sequence of calls to SortCompare. If any such call returns an abrupt completion, stop before performing any further calls to SortCompare or steps in this algorithm and return that Completion Record.
+
+    // Perform sorting by merge sort. This isn't as efficient compared to quick sort, but
+    // quicksort can't be used in all cases because the spec requires Array.prototype.sort()
+    // to be stable. FIXME: when initially scanning through the array, maintain a flag
+    // for if an unstable sort would be indistinguishable from a stable sort (such as just
+    // just strings or numbers), and in that case use quick sort instead for better performance.
+    TRY(array_merge_sort(vm, sort_compare, items));
+
+    // 5. Return items.
+    return items;
+}
+
+// 23.1.3.30.2 CompareArrayElements ( x, y, comparefn ), https://tc39.es/ecma262/#sec-comparearrayelements
 ThrowCompletionOr<double> compare_array_elements(VM& vm, Value x, Value y, FunctionObject* comparefn)
 {
     // 1. If x and y are both undefined, return +0𝔽.
@@ -186,10 +239,10 @@ ThrowCompletionOr<double> compare_array_elements(VM& vm, Value x, Value y, Funct
     }
 
     // 5. Let xString be ? ToString(x).
-    auto x_string = PrimitiveString::create(vm, TRY(x.to_string(vm)));
+    auto x_string = PrimitiveString::create(vm, TRY(x.to_deprecated_string(vm)));
 
     // 6. Let yString be ? ToString(y).
-    auto y_string = PrimitiveString::create(vm, TRY(y.to_string(vm)));
+    auto y_string = PrimitiveString::create(vm, TRY(y.to_deprecated_string(vm)));
 
     // 7. Let xSmaller be ! IsLessThan(xString, yString, true).
     auto x_smaller = MUST(is_less_than(vm, x_string, y_string, true));
@@ -207,56 +260,6 @@ ThrowCompletionOr<double> compare_array_elements(VM& vm, Value x, Value y, Funct
 
     // 11. Return +0𝔽.
     return 0;
-}
-
-// 1.1.1.3 SortIndexedProperties ( obj, len, SortCompare, skipHoles ), https://tc39.es/proposal-change-array-by-copy/#sec-sortindexedproperties
-ThrowCompletionOr<MarkedVector<Value>> sort_indexed_properties(VM& vm, Object const& object, size_t length, Function<ThrowCompletionOr<double>(Value, Value)> const& sort_compare, bool skip_holes)
-{
-    // 1. Let items be a new empty List.
-    auto items = MarkedVector<Value> { vm.heap() };
-
-    // 2. Let k be 0.
-    // 3. Repeat, while k < len,
-    for (size_t k = 0; k < length; ++k) {
-        // a. Let Pk be ! ToString(𝔽(k)).
-        auto property_key = PropertyKey { k };
-
-        bool k_read;
-
-        // b. If skipHoles is true, then
-        if (skip_holes) {
-            // i. Let kRead be ? HasProperty(obj, Pk).
-            k_read = TRY(object.has_property(property_key));
-        }
-        // c. Else,
-        else {
-            // i. Let kRead be true.
-            k_read = true;
-        }
-
-        // d. If kRead is true, then
-        if (k_read) {
-            // i. Let kValue be ? Get(obj, Pk).
-            auto k_value = TRY(object.get(property_key));
-
-            // ii. Append kValue to items.
-            items.append(k_value);
-        }
-
-        // e. Set k to k + 1.
-    }
-
-    // 4. Sort items using an implementation-defined sequence of calls to SortCompare. If any such call returns an abrupt completion, stop before performing any further calls to SortCompare or steps in this algorithm and return that Completion Record.
-
-    // Perform sorting by merge sort. This isn't as efficient compared to quick sort, but
-    // quicksort can't be used in all cases because the spec requires Array.prototype.sort()
-    // to be stable. FIXME: when initially scanning through the array, maintain a flag
-    // for if an unstable sort would be indistinguishable from a stable sort (such as just
-    // just strings or numbers), and in that case use quick sort instead for better performance.
-    TRY(array_merge_sort(vm, sort_compare, items));
-
-    // 5. Return items.
-    return items;
 }
 
 // NON-STANDARD: Used to return the value of the ephemeral length property

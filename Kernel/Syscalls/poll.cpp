@@ -6,6 +6,7 @@
 
 #include <AK/ScopeGuard.h>
 #include <AK/Time.h>
+#include <Kernel/API/POSIX/select.h>
 #include <Kernel/Debug.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
 #include <Kernel/Process.h>
@@ -50,7 +51,7 @@ ErrorOr<FlatPtr> Process::sys$poll(Userspace<Syscall::SC_poll_params const*> use
     TRY(m_fds.with_shared([&](auto& fds) -> ErrorOr<void> {
         for (size_t i = 0; i < params.nfds; i++) {
             auto& pfd = fds_copy[i];
-            LockRefPtr<OpenFileDescription> description;
+            RefPtr<OpenFileDescription> description;
             auto description_or_error = fds.open_file_description(pfd.fd);
             if (!description_or_error.is_error())
                 description = description_or_error.release_value();
@@ -130,7 +131,7 @@ ErrorOr<FlatPtr> Process::sys$poll(Userspace<Syscall::SC_poll_params const*> use
     }
 
     if (params.nfds > 0)
-        TRY(copy_to_user(&params.fds[0], fds_copy.data(), params.nfds * sizeof(pollfd)));
+        TRY(copy_n_to_user(&params.fds[0], fds_copy.data(), params.nfds));
 
     return fds_with_revents;
 }

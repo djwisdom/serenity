@@ -24,13 +24,22 @@ CodeDocument::CodeDocument(DeprecatedString const& file_path, Client* client)
     , m_file_path(file_path)
 {
     auto lexical_path = LexicalPath(file_path);
-    m_language = language_from_file(lexical_path);
-    m_language_name = language_name_from_file(lexical_path);
+    m_language = Syntax::language_from_filename(lexical_path);
 }
 
 CodeDocument::CodeDocument(Client* client)
     : TextDocument(client)
 {
+}
+
+CodeDocument::DiffType CodeDocument::line_difference(size_t line) const
+{
+    return m_line_differences[line];
+}
+
+void CodeDocument::set_line_differences(Badge<HackStudio::Editor>, Vector<HackStudio::CodeDocument::DiffType> line_differences)
+{
+    m_line_differences = move(line_differences);
 }
 
 }

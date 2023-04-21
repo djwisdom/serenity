@@ -5,7 +5,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "LibGUI/Window.h"
 #include "ShutdownDialog.h"
 #include "TaskbarWindow.h"
 #include <AK/Debug.h>
@@ -25,12 +24,13 @@
 #include <LibGUI/Menu.h>
 #include <LibGUI/MenuItem.h>
 #include <LibGUI/Process.h>
+#include <LibGUI/Window.h>
+#include <LibGfx/Palette.h>
 #include <LibGfx/SystemTheme.h>
 #include <LibMain/Main.h>
 #include <WindowServer/Window.h>
 #include <serenity.h>
 #include <signal.h>
-#include <spawn.h>
 #include <stdio.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -96,6 +96,8 @@ ErrorOr<Vector<DeprecatedString>> discover_apps_and_categories()
 {
     HashTable<DeprecatedString> seen_app_categories;
     Desktop::AppFile::for_each([&](auto af) {
+        if (af->exclude_from_system_menu())
+            return;
         if (access(af->executable().characters(), X_OK) == 0) {
             g_apps.append({ af->executable(), af->name(), af->category(), af->working_directory(), af->icon(), af->run_in_terminal(), af->requires_root() });
             seen_app_categories.set(af->category());
@@ -115,9 +117,9 @@ ErrorOr<Vector<DeprecatedString>> discover_apps_and_categories()
 ErrorOr<NonnullRefPtr<GUI::Menu>> build_system_menu(GUI::Window& window)
 {
     Vector<DeprecatedString> const sorted_app_categories = TRY(discover_apps_and_categories());
-    auto system_menu = TRY(GUI::Menu::try_create("\xE2\x9A\xA1")); // HIGH VOLTAGE SIGN
+    auto system_menu = TRY(GUI::Menu::try_create("\xE2\x9A\xA1"_short_string)); // HIGH VOLTAGE SIGN
 
-    system_menu->add_action(GUI::Action::create("&About SerenityOS", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/ladyball.png"sv)), [&](auto&) {
+    system_menu->add_action(GUI::Action::create("&About SerenityOS", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/ladyball.png"sv)), [&](auto&) {
         GUI::Process::spawn_or_show_error(&window, "/bin/About"sv);
     }));
 
@@ -149,29 +151,22 @@ ErrorOr<NonnullRefPtr<GUI::Menu>> build_system_menu(GUI::Window& window)
                 VERIFY(parent_menu);
             }
         }
-        auto& category_menu = parent_menu->add_submenu(child_category);
+        auto& category_menu = parent_menu->add_submenu(String::from_deprecated_string(child_category).release_value_but_fixme_should_propagate_errors());
         auto category_icon_path = category_icons->read_entry("16x16", category);
         if (!category_icon_path.is_empty()) {
-            auto icon_or_error = Gfx::Bitmap::try_load_from_file(category_icon_path);
+            auto icon_or_error = Gfx::Bitmap::load_from_file(category_icon_path);
             if (!icon_or_error.is_error())
                 category_menu.set_icon(icon_or_error.release_value());
         }
         app_category_menus.set(category, category_menu);
     };
 
-    for (auto const& category : sorted_app_categories) {
-        if (category != "Settings"sv)
-            create_category_menu(category);
-    }
+    for (auto const& category : sorted_app_categories)
+        create_category_menu(category);
 
     // Then we create and insert all the app menu items into the right place.
     int app_identifier = 0;
     for (auto const& app : g_apps) {
-        if (app.category == "Settings"sv) {
-            ++app_identifier;
-            continue;
-        }
-
         auto icon = app.icon.bitmap_for_size(16);
 
         if constexpr (SYSTEM_MENU_DEBUG) {
@@ -180,42 +175,27 @@ ErrorOr<NonnullRefPtr<GUI::Menu>> build_system_menu(GUI::Window& window)
         }
 
         auto parent_menu = app_category_menus.get(app.category).value_or(system_menu.ptr());
-        parent_menu->add_action(GUI::Action::create(app.name, icon, [app_identifier](auto&) {
+        parent_menu->add_action(GUI::Action::create(app.name, icon, [app_identifier, &window](auto&) {
             dbgln("Activated app with ID {}", app_identifier);
             auto& app = g_apps[app_identifier];
-            char const* argv[4] { nullptr, nullptr, nullptr, nullptr };
-            auto pls_with_executable = DeprecatedString::formatted("/bin/pls {}", app.executable);
+            StringView executable;
+            Vector<char const*, 2> arguments;
+            // FIXME: These single quotes won't be enough for executables with single quotes in their name.
+            auto pls_with_executable = DeprecatedString::formatted("/bin/pls '{}'", app.executable);
             if (app.run_in_terminal && !app.requires_root) {
-                argv[0] = "/bin/Terminal";
-                argv[1] = "-e";
-                argv[2] = app.executable.characters();
+                executable = "/bin/Terminal"sv;
+                arguments = { "-e", app.executable.characters() };
             } else if (!app.run_in_terminal && app.requires_root) {
-                argv[0] = "/bin/Escalator";
-                argv[1] = app.executable.characters();
+                executable = "/bin/Escalator"sv;
+                arguments = { app.executable.characters() };
             } else if (app.run_in_terminal && app.requires_root) {
-                argv[0] = "/bin/Terminal";
-                argv[1] = "-e";
-                argv[2] = pls_with_executable.characters();
+                executable = "/bin/Terminal"sv;
+                arguments = { "-e", pls_with_executable.characters() };
             } else {
-                argv[0] = app.executable.characters();
+                executable = app.executable;
             }
-
-            posix_spawn_file_actions_t spawn_actions;
-            posix_spawn_file_actions_init(&spawn_actions);
-            auto home_directory = Core::StandardPaths::home_directory();
-            if (app.working_directory.is_empty())
-                posix_spawn_file_actions_addchdir(&spawn_actions, home_directory.characters());
-            else
-                posix_spawn_file_actions_addchdir(&spawn_actions, app.working_directory.characters());
-
-            pid_t child_pid;
-            if ((errno = posix_spawn(&child_pid, argv[0], &spawn_actions, nullptr, const_cast<char**>(argv), environ))) {
-                perror("posix_spawn");
-            } else {
-                if (disown(child_pid) < 0)
-                    perror("disown");
-            }
-            posix_spawn_file_actions_destroy(&spawn_actions);
+            GUI::Process::spawn_or_show_error(&window, executable, arguments,
+                app.working_directory.is_empty() ? Core::StandardPaths::home_directory() : app.working_directory);
         }));
         ++app_identifier;
     }
@@ -225,8 +205,8 @@ ErrorOr<NonnullRefPtr<GUI::Menu>> build_system_menu(GUI::Window& window)
     g_themes_group.set_exclusive(true);
     g_themes_group.set_unchecking_allowed(false);
 
-    g_themes_menu = &system_menu->add_submenu("&Themes");
-    g_themes_menu->set_icon(TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/themes.png"sv)));
+    g_themes_menu = &system_menu->add_submenu("&Themes"_short_string);
+    g_themes_menu->set_icon(TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/themes.png"sv)));
 
     g_themes = TRY(Gfx::list_installed_system_themes());
     auto current_theme_name = GUI::ConnectionToWindowServer::the().get_system_theme();
@@ -234,11 +214,13 @@ ErrorOr<NonnullRefPtr<GUI::Menu>> build_system_menu(GUI::Window& window)
     {
         int theme_identifier = 0;
         for (auto& theme : g_themes) {
-            auto action = GUI::Action::create_checkable(theme.name, [theme_identifier](auto&) {
+            auto action = GUI::Action::create_checkable(theme.name, [theme_identifier, &window](auto&) {
                 auto& theme = g_themes[theme_identifier];
                 dbgln("Theme switched to {} at path {}", theme.name, theme.path);
-                auto success = GUI::ConnectionToWindowServer::the().set_system_theme(theme.path, theme.name, false);
-                VERIFY(success);
+                if (window.main_widget()->palette().color_scheme_path() != ""sv)
+                    VERIFY(GUI::ConnectionToWindowServer::the().set_system_theme(theme.path, theme.name, false, GUI::ConnectionToWindowServer::the().get_preferred_color_scheme()));
+                else
+                    VERIFY(GUI::ConnectionToWindowServer::the().set_system_theme(theme.path, theme.name, false, "Custom"sv));
             });
             if (theme.name == current_theme_name)
                 action->set_checked(true);
@@ -259,45 +241,21 @@ ErrorOr<NonnullRefPtr<GUI::Menu>> build_system_menu(GUI::Window& window)
         }
     };
 
-    system_menu->add_action(GUI::Action::create("&Settings", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-settings.png"sv)), [&](auto&) {
+    system_menu->add_action(GUI::Action::create("&Settings", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/app-settings.png"sv)), [&](auto&) {
         GUI::Process::spawn_or_show_error(&window, "/bin/Settings"sv);
     }));
 
     system_menu->add_separator();
-    system_menu->add_action(GUI::Action::create("&Help", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-help.png"sv)), [&](auto&) {
+    system_menu->add_action(GUI::Action::create("&Help", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/app-help.png"sv)), [&](auto&) {
         GUI::Process::spawn_or_show_error(&window, "/bin/Help"sv);
     }));
-    system_menu->add_action(GUI::Action::create("&Run...", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-run.png"sv)), [](auto&) {
-        posix_spawn_file_actions_t spawn_actions;
-        posix_spawn_file_actions_init(&spawn_actions);
-        auto home_directory = Core::StandardPaths::home_directory();
-        posix_spawn_file_actions_addchdir(&spawn_actions, home_directory.characters());
-
-        pid_t child_pid;
-        const char* argv[] = { "/bin/Run", nullptr };
-        if ((errno = posix_spawn(&child_pid, "/bin/Run", &spawn_actions, nullptr, const_cast<char**>(argv), environ))) {
-            perror("posix_spawn");
-        } else {
-            if (disown(child_pid) < 0)
-                perror("disown");
-        }
-
-        posix_spawn_file_actions_destroy(&spawn_actions);
+    system_menu->add_action(GUI::Action::create("&Run...", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/app-run.png"sv)), [&](auto&) {
+        GUI::Process::spawn_or_show_error(&window, "/bin/Run"sv, ReadonlySpan<StringView> {}, Core::StandardPaths::home_directory());
     }));
     system_menu->add_separator();
-    system_menu->add_action(GUI::Action::create("E&xit...", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/power.png"sv)), [](auto&) {
-        auto command = ShutdownDialog::show();
-
-        if (command.size() == 0)
-            return;
-
-        pid_t child_pid;
-        if ((errno = posix_spawn(&child_pid, command[0], nullptr, nullptr, const_cast<char**>(command.data()), environ))) {
-            perror("posix_spawn");
-        } else {
-            if (disown(child_pid) < 0)
-                perror("disown");
-        }
+    system_menu->add_action(GUI::Action::create("E&xit...", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/power.png"sv)), [&](auto&) {
+        if (auto command = ShutdownDialog::show(); command.has_value())
+            GUI::Process::spawn_or_show_error(&window, command->executable, command->arguments);
     }));
 
     return system_menu;

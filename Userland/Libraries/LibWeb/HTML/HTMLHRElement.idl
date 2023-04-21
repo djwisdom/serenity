@@ -4,10 +4,12 @@
 [Exposed=Window]
 interface HTMLHRElement : HTMLElement {
 
-    [Reflect] attribute DOMString align;
-    [Reflect] attribute DOMString color;
-    [Reflect=noshade] attribute boolean noShade;
-    [Reflect] attribute DOMString size;
-    [Reflect] attribute DOMString width;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString align;
+    [CEReactions, Reflect] attribute DOMString color;
+    [CEReactions, Reflect=noshade] attribute boolean noShade;
+    [CEReactions, Reflect] attribute DOMString size;
+    [CEReactions, Reflect] attribute DOMString width;
 
 };

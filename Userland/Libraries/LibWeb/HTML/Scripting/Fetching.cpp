@@ -113,7 +113,7 @@ WebIDL::ExceptionOr<AK::URL> resolve_module_specifier(Optional<Script&> referrin
         return as_url.release_value();
 
     // 13. Throw a TypeError indicating that specifier was a bare specifier, but was not remapped to anything by importMap.
-    return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, DeprecatedString::formatted("Failed to resolve non relative module specifier '{}' from an import map.", specifier) };
+    return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, String::formatted("Failed to resolve non relative module specifier '{}' from an import map.", specifier).release_value_but_fixme_should_propagate_errors() };
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#resolving-an-imports-match
@@ -125,7 +125,7 @@ WebIDL::ExceptionOr<Optional<AK::URL>> resolve_imports_match(DeprecatedString co
         if (specifier_key == normalized_specifier) {
             // 1. If resolutionResult is null, then throw a TypeError indicating that resolution of specifierKey was blocked by a null entry.
             if (!resolution_result.has_value())
-                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, DeprecatedString::formatted("Import resolution of '{}' was blocked by a null entry.", specifier_key) };
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, String::formatted("Import resolution of '{}' was blocked by a null entry.", specifier_key).release_value_but_fixme_should_propagate_errors() };
 
             // 2. Assert: resolutionResult is a URL.
             VERIFY(resolution_result->is_valid());
@@ -146,7 +146,7 @@ WebIDL::ExceptionOr<Optional<AK::URL>> resolve_imports_match(DeprecatedString co
         ) {
             // 1. If resolutionResult is null, then throw a TypeError indicating that the resolution of specifierKey was blocked by a null entry.
             if (!resolution_result.has_value())
-                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, DeprecatedString::formatted("Import resolution of '{}' was blocked by a null entry.", specifier_key) };
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, String::formatted("Import resolution of '{}' was blocked by a null entry.", specifier_key).release_value_but_fixme_should_propagate_errors() };
 
             // 2. Assert: resolutionResult is a URL.
             VERIFY(resolution_result->is_valid());
@@ -159,12 +159,12 @@ WebIDL::ExceptionOr<Optional<AK::URL>> resolve_imports_match(DeprecatedString co
             VERIFY(resolution_result->serialize().ends_with("/"sv));
 
             // 5. Let url be the result of URL parsing afterPrefix with resolutionResult.
-            auto url = URLParser::parse(after_prefix, &*resolution_result);
+            auto url = URLParser::parse(after_prefix, *resolution_result);
 
             // 6. If url is failure, then throw a TypeError indicating that resolution of normalizedSpecifier was blocked since the afterPrefix portion
             //    could not be URL-parsed relative to the resolutionResult mapped to by the specifierKey prefix.
             if (!url.is_valid())
-                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, DeprecatedString::formatted("Could not resolve '{}' as the after prefix portion could not be URL-parsed.", normalized_specifier) };
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, String::formatted("Could not resolve '{}' as the after prefix portion could not be URL-parsed.", normalized_specifier).release_value_but_fixme_should_propagate_errors() };
 
             // 7. Assert: url is a URL.
             VERIFY(url.is_valid());
@@ -172,7 +172,7 @@ WebIDL::ExceptionOr<Optional<AK::URL>> resolve_imports_match(DeprecatedString co
             // 8. If the serialization of resolutionResult is not a code unit prefix of the serialization of url, then throw a TypeError indicating
             //    that the resolution of normalizedSpecifier was blocked due to it backtracking above its prefix specifierKey.
             if (!Infra::is_code_unit_prefix(resolution_result->serialize(), url.serialize()))
-                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, DeprecatedString::formatted("Could not resolve '{}' as it backtracks above its prefix specifierKey.", normalized_specifier) };
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, String::formatted("Could not resolve '{}' as it backtracks above its prefix specifierKey.", normalized_specifier).release_value_but_fixme_should_propagate_errors() };
 
             // 9. Return url.
             return url;
@@ -189,7 +189,7 @@ Optional<AK::URL> resolve_url_like_module_specifier(DeprecatedString const& spec
     // 1. If specifier starts with "/", "./", or "../", then:
     if (specifier.starts_with("/"sv) || specifier.starts_with("./"sv) || specifier.starts_with("../"sv)) {
         // 1. Let url be the result of URL parsing specifier with baseURL.
-        auto url = URLParser::parse(specifier, &base_url);
+        auto url = URLParser::parse(specifier, base_url);
 
         // 2. If url is failure, then return null.
         if (!url.is_valid())
@@ -401,7 +401,7 @@ void fetch_single_module_script(AK::URL const& url, EnvironmentSettingsObject&, 
             }
 
             if (MimeSniff::is_javascript_mime_type_essence_match(*content_type_header) && module_type == "javascript"sv) {
-                auto module_script = JavaScriptModuleScript::create(url.basename(), data, module_map_settings_object, url);
+                auto module_script = JavaScriptModuleScript::create(url.basename(), data, module_map_settings_object, url).release_value_but_fixme_should_propagate_errors();
                 module_map.set(url, module_type, { ModuleMap::EntryType::ModuleScript, module_script });
                 on_complete(module_script);
                 return;
@@ -448,7 +448,7 @@ void fetch_inline_module_script_graph(DeprecatedString const& filename, Deprecat
     settings_object.disallow_further_import_maps();
 
     // 2. Let script be the result of creating a JavaScript module script using source text, settings object, base URL, and options.
-    auto script = JavaScriptModuleScript::create(filename, source_text.view(), settings_object, base_url);
+    auto script = JavaScriptModuleScript::create(filename, source_text.view(), settings_object, base_url).release_value_but_fixme_should_propagate_errors();
 
     // 3. If script is null, run onComplete given null, and return.
     if (!script) {

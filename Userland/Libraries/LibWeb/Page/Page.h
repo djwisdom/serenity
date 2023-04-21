@@ -25,6 +25,7 @@
 #include <LibWeb/CSS/PreferredColorScheme.h>
 #include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/HTML/ActivateTab.h>
 #include <LibWeb/Loader/FileRequest.h>
 #include <LibWeb/PixelUnits.h>
 
@@ -87,20 +88,20 @@ public:
     bool is_webdriver_active() const { return m_is_webdriver_active; }
     void set_is_webdriver_active(bool b) { m_is_webdriver_active = b; }
 
-    Gfx::IntPoint window_position() const { return m_window_position; }
-    void set_window_position(Gfx::IntPoint position) { m_window_position = position; }
+    DevicePixelPoint window_position() const { return m_window_position; }
+    void set_window_position(DevicePixelPoint position) { m_window_position = position; }
 
-    Gfx::IntSize window_size() const { return m_window_size; }
-    void set_window_size(Gfx::IntSize size) { m_window_size = size; }
+    DevicePixelSize window_size() const { return m_window_size; }
+    void set_window_size(DevicePixelSize size) { m_window_size = size; }
 
-    void did_request_alert(DeprecatedString const& message);
+    void did_request_alert(String const& message);
     void alert_closed();
 
-    bool did_request_confirm(DeprecatedString const& message);
+    bool did_request_confirm(String const& message);
     void confirm_closed(bool accepted);
 
-    DeprecatedString did_request_prompt(DeprecatedString const& message, DeprecatedString const& default_);
-    void prompt_closed(DeprecatedString response);
+    Optional<String> did_request_prompt(String const& message, String const& default_);
+    void prompt_closed(Optional<String> response);
 
     enum class PendingDialog {
         None,
@@ -110,9 +111,11 @@ public:
     };
     bool has_pending_dialog() const { return m_pending_dialog != PendingDialog::None; }
     PendingDialog pending_dialog() const { return m_pending_dialog; }
-    Optional<DeprecatedString> const& pending_dialog_text() const { return m_pending_dialog_text; }
+    Optional<String> const& pending_dialog_text() const { return m_pending_dialog_text; }
     void dismiss_dialog();
     void accept_dialog();
+
+    bool pdf_viewer_supported() const { return m_pdf_viewer_supported; }
 
 private:
     PageClient& m_client;
@@ -131,14 +134,20 @@ private:
     // The webdriver-active flag is set to true when the user agent is under remote control. It is initially false.
     bool m_is_webdriver_active { false };
 
-    Gfx::IntPoint m_window_position {};
-    Gfx::IntSize m_window_size {};
+    DevicePixelPoint m_window_position {};
+    DevicePixelSize m_window_size {};
 
     PendingDialog m_pending_dialog { PendingDialog::None };
-    Optional<DeprecatedString> m_pending_dialog_text;
+    Optional<String> m_pending_dialog_text;
     Optional<Empty> m_pending_alert_response;
     Optional<bool> m_pending_confirm_response;
-    Optional<DeprecatedString> m_pending_prompt_response;
+    Optional<Optional<String>> m_pending_prompt_response;
+
+    // https://html.spec.whatwg.org/multipage/system-state.html#pdf-viewer-supported
+    // Each user agent has a PDF viewer supported boolean, whose value is implementation-defined (and might vary according to user preferences).
+    // Spec Note: This value also impacts the navigation processing model.
+    // FIXME: Actually support pdf viewing
+    bool m_pdf_viewer_supported { false };
 };
 
 class PageClient {
@@ -181,10 +190,10 @@ public:
     virtual void page_did_request_scroll(i32, i32) { }
     virtual void page_did_request_scroll_to(CSSPixelPoint) { }
     virtual void page_did_request_scroll_into_view(CSSPixelRect const&) { }
-    virtual void page_did_request_alert(DeprecatedString const&) { }
-    virtual void page_did_request_confirm(DeprecatedString const&) { }
-    virtual void page_did_request_prompt(DeprecatedString const&, DeprecatedString const&) { }
-    virtual void page_did_request_set_prompt_text(DeprecatedString const&) { }
+    virtual void page_did_request_alert(String const&) { }
+    virtual void page_did_request_confirm(String const&) { }
+    virtual void page_did_request_prompt(String const&, String const&) { }
+    virtual void page_did_request_set_prompt_text(String const&) { }
     virtual void page_did_request_accept_dialog() { }
     virtual void page_did_request_dismiss_dialog() { }
     virtual Vector<Web::Cookie::Cookie> page_did_request_all_cookies(AK::URL const&) { return {}; }
@@ -193,9 +202,11 @@ public:
     virtual void page_did_set_cookie(const AK::URL&, Cookie::ParsedCookie const&, Cookie::Source) { }
     virtual void page_did_update_cookie(Web::Cookie::Cookie) { }
     virtual void page_did_update_resource_count(i32) { }
+    virtual String page_did_request_new_tab(HTML::ActivateTab) { return {}; }
+    virtual void page_did_request_activate_tab() { }
     virtual void page_did_close_browsing_context(HTML::BrowsingContext const&) { }
 
-    virtual void request_file(NonnullRefPtr<FileRequest>&) = 0;
+    virtual void request_file(FileRequest) = 0;
 
     // https://html.spec.whatwg.org/multipage/input.html#show-the-picker,-if-applicable
     virtual void page_did_request_file_picker(WeakPtr<DOM::EventTarget>, [[maybe_unused]] bool multiple) {};

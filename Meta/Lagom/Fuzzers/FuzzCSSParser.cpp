@@ -9,10 +9,17 @@
 #include <LibWeb/Platform/EventLoopPluginSerenity.h>
 
 namespace {
+
 struct Globals {
     Globals();
 } globals;
-Globals::Globals() { Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPluginSerenity); }
+
+Globals::Globals()
+{
+    Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPluginSerenity);
+    MUST(Web::Bindings::initialize_main_thread_vm());
+}
+
 }
 
 extern "C" int LLVMFuzzerTestOneInput(uint8_t const* data, size_t size)

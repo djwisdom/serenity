@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include "DOMNodeProperties.h"
 #include "ModelTranslator.h"
+#include "WebContentView.h"
 #include <AK/Optional.h>
 #include <AK/StringView.h>
 #include <LibWeb/CSS/Selector.h>
@@ -33,10 +33,12 @@ public:
     void clear_dom_json();
     void set_dom_json(StringView dom_json);
 
+    void set_accessibility_json(StringView accessibility_json);
+
     void load_style_json(StringView computed_style_json, StringView resolved_style_json, StringView custom_properties_json);
     void clear_style_json();
 
-    Function<ErrorOr<DOMNodeProperties>(i32, Optional<Web::CSS::Selector::PseudoElement>)> on_dom_node_inspected;
+    Function<ErrorOr<WebContentView::DOMNodeProperties>(i32, Optional<Web::CSS::Selector::PseudoElement>)> on_dom_node_inspected;
     Function<void()> on_close;
 
 private:
@@ -46,6 +48,7 @@ private:
     Selection m_selection;
 
     ModelTranslator m_dom_model {};
+    ModelTranslator m_accessibility_model {};
     ModelTranslator m_computed_style_model {};
     ModelTranslator m_resolved_style_model {};
     ModelTranslator m_custom_properties_model {};

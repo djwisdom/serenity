@@ -11,7 +11,7 @@ namespace JS {
 
 NonnullGCPtr<SetIterator> SetIterator::create(Realm& realm, Set& set, Object::PropertyKind iteration_kind)
 {
-    return realm.heap().allocate<SetIterator>(realm, set, iteration_kind, *realm.intrinsics().set_iterator_prototype());
+    return realm.heap().allocate<SetIterator>(realm, set, iteration_kind, realm.intrinsics().set_iterator_prototype()).release_allocated_value_but_fixme_should_propagate_errors();
 }
 
 SetIterator::SetIterator(Set& set, Object::PropertyKind iteration_kind, Object& prototype)
@@ -25,7 +25,7 @@ SetIterator::SetIterator(Set& set, Object::PropertyKind iteration_kind, Object& 
 void SetIterator::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(&m_set);
+    visitor.visit(m_set);
 }
 
 }

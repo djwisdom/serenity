@@ -17,7 +17,7 @@
 
 namespace Kernel {
 
-ErrorOr<NonnullLockRefPtr<Socket>> Socket::create(int domain, int type, int protocol)
+ErrorOr<NonnullRefPtr<Socket>> Socket::create(int domain, int type, int protocol)
 {
     switch (domain) {
     case AF_LOCAL:
@@ -46,7 +46,7 @@ void Socket::set_setup_state(SetupState new_setup_state)
     evaluate_block_conditions();
 }
 
-LockRefPtr<Socket> Socket::accept()
+RefPtr<Socket> Socket::accept()
 {
     MutexLocker locker(mutex());
     if (m_pending.is_empty())
@@ -63,7 +63,7 @@ LockRefPtr<Socket> Socket::accept()
     return client;
 }
 
-ErrorOr<void> Socket::queue_connection_from(NonnullLockRefPtr<Socket> peer)
+ErrorOr<void> Socket::queue_connection_from(NonnullRefPtr<Socket> peer)
 {
     dbgln_if(SOCKET_DEBUG, "Socket({}) queueing connection", this);
     MutexLocker locker(mutex());
@@ -100,7 +100,9 @@ ErrorOr<void> Socket::setsockopt(int level, int option, Userspace<void const*> u
         auto device = NetworkingManagement::the().lookup_by_name(ifname->view());
         if (!device)
             return ENODEV;
-        m_bound_interface = move(device);
+        m_bound_interface.with([&device](auto& bound_device) {
+            bound_device = move(device);
+        });
         return {};
     }
     case SO_DEBUG:
@@ -169,33 +171,35 @@ ErrorOr<void> Socket::getsockopt(OpenFileDescription&, int level, int option, Us
     case SO_ERROR: {
         if (size < sizeof(int))
             return EINVAL;
-        int errno;
-        if (so_error().is_error())
-            errno = so_error().error().code();
-        else
-            errno = 0;
-        TRY(copy_to_user(static_ptr_cast<int*>(value), &errno));
-        size = sizeof(int);
-        TRY(copy_to_user(value_size, &size));
-        clear_so_error();
-        return {};
+        return so_error().with([&size, value, value_size](auto& error) -> ErrorOr<void> {
+            int errno = 0;
+            if (error.has_value())
+                errno = error.value();
+            TRY(copy_to_user(static_ptr_cast<int*>(value), &errno));
+            size = sizeof(int);
+            TRY(copy_to_user(value_size, &size));
+            error = {};
+            return {};
+        });
     }
     case SO_BINDTODEVICE:
         if (size < IFNAMSIZ)
             return EINVAL;
-        if (m_bound_interface) {
-            auto name = m_bound_interface->name();
-            auto length = name.length() + 1;
-            auto characters = name.characters_without_null_termination();
-            TRY(copy_to_user(static_ptr_cast<char*>(value), characters, length));
-            size = length;
-            return copy_to_user(value_size, &size);
-        } else {
-            size = 0;
-            TRY(copy_to_user(value_size, &size));
-            // FIXME: This return value looks suspicious.
-            return EFAULT;
-        }
+        return m_bound_interface.with([&](auto& bound_device) -> ErrorOr<void> {
+            if (bound_device) {
+                auto name = bound_device->name();
+                auto length = name.length() + 1;
+                auto characters = name.characters_without_null_termination();
+                TRY(copy_to_user(static_ptr_cast<char*>(value), characters, length));
+                size = length;
+                return copy_to_user(value_size, &size);
+            } else {
+                size = 0;
+                TRY(copy_to_user(value_size, &size));
+                // FIXME: This return value looks suspicious.
+                return EFAULT;
+            }
+        });
     case SO_TIMESTAMP:
         if (size < sizeof(int))
             return EINVAL;

@@ -9,6 +9,9 @@
 
 endpoint WebContentServer
 {
+    get_window_handle() => (String handle)
+    set_window_handle(String handle) =|
+
     connect_to_webdriver(DeprecatedString webdriver_ipc_path) =|
 
     update_system_theme(Core::AnonymousBuffer theme_buffer) =|
@@ -37,6 +40,7 @@ endpoint WebContentServer
     get_source() =|
     inspect_dom_tree() =|
     inspect_dom_node(i32 node_id, Optional<Web::CSS::Selector::PseudoElement> pseudo_element) => (bool has_style, DeprecatedString computed_style,  DeprecatedString resolved_style,  DeprecatedString custom_properties, DeprecatedString node_box_sizing)
+    inspect_accessibility_tree() =|
     get_hovered_node_id() => (i32 node_id)
     js_console_input(DeprecatedString js_source) =|
     js_console_request_messages(i32 start_index) =|
@@ -51,10 +55,13 @@ endpoint WebContentServer
     select_all() =|
 
     set_content_filters(Vector<DeprecatedString> filters) =|
+    set_autoplay_allowed_on_all_websites() =|
+    set_autoplay_allowlist(Vector<String> allowlist) =|
     set_proxy_mappings(Vector<DeprecatedString> proxies, HashMap<DeprecatedString,size_t> mappings) =|
     set_preferred_color_scheme(Web::CSS::PreferredColorScheme color_scheme) =|
     set_has_focus(bool has_focus) =|
     set_is_scripting_enabled(bool is_scripting_enabled) =|
+    set_device_pixels_per_css_pixel(float device_pixels_per_css_pixel) =|
 
     set_window_position(Gfx::IntPoint position) =|
     set_window_size(Gfx::IntSize size) =|
@@ -68,5 +75,5 @@ endpoint WebContentServer
 
     alert_closed() =|
     confirm_closed(bool accepted) =|
-    prompt_closed(DeprecatedString response) =|
+    prompt_closed(Optional<String> response) =|
 }

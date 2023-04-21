@@ -7,11 +7,11 @@
 
 #include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
-#include <LibCore/FileStream.h>
+#include <LibCore/File.h>
 #include <LibGL/GL/gl.h>
 #include <LibGL/GLContext.h>
 #include <LibGfx/Bitmap.h>
-#include <LibGfx/QOIWriter.h>
+#include <LibGfx/ImageFormats/QOIWriter.h>
 #include <LibTest/TestCase.h>
 
 #ifdef AK_OS_SERENITY
@@ -23,7 +23,7 @@
 
 static NonnullOwnPtr<GL::GLContext> create_testing_context(int width, int height)
 {
-    auto bitmap = MUST(Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, { width, height }));
+    auto bitmap = MUST(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRx8888, { width, height }));
     auto context = MUST(GL::create_context(*bitmap));
     GL::make_context_current(context);
     return context;
@@ -35,15 +35,13 @@ static void expect_bitmap_equals_reference(Gfx::Bitmap const& bitmap, StringView
 
     if constexpr (SAVE_OUTPUT) {
         auto target_path = LexicalPath("/home/anon").append(reference_filename);
-        auto qoi_buffer = Gfx::QOIWriter::encode(bitmap);
-        auto qoi_output_stream = MUST(Core::OutputFileStream::open(target_path.string()));
-        auto number_of_bytes_written = qoi_output_stream.write(qoi_buffer);
-        qoi_output_stream.close();
-        EXPECT_EQ(number_of_bytes_written, qoi_buffer.size());
+        auto qoi_buffer = MUST(Gfx::QOIWriter::encode(bitmap));
+        auto qoi_output_stream = MUST(Core::File::open(target_path.string(), Core::File::OpenMode::Write));
+        MUST(qoi_output_stream->write_until_depleted(qoi_buffer));
     }
 
     auto reference_image_path = DeprecatedString::formatted(REFERENCE_IMAGE_DIR "/{}", reference_filename);
-    auto reference_bitmap = MUST(Gfx::Bitmap::try_load_from_file(reference_image_path));
+    auto reference_bitmap = MUST(Gfx::Bitmap::load_from_file(reference_image_path));
     EXPECT_EQ(reference_bitmap->visually_equals(bitmap), true);
 }
 
@@ -298,4 +296,24 @@ TEST_CASE(0010_test_store_data_in_buffer)
 
     context->present();
     expect_bitmap_equals_reference(context->frontbuffer(), "0010_test_store_data_in_buffer"sv);
+}
+
+TEST_CASE(0011_tex_env_combine_with_constant_color)
+{
+    auto context = create_testing_context(64, 64);
+
+    glEnable(GL_TEXTURE_2D);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+    glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_CONSTANT);
+    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+
+    float color[4] = { .3f, .5f, .7f, 1.f };
+    glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, color);
+
+    glRecti(-1, -1, 1, 1);
+
+    EXPECT_EQ(glGetError(), 0u);
+
+    context->present();
+    expect_bitmap_equals_reference(context->frontbuffer(), "0011_tex_env_combine_with_constant_color"sv);
 }

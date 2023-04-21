@@ -60,6 +60,10 @@
         "content-box",
         "padding-box"
     ],
+    "border-collapse": [
+      "separate",
+      "collapse"
+    ],
     "box-sizing": [
         "border-box",
         "content-box"
@@ -138,6 +142,8 @@
         "optimizequality=smooth"
     ],
     "justify-content": [
+        "start",
+        "end",
         "flex-start",
         "flex-end",
         "center",

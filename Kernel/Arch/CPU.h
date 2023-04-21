@@ -16,8 +16,8 @@
 #define LSB(x) ((x)&0xFF)
 #define MSB(x) (((x) >> 8) & 0xFF)
 
-#if ARCH(X86_64) || ARCH(I386)
-#    include <Kernel/Arch/x86/CPU.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/CPU.h>
 #elif ARCH(AARCH64)
 #    include <Kernel/Arch/aarch64/CPU.h>
 #else

@@ -7,7 +7,7 @@
 
 #include "Player.h"
 #include <LibAudio/FlacLoader.h>
-#include <LibCore/File.h>
+#include <LibFileSystem/FileSystem.h>
 
 Player::Player(Audio::ConnectionToServer& audio_client_connection)
     : m_audio_client_connection(audio_client_connection)
@@ -18,7 +18,6 @@ Player::Player(Audio::ConnectionToServer& audio_client_connection)
         auto sample_rate = m_playback_manager.loader()->sample_rate();
         float source_to_dest_ratio = static_cast<float>(sample_rate) / m_playback_manager.device_sample_rate();
         samples_played *= source_to_dest_ratio;
-        samples_played += m_playback_manager.last_seek();
 
         auto played_seconds = samples_played / sample_rate;
         time_elapsed(played_seconds);
@@ -45,7 +44,7 @@ void Player::play_file_path(DeprecatedString const& path)
     if (path.is_null())
         return;
 
-    if (!Core::File::exists(path)) {
+    if (!FileSystem::exists(path)) {
         audio_load_error(path, "File does not exist"sv);
         return;
     }
@@ -64,7 +63,8 @@ void Player::play_file_path(DeprecatedString const& path)
 
     m_loaded_filename = path;
 
-    total_samples_changed(loader->total_samples());
+    // TODO: The combination of sample count, sample rate, and sample data should be properly abstracted for the source and the playback device.
+    total_samples_changed(loader->total_samples() * (static_cast<float>(loader->sample_rate()) / m_playback_manager.device_sample_rate()));
     m_playback_manager.set_loader(move(loader));
     file_name_changed(path);
 
@@ -155,6 +155,11 @@ void Player::toggle_mute()
 
 void Player::seek(int sample)
 {
+    auto loader = m_playback_manager.loader();
+    if (loader.is_null()) {
+        return;
+    }
+    sample *= (m_playback_manager.device_sample_rate() / static_cast<float>(loader->sample_rate()));
     m_playback_manager.seek(sample);
 }
 

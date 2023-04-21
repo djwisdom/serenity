@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,6 +14,7 @@
 #include <AK/Vector.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibJS/Heap/GCPtr.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Headers.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Statuses.h>
@@ -50,7 +51,7 @@ public:
 
     [[nodiscard]] static JS::NonnullGCPtr<Response> create(JS::VM&);
     [[nodiscard]] static JS::NonnullGCPtr<Response> aborted_network_error(JS::VM&);
-    [[nodiscard]] static JS::NonnullGCPtr<Response> network_error(JS::VM&, DeprecatedString message);
+    [[nodiscard]] static JS::NonnullGCPtr<Response> network_error(JS::VM&, Variant<String, StringView> message);
     [[nodiscard]] static JS::NonnullGCPtr<Response> appropriate_network_error(JS::VM&, FetchParams const&);
 
     virtual ~Response() = default;
@@ -103,12 +104,12 @@ public:
     [[nodiscard]] bool is_network_error() const;
 
     [[nodiscard]] Optional<AK::URL const&> url() const;
-    [[nodiscard]] ErrorOr<Optional<AK::URL>> location_url(Optional<DeprecatedString> const& request_fragment) const;
+    [[nodiscard]] ErrorOr<Optional<AK::URL>> location_url(Optional<String> const& request_fragment) const;
 
-    [[nodiscard]] WebIDL::ExceptionOr<JS::NonnullGCPtr<Response>> clone(JS::VM&) const;
+    [[nodiscard]] WebIDL::ExceptionOr<JS::NonnullGCPtr<Response>> clone(JS::Realm&) const;
 
     // Non-standard
-    Optional<DeprecatedString> const& network_error_message() const { return m_network_error_message; }
+    [[nodiscard]] Optional<StringView> network_error_message() const;
 
 protected:
     explicit Response(JS::NonnullGCPtr<HeaderList>);
@@ -176,7 +177,7 @@ private:
     bool m_has_cross_origin_redirects { false };
 
     // Non-standard
-    Optional<DeprecatedString> m_network_error_message;
+    Optional<Variant<String, StringView>> m_network_error_message;
 };
 
 // https://fetch.spec.whatwg.org/#concept-filtered-response

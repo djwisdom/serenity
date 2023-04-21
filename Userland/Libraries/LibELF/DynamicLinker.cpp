@@ -12,11 +12,11 @@
 #include <AK/HashMap.h>
 #include <AK/HashTable.h>
 #include <AK/LexicalPath.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/Platform.h>
 #include <AK/ScopeGuard.h>
 #include <AK/Vector.h>
 #include <Kernel/API/VirtualMemoryAnnotations.h>
+#include <Kernel/API/prctl_numbers.h>
 #include <LibC/bits/pthread_integration.h>
 #include <LibC/link.h>
 #include <LibC/sys/mman.h>
@@ -105,7 +105,7 @@ static Result<NonnullRefPtr<DynamicLoader>, DlErrorMessage> map_library(Deprecat
     return loader;
 }
 
-static Optional<DeprecatedString> resolve_library(DeprecatedString const& name, DynamicObject const& parent_object)
+Optional<DeprecatedString> DynamicLinker::resolve_library(DeprecatedString const& name, DynamicObject const& parent_object)
 {
     // Absolute and relative (to the current working directory) paths are already considered resolved.
     // However, ensure that the returned path is absolute and canonical, so pass it through LexicalPath.
@@ -132,8 +132,16 @@ static Optional<DeprecatedString> resolve_library(DeprecatedString const& name, 
         LexicalPath library_path(search_path.replace("$ORIGIN"sv, LexicalPath::dirname(parent_object.filepath()), ReplaceMode::FirstOnly));
         DeprecatedString library_name = library_path.append(name).string();
 
-        if (access(library_name.characters(), F_OK) == 0)
+        if (access(library_name.characters(), F_OK) == 0) {
+            if (!library_name.starts_with('/')) {
+                // FIXME: Non-absolute paths should resolve from the current working directory. However,
+                //        since that's almost never the effect that is actually desired, let's print
+                //        a warning and only implement it once something actually needs that behavior.
+                dbgln("\033[33mWarning:\033[0m Resolving library '{}' resulted in non-absolute path '{}'. Check your binary for relative RPATHs and RUNPATHs.", name, library_name);
+            }
+
             return library_name;
+        }
     }
 
     return {};
@@ -177,7 +185,7 @@ static Result<void, DlErrorMessage> map_dependencies(DeprecatedString const& pat
     for (auto const& needed_name : get_dependencies(path)) {
         dbgln_if(DYNAMIC_LOAD_DEBUG, "needed library: {}", needed_name.characters());
 
-        auto dependency_path = resolve_library(needed_name, parent_object);
+        auto dependency_path = DynamicLinker::resolve_library(needed_name, parent_object);
 
         if (!dependency_path.has_value())
             return DlErrorMessage { DeprecatedString::formatted("Could not find required shared library: {}", needed_name) };
@@ -332,19 +340,19 @@ static void for_each_unfinished_dependency_of(DeprecatedString const& path, Hash
     seen_names.set(path);
 
     for (auto const& needed_name : get_dependencies(path)) {
-        auto dependency_path = *resolve_library(needed_name, loader.value()->dynamic_object());
+        auto dependency_path = *DynamicLinker::resolve_library(needed_name, loader.value()->dynamic_object());
         for_each_unfinished_dependency_of(dependency_path, seen_names, callback);
     }
 
     callback(*s_loaders.get(path).value());
 }
 
-static NonnullRefPtrVector<DynamicLoader> collect_loaders_for_library(DeprecatedString const& path)
+static Vector<NonnullRefPtr<DynamicLoader>> collect_loaders_for_library(DeprecatedString const& path)
 {
     VERIFY(path.starts_with('/'));
 
     HashTable<DeprecatedString> seen_names;
-    NonnullRefPtrVector<DynamicLoader> loaders;
+    Vector<NonnullRefPtr<DynamicLoader>> loaders;
     for_each_unfinished_dependency_of(path, seen_names, [&](auto& loader) {
         loaders.append(loader);
     });
@@ -377,37 +385,37 @@ static Result<void, DlErrorMessage> link_main_library(DeprecatedString const& pa
     auto loaders = collect_loaders_for_library(path);
 
     for (auto& loader : loaders) {
-        auto dynamic_object = loader.map();
+        auto dynamic_object = loader->map();
         if (dynamic_object)
             s_global_objects.set(dynamic_object->filepath(), *dynamic_object);
     }
 
     for (auto& loader : loaders) {
-        bool success = loader.link(flags);
+        bool success = loader->link(flags);
         if (!success) {
-            return DlErrorMessage { DeprecatedString::formatted("Failed to link library {}", loader.filepath()) };
+            return DlErrorMessage { DeprecatedString::formatted("Failed to link library {}", loader->filepath()) };
         }
     }
 
     for (auto& loader : loaders) {
-        auto result = loader.load_stage_3(flags);
+        auto result = loader->load_stage_3(flags);
         VERIFY(!result.is_error());
         auto& object = result.value();
 
-        if (loader.filepath().ends_with("/libc.so"sv)) {
+        if (loader->filepath().ends_with("/libc.so"sv)) {
             initialize_libc(*object);
         }
 
-        if (loader.filepath().ends_with("/libsystem.so"sv)) {
-            VERIFY(!loader.text_segments().is_empty());
-            for (auto const& segment : loader.text_segments()) {
+        if (loader->filepath().ends_with("/libsystem.so"sv)) {
+            VERIFY(!loader->text_segments().is_empty());
+            for (auto const& segment : loader->text_segments()) {
                 auto flags = static_cast<int>(VirtualMemoryRangeFlags::SyscallCode) | static_cast<int>(VirtualMemoryRangeFlags::Immutable);
                 if (syscall(SC_annotate_mapping, segment.address().get(), flags)) {
                     VERIFY_NOT_REACHED();
                 }
             }
         } else {
-            for (auto const& segment : loader.text_segments()) {
+            for (auto const& segment : loader->text_segments()) {
                 auto flags = static_cast<int>(VirtualMemoryRangeFlags::Immutable);
                 if (syscall(SC_annotate_mapping, segment.address().get(), flags)) {
                     VERIFY_NOT_REACHED();
@@ -419,7 +427,7 @@ static Result<void, DlErrorMessage> link_main_library(DeprecatedString const& pa
     drop_loader_promise("prot_exec"sv);
 
     for (auto& loader : loaders) {
-        loader.load_stage_4();
+        loader->load_stage_4();
     }
 
     return {};
@@ -485,7 +493,7 @@ static Result<void*, DlErrorMessage> __dlopen(char const* filename, int flags)
 
     auto const& parent_object = **s_global_objects.get(s_main_program_path);
 
-    auto library_path = (filename ? resolve_library(filename, parent_object) : s_main_program_path);
+    auto library_path = (filename ? DynamicLinker::resolve_library(filename, parent_object) : s_main_program_path);
 
     if (!library_path.has_value())
         return DlErrorMessage { DeprecatedString::formatted("Could not find required shared library: {}", filename) };
@@ -669,14 +677,14 @@ void ELF::DynamicLinker::linker_main(DeprecatedString&& main_program_path, int m
 
     s_loaders.clear();
 
-    int rc = syscall(SC_annotate_mapping, nullptr);
+    int rc = syscall(SC_prctl, PR_SET_NO_NEW_SYSCALL_REGION_ANNOTATIONS, 1, 0);
     if (rc < 0) {
         VERIFY_NOT_REACHED();
     }
 
     dbgln_if(DYNAMIC_LOAD_DEBUG, "Jumping to entry point: {:p}", entry_point_function);
     if (s_do_breakpoint_trap_before_entry) {
-#ifdef AK_ARCH_AARCH64
+#if ARCH(AARCH64)
         asm("brk #0");
 #else
         asm("int3");

@@ -5,8 +5,10 @@
 [Exposed=Window]
 interface HTMLFrameSetElement : HTMLElement {
 
-    [Reflect] attribute DOMString cols;
-    [Reflect] attribute DOMString rows;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString cols;
+    [CEReactions, Reflect] attribute DOMString rows;
 
 };
 

@@ -7,11 +7,11 @@
 #pragma once
 
 #include <AK/ByteBuffer.h>
+#include <AK/Format.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
 
-namespace Crypto {
-namespace Hash {
+namespace Crypto::Hash {
 
 template<size_t DigestS>
 struct Digest {
@@ -23,6 +23,9 @@ struct Digest {
     [[nodiscard]] ALWAYS_INLINE size_t data_length() const { return Size; }
 
     [[nodiscard]] ALWAYS_INLINE ReadonlyBytes bytes() const { return { immutable_data(), data_length() }; }
+
+    [[nodiscard]] bool operator==(Digest const& other) const = default;
+    [[nodiscard]] bool operator!=(Digest const& other) const = default;
 };
 
 template<size_t BlockS, size_t DigestS, typename DigestT = Digest<DigestS>>
@@ -59,4 +62,16 @@ protected:
     virtual ~HashFunction() = default;
 };
 }
-}
+
+template<size_t DigestS>
+struct AK::Formatter<Crypto::Hash::Digest<DigestS>> : StandardFormatter {
+    ErrorOr<void> format(FormatBuilder& builder, Crypto::Hash::Digest<DigestS> const& digest)
+    {
+        for (size_t i = 0; i < digest.Size; ++i) {
+            if (i > 0 && i % 4 == 0)
+                TRY(builder.put_padding('-', 1));
+            TRY(builder.put_u64(digest.data[i], 16, false, false, true, false, FormatBuilder::Align::Right, 2));
+        }
+        return {};
+    }
+};

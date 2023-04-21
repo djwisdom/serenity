@@ -1,21 +1,20 @@
 /*
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/FlyString.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <AK/RefCounted.h>
 #include <LibWeb/CSS/GeneralEnclosed.h>
+#include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/MediaFeatureID.h>
 #include <LibWeb/CSS/Ratio.h>
-#include <LibWeb/CSS/StyleValue.h>
+#include <LibWeb/CSS/Resolution.h>
 
 namespace Web::CSS {
 
@@ -47,7 +46,7 @@ public:
     {
     }
 
-    DeprecatedString to_deprecated_string() const;
+    ErrorOr<String> to_string() const;
 
     bool is_ident() const { return m_value.has<ValueID>(); }
     bool is_length() const { return m_value.has<Length>(); }
@@ -146,7 +145,7 @@ public:
     }
 
     bool evaluate(HTML::Window const&) const;
-    DeprecatedString to_deprecated_string() const;
+    ErrorOr<String> to_string() const;
 
 private:
     enum class Type {
@@ -198,17 +197,17 @@ struct MediaCondition {
     static NonnullOwnPtr<MediaCondition> from_general_enclosed(GeneralEnclosed&&);
     static NonnullOwnPtr<MediaCondition> from_feature(MediaFeature&&);
     static NonnullOwnPtr<MediaCondition> from_not(NonnullOwnPtr<MediaCondition>&&);
-    static NonnullOwnPtr<MediaCondition> from_and_list(NonnullOwnPtrVector<MediaCondition>&&);
-    static NonnullOwnPtr<MediaCondition> from_or_list(NonnullOwnPtrVector<MediaCondition>&&);
+    static NonnullOwnPtr<MediaCondition> from_and_list(Vector<NonnullOwnPtr<MediaCondition>>&&);
+    static NonnullOwnPtr<MediaCondition> from_or_list(Vector<NonnullOwnPtr<MediaCondition>>&&);
 
     MatchResult evaluate(HTML::Window const&) const;
-    DeprecatedString to_deprecated_string() const;
+    ErrorOr<String> to_string() const;
 
 private:
     MediaCondition() = default;
     Type type;
     Optional<MediaFeature> feature;
-    NonnullOwnPtrVector<MediaCondition> conditions;
+    Vector<NonnullOwnPtr<MediaCondition>> conditions;
     Optional<GeneralEnclosed> general_enclosed;
 };
 
@@ -241,7 +240,7 @@ public:
 
     bool matches() const { return m_matches; }
     bool evaluate(HTML::Window const&);
-    DeprecatedString to_deprecated_string() const;
+    ErrorOr<String> to_string() const;
 
 private:
     MediaQuery() = default;
@@ -255,7 +254,7 @@ private:
     bool m_matches { false };
 };
 
-DeprecatedString serialize_a_media_query_list(NonnullRefPtrVector<MediaQuery> const&);
+ErrorOr<String> serialize_a_media_query_list(Vector<NonnullRefPtr<MediaQuery>> const&);
 
 bool is_media_feature_name(StringView name);
 
@@ -270,7 +269,7 @@ template<>
 struct Formatter<Web::CSS::MediaFeature> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Web::CSS::MediaFeature const& media_feature)
     {
-        return Formatter<StringView>::format(builder, media_feature.to_deprecated_string());
+        return Formatter<StringView>::format(builder, TRY(media_feature.to_string()));
     }
 };
 
@@ -278,7 +277,7 @@ template<>
 struct Formatter<Web::CSS::MediaCondition> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Web::CSS::MediaCondition const& media_condition)
     {
-        return Formatter<StringView>::format(builder, media_condition.to_deprecated_string());
+        return Formatter<StringView>::format(builder, TRY(media_condition.to_string()));
     }
 };
 
@@ -286,7 +285,7 @@ template<>
 struct Formatter<Web::CSS::MediaQuery> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Web::CSS::MediaQuery const& media_query)
     {
-        return Formatter<StringView>::format(builder, media_query.to_deprecated_string());
+        return Formatter<StringView>::format(builder, TRY(media_query.to_string()));
     }
 };
 

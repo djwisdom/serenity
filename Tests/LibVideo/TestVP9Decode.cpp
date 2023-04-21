@@ -33,6 +33,15 @@ static void decode_video(StringView path, size_t expected_frame_count)
         auto block = block_result.release_value();
         for (auto const& frame : block.frames()) {
             MUST(vp9_decoder.receive_sample(frame));
+            while (true) {
+                auto frame_result = vp9_decoder.get_decoded_frame();
+                if (frame_result.is_error()) {
+                    if (frame_result.error().category() == Video::DecoderErrorCategory::NeedsMoreInput) {
+                        break;
+                    }
+                    VERIFY_NOT_REACHED();
+                }
+            }
             frame_count++;
         }
     }
@@ -48,4 +57,9 @@ TEST_CASE(webm_in_vp9)
 BENCHMARK_CASE(vp9_4k)
 {
     decode_video("./vp9_4k.webm"sv, 2);
+}
+
+BENCHMARK_CASE(vp9_clamp_reference_mvs)
+{
+    decode_video("./vp9_clamp_reference_mvs.webm"sv, 92);
 }

@@ -8,6 +8,7 @@
 #include <Kernel/Bus/PCI/API.h>
 #include <Kernel/Bus/PCI/IDs.h>
 #include <Kernel/Devices/Audio/AC97.h>
+#include <Kernel/Devices/Audio/IntelHDA/Controller.h>
 #include <Kernel/Devices/Audio/Management.h>
 #include <Kernel/Sections.h>
 
@@ -36,50 +37,62 @@ UNMAP_AFTER_INIT AudioManagement::AudioManagement()
 {
 }
 
-UNMAP_AFTER_INIT void AudioManagement::enumerate_hardware_controllers()
-{
-    if (!PCI::Access::is_disabled()) {
-        MUST(PCI::enumerate([&](PCI::DeviceIdentifier const& device_identifier) {
-            // Note: Only consider PCI audio controllers
-            if (device_identifier.class_code().value() != to_underlying(PCI::ClassID::Multimedia)
-                || device_identifier.subclass_code().value() != to_underlying(PCI::Multimedia::SubclassID::AudioController))
-                return;
+struct PCIAudioDriverInitializer {
+    ErrorOr<bool> (*probe)(PCI::DeviceIdentifier const&) = nullptr;
+    ErrorOr<NonnullRefPtr<AudioController>> (*create)(PCI::DeviceIdentifier const&) = nullptr;
+};
 
-            dbgln("AC97: found audio controller at {}", device_identifier.address());
-            auto ac97_device = AC97::try_create(device_identifier);
-            if (ac97_device.is_error()) {
-                // FIXME: Propagate errors properly
-                dbgln("AudioManagement: failed to initialize AC97 device: {}", ac97_device.error());
-                return;
-            }
-            m_controllers_list.append(ac97_device.release_value());
-        }));
+static constexpr PCIAudioDriverInitializer s_initializers[] = {
+    { AC97::probe, AC97::create },
+    { Audio::IntelHDA::Controller::probe, Audio::IntelHDA::Controller::create },
+};
+
+UNMAP_AFTER_INIT ErrorOr<NonnullRefPtr<AudioController>> AudioManagement::determine_audio_device(PCI::DeviceIdentifier const& device_identifier) const
+{
+    for (auto& initializer : s_initializers) {
+        auto initializer_probe_found_driver_match_or_error = initializer.probe(device_identifier);
+        if (initializer_probe_found_driver_match_or_error.is_error()) {
+            dmesgln("AudioManagement: Failed to probe device {}, due to {}", device_identifier.address(), initializer_probe_found_driver_match_or_error.error());
+            continue;
+        }
+        auto initializer_probe_found_driver_match = initializer_probe_found_driver_match_or_error.release_value();
+        if (initializer_probe_found_driver_match) {
+            auto device = TRY(initializer.create(device_identifier));
+            TRY(device->initialize({}));
+            return device;
+        }
     }
+    dmesgln("AudioManagement: Failed to initialize device {}, unsupported audio device", device_identifier.address());
+    return Error::from_errno(ENODEV);
 }
 
-UNMAP_AFTER_INIT void AudioManagement::enumerate_hardware_audio_channels()
+UNMAP_AFTER_INIT void AudioManagement::enumerate_hardware_controllers()
 {
-    for (auto& controller : m_controllers_list)
-        controller.detect_hardware_audio_channels({});
+    if (PCI::Access::is_disabled())
+        return;
+    MUST(PCI::enumerate([&](PCI::DeviceIdentifier const& device_identifier) {
+        // Only consider PCI multimedia devices
+        if (device_identifier.class_code().value() != to_underlying(PCI::ClassID::Multimedia))
+            return;
+
+        auto result = determine_audio_device(device_identifier);
+        if (result.is_error()) {
+            dmesgln("Failed to initialize audio device ({} {}): {}", device_identifier.address(), device_identifier.hardware_id(), result.error());
+            return;
+        }
+        m_controllers_list.with([&](auto& list) { list.append(result.release_value()); });
+    }));
 }
 
 UNMAP_AFTER_INIT bool AudioManagement::initialize()
 {
-
-    /* Explanation on the flow:
-     * 1. Enumerate all audio controllers connected to the system:
-     *  a. Try to find the SB16 ISA-based controller.
-     *  b. Enumerate the PCI bus and try to find audio controllers there too
-     * 2. Ask each controller to detect the audio channels and instantiate AudioChannel objects.
-     */
     enumerate_hardware_controllers();
-    enumerate_hardware_audio_channels();
-
-    if (m_controllers_list.is_empty()) {
-        dbgln("No audio controller was initialized.");
-        return false;
-    }
-    return true;
+    auto list_empty = m_controllers_list.with([&](auto& list) -> bool {
+        return list.is_empty();
+    });
+    if (list_empty)
+        dbgln("AudioManagement: no audio controller was initialized.");
+    return !list_empty;
 }
 
 }

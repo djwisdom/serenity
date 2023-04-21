@@ -3,7 +3,7 @@
  * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2022, Tobias Christiansen <tobyase@serenityos.org>
  * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
- * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2022-2023, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -18,9 +18,9 @@
 namespace WebDriver {
 
 Atomic<unsigned> Client::s_next_session_id;
-NonnullOwnPtrVector<Session> Client::s_sessions;
+HashMap<unsigned, NonnullRefPtr<Session>> Client::s_sessions;
 
-ErrorOr<NonnullRefPtr<Client>> Client::try_create(NonnullOwnPtr<Core::Stream::BufferedTCPSocket> socket, LaunchBrowserCallbacks callbacks, Core::Object* parent)
+ErrorOr<NonnullRefPtr<Client>> Client::try_create(NonnullOwnPtr<Core::BufferedTCPSocket> socket, LaunchBrowserCallbacks callbacks, Core::Object* parent)
 {
     if (!callbacks.launch_browser || !callbacks.launch_headless_browser)
         return Error::from_string_view("All callbacks to launch a browser must be provided"sv);
@@ -29,7 +29,7 @@ ErrorOr<NonnullRefPtr<Client>> Client::try_create(NonnullOwnPtr<Core::Stream::Bu
     return adopt_nonnull_ref_or_enomem(new (nothrow) Client(move(socket), move(callbacks), parent));
 }
 
-Client::Client(NonnullOwnPtr<Core::Stream::BufferedTCPSocket> socket, LaunchBrowserCallbacks callbacks, Core::Object* parent)
+Client::Client(NonnullOwnPtr<Core::BufferedTCPSocket> socket, LaunchBrowserCallbacks callbacks, Core::Object* parent)
     : Web::WebDriver::Client(move(socket), parent)
     , m_callbacks(move(callbacks))
 {
@@ -37,41 +37,21 @@ Client::Client(NonnullOwnPtr<Core::Stream::BufferedTCPSocket> socket, LaunchBrow
 
 Client::~Client() = default;
 
-ErrorOr<Session*, Web::WebDriver::Error> Client::find_session_with_id(StringView session_id)
+ErrorOr<NonnullRefPtr<Session>, Web::WebDriver::Error> Client::find_session_with_id(StringView session_id)
 {
     auto session_id_or_error = session_id.to_uint<>();
     if (!session_id_or_error.has_value())
         return Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::InvalidSessionId, "Invalid session id");
 
-    for (auto& session : Client::s_sessions) {
-        if (session.session_id() == session_id_or_error.value())
-            return &session;
-    }
-    return Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::InvalidSessionId, "Invalid session id");
-}
-
-ErrorOr<NonnullOwnPtr<Session>, Web::WebDriver::Error> Client::take_session_with_id(StringView session_id)
-{
-    auto session_id_or_error = session_id.to_uint<>();
-    if (!session_id_or_error.has_value())
-        return Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::InvalidSessionId, "Invalid session id");
-
-    for (size_t i = 0; i < Client::s_sessions.size(); ++i) {
-        if (Client::s_sessions[i].session_id() == session_id_or_error.value()) {
-            return Client::s_sessions.take(i);
-        }
-    }
+    if (auto session = s_sessions.get(*session_id_or_error); session.has_value())
+        return *session.release_value();
 
     return Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::InvalidSessionId, "Invalid session id");
 }
 
 void Client::close_session(unsigned session_id)
 {
-    bool found = Client::s_sessions.remove_first_matching([&](auto const& it) {
-        return it->session_id() == session_id;
-    });
-
-    if (found)
+    if (s_sessions.remove(session_id))
         dbgln_if(WEBDRIVER_DEBUG, "Shut down session {}", session_id);
     else
         dbgln_if(WEBDRIVER_DEBUG, "Unable to shut down session {}: Not found", session_id);
@@ -81,20 +61,20 @@ void Client::close_session(unsigned session_id)
 static void initialize_session_from_capabilities(WebContentConnection& web_content_connection, JsonObject& capabilities)
 {
     // 1. Let strategy be the result of getting property "pageLoadStrategy" from capabilities.
-    auto const* strategy = capabilities.get_ptr("pageLoadStrategy"sv);
+    auto strategy = capabilities.get_deprecated_string("pageLoadStrategy"sv);
 
     // 2. If strategy is a string, set the current session’s page loading strategy to strategy. Otherwise, set the page loading strategy to normal and set a property of capabilities with name "pageLoadStrategy" and value "normal".
-    if (strategy && strategy->is_string())
-        web_content_connection.async_set_page_load_strategy(Web::WebDriver::page_load_strategy_from_string(strategy->as_string()));
+    if (strategy.has_value())
+        web_content_connection.async_set_page_load_strategy(Web::WebDriver::page_load_strategy_from_string(*strategy));
     else
         capabilities.set("pageLoadStrategy"sv, "normal"sv);
 
     // 3. Let strictFileInteractability be the result of getting property "strictFileInteractability" from capabilities.
-    auto const* strict_file_interactiblity = capabilities.get_ptr("strictFileInteractability"sv);
+    auto strict_file_interactiblity = capabilities.get_bool("strictFileInteractability"sv);
 
     // 4. If strictFileInteractability is a boolean, set the current session’s strict file interactability to strictFileInteractability. Otherwise set the current session’s strict file interactability to false.
-    if (strict_file_interactiblity && strict_file_interactiblity->is_bool())
-        web_content_connection.async_set_strict_file_interactability(strict_file_interactiblity->as_bool());
+    if (strict_file_interactiblity.has_value())
+        web_content_connection.async_set_strict_file_interactability(*strict_file_interactiblity);
     else
         capabilities.set("strictFileInteractability"sv, false);
 
@@ -105,7 +85,7 @@ static void initialize_session_from_capabilities(WebContentConnection& web_conte
     // FIXME:         Set a property of capabilities with name "proxy" and a value that is a new JSON Object.
 
     // 6. If capabilities has a property with the key "timeouts":
-    if (auto const* timeouts = capabilities.get_ptr("timeouts"sv); timeouts && timeouts->is_object()) {
+    if (auto timeouts = capabilities.get_object("timeouts"sv); timeouts.has_value()) {
         // a. Let timeouts be the result of trying to JSON deserialize as a timeouts configuration the value of the "timeouts" property.
         // NOTE: This happens on the remote end.
 
@@ -117,9 +97,9 @@ static void initialize_session_from_capabilities(WebContentConnection& web_conte
     }
 
     // 8. Apply changes to the user agent for any implementation-defined capabilities selected during the capabilities processing step.
-    auto const* behavior = capabilities.get_ptr("unhandledPromptBehavior"sv);
-    if (behavior && behavior->is_string())
-        web_content_connection.async_set_unhandled_prompt_behavior(Web::WebDriver::unhandled_prompt_behavior_from_string(behavior->as_string()));
+    auto behavior = capabilities.get_deprecated_string("unhandledPromptBehavior"sv);
+    if (behavior.has_value())
+        web_content_connection.async_set_unhandled_prompt_behavior(Web::WebDriver::unhandled_prompt_behavior_from_string(*behavior));
     else
         capabilities.set("unhandledPromptBehavior"sv, "dismiss and notify"sv);
 }
@@ -156,7 +136,7 @@ Web::WebDriver::Response Client::new_session(Web::WebDriver::Parameters, JsonVal
 
     // 7. Let session be a new session with the session ID of session id.
     Web::WebDriver::LadybirdOptions options { capabilities.as_object() };
-    auto session = make<Session>(session_id, *this, move(options));
+    auto session = make_ref_counted<Session>(session_id, *this, move(options));
 
     if (auto start_result = session->start(m_callbacks); start_result.is_error())
         return Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::SessionNotCreated, DeprecatedString::formatted("Failed to start session: {}", start_result.error().string_literal()));
@@ -169,7 +149,7 @@ Web::WebDriver::Response Client::new_session(Web::WebDriver::Parameters, JsonVal
     //           with arguments session and capabilities.
 
     // 10. Append session to active sessions.
-    Client::s_sessions.append(move(session));
+    s_sessions.set(session_id, move(session));
 
     // NOTE: We do step 12 before 11 because step 12 mutates the capabilities we set in step 11.
 
@@ -204,8 +184,8 @@ Web::WebDriver::Response Client::delete_session(Web::WebDriver::Parameters param
     dbgln_if(WEBDRIVER_DEBUG, "Handling DELETE /session/<session_id>");
 
     // 1. If the current session is an active session, try to close the session.
-    auto session = TRY(take_session_with_id(parameters[0]));
-    TRY(session->stop());
+    if (auto session = find_session_with_id(parameters[0]); !session.is_error())
+        close_session(session.value()->session_id());
 
     // 2. Return success with data null.
     return JsonValue {};
@@ -236,7 +216,7 @@ Web::WebDriver::Response Client::get_status(Web::WebDriver::Parameters, JsonValu
 Web::WebDriver::Response Client::get_timeouts(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session id>/timeouts");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().get_timeouts();
 }
 
@@ -245,7 +225,7 @@ Web::WebDriver::Response Client::get_timeouts(Web::WebDriver::Parameters paramet
 Web::WebDriver::Response Client::set_timeouts(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session id>/timeouts");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().set_timeouts(payload);
 }
 
@@ -254,7 +234,7 @@ Web::WebDriver::Response Client::set_timeouts(Web::WebDriver::Parameters paramet
 Web::WebDriver::Response Client::navigate_to(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/url");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().navigate_to(payload);
 }
 
@@ -263,7 +243,7 @@ Web::WebDriver::Response Client::navigate_to(Web::WebDriver::Parameters paramete
 Web::WebDriver::Response Client::get_current_url(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/url");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().get_current_url();
 }
 
@@ -272,7 +252,7 @@ Web::WebDriver::Response Client::get_current_url(Web::WebDriver::Parameters para
 Web::WebDriver::Response Client::back(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/back");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().back();
 }
 
@@ -281,7 +261,7 @@ Web::WebDriver::Response Client::back(Web::WebDriver::Parameters parameters, Jso
 Web::WebDriver::Response Client::forward(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/forward");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().forward();
 }
 
@@ -290,7 +270,7 @@ Web::WebDriver::Response Client::forward(Web::WebDriver::Parameters parameters, 
 Web::WebDriver::Response Client::refresh(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/refresh");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().refresh();
 }
 
@@ -299,7 +279,7 @@ Web::WebDriver::Response Client::refresh(Web::WebDriver::Parameters parameters, 
 Web::WebDriver::Response Client::get_title(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/title");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().get_title();
 }
 
@@ -308,8 +288,13 @@ Web::WebDriver::Response Client::get_title(Web::WebDriver::Parameters parameters
 Web::WebDriver::Response Client::get_window_handle(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/window");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_window_handle();
+    auto session = TRY(find_session_with_id(parameters[0]));
+
+    // 1. If the current top-level browsing context is no longer open, return error with error code no such window.
+    TRY(session->web_content_connection().ensure_top_level_browsing_context_is_open());
+
+    // 2. Return success with data being the window handle associated with the current top-level browsing context.
+    return JsonValue { session->current_window_handle() };
 }
 
 // 11.2 Close Window, https://w3c.github.io/webdriver/#dfn-close-window
@@ -317,13 +302,8 @@ Web::WebDriver::Response Client::get_window_handle(Web::WebDriver::Parameters pa
 Web::WebDriver::Response Client::close_window(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling DELETE /session/<session_id>/window");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-
-    auto open_windows = TRY(session->web_content_connection().close_window());
-    if (open_windows.is_array() && open_windows.as_array().is_empty())
-        TRY(session->stop());
-
-    return open_windows;
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->close_window();
 }
 
 // 11.3 Switch to Window, https://w3c.github.io/webdriver/#dfn-switch-to-window
@@ -331,8 +311,19 @@ Web::WebDriver::Response Client::close_window(Web::WebDriver::Parameters paramet
 Web::WebDriver::Response Client::switch_to_window(Web::WebDriver::Parameters parameters, AK::JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/window");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().switch_to_window(payload);
+    auto session = TRY(find_session_with_id(parameters[0]));
+
+    if (!payload.is_object())
+        return Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::InvalidArgument, "Payload is not a JSON object");
+
+    // 1. Let handle be the result of getting the property "handle" from the parameters argument.
+    auto handle = payload.as_object().get("handle"sv);
+
+    // 2. If handle is undefined, return error with error code invalid argument.
+    if (!handle.has_value())
+        return Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::InvalidArgument, "No property called 'handle' present");
+
+    return session->switch_to_window(handle->as_string());
 }
 
 // 11.4 Get Window Handles, https://w3c.github.io/webdriver/#dfn-get-window-handles
@@ -340,8 +331,17 @@ Web::WebDriver::Response Client::switch_to_window(Web::WebDriver::Parameters par
 Web::WebDriver::Response Client::get_window_handles(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/window/handles");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_window_handles();
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->get_window_handles();
+}
+
+// 11.5 New Window, https://w3c.github.io/webdriver/#dfn-new-window
+// POST /session/{session id}/window/new
+Web::WebDriver::Response Client::new_window(Web::WebDriver::Parameters parameters, JsonValue payload)
+{
+    dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/window/new");
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().new_window(payload);
 }
 
 // 11.8.1 Get Window Rect, https://w3c.github.io/webdriver/#dfn-get-window-rect
@@ -349,7 +349,7 @@ Web::WebDriver::Response Client::get_window_handles(Web::WebDriver::Parameters p
 Web::WebDriver::Response Client::get_window_rect(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/window/rect");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().get_window_rect();
 }
 
@@ -358,7 +358,7 @@ Web::WebDriver::Response Client::get_window_rect(Web::WebDriver::Parameters para
 Web::WebDriver::Response Client::set_window_rect(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/window/rect");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().set_window_rect(payload);
 }
 
@@ -367,7 +367,7 @@ Web::WebDriver::Response Client::set_window_rect(Web::WebDriver::Parameters para
 Web::WebDriver::Response Client::maximize_window(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/window/maximize");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().maximize_window();
 }
 
@@ -376,7 +376,7 @@ Web::WebDriver::Response Client::maximize_window(Web::WebDriver::Parameters para
 Web::WebDriver::Response Client::minimize_window(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/window/minimize");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().minimize_window();
 }
 
@@ -385,7 +385,7 @@ Web::WebDriver::Response Client::minimize_window(Web::WebDriver::Parameters para
 Web::WebDriver::Response Client::fullscreen_window(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/window/fullscreen");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().fullscreen_window();
 }
 
@@ -394,7 +394,7 @@ Web::WebDriver::Response Client::fullscreen_window(Web::WebDriver::Parameters pa
 Web::WebDriver::Response Client::find_element(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/element");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().find_element(payload);
 }
 
@@ -403,7 +403,7 @@ Web::WebDriver::Response Client::find_element(Web::WebDriver::Parameters paramet
 Web::WebDriver::Response Client::find_elements(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/elements");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().find_elements(payload);
 }
 
@@ -412,8 +412,8 @@ Web::WebDriver::Response Client::find_elements(Web::WebDriver::Parameters parame
 Web::WebDriver::Response Client::find_element_from_element(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/element/<element_id>/element");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().find_element_from_element(payload, parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().find_element_from_element(payload, move(parameters[1]));
 }
 
 // 12.3.5 Find Elements From Element, https://w3c.github.io/webdriver/#dfn-find-elements-from-element
@@ -421,8 +421,8 @@ Web::WebDriver::Response Client::find_element_from_element(Web::WebDriver::Param
 Web::WebDriver::Response Client::find_elements_from_element(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/element/<element_id>/elements");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().find_elements_from_element(payload, parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().find_elements_from_element(payload, move(parameters[1]));
 }
 
 // 12.3.6 Find Element From Shadow Root, https://w3c.github.io/webdriver/#find-element-from-shadow-root
@@ -430,8 +430,8 @@ Web::WebDriver::Response Client::find_elements_from_element(Web::WebDriver::Para
 Web::WebDriver::Response Client::find_element_from_shadow_root(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/shadow/<shadow_id>/element");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().find_element_from_shadow_root(payload, parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().find_element_from_shadow_root(payload, move(parameters[1]));
 }
 
 // 12.3.7 Find Elements From Shadow Root, https://w3c.github.io/webdriver/#find-elements-from-shadow-root
@@ -439,8 +439,8 @@ Web::WebDriver::Response Client::find_element_from_shadow_root(Web::WebDriver::P
 Web::WebDriver::Response Client::find_elements_from_shadow_root(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/shadow/<shadow_id>/elements");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().find_elements_from_shadow_root(payload, parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().find_elements_from_shadow_root(payload, move(parameters[1]));
 }
 
 // 12.3.8 Get Active Element, https://w3c.github.io/webdriver/#get-active-element
@@ -448,7 +448,7 @@ Web::WebDriver::Response Client::find_elements_from_shadow_root(Web::WebDriver::
 Web::WebDriver::Response Client::get_active_element(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/active");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().get_active_element();
 }
 
@@ -457,8 +457,8 @@ Web::WebDriver::Response Client::get_active_element(Web::WebDriver::Parameters p
 Web::WebDriver::Response Client::get_element_shadow_root(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/shadow");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_element_shadow_root(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_element_shadow_root(move(parameters[1]));
 }
 
 // 12.4.1 Is Element Selected, https://w3c.github.io/webdriver/#dfn-is-element-selected
@@ -466,8 +466,8 @@ Web::WebDriver::Response Client::get_element_shadow_root(Web::WebDriver::Paramet
 Web::WebDriver::Response Client::is_element_selected(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/selected");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().is_element_selected(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().is_element_selected(move(parameters[1]));
 }
 
 // 12.4.2 Get Element Attribute, https://w3c.github.io/webdriver/#dfn-get-element-attribute
@@ -475,8 +475,8 @@ Web::WebDriver::Response Client::is_element_selected(Web::WebDriver::Parameters 
 Web::WebDriver::Response Client::get_element_attribute(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/attribute/<name>");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_element_attribute(parameters[1], parameters[2]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_element_attribute(move(parameters[1]), move(parameters[2]));
 }
 
 // 12.4.3 Get Element Property, https://w3c.github.io/webdriver/#dfn-get-element-property
@@ -484,8 +484,8 @@ Web::WebDriver::Response Client::get_element_attribute(Web::WebDriver::Parameter
 Web::WebDriver::Response Client::get_element_property(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/property/<name>");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_element_property(parameters[1], parameters[2]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_element_property(move(parameters[1]), move(parameters[2]));
 }
 
 // 12.4.4 Get Element CSS Value, https://w3c.github.io/webdriver/#dfn-get-element-css-value
@@ -493,8 +493,8 @@ Web::WebDriver::Response Client::get_element_property(Web::WebDriver::Parameters
 Web::WebDriver::Response Client::get_element_css_value(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/css/<property_name>");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_element_css_value(parameters[1], parameters[2]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_element_css_value(move(parameters[1]), move(parameters[2]));
 }
 
 // 12.4.5 Get Element Text, https://w3c.github.io/webdriver/#dfn-get-element-text
@@ -502,8 +502,8 @@ Web::WebDriver::Response Client::get_element_css_value(Web::WebDriver::Parameter
 Web::WebDriver::Response Client::get_element_text(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/text");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_element_text(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_element_text(move(parameters[1]));
 }
 
 // 12.4.6 Get Element Tag Name, https://w3c.github.io/webdriver/#dfn-get-element-tag-name
@@ -511,8 +511,8 @@ Web::WebDriver::Response Client::get_element_text(Web::WebDriver::Parameters par
 Web::WebDriver::Response Client::get_element_tag_name(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/name");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_element_tag_name(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_element_tag_name(move(parameters[1]));
 }
 
 // 12.4.7 Get Element Rect, https://w3c.github.io/webdriver/#dfn-get-element-rect
@@ -520,8 +520,8 @@ Web::WebDriver::Response Client::get_element_tag_name(Web::WebDriver::Parameters
 Web::WebDriver::Response Client::get_element_rect(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/rect");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_element_rect(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_element_rect(move(parameters[1]));
 }
 
 // 12.4.8 Is Element Enabled, https://w3c.github.io/webdriver/#dfn-is-element-enabled
@@ -529,17 +529,35 @@ Web::WebDriver::Response Client::get_element_rect(Web::WebDriver::Parameters par
 Web::WebDriver::Response Client::is_element_enabled(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/enabled");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().is_element_enabled(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().is_element_enabled(move(parameters[1]));
+}
+
+// 12.4.9 https://w3c.github.io/webdriver/#dfn-get-computed-role
+// GET /session/{session id}/element/{element id}/computedrole
+Web::WebDriver::Response Client::get_computed_role(Web::WebDriver::Parameters parameters, AK::JsonValue)
+{
+    dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session id>/element/<element id>/computedrole");
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_computed_role(move(parameters[1]));
+}
+
+// 12.4.10 Get Computed Label, https://w3c.github.io/webdriver/#get-computed-label
+// GET /session/{session id}/element/{element id}/computedlabel
+Web::WebDriver::Response Client::get_computed_label(Web::WebDriver::Parameters parameters, JsonValue)
+{
+    dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session id>/element/<element id>/computedlabel");
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_computed_label(move(parameters[1]));
 }
 
 // 12.5.1 Element Click, https://w3c.github.io/webdriver/#element-click
 // POST /session/{session id}/element/{element id}/click
-Web::WebDriver::Response Client::click(Web::WebDriver::Parameters parameters, JsonValue)
+Web::WebDriver::Response Client::element_click(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/element/<element_id>/click");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().click(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().element_click(move(parameters[1]));
 }
 
 // 13.1 Get Page Source, https://w3c.github.io/webdriver/#dfn-get-page-source
@@ -547,7 +565,7 @@ Web::WebDriver::Response Client::click(Web::WebDriver::Parameters parameters, Js
 Web::WebDriver::Response Client::get_source(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/source");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().get_source();
 }
 
@@ -556,7 +574,7 @@ Web::WebDriver::Response Client::get_source(Web::WebDriver::Parameters parameter
 Web::WebDriver::Response Client::execute_script(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/execute/sync");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().execute_script(payload);
 }
 
@@ -565,7 +583,7 @@ Web::WebDriver::Response Client::execute_script(Web::WebDriver::Parameters param
 Web::WebDriver::Response Client::execute_async_script(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/execute/async");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().execute_async_script(payload);
 }
 
@@ -574,7 +592,7 @@ Web::WebDriver::Response Client::execute_async_script(Web::WebDriver::Parameters
 Web::WebDriver::Response Client::get_all_cookies(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/cookie");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().get_all_cookies();
 }
 
@@ -583,8 +601,8 @@ Web::WebDriver::Response Client::get_all_cookies(Web::WebDriver::Parameters para
 Web::WebDriver::Response Client::get_named_cookie(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/cookie/<name>");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().get_named_cookie(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().get_named_cookie(move(parameters[1]));
 }
 
 // 14.3 Add Cookie, https://w3c.github.io/webdriver/#dfn-adding-a-cookie
@@ -592,7 +610,7 @@ Web::WebDriver::Response Client::get_named_cookie(Web::WebDriver::Parameters par
 Web::WebDriver::Response Client::add_cookie(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/cookie");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().add_cookie(payload);
 }
 
@@ -601,8 +619,8 @@ Web::WebDriver::Response Client::add_cookie(Web::WebDriver::Parameters parameter
 Web::WebDriver::Response Client::delete_cookie(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling DELETE /session/<session_id>/cookie/<name>");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().delete_cookie(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().delete_cookie(move(parameters[1]));
 }
 
 // 14.5 Delete All Cookies, https://w3c.github.io/webdriver/#dfn-delete-all-cookies
@@ -610,7 +628,7 @@ Web::WebDriver::Response Client::delete_cookie(Web::WebDriver::Parameters parame
 Web::WebDriver::Response Client::delete_all_cookies(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling DELETE /session/<session_id>/cookie");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().delete_all_cookies();
 }
 
@@ -619,7 +637,7 @@ Web::WebDriver::Response Client::delete_all_cookies(Web::WebDriver::Parameters p
 Web::WebDriver::Response Client::dismiss_alert(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/alert/dismiss");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().dismiss_alert();
 }
 
@@ -628,7 +646,7 @@ Web::WebDriver::Response Client::dismiss_alert(Web::WebDriver::Parameters parame
 Web::WebDriver::Response Client::accept_alert(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/alert/accept");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().accept_alert();
 }
 
@@ -637,7 +655,7 @@ Web::WebDriver::Response Client::accept_alert(Web::WebDriver::Parameters paramet
 Web::WebDriver::Response Client::get_alert_text(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/alert/text");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().get_alert_text();
 }
 
@@ -646,7 +664,7 @@ Web::WebDriver::Response Client::get_alert_text(Web::WebDriver::Parameters param
 Web::WebDriver::Response Client::send_alert_text(Web::WebDriver::Parameters parameters, JsonValue payload)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session_id>/alert/text");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().send_alert_text(payload);
 }
 
@@ -655,7 +673,7 @@ Web::WebDriver::Response Client::send_alert_text(Web::WebDriver::Parameters para
 Web::WebDriver::Response Client::take_screenshot(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/screenshot");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().take_screenshot();
 }
 
@@ -664,8 +682,8 @@ Web::WebDriver::Response Client::take_screenshot(Web::WebDriver::Parameters para
 Web::WebDriver::Response Client::take_element_screenshot(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling GET /session/<session_id>/element/<element_id>/screenshot");
-    auto* session = TRY(find_session_with_id(parameters[0]));
-    return session->web_content_connection().take_element_screenshot(parameters[1]);
+    auto session = TRY(find_session_with_id(parameters[0]));
+    return session->web_content_connection().take_element_screenshot(move(parameters[1]));
 }
 
 // 18.1 Print Page, https://w3c.github.io/webdriver/#dfn-print-page
@@ -673,7 +691,7 @@ Web::WebDriver::Response Client::take_element_screenshot(Web::WebDriver::Paramet
 Web::WebDriver::Response Client::print_page(Web::WebDriver::Parameters parameters, JsonValue)
 {
     dbgln_if(WEBDRIVER_DEBUG, "Handling POST /session/<session id>/print");
-    auto* session = TRY(find_session_with_id(parameters[0]));
+    auto session = TRY(find_session_with_id(parameters[0]));
     return session->web_content_connection().print_page();
 }
 

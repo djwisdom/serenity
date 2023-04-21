@@ -6,7 +6,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/IterationDecision.h>
 #include <Applications/Browser/Browser.h>
 #include <Applications/Browser/BrowserWindow.h>
 #include <Applications/Browser/CookieJar.h>
@@ -15,11 +14,11 @@
 #include <Applications/Browser/WindowActions.h>
 #include <LibConfig/Client.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
 #include <LibCore/FileWatcher.h>
 #include <LibCore/StandardPaths.h>
 #include <LibCore/System.h>
 #include <LibDesktop/Launcher.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Icon.h>
@@ -37,6 +36,8 @@ DeprecatedString g_home_url;
 DeprecatedString g_new_tab_url;
 Vector<DeprecatedString> g_content_filters;
 bool g_content_filters_enabled { true };
+Vector<String> g_autoplay_allowlist;
+bool g_autoplay_allowed_on_all_websites { false };
 Vector<DeprecatedString> g_proxies;
 HashMap<DeprecatedString, size_t> g_proxy_mappings;
 IconBag g_icon_bag;
@@ -46,13 +47,33 @@ DeprecatedString g_webdriver_content_ipc_path;
 
 static ErrorOr<void> load_content_filters()
 {
-    auto file = TRY(Core::Stream::File::open(DeprecatedString::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::Stream::OpenMode::Read));
-    auto ad_filter_list = TRY(Core::Stream::BufferedFile::create(move(file)));
+    auto file = TRY(Core::File::open(DeprecatedString::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::File::OpenMode::Read));
+    auto ad_filter_list = TRY(Core::BufferedFile::create(move(file)));
     auto buffer = TRY(ByteBuffer::create_uninitialized(4096));
     while (TRY(ad_filter_list->can_read_line())) {
         auto line = TRY(ad_filter_list->read_line(buffer));
         if (!line.is_empty())
             Browser::g_content_filters.append(line);
+    }
+
+    return {};
+}
+
+static ErrorOr<void> load_autoplay_allowlist()
+{
+    auto file = TRY(Core::File::open(TRY(String::formatted("{}/BrowserAutoplayAllowlist.txt", Core::StandardPaths::config_directory())), Core::File::OpenMode::Read));
+    auto allowlist = TRY(Core::BufferedFile::create(move(file)));
+    auto buffer = TRY(ByteBuffer::create_uninitialized(4096));
+
+    Browser::g_autoplay_allowlist.clear_with_capacity();
+
+    while (TRY(allowlist->can_read_line())) {
+        auto line = TRY(allowlist->read_line(buffer));
+        if (line.is_empty())
+            continue;
+
+        auto domain = TRY(String::from_utf8(line));
+        TRY(Browser::g_autoplay_allowlist.try_append(move(domain)));
     }
 
     return {};
@@ -89,7 +110,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     if (!Browser::g_webdriver_content_ipc_path.is_empty())
         specified_urls.empend("about:blank");
 
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/image", "rw"));
@@ -112,11 +132,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     Browser::g_new_tab_url = Config::read_string("Browser"sv, "Preferences"sv, "NewTab"sv, "file:///res/html/misc/new-tab.html"sv);
     Browser::g_search_engine = Config::read_string("Browser"sv, "Preferences"sv, "SearchEngine"sv, {});
     Browser::g_content_filters_enabled = Config::read_bool("Browser"sv, "Preferences"sv, "EnableContentFilters"sv, true);
+    Browser::g_autoplay_allowed_on_all_websites = Config::read_bool("Browser"sv, "Preferences"sv, "AllowAutoplayOnAllWebsites"sv, false);
 
     Browser::g_icon_bag = TRY(Browser::IconBag::try_create());
 
     auto database = TRY(Browser::Database::create());
     TRY(load_content_filters());
+    TRY(load_autoplay_allowlist());
 
     for (auto& group : Config::list_groups("Browser"sv)) {
         if (!group.starts_with("Proxy:"sv))
@@ -132,16 +154,16 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
     }
 
-    auto url_from_argument_string = [](DeprecatedString const& string) -> URL {
-        if (Core::File::exists(string)) {
-            return URL::create_with_file_scheme(Core::File::real_path_for(string));
+    auto url_from_argument_string = [](DeprecatedString const& string) -> ErrorOr<URL> {
+        if (FileSystem::exists(string)) {
+            return URL::create_with_file_scheme(TRY(FileSystem::real_path(string)).to_deprecated_string());
         }
         return Browser::url_from_user_input(string);
     };
 
     URL first_url = Browser::url_from_user_input(Browser::g_home_url);
     if (!specified_urls.is_empty())
-        first_url = url_from_argument_string(specified_urls.first());
+        first_url = TRY(url_from_argument_string(specified_urls.first()));
 
     auto cookie_jar = TRY(Browser::CookieJar::create(*database));
     auto window = Browser::BrowserWindow::construct(cookie_jar, first_url);
@@ -157,6 +179,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         window->content_filters_changed();
     };
     TRY(content_filters_watcher->add_watch(DeprecatedString::formatted("{}/BrowserContentFilters.txt", Core::StandardPaths::config_directory()), Core::FileWatcherEvent::Type::ContentModified));
+
+    auto autoplay_allowlist_watcher = TRY(Core::FileWatcher::create());
+    autoplay_allowlist_watcher->on_change = [&](Core::FileWatcherEvent const&) {
+        dbgln("Reloading autoplay allowlist because config file changed");
+        if (auto error = load_autoplay_allowlist(); error.is_error()) {
+            dbgln("Reloading autoplay allowlist failed: {}", error.release_error());
+            return;
+        }
+        window->autoplay_allowlist_changed();
+    };
+    TRY(autoplay_allowlist_watcher->add_watch(DeprecatedString::formatted("{}/BrowserAutoplayAllowlist.txt", Core::StandardPaths::config_directory()), Core::FileWatcherEvent::Type::ContentModified));
 
     app->on_action_enter = [&](GUI::Action& action) {
         if (auto* browser_window = dynamic_cast<Browser::BrowserWindow*>(app->active_window())) {
@@ -177,7 +210,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     };
 
     for (size_t i = 1; i < specified_urls.size(); ++i)
-        window->create_new_tab(url_from_argument_string(specified_urls[i]), false);
+        window->create_new_tab(TRY(url_from_argument_string(specified_urls[i])), Web::HTML::ActivateTab::No);
 
     window->show();
 

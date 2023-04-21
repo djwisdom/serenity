@@ -26,8 +26,8 @@ public:
 
 class OpenFileDescription final : public AtomicRefCounted<OpenFileDescription> {
 public:
-    static ErrorOr<NonnullLockRefPtr<OpenFileDescription>> try_create(Custody&);
-    static ErrorOr<NonnullLockRefPtr<OpenFileDescription>> try_create(File&);
+    static ErrorOr<NonnullRefPtr<OpenFileDescription>> try_create(Custody&);
+    static ErrorOr<NonnullRefPtr<OpenFileDescription>> try_create(File&);
     ~OpenFileDescription();
 
     Thread::FileBlocker::BlockFlags should_unblock(Thread::FileBlocker::BlockFlags) const;
@@ -57,8 +57,6 @@ public:
     bool can_write() const;
 
     ErrorOr<size_t> get_dir_entries(UserOrKernelBuffer& buffer, size_t);
-
-    ErrorOr<NonnullOwnPtr<KBuffer>> read_entire_file();
 
     ErrorOr<NonnullOwnPtr<KString>> original_absolute_path() const;
     ErrorOr<NonnullOwnPtr<KString>> pseudo_path() const;
@@ -114,7 +112,7 @@ public:
 
     OwnPtr<OpenFileDescriptionData>& data();
 
-    void set_original_inode(Badge<VirtualFileSystem>, NonnullLockRefPtr<Inode>&& inode) { m_inode = move(inode); }
+    void set_original_inode(Badge<VirtualFileSystem>, NonnullRefPtr<Inode> inode) { m_inode = move(inode); }
     void set_original_custody(Badge<VirtualFileSystem>, Custody& custody);
 
     ErrorOr<void> truncate(u64);
@@ -140,8 +138,8 @@ private:
         blocker_set().unblock_all_blockers_whose_conditions_are_met();
     }
 
-    LockRefPtr<Inode> m_inode;
-    NonnullLockRefPtr<File> m_file;
+    RefPtr<Inode> m_inode;
+    NonnullRefPtr<File> const m_file;
 
     struct State {
         OwnPtr<OpenFileDescriptionData> data;
@@ -157,6 +155,6 @@ private:
         FIFO::Direction fifo_direction : 2 { FIFO::Direction::Neither };
     };
 
-    SpinlockProtected<State> m_state { LockRank::None };
+    SpinlockProtected<State, LockRank::None> m_state {};
 };
 }

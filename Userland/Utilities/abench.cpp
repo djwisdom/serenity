@@ -8,8 +8,8 @@
 #include <AK/Types.h>
 #include <LibAudio/Loader.h>
 #include <LibCore/ArgsParser.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/ElapsedTimer.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <stdio.h>
@@ -28,7 +28,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
     args_parser.add_option(sample_count, "How many samples to load at maximum", "sample-count", 's', "samples");
     args_parser.parse(args);
 
-    TRY(Core::System::unveil(Core::File::absolute_path(path), "r"sv));
+    TRY(Core::System::unveil(Core::DeprecatedFile::absolute_path(path), "r"sv));
     TRY(Core::System::unveil(nullptr, nullptr));
     TRY(Core::System::pledge("stdio recvfd rpath"));
 
@@ -40,7 +40,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
     auto loader = maybe_loader.release_value();
 
     Core::ElapsedTimer sample_timer { true };
-    u64 total_loader_time = 0;
+    i64 total_loader_time = 0;
     int remaining_samples = sample_count > 0 ? sample_count : NumericLimits<int>::max();
     unsigned total_loaded_samples = 0;
 
@@ -48,8 +48,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
         if (remaining_samples > 0) {
             sample_timer = sample_timer.start_new();
             auto samples = loader->get_more_samples(min(MAX_CHUNK_SIZE, remaining_samples));
-            auto elapsed = static_cast<u64>(sample_timer.elapsed());
-            total_loader_time += static_cast<u64>(elapsed);
+            total_loader_time += sample_timer.elapsed();
             if (!samples.is_error()) {
                 remaining_samples -= samples.value().size();
                 total_loaded_samples += samples.value().size();

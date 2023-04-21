@@ -1,16 +1,19 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, Jelle Raaijmakers <jelle@gmta.nl>
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/DeprecatedString.h>
 #include <AK/StringBuilder.h>
+#include <AK/Utf16View.h>
 #include <AK/Utf8View.h>
 #include <LibTextCodec/Decoder.h>
 
 namespace TextCodec {
+
+static constexpr u32 replacement_code_point = 0xfffd;
 
 namespace {
 Latin1Decoder s_latin1_decoder;
@@ -22,39 +25,42 @@ HebrewDecoder s_hebrew_decoder;
 CyrillicDecoder s_cyrillic_decoder;
 Koi8RDecoder s_koi8r_decoder;
 Latin9Decoder s_latin9_decoder;
+MacRomanDecoder s_mac_roman_decoder;
 TurkishDecoder s_turkish_decoder;
 XUserDefinedDecoder s_x_user_defined_decoder;
 }
 
-Decoder* decoder_for(DeprecatedString const& a_encoding)
+Optional<Decoder&> decoder_for(StringView a_encoding)
 {
     auto encoding = get_standardized_encoding(a_encoding);
     if (encoding.has_value()) {
-        if (encoding.value().equals_ignoring_case("windows-1252"sv))
-            return &s_latin1_decoder;
-        if (encoding.value().equals_ignoring_case("utf-8"sv))
-            return &s_utf8_decoder;
-        if (encoding.value().equals_ignoring_case("utf-16be"sv))
-            return &s_utf16be_decoder;
-        if (encoding.value().equals_ignoring_case("utf-16le"sv))
-            return &s_utf16le_decoder;
-        if (encoding.value().equals_ignoring_case("iso-8859-2"sv))
-            return &s_latin2_decoder;
-        if (encoding.value().equals_ignoring_case("windows-1255"sv))
-            return &s_hebrew_decoder;
-        if (encoding.value().equals_ignoring_case("windows-1251"sv))
-            return &s_cyrillic_decoder;
-        if (encoding.value().equals_ignoring_case("koi8-r"sv))
-            return &s_koi8r_decoder;
-        if (encoding.value().equals_ignoring_case("iso-8859-15"sv))
-            return &s_latin9_decoder;
-        if (encoding.value().equals_ignoring_case("windows-1254"sv))
-            return &s_turkish_decoder;
-        if (encoding.value().equals_ignoring_case("x-user-defined"sv))
-            return &s_x_user_defined_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("windows-1252"sv))
+            return s_latin1_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("utf-8"sv))
+            return s_utf8_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("utf-16be"sv))
+            return s_utf16be_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("utf-16le"sv))
+            return s_utf16le_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("iso-8859-2"sv))
+            return s_latin2_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("windows-1255"sv))
+            return s_hebrew_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("windows-1251"sv))
+            return s_cyrillic_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("koi8-r"sv))
+            return s_koi8r_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("iso-8859-15"sv))
+            return s_latin9_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("macintosh"sv))
+            return s_mac_roman_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("windows-1254"sv))
+            return s_turkish_decoder;
+        if (encoding.value().equals_ignoring_ascii_case("x-user-defined"sv))
+            return s_x_user_defined_decoder;
     }
     dbgln("TextCodec: No decoder implemented for encoding '{}'", a_encoding);
-    return nullptr;
+    return {};
 }
 
 // https://encoding.spec.whatwg.org/#concept-encoding-get
@@ -62,87 +68,87 @@ Optional<StringView> get_standardized_encoding(StringView encoding)
 {
     encoding = encoding.trim_whitespace();
 
-    if (encoding.is_one_of_ignoring_case("unicode-1-1-utf-8"sv, "unicode11utf8"sv, "unicode20utf8"sv, "utf-8"sv, "utf8"sv, "x-unicode20utf8"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("unicode-1-1-utf-8"sv, "unicode11utf8"sv, "unicode20utf8"sv, "utf-8"sv, "utf8"sv, "x-unicode20utf8"sv))
         return "UTF-8"sv;
-    if (encoding.is_one_of_ignoring_case("866"sv, "cp866"sv, "csibm866"sv, "ibm866"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("866"sv, "cp866"sv, "csibm866"sv, "ibm866"sv))
         return "IBM866"sv;
-    if (encoding.is_one_of_ignoring_case("csisolatin2"sv, "iso-8859-2"sv, "iso-ir-101"sv, "iso8859-2"sv, "iso88592"sv, "iso_8859-2"sv, "iso_8859-2:1987"sv, "l2"sv, "latin2"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csisolatin2"sv, "iso-8859-2"sv, "iso-ir-101"sv, "iso8859-2"sv, "iso88592"sv, "iso_8859-2"sv, "iso_8859-2:1987"sv, "l2"sv, "latin2"sv))
         return "ISO-8859-2"sv;
-    if (encoding.is_one_of_ignoring_case("csisolatin3"sv, "iso-8859-3"sv, "iso-ir-109"sv, "iso8859-3"sv, "iso88593"sv, "iso_8859-3"sv, "iso_8859-3:1988"sv, "l3"sv, "latin3"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csisolatin3"sv, "iso-8859-3"sv, "iso-ir-109"sv, "iso8859-3"sv, "iso88593"sv, "iso_8859-3"sv, "iso_8859-3:1988"sv, "l3"sv, "latin3"sv))
         return "ISO-8859-3"sv;
-    if (encoding.is_one_of_ignoring_case("csisolatin4"sv, "iso-8859-4"sv, "iso-ir-110"sv, "iso8859-4"sv, "iso88594"sv, "iso_8859-4"sv, "iso_8859-4:1989"sv, "l4"sv, "latin4"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csisolatin4"sv, "iso-8859-4"sv, "iso-ir-110"sv, "iso8859-4"sv, "iso88594"sv, "iso_8859-4"sv, "iso_8859-4:1989"sv, "l4"sv, "latin4"sv))
         return "ISO-8859-4"sv;
-    if (encoding.is_one_of_ignoring_case("csisolatincyrillic"sv, "cyrillic"sv, "iso-8859-5"sv, "iso-ir-144"sv, "iso8859-5"sv, "iso88595"sv, "iso_8859-5"sv, "iso_8859-5:1988"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csisolatincyrillic"sv, "cyrillic"sv, "iso-8859-5"sv, "iso-ir-144"sv, "iso8859-5"sv, "iso88595"sv, "iso_8859-5"sv, "iso_8859-5:1988"sv))
         return "ISO-8859-5"sv;
-    if (encoding.is_one_of_ignoring_case("arabic"sv, "asmo-708"sv, "csiso88596e"sv, "csiso88596i"sv, "csisolatinarabic"sv, "ecma-114"sv, "iso-8859-6"sv, "iso-8859-6-e"sv, "iso-8859-6-i"sv, "iso-ir-127"sv, "iso8859-6"sv, "iso88596"sv, "iso_8859-6"sv, "iso_8859-6:1987"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("arabic"sv, "asmo-708"sv, "csiso88596e"sv, "csiso88596i"sv, "csisolatinarabic"sv, "ecma-114"sv, "iso-8859-6"sv, "iso-8859-6-e"sv, "iso-8859-6-i"sv, "iso-ir-127"sv, "iso8859-6"sv, "iso88596"sv, "iso_8859-6"sv, "iso_8859-6:1987"sv))
         return "ISO-8859-6"sv;
-    if (encoding.is_one_of_ignoring_case("csisolatingreek"sv, "ecma-118"sv, "elot_928"sv, "greek"sv, "greek8"sv, "iso-8859-7"sv, "iso-ir-126"sv, "iso8859-7"sv, "iso88597"sv, "iso_8859-7"sv, "iso_8859-7:1987"sv, "sun_eu_greek"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csisolatingreek"sv, "ecma-118"sv, "elot_928"sv, "greek"sv, "greek8"sv, "iso-8859-7"sv, "iso-ir-126"sv, "iso8859-7"sv, "iso88597"sv, "iso_8859-7"sv, "iso_8859-7:1987"sv, "sun_eu_greek"sv))
         return "ISO-8859-7"sv;
-    if (encoding.is_one_of_ignoring_case("csiso88598e"sv, "csisolatinhebrew"sv, "hebrew"sv, "iso-8859-8"sv, "iso-8859-8-e"sv, "iso-ir-138"sv, "iso8859-8"sv, "iso88598"sv, "iso_8859-8"sv, "iso_8859-8:1988"sv, "visual"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csiso88598e"sv, "csisolatinhebrew"sv, "hebrew"sv, "iso-8859-8"sv, "iso-8859-8-e"sv, "iso-ir-138"sv, "iso8859-8"sv, "iso88598"sv, "iso_8859-8"sv, "iso_8859-8:1988"sv, "visual"sv))
         return "ISO-8859-8"sv;
-    if (encoding.is_one_of_ignoring_case("csiso88598i"sv, "iso-8859-8-i"sv, "logical"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csiso88598i"sv, "iso-8859-8-i"sv, "logical"sv))
         return "ISO-8859-8-I"sv;
-    if (encoding.is_one_of_ignoring_case("csisolatin6"sv, "iso8859-10"sv, "iso-ir-157"sv, "iso8859-10"sv, "iso885910"sv, "l6"sv, "latin6"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csisolatin6"sv, "iso8859-10"sv, "iso-ir-157"sv, "iso8859-10"sv, "iso885910"sv, "l6"sv, "latin6"sv))
         return "ISO-8859-10"sv;
-    if (encoding.is_one_of_ignoring_case("iso-8859-13"sv, "iso8859-13"sv, "iso885913"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("iso-8859-13"sv, "iso8859-13"sv, "iso885913"sv))
         return "ISO-8859-13"sv;
-    if (encoding.is_one_of_ignoring_case("iso-8859-14"sv, "iso8859-14"sv, "iso885914"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("iso-8859-14"sv, "iso8859-14"sv, "iso885914"sv))
         return "ISO-8859-14"sv;
-    if (encoding.is_one_of_ignoring_case("csisolatin9"sv, "iso-8859-15"sv, "iso8859-15"sv, "iso885915"sv, "iso_8859-15"sv, "l9"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csisolatin9"sv, "iso-8859-15"sv, "iso8859-15"sv, "iso885915"sv, "iso_8859-15"sv, "l9"sv))
         return "ISO-8859-15"sv;
-    if (encoding.is_one_of_ignoring_case("iso-8859-16"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("iso-8859-16"sv))
         return "ISO-8859-16"sv;
-    if (encoding.is_one_of_ignoring_case("cskoi8r"sv, "koi"sv, "koi8"sv, "koi8-r"sv, "koi8_r"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cskoi8r"sv, "koi"sv, "koi8"sv, "koi8-r"sv, "koi8_r"sv))
         return "KOI8-R"sv;
-    if (encoding.is_one_of_ignoring_case("koi8-ru"sv, "koi8-u"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("koi8-ru"sv, "koi8-u"sv))
         return "KOI8-U"sv;
-    if (encoding.is_one_of_ignoring_case("csmacintosh"sv, "mac"sv, "macintosh"sv, "x-mac-roman"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csmacintosh"sv, "mac"sv, "macintosh"sv, "x-mac-roman"sv))
         return "macintosh"sv;
-    if (encoding.is_one_of_ignoring_case("dos-874"sv, "iso-8859-11"sv, "iso8859-11"sv, "iso885911"sv, "tis-620"sv, "windows-874"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("dos-874"sv, "iso-8859-11"sv, "iso8859-11"sv, "iso885911"sv, "tis-620"sv, "windows-874"sv))
         return "windows-874"sv;
-    if (encoding.is_one_of_ignoring_case("cp1250"sv, "windows-1250"sv, "x-cp1250"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cp1250"sv, "windows-1250"sv, "x-cp1250"sv))
         return "windows-1250"sv;
-    if (encoding.is_one_of_ignoring_case("cp1251"sv, "windows-1251"sv, "x-cp1251"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cp1251"sv, "windows-1251"sv, "x-cp1251"sv))
         return "windows-1251"sv;
-    if (encoding.is_one_of_ignoring_case("ansi_x3.4-1968"sv, "ascii"sv, "cp1252"sv, "cp819"sv, "csisolatin1"sv, "ibm819"sv, "iso-8859-1"sv, "iso-ir-100"sv, "iso8859-1"sv, "iso88591"sv, "iso_8859-1"sv, "iso_8859-1:1987"sv, "l1"sv, "latin1"sv, "us-ascii"sv, "windows-1252"sv, "x-cp1252"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("ansi_x3.4-1968"sv, "ascii"sv, "cp1252"sv, "cp819"sv, "csisolatin1"sv, "ibm819"sv, "iso-8859-1"sv, "iso-ir-100"sv, "iso8859-1"sv, "iso88591"sv, "iso_8859-1"sv, "iso_8859-1:1987"sv, "l1"sv, "latin1"sv, "us-ascii"sv, "windows-1252"sv, "x-cp1252"sv))
         return "windows-1252"sv;
-    if (encoding.is_one_of_ignoring_case("cp1253"sv, "windows-1253"sv, "x-cp1253"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cp1253"sv, "windows-1253"sv, "x-cp1253"sv))
         return "windows-1253"sv;
-    if (encoding.is_one_of_ignoring_case("cp1254"sv, "csisolatin5"sv, "iso-8859-9"sv, "iso-ir-148"sv, "iso-8859-9"sv, "iso-88599"sv, "iso_8859-9"sv, "iso_8859-9:1989"sv, "l5"sv, "latin5"sv, "windows-1254"sv, "x-cp1254"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cp1254"sv, "csisolatin5"sv, "iso-8859-9"sv, "iso-ir-148"sv, "iso-8859-9"sv, "iso-88599"sv, "iso_8859-9"sv, "iso_8859-9:1989"sv, "l5"sv, "latin5"sv, "windows-1254"sv, "x-cp1254"sv))
         return "windows-1254"sv;
-    if (encoding.is_one_of_ignoring_case("cp1255"sv, "windows-1255"sv, "x-cp1255"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cp1255"sv, "windows-1255"sv, "x-cp1255"sv))
         return "windows-1255"sv;
-    if (encoding.is_one_of_ignoring_case("cp1256"sv, "windows-1256"sv, "x-cp1256"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cp1256"sv, "windows-1256"sv, "x-cp1256"sv))
         return "windows-1256"sv;
-    if (encoding.is_one_of_ignoring_case("cp1257"sv, "windows-1257"sv, "x-cp1257"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cp1257"sv, "windows-1257"sv, "x-cp1257"sv))
         return "windows-1257"sv;
-    if (encoding.is_one_of_ignoring_case("cp1258"sv, "windows-1258"sv, "x-cp1258"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cp1258"sv, "windows-1258"sv, "x-cp1258"sv))
         return "windows-1258"sv;
-    if (encoding.is_one_of_ignoring_case("x-mac-cyrillic"sv, "x-mac-ukrainian"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("x-mac-cyrillic"sv, "x-mac-ukrainian"sv))
         return "x-mac-cyrillic"sv;
-    if (encoding.is_one_of_ignoring_case("koi8-r"sv, "koi8r"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("koi8-r"sv, "koi8r"sv))
         return "koi8-r"sv;
-    if (encoding.is_one_of_ignoring_case("chinese"sv, "csgb2312"sv, "csiso58gb231280"sv, "gb2312"sv, "gb_2312"sv, "gb_2312-80"sv, "gbk"sv, "iso-ir-58"sv, "x-gbk"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("chinese"sv, "csgb2312"sv, "csiso58gb231280"sv, "gb2312"sv, "gb_2312"sv, "gb_2312-80"sv, "gbk"sv, "iso-ir-58"sv, "x-gbk"sv))
         return "GBK"sv;
-    if (encoding.is_one_of_ignoring_case("gb18030"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("gb18030"sv))
         return "gb18030"sv;
-    if (encoding.is_one_of_ignoring_case("big5"sv, "big5-hkscs"sv, "cn-big5"sv, "csbig5"sv, "x-x-big5"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("big5"sv, "big5-hkscs"sv, "cn-big5"sv, "csbig5"sv, "x-x-big5"sv))
         return "Big5"sv;
-    if (encoding.is_one_of_ignoring_case("cseucpkdfmtjapanese"sv, "euc-jp"sv, "x-euc-jp"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cseucpkdfmtjapanese"sv, "euc-jp"sv, "x-euc-jp"sv))
         return "EUC-JP"sv;
-    if (encoding.is_one_of_ignoring_case("csiso2022jp"sv, "iso-2022-jp"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csiso2022jp"sv, "iso-2022-jp"sv))
         return "ISO-2022-JP"sv;
-    if (encoding.is_one_of_ignoring_case("csshiftjis"sv, "ms932"sv, "ms_kanji"sv, "shift-jis"sv, "shift_jis"sv, "sjis"sv, "windows-31j"sv, "x-sjis"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csshiftjis"sv, "ms932"sv, "ms_kanji"sv, "shift-jis"sv, "shift_jis"sv, "sjis"sv, "windows-31j"sv, "x-sjis"sv))
         return "Shift_JIS"sv;
-    if (encoding.is_one_of_ignoring_case("cseuckr"sv, "csksc56011987"sv, "euc-kr"sv, "iso-ir-149"sv, "korean"sv, "ks_c_5601-1987"sv, "ks_c_5601-1989"sv, "ksc5601"sv, "ksc_5601"sv, "windows-949"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("cseuckr"sv, "csksc56011987"sv, "euc-kr"sv, "iso-ir-149"sv, "korean"sv, "ks_c_5601-1987"sv, "ks_c_5601-1989"sv, "ksc5601"sv, "ksc_5601"sv, "windows-949"sv))
         return "EUC-KR"sv;
-    if (encoding.is_one_of_ignoring_case("csiso2022kr"sv, "hz-gb-2312"sv, "iso-2022-cn"sv, "iso-2022-cn-ext"sv, "iso-2022-kr"sv, "replacement"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csiso2022kr"sv, "hz-gb-2312"sv, "iso-2022-cn"sv, "iso-2022-cn-ext"sv, "iso-2022-kr"sv, "replacement"sv))
         return "replacement"sv;
-    if (encoding.is_one_of_ignoring_case("unicodefffe"sv, "utf-16be"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("unicodefffe"sv, "utf-16be"sv))
         return "UTF-16BE"sv;
-    if (encoding.is_one_of_ignoring_case("csunicode"sv, "iso-10646-ucs-2"sv, "ucs-2"sv, "unicode"sv, "unicodefeff"sv, "utf-16"sv, "utf-16le"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("csunicode"sv, "iso-10646-ucs-2"sv, "ucs-2"sv, "unicode"sv, "unicodefeff"sv, "utf-16"sv, "utf-16le"sv))
         return "UTF-16LE"sv;
-    if (encoding.is_one_of_ignoring_case("x-user-defined"sv))
+    if (encoding.is_one_of_ignoring_ascii_case("x-user-defined"sv))
         return "x-user-defined"sv;
 
     dbgln("TextCodec: Unrecognized encoding: {}", encoding);
@@ -150,7 +156,7 @@ Optional<StringView> get_standardized_encoding(StringView encoding)
 }
 
 // https://encoding.spec.whatwg.org/#bom-sniff
-Decoder* bom_sniff_to_decoder(StringView input)
+Optional<Decoder&> bom_sniff_to_decoder(StringView input)
 {
     // 1. Let BOM be the result of peeking 3 bytes from ioQueue, converted to a byte sequence.
     // 2. For each of the rows in the table below, starting with the first one and going down,
@@ -165,38 +171,44 @@ Decoder* bom_sniff_to_decoder(StringView input)
 
     auto bytes = input.bytes();
     if (bytes.size() < 2)
-        return nullptr;
+        return {};
 
     auto first_byte = bytes[0];
 
     switch (first_byte) {
     case 0xEF: // UTF-8
         if (bytes.size() < 3)
-            return nullptr;
-        return bytes[1] == 0xBB && bytes[2] == 0xBF ? &s_utf8_decoder : nullptr;
+            return {};
+        if (bytes[1] == 0xBB && bytes[2] == 0xBF)
+            return s_utf8_decoder;
+        return {};
     case 0xFE: // UTF-16BE
-        return bytes[1] == 0xFF ? &s_utf16be_decoder : nullptr;
+        if (bytes[1] == 0xFF)
+            return s_utf16be_decoder;
+        return {};
     case 0xFF: // UTF-16LE
-        return bytes[1] == 0xFE ? &s_utf16le_decoder : nullptr;
+        if (bytes[1] == 0xFE)
+            return s_utf16le_decoder;
+        return {};
     }
 
-    return nullptr;
+    return {};
 }
 
 // https://encoding.spec.whatwg.org/#decode
-DeprecatedString convert_input_to_utf8_using_given_decoder_unless_there_is_a_byte_order_mark(Decoder& fallback_decoder, StringView input)
+ErrorOr<String> convert_input_to_utf8_using_given_decoder_unless_there_is_a_byte_order_mark(Decoder& fallback_decoder, StringView input)
 {
     Decoder* actual_decoder = &fallback_decoder;
 
     // 1. Let BOMEncoding be the result of BOM sniffing ioQueue.
     // 2. If BOMEncoding is non-null:
-    if (auto* unicode_decoder = bom_sniff_to_decoder(input); unicode_decoder) {
+    if (auto unicode_decoder = bom_sniff_to_decoder(input); unicode_decoder.has_value()) {
         // 1. Set encoding to BOMEncoding.
-        actual_decoder = unicode_decoder;
+        actual_decoder = &unicode_decoder.value();
 
         // 2. Read three bytes from ioQueue, if BOMEncoding is UTF-8; otherwise read two bytes. (Do nothing with those bytes.)
         // FIXME: I imagine this will be pretty slow for large inputs, as it's regenerating the input without the first 2/3 bytes.
-        input = input.substring_view(unicode_decoder == &s_utf8_decoder ? 3 : 2);
+        input = input.substring_view(&unicode_decoder.value() == &s_utf8_decoder ? 3 : 2);
     }
 
     VERIFY(actual_decoder);
@@ -207,21 +219,22 @@ DeprecatedString convert_input_to_utf8_using_given_decoder_unless_there_is_a_byt
     return actual_decoder->to_utf8(input);
 }
 
-DeprecatedString Decoder::to_utf8(StringView input)
+ErrorOr<String> Decoder::to_utf8(StringView input)
 {
     StringBuilder builder(input.length());
-    process(input, [&builder](u32 c) { builder.append_code_point(c); });
-    return builder.to_deprecated_string();
+    TRY(process(input, [&builder](u32 c) { return builder.try_append_code_point(c); }));
+    return builder.to_string();
 }
 
-void UTF8Decoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> UTF8Decoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
     for (auto c : Utf8View(input)) {
-        on_code_point(c);
+        TRY(on_code_point(c));
     }
+    return {};
 }
 
-DeprecatedString UTF8Decoder::to_utf8(StringView input)
+ErrorOr<String> UTF8Decoder::to_utf8(StringView input)
 {
     // Discard the BOM
     auto bomless_input = input;
@@ -229,19 +242,51 @@ DeprecatedString UTF8Decoder::to_utf8(StringView input)
         bomless_input = input.substring_view(3);
     }
 
-    return bomless_input;
+    return String::from_utf8(bomless_input);
 }
 
-void UTF16BEDecoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> UTF16BEDecoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
+    // rfc2781, 2.2 Decoding UTF-16
     size_t utf16_length = input.length() - (input.length() % 2);
     for (size_t i = 0; i < utf16_length; i += 2) {
-        u16 code_point = (input[i] << 8) | input[i + 1];
-        on_code_point(code_point);
+        // 1) If W1 < 0xD800 or W1 > 0xDFFF, the character value U is the value
+        //    of W1. Terminate.
+        u16 w1 = (static_cast<u8>(input[i]) << 8) | static_cast<u8>(input[i + 1]);
+        if (!is_unicode_surrogate(w1)) {
+            TRY(on_code_point(w1));
+            continue;
+        }
+
+        // 2) Determine if W1 is between 0xD800 and 0xDBFF. If not, the sequence
+        //    is in error and no valid character can be obtained using W1.
+        //    Terminate.
+        // 3) If there is no W2 (that is, the sequence ends with W1), or if W2
+        //    is not between 0xDC00 and 0xDFFF, the sequence is in error.
+        //    Terminate.
+        if (!Utf16View::is_high_surrogate(w1) || i + 2 == utf16_length) {
+            TRY(on_code_point(replacement_code_point));
+            continue;
+        }
+
+        u16 w2 = (static_cast<u8>(input[i + 2]) << 8) | static_cast<u8>(input[i + 3]);
+        if (!Utf16View::is_low_surrogate(w2)) {
+            TRY(on_code_point(replacement_code_point));
+            continue;
+        }
+
+        // 4) Construct a 20-bit unsigned integer U', taking the 10 low-order
+        //    bits of W1 as its 10 high-order bits and the 10 low-order bits of
+        //    W2 as its 10 low-order bits.
+        // 5) Add 0x10000 to U' to obtain the character value U. Terminate.
+        TRY(on_code_point(Utf16View::decode_surrogate_pair(w1, w2)));
+        i += 2;
     }
+
+    return {};
 }
 
-DeprecatedString UTF16BEDecoder::to_utf8(StringView input)
+ErrorOr<String> UTF16BEDecoder::to_utf8(StringView input)
 {
     // Discard the BOM
     auto bomless_input = input;
@@ -249,20 +294,52 @@ DeprecatedString UTF16BEDecoder::to_utf8(StringView input)
         bomless_input = input.substring_view(2);
 
     StringBuilder builder(bomless_input.length() / 2);
-    process(bomless_input, [&builder](u32 c) { builder.append_code_point(c); });
-    return builder.to_deprecated_string();
+    TRY(process(bomless_input, [&builder](u32 c) { return builder.try_append_code_point(c); }));
+    return builder.to_string();
 }
 
-void UTF16LEDecoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> UTF16LEDecoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
+    // rfc2781, 2.2 Decoding UTF-16
     size_t utf16_length = input.length() - (input.length() % 2);
     for (size_t i = 0; i < utf16_length; i += 2) {
-        u16 code_point = input[i] | (input[i + 1] << 8);
-        on_code_point(code_point);
+        // 1) If W1 < 0xD800 or W1 > 0xDFFF, the character value U is the value
+        //    of W1. Terminate.
+        u16 w1 = static_cast<u8>(input[i]) | (static_cast<u8>(input[i + 1]) << 8);
+        if (!is_unicode_surrogate(w1)) {
+            TRY(on_code_point(w1));
+            continue;
+        }
+
+        // 2) Determine if W1 is between 0xD800 and 0xDBFF. If not, the sequence
+        //    is in error and no valid character can be obtained using W1.
+        //    Terminate.
+        // 3) If there is no W2 (that is, the sequence ends with W1), or if W2
+        //    is not between 0xDC00 and 0xDFFF, the sequence is in error.
+        //    Terminate.
+        if (!Utf16View::is_high_surrogate(w1) || i + 2 == utf16_length) {
+            TRY(on_code_point(replacement_code_point));
+            continue;
+        }
+
+        u16 w2 = static_cast<u8>(input[i + 2]) | (static_cast<u8>(input[i + 3]) << 8);
+        if (!Utf16View::is_low_surrogate(w2)) {
+            TRY(on_code_point(replacement_code_point));
+            continue;
+        }
+
+        // 4) Construct a 20-bit unsigned integer U', taking the 10 low-order
+        //    bits of W1 as its 10 high-order bits and the 10 low-order bits of
+        //    W2 as its 10 low-order bits.
+        // 5) Add 0x10000 to U' to obtain the character value U. Terminate.
+        TRY(on_code_point(Utf16View::decode_surrogate_pair(w1, w2)));
+        i += 2;
     }
+
+    return {};
 }
 
-DeprecatedString UTF16LEDecoder::to_utf8(StringView input)
+ErrorOr<String> UTF16LEDecoder::to_utf8(StringView input)
 {
     // Discard the BOM
     auto bomless_input = input;
@@ -270,17 +347,18 @@ DeprecatedString UTF16LEDecoder::to_utf8(StringView input)
         bomless_input = input.substring_view(2);
 
     StringBuilder builder(bomless_input.length() / 2);
-    process(bomless_input, [&builder](u32 c) { builder.append_code_point(c); });
-    return builder.to_deprecated_string();
+    TRY(process(bomless_input, [&builder](u32 c) { return builder.try_append_code_point(c); }));
+    return builder.to_string();
 }
 
-void Latin1Decoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> Latin1Decoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
-    for (size_t i = 0; i < input.length(); ++i) {
-        u8 ch = input[i];
+    for (u8 ch : input) {
         // Latin1 is the same as the first 256 Unicode code_points, so no mapping is needed, just utf-8 encoding.
-        on_code_point(ch);
+        TRY(on_code_point(ch));
     }
+
+    return {};
 }
 
 namespace {
@@ -362,14 +440,16 @@ u32 convert_latin2_to_utf8(u8 in)
 }
 }
 
-void Latin2Decoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> Latin2Decoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
     for (auto c : input) {
-        on_code_point(convert_latin2_to_utf8(c));
+        TRY(on_code_point(convert_latin2_to_utf8(c)));
     }
+
+    return {};
 }
 
-void HebrewDecoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> HebrewDecoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
     static constexpr Array<u32, 128> translation_table = {
         0x20AC, 0xFFFD, 0x201A, 0x192, 0x201E, 0x2026, 0x2020, 0x2021, 0x2C6, 0x2030, 0xFFFD, 0x2039, 0xFFFD, 0xFFFD, 0xFFFD, 0xFFFD,
@@ -383,14 +463,16 @@ void HebrewDecoder::process(StringView input, Function<void(u32)> on_code_point)
     };
     for (unsigned char ch : input) {
         if (ch < 0x80) { // Superset of ASCII
-            on_code_point(ch);
+            TRY(on_code_point(ch));
         } else {
-            on_code_point(translation_table[ch - 0x80]);
+            TRY(on_code_point(translation_table[ch - 0x80]));
         }
     }
+
+    return {};
 }
 
-void CyrillicDecoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> CyrillicDecoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
     static constexpr Array<u32, 128> translation_table = {
         0x402, 0x403, 0x201A, 0x453, 0x201E, 0x2026, 0x2020, 0x2021, 0x20AC, 0x2030, 0x409, 0x2039, 0x40A, 0x40C, 0x40B, 0x40F,
@@ -404,14 +486,16 @@ void CyrillicDecoder::process(StringView input, Function<void(u32)> on_code_poin
     };
     for (unsigned char ch : input) {
         if (ch < 0x80) { // Superset of ASCII
-            on_code_point(ch);
+            TRY(on_code_point(ch));
         } else {
-            on_code_point(translation_table[ch - 0x80]);
+            TRY(on_code_point(translation_table[ch - 0x80]));
         }
     }
+
+    return {};
 }
 
-void Koi8RDecoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> Koi8RDecoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
     // clang-format off
     static constexpr Array<u32, 128> translation_table = {
@@ -428,14 +512,16 @@ void Koi8RDecoder::process(StringView input, Function<void(u32)> on_code_point)
 
     for (unsigned char ch : input) {
         if (ch < 0x80) { // Superset of ASCII
-            on_code_point(ch);
+            TRY(on_code_point(ch));
         } else {
-            on_code_point(translation_table[ch - 0x80]);
+            TRY(on_code_point(translation_table[ch - 0x80]));
         }
     }
+
+    return {};
 }
 
-void Latin9Decoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> Latin9Decoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
     auto convert_latin9_to_utf8 = [](u8 ch) -> u32 {
         // Latin9 is the same as the first 256 Unicode code points, except for 8 characters.
@@ -462,11 +548,40 @@ void Latin9Decoder::process(StringView input, Function<void(u32)> on_code_point)
     };
 
     for (auto ch : input) {
-        on_code_point(convert_latin9_to_utf8(ch));
+        TRY(on_code_point(convert_latin9_to_utf8(ch)));
     }
+
+    return {};
 }
 
-void TurkishDecoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> MacRomanDecoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
+{
+    // https://encoding.spec.whatwg.org/index-macintosh.txt
+    // clang-format off
+    static constexpr Array<u32, 128> translation_table = {
+        0x00C4, 0x00C5, 0x00C7, 0x00C9, 0x00D1, 0x00D6, 0x00DC, 0x00E1, 0x00E0, 0x00E2, 0x00E4, 0x00E3, 0x00E5, 0x00E7, 0x00E9, 0x00E8,
+        0x00EA, 0x00EB, 0x00ED, 0x00EC, 0x00EE, 0x00EF, 0x00F1, 0x00F3, 0x00F2, 0x00F4, 0x00F6, 0x00F5, 0x00FA, 0x00F9, 0x00FB, 0x00FC,
+        0x2020, 0x00B0, 0x00A2, 0x00A3, 0x00A7, 0x2022, 0x00B6, 0x00DF, 0x00AE, 0x00A9, 0x2122, 0x00B4, 0x00A8, 0x2260, 0x00C6, 0x00D8,
+        0x221E, 0x00B1, 0x2264, 0x2265, 0x00A5, 0x00B5, 0x2202, 0x2211, 0x220F, 0x03C0, 0x222B, 0x00AA, 0x00BA, 0x03A9, 0x00E6, 0x00F8,
+        0x00BF, 0x00A1, 0x00AC, 0x221A, 0x0192, 0x2248, 0x2206, 0x00AB, 0x00BB, 0x2026, 0x00A0, 0x00C0, 0x00C3, 0x00D5, 0x0152, 0x0153,
+        0x2013, 0x2014, 0x201C, 0x201D, 0x2018, 0x2019, 0x00F7, 0x25CA, 0x00FF, 0x0178, 0x2044, 0x20AC, 0x2039, 0x203A, 0xFB01, 0xFB02,
+        0x2021, 0x00B7, 0x201A, 0x201E, 0x2030, 0x00C2, 0x00CA, 0x00C1, 0x00CB, 0x00C8, 0x00CD, 0x00CE, 0x00CF, 0x00CC, 0x00D3, 0x00D4,
+        0xF8FF, 0x00D2, 0x00DA, 0x00DB, 0x00D9, 0x0131, 0x02C6, 0x02DC, 0x00AF, 0x02D8, 0x02D9, 0x02DA, 0x00B8, 0x02DD, 0x02DB, 0x02C7,
+    };
+    // clang-format on
+
+    for (u8 ch : input) {
+        if (ch < 0x80) { // Superset of ASCII
+            TRY(on_code_point(ch));
+        } else {
+            TRY(on_code_point(translation_table[ch - 0x80]));
+        }
+    }
+
+    return {};
+}
+
+ErrorOr<void> TurkishDecoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
     auto convert_turkish_to_utf8 = [](u8 ch) -> u32 {
         // Turkish (aka ISO-8859-9, Windows-1254) is the same as the first 256 Unicode code points, except for 6 characters.
@@ -489,12 +604,14 @@ void TurkishDecoder::process(StringView input, Function<void(u32)> on_code_point
     };
 
     for (auto ch : input) {
-        on_code_point(convert_turkish_to_utf8(ch));
+        TRY(on_code_point(convert_turkish_to_utf8(ch)));
     }
+
+    return {};
 }
 
 // https://encoding.spec.whatwg.org/#x-user-defined-decoder
-void XUserDefinedDecoder::process(StringView input, Function<void(u32)> on_code_point)
+ErrorOr<void> XUserDefinedDecoder::process(StringView input, Function<ErrorOr<void>(u32)> on_code_point)
 {
     auto convert_x_user_defined_to_utf8 = [](u8 ch) -> u32 {
         // 2. If byte is an ASCII byte, return a code point whose value is byte.
@@ -509,10 +626,12 @@ void XUserDefinedDecoder::process(StringView input, Function<void(u32)> on_code_
     };
 
     for (auto ch : input) {
-        on_code_point(convert_x_user_defined_to_utf8(ch));
+        TRY(on_code_point(convert_x_user_defined_to_utf8(ch)));
     }
 
     // 1. If byte is end-of-queue, return finished.
+
+    return {};
 }
 
 }

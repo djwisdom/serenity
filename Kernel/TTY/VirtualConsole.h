@@ -8,11 +8,10 @@
 #pragma once
 
 #include <AK/Noncopyable.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/Vector.h>
 #include <Kernel/API/KeyCode.h>
 #include <Kernel/Devices/ConsoleDevice.h>
-#include <Kernel/Devices/HID/HIDManagement.h>
+#include <Kernel/Devices/HID/Management.h>
 #include <Kernel/Graphics/Console/Console.h>
 #include <Kernel/TTY/TTY.h>
 #include <LibVT/Attribute.h>
@@ -121,13 +120,9 @@ private:
 
     void clear();
 
-    void inject_string(StringView);
-
     Cell& cell_at(size_t column, size_t row);
 
     using ParamVector = Vector<unsigned, 4>;
-
-    void on_code_point(u32);
 
     void scroll_down(u16 region_top, u16 region_bottom, size_t count);
     void scroll_up(u16 region_top, u16 region_bottom, size_t count);

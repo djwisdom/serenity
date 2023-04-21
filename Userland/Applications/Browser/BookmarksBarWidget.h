@@ -34,11 +34,18 @@ public:
 
     Function<void(DeprecatedString const& url, Open)> on_bookmark_click;
     Function<void(DeprecatedString const&, DeprecatedString const&)> on_bookmark_hover;
+    Function<void()> on_bookmark_change;
 
     bool contains_bookmark(DeprecatedString const& url);
     bool remove_bookmark(DeprecatedString const& url);
     bool add_bookmark(DeprecatedString const& url, DeprecatedString const& title);
-    bool edit_bookmark(DeprecatedString const& url);
+
+    enum class PerformEditOn {
+        NewBookmark,
+        ExistingBookmark
+    };
+
+    bool edit_bookmark(DeprecatedString const& url, PerformEditOn perform_edit_on = PerformEditOn::ExistingBookmark);
 
     virtual Optional<GUI::UISize> calculated_min_size() const override
     {
@@ -57,6 +64,8 @@ private:
 
     void update_content_size();
 
+    bool update_model(Vector<JsonValue>& values, Function<bool(GUI::JsonArrayModel& model, Vector<JsonValue>&& values)> perform_model_change);
+
     RefPtr<GUI::Model> m_model;
     RefPtr<GUI::Button> m_additional;
     RefPtr<GUI::Widget> m_separator;
@@ -66,7 +75,7 @@ private:
     RefPtr<GUI::Action> m_context_menu_default_action;
     DeprecatedString m_context_menu_url;
 
-    NonnullRefPtrVector<GUI::Button> m_bookmarks;
+    Vector<NonnullRefPtr<GUI::Button>> m_bookmarks;
 
     int m_last_visible_index { -1 };
 };

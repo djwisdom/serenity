@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Matthew Olsson <mattco@serenityos.org>
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -23,25 +23,25 @@
 namespace JS {
 
 RegExpPrototype::RegExpPrototype(Realm& realm)
-    : PrototypeObject(*realm.intrinsics().object_prototype())
+    : PrototypeObject(realm.intrinsics().object_prototype())
 {
 }
 
-void RegExpPrototype::initialize(Realm& realm)
+ThrowCompletionOr<void> RegExpPrototype::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, vm.names.toString, to_string, 0, attr);
     define_native_function(realm, vm.names.test, test, 1, attr);
     define_native_function(realm, vm.names.exec, exec, 1, attr);
     define_native_function(realm, vm.names.compile, compile, 2, attr);
 
-    define_native_function(realm, *vm.well_known_symbol_match(), symbol_match, 1, attr);
-    define_native_function(realm, *vm.well_known_symbol_match_all(), symbol_match_all, 1, attr);
-    define_native_function(realm, *vm.well_known_symbol_replace(), symbol_replace, 2, attr);
-    define_native_function(realm, *vm.well_known_symbol_search(), symbol_search, 1, attr);
-    define_native_function(realm, *vm.well_known_symbol_split(), symbol_split, 2, attr);
+    define_native_function(realm, vm.well_known_symbol_match(), symbol_match, 1, attr);
+    define_native_function(realm, vm.well_known_symbol_match_all(), symbol_match_all, 1, attr);
+    define_native_function(realm, vm.well_known_symbol_replace(), symbol_replace, 2, attr);
+    define_native_function(realm, vm.well_known_symbol_search(), symbol_search, 1, attr);
+    define_native_function(realm, vm.well_known_symbol_split(), symbol_split, 2, attr);
 
     define_native_accessor(realm, vm.names.flags, flags, {}, Attribute::Configurable);
     define_native_accessor(realm, vm.names.source, source, {}, Attribute::Configurable);
@@ -50,6 +50,8 @@ void RegExpPrototype::initialize(Realm& realm)
     define_native_accessor(realm, vm.names.flagName, flag_name, {}, Attribute::Configurable);
     JS_ENUMERATE_REGEXP_FLAGS
 #undef __JS_ENUMERATE
+
+    return {};
 }
 
 // Non-standard abstraction around steps used by multiple prototypes.
@@ -95,7 +97,7 @@ static Value get_match_index_par(VM& vm, Utf16View const& string, Match const& m
 }
 
 // 22.2.5.2.8 MakeMatchIndicesIndexPairArray ( S, indices, groupNames, hasGroups ), https://tc39.es/ecma262/#sec-makematchindicesindexpairarray
-static Value make_match_indices_index_pair_array(VM& vm, Utf16View const& string, Vector<Optional<Match>> const& indices, HashMap<FlyString, Match> const& group_names, bool has_groups)
+static Value make_match_indices_index_pair_array(VM& vm, Utf16View const& string, Vector<Optional<Match>> const& indices, HashMap<DeprecatedFlyString, Match> const& group_names, bool has_groups)
 {
     // Note: This implementation differs from the spec, but has the same behavior.
     //
@@ -268,14 +270,14 @@ static ThrowCompletionOr<Value> regexp_builtin_exec(VM& vm, RegExpObject& regexp
     Vector<Utf16String> captured_values;
 
     // 25. Let groupNames be a new empty List.
-    HashMap<FlyString, Match> group_names;
+    HashMap<DeprecatedFlyString, Match> group_names;
 
     // 26. Add match as the last element of indices.
     indices.append(move(match_indices));
 
     // 27. Let matchedValue be ! GetMatchString(S, match).
     // 28. Perform ! CreateDataPropertyOrThrow(A, "0", matchedValue).
-    MUST(array->create_data_property_or_throw(0, PrimitiveString::create(vm, match.view.u16_view())));
+    MUST(array->create_data_property_or_throw(0, PrimitiveString::create(vm, TRY(Utf16String::create(vm, match.view.u16_view())))));
 
     // 29. If R contains any GroupName, then
     //     a. Let groups be OrdinaryObjectCreate(null).
@@ -300,7 +302,7 @@ static ThrowCompletionOr<Value> regexp_builtin_exec(VM& vm, RegExpObject& regexp
             // ii. Append undefined to indices.
             indices.append({});
             // iii. Append capture to indices.
-            captured_values.append(Utf16String(""sv));
+            captured_values.append(TRY(Utf16String::create(vm)));
         }
         // c. Else,
         else {
@@ -311,7 +313,7 @@ static ThrowCompletionOr<Value> regexp_builtin_exec(VM& vm, RegExpObject& regexp
             //     2. Set captureEnd to ! GetStringIndex(S, Input, captureEnd).
             // iv. Let capture be the Match { [[StartIndex]]: captureStart, [[EndIndex]: captureEnd }.
             // v. Let capturedValue be ! GetMatchString(S, capture).
-            auto capture_as_utf16_string = Utf16String(capture.view.u16_view());
+            auto capture_as_utf16_string = TRY(Utf16String::create(vm, capture.view.u16_view()));
             captured_value = PrimitiveString::create(vm, capture_as_utf16_string);
             // vi. Append capture to indices.
             indices.append(Match::create(capture));
@@ -350,14 +352,12 @@ static ThrowCompletionOr<Value> regexp_builtin_exec(VM& vm, RegExpObject& regexp
         // i. If the value of R’s [[LegacyFeaturesEnabled]] internal slot is true, then
         if (regexp_object.legacy_features_enabled()) {
             // a. Perform UpdateLegacyRegExpStaticProperties(%RegExp%, S, lastIndex, e, capturedValues).
-            auto* regexp_constructor = realm.intrinsics().regexp_constructor();
-            update_legacy_regexp_static_properties(*regexp_constructor, string, match_indices.start_index, match_indices.end_index, captured_values);
+            TRY(update_legacy_regexp_static_properties(vm, realm.intrinsics().regexp_constructor(), string, match_indices.start_index, match_indices.end_index, captured_values));
         }
         // ii. Else,
         else {
             // a. Perform InvalidateLegacyRegExpStaticProperties(%RegExp%).
-            auto* regexp_constructor = realm.intrinsics().regexp_constructor();
-            invalidate_legacy_regexp_static_properties(*regexp_constructor);
+            invalidate_legacy_regexp_static_properties(realm.intrinsics().regexp_constructor());
         }
     }
 
@@ -395,7 +395,7 @@ ThrowCompletionOr<Value> regexp_exec(VM& vm, Object& regexp_object, Utf16String 
 
         // b. If Type(result) is neither Object nor Null, throw a TypeError exception.
         if (!result.is_object() && !result.is_null())
-            return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOrNull, result.to_string_without_side_effects());
+            return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOrNull, TRY_OR_THROW_OOM(vm, result.to_string_without_side_effects()));
 
         // c. Return result.
         return result;
@@ -443,9 +443,9 @@ size_t advance_string_index(Utf16View const& string, size_t index, bool unicode)
     {                                                                                      \
         auto& realm = *vm.current_realm();                                                 \
         /* 1. If Type(R) is not Object, throw a TypeError exception. */                    \
-        auto* regexp_object = TRY(this_object(vm));                                        \
+        auto regexp_object = TRY(this_object(vm));                                         \
         /* 2. If R does not have an [[OriginalFlags]] internal slot, then */               \
-        if (!is<RegExpObject>(regexp_object)) {                                            \
+        if (!is<RegExpObject>(*regexp_object)) {                                           \
             /* a. If SameValue(R, %RegExp.prototype%) is true, return undefined. */        \
             if (same_value(regexp_object, realm.intrinsics().regexp_prototype()))          \
                 return js_undefined();                                                     \
@@ -453,7 +453,7 @@ size_t advance_string_index(Utf16View const& string, size_t index, bool unicode)
             return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOfType, "RegExp"); \
         }                                                                                  \
         /* 3. Let flags be R.[[OriginalFlags]]. */                                         \
-        auto const& flags = static_cast<RegExpObject*>(regexp_object)->flags();            \
+        auto const& flags = static_cast<RegExpObject&>(*regexp_object).flags();            \
         /* 4. If flags contains codeUnit, return true. */                                  \
         /* 5. Return false. */                                                             \
         return Value(flags.contains(#flag_char##sv));                                      \
@@ -466,13 +466,13 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::exec)
 {
     // 1. Let R be the this value.
     // 2. Perform ? RequireInternalSlot(R, [[RegExpMatcher]]).
-    auto* regexp_object = TRY(typed_this_object(vm));
+    auto regexp_object = TRY(typed_this_object(vm));
 
     // 3. Let S be ? ToString(string).
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
     // 4. Return ? RegExpBuiltinExec(R, S).
-    return TRY(regexp_builtin_exec(vm, *regexp_object, move(string)));
+    return TRY(regexp_builtin_exec(vm, regexp_object, move(string)));
 }
 
 // 22.2.5.4 get RegExp.prototype.flags, https://tc39.es/ecma262/#sec-get-regexp.prototype.flags
@@ -481,7 +481,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::flags)
 
     // 1. Let R be the this value.
     // 2. If Type(R) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. Let result be the empty String.
     StringBuilder builder(8);
@@ -521,19 +521,19 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match)
 
     // 1. Let rx be the this value.
     // 2. If Type(rx) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. Let S be ? ToString(string).
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
     // 4. Let flags be ? ToString(? Get(rx, "flags")).
     auto flags_value = TRY(regexp_object->get(vm.names.flags));
-    auto flags = TRY(flags_value.to_string(vm));
+    auto flags = TRY(flags_value.to_deprecated_string(vm));
 
     // 5. If flags does not contain "g", then
     if (!flags.contains('g')) {
         // a. Return ? RegExpExec(rx, S).
-        return TRY(regexp_exec(vm, *regexp_object, move(string)));
+        return TRY(regexp_exec(vm, regexp_object, move(string)));
     }
 
     // 6. Else,
@@ -554,7 +554,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match)
     // e. Repeat,
     while (true) {
         // i. Let result be ? RegExpExec(rx, S).
-        auto result_value = TRY(regexp_exec(vm, *regexp_object, string));
+        auto result_value = TRY(regexp_exec(vm, regexp_object, string));
 
         // ii. If result is null, then
         if (result_value.is_null()) {
@@ -573,7 +573,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match)
 
         // 1. Let matchStr be ? ToString(? Get(result, "0")).
         auto match_value = TRY(result.get(0));
-        auto match_str = TRY(match_value.to_string(vm));
+        auto match_str = TRY(match_value.to_deprecated_string(vm));
 
         // 2. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(n)), matchStr).
         MUST(array->create_data_property_or_throw(n, PrimitiveString::create(vm, match_str)));
@@ -581,7 +581,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match)
         // 3. If matchStr is the empty String, then
         if (match_str.is_empty()) {
             // Steps 3a-3c are implemented by increment_last_index.
-            TRY(increment_last_index(vm, *regexp_object, string.view(), full_unicode));
+            TRY(increment_last_index(vm, regexp_object, string.view(), full_unicode));
         }
 
         // 4. Set n to n + 1.
@@ -597,17 +597,17 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match_all)
 
     // 1. Let R be the this value.
     // 2. If Type(R) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. Let S be ? ToString(string).
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
     // 4. Let C be ? SpeciesConstructor(R, %RegExp%).
-    auto* constructor = TRY(species_constructor(vm, *regexp_object, *realm.intrinsics().regexp_constructor()));
+    auto* constructor = TRY(species_constructor(vm, regexp_object, realm.intrinsics().regexp_constructor()));
 
     // 5. Let flags be ? ToString(? Get(R, "flags")).
     auto flags_value = TRY(regexp_object->get(vm.names.flags));
-    auto flags = TRY(flags_value.to_string(vm));
+    auto flags = TRY(flags_value.to_deprecated_string(vm));
 
     // Steps 9-12 are performed early so that flags can be moved.
 
@@ -642,7 +642,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
 
     // 1. Let rx be the this value.
     // 2. If Type(rx) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. Let S be ? ToString(string).
     auto string = TRY(string_value.to_utf16_string(vm));
@@ -653,13 +653,13 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
     // 6. If functionalReplace is false, then
     if (!replace_value.is_function()) {
         // a. Set replaceValue to ? ToString(replaceValue).
-        auto replace_string = TRY(replace_value.to_string(vm));
+        auto replace_string = TRY(replace_value.to_deprecated_string(vm));
         replace_value = PrimitiveString::create(vm, move(replace_string));
     }
 
     // 7. Let flags be ? ToString(? Get(rx, "flags")).
     auto flags_value = TRY(regexp_object->get(vm.names.flags));
-    auto flags = TRY(flags_value.to_string(vm));
+    auto flags = TRY(flags_value.to_deprecated_string(vm));
 
     // 8. If flags contains "g", let global be true. Otherwise, let global be false.
     bool global = flags.contains('g');
@@ -683,7 +683,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
     // 11. Repeat, while done is false,
     while (true) {
         // a. Let result be ? RegExpExec(rx, S).
-        auto result = TRY(regexp_exec(vm, *regexp_object, string));
+        auto result = TRY(regexp_exec(vm, regexp_object, string));
 
         // b. If result is null, set done to true.
         if (result.is_null())
@@ -702,12 +702,12 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
 
         // 1. Let matchStr be ? ToString(? Get(result, "0")).
         auto match_value = TRY(result.get(vm, 0));
-        auto match_str = TRY(match_value.to_string(vm));
+        auto match_str = TRY(match_value.to_deprecated_string(vm));
 
         // 2. If matchStr is the empty String, then
         if (match_str.is_empty()) {
             // Steps 2a-2c are implemented by increment_last_index.
-            TRY(increment_last_index(vm, *regexp_object, string.view(), full_unicode));
+            TRY(increment_last_index(vm, regexp_object, string.view(), full_unicode));
         }
     }
 
@@ -752,7 +752,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
             // ii. If capN is not undefined, then
             if (!capture.is_undefined()) {
                 // 1. Set capN to ? ToString(capN).
-                capture = PrimitiveString::create(vm, TRY(capture.to_string(vm)));
+                capture = PrimitiveString::create(vm, TRY(capture.to_deprecated_string(vm)));
             }
 
             // iii. Append capN as the last element of captures.
@@ -765,7 +765,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
         // j. Let namedCaptures be ? Get(result, "groups").
         auto named_captures = TRY(result->get(vm.names.groups));
 
-        DeprecatedString replacement;
+        String replacement;
 
         // k. If functionalReplace is true, then
         if (replace_value.is_function()) {
@@ -820,13 +820,13 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
 
     // 15. If nextSourcePosition ≥ lengthS, return accumulatedResult.
     if (next_source_position >= string.length_in_code_units())
-        return PrimitiveString::create(vm, accumulated_result.build());
+        return PrimitiveString::create(vm, accumulated_result.to_deprecated_string());
 
     // 16. Return the string-concatenation of accumulatedResult and the substring of S from nextSourcePosition.
     auto substring = string.substring_view(next_source_position);
     accumulated_result.append(substring);
 
-    return PrimitiveString::create(vm, accumulated_result.build());
+    return PrimitiveString::create(vm, accumulated_result.to_deprecated_string());
 }
 
 // 22.2.5.12 RegExp.prototype [ @@search ] ( string ), https://tc39.es/ecma262/#sec-regexp.prototype-@@search
@@ -834,7 +834,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_search)
 {
     // 1. Let rx be the this value.
     // 2. If Type(rx) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. Let S be ? ToString(string).
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
@@ -849,7 +849,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_search)
     }
 
     // 6. Let result be ? RegExpExec(rx, S).
-    auto result = TRY(regexp_exec(vm, *regexp_object, move(string)));
+    auto result = TRY(regexp_exec(vm, regexp_object, move(string)));
 
     // 7. Let currentLastIndex be ? Get(rx, "lastIndex").
     auto current_last_index = TRY(regexp_object->get(vm.names.lastIndex));
@@ -875,13 +875,13 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::source)
 
     // 1. Let R be the this value.
     // 2. If Type(R) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. If R does not have an [[OriginalSource]] internal slot, then
-    if (!is<RegExpObject>(regexp_object)) {
+    if (!is<RegExpObject>(*regexp_object)) {
         // a. If SameValue(R, %RegExp.prototype%) is true, return "(?:)".
         if (same_value(regexp_object, realm.intrinsics().regexp_prototype()))
-            return PrimitiveString::create(vm, "(?:)");
+            return MUST_OR_THROW_OOM(PrimitiveString::create(vm, "(?:)"sv));
 
         // b. Otherwise, throw a TypeError exception.
         return vm.throw_completion<TypeError>(ErrorType::NotAnObjectOfType, "RegExp");
@@ -902,17 +902,17 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_split)
 
     // 1. Let rx be the this value.
     // 2. If Type(rx) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. Let S be ? ToString(string).
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
     // 4. Let C be ? SpeciesConstructor(rx, %RegExp%).
-    auto* constructor = TRY(species_constructor(vm, *regexp_object, *realm.intrinsics().regexp_constructor()));
+    auto* constructor = TRY(species_constructor(vm, regexp_object, realm.intrinsics().regexp_constructor()));
 
     // 5. Let flags be ? ToString(? Get(rx, "flags")).
     auto flags_value = TRY(regexp_object->get(vm.names.flags));
-    auto flags = TRY(flags_value.to_string(vm));
+    auto flags = TRY(flags_value.to_deprecated_string(vm));
 
     // 6. If flags contains "u" or flags contains "v", let unicodeMatching be true.
     // 7. Else, let unicodeMatching be false.
@@ -998,7 +998,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_split)
         auto substring = string.substring_view(last_match_end, next_search_from - last_match_end);
 
         // 2. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(lengthA)), T).
-        MUST(array->create_data_property_or_throw(array_length, PrimitiveString::create(vm, substring)));
+        MUST(array->create_data_property_or_throw(array_length, PrimitiveString::create(vm, TRY(Utf16String::create(vm, substring)))));
 
         // 3. Set lengthA to lengthA + 1.
         ++array_length;
@@ -1045,7 +1045,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_split)
     auto substring = string.substring_view(last_match_end);
 
     // 21. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(lengthA)), T).
-    MUST(array->create_data_property_or_throw(array_length, PrimitiveString::create(vm, substring)));
+    MUST(array->create_data_property_or_throw(array_length, PrimitiveString::create(vm, TRY(Utf16String::create(vm, substring)))));
 
     // 22. Return A.
     return array;
@@ -1056,13 +1056,13 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::test)
 {
     // 1. Let R be the this value.
     // 2. If Type(R) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. Let string be ? ToString(S).
     auto string = TRY(vm.argument(0).to_utf16_string(vm));
 
     // 4. Let match be ? RegExpExec(R, string).
-    auto match = TRY(regexp_exec(vm, *regexp_object, move(string)));
+    auto match = TRY(regexp_exec(vm, regexp_object, move(string)));
 
     // 5. If match is not null, return true; else return false.
     return Value(!match.is_null());
@@ -1073,15 +1073,15 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::to_string)
 {
     // 1. Let R be the this value.
     // 2. If Type(R) is not Object, throw a TypeError exception.
-    auto* regexp_object = TRY(this_object(vm));
+    auto regexp_object = TRY(this_object(vm));
 
     // 3. Let pattern be ? ToString(? Get(R, "source")).
     auto source_attr = TRY(regexp_object->get(vm.names.source));
-    auto pattern = TRY(source_attr.to_string(vm));
+    auto pattern = TRY(source_attr.to_deprecated_string(vm));
 
     // 4. Let flags be ? ToString(? Get(R, "flags")).
     auto flags_attr = TRY(regexp_object->get(vm.names.flags));
-    auto flags = TRY(flags_attr.to_string(vm));
+    auto flags = TRY(flags_attr.to_deprecated_string(vm));
 
     // 5. Let result be the string-concatenation of "/", pattern, "/", and flags.
     // 6. Return result.
@@ -1097,7 +1097,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::compile)
 
     // 1. Let O be the this value.
     // 2. Perform ? RequireInternalSlot(O, [[RegExpMatcher]]).
-    auto* regexp_object = TRY(typed_this_object(vm));
+    auto regexp_object = TRY(typed_this_object(vm));
 
     // 3. Let thisRealm be the current Realm Record.
     auto* this_realm = vm.current_realm();
@@ -1117,7 +1117,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::compile)
     if (pattern.is_object() && is<RegExpObject>(pattern.as_object())) {
         // a. If flags is not undefined, throw a TypeError exception.
         if (!flags.is_undefined())
-            return vm.throw_completion<TypeError>(ErrorType::NotUndefined, flags.to_string_without_side_effects());
+            return vm.throw_completion<TypeError>(ErrorType::NotUndefined, TRY_OR_THROW_OOM(vm, flags.to_string_without_side_effects()));
 
         auto& regexp_pattern = static_cast<RegExpObject&>(pattern.as_object());
 

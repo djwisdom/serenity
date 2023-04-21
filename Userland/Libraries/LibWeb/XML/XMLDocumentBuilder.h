@@ -32,12 +32,12 @@ private:
     virtual void set_source(DeprecatedString) override;
     virtual void element_start(XML::Name const& name, HashMap<XML::Name, DeprecatedString> const& attributes) override;
     virtual void element_end(XML::Name const& name) override;
-    virtual void text(DeprecatedString const& data) override;
-    virtual void comment(DeprecatedString const& data) override;
+    virtual void text(StringView data) override;
+    virtual void comment(StringView data) override;
     virtual void document_end() override;
 
-    DOM::Document& m_document;
-    DOM::Node* m_current_node { nullptr };
+    JS::NonnullGCPtr<DOM::Document> m_document;
+    JS::GCPtr<DOM::Node> m_current_node;
     XMLScriptingSupport m_scripting_support { XMLScriptingSupport::Enabled };
     bool m_has_error { false };
     StringBuilder text_builder;

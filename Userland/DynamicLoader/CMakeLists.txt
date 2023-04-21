@@ -8,9 +8,6 @@ file(GLOB LIBC_SOURCES1 "../Libraries/LibC/*.cpp")
 file(GLOB LIBC_SOURCES2 "../Libraries/LibC/*/*.cpp")
 
 set(ARCH_FOLDER "${SERENITY_ARCH}")
-if (SERENITY_ARCH STREQUAL "i686")
-    set(ARCH_FOLDER "i386")
-endif()
 
 file(GLOB LIBC_SOURCES3 "../Libraries/LibC/arch/${ARCH_FOLDER}/*.S")
 set(ELF_SOURCES ${ELF_SOURCES} "../Libraries/LibELF/Arch/${ARCH_FOLDER}/entry.S" "../Libraries/LibELF/Arch/${ARCH_FOLDER}/plt_trampoline.S")
@@ -32,6 +29,11 @@ add_definitions(-D_DYNAMIC_LOADER)
 set(SOURCES ${LOADER_SOURCES} ${AK_SOURCES} ${ELF_SOURCES} ${LIBC_SOURCES1} ${LIBC_SOURCES2} ${LIBC_SOURCES3} ${LIBSYSTEM_SOURCES})
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti -nostdlib -pie -fpic -DNO_TLS")
+
+if ("${SERENITY_ARCH}" STREQUAL "aarch64")
+    # On aarch64 the stack protector would be accessed before the Loader can relocate itself.
+    set_source_files_properties(main.cpp ../Libraries/LibELF/Relocation.cpp PROPERTIES COMPILE_FLAGS "-fno-stack-protector")
+endif()
 
 set_source_files_properties(../Libraries/LibC/ssp.cpp PROPERTIES COMPILE_FLAGS "-fno-stack-protector")
 set_source_files_properties(../Libraries/LibC/ssp_nonshared.cpp PROPERTIES COMPILE_FLAGS "-fno-stack-protector")

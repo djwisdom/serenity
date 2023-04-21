@@ -48,8 +48,7 @@ public:
     ALWAYS_INLINE void set_x(T x) { m_x = x; }
     ALWAYS_INLINE void set_y(T y) { m_y = y; }
 
-    [[nodiscard]] ALWAYS_INLINE bool is_null() const { return !m_x && !m_y; }
-    [[nodiscard]] ALWAYS_INLINE bool is_empty() const { return m_x <= 0 && m_y <= 0; }
+    [[nodiscard]] ALWAYS_INLINE bool is_zero() const { return m_x == 0 && m_y == 0; }
 
     void translate_by(T dx, T dy)
     {
@@ -248,6 +247,13 @@ public:
         return Point<U>(ceil(x()), ceil(y()));
     }
 
+    template<typename U>
+    requires FloatingPoint<T>
+    [[nodiscard]] Point<U> to_floored() const
+    {
+        return Point<U>(AK::floor(x()), AK::floor(y()));
+    }
+
     [[nodiscard]] DeprecatedString to_deprecated_string() const;
 
 private:
@@ -292,7 +298,7 @@ struct Formatter<Gfx::Point<T>> : Formatter<FormatString> {
 namespace IPC {
 
 template<>
-bool encode(Encoder&, Gfx::IntPoint const&);
+ErrorOr<void> encode(Encoder&, Gfx::IntPoint const&);
 
 template<>
 ErrorOr<Gfx::IntPoint> decode(Decoder&);

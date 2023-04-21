@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Error.h>
 #include <AK/FlyString.h>
 
 namespace Web::XHR::EventNames {
@@ -23,5 +24,7 @@ namespace Web::XHR::EventNames {
 #define __ENUMERATE_XHR_EVENT(name) extern FlyString name;
 ENUMERATE_XHR_EVENTS
 #undef __ENUMERATE_XHR_EVENT
+
+ErrorOr<void> initialize_strings();
 
 }

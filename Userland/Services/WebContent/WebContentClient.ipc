@@ -3,6 +3,7 @@
 #include <LibGfx/ShareableBitmap.h>
 #include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/Cookie/ParsedCookie.h>
+#include <LibWeb/HTML/ActivateTab.h>
 
 endpoint WebContentClient
 {
@@ -29,15 +30,16 @@ endpoint WebContentClient
     did_request_context_menu(Gfx::IntPoint content_position) =|
     did_request_link_context_menu(Gfx::IntPoint content_position, URL url, DeprecatedString target, unsigned modifiers) =|
     did_request_image_context_menu(Gfx::IntPoint content_position, URL url, DeprecatedString target, unsigned modifiers, Gfx::ShareableBitmap bitmap) =|
-    did_request_alert(DeprecatedString message) =|
-    did_request_confirm(DeprecatedString message) =|
-    did_request_prompt(DeprecatedString message, DeprecatedString default_) =|
-    did_request_set_prompt_text(DeprecatedString message) =|
+    did_request_alert(String message) =|
+    did_request_confirm(String message) =|
+    did_request_prompt(String message, String default_) =|
+    did_request_set_prompt_text(String message) =|
     did_request_accept_dialog() =|
     did_request_dismiss_dialog() =|
     did_get_source(URL url, DeprecatedString source) =|
     did_get_dom_tree(DeprecatedString dom_tree) =|
     did_get_dom_node_properties(i32 node_id, DeprecatedString computed_style, DeprecatedString resolved_style, DeprecatedString custom_properties, DeprecatedString node_box_sizing_json) =|
+    did_get_accessibility_tree(DeprecatedString accessibility_tree) =|
     did_change_favicon(Gfx::ShareableBitmap favicon) =|
     did_request_all_cookies(URL url) => (Vector<Web::Cookie::Cookie> cookies)
     did_request_named_cookie(URL url, DeprecatedString name) => (Optional<Web::Cookie::Cookie> cookie)
@@ -45,6 +47,9 @@ endpoint WebContentClient
     did_set_cookie(URL url, Web::Cookie::ParsedCookie cookie, u8 source) =|
     did_update_cookie(Web::Cookie::Cookie cookie) =|
     did_update_resource_count(i32 count_waiting) =|
+    did_request_new_tab(Web::HTML::ActivateTab activate_tab) => (String handle)
+    did_request_activate_tab() =|
+    did_close_browsing_context() =|
     did_request_restore_window() =|
     did_request_reposition_window(Gfx::IntPoint position) => (Gfx::IntPoint window_position)
     did_request_resize_window(Gfx::IntSize size) => (Gfx::IntSize window_size)

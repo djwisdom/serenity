@@ -8,12 +8,12 @@
 #include <AK/ByteBuffer.h>
 #include <AK/Find.h>
 #include <AK/Function.h>
-#include <AK/Memory.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
 #include <AK/Vector.h>
 
 #ifndef KERNEL
+#    include <AK/DeprecatedFlyString.h>
 #    include <AK/DeprecatedString.h>
 #    include <AK/FlyString.h>
 #    include <AK/String.h>
@@ -28,13 +28,19 @@ StringView::StringView(String const& string)
 {
 }
 
+StringView::StringView(FlyString const& string)
+    : m_characters(reinterpret_cast<char const*>(string.bytes().data()))
+    , m_length(string.bytes().size())
+{
+}
+
 StringView::StringView(DeprecatedString const& string)
     : m_characters(string.characters())
     , m_length(string.length())
 {
 }
 
-StringView::StringView(FlyString const& string)
+StringView::StringView(DeprecatedFlyString const& string)
     : m_characters(string.characters())
     , m_length(string.length())
 {
@@ -164,9 +170,9 @@ bool StringView::contains(StringView needle, CaseSensitivity case_sensitivity) c
     return StringUtils::contains(*this, needle, case_sensitivity);
 }
 
-bool StringView::equals_ignoring_case(StringView other) const
+bool StringView::equals_ignoring_ascii_case(StringView other) const
 {
-    return StringUtils::equals_ignoring_case(*this, other);
+    return StringUtils::equals_ignoring_ascii_case(*this, other);
 }
 
 #ifndef KERNEL

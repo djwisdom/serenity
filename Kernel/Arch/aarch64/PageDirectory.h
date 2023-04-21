@@ -7,12 +7,18 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Badge.h>
+#include <AK/HashMap.h>
+#include <AK/IntrusiveRedBlackTree.h>
+#include <AK/RefPtr.h>
 #include <AK/Types.h>
 #include <Kernel/Forward.h>
+#include <Kernel/Locking/Spinlock.h>
+#include <Kernel/Memory/PhysicalPage.h>
 #include <Kernel/PhysicalAddress.h>
 
-namespace Kernel {
+namespace Kernel::Memory {
 
 // 4KiB page size was chosen to make this code slightly simpler
 constexpr u32 GRANULE_SIZE = 0x1000;
@@ -33,6 +39,9 @@ constexpr u32 INNER_SHAREABLE = (3 << 8);
 // these index into the MAIR attribute table
 constexpr u32 NORMAL_MEMORY = (0 << 2);
 constexpr u32 DEVICE_MEMORY = (1 << 2);
+
+constexpr u32 ACCESS_PERMISSION_EL0 = (1 << 6);
+constexpr u32 ACCESS_PERMISSION_READONLY = (1 << 7);
 
 // Figure D5-15 of Arm Architecture Reference Manual Armv8 - page D5-2588
 class PageDirectoryEntry {
@@ -114,13 +123,13 @@ public:
     };
 
     bool is_present() const { return (raw() & Present) == Present; }
-    void set_present(bool) { }
+    void set_present(bool b) { set_bit(Present, b); }
 
-    bool is_user_allowed() const { TODO_AARCH64(); }
-    void set_user_allowed(bool) { }
+    bool is_user_allowed() const { return (raw() & ACCESS_PERMISSION_EL0) == ACCESS_PERMISSION_EL0; }
+    void set_user_allowed(bool b) { set_bit(ACCESS_PERMISSION_EL0, b); }
 
-    bool is_writable() const { TODO_AARCH64(); }
-    void set_writable(bool) { }
+    bool is_writable() const { return !((raw() & ACCESS_PERMISSION_READONLY) == ACCESS_PERMISSION_READONLY); }
+    void set_writable(bool b) { set_bit(ACCESS_PERMISSION_READONLY, !b); }
 
     bool is_write_through() const { TODO_AARCH64(); }
     void set_write_through(bool) { }
@@ -165,5 +174,49 @@ public:
 
     u64 raw[512];
 };
+
+class PageDirectory final : public AtomicRefCounted<PageDirectory> {
+    friend class MemoryManager;
+
+public:
+    static ErrorOr<NonnullLockRefPtr<PageDirectory>> try_create_for_userspace(Process&);
+    static NonnullLockRefPtr<PageDirectory> must_create_kernel_page_directory();
+    static LockRefPtr<PageDirectory> find_current();
+
+    ~PageDirectory();
+
+    void allocate_kernel_directory();
+
+    FlatPtr ttbr0() const
+    {
+        return m_root_table->paddr().get();
+    }
+
+    bool is_root_table_initialized() const
+    {
+        return m_root_table;
+    }
+
+    Process* process() { return m_process; }
+
+    RecursiveSpinlock<LockRank::None>& get_lock() { return m_lock; }
+
+    // This has to be public to let the global singleton access the member pointer
+    IntrusiveRedBlackTreeNode<FlatPtr, PageDirectory, RawPtr<PageDirectory>> m_tree_node;
+
+private:
+    PageDirectory();
+    static void register_page_directory(PageDirectory* directory);
+    static void deregister_page_directory(PageDirectory* directory);
+
+    Process* m_process { nullptr };
+    RefPtr<PhysicalPage> m_root_table;
+    RefPtr<PhysicalPage> m_directory_table;
+    RefPtr<PhysicalPage> m_directory_pages[512];
+    RecursiveSpinlock<LockRank::None> m_lock {};
+};
+
+void activate_kernel_page_directory(PageDirectory const& pgd);
+void activate_page_directory(PageDirectory const& pgd, Thread* current_thread);
 
 }

@@ -17,29 +17,37 @@
 
 namespace Web::CSS {
 
-CSSRuleList* CSSRuleList::create(JS::Realm& realm, JS::MarkedVector<CSSRule*> const& rules)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<CSSRuleList>> CSSRuleList::create(JS::Realm& realm, JS::MarkedVector<CSSRule*> const& rules)
 {
-    auto rule_list = realm.heap().allocate<CSSRuleList>(realm, realm);
+    auto rule_list = MUST_OR_THROW_OOM(realm.heap().allocate<CSSRuleList>(realm, realm));
     for (auto* rule : rules)
         rule_list->m_rules.append(*rule);
     return rule_list;
 }
 
 CSSRuleList::CSSRuleList(JS::Realm& realm)
-    : Bindings::LegacyPlatformObject(Bindings::ensure_web_prototype<Bindings::CSSRuleListPrototype>(realm, "CSSRuleList"))
+    : Bindings::LegacyPlatformObject(realm)
 {
 }
 
-CSSRuleList* CSSRuleList::create_empty(JS::Realm& realm)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<CSSRuleList>> CSSRuleList::create_empty(JS::Realm& realm)
 {
-    return realm.heap().allocate<CSSRuleList>(realm, realm);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<CSSRuleList>(realm, realm));
+}
+
+JS::ThrowCompletionOr<void> CSSRuleList::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::CSSRuleListPrototype>(realm, "CSSRuleList"));
+
+    return {};
 }
 
 void CSSRuleList::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     for (auto& rule : m_rules)
-        visitor.visit(&rule);
+        visitor.visit(rule);
 }
 
 bool CSSRuleList::is_supported_property_index(u32 index) const
@@ -115,23 +123,23 @@ WebIDL::ExceptionOr<void> CSSRuleList::remove_a_css_rule(u32 index)
 void CSSRuleList::for_each_effective_style_rule(Function<void(CSSStyleRule const&)> const& callback) const
 {
     for (auto const& rule : m_rules) {
-        switch (rule.type()) {
+        switch (rule->type()) {
         case CSSRule::Type::FontFace:
             break;
         case CSSRule::Type::Import: {
-            auto const& import_rule = static_cast<CSSImportRule const&>(rule);
-            if (import_rule.has_import_result() && import_rule.loaded_style_sheet())
+            auto const& import_rule = static_cast<CSSImportRule const&>(*rule);
+            if (import_rule.loaded_style_sheet())
                 import_rule.loaded_style_sheet()->for_each_effective_style_rule(callback);
             break;
         }
         case CSSRule::Type::Media:
-            static_cast<CSSMediaRule const&>(rule).for_each_effective_style_rule(callback);
+            static_cast<CSSMediaRule const&>(*rule).for_each_effective_style_rule(callback);
             break;
         case CSSRule::Type::Style:
-            callback(static_cast<CSSStyleRule const&>(rule));
+            callback(static_cast<CSSStyleRule const&>(*rule));
             break;
         case CSSRule::Type::Supports:
-            static_cast<CSSSupportsRule const&>(rule).for_each_effective_style_rule(callback);
+            static_cast<CSSSupportsRule const&>(*rule).for_each_effective_style_rule(callback);
             break;
         }
     }
@@ -142,17 +150,17 @@ bool CSSRuleList::evaluate_media_queries(HTML::Window const& window)
     bool any_media_queries_changed_match_state = false;
 
     for (auto& rule : m_rules) {
-        switch (rule.type()) {
+        switch (rule->type()) {
         case CSSRule::Type::FontFace:
             break;
         case CSSRule::Type::Import: {
-            auto& import_rule = verify_cast<CSSImportRule>(rule);
-            if (import_rule.has_import_result() && import_rule.loaded_style_sheet() && import_rule.loaded_style_sheet()->evaluate_media_queries(window))
+            auto& import_rule = verify_cast<CSSImportRule>(*rule);
+            if (import_rule.loaded_style_sheet() && import_rule.loaded_style_sheet()->evaluate_media_queries(window))
                 any_media_queries_changed_match_state = true;
             break;
         }
         case CSSRule::Type::Media: {
-            auto& media_rule = verify_cast<CSSMediaRule>(rule);
+            auto& media_rule = verify_cast<CSSMediaRule>(*rule);
             bool did_match = media_rule.condition_matches();
             bool now_matches = media_rule.evaluate(window);
             if (did_match != now_matches)
@@ -164,7 +172,7 @@ bool CSSRuleList::evaluate_media_queries(HTML::Window const& window)
         case CSSRule::Type::Style:
             break;
         case CSSRule::Type::Supports: {
-            auto& supports_rule = verify_cast<CSSSupportsRule>(rule);
+            auto& supports_rule = verify_cast<CSSSupportsRule>(*rule);
             if (supports_rule.condition_matches() && supports_rule.css_rules().evaluate_media_queries(window))
                 any_media_queries_changed_match_state = true;
             break;
@@ -175,7 +183,7 @@ bool CSSRuleList::evaluate_media_queries(HTML::Window const& window)
     return any_media_queries_changed_match_state;
 }
 
-JS::Value CSSRuleList::item_value(size_t index) const
+WebIDL::ExceptionOr<JS::Value> CSSRuleList::item_value(size_t index) const
 {
     return item(index);
 }

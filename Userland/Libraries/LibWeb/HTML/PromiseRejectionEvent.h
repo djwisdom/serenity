@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <AK/FlyString.h>
 #include <LibJS/Heap/Handle.h>
 #include <LibJS/Runtime/Promise.h>
 #include <LibJS/Runtime/Value.h>
@@ -23,8 +24,8 @@ class PromiseRejectionEvent final : public DOM::Event {
     WEB_PLATFORM_OBJECT(PromiseRejectionEvent, DOM::Event);
 
 public:
-    static PromiseRejectionEvent* create(JS::Realm&, FlyString const& event_name, PromiseRejectionEventInit const& event_init = {});
-    static PromiseRejectionEvent* construct_impl(JS::Realm&, FlyString const& event_name, PromiseRejectionEventInit const& event_init);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<PromiseRejectionEvent>> create(JS::Realm&, FlyString const& event_name, PromiseRejectionEventInit const& event_init = {});
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<PromiseRejectionEvent>> construct_impl(JS::Realm&, FlyString const& event_name, PromiseRejectionEventInit const& event_init);
 
     virtual ~PromiseRejectionEvent() override;
 
@@ -35,9 +36,10 @@ public:
 private:
     PromiseRejectionEvent(JS::Realm&, FlyString const& event_name, PromiseRejectionEventInit const& event_init);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    JS::Promise* m_promise { nullptr };
+    JS::GCPtr<JS::Promise> m_promise;
     JS::Value m_reason;
 };
 

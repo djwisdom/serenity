@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2020-2022, Ali Mohammad Pur <mpfard@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -9,7 +9,6 @@
 #include <LibCore/ArgsParser.h>
 #include <LibCore/ConfigFile.h>
 #include <LibCore/StandardPaths.h>
-#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 #include <LibJS/AST.h>
 #include <LibJS/Bytecode/BasicBlock.h>
@@ -63,9 +62,9 @@ void displayln(CheckedFormatString<Args...> format_string, Args const&... args)
 
 void displayln() { user_display("\n", 1); }
 
-class UserDisplayStream final : public Core::Stream::Stream {
-    virtual ErrorOr<Bytes> read(Bytes) override { return Error::from_string_view("Not readable"sv); };
-    virtual ErrorOr<size_t> write(ReadonlyBytes bytes) override
+class UserDisplayStream final : public Stream {
+    virtual ErrorOr<Bytes> read_some(Bytes) override { return Error::from_string_view("Not readable"sv); };
+    virtual ErrorOr<size_t> write_some(ReadonlyBytes bytes) override
     {
         user_display(bit_cast<char const*>(bytes.data()), bytes.size());
         return bytes.size();
@@ -94,7 +93,7 @@ public:
         : GlobalObject(realm)
     {
     }
-    virtual void initialize(JS::Realm&) override;
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual ~ReplObject() override = default;
 
 private:
@@ -108,7 +107,7 @@ static bool s_opt_bytecode = false;
 static bool s_as_module = false;
 static bool s_print_last_result = false;
 
-static bool parse_and_run(JS::Interpreter& interpreter, StringView source, StringView source_name)
+static ErrorOr<bool> parse_and_run(JS::Interpreter& interpreter, StringView source, StringView source_name)
 {
     enum class ReturnEarly {
         No,
@@ -117,14 +116,14 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
 
     JS::ThrowCompletionOr<JS::Value> result { JS::js_undefined() };
 
-    auto run_script_or_module = [&](auto& script_or_module) {
+    auto run_script_or_module = [&](auto& script_or_module) -> ErrorOr<ReturnEarly> {
         if (s_dump_ast)
             script_or_module->parse_node().dump(0);
 
         if (JS::Bytecode::g_dump_bytecode || s_run_bytecode) {
             auto executable_result = JS::Bytecode::Generator::generate(script_or_module->parse_node());
             if (executable_result.is_error()) {
-                result = g_vm->throw_completion<JS::InternalError>(executable_result.error().to_deprecated_string());
+                result = g_vm->throw_completion<JS::InternalError>(TRY(executable_result.error().to_string()));
                 return ReturnEarly::No;
             }
 
@@ -162,10 +161,12 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             auto hint = error.source_location_hint(source);
             if (!hint.is_empty())
                 displayln("{}", hint);
-            displayln("{}", error.to_deprecated_string());
-            result = interpreter.vm().throw_completion<JS::SyntaxError>(error.to_deprecated_string());
+
+            auto error_string = TRY(error.to_string());
+            displayln("{}", error_string);
+            result = interpreter.vm().throw_completion<JS::SyntaxError>(move(error_string));
         } else {
-            auto return_early = run_script_or_module(script_or_error.value());
+            auto return_early = TRY(run_script_or_module(script_or_error.value()));
             if (return_early == ReturnEarly::Yes)
                 return true;
         }
@@ -176,10 +177,12 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
             auto hint = error.source_location_hint(source);
             if (!hint.is_empty())
                 displayln("{}", hint);
-            displayln(error.to_deprecated_string());
-            result = interpreter.vm().throw_completion<JS::SyntaxError>(error.to_deprecated_string());
+
+            auto error_string = TRY(error.to_string());
+            displayln("{}", error_string);
+            result = interpreter.vm().throw_completion<JS::SyntaxError>(move(error_string));
         } else {
-            auto return_early = run_script_or_module(module_or_error.value());
+            auto return_early = TRY(run_script_or_module(module_or_error.value()));
             if (return_early == ReturnEarly::Yes)
                 return true;
         }
@@ -235,9 +238,9 @@ static bool parse_and_run(JS::Interpreter& interpreter, StringView source, Strin
     return true;
 }
 
-void ReplObject::initialize(JS::Realm& realm)
+JS::ThrowCompletionOr<void> ReplObject::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
     define_direct_property("global", this, JS::Attribute::Enumerable);
     u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
@@ -262,13 +265,15 @@ void ReplObject::initialize(JS::Realm& realm)
             return value;
         },
         attr);
+
+    return {};
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ReplObject::print)
 {
     auto result = ::print(vm.argument(0));
     if (result.is_error())
-        return g_vm->throw_completion<JS::InternalError>(DeprecatedString::formatted("Failed to print value: {}", result.error()));
+        return g_vm->throw_completion<JS::InternalError>(TRY_OR_THROW_OOM(*g_vm, String::formatted("Failed to print value: {}", result.error())));
 
     displayln();
 
@@ -354,7 +359,7 @@ extern "C" int initialize_repl(char const* time_zone)
     if (time_zone)
         setenv("TZ", time_zone, 1);
 
-    g_vm = JS::VM::create();
+    g_vm = MUST(JS::VM::create());
     g_vm->enable_default_host_import_module_dynamically_hook();
 
     // NOTE: These will print out both warnings when using something like Promise.reject().catch(...) -
@@ -377,9 +382,9 @@ extern "C" int initialize_repl(char const* time_zone)
 
     s_print_last_result = true;
     interpreter = JS::Interpreter::create<ReplObject>(*g_vm);
-    auto& console_object = *interpreter->realm().intrinsics().console_object();
-    g_console_client = make<ReplConsoleClient>(console_object.console());
-    console_object.console().set_client(*g_console_client);
+    auto console_object = interpreter->realm().intrinsics().console_object();
+    g_console_client = make<ReplConsoleClient>(console_object->console());
+    console_object->console().set_client(*g_console_client);
     g_interpreter = move(interpreter);
 
     return 0;
@@ -387,5 +392,10 @@ extern "C" int initialize_repl(char const* time_zone)
 
 extern "C" bool execute(char const* source)
 {
-    return parse_and_run(*g_interpreter, { source, strlen(source) }, "REPL"sv);
+    if (auto result = parse_and_run(*g_interpreter, { source, strlen(source) }, "REPL"sv); result.is_error()) {
+        displayln("{}", result.error());
+        return false;
+    } else {
+        return result.value();
+    }
 }

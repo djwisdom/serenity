@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2022, Filiph Sandström <filiph.sandstrom@filfatstudios.com>
  *
@@ -22,8 +22,8 @@ PaletteImpl::PaletteImpl(Core::AnonymousBuffer buffer)
 {
 }
 
-Palette::Palette(PaletteImpl const& impl)
-    : m_impl(impl)
+Palette::Palette(NonnullRefPtr<PaletteImpl> impl)
+    : m_impl(move(impl))
 {
 }
 

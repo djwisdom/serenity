@@ -175,7 +175,7 @@ void Scrollbar::paint_event(PaintEvent& event)
         hovered_component_for_painting = Component::None;
 
     painter.fill_rect_with_dither_pattern(rect(), palette().button().lightened(1.3f), palette().button());
-    if (m_gutter_click_state != GutterClickState::NotPressed && has_scrubber() && !scrubber_rect().is_null() && hovered_component_for_painting == Component::Gutter) {
+    if (m_gutter_click_state != GutterClickState::NotPressed && has_scrubber() && !scrubber_rect().is_empty() && hovered_component_for_painting == Component::Gutter) {
         Gfx::IntRect rect_to_fill = rect();
         if (orientation() == Orientation::Vertical) {
             if (m_gutter_click_state == GutterClickState::BeforeScrubber) {
@@ -209,19 +209,19 @@ void Scrollbar::paint_event(PaintEvent& event)
         auto decrement_location = decrement_button_rect().location().translated(3, 3);
         if (decrement_pressed)
             decrement_location.translate_by(1, 1);
-        if (!has_scrubber() || !is_enabled())
+        if (!has_scrubber() || !is_enabled() || is_min())
             painter.draw_triangle(decrement_location + Gfx::IntPoint { 1, 1 }, orientation() == Orientation::Vertical ? s_up_arrow_coords : s_left_arrow_coords, palette().threed_highlight());
         painter.draw_triangle(decrement_location, orientation() == Orientation::Vertical ? s_up_arrow_coords : s_left_arrow_coords, (has_scrubber() && is_enabled() && !is_min()) ? palette().button_text() : palette().threed_shadow1());
 
         auto increment_location = increment_button_rect().location().translated(3, 3);
         if (increment_pressed)
             increment_location.translate_by(1, 1);
-        if (!has_scrubber() || !is_enabled())
+        if (!has_scrubber() || !is_enabled() || is_max())
             painter.draw_triangle(increment_location + Gfx::IntPoint { 1, 1 }, orientation() == Orientation::Vertical ? s_down_arrow_coords : s_right_arrow_coords, palette().threed_highlight());
         painter.draw_triangle(increment_location, orientation() == Orientation::Vertical ? s_down_arrow_coords : s_right_arrow_coords, (has_scrubber() && is_enabled() && !is_max()) ? palette().button_text() : palette().threed_shadow1());
     }
 
-    if (has_scrubber() && !scrubber_rect().is_null())
+    if (has_scrubber() && !scrubber_rect().is_empty())
         Gfx::StylePainter::paint_button(painter, scrubber_rect(), palette(), Gfx::ButtonStyle::ThickCap, false, hovered_component_for_painting == Component::Scrubber || m_pressed_component == Component::Scrubber);
 }
 

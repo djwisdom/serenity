@@ -47,9 +47,9 @@ RSA::KeyPairType RSA::parse_rsa_key(ReadonlyBytes der)
     // Then enter the sequence
     {
         auto error = decoder.enter();
-        if (error.has_value()) {
+        if (error.is_error()) {
             // Something was weird with the input.
-            dbgln_if(RSA_PARSE_DEBUG, "RSA key parse failed: {}", error.value());
+            dbgln_if(RSA_PARSE_DEBUG, "RSA key parse failed: {}", error.error());
             return keypair;
         }
     }
@@ -74,16 +74,16 @@ RSA::KeyPairType RSA::parse_rsa_key(ReadonlyBytes der)
 
         // It's a sequence, now let's see if it's actually an RSA key.
         auto error = decoder.enter();
-        if (error.has_value()) {
+        if (error.is_error()) {
             // Shenanigans!
-            dbgln_if(RSA_PARSE_DEBUG, "RSA PKCS#8 public key parse failed: {}", error.value());
+            dbgln_if(RSA_PARSE_DEBUG, "RSA PKCS#8 public key parse failed: {}", error.error());
             return false;
         }
 
         ScopeGuard leave { [&] {
             auto error = decoder.leave();
-            if (error.has_value()) {
-                dbgln_if(RSA_PARSE_DEBUG, "RSA key parse failed: {}", error.value());
+            if (error.is_error()) {
+                dbgln_if(RSA_PARSE_DEBUG, "RSA key parse failed: {}", error.error());
                 has_read_error = true;
             }
         } };
@@ -343,12 +343,13 @@ void RSA_PKCS1_EME::encrypt(ReadonlyBytes in, Bytes& out)
     Vector<u8, 8096> ps;
     ps.resize(ps_length);
 
-    fill_with_random(ps.data(), ps_length);
+    fill_with_random(ps);
     // since fill_with_random can create zeros (shocking!)
     // we have to go through and un-zero the zeros
-    for (size_t i = 0; i < ps_length; ++i)
+    for (size_t i = 0; i < ps_length; ++i) {
         while (!ps[i])
-            fill_with_random(ps.span().offset(i), 1);
+            ps[i] = get_random<u8>();
+    }
 
     u8 paddings[] { 0x00, 0x02 };
 

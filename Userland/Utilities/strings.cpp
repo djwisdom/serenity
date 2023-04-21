@@ -7,7 +7,7 @@
 #include <AK/CharacterTypes.h>
 #include <AK/Forward.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <unistd.h>
@@ -67,12 +67,12 @@ static ErrorOr<void> process_strings_in_file(StringView path, bool show_paths, S
 {
     Array<u8, buffer_read_size> buffer;
     Vector<u8> output_characters;
-    auto file = TRY(Core::Stream::File::open_file_or_standard_stream(path, Core::Stream::OpenMode::Read));
+    auto file = TRY(Core::File::open_file_or_standard_stream(path, Core::File::OpenMode::Read));
     size_t processed_characters = 0;
     size_t string_offset_position = 0;
     bool did_show_path = false;
     while (!file->is_eof()) {
-        auto buffer_span = TRY(file->read(buffer));
+        auto buffer_span = TRY(file->read_some(buffer));
         while (!buffer_span.is_empty()) {
             string_offset_position += processed_characters;
             processed_characters = process_characters_in_span(output_characters, buffer_span);
@@ -108,8 +108,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         nullptr,
         't',
         "format",
-        [&string_offset_format](char const* s) {
-            StringView value = { s, strlen(s) };
+        [&string_offset_format](StringView value) {
             if (value == "d") {
                 string_offset_format = StringOffsetFormat::Decimal;
             } else if (value == "o") {

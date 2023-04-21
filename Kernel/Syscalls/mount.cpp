@@ -11,8 +11,8 @@
 #include <Kernel/FileSystem/ISO9660FS/FileSystem.h>
 #include <Kernel/FileSystem/Plan9FS/FileSystem.h>
 #include <Kernel/FileSystem/ProcFS/FileSystem.h>
+#include <Kernel/FileSystem/RAMFS/FileSystem.h>
 #include <Kernel/FileSystem/SysFS/FileSystem.h>
-#include <Kernel/FileSystem/TmpFS/FileSystem.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Process.h>
 
@@ -24,29 +24,29 @@ struct FileSystemInitializer {
     bool requires_open_file_description { false };
     bool requires_block_device { false };
     bool requires_seekable_file { false };
-    ErrorOr<NonnullLockRefPtr<FileSystem>> (*create_with_fd)(OpenFileDescription&) = nullptr;
-    ErrorOr<NonnullLockRefPtr<FileSystem>> (*create)(void) = nullptr;
+    ErrorOr<NonnullRefPtr<FileSystem>> (*create_with_fd)(OpenFileDescription&) = nullptr;
+    ErrorOr<NonnullRefPtr<FileSystem>> (*create)(void) = nullptr;
 };
 
 static constexpr FileSystemInitializer s_initializers[] = {
     { "proc"sv, "ProcFS"sv, false, false, false, {}, ProcFS::try_create },
     { "devpts"sv, "DevPtsFS"sv, false, false, false, {}, DevPtsFS::try_create },
     { "sys"sv, "SysFS"sv, false, false, false, {}, SysFS::try_create },
-    { "tmp"sv, "TmpFS"sv, false, false, false, {}, TmpFS::try_create },
+    { "ram"sv, "RAMFS"sv, false, false, false, {}, RAMFS::try_create },
     { "ext2"sv, "Ext2FS"sv, true, true, true, Ext2FS::try_create, {} },
     { "9p"sv, "Plan9FS"sv, true, true, true, Plan9FS::try_create, {} },
     { "iso9660"sv, "ISO9660FS"sv, true, true, true, ISO9660FS::try_create, {} },
     { "fat"sv, "FATFS"sv, true, true, true, FATFS::try_create, {} },
 };
 
-static ErrorOr<NonnullLockRefPtr<FileSystem>> find_or_create_filesystem_instance(StringView fs_type, OpenFileDescription* possible_description)
+static ErrorOr<NonnullRefPtr<FileSystem>> find_or_create_filesystem_instance(StringView fs_type, OpenFileDescription* possible_description)
 {
     for (auto& initializer_entry : s_initializers) {
         if (fs_type != initializer_entry.short_name && fs_type != initializer_entry.name)
             continue;
         if (!initializer_entry.requires_open_file_description) {
             VERIFY(initializer_entry.create);
-            NonnullLockRefPtr<FileSystem> fs = TRY(initializer_entry.create());
+            NonnullRefPtr<FileSystem> fs = TRY(initializer_entry.create());
             return fs;
         }
         // Note: If there's an associated file description with the filesystem, we could
@@ -110,7 +110,7 @@ ErrorOr<FlatPtr> Process::sys$mount(Userspace<Syscall::SC_mount_params const*> u
         return 0;
     }
 
-    LockRefPtr<FileSystem> fs;
+    RefPtr<FileSystem> fs;
 
     if (!description_or_error.is_error()) {
         auto description = description_or_error.release_value();

@@ -13,8 +13,6 @@ namespace Web::HTML {
 HTMLButtonElement::HTMLButtonElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLButtonElement"));
-
     // https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element:activation-behaviour
     activation_behavior = [this](auto&) {
         // 1. If element is disabled, then return.
@@ -34,12 +32,12 @@ HTMLButtonElement::HTMLButtonElement(DOM::Document& document, DOM::QualifiedName
         case TypeAttributeState::Submit:
             // Submit Button
             // Submit element's form owner from element.
-            form()->submit_form(this);
+            form()->submit_form(this).release_value_but_fixme_should_propagate_errors();
             break;
         case TypeAttributeState::Reset:
             // Reset Button
-            // FIXME: Reset element's form owner.
-            TODO();
+            // Reset element's form owner.
+            form()->reset_form();
             break;
         case TypeAttributeState::Button:
             // Button
@@ -53,12 +51,20 @@ HTMLButtonElement::HTMLButtonElement(DOM::Document& document, DOM::QualifiedName
 
 HTMLButtonElement::~HTMLButtonElement() = default;
 
+JS::ThrowCompletionOr<void> HTMLButtonElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLButtonElementPrototype>(realm, "HTMLButtonElement"));
+
+    return {};
+}
+
 DeprecatedString HTMLButtonElement::type() const
 {
     auto value = attribute(HTML::AttributeNames::type);
 
 #define __ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTE(keyword, _) \
-    if (value.equals_ignoring_case(#keyword##sv))          \
+    if (value.equals_ignoring_ascii_case(#keyword##sv))    \
         return #keyword;
     ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTES
 #undef __ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTE
@@ -72,7 +78,7 @@ HTMLButtonElement::TypeAttributeState HTMLButtonElement::type_state() const
     auto value = attribute(HTML::AttributeNames::type);
 
 #define __ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTE(keyword, state) \
-    if (value.equals_ignoring_case(#keyword##sv))              \
+    if (value.equals_ignoring_ascii_case(#keyword##sv))        \
         return HTMLButtonElement::TypeAttributeState::state;
     ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTES
 #undef __ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTE

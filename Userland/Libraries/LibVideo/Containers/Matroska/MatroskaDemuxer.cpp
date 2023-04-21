@@ -5,6 +5,7 @@
  */
 
 #include "MatroskaDemuxer.h"
+#include "AK/Debug.h"
 
 namespace Video::Matroska {
 
@@ -37,9 +38,21 @@ DecoderErrorOr<Vector<Track>> MatroskaDemuxer::get_tracks_for_type(TrackType typ
     Vector<Track> tracks;
     TRY(m_reader.for_each_track_of_type(matroska_track_type, [&](TrackEntry const& track_entry) -> DecoderErrorOr<IterationDecision> {
         VERIFY(track_entry.track_type() == matroska_track_type);
-        DECODER_TRY_ALLOC(tracks.try_append(Track(type, track_entry.track_number())));
+        Track track(type, track_entry.track_number());
+
+        switch (type) {
+        case TrackType::Video:
+            if (auto video_track = track_entry.video_track(); video_track.has_value())
+                track.set_video_data({ TRY(duration()), video_track->pixel_width, video_track->pixel_height });
+            break;
+        default:
+            break;
+        }
+
+        DECODER_TRY_ALLOC(tracks.try_append(track));
         return IterationDecision::Continue;
     }));
+
     return tracks;
 }
 
@@ -53,7 +66,7 @@ DecoderErrorOr<MatroskaDemuxer::TrackStatus*> MatroskaDemuxer::get_track_status(
     return &m_track_statuses.get(track).release_value();
 }
 
-DecoderErrorOr<Time> MatroskaDemuxer::seek_to_most_recent_keyframe(Track track, Time timestamp)
+DecoderErrorOr<Optional<Time>> MatroskaDemuxer::seek_to_most_recent_keyframe(Track track, Time timestamp, Optional<Time> earliest_available_sample)
 {
     // Removing the track status will cause us to start from the beginning.
     if (timestamp.is_zero()) {
@@ -62,7 +75,22 @@ DecoderErrorOr<Time> MatroskaDemuxer::seek_to_most_recent_keyframe(Track track, 
     }
 
     auto& track_status = *TRY(get_track_status(track));
-    TRY(m_reader.seek_to_random_access_point(track_status.iterator, timestamp));
+    auto seeked_iterator = TRY(m_reader.seek_to_random_access_point(track_status.iterator, timestamp));
+    VERIFY(seeked_iterator.last_timestamp().has_value());
+
+    auto last_sample = earliest_available_sample;
+    if (!last_sample.has_value()) {
+        last_sample = track_status.iterator.last_timestamp();
+    }
+    if (last_sample.has_value()) {
+        bool skip_seek = seeked_iterator.last_timestamp().value() <= last_sample.value() && last_sample.value() <= timestamp;
+        dbgln_if(MATROSKA_DEBUG, "The last available sample at {}ms is {}closer to target timestamp {}ms than the keyframe at {}ms, {}", last_sample->to_milliseconds(), skip_seek ? ""sv : "not "sv, timestamp.to_milliseconds(), seeked_iterator.last_timestamp()->to_milliseconds(), skip_seek ? "skipping seek"sv : "seeking"sv);
+        if (skip_seek) {
+            return OptionalNone();
+        }
+    }
+
+    track_status.iterator = move(seeked_iterator);
     return track_status.iterator.last_timestamp();
 }
 

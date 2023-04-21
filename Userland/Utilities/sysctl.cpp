@@ -7,7 +7,7 @@
 
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DirIterator.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibMain/Main.h>
 
 static bool s_set_variable = false;
@@ -15,7 +15,7 @@ static bool s_set_variable = false;
 static DeprecatedString get_variable(StringView name)
 {
     auto path = DeprecatedString::formatted("/sys/kernel/variables/{}", name);
-    auto file = Core::Stream::File::open(path, Core::Stream::OpenMode::Read);
+    auto file = Core::File::open(path, Core::File::OpenMode::Read);
     if (file.is_error()) {
         warnln("Failed to open {}: {}", path, file.error());
         return {};
@@ -43,12 +43,12 @@ static bool write_variable(StringView name, StringView value)
     if (old_value.is_null())
         return false;
     auto path = DeprecatedString::formatted("/sys/kernel/variables/{}", name);
-    auto file = Core::Stream::File::open(path, Core::Stream::OpenMode::Write);
+    auto file = Core::File::open(path, Core::File::OpenMode::Write);
     if (file.is_error()) {
         warnln("Failed to open {}: {}", path, file.error());
         return false;
     }
-    if (auto result = file.value()->write(value.bytes()); result.is_error()) {
+    if (auto result = file.value()->write_until_depleted(value.bytes()); result.is_error()) {
         warnln("Failed to write {}: {}", path, result.error());
         return false;
     }
@@ -82,7 +82,7 @@ static int handle_show_all()
 {
     Core::DirIterator di("/sys/kernel/variables", Core::DirIterator::SkipDots);
     if (di.has_error()) {
-        outln("DirIterator: {}", di.error_string());
+        outln("DirIterator: {}", di.error());
         return 1;
     }
 
@@ -107,7 +107,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     if (!show_all && variables.is_empty()) {
-        args_parser.print_usage(stdout, arguments.argv[0]);
+        args_parser.print_usage(stdout, arguments.strings[0]);
         return 1;
     }
 

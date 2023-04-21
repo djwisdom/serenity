@@ -4,7 +4,7 @@ presenter - Presenter slide presentation format (.presenter)
 
 ## Description
 
-The presenter file format is a format for specifying slides and presentations in a JSON-based format. It is intentionally simple, allowing it to be written by hand. It is the native format of [Presenter](help://man/1/Presenter).
+The presenter file format is a format for specifying slides and presentations in a JSON-based format. It is intentionally simple, allowing it to be written by hand. It is the native format of [Presenter](help://man/1/Applications/Presenter).
 
 This manpage specifies version 1 of the presenter file format.
 
@@ -46,7 +46,7 @@ The slides array contains a list of slide objects, their JSON order determines t
 
 Most slide objects are graphical objects of one of the pre-defined types. All graphical objects, like GUI widgets, have a bounding box rectangle which determines their position and size. Objects choose which frames they appear on.
 
-In the file format, slide objects are JSON objects with the following basic properties:
+In the file format, slide objects are JSON objects with the following basic properties:
 
 -   `type`: (string enum) Specifies the type of the slide object and what other properties the object may have, see below.
 -   `rect`: (4-element array of integers: `[left, top, width, height]`, optional) Specifies the bounding box of the object. Is mandatory for most types.
@@ -72,4 +72,4 @@ The following types with their own special properties exist:
 
 ## See also
 
--   [Presenter(1)](help://man/1/Presenter)
+-   [Presenter(1)](help://man/1/Applications/Presenter)

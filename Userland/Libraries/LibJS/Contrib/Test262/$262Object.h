@@ -17,7 +17,7 @@ class $262Object final : public Object {
     JS_OBJECT($262Object, Object);
 
 public:
-    virtual void initialize(JS::Realm&) override;
+    virtual ThrowCompletionOr<void> initialize(Realm&) override;
     virtual ~$262Object() override = default;
 
 private:
@@ -25,8 +25,8 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    AgentObject* m_agent { nullptr };
-    IsHTMLDDA* m_is_htmldda { nullptr };
+    GCPtr<AgentObject> m_agent;
+    GCPtr<IsHTMLDDA> m_is_htmldda;
 
     JS_DECLARE_NATIVE_FUNCTION(clear_kept_objects);
     JS_DECLARE_NATIVE_FUNCTION(create_realm);

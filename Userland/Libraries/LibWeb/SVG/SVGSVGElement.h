@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGfx/Bitmap.h>
+#include <LibWeb/SVG/AttributeParser.h>
 #include <LibWeb/SVG/SVGGraphicsElement.h>
 #include <LibWeb/SVG/ViewBox.h>
 
@@ -24,15 +25,19 @@ public:
     virtual bool is_svg_container() const override { return true; }
 
     Optional<ViewBox> const& view_box() const { return m_view_box; }
+    Optional<PreserveAspectRatio> const& preserve_aspect_ratio() const { return m_preserve_aspect_ratio; }
 
 private:
     SVGSVGElement(DOM::Document&, DOM::QualifiedName);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
+
     virtual bool is_svg_svg_element() const override { return true; }
 
-    virtual void parse_attribute(FlyString const& name, DeprecatedString const& value) override;
+    virtual void parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value) override;
 
     Optional<ViewBox> m_view_box;
+    Optional<PreserveAspectRatio> m_preserve_aspect_ratio;
 };
 
 }

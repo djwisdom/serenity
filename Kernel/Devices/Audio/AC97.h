@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Error.h>
+#include <AK/RefPtr.h>
 #include <Kernel/Bus/PCI/API.h>
 #include <Kernel/Bus/PCI/Device.h>
 #include <Kernel/Devices/Audio/Controller.h>
@@ -26,9 +27,13 @@ class AC97 final
     , public IRQHandler {
 
 public:
-    static ErrorOr<NonnullLockRefPtr<AC97>> try_create(PCI::DeviceIdentifier const&);
+    static ErrorOr<bool> probe(PCI::DeviceIdentifier const&);
+    static ErrorOr<NonnullRefPtr<AudioController>> create(PCI::DeviceIdentifier const&);
 
     virtual ~AC97() override;
+
+    // ^PCI::Device
+    virtual StringView device_name() const override { return "AC97"sv; }
 
     // ^IRQHandler
     virtual StringView purpose() const override { return "AC97"sv; }
@@ -147,7 +152,7 @@ private:
 
         NonnullOwnPtr<IOWindow> m_channel_io_window;
         PCI::Address m_device_pci_address;
-        SpinlockProtected<bool> m_dma_running { LockRank::None, false };
+        SpinlockProtected<bool, LockRank::None> m_dma_running { false };
         StringView m_name;
     };
 
@@ -156,16 +161,15 @@ private:
     // ^IRQHandler
     virtual bool handle_irq(RegisterState const&) override;
 
-    ErrorOr<void> initialize();
     void set_master_output_volume(u8, u8, Muted);
     ErrorOr<void> set_pcm_output_sample_rate(u32);
     void set_pcm_output_volume(u8, u8, Muted);
     ErrorOr<void> write_single_buffer(UserOrKernelBuffer const&, size_t, size_t);
 
     // ^AudioController
-    virtual LockRefPtr<AudioChannel> audio_channel(u32 index) const override;
+    virtual ErrorOr<void> initialize(Badge<AudioManagement>) override;
+    virtual RefPtr<AudioChannel> audio_channel(u32 index) const override;
     virtual ErrorOr<size_t> write(size_t channel_index, UserOrKernelBuffer const& data, size_t length) override;
-    virtual void detect_hardware_audio_channels(Badge<AudioManagement>) override;
     virtual ErrorOr<void> set_pcm_output_sample_rate(size_t channel_index, u32 samples_per_second_rate) override;
     virtual ErrorOr<u32> get_pcm_output_sample_rate(size_t channel_index) override;
 
@@ -182,7 +186,7 @@ private:
     NonnullOwnPtr<AC97Channel> m_pcm_out_channel;
     u32 m_sample_rate { 0 };
     bool m_variable_rate_pcm_supported { false };
-    LockRefPtr<AudioChannel> m_audio_channel;
+    RefPtr<AudioChannel> m_audio_channel;
 };
 
 }

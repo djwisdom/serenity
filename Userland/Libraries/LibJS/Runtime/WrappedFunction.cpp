@@ -22,7 +22,7 @@ ThrowCompletionOr<NonnullGCPtr<WrappedFunction>> WrappedFunction::create(Realm& 
     // 5. Set wrapped.[[WrappedTargetFunction]] to Target.
     // 6. Set wrapped.[[Realm]] to callerRealm.
     auto& prototype = *caller_realm.intrinsics().function_prototype();
-    auto wrapped = vm.heap().allocate<WrappedFunction>(realm, caller_realm, target, prototype);
+    auto wrapped = MUST_OR_THROW_OOM(vm.heap().allocate<WrappedFunction>(realm, caller_realm, target, prototype));
 
     // 7. Let result be CopyNameAndLength(wrapped, Target).
     auto result = copy_name_and_length(vm, *wrapped, target);
@@ -47,8 +47,8 @@ void WrappedFunction::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
 
-    visitor.visit(&m_wrapped_target_function);
-    visitor.visit(&m_realm);
+    visitor.visit(m_wrapped_target_function);
+    visitor.visit(m_realm);
 }
 
 // 2.1 [[Call]] ( thisArgument, argumentsList ), https://tc39.es/proposal-shadowrealm/#sec-wrapped-function-exotic-objects-call-thisargument-argumentslist

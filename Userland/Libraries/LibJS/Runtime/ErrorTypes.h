@@ -32,6 +32,7 @@
     M(DescWriteNonWritable, "Cannot write to non-writable property '{}'")                                                               \
     M(DetachedArrayBuffer, "ArrayBuffer is detached")                                                                                   \
     M(DetachKeyMismatch, "Provided detach key {} does not match the ArrayBuffer's detach key {}")                                       \
+    M(DisposableStackAlreadyDisposed, "DisposableStack already disposed values")                                                        \
     M(DivisionByZero, "Division by zero")                                                                                               \
     M(DynamicImportNotAllowed, "Dynamic Imports are not allowed")                                                                       \
     M(FinalizationRegistrySameTargetAndValue, "Target and held value must not be the same")                                             \
@@ -85,6 +86,7 @@
     M(ModuleNotFound, "Cannot find/open module: '{}'")                                                                                  \
     M(ModuleNotFoundNoReferencingScript, "Cannot resolve module {} without any active script or module")                                \
     M(NegativeExponent, "Exponent must be positive")                                                                                    \
+    M(NoDisposeMethod, "{} does not have dispose method")                                                                               \
     M(NonExtensibleDefine, "Cannot define property {} on non-extensible object")                                                        \
     M(NotAConstructor, "{} is not a constructor")                                                                                       \
     M(NotAFunction, "{} is not a function")                                                                                             \
@@ -110,6 +112,7 @@
         "Object prototype must not be {} on a super property access")                                                                   \
     M(ObjectPrototypeWrongType, "Prototype must be an object or null")                                                                  \
     M(OptionIsNotValidValue, "{} is not a valid value for option {}")                                                                   \
+    M(OutOfMemory, "Out of memory")                                                                                                     \
     M(OverloadResolutionFailed, "Overload resolution failed")                                                                           \
     M(PrivateFieldAlreadyDeclared, "Private field '{}' has already been declared")                                                      \
     M(PrivateFieldDoesNotExistOnObject, "Private field '{}' does not exist on object")                                                  \
@@ -268,6 +271,8 @@
     M(TemporalInvalidYearMonthStringUTCDesignator, "Invalid year month string '{}': must not contain a UTC designator")                 \
     M(TemporalInvalidZonedDateTimeOffset, "Invalid offset for the provided date and time in the current time zone")                     \
     M(TemporalInvalidZonedDateTimeString, "Invalid zoned date time string '{}'")                                                        \
+    M(TemporalOnlyISO8601WithMonthDayString, "MM-DD string format can only be used with the iso8601 calendar")                          \
+    M(TemporalOnlyISO8601WithYearMonthString, "YYYY-MM string format can only be used with the iso8601 calendar")                       \
     M(TemporalMissingOptionsObject, "Required options object is missing or undefined")                                                  \
     M(TemporalMissingStartingPoint, "A starting point is required for balancing {}")                                                    \
     M(TemporalMissingUnits, "One or both of smallestUnit or largestUnit is required")                                                   \

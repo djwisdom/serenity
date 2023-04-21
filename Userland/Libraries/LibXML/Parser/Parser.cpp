@@ -78,7 +78,7 @@ void Parser::append_node(NonnullOwnPtr<Node> node)
     }
 }
 
-void Parser::append_text(DeprecatedString text)
+void Parser::append_text(StringView text)
 {
     if (m_listener) {
         m_listener->text(text);
@@ -95,7 +95,7 @@ void Parser::append_text(DeprecatedString text)
     m_entered_node->content.visit(
         [&](Node::Element& node) {
             if (!node.children.is_empty()) {
-                auto* text_node = node.children.last().content.get_pointer<Node::Text>();
+                auto* text_node = node.children.last()->content.get_pointer<Node::Text>();
                 if (text_node) {
                     text_node->builder.append(text);
                     return;
@@ -111,7 +111,7 @@ void Parser::append_text(DeprecatedString text)
         });
 }
 
-void Parser::append_comment(DeprecatedString text)
+void Parser::append_comment(StringView text)
 {
     if (m_listener) {
         m_listener->comment(text);
@@ -125,7 +125,7 @@ void Parser::append_comment(DeprecatedString text)
 
     m_entered_node->content.visit(
         [&](Node::Element& node) {
-            node.children.append(make<Node>(Node::Comment { move(text) }));
+            node.children.append(make<Node>(Node::Comment { text }));
         },
         [&](auto&) {
             // Can't enter a text or comment node.
@@ -242,7 +242,7 @@ ErrorOr<void, ParseError> Parser::expect(StringView expected)
 }
 
 template<typename Pred>
-requires(IsCallableWithArguments<Pred, char>) ErrorOr<StringView, ParseError> Parser::expect(Pred predicate, StringView description)
+requires(IsCallableWithArguments<Pred, bool, char>) ErrorOr<StringView, ParseError> Parser::expect(Pred predicate, StringView description)
 {
     auto rollback = rollback_point();
     auto start = m_lexer.tell();
@@ -257,7 +257,7 @@ requires(IsCallableWithArguments<Pred, char>) ErrorOr<StringView, ParseError> Pa
 }
 
 template<typename Pred>
-requires(IsCallableWithArguments<Pred, char>) ErrorOr<StringView, ParseError> Parser::expect_many(Pred predicate, StringView description)
+requires(IsCallableWithArguments<Pred, bool, char>) ErrorOr<StringView, ParseError> Parser::expect_many(Pred predicate, StringView description)
 {
     auto rollback = rollback_point();
     auto start = m_lexer.tell();
@@ -515,7 +515,7 @@ ErrorOr<Name, ParseError> Parser::parse_processing_instruction_target()
     auto target = TRY(parse_name());
     auto accept = accept_rule();
 
-    if (target.equals_ignoring_case("xml"sv) && m_options.treat_errors_as_fatal) {
+    if (target.equals_ignoring_ascii_case("xml"sv) && m_options.treat_errors_as_fatal) {
         return parse_error(
             m_lexer.tell() - target.length(),
             "Use of the reserved 'xml' name for processing instruction target name is disallowed");

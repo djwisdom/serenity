@@ -18,9 +18,7 @@
 #include <Kernel/Sections.h>
 #include <Kernel/StdLib.h>
 
-#if ARCH(I386)
-static constexpr size_t CHUNK_SIZE = 32;
-#elif ARCH(X86_64) || ARCH(AARCH64)
+#if ARCH(X86_64) || ARCH(AARCH64)
 static constexpr size_t CHUNK_SIZE = 64;
 #else
 #    error Unknown architecture
@@ -38,7 +36,7 @@ const nothrow_t nothrow;
 }
 
 // FIXME: Figure out whether this can be MemoryManager.
-static RecursiveSpinlock s_lock { LockRank::None }; // needs to be recursive because of dump_backtrace()
+static RecursiveSpinlock<LockRank::None> s_lock {}; // needs to be recursive because of dump_backtrace()
 
 struct KmallocSubheap {
     KmallocSubheap(u8* base, size_t size)

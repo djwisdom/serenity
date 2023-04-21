@@ -17,7 +17,7 @@ class SVGRectElement final : public SVGGeometryElement {
 public:
     virtual ~SVGRectElement() override = default;
 
-    virtual void parse_attribute(FlyString const& name, DeprecatedString const& value) override;
+    virtual void parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value) override;
 
     virtual Gfx::Path& get_path() override;
 
@@ -31,7 +31,9 @@ public:
 private:
     SVGRectElement(DOM::Document&, DOM::QualifiedName);
 
-    Gfx::FloatPoint calculate_used_corner_radius_values();
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
+
+    Gfx::FloatSize calculate_used_corner_radius_values() const;
 
     Optional<Gfx::Path> m_path;
 

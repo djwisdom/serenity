@@ -4,7 +4,9 @@
 [Exposed=Window]
 interface HTMLOptGroupElement : HTMLElement {
 
-    [Reflect] attribute boolean disabled;
-    [Reflect] attribute DOMString label;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute boolean disabled;
+    [CEReactions, Reflect] attribute DOMString label;
 
 };

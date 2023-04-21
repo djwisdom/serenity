@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Julius Heijmen <julius.heijmen@gmail.com>
+ * Copyright (c) 2023, Jelle Raaijmakers <jelle@gmta.nl>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -46,13 +47,13 @@ static bool generate_profile(pid_t& pid);
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     int pid = 0;
-    char const* perfcore_file_arg = nullptr;
+    StringView perfcore_file_arg;
     Core::ArgsParser args_parser;
     args_parser.add_option(pid, "PID to profile", "pid", 'p', "PID");
     args_parser.add_positional_argument(perfcore_file_arg, "Path of perfcore file", "perfcore-file", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
-    if (pid && perfcore_file_arg) {
+    if (pid && !perfcore_file_arg.is_empty()) {
         warnln("-p/--pid option and perfcore-file argument must not be used together!");
         return 1;
     }
@@ -61,7 +62,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-profiler"sv));
 
     DeprecatedString perfcore_file;
-    if (!perfcore_file_arg) {
+    if (perfcore_file_arg.is_empty()) {
         if (!generate_profile(pid))
             return 0;
         perfcore_file = DeprecatedString::formatted("/proc/{}/perf_events", pid);
@@ -86,7 +87,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_icon(app_icon.bitmap_for_size(16));
     window->resize(800, 600);
 
-    auto main_widget = TRY(window->try_set_main_widget<GUI::Widget>());
+    auto main_widget = TRY(window->set_main_widget<GUI::Widget>());
     main_widget->set_fill_with_background_color(true);
     main_widget->set_layout<GUI::VerticalBoxLayout>();
 
@@ -130,9 +131,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto tab_widget = TRY(main_splitter->try_add<GUI::TabWidget>());
 
-    auto tree_tab = TRY(tab_widget->try_add_tab<GUI::Widget>("Call Tree"));
-    tree_tab->set_layout<GUI::VerticalBoxLayout>();
-    tree_tab->layout()->set_margins(4);
+    auto tree_tab = TRY(tab_widget->try_add_tab<GUI::Widget>(TRY("Call Tree"_string)));
+    TRY(tree_tab->try_set_layout<GUI::VerticalBoxLayout>(4));
     auto bottom_splitter = TRY(tree_tab->try_add<GUI::VerticalSplitter>());
 
     auto tree_view = TRY(bottom_splitter->try_add<GUI::TreeView>());
@@ -170,19 +170,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         update_source_model();
     };
 
-    auto disassembly_action = GUI::Action::create_checkable("Show &Disassembly", { Mod_Ctrl, Key_D }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/x86.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto& action) {
+    auto disassembly_action = GUI::Action::create_checkable("Show &Disassembly", { Mod_Ctrl, Key_D }, Gfx::Bitmap::load_from_file("/res/icons/16x16/x86.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto& action) {
         disassembly_view->set_visible(action.is_checked());
         update_disassembly_model();
     });
 
-    auto source_action = GUI::Action::create_checkable("Show &Source", { Mod_Ctrl, Key_S }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/x86.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto& action) {
+    auto source_action = GUI::Action::create_checkable("Show &Source", { Mod_Ctrl, Key_S }, Gfx::Bitmap::load_from_file("/res/icons/16x16/x86.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto& action) {
         source_view->set_visible(action.is_checked());
         update_source_model();
     });
 
-    auto samples_tab = TRY(tab_widget->try_add_tab<GUI::Widget>("Samples"));
-    samples_tab->set_layout<GUI::VerticalBoxLayout>();
-    samples_tab->layout()->set_margins(4);
+    auto samples_tab = TRY(tab_widget->try_add_tab<GUI::Widget>(TRY("Samples"_string)));
+    TRY(samples_tab->try_set_layout<GUI::VerticalBoxLayout>(4));
 
     auto samples_splitter = TRY(samples_tab->try_add<GUI::HorizontalSplitter>());
     auto samples_table_view = TRY(samples_splitter->try_add<GUI::TableView>());
@@ -195,9 +194,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         individual_sample_view->set_model(move(model));
     };
 
-    auto signposts_tab = TRY(tab_widget->try_add_tab<GUI::Widget>("Signposts"));
-    signposts_tab->set_layout<GUI::VerticalBoxLayout>();
-    signposts_tab->layout()->set_margins(4);
+    auto signposts_tab = TRY(tab_widget->try_add_tab<GUI::Widget>(TRY("Signposts"_string)));
+    TRY(signposts_tab->try_set_layout<GUI::VerticalBoxLayout>(4));
 
     auto signposts_splitter = TRY(signposts_tab->try_add<GUI::HorizontalSplitter>());
     auto signposts_table_view = TRY(signposts_splitter->try_add<GUI::TableView>());
@@ -210,9 +208,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         individual_signpost_view->set_model(move(model));
     };
 
-    auto flamegraph_tab = TRY(tab_widget->try_add_tab<GUI::Widget>("Flame Graph"));
-    flamegraph_tab->set_layout<GUI::VerticalBoxLayout>();
-    flamegraph_tab->layout()->set_margins({ 4, 4, 4, 4 });
+    auto flamegraph_tab = TRY(tab_widget->try_add_tab<GUI::Widget>(TRY("Flame Graph"_string)));
+    TRY(flamegraph_tab->try_set_layout<GUI::VerticalBoxLayout>(GUI::Margins { 4, 4, 4, 4 }));
 
     auto flamegraph_view = TRY(flamegraph_tab->try_add<FlameGraphView>(profile->model(), ProfileModel::Column::StackFrame, ProfileModel::Column::SampleCount));
 
@@ -223,10 +220,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     };
 
     // FIXME: Make this constexpr once String is able to.
-    auto const sample_count_percent_format_string = DeprecatedString::formatted("{{:.{}f}}%", number_of_percent_digits);
-    auto const format_sample_count = [&profile, sample_count_percent_format_string](auto const sample_count) {
+    auto const format_sample_count = [&profile](auto const sample_count) {
         if (profile->show_percentages())
-            return DeprecatedString::formatted(sample_count_percent_format_string, sample_count.as_float_or(0.0));
+            return DeprecatedString::formatted("{}%", sample_count.as_string());
         return DeprecatedString::formatted("{} Samples", sample_count.to_i32());
     };
 
@@ -260,9 +256,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     timeline_view->on_selection_change = [&] { statusbar_update(); };
     flamegraph_view->on_hover_change = [&] { statusbar_update(); };
 
-    auto filesystem_events_tab = TRY(tab_widget->try_add_tab<GUI::Widget>("Filesystem events"));
-    filesystem_events_tab->set_layout<GUI::VerticalBoxLayout>();
-    filesystem_events_tab->layout()->set_margins(4);
+    auto filesystem_events_tab = TRY(tab_widget->try_add_tab<GUI::Widget>(TRY("Filesystem events"_string)));
+    TRY(filesystem_events_tab->try_set_layout<GUI::VerticalBoxLayout>(4));
 
     auto filesystem_events_tree_view = TRY(filesystem_events_tab->try_add<GUI::TreeView>());
     filesystem_events_tree_view->set_should_fill_selected_rows(true);
@@ -270,10 +265,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     filesystem_events_tree_view->set_selection_behavior(GUI::TreeView::SelectionBehavior::SelectRows);
     filesystem_events_tree_view->set_model(profile->file_event_model());
 
-    auto file_menu = TRY(window->try_add_menu("&File"));
+    auto file_menu = TRY(window->try_add_menu("&File"_short_string));
     TRY(file_menu->try_add_action(GUI::CommonActions::make_quit_action([&](auto&) { app->quit(); })));
 
-    auto view_menu = TRY(window->try_add_menu("&View"));
+    auto view_menu = TRY(window->try_add_menu("&View"_short_string));
 
     auto invert_action = GUI::Action::create_checkable("&Invert Tree", { Mod_Ctrl, Key_I }, [&](auto& action) {
         profile->set_inverted(action.is_checked());
@@ -299,7 +294,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(view_menu->try_add_action(disassembly_action));
     TRY(view_menu->try_add_action(source_action));
 
-    auto help_menu = TRY(window->try_add_menu("&Help"));
+    auto help_menu = TRY(window->try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/Profiler.md"), "/bin/Help");
@@ -315,22 +310,22 @@ static bool prompt_to_stop_profiling(pid_t pid, DeprecatedString const& process_
     auto window = GUI::Window::construct();
     window->set_title(DeprecatedString::formatted("Profiling {}({})", process_name, pid));
     window->resize(240, 100);
-    window->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-profiler.png"sv).release_value_but_fixme_should_propagate_errors());
+    window->set_icon(Gfx::Bitmap::load_from_file("/res/icons/16x16/app-profiler.png"sv).release_value_but_fixme_should_propagate_errors());
     window->center_on_screen();
 
-    auto& widget = window->set_main_widget<GUI::Widget>();
-    widget.set_fill_with_background_color(true);
-    auto& layout = widget.set_layout<GUI::VerticalBoxLayout>();
-    layout.set_margins({ 0, 0, 16 });
+    auto widget = window->set_main_widget<GUI::Widget>().release_value_but_fixme_should_propagate_errors();
+    widget->set_fill_with_background_color(true);
+    widget->set_layout<GUI::VerticalBoxLayout>(GUI::Margins { 0, 0, 16 });
 
-    auto& timer_label = widget.add<GUI::Label>("...");
+    auto& timer_label = widget->add<GUI::Label>("...");
     Core::ElapsedTimer clock;
     clock.start();
-    auto update_timer = Core::Timer::construct(100, [&] {
-        timer_label.set_text(DeprecatedString::formatted("{:.1} seconds", clock.elapsed() / 1000.0f));
-    });
+    auto update_timer = Core::Timer::create_repeating(100, [&] {
+        timer_label.set_text(DeprecatedString::formatted("{:.1} seconds", static_cast<float>(clock.elapsed()) / 1000.0f));
+    }).release_value_but_fixme_should_propagate_errors();
+    update_timer->start();
 
-    auto& stop_button = widget.add<GUI::Button>("Stop");
+    auto& stop_button = widget->add<GUI::Button>("Stop"_short_string);
     stop_button.set_fixed_size(140, 22);
     stop_button.on_click = [&](auto) {
         GUI::Application::the()->quit();
@@ -343,7 +338,7 @@ static bool prompt_to_stop_profiling(pid_t pid, DeprecatedString const& process_
 bool generate_profile(pid_t& pid)
 {
     if (!pid) {
-        auto process_chooser = GUI::ProcessChooser::construct("Profiler"sv, "Profile"sv, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-profiler.png"sv).release_value_but_fixme_should_propagate_errors());
+        auto process_chooser = GUI::ProcessChooser::construct("Profiler"sv, "Profile"_short_string, Gfx::Bitmap::load_from_file("/res/icons/16x16/app-profiler.png"sv).release_value_but_fixme_should_propagate_errors());
         if (process_chooser->exec() == GUI::Dialog::ExecResult::Cancel)
             return false;
         pid = process_chooser->pid();

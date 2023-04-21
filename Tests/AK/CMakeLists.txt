@@ -10,12 +10,13 @@ set(AK_TEST_SOURCES
     TestBinarySearch.cpp
     TestBitCast.cpp
     TestBitmap.cpp
+    TestBitStream.cpp
     TestBuiltinWrappers.cpp
     TestByteBuffer.cpp
     TestCharacterTypes.cpp
     TestChecked.cpp
+    TestCircularBuffer.cpp
     TestCircularDeque.cpp
-    TestCircularDuplexStream.cpp
     TestCircularQueue.cpp
     TestComplex.cpp
     TestDeprecatedString.cpp
@@ -29,6 +30,7 @@ set(AK_TEST_SOURCES
     TestFixedPoint.cpp
     TestFloatingPoint.cpp
     TestFloatingPointParsing.cpp
+    TestFlyString.cpp
     TestFormat.cpp
     TestGenericLexer.cpp
     TestHashFunctions.cpp
@@ -49,20 +51,24 @@ set(AK_TEST_SOURCES
     TestMemory.cpp
     TestMemoryStream.cpp
     TestNeverDestroyed.cpp
+    TestNonnullOwnPtr.cpp
     TestNonnullRefPtr.cpp
     TestNumberFormat.cpp
     TestOptional.cpp
     TestOwnPtr.cpp
     TestPrint.cpp
     TestQueue.cpp
+    TestQuickSelect.cpp
     TestQuickSort.cpp
     TestRedBlackTree.cpp
     TestRefPtr.cpp
+    TestSIMD.cpp
     TestSinglyLinkedList.cpp
     TestSourceGenerator.cpp
     TestSourceLocation.cpp
     TestSpan.cpp
     TestStack.cpp
+    TestStatistics.cpp
     TestStdLibExtras.cpp
     TestString.cpp
     TestStringFloatingPointConversions.cpp
@@ -85,3 +91,5 @@ set(AK_TEST_SOURCES
 foreach(source IN LISTS AK_TEST_SOURCES)
     serenity_test("${source}" AK)
 endforeach()
+
+target_link_libraries(TestString PRIVATE LibUnicode)

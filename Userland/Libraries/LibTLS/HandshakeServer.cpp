@@ -46,7 +46,7 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
         dbgln("not enough data for version");
         return (i8)Error::NeedMoreData;
     }
-    auto version = static_cast<Version>(AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(res))));
+    auto version = static_cast<ProtocolVersion>(AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(res))));
 
     res += 2;
     if (!supports_version(version))
@@ -80,12 +80,12 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
     auto cipher = static_cast<CipherSuite>(AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(res))));
     res += 2;
     if (!supports_cipher(cipher)) {
-        m_context.cipher = CipherSuite::Invalid;
+        m_context.cipher = CipherSuite::TLS_NULL_WITH_NULL_NULL;
         dbgln("No supported cipher could be agreed upon");
         return (i8)Error::NoCommonCipher;
     }
     m_context.cipher = cipher;
-    dbgln_if(TLS_DEBUG, "Cipher: {}", (u16)cipher);
+    dbgln_if(TLS_DEBUG, "Cipher: {}", enum_to_string(cipher));
 
     // Simplification: We only support handshake hash functions via HMAC
     m_context.handshake_hash.initialize(hmac_hash());
@@ -111,17 +111,17 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
     }
 
     while (buffer.size() - res >= 4) {
-        auto extension_type = (HandshakeExtension)AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(res)));
+        auto extension_type = (ExtensionType)AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(res)));
         res += 2;
         u16 extension_length = AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(res)));
         res += 2;
 
-        dbgln_if(TLS_DEBUG, "Extension {} with length {}", (u16)extension_type, extension_length);
+        dbgln_if(TLS_DEBUG, "Extension {} with length {}", enum_to_string(extension_type), extension_length);
 
         if (buffer.size() - res < extension_length)
             return (i8)Error::NeedMoreData;
 
-        if (extension_type == HandshakeExtension::ServerName) {
+        if (extension_type == ExtensionType::SERVER_NAME) {
             // RFC6066 section 3: SNI extension_data can be empty in the server hello
             if (extension_length > 0) {
                 // ServerNameList total size
@@ -136,7 +136,7 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
                 auto sni_name_type = (NameType)(*(u8 const*)buffer.offset_pointer(res++));
                 auto sni_name_length = AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(res += 2)));
 
-                if (sni_name_type != NameType::HostName)
+                if (sni_name_type != NameType::HOST_NAME)
                     return (i8)Error::NotUnderstood;
 
                 if (sizeof(sni_name_type) + sizeof(sni_name_length) + sni_name_length != sni_name_list_bytes)
@@ -149,7 +149,7 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
                 res += sni_name_length;
                 dbgln("SNI host_name: {}", m_context.extensions.SNI);
             }
-        } else if (extension_type == HandshakeExtension::ApplicationLayerProtocolNegotiation && m_context.alpn.size()) {
+        } else if (extension_type == ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION && m_context.alpn.size()) {
             if (buffer.size() - res > 2) {
                 auto alpn_length = AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(res)));
                 if (alpn_length && alpn_length <= extension_length - 2) {
@@ -172,12 +172,12 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
                 }
             }
             res += extension_length;
-        } else if (extension_type == HandshakeExtension::SignatureAlgorithms) {
+        } else if (extension_type == ExtensionType::SIGNATURE_ALGORITHMS) {
             dbgln("supported signatures: ");
             print_buffer(buffer.slice(res, extension_length));
             res += extension_length;
             // FIXME: what are we supposed to do here?
-        } else if (extension_type == HandshakeExtension::ECPointFormats) {
+        } else if (extension_type == ExtensionType::EC_POINT_FORMATS) {
             // RFC8422 section 5.2: A server that selects an ECC cipher suite in response to a ClientHello message
             // including a Supported Point Formats Extension appends this extension (along with others) to its
             // ServerHello message, enumerating the point formats it can parse. The Supported Point Formats Extension,
@@ -188,7 +188,7 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
             // that the server supports uncompressed points.
             res += extension_length;
         } else {
-            dbgln("Encountered unknown extension {} with length {}", (u16)extension_type, extension_length);
+            dbgln("Encountered unknown extension {} with length {}", enum_to_string(extension_type), extension_length);
             res += extension_length;
         }
     }
@@ -298,21 +298,21 @@ ssize_t TLSv12::handle_ecdhe_rsa_server_key_exchange(ReadonlyBytes buffer)
         return (i8)Error::NeedMoreData;
 
     auto curve_type = buffer[3];
-    if (curve_type != (u8)ECCurveType::NamedCurve)
+    if (curve_type != (u8)ECCurveType::NAMED_CURVE)
         return (i8)Error::NotUnderstood;
 
-    auto curve = static_cast<NamedCurve>(AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(4))));
+    auto curve = static_cast<SupportedGroup>(AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(4))));
     if (!m_context.options.elliptic_curves.contains_slow(curve))
         return (i8)Error::NotUnderstood;
 
-    switch ((NamedCurve)curve) {
-    case NamedCurve::x25519:
+    switch ((SupportedGroup)curve) {
+    case SupportedGroup::X25519:
         m_context.server_key_exchange_curve = make<Crypto::Curves::X25519>();
         break;
-    case NamedCurve::x448:
+    case SupportedGroup::X448:
         m_context.server_key_exchange_curve = make<Crypto::Curves::X448>();
         break;
-    case NamedCurve::secp256r1:
+    case SupportedGroup::SECP256R1:
         m_context.server_key_exchange_curve = make<Crypto::Curves::SECP256r1>();
         break;
     default:
@@ -346,9 +346,9 @@ ssize_t TLSv12::handle_ecdhe_rsa_server_key_exchange(ReadonlyBytes buffer)
 ssize_t TLSv12::verify_rsa_server_key_exchange(ReadonlyBytes server_key_info_buffer, ReadonlyBytes signature_buffer)
 {
     auto signature_hash = signature_buffer[0];
-    auto signature_algorithm = signature_buffer[1];
-    if (signature_algorithm != (u8)SignatureAlgorithm::RSA) {
-        dbgln("verify_rsa_server_key_exchange failed: Signature algorithm is not RSA, instead {}", signature_algorithm);
+    auto signature_algorithm = static_cast<SignatureAlgorithm>(signature_buffer[1]);
+    if (signature_algorithm != SignatureAlgorithm::RSA) {
+        dbgln("verify_rsa_server_key_exchange failed: Signature algorithm is not RSA, instead {}", enum_to_string(signature_algorithm));
         return (i8)Error::NotUnderstood;
     }
 
@@ -362,7 +362,7 @@ ssize_t TLSv12::verify_rsa_server_key_exchange(ReadonlyBytes server_key_info_buf
     // RFC5246 section 7.4.2: The sender's certificate MUST come first in the list.
     auto certificate_public_key = m_context.certificates.first().public_key;
     Crypto::PK::RSAPrivateKey dummy_private_key;
-    auto rsa = Crypto::PK::RSA(certificate_public_key, dummy_private_key);
+    auto rsa = Crypto::PK::RSA(certificate_public_key.rsa, dummy_private_key);
 
     auto signature_verify_buffer_result = ByteBuffer::create_uninitialized(signature_length);
     if (signature_verify_buffer_result.is_error()) {

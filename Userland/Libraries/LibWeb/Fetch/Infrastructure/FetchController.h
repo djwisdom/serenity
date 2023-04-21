@@ -6,10 +6,13 @@
 
 #pragma once
 
+#include <AK/Badge.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibJS/Heap/GCPtr.h>
 #include <LibJS/SafeFunction.h>
 #include <LibWeb/Fetch/Infrastructure/FetchTimingInfo.h>
+#include <LibWeb/Forward.h>
 
 namespace Web::Fetch::Infrastructure {
 
@@ -35,8 +38,12 @@ public:
     void report_timing(JS::Object const&) const;
     void process_next_manual_redirect() const;
     [[nodiscard]] JS::NonnullGCPtr<FetchTimingInfo> extract_full_timing_info() const;
-    void abort(JS::VM&, Optional<JS::Value>);
+    void abort(JS::Realm&, Optional<JS::Value>);
     void terminate();
+
+    void set_fetch_params(Badge<FetchParams>, JS::NonnullGCPtr<FetchParams> fetch_params) { m_fetch_params = fetch_params; }
+
+    void stop_fetch();
 
 private:
     FetchController();
@@ -66,6 +73,8 @@ private:
     // next manual redirect steps (default null)
     //     Null or an algorithm accepting nothing.
     Optional<JS::SafeFunction<void()>> m_next_manual_redirect_steps;
+
+    JS::GCPtr<FetchParams> m_fetch_params;
 };
 
 }

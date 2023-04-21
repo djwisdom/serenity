@@ -27,7 +27,7 @@ This will configure your keymap to German (`de`) instead of US English. See [`Ba
 
 The `Meta/serenity.sh` script provides an abstraction over the build targets which are made available by CMake. The
 following build targets cannot be accessed through the script and have to be used directly by changing the current
-directory to `Build/i686` and then running `ninja <target>`:
+directory to `Build/x86_64` and then running `ninja <target>`:
 
 - `ninja limine-image`: Builds a disk image (`limine_disk_image`) with Limine
 - `ninja grub-image`: Builds a disk image (`grub_disk_image`) with GRUB
@@ -48,9 +48,9 @@ There are some optional features that can be enabled during compilation that are
 - `ENABLE_MEMORY_SANITIZER`: enables runtime checks for uninitialized memory accesses in Lagom test cases.
 - `ENABLE_UNDEFINED_SANITIZER`: builds in runtime checks for [undefined behavior](https://en.wikipedia.org/wiki/Undefined_behavior) (like null pointer dereferences and signed integer overflows) in Lagom test cases.
 - `ENABLE_COMPILER_EXPLORER_BUILD`: Skip building non-library entities in Lagom (this only applies to Lagom).
-- `ENABLE_FUZZERS`: builds [fuzzers](https://en.wikipedia.org/wiki/Fuzzing) for various parts of the system.
-- `ENABLE_FUZZERS_LIBFUZZER`: builds Clang libFuzzer-based [fuzzers](https://en.wikipedia.org/wiki/Fuzzing) for various parts of the system.
-- `ENABLE_FUZZERS_OSSFUZZ`: builds OSS-Fuzz compatible [fuzzers](https://en.wikipedia.org/wiki/Fuzzing) for various parts of the system.
+- `ENABLE_FUZZERS`: builds [fuzzers](../Meta/Lagom/ReadMe.md#fuzzing) for various parts of the system.
+- `ENABLE_FUZZERS_LIBFUZZER`: builds Clang libFuzzer-based [fuzzers](../Meta/Lagom/ReadMe.md#fuzzing) for various parts of the system.
+- `ENABLE_FUZZERS_OSSFUZZ`: builds OSS-Fuzz compatible [fuzzers](../Meta/Lagom/ReadMe.md#fuzzing) for various parts of the system.
 - `ENABLE_EXTRA_KERNEL_DEBUG_SYMBOLS`: sets -Og and -ggdb3 compile options for building the Kernel. Allows for easier debugging of Kernel code. By default, the Kernel is built with -O2 instead.
 - `ENABLE_ALL_THE_DEBUG_MACROS`: used for checking whether debug code compiles on CI. This should not be set normally, as it clutters the console output and makes the system run very slowly. Instead, enable only the needed debug macros, as described below.
 - `ENABLE_ALL_DEBUG_FACILITIES`: used for checking whether debug code compiles on CI. Enables both `ENABLE_ALL_THE_DEBUG_MACROS` and `ENABLE_EXTRA_KERNEL_DEBUG_SYMBOLS`.
@@ -64,8 +64,8 @@ There are some optional features that can be enabled during compilation that are
 - `INCLUDE_WASM_SPEC_TESTS`: downloads and includes the WebAssembly spec testsuite tests. In order to use this option, you will need to install `prettier` and `wabt`. wabt version 1.0.23 or higher is required to pre-process the WebAssembly spec testsuite.
 - `INCLUDE_FLAC_SPEC_TESTS`: downloads and includes the xiph.org FLAC test suite.
 - `SERENITY_TOOLCHAIN`: Specifies whether to use the established GNU toolchain, or the experimental Clang-based toolchain for building SerenityOS. See the [Clang-based toolchain](#clang-based-toolchain) section below.
-- `SERENITY_ARCH`: Specifies which architecture to build for. Currently supported options are `i686` and `x86_64`. `x86_64` requires a separate toolchain build from `i686`.
-- `BUILD_<component>`: builds the specified component, e.g. `BUILD_HEARTS` (note: must be all caps). Check the components.ini file in your build directory for a list of available components. Make sure to run `ninja clean` and `rm -rf Build/i686/Root` after disabling components. These options can be easily configured by using the `ConfigureComponents` utility. See the [Component Configuration](#component-configuration) section below.
+- `SERENITY_ARCH`: Specifies which architecture to build for. Currently supported options are `x86_64`.
+- `BUILD_<component>`: builds the specified component, e.g. `BUILD_HEARTS` (note: must be all caps). Check the components.ini file in your build directory for a list of available components. Make sure to run `ninja clean` and `rm -rf Build/x86_64/Root` after disabling components. These options can be easily configured by using the `ConfigureComponents` utility. See the [Component Configuration](#component-configuration) section below.
 - `BUILD_EVERYTHING`: builds all optional components, overrides other `BUILD_<component>` flags when enabled
 
 Many parts of the SerenityOS codebase have debug functionality, mostly consisting of additional messages printed to the debug console. This is done via the `<component_name>_DEBUG` macros, which can be enabled individually at build time. They are listed in [this file](../Meta/CMake/all_the_debug_macros.cmake).
@@ -88,7 +88,7 @@ For example, boolean options such as `ENABLE_<setting>` or `<component_name>_DEB
 
 ```console
 # Reconfigure an existing binary directory with process debug enabled
-$ cmake -B Build/i686 -DPROCESS_DEBUG=ON
+$ cmake -B Build/x86_64 -DPROCESS_DEBUG=ON
 ```
 
 For more information on how the CMake cache works, see the CMake guide for [Running CMake](https://cmake.org/runningcmake/). Additional context is available in the CMake documentation for
@@ -104,9 +104,9 @@ and unifies the approach taken towards different compiler toolchains and archite
 The recommended way to build and run the system, `./Meta/serenity.sh run`, invokes the SuperBuild equivalently to the commands below:
 
 ```console
-$ cmake -GNinja -S Meta/CMake/Superbuild -B Build/superbuild-i686 -DSERENITY_ARCH=i686 -DSERENITY_TOOLCHAIN=GNU
-$ cmake --build Build/superbuild-i686
-$ ninja -C Build/i686 setup-and-run
+$ cmake -GNinja -S Meta/CMake/Superbuild -B Build/superbuild-x86_64 -DSERENITY_ARCH=x86_64 -DSERENITY_TOOLCHAIN=GNU
+$ cmake --build Build/superbuild-x86_64
+$ ninja -C Build/x86_64 setup-and-run
 ```
 
 The CMake configuration of the `superbuild-<arch>` directory configures two [ExternalProjects](https://cmake.org/cmake/help/latest/module/ExternalProject.html).
@@ -123,18 +123,18 @@ The SuperBuild build steps are roughly equivalent to the following commands:
 
 ```console
 # Generate CMakeToolchain.txt
-mkdir -p Build/i686
-cp Toolchain/CMake/GNUToolchain.txt.in Build/i686/CMakeToolchain.txt
-sed -i 's/@SERENITY_ARCH@/i686/g' Build/i686/CMakeToolchain.txt
-sed -i 's/@SERENITY_SOURCE_DIR@/'"$PWD"'/g' Build/i686/CMakeToolchain.txt
-sed -i 's/@SERENITY_BUILD_DIR@/'"$PWD"'\/Build\/i686/g' Build/i686/CMakeToolchain.txt
+mkdir -p Build/x86_64
+cp Toolchain/CMake/GNUToolchain.txt.in Build/x86_64/CMakeToolchain.txt
+sed -i 's/@SERENITY_ARCH@/x86_64/g' Build/x86_64/CMakeToolchain.txt
+sed -i 's/@SERENITY_SOURCE_DIR@/'"$PWD"'/g' Build/x86_64/CMakeToolchain.txt
+sed -i 's/@SERENITY_BUILD_DIR@/'"$PWD"'\/Build\/x86_64/g' Build/x86_64/CMakeToolchain.txt
 
 # Configure and install Lagom
 cmake -GNinja -S Meta/Lagom -B Build/lagom -DCMAKE_INSTALL_PREFIX=${PWD}/Build/lagom-install
 ninja -C Build/lagom install
 # Configure and install Serenity, pointing it to Lagom's install prefix
-cmake -GNinja -B Build/i686 -DCMAKE_PREFIX_PATH=${PWD}/Build/lagom-install -DSERENITY_ARCH=i686 -DCMAKE_TOOLCHAIN_FILE=${PWD}/Build/i686/CMakeToolchain.txt
-ninja -C Build/i686 install
+cmake -GNinja -B Build/x86_64 -DCMAKE_PREFIX_PATH=${PWD}/Build/lagom-install -DSERENITY_ARCH=x86_64 -DCMAKE_TOOLCHAIN_FILE=${PWD}/Build/x86_64/CMakeToolchain.txt
+ninja -C Build/x86_64 install
 ```
 
 Directing future `ninja` or `cmake --build` invocations to the `superbuild-<arch>` directory ensures that any headers or cpp files shared between the
@@ -149,12 +149,12 @@ The debug flags might be manipulated after a build per the following commands:
 
 ```console
 # Initial build, generate binary directories for both child builds
-$ cmake -GNinja -S Meta/CMake/Superbuild -B Build/superbuild-i686 -DSERENITY_ARCH=i686 -DSERENITY_TOOLCHAIN=GNU
-$ cmake --build Build/superbuild-i686
+$ cmake -GNinja -S Meta/CMake/Superbuild -B Build/superbuild-x86_64 -DSERENITY_ARCH=x86_64 -DSERENITY_TOOLCHAIN=GNU
+$ cmake --build Build/superbuild-x86_64
 
 # Turn on process debug and don't build the browser for the Serenity build
-$ cmake -B Build/i686 -DPROCESS_DEBUG=ON -DBUILD_BROWSER=OFF
-$ ninja -C Build/i686 install
+$ cmake -B Build/x86_64 -DPROCESS_DEBUG=ON -DBUILD_BROWSER=OFF
+$ ninja -C Build/x86_64 install
 
 # Build host tests in Lagom build
 $ cmake -S Meta/Lagom -B Build/lagom -DBUILD_LAGOM=ON
@@ -165,7 +165,7 @@ $ ninja -C Build/lagom install
 
 For selecting which components of the system to build and install, a helper program, `ConfigureComponents` is available.
 
-It requires `whiptail` as a dependency, which is available on most systems in the `newt` or `libnewt` package. To build and run it, run the following commands from the `Build/i686` directory:
+It requires `whiptail` as a dependency, which is available on most systems in the `newt` or `libnewt` package. To build and run it, run the following commands from the `Build/x86_64` directory:
 ```console
 $ ninja configure-components
 ```
@@ -203,8 +203,7 @@ bugs. Code compiled with both of these toolchains works identically in most case
 can't be built with Clang yet.
 
 To build the Clang-based toolchain, run `BuildClang.sh` from the `Toolchain` directory. The script will build a Clang
-toolchain that is capable of building applications for the build host and serenity, 
-for all supported architecutres (i686, x86_64 and aarch64).
+toolchain that is capable of building applications for the build host and serenity.
 
 **Warning:** While the build script is running, your computer may slow down extremely or even lock up for short
 intervals.  This generally happens if you have more CPU cores than free RAM in gigabytes. To fix this, limit the number
@@ -214,6 +213,8 @@ Once the build script finishes, you can use it to compile SerenityOS. Either set
 option to `Clang` as shown [above](#cmake-build-options), or pass `Clang` as the TOOLCHAIN option to
 `Meta/serenity.sh`, for example: `Meta/serenity.sh run x86_64 Clang`.
 
+### Serenity-aware clang tools
+
 Building the clang-based toolchain also builds libTooling-based tools such as clang-format, clang-tidy and (optionally)
 clangd that are aware of SerenityOS as a valid target. These tools will be installed into ``Toolchain/Local/clang/bin`` by
 the script. Pointing your editor's plugins to the custom-built clang tools and a ``compile_commands.json`` from a clang build
@@ -221,7 +222,7 @@ of Serenity can enable richer error reporting than the tools that are installed 
 
 To enable building clangd as part of the clang toolchain, set ``CLANG_ENABLE_CLANGD`` to ON in
 ``Toolchain/CMake/LLVMConfig.cmake`` before running BuildClang.sh. If you already built the clang toolchain and would like to
-enable the custom clangd build, change the CMake cache variable ``CLANG_ENABLE_CLANGD`` to ON in ``Toolchain/Build/clang/llvm``  
+enable the custom clangd build, change the CMake cache variable ``CLANG_ENABLE_CLANGD`` to ON in ``Toolchain/Build/clang/llvm``
 and re-install with ``cd Toolchain/Build/clang/llvm && cmake ../../../Tarballs/llvm-project-$LLVM_VERSION.src/llvm -DCLANG_ENABLE_CLANGD=ON && ninja install/strip``, where $LLVM_VERSION should be tab-completable in your shell.
 
 ## Clang-format updates

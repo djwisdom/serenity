@@ -15,18 +15,25 @@
 
 namespace Web::CSS {
 
-JS::NonnullGCPtr<MediaQueryList> MediaQueryList::create(DOM::Document& document, NonnullRefPtrVector<MediaQuery>&& media)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<MediaQueryList>> MediaQueryList::create(DOM::Document& document, Vector<NonnullRefPtr<MediaQuery>>&& media)
 {
-    return document.heap().allocate<MediaQueryList>(document.realm(), document, move(media));
+    return MUST_OR_THROW_OOM(document.heap().allocate<MediaQueryList>(document.realm(), document, move(media)));
 }
 
-MediaQueryList::MediaQueryList(DOM::Document& document, NonnullRefPtrVector<MediaQuery>&& media)
+MediaQueryList::MediaQueryList(DOM::Document& document, Vector<NonnullRefPtr<MediaQuery>>&& media)
     : DOM::EventTarget(document.realm())
     , m_document(document)
     , m_media(move(media))
 {
-    set_prototype(&Bindings::ensure_web_prototype<Bindings::MediaQueryListPrototype>(document.realm(), "MediaQueryList"));
     evaluate();
+}
+
+JS::ThrowCompletionOr<void> MediaQueryList::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::MediaQueryListPrototype>(realm, "MediaQueryList"));
+
+    return {};
 }
 
 void MediaQueryList::visit_edges(Cell::Visitor& visitor)
@@ -38,14 +45,14 @@ void MediaQueryList::visit_edges(Cell::Visitor& visitor)
 // https://drafts.csswg.org/cssom-view/#dom-mediaquerylist-media
 DeprecatedString MediaQueryList::media() const
 {
-    return serialize_a_media_query_list(m_media);
+    return serialize_a_media_query_list(m_media).release_value_but_fixme_should_propagate_errors().to_deprecated_string();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-mediaquerylist-matches
 bool MediaQueryList::matches() const
 {
     for (auto& media : m_media) {
-        if (media.matches())
+        if (media->matches())
             return true;
     }
     return false;
@@ -55,7 +62,7 @@ bool MediaQueryList::evaluate()
 {
     bool now_matches = false;
     for (auto& media : m_media) {
-        now_matches = now_matches || media.evaluate(m_document->window());
+        now_matches = now_matches || media->evaluate(m_document->window());
     }
 
     return now_matches;

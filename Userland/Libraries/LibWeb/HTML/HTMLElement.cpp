@@ -6,11 +6,12 @@
 
 #include <AK/StringBuilder.h>
 #include <LibJS/Interpreter.h>
+#include <LibWeb/ARIA/Roles.h>
+#include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/IDLEventListener.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/BrowsingContext.h>
-#include <LibWeb/HTML/BrowsingContextContainer.h>
 #include <LibWeb/HTML/DOMStringMap.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/Focus.h>
@@ -18,6 +19,7 @@
 #include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/HTML/VisibilityState.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Layout/Box.h>
@@ -35,15 +37,20 @@ namespace Web::HTML {
 HTMLElement::HTMLElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : Element(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLElement"));
 }
 
 HTMLElement::~HTMLElement() = default;
 
-void HTMLElement::initialize(JS::Realm& realm)
+JS::ThrowCompletionOr<void> HTMLElement::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
-    m_dataset = DOMStringMap::create(*this);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLElementPrototype>(realm, "HTMLElement"));
+
+    m_dataset = TRY(Bindings::throw_dom_exception_if_needed(realm.vm(), [&]() {
+        return DOMStringMap::create(*this);
+    }));
+
+    return {};
 }
 
 void HTMLElement::visit_edges(Cell::Visitor& visitor)
@@ -57,7 +64,7 @@ DeprecatedString HTMLElement::dir() const
 {
     auto dir = attribute(HTML::AttributeNames::dir);
 #define __ENUMERATE_HTML_ELEMENT_DIR_ATTRIBUTE(keyword) \
-    if (dir.equals_ignoring_case(#keyword##sv))         \
+    if (dir.equals_ignoring_ascii_case(#keyword##sv))   \
         return #keyword##sv;
     ENUMERATE_HTML_ELEMENT_DIR_ATTRIBUTES
 #undef __ENUMERATE_HTML_ELEMENT_DIR_ATTRIBUTE
@@ -74,10 +81,10 @@ HTMLElement::ContentEditableState HTMLElement::content_editable_state() const
 {
     auto contenteditable = attribute(HTML::AttributeNames::contenteditable);
     // "true", an empty string or a missing value map to the "true" state.
-    if ((!contenteditable.is_null() && contenteditable.is_empty()) || contenteditable.equals_ignoring_case("true"sv))
+    if ((!contenteditable.is_null() && contenteditable.is_empty()) || contenteditable.equals_ignoring_ascii_case("true"sv))
         return ContentEditableState::True;
     // "false" maps to the "false" state.
-    if (contenteditable.equals_ignoring_case("false"sv))
+    if (contenteditable.equals_ignoring_ascii_case("false"sv))
         return ContentEditableState::False;
     // Having no such attribute or an invalid value maps to the "inherit" state.
     return ContentEditableState::Inherit;
@@ -114,15 +121,15 @@ DeprecatedString HTMLElement::content_editable() const
 // https://html.spec.whatwg.org/multipage/interaction.html#contenteditable
 WebIDL::ExceptionOr<void> HTMLElement::set_content_editable(DeprecatedString const& content_editable)
 {
-    if (content_editable.equals_ignoring_case("inherit"sv)) {
+    if (content_editable.equals_ignoring_ascii_case("inherit"sv)) {
         remove_attribute(HTML::AttributeNames::contenteditable);
         return {};
     }
-    if (content_editable.equals_ignoring_case("true"sv)) {
+    if (content_editable.equals_ignoring_ascii_case("true"sv)) {
         MUST(set_attribute(HTML::AttributeNames::contenteditable, "true"));
         return {};
     }
-    if (content_editable.equals_ignoring_case("false"sv)) {
+    if (content_editable.equals_ignoring_ascii_case("false"sv)) {
         MUST(set_attribute(HTML::AttributeNames::contenteditable, "false"));
         return {};
     }
@@ -170,7 +177,7 @@ int HTMLElement::offset_top() const
         return 0;
     auto position = layout_node()->box_type_agnostic_position();
     auto parent_position = parent_element()->layout_node()->box_type_agnostic_position();
-    return position.y() - parent_position.y();
+    return position.y().value() - parent_position.y().value();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetleft
@@ -183,7 +190,7 @@ int HTMLElement::offset_left() const
         return 0;
     auto position = layout_node()->box_type_agnostic_position();
     auto parent_position = parent_element()->layout_node()->box_type_agnostic_position();
-    return position.x() - parent_position.x();
+    return position.x().value() - parent_position.x().value();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetwidth
@@ -193,13 +200,13 @@ int HTMLElement::offset_width() const
     const_cast<DOM::Document&>(document()).update_layout();
 
     // 1. If the element does not have any associated CSS layout box return zero and terminate this algorithm.
-    if (!paint_box())
+    if (!paintable_box())
         return 0;
 
     // 2. Return the width of the axis-aligned bounding box of the border boxes of all fragments generated by the element’s principal box,
     //    ignoring any transforms that apply to the element and its ancestors.
     // FIXME: Account for inline boxes.
-    return paint_box()->border_box_width().value();
+    return paintable_box()->border_box_width().value();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetheight
@@ -209,13 +216,13 @@ int HTMLElement::offset_height() const
     const_cast<DOM::Document&>(document()).update_layout();
 
     // 1. If the element does not have any associated CSS layout box return zero and terminate this algorithm.
-    if (!paint_box())
+    if (!paintable_box())
         return 0;
 
     // 2. Return the height of the axis-aligned bounding box of the border boxes of all fragments generated by the element’s principal box,
     //    ignoring any transforms that apply to the element and its ancestors.
     // FIXME: Account for inline boxes.
-    return paint_box()->border_box_height().value();
+    return paintable_box()->border_box_height().value();
 }
 
 // https://html.spec.whatwg.org/multipage/links.html#cannot-navigate
@@ -231,16 +238,16 @@ bool HTMLElement::cannot_navigate() const
     return !is<HTML::HTMLAnchorElement>(this) && !is_connected();
 }
 
-void HTMLElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
+void HTMLElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     Element::parse_attribute(name, value);
 
     // 1. If namespace is not null, or localName is not the name of an event handler content attribute on element, then return.
     // FIXME: Add the namespace part once we support attribute namespaces.
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                     \
-    if (name == HTML::AttributeNames::attribute_name) {             \
-        element_event_handler_attribute_changed(event_name, value); \
+#define __ENUMERATE(attribute_name, event_name)                                                                     \
+    if (name == HTML::AttributeNames::attribute_name) {                                                             \
+        element_event_handler_attribute_changed(event_name, String::from_deprecated_string(value).release_value()); \
     }
     ENUMERATE_GLOBAL_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE
@@ -274,7 +281,7 @@ bool HTMLElement::fire_a_synthetic_pointer_event(FlyString const& type, DOM::Ele
     // 1. Let event be the result of creating an event using PointerEvent.
     // 2. Initialize event's type attribute to e.
     // FIXME: Actually create a PointerEvent!
-    auto event = UIEvents::MouseEvent::create(realm(), type);
+    auto event = UIEvents::MouseEvent::create(realm(), type).release_value_but_fixme_should_propagate_errors();
 
     // 3. Initialize event's bubbles and cancelable attributes to true.
     event->set_bubbles(true);
@@ -296,7 +303,7 @@ bool HTMLElement::fire_a_synthetic_pointer_event(FlyString const& type, DOM::Ele
     // FIXME: 8. event's getModifierState() method is to return values appropriately describing the current state of the key input device.
 
     // 9. Return the result of dispatching event at target.
-    return target.dispatch_event(*event);
+    return target.dispatch_event(event);
 }
 
 // https://html.spec.whatwg.org/multipage/interaction.html#dom-click
@@ -325,6 +332,90 @@ void HTMLElement::blur()
     run_unfocusing_steps(this);
 
     // User agents may selectively or uniformly ignore calls to this method for usability reasons.
+}
+
+Optional<ARIA::Role> HTMLElement::default_role() const
+{
+    // https://www.w3.org/TR/html-aria/#el-article
+    if (local_name() == TagNames::article)
+        return ARIA::Role::article;
+    // https://www.w3.org/TR/html-aria/#el-aside
+    if (local_name() == TagNames::aside)
+        return ARIA::Role::complementary;
+    // https://www.w3.org/TR/html-aria/#el-b
+    if (local_name() == TagNames::b)
+        return ARIA::Role::generic;
+    // https://www.w3.org/TR/html-aria/#el-bdi
+    if (local_name() == TagNames::bdi)
+        return ARIA::Role::generic;
+    // https://www.w3.org/TR/html-aria/#el-bdo
+    if (local_name() == TagNames::bdo)
+        return ARIA::Role::generic;
+    // https://www.w3.org/TR/html-aria/#el-code
+    if (local_name() == TagNames::code)
+        return ARIA::Role::code;
+    // https://www.w3.org/TR/html-aria/#el-dfn
+    if (local_name() == TagNames::dfn)
+        return ARIA::Role::term;
+    // https://www.w3.org/TR/html-aria/#el-em
+    if (local_name() == TagNames::em)
+        return ARIA::Role::emphasis;
+    // https://www.w3.org/TR/html-aria/#el-figure
+    if (local_name() == TagNames::figure)
+        return ARIA::Role::figure;
+    // https://www.w3.org/TR/html-aria/#el-footer
+    if (local_name() == TagNames::footer) {
+        // TODO: If not a descendant of an article, aside, main, nav or section element, or an element with role=article, complementary, main, navigation or region then role=contentinfo
+        // Otherwise, role=generic
+        return ARIA::Role::generic;
+    }
+    // https://www.w3.org/TR/html-aria/#el-header
+    if (local_name() == TagNames::header) {
+        // TODO: If not a descendant of an article, aside, main, nav or section element, or an element with role=article, complementary, main, navigation or region then role=banner
+        // Otherwise, role=generic
+        return ARIA::Role::generic;
+    }
+    // https://www.w3.org/TR/html-aria/#el-hgroup
+    if (local_name() == TagNames::hgroup)
+        return ARIA::Role::generic;
+    // https://www.w3.org/TR/html-aria/#el-i
+    if (local_name() == TagNames::i)
+        return ARIA::Role::generic;
+    // https://www.w3.org/TR/html-aria/#el-main
+    if (local_name() == TagNames::main)
+        return ARIA::Role::main;
+    // https://www.w3.org/TR/html-aria/#el-nav
+    if (local_name() == TagNames::nav)
+        return ARIA::Role::navigation;
+    // https://www.w3.org/TR/html-aria/#el-samp
+    if (local_name() == TagNames::samp)
+        return ARIA::Role::generic;
+    // https://www.w3.org/TR/html-aria/#el-section
+    if (local_name() == TagNames::section) {
+        // TODO:  role=region if the section element has an accessible name
+        //        Otherwise, no corresponding role
+        return ARIA::Role::region;
+    }
+    // https://www.w3.org/TR/html-aria/#el-small
+    if (local_name() == TagNames::small)
+        return ARIA::Role::generic;
+    // https://www.w3.org/TR/html-aria/#el-strong
+    if (local_name() == TagNames::strong)
+        return ARIA::Role::strong;
+    // https://www.w3.org/TR/html-aria/#el-sub
+    if (local_name() == TagNames::sub)
+        return ARIA::Role::subscript;
+    // https://www.w3.org/TR/html-aria/#el-summary
+    if (local_name() == TagNames::summary)
+        return ARIA::Role::button;
+    // https://www.w3.org/TR/html-aria/#el-sup
+    if (local_name() == TagNames::sup)
+        return ARIA::Role::superscript;
+    // https://www.w3.org/TR/html-aria/#el-u
+    if (local_name() == TagNames::u)
+        return ARIA::Role::generic;
+
+    return {};
 }
 
 }

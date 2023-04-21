@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLLegendElement : HTMLElement {
 
-    [Reflect] attribute DOMString align;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString align;
 
 };

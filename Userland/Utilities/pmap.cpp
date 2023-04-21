@@ -8,7 +8,7 @@
 #include <AK/JsonObject.h>
 #include <AK/QuickSort.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 
@@ -18,7 +18,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/proc", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    char const* pid;
+    StringView pid;
     static bool extended = false;
 
     Core::ArgsParser args_parser;
@@ -26,15 +26,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_positional_argument(pid, "PID", "PID", Core::ArgsParser::Required::Yes);
     args_parser.parse(arguments);
 
-    auto file = TRY(Core::Stream::File::open(DeprecatedString::formatted("/proc/{}/vm", pid), Core::Stream::OpenMode::Read));
+    auto file = TRY(Core::File::open(DeprecatedString::formatted("/proc/{}/vm", pid), Core::File::OpenMode::Read));
 
     outln("{}:", pid);
 
-#if ARCH(I386)
-    auto padding = "";
-#else
     auto padding = "        ";
-#endif
 
     if (extended) {
         outln("Address{}           Size   Resident      Dirty Access  VMObject Type  Purgeable   CoW Pages Name", padding);
@@ -47,31 +43,31 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Vector<JsonValue> sorted_regions = json.as_array().values();
     quick_sort(sorted_regions, [](auto& a, auto& b) {
-        return a.as_object().get("address"sv).to_addr() < b.as_object().get("address"sv).to_addr();
+        return a.as_object().get_addr("address"sv).value_or(0) < b.as_object().get_addr("address"sv).value_or(0);
     });
 
     for (auto& value : sorted_regions) {
         auto& map = value.as_object();
-        auto address = map.get("address"sv).to_addr();
-        auto size = map.get("size"sv).to_deprecated_string();
+        auto address = map.get_addr("address"sv).value_or(0);
+        auto size = map.get("size"sv).value_or({}).to_deprecated_string();
 
         auto access = DeprecatedString::formatted("{}{}{}{}{}",
-            (map.get("readable"sv).to_bool() ? "r" : "-"),
-            (map.get("writable"sv).to_bool() ? "w" : "-"),
-            (map.get("executable"sv).to_bool() ? "x" : "-"),
-            (map.get("shared"sv).to_bool() ? "s" : "-"),
-            (map.get("syscall"sv).to_bool() ? "c" : "-"));
+            (map.get_bool("readable"sv).value_or(false) ? "r" : "-"),
+            (map.get_bool("writable"sv).value_or(false) ? "w" : "-"),
+            (map.get_bool("executable"sv).value_or(false) ? "x" : "-"),
+            (map.get_bool("shared"sv).value_or(false) ? "s" : "-"),
+            (map.get_bool("syscall"sv).value_or(false) ? "c" : "-"));
 
         out("{:p}  ", address);
         out("{:>10} ", size);
         if (extended) {
-            auto resident = map.get("amount_resident"sv).to_deprecated_string();
-            auto dirty = map.get("amount_dirty"sv).to_deprecated_string();
-            auto vmobject = map.get("vmobject"sv).to_deprecated_string();
+            auto resident = map.get("amount_resident"sv).value_or({}).to_deprecated_string();
+            auto dirty = map.get("amount_dirty"sv).value_or({}).to_deprecated_string();
+            auto vmobject = map.get_deprecated_string("vmobject"sv).value_or({});
             if (vmobject.ends_with("VMObject"sv))
                 vmobject = vmobject.substring(0, vmobject.length() - 8);
-            auto purgeable = map.get("purgeable"sv).to_deprecated_string();
-            auto cow_pages = map.get("cow_pages"sv).to_deprecated_string();
+            auto purgeable = map.get("purgeable"sv).value_or({}).to_deprecated_string();
+            auto cow_pages = map.get("cow_pages"sv).value_or({}).to_deprecated_string();
             out("{:>10} ", resident);
             out("{:>10} ", dirty);
             out("{:6} ", access);
@@ -81,7 +77,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         } else {
             out("{:6} ", access);
         }
-        auto name = map.get("name"sv).to_deprecated_string();
+        auto name = map.get_deprecated_string("name"sv).value_or({});
         out("{:20}", name);
         outln();
     }

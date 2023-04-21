@@ -7,7 +7,7 @@
 #include "CharacterMapFile.h"
 #include <AK/ByteBuffer.h>
 #include <AK/Utf8View.h>
-#include <LibCore/File.h>
+#include <LibCore/DeprecatedFile.h>
 
 namespace Keyboard {
 
@@ -22,7 +22,7 @@ ErrorOr<CharacterMapData> CharacterMapFile::load_from_file(DeprecatedString cons
         path = full_path.to_deprecated_string();
     }
 
-    auto file = TRY(Core::File::open(path, Core::OpenMode::ReadOnly));
+    auto file = TRY(Core::DeprecatedFile::open(path, Core::OpenMode::ReadOnly));
     auto file_contents = file->read_all();
     auto json_result = TRY(JsonValue::from_string(file_contents));
     auto const& json = json_result.as_object();
@@ -63,7 +63,7 @@ Vector<u32> CharacterMapFile::read_map(JsonObject const& json, DeprecatedString 
     Vector<u32> buffer;
     buffer.resize(CHAR_MAP_SIZE);
 
-    auto map_arr = json.get(name).as_array();
+    auto map_arr = json.get_array(name).value();
     for (size_t i = 0; i < map_arr.size(); i++) {
         auto key_value = map_arr.at(i).as_string();
         if (key_value.length() == 0) {

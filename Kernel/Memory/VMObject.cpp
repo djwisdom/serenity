@@ -10,21 +10,21 @@
 
 namespace Kernel::Memory {
 
-static Singleton<SpinlockProtected<VMObject::AllInstancesList>> s_all_instances;
+static Singleton<SpinlockProtected<VMObject::AllInstancesList, LockRank::None>> s_all_instances;
 
-SpinlockProtected<VMObject::AllInstancesList>& VMObject::all_instances()
+SpinlockProtected<VMObject::AllInstancesList, LockRank::None>& VMObject::all_instances()
 {
     return s_all_instances;
 }
 
 ErrorOr<FixedArray<RefPtr<PhysicalPage>>> VMObject::try_clone_physical_pages() const
 {
-    return m_physical_pages.try_clone();
+    return m_physical_pages.clone();
 }
 
 ErrorOr<FixedArray<RefPtr<PhysicalPage>>> VMObject::try_create_physical_pages(size_t size)
 {
-    return FixedArray<RefPtr<PhysicalPage>>::try_create(ceil_div(size, static_cast<size_t>(PAGE_SIZE)));
+    return FixedArray<RefPtr<PhysicalPage>>::create(ceil_div(size, static_cast<size_t>(PAGE_SIZE)));
 }
 
 VMObject::VMObject(FixedArray<RefPtr<PhysicalPage>>&& new_physical_pages)

@@ -13,6 +13,16 @@
 
 namespace AK {
 
+namespace Detail {
+// This type serves as the storage of 0-sized `AK::Array`s. While zero-length `T[0]`
+// is accepted as a GNU extension, it causes problems with UBSan in Clang 16.
+template<typename T>
+struct EmptyArrayStorage {
+    T& operator[](size_t) const { VERIFY_NOT_REACHED(); }
+    constexpr operator T*() const { return nullptr; }
+};
+}
+
 template<typename T, size_t Size>
 struct Array {
     using ValueType = T;
@@ -31,7 +41,7 @@ struct Array {
 
     [[nodiscard]] constexpr size_t size() const { return Size; }
 
-    [[nodiscard]] constexpr Span<T const> span() const { return { __data, Size }; }
+    [[nodiscard]] constexpr ReadonlySpan<T> span() const { return { __data, Size }; }
     [[nodiscard]] constexpr Span<T> span() { return { __data, Size }; }
 
     [[nodiscard]] constexpr T const& at(size_t index) const
@@ -76,7 +86,7 @@ struct Array {
     [[nodiscard]] constexpr ConstIterator end() const { return ConstIterator::end(*this); }
     [[nodiscard]] constexpr Iterator end() { return Iterator::end(*this); }
 
-    [[nodiscard]] constexpr operator Span<T const>() const { return span(); }
+    [[nodiscard]] constexpr operator ReadonlySpan<T>() const { return span(); }
     [[nodiscard]] constexpr operator Span<T>() { return span(); }
 
     constexpr size_t fill(T const& value)
@@ -109,7 +119,7 @@ struct Array {
         return value;
     }
 
-    T __data[Size];
+    Conditional<Size == 0, Detail::EmptyArrayStorage<T>, T[Size]> __data;
 };
 
 template<typename T, typename... Types>

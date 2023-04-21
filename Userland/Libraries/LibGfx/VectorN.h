@@ -11,7 +11,6 @@
 #include <AK/Array.h>
 #include <AK/DeprecatedString.h>
 #include <AK/Error.h>
-#include <AK/Format.h>
 #include <AK/Math.h>
 #include <AK/StdLibExtras.h>
 #include <AK/StringView.h>
@@ -297,7 +296,7 @@ public:
     constexpr auto const& data() const { return m_data; }
 
 private:
-    AK::Array<T, N> m_data;
+    Array<T, N> m_data;
 };
 
 }

@@ -9,11 +9,10 @@
 #include <AK/Badge.h>
 #include <AK/Error.h>
 #include <AK/IntrusiveList.h>
+#include <AK/NonnullRefPtr.h>
 #include <AK/OwnPtr.h>
-#include <AK/Time.h>
 #include <AK/Types.h>
 #include <Kernel/Devices/Audio/Controller.h>
-#include <Kernel/Library/LockRefPtr.h>
 
 namespace Kernel {
 
@@ -29,10 +28,10 @@ public:
     bool initialize();
 
 private:
-    void enumerate_hardware_controllers();
-    void enumerate_hardware_audio_channels();
+    ErrorOr<NonnullRefPtr<AudioController>> determine_audio_device(PCI::DeviceIdentifier const& device_identifier) const;
 
-    IntrusiveList<&AudioController::m_node> m_controllers_list;
+    void enumerate_hardware_controllers();
+    SpinlockProtected<IntrusiveList<&AudioController::m_node>, LockRank::None> m_controllers_list;
 };
 
 }

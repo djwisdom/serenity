@@ -17,7 +17,8 @@ public:
     ~SVGFormattingContext();
 
     virtual void run(Box const&, LayoutMode, AvailableSpace const&) override;
-    virtual float automatic_content_height() const override;
+    virtual CSSPixels automatic_content_width() const override;
+    virtual CSSPixels automatic_content_height() const override;
 };
 
 }

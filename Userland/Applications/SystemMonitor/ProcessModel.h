@@ -9,7 +9,6 @@
 
 #include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/Vector.h>
 #include <LibGUI/Icon.h>
 #include <LibGUI/Model.h>
@@ -85,10 +84,10 @@ public:
         }
     };
 
-    Function<void(NonnullOwnPtrVector<CpuInfo> const&)> on_cpu_info_change;
+    Function<void(Vector<NonnullOwnPtr<CpuInfo>> const&)> on_cpu_info_change;
     Function<void(int process_count, int thread_count)> on_state_update;
 
-    NonnullOwnPtrVector<CpuInfo> const& cpus() const { return m_cpus; }
+    Vector<NonnullOwnPtr<CpuInfo>> const& cpus() const { return m_cpus; }
 
 private:
     ProcessModel();
@@ -207,7 +206,7 @@ private:
 
     struct Process {
         pid_t pid;
-        NonnullRefPtrVector<Thread> threads;
+        Vector<NonnullRefPtr<Thread>> threads;
 
         bool operator==(Process const& other) const
         {
@@ -224,7 +223,7 @@ private:
         {
             auto main_thread_index = -1;
             for (size_t i = 0; i < threads.size(); ++i) {
-                if (threads[i].is_main_thread()) {
+                if (threads[i]->is_main_thread()) {
                     main_thread_index = static_cast<int>(i);
                     break;
                 }
@@ -243,9 +242,9 @@ private:
 
     // The thread list contains the same threads as the Process structs.
     HashMap<int, NonnullRefPtr<Thread>> m_threads;
-    NonnullOwnPtrVector<Process> m_processes;
-    NonnullOwnPtrVector<CpuInfo> m_cpus;
-    RefPtr<Core::File> m_proc_all;
+    Vector<NonnullOwnPtr<Process>> m_processes;
+    Vector<NonnullOwnPtr<CpuInfo>> m_cpus;
+    RefPtr<Core::DeprecatedFile> m_proc_all;
     GUI::Icon m_kernel_process_icon;
     u64 m_total_time_scheduled { 0 };
     u64 m_total_time_scheduled_kernel { 0 };

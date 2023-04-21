@@ -10,9 +10,10 @@
 #include <AK/JsonObject.h>
 #include <AK/JsonValue.h>
 #include <AK/LexicalPath.h>
-#include <LibCore/File.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/MappedFile.h>
 #include <LibDebug/DebugInfo.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibSymbolication/Symbolication.h>
 
 namespace Symbolication {
@@ -37,19 +38,13 @@ static KernelBaseState s_kernel_base_state = KernelBaseState::Uninitialized;
 Optional<FlatPtr> kernel_base()
 {
     if (s_kernel_base_state == KernelBaseState::Uninitialized) {
-        auto file = Core::File::open("/sys/kernel/load_base", Core::OpenMode::ReadOnly);
+        auto file = Core::DeprecatedFile::open("/sys/kernel/constants/load_base", Core::OpenMode::ReadOnly);
         if (file.is_error()) {
             s_kernel_base_state = KernelBaseState::Invalid;
             return {};
         }
         auto kernel_base_str = DeprecatedString { file.value()->read_all(), NoChomp };
-#if ARCH(I386)
-        using AddressType = u32;
-#elif ARCH(X86_64) || ARCH(AARCH64)
         using AddressType = u64;
-#else
-#    error Unknown architecture
-#endif
         auto maybe_kernel_base = kernel_base_str.to_uint<AddressType>();
         if (!maybe_kernel_base.has_value()) {
             s_kernel_base_state = KernelBaseState::Invalid;
@@ -71,7 +66,7 @@ Optional<Symbol> symbolicate(DeprecatedString const& path, FlatPtr address, Incl
         bool found = false;
         for (auto& search_path : search_paths) {
             full_path = LexicalPath::join(search_path, path).string();
-            if (Core::File::exists(full_path)) {
+            if (FileSystem::exists(full_path)) {
                 found = true;
                 break;
             }
@@ -111,7 +106,7 @@ Optional<Symbol> symbolicate(DeprecatedString const& path, FlatPtr address, Incl
 
     Vector<Debug::DebugInfo::SourcePosition> positions;
     if (include_source_positions == IncludeSourcePosition::Yes) {
-        auto source_position_with_inlines = cached_elf->debug_info->get_source_position_with_inlines(address);
+        auto source_position_with_inlines = cached_elf->debug_info->get_source_position_with_inlines(address).release_value_but_fixme_should_propagate_errors();
 
         for (auto& position : source_position_with_inlines.inline_chain) {
             if (!positions.contains_slow(position))
@@ -153,7 +148,7 @@ Vector<Symbol> symbolicate_thread(pid_t pid, pid_t tid, IncludeSourcePosition in
 
     {
         auto stack_path = DeprecatedString::formatted("/proc/{}/stacks/{}", pid, tid);
-        auto file_or_error = Core::File::open(stack_path, Core::OpenMode::ReadOnly);
+        auto file_or_error = Core::DeprecatedFile::open(stack_path, Core::OpenMode::ReadOnly);
         if (file_or_error.is_error()) {
             warnln("Could not open {}: {}", stack_path, file_or_error.error());
             return {};
@@ -173,7 +168,7 @@ Vector<Symbol> symbolicate_thread(pid_t pid, pid_t tid, IncludeSourcePosition in
 
     {
         auto vm_path = DeprecatedString::formatted("/proc/{}/vm", pid);
-        auto file_or_error = Core::File::open(vm_path, Core::OpenMode::ReadOnly);
+        auto file_or_error = Core::DeprecatedFile::open(vm_path, Core::OpenMode::ReadOnly);
         if (file_or_error.is_error()) {
             warnln("Could not open {}: {}", vm_path, file_or_error.error());
             return {};
@@ -187,9 +182,9 @@ Vector<Symbol> symbolicate_thread(pid_t pid, pid_t tid, IncludeSourcePosition in
 
         for (auto& region_value : json.value().as_array().values()) {
             auto& region = region_value.as_object();
-            auto name = region.get("name"sv).to_deprecated_string();
-            auto address = region.get("address"sv).to_addr();
-            auto size = region.get("size"sv).to_addr();
+            auto name = region.get_deprecated_string("name"sv).value_or({});
+            auto address = region.get_addr("address"sv).value_or(0);
+            auto size = region.get_addr("size"sv).value_or(0);
 
             DeprecatedString path;
             if (name == "/usr/lib/Loader.so") {

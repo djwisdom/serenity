@@ -15,26 +15,24 @@ class WorkerLocation : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(WorkerLocation, Bindings::PlatformObject);
 
 public:
-    static JS::NonnullGCPtr<WorkerLocation> create(WorkerGlobalScope&);
-
     virtual ~WorkerLocation() override;
 
-    DeprecatedString href() const;
-    DeprecatedString origin() const;
-    DeprecatedString protocol() const;
-    DeprecatedString host() const;
-    DeprecatedString hostname() const;
-    DeprecatedString port() const;
-    DeprecatedString pathname() const;
-    DeprecatedString search() const;
-    DeprecatedString hash() const;
+    WebIDL::ExceptionOr<String> href() const;
+    WebIDL::ExceptionOr<String> origin() const;
+    WebIDL::ExceptionOr<String> protocol() const;
+    WebIDL::ExceptionOr<String> host() const;
+    WebIDL::ExceptionOr<String> hostname() const;
+    WebIDL::ExceptionOr<String> port() const;
+    WebIDL::ExceptionOr<String> pathname() const;
+    WebIDL::ExceptionOr<String> search() const;
+    WebIDL::ExceptionOr<String> hash() const;
 
 private:
     explicit WorkerLocation(WorkerGlobalScope&);
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    WorkerGlobalScope& m_global_scope;
+    JS::NonnullGCPtr<WorkerGlobalScope> m_global_scope;
 };
 
 }

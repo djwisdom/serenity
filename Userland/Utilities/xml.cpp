@@ -9,8 +9,8 @@
 #include <AK/URL.h>
 #include <AK/URLParser.h>
 #include <LibCore/ArgsParser.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/File.h>
-#include <LibCore/Stream.h>
 #include <LibMain/Main.h>
 #include <LibXML/DOM/Document.h>
 #include <LibXML/DOM/Node.h>
@@ -112,7 +112,7 @@ static void dump(XML::Node const& node)
                 color(ColorRole::Reset);
 
                 for (auto& node : element.children)
-                    dump(node);
+                    dump(*node);
 
                 color(ColorRole::Tag);
                 out("</{}>", element.name);
@@ -364,14 +364,14 @@ static auto parse(StringView contents)
             .preserve_comments = true,
             .resolve_external_resource = [&](XML::SystemID const& system_id, Optional<XML::PublicID> const&) -> ErrorOr<DeprecatedString> {
                 auto base = URL::create_with_file_scheme(s_path);
-                auto url = URLParser::parse(system_id.system_literal, &base);
+                auto url = URLParser::parse(system_id.system_literal, base);
                 if (!url.is_valid())
                     return Error::from_string_literal("Invalid URL");
 
                 if (url.scheme() != "file")
                     return Error::from_string_literal("NYI: Nonlocal entity");
 
-                auto file = TRY(Core::Stream::File::open(url.path(), Core::Stream::OpenMode::Read));
+                auto file = TRY(Core::File::open(url.serialize_path(), Core::File::OpenMode::Read));
                 return DeprecatedString::copy(TRY(file->read_until_eof()));
             },
         },
@@ -391,12 +391,12 @@ static void do_run_tests(XML::Document& document)
     Queue<XML::Node*> suites;
     auto dump_cases = [&](auto& root) {
         for (auto& node : root.children) {
-            auto element = node.content.template get_pointer<XML::Node::Element>();
+            auto element = node->content.template get_pointer<XML::Node::Element>();
             if (!element)
                 continue;
             if (element->name != "TESTCASES" && element->name != "TEST")
                 continue;
-            suites.enqueue(&node);
+            suites.enqueue(node);
         }
     };
 
@@ -440,64 +440,65 @@ static void do_run_tests(XML::Document& document)
                 continue;
             }
 
-            auto file_result = Core::Stream::File::open(url.path(), Core::Stream::OpenMode::Read);
+            auto file_path = url.serialize_path();
+            auto file_result = Core::File::open(file_path, Core::File::OpenMode::Read);
             if (file_result.is_error()) {
-                warnln("Read error for {}: {}", url.path(), file_result.error());
-                s_test_results.set(url.path(), TestResult::RunnerFailed);
+                warnln("Read error for {}: {}", file_path, file_result.error());
+                s_test_results.set(file_path, TestResult::RunnerFailed);
                 continue;
             }
 
-            warnln("Running test {}", url.path());
+            warnln("Running test {}", file_path);
 
             auto contents = file_result.value()->read_until_eof();
             if (contents.is_error()) {
-                warnln("Read error for {}: {}", url.path(), contents.error());
-                s_test_results.set(url.path(), TestResult::RunnerFailed);
+                warnln("Read error for {}: {}", file_path, contents.error());
+                s_test_results.set(file_path, TestResult::RunnerFailed);
                 continue;
             }
             auto parser = parse(contents.value());
             auto doc_or_error = parser.parse();
             if (doc_or_error.is_error()) {
                 if (type == "invalid" || type == "error" || type == "not-wf")
-                    s_test_results.set(url.path(), TestResult::Passed);
+                    s_test_results.set(file_path, TestResult::Passed);
                 else
-                    s_test_results.set(url.path(), TestResult::Failed);
+                    s_test_results.set(file_path, TestResult::Failed);
                 continue;
             }
 
             auto out = suite.attributes.find("OUTPUT");
             if (out != suite.attributes.end()) {
                 auto out_path = LexicalPath::join(test_base_path, out->value).string();
-                auto file_result = Core::Stream::File::open(out_path, Core::Stream::OpenMode::Read);
+                auto file_result = Core::File::open(out_path, Core::File::OpenMode::Read);
                 if (file_result.is_error()) {
                     warnln("Read error for {}: {}", out_path, file_result.error());
-                    s_test_results.set(url.path(), TestResult::RunnerFailed);
+                    s_test_results.set(file_path, TestResult::RunnerFailed);
                     continue;
                 }
                 auto contents = file_result.value()->read_until_eof();
                 if (contents.is_error()) {
                     warnln("Read error for {}: {}", out_path, contents.error());
-                    s_test_results.set(url.path(), TestResult::RunnerFailed);
+                    s_test_results.set(file_path, TestResult::RunnerFailed);
                     continue;
                 }
                 auto parser = parse(contents.value());
                 auto out_doc_or_error = parser.parse();
                 if (out_doc_or_error.is_error()) {
                     warnln("Parse error for {}: {}", out_path, out_doc_or_error.error());
-                    s_test_results.set(url.path(), TestResult::RunnerFailed);
+                    s_test_results.set(file_path, TestResult::RunnerFailed);
                     continue;
                 }
                 auto out_doc = out_doc_or_error.release_value();
                 if (out_doc.root() != doc_or_error.value().root()) {
-                    s_test_results.set(url.path(), TestResult::Failed);
+                    s_test_results.set(file_path, TestResult::Failed);
                     continue;
                 }
             }
 
             if (type == "invalid" || type == "error" || type == "not-wf")
-                s_test_results.set(url.path(), TestResult::Failed);
+                s_test_results.set(file_path, TestResult::Failed);
             else
-                s_test_results.set(url.path(), TestResult::Passed);
+                s_test_results.set(file_path, TestResult::Passed);
         }
     }
 }
@@ -515,8 +516,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     parser.add_positional_argument(filename, "File to read from", "file");
     parser.parse(arguments);
 
-    s_path = Core::File::real_path_for(filename);
-    auto file = TRY(Core::Stream::File::open(s_path, Core::Stream::OpenMode::Read));
+    s_path = Core::DeprecatedFile::real_path_for(filename);
+    auto file = TRY(Core::File::open(s_path, Core::File::OpenMode::Read));
     auto contents = TRY(file->read_until_eof());
 
     auto xml_parser = parse(contents);

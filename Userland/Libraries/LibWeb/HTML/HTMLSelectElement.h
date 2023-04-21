@@ -27,7 +27,7 @@ public:
 
     size_t length();
     DOM::Element* item(size_t index);
-    DOM::Element* named_item(FlyString const& name);
+    DOM::Element* named_item(DeprecatedFlyString const& name);
     WebIDL::ExceptionOr<void> add(HTMLOptionOrOptGroupElement element, Optional<HTMLElementOrElementIndex> before = {});
 
     int selected_index() const;
@@ -56,11 +56,16 @@ public:
     // https://html.spec.whatwg.org/multipage/forms.html#category-label
     virtual bool is_labelable() const override { return true; }
 
+    virtual void reset_algorithm() override;
+
     DeprecatedString const& type() const;
+
+    virtual Optional<ARIA::Role> default_role() const override;
 
 private:
     HTMLSelectElement(DOM::Document&, DOM::QualifiedName);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     // ^DOM::Element

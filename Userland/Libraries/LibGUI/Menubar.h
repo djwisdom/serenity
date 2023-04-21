@@ -10,7 +10,6 @@
 
 #include <AK/Badge.h>
 #include <AK/IterationDecision.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <LibCore/Object.h>
 #include <LibGUI/Forward.h>
 #include <LibGUI/Menu.h>
@@ -24,15 +23,15 @@ public:
     virtual ~Menubar() override = default;
 
     ErrorOr<void> try_add_menu(Badge<Window>, NonnullRefPtr<Menu>);
-    ErrorOr<NonnullRefPtr<Menu>> try_add_menu(Badge<Window>, DeprecatedString name);
-    Menu& add_menu(Badge<Window>, DeprecatedString name);
+    ErrorOr<NonnullRefPtr<Menu>> try_add_menu(Badge<Window>, String name);
+    Menu& add_menu(Badge<Window>, String name);
 
     void for_each_menu(Function<IterationDecision(Menu&)>);
 
 private:
     Menubar() = default;
 
-    NonnullRefPtrVector<Menu> m_menus;
+    Vector<NonnullRefPtr<Menu>> m_menus;
 };
 
 }

@@ -9,7 +9,6 @@
 #include <AK/Random.h>
 #include <AK/StringView.h>
 #include <LibConfig/Client.h>
-#include <LibCore/Stream.h>
 #include <LibCore/Timer.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/MessageBox.h>
@@ -25,7 +24,7 @@ REGISTER_WIDGET(MasterWord, WordGame)
 namespace MasterWord {
 
 WordGame::WordGame()
-    : m_clear_message_timer(Core::Timer::create_single_shot(5000, [this] { clear_message(); }))
+    : m_clear_message_timer(Core::Timer::create_single_shot(5000, [this] { clear_message(); }).release_value_but_fixme_should_propagate_errors())
 {
     read_words();
     m_num_letters = Config::read_i32("MasterWord"sv, ""sv, "word_length"sv, 5);
@@ -49,6 +48,7 @@ void WordGame::reset()
             reset();
         }
     }
+    set_fixed_size(game_size());
     clear_message();
     update();
 }
@@ -61,7 +61,7 @@ void WordGame::pick_font()
     font_database.for_each_font([&](Gfx::Font const& font) {
         if (font.family() != "Liza" || font.weight() != 700)
             return;
-        auto size = font.glyph_height();
+        auto size = font.pixel_size_rounded_up();
         if (size * 2 <= m_letter_height && size > best_font_size) {
             best_font_name = font.qualified_name();
             best_font_size = size;
@@ -177,8 +177,8 @@ void WordGame::read_words()
     m_words.clear();
 
     auto try_load_words = [&]() -> ErrorOr<void> {
-        auto response = TRY(Core::Stream::File::open("/res/words.txt"sv, Core::Stream::OpenMode::Read));
-        auto words_file = TRY(Core::Stream::BufferedFile::create(move(response)));
+        auto response = TRY(Core::File::open("/res/words.txt"sv, Core::File::OpenMode::Read));
+        auto words_file = TRY(Core::BufferedFile::create(move(response)));
         Array<u8, 128> buffer;
 
         while (!words_file->is_eof()) {

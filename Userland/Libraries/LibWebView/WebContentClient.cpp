@@ -11,7 +11,7 @@
 
 namespace WebView {
 
-WebContentClient::WebContentClient(NonnullOwnPtr<Core::Stream::LocalSocket> socket, ViewImplementation& view)
+WebContentClient::WebContentClient(NonnullOwnPtr<Core::LocalSocket> socket, ViewImplementation& view)
     : IPC::ConnectionToServer<WebContentClientEndpoint, WebContentServerEndpoint>(*this, move(socket))
     , m_view(view)
 {
@@ -176,22 +176,22 @@ void WebContentClient::did_get_js_console_messages(i32 start_index, Vector<Depre
     m_view.notify_server_did_get_js_console_messages(start_index, message_types, messages);
 }
 
-void WebContentClient::did_request_alert(DeprecatedString const& message)
+void WebContentClient::did_request_alert(String const& message)
 {
     m_view.notify_server_did_request_alert({}, message);
 }
 
-void WebContentClient::did_request_confirm(DeprecatedString const& message)
+void WebContentClient::did_request_confirm(String const& message)
 {
     m_view.notify_server_did_request_confirm({}, message);
 }
 
-void WebContentClient::did_request_prompt(DeprecatedString const& message, DeprecatedString const& default_)
+void WebContentClient::did_request_prompt(String const& message, String const& default_)
 {
     m_view.notify_server_did_request_prompt({}, message, default_);
 }
 
-void WebContentClient::did_request_set_prompt_text(DeprecatedString const& message)
+void WebContentClient::did_request_set_prompt_text(String const& message)
 {
     m_view.notify_server_did_request_set_prompt_text({}, message);
 }
@@ -240,6 +240,21 @@ void WebContentClient::did_update_cookie(Web::Cookie::Cookie const& cookie)
     m_view.notify_server_did_update_cookie({}, cookie);
 }
 
+Messages::WebContentClient::DidRequestNewTabResponse WebContentClient::did_request_new_tab(Web::HTML::ActivateTab const& activate_tab)
+{
+    return m_view.notify_server_did_request_new_tab({}, activate_tab);
+}
+
+void WebContentClient::did_request_activate_tab()
+{
+    m_view.notify_server_did_request_activate_tab({});
+}
+
+void WebContentClient::did_close_browsing_context()
+{
+    m_view.notify_server_did_close_browsing_context({});
+}
+
 void WebContentClient::did_update_resource_count(i32 count_waiting)
 {
     m_view.notify_server_did_update_resource_count(count_waiting);
@@ -283,6 +298,11 @@ void WebContentClient::did_request_file(DeprecatedString const& path, i32 reques
 void WebContentClient::did_finish_handling_input_event(bool event_was_accepted)
 {
     m_view.notify_server_did_finish_handling_input_event(event_was_accepted);
+}
+
+void WebContentClient::did_get_accessibility_tree(DeprecatedString const& accessibility_tree)
+{
+    m_view.notify_server_did_get_accessibility_tree(accessibility_tree);
 }
 
 }

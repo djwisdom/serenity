@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, kleines Filmröllchen <filmroellchen@serenityos.org>
+ * Copyright (c) 2023, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,223 +11,150 @@
 #include <AK/DeprecatedString.h>
 #include <AK/JsonObject.h>
 #include <AK/JsonValue.h>
+#include <AK/NumericLimits.h>
+#include <AK/String.h>
+#include <AK/Time.h>
 #include <AK/URL.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibCore/DateTime.h>
 #include <LibCore/Proxy.h>
+#include <LibCore/System.h>
 #include <LibIPC/Dictionary.h>
 #include <LibIPC/Encoder.h>
 #include <LibIPC/File.h>
 
 namespace IPC {
 
-Encoder& Encoder::operator<<(bool value)
+ErrorOr<void> Encoder::encode_size(size_t size)
 {
-    return *this << (u8)value;
+    if (static_cast<u64>(size) > static_cast<u64>(NumericLimits<u32>::max()))
+        return Error::from_string_literal("Container exceeds the maximum allowed size");
+    return encode(static_cast<u32>(size));
 }
 
-Encoder& Encoder::operator<<(u8 value)
+template<>
+ErrorOr<void> encode(Encoder& encoder, float const& value)
 {
-    m_buffer.data.append(value);
-    return *this;
+    return encoder.encode(bit_cast<u32>(value));
 }
 
-Encoder& Encoder::operator<<(u16 value)
+template<>
+ErrorOr<void> encode(Encoder& encoder, double const& value)
 {
-    m_buffer.data.ensure_capacity(m_buffer.data.size() + 2);
-    m_buffer.data.unchecked_append((u8)value);
-    m_buffer.data.unchecked_append((u8)(value >> 8));
-    return *this;
+    return encoder.encode(bit_cast<u64>(value));
 }
 
-void Encoder::encode_u32(u32 value)
+template<>
+ErrorOr<void> encode(Encoder& encoder, String const& value)
 {
-    m_buffer.data.ensure_capacity(m_buffer.data.size() + 4);
-    m_buffer.data.unchecked_append((u8)value);
-    m_buffer.data.unchecked_append((u8)(value >> 8));
-    m_buffer.data.unchecked_append((u8)(value >> 16));
-    m_buffer.data.unchecked_append((u8)(value >> 24));
+    auto bytes = value.bytes();
+    TRY(encoder.encode_size(bytes.size()));
+    TRY(encoder.append(bytes.data(), bytes.size()));
+    return {};
 }
 
-void Encoder::encode_u64(u64 value)
+template<>
+ErrorOr<void> encode(Encoder& encoder, StringView const& value)
 {
-    m_buffer.data.ensure_capacity(m_buffer.data.size() + 8);
-    m_buffer.data.unchecked_append((u8)value);
-    m_buffer.data.unchecked_append((u8)(value >> 8));
-    m_buffer.data.unchecked_append((u8)(value >> 16));
-    m_buffer.data.unchecked_append((u8)(value >> 24));
-    m_buffer.data.unchecked_append((u8)(value >> 32));
-    m_buffer.data.unchecked_append((u8)(value >> 40));
-    m_buffer.data.unchecked_append((u8)(value >> 48));
-    m_buffer.data.unchecked_append((u8)(value >> 56));
-}
-
-Encoder& Encoder::operator<<(unsigned value)
-{
-    encode_u32(value);
-    return *this;
-}
-
-Encoder& Encoder::operator<<(unsigned long value)
-{
-    if constexpr (sizeof(value) == 4)
-        encode_u32(value);
-    else
-        encode_u64(value);
-    return *this;
-}
-
-Encoder& Encoder::operator<<(unsigned long long value)
-{
-    if constexpr (sizeof(value) == 4)
-        encode_u32(value);
-    else
-        encode_u64(value);
-    return *this;
-}
-
-Encoder& Encoder::operator<<(i8 value)
-{
-    m_buffer.data.append((u8)value);
-    return *this;
-}
-
-Encoder& Encoder::operator<<(i16 value)
-{
-    m_buffer.data.ensure_capacity(m_buffer.data.size() + 2);
-    m_buffer.data.unchecked_append((u8)value);
-    m_buffer.data.unchecked_append((u8)(value >> 8));
-    return *this;
-}
-
-Encoder& Encoder::operator<<(i32 value)
-{
-    m_buffer.data.ensure_capacity(m_buffer.data.size() + 4);
-    m_buffer.data.unchecked_append((u8)value);
-    m_buffer.data.unchecked_append((u8)(value >> 8));
-    m_buffer.data.unchecked_append((u8)(value >> 16));
-    m_buffer.data.unchecked_append((u8)(value >> 24));
-    return *this;
-}
-
-Encoder& Encoder::operator<<(i64 value)
-{
-    m_buffer.data.ensure_capacity(m_buffer.data.size() + 8);
-    m_buffer.data.unchecked_append((u8)value);
-    m_buffer.data.unchecked_append((u8)(value >> 8));
-    m_buffer.data.unchecked_append((u8)(value >> 16));
-    m_buffer.data.unchecked_append((u8)(value >> 24));
-    m_buffer.data.unchecked_append((u8)(value >> 32));
-    m_buffer.data.unchecked_append((u8)(value >> 40));
-    m_buffer.data.unchecked_append((u8)(value >> 48));
-    m_buffer.data.unchecked_append((u8)(value >> 56));
-    return *this;
-}
-
-Encoder& Encoder::operator<<(float value)
-{
-    u32 as_u32 = bit_cast<u32>(value);
-    return *this << as_u32;
-}
-
-Encoder& Encoder::operator<<(double value)
-{
-    u64 as_u64 = bit_cast<u64>(value);
-    return *this << as_u64;
-}
-
-Encoder& Encoder::operator<<(char const* value)
-{
-    return *this << StringView { value, strlen(value) };
-}
-
-Encoder& Encoder::operator<<(StringView value)
-{
-    m_buffer.data.append((u8 const*)value.characters_without_null_termination(), value.length());
-    return *this;
-}
-
-Encoder& Encoder::operator<<(DeprecatedString const& value)
-{
+    // NOTE: Do not change this encoding without also updating LibC/netdb.cpp.
     if (value.is_null())
-        return *this << (i32)-1;
-    *this << static_cast<i32>(value.length());
-    return *this << value.view();
+        return encoder.encode(NumericLimits<u32>::max());
+
+    TRY(encoder.encode_size(value.length()));
+    TRY(encoder.append(reinterpret_cast<u8 const*>(value.characters_without_null_termination()), value.length()));
+    return {};
 }
 
-Encoder& Encoder::operator<<(ByteBuffer const& value)
+template<>
+ErrorOr<void> encode(Encoder& encoder, DeprecatedString const& value)
 {
-    *this << static_cast<i32>(value.size());
-    m_buffer.data.append(value.data(), value.size());
-    return *this;
+    return encoder.encode(value.view());
 }
 
-Encoder& Encoder::operator<<(JsonValue const& value)
+template<>
+ErrorOr<void> encode(Encoder& encoder, ByteBuffer const& value)
 {
-    *this << value.serialized<StringBuilder>();
-    return *this;
+    TRY(encoder.encode_size(value.size()));
+    TRY(encoder.append(value.data(), value.size()));
+    return {};
 }
 
-Encoder& Encoder::operator<<(URL const& value)
+template<>
+ErrorOr<void> encode(Encoder& encoder, JsonValue const& value)
 {
-    return *this << value.to_deprecated_string();
+    return encoder.encode(value.serialized<StringBuilder>());
 }
 
-Encoder& Encoder::operator<<(Dictionary const& dictionary)
+template<>
+ErrorOr<void> encode(Encoder& encoder, Time const& value)
 {
-    *this << (u64)dictionary.size();
-    dictionary.for_each_entry([this](auto& key, auto& value) {
-        *this << key << value;
-    });
-    return *this;
+    return encoder.encode(value.to_nanoseconds());
 }
 
-Encoder& Encoder::operator<<(File const& file)
+template<>
+ErrorOr<void> encode(Encoder& encoder, URL const& value)
+{
+    return encoder.encode(value.to_deprecated_string());
+}
+
+template<>
+ErrorOr<void> encode(Encoder& encoder, Dictionary const& dictionary)
+{
+    TRY(encoder.encode_size(dictionary.size()));
+
+    TRY(dictionary.try_for_each_entry([&](auto const& key, auto const& value) -> ErrorOr<void> {
+        TRY(encoder.encode(key));
+        TRY(encoder.encode(value));
+        return {};
+    }));
+
+    return {};
+}
+
+template<>
+ErrorOr<void> encode(Encoder& encoder, File const& file)
 {
     int fd = file.fd();
-    if (fd != -1) {
-        auto result = dup(fd);
-        if (result < 0) {
-            perror("dup");
-            VERIFY_NOT_REACHED();
-        }
-        fd = result;
-    }
-    m_buffer.fds.append(adopt_ref(*new AutoCloseFileDescriptor(fd)));
-    return *this;
-}
 
-// No-op.
-Encoder& Encoder::operator<<(AK::Empty const&)
-{
-    return *this;
+    if (fd != -1)
+        fd = TRY(Core::System::dup(fd));
+
+    TRY(encoder.append_file_descriptor(fd));
+    return {};
 }
 
 template<>
-bool encode(Encoder& encoder, Core::AnonymousBuffer const& buffer)
+ErrorOr<void> encode(Encoder&, Empty const&)
 {
-    encoder << buffer.is_valid();
+    return {};
+}
+
+template<>
+ErrorOr<void> encode(Encoder& encoder, Core::AnonymousBuffer const& buffer)
+{
+    TRY(encoder.encode(buffer.is_valid()));
+
     if (buffer.is_valid()) {
-        encoder << (u32)buffer.size();
-        encoder << IPC::File(buffer.fd());
+        TRY(encoder.encode_size(buffer.size()));
+        TRY(encoder.encode(IPC::File { buffer.fd() }));
     }
-    return true;
+
+    return {};
 }
 
 template<>
-bool encode(Encoder& encoder, Core::DateTime const& datetime)
+ErrorOr<void> encode(Encoder& encoder, Core::DateTime const& datetime)
 {
-    encoder << static_cast<i64>(datetime.timestamp());
-    return true;
+    return encoder.encode(static_cast<i64>(datetime.timestamp()));
 }
 
 template<>
-bool encode(Encoder& encoder, Core::ProxyData const& proxy)
+ErrorOr<void> encode(Encoder& encoder, Core::ProxyData const& proxy)
 {
-    encoder << to_underlying(proxy.type);
-    encoder << proxy.host_ipv4;
-    encoder << proxy.port;
-    return true;
+    TRY(encoder.encode(proxy.type));
+    TRY(encoder.encode(proxy.host_ipv4));
+    TRY(encoder.encode(proxy.port));
+    return {};
 }
 
 }

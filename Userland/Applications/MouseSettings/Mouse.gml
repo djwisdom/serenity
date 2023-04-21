@@ -108,7 +108,7 @@
                 name: "natural_scroll_checkbox"
                 text: "Natural scrolling"
                 tooltip: "Content follows motion instead of the viewport,\nalso commonly referred to as \"reverse scrolling\"."
-                preferred_width: 108
+                preferred_width: 110
             }
         }
     }
@@ -178,7 +178,7 @@
             @GUI::Label {
                 fixed_width: 32
                 fixed_height: 32
-                icon: "/res/graphics/switch-mouse-buttons.png"
+                name: "switch_buttons_image_label"
             }
 
             @GUI::CheckBox {

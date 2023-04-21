@@ -9,13 +9,12 @@
 #pragma once
 
 #include <AK/HashTable.h>
-#include <LibCore/Stream.h>
 #include <LibJS/Runtime/Value.h>
 
 namespace JS {
 struct PrintContext {
     JS::VM& vm;
-    Core::Stream::Stream& stream;
+    Stream& stream;
     bool strip_ansi { false };
 };
 

@@ -11,18 +11,26 @@
 
 namespace Web::FileAPI {
 
-JS::NonnullGCPtr<FileList> FileList::create(JS::Realm& realm, Vector<JS::NonnullGCPtr<File>>&& files)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<FileList>> FileList::create(JS::Realm& realm, Vector<JS::NonnullGCPtr<File>>&& files)
 {
-    return realm.heap().allocate<FileList>(realm, realm, move(files));
+    return MUST_OR_THROW_OOM(realm.heap().allocate<FileList>(realm, realm, move(files)));
 }
 
 FileList::FileList(JS::Realm& realm, Vector<JS::NonnullGCPtr<File>>&& files)
-    : Bindings::LegacyPlatformObject(Bindings::cached_web_prototype(realm, "FileList"))
+    : Bindings::LegacyPlatformObject(realm)
     , m_files(move(files))
 {
 }
 
 FileList::~FileList() = default;
+
+JS::ThrowCompletionOr<void> FileList::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::FileListPrototype>(realm, "FileList"));
+
+    return {};
+}
 
 // https://w3c.github.io/FileAPI/#dfn-item
 bool FileList::is_supported_property_index(u32 index) const
@@ -35,7 +43,7 @@ bool FileList::is_supported_property_index(u32 index) const
     return m_files.size() < index;
 }
 
-JS::Value FileList::item_value(size_t index) const
+WebIDL::ExceptionOr<JS::Value> FileList::item_value(size_t index) const
 {
     if (index >= m_files.size())
         return JS::js_undefined();

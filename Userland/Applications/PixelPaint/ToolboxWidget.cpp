@@ -11,6 +11,7 @@
 #include "Tools/CloneTool.h"
 #include "Tools/EllipseTool.h"
 #include "Tools/EraseTool.h"
+#include "Tools/GradientTool.h"
 #include "Tools/GuideTool.h"
 #include "Tools/LassoSelectTool.h"
 #include "Tools/LineTool.h"
@@ -38,10 +39,7 @@ ToolboxWidget::ToolboxWidget()
     set_fill_with_background_color(true);
 
     set_fixed_width(26);
-
-    set_layout<GUI::VerticalBoxLayout>();
-    layout()->set_spacing(0);
-    layout()->set_margins(2);
+    set_layout<GUI::VerticalBoxLayout>(2, 0);
 
     m_action_group.set_exclusive(true);
     m_action_group.set_unchecking_allowed(false);
@@ -54,7 +52,7 @@ ToolboxWidget::ToolboxWidget()
 void ToolboxWidget::setup_tools()
 {
     auto add_tool = [&](StringView icon_name, GUI::Shortcut const& shortcut, NonnullOwnPtr<Tool> tool, bool is_default_tool = false) {
-        auto action = GUI::Action::create_checkable(tool->tool_name(), shortcut, Gfx::Bitmap::try_load_from_file(DeprecatedString::formatted("/res/icons/pixelpaint/{}.png", icon_name)).release_value_but_fixme_should_propagate_errors(),
+        auto action = GUI::Action::create_checkable(tool->tool_name(), shortcut, Gfx::Bitmap::load_from_file(DeprecatedString::formatted("/res/icons/pixelpaint/{}.png", icon_name)).release_value_but_fixme_should_propagate_errors(),
             [this, tool = tool.ptr()](auto& action) {
                 if (action.is_checked()) {
                     on_tool_selection(tool);
@@ -73,7 +71,7 @@ void ToolboxWidget::setup_tools()
         m_tools.append(move(tool));
         if (is_default_tool) {
             VERIFY(m_active_tool == nullptr);
-            m_active_tool = &m_tools[m_tools.size() - 1];
+            m_active_tool = m_tools[m_tools.size() - 1];
             action->set_checked(true);
         }
     };
@@ -96,6 +94,7 @@ void ToolboxWidget::setup_tools()
     add_tool("lasso-select"sv, { 0, Key_L }, make<LassoSelectTool>());
     add_tool("guides"sv, { 0, Key_G }, make<GuideTool>());
     add_tool("clone"sv, { 0, Key_C }, make<CloneTool>());
+    add_tool("gradients"sv, { Mod_Ctrl, Key_G }, make<GradientTool>());
 }
 
 }

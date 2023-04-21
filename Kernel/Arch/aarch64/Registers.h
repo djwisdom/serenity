@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021, James Mintram <me@jamesrm.com>
  * Copyright (c) 2021, Marcin Undak <mcinek@gmail.com>
+ * Copyright (c) 2022, Konrad <konrad@serenityos.org>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -13,8 +14,213 @@
 
 namespace Kernel::Aarch64 {
 
-// https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/ID-AA64MMFR0-EL1--AArch64-Memory-Model-Feature-Register-0
-// Memory Model Feature Register 0
+// https://developer.arm.com/documentation/ddi0601/2022-09/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
+// ID_AA64ISAR0_EL1, AArch64 Instruction Set Attribute Register 0
+struct alignas(u64) ID_AA64ISAR0_EL1 {
+    int : 4;
+    int AES : 4;
+    int SHA1 : 4;
+    int SHA2 : 4;
+    int CRC32 : 4;
+    int Atomic : 4;
+    int TME : 4;
+    int RDM : 4;
+    int SHA3 : 4;
+    int SM3 : 4;
+    int SM4 : 4;
+    int DP : 4;
+    int FHM : 4;
+    int TS : 4;
+    int TLB : 4;
+    int RNDR : 4;
+
+    static inline ID_AA64ISAR0_EL1 read()
+    {
+        ID_AA64ISAR0_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64ISAR0_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64ISAR0_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64ISAR1-EL1--AArch64-Instruction-Set-Attribute-Register-1
+// ID_AA64ISAR1_EL1, AArch64 Instruction Set Attribute Register 1
+struct alignas(u64) ID_AA64ISAR1_EL1 {
+    int DPB : 4;
+    int APA : 4;
+    int API : 4;
+    int JSCVT : 4;
+    int FCMA : 4;
+    int LRCPC : 4;
+    int GPA : 4;
+    int GPI : 4;
+    int FRINTTS : 4;
+    int SB : 4;
+    int SPECRES : 4;
+    int BF16 : 4;
+    int DGH : 4;
+    int I8MM : 4;
+    int XS : 4;
+    int LS64 : 4;
+
+    static inline ID_AA64ISAR1_EL1 read()
+    {
+        ID_AA64ISAR1_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64ISAR1_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64ISAR1_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64ISAR2-EL1--AArch64-Instruction-Set-Attribute-Register-2
+// ID_AA64ISAR2_EL1, AArch64 Instruction Set Attribute Register 2
+struct alignas(u64) ID_AA64ISAR2_EL1 {
+    int WFxT : 4;
+    int RPRES : 4;
+    int GPA3 : 4;
+    int APA3 : 4;
+    int MOPS : 4;
+    int BC : 4;
+    int PAC_frac : 4;
+    int CLRBHB : 4;
+    int SYSREG_128 : 4;
+    int SYSINSTR_128 : 4;
+    int PRFMSLC : 4;
+    int : 4;
+    int RPRFM : 4;
+    int CSSC : 4;
+    int : 8;
+
+    static inline ID_AA64ISAR2_EL1 read()
+    {
+        ID_AA64ISAR2_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64ISAR2_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64ISAR2_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64PFR0-EL1--AArch64-Processor-Feature-Register-0
+// ID_AA64PFR0_EL1, AArch64 Processor Feature Register 0
+struct alignas(u64) ID_AA64PFR0_EL1 {
+    int EL0 : 4;
+    int EL1 : 4;
+    int EL2 : 4;
+    int EL3 : 4;
+    int FP : 4;
+    int AdvSIMD : 4;
+    int GIC : 4;
+    int RAS : 4;
+    int SVE : 4;
+    int SEL2 : 4;
+    int MPAM : 4;
+    int AMU : 4;
+    int DIT : 4;
+    int RME : 4;
+    int CSV2 : 4;
+    int CSV3 : 4;
+
+    static inline ID_AA64PFR0_EL1 read()
+    {
+        ID_AA64PFR0_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64PFR0_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64PFR0_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64PFR1-EL1--AArch64-Processor-Feature-Register-1
+// ID_AA64PFR1_EL1, AArch64 Processor Feature Register 1
+struct alignas(u64) ID_AA64PFR1_EL1 {
+    int BT : 4;
+    int SSBS : 4;
+    int MTE : 4;
+    int RAS_frac : 4;
+    int MPAM_frac : 4;
+    int : 4;
+    int SME : 4;
+    int RNDR_trap : 4;
+    int CSV2_frac : 4;
+    int NMI : 4;
+    int MTE_frac : 4;
+    int GCS : 4;
+    int THE : 4;
+    int MTEX : 4;
+    int DF2 : 4;
+    int PFAR : 4;
+
+    static inline ID_AA64PFR1_EL1 read()
+    {
+        ID_AA64PFR1_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64PFR1_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64PFR1_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64PFR2-EL1--AArch64-Processor-Feature-Register-2
+// ID_AA64PFR2_EL1, AArch64 Processor Feature Register 2
+struct alignas(u64) ID_AA64PFR2_EL1 {
+    int MTEPERM : 4;
+    int MTESTOREONLY : 4;
+    int MTEFAR : 4;
+    int : 20;
+    int : 32;
+
+    static inline ID_AA64PFR2_EL1 read()
+    {
+        ID_AA64PFR2_EL1 feature_register;
+
+        asm volatile("mrs %[value], s3_0_c0_c4_2" // encoded ID_AA64PFR2_EL1 register
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64PFR2_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0595/2021-12/AArch64-Registers/MPIDR-EL1--Multiprocessor-Affinity-Register?lang=en
+// MPIDR_EL1, Multiprocessor Affinity Register
+struct alignas(u64) MPIDR_EL1 {
+    int Aff0 : 8;
+    int Aff1 : 8;
+    int Aff2 : 8;
+    int MT : 1;
+    int : 5;
+    int U : 1;
+    int : 1;
+    int Aff3 : 8;
+    int : 24;
+
+    static inline MPIDR_EL1 read()
+    {
+        MPIDR_EL1 affinity_register;
+
+        asm volatile("mrs %[value], MPIDR_EL1"
+                     : [value] "=r"(affinity_register));
+
+        return affinity_register;
+    }
+};
+static_assert(sizeof(MPIDR_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64MMFR0-EL1--AArch64-Memory-Model-Feature-Register-0
+// ID_AA64MMFR0_EL1, AArch64 Memory Model Feature Register 0
 struct alignas(u64) ID_AA64MMFR0_EL1 {
     int PARange : 4;
     int ASIDBits : 4;
@@ -28,7 +234,7 @@ struct alignas(u64) ID_AA64MMFR0_EL1 {
     int TGran64_2 : 4;
     int TGran4_2 : 4;
     int ExS : 4;
-    int RES0 : 8;
+    int : 8;
     int FGT : 4;
     int ECV : 4;
 
@@ -36,13 +242,269 @@ struct alignas(u64) ID_AA64MMFR0_EL1 {
     {
         ID_AA64MMFR0_EL1 feature_register;
 
-        asm("mrs %[value], ID_AA64MMFR0_EL1"
-            : [value] "=r"(feature_register));
+        asm volatile("mrs %[value], ID_AA64MMFR0_EL1"
+                     : [value] "=r"(feature_register));
 
         return feature_register;
     }
 };
 static_assert(sizeof(ID_AA64MMFR0_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64MMFR1-EL1--AArch64-Memory-Model-Feature-Register-1
+// ID_AA64MMFR1_EL1, AArch64 Memory Model Feature Register 1
+struct alignas(u64) ID_AA64MMFR1_EL1 {
+    int HAFDBS : 4;
+    int VMIDBits : 4;
+    int VH : 4;
+    int HPDS : 4;
+    int LO : 4;
+    int PAN : 4;
+    int SpecSEI : 4;
+    int XNX : 4;
+    int TWED : 4;
+    int ETS : 4;
+    int HCX : 4;
+    int AFP : 4;
+    int nTLBPA : 4;
+    int TIDCP1 : 4;
+    int CMOW : 4;
+    int ECBHB : 4;
+
+    static inline ID_AA64MMFR1_EL1 read()
+    {
+        ID_AA64MMFR1_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64MMFR1_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64MMFR1_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64MMFR2-EL1--AArch64-Memory-Model-Feature-Register-2
+// ID_AA64MMFR2_EL1, AArch64 Memory Model Feature Register 2
+struct alignas(u64) ID_AA64MMFR2_EL1 {
+    int CnP : 4;
+    int UAO : 4;
+    int LSM : 4;
+    int IESB : 4;
+    int VARange : 4;
+    int CCIDX : 4;
+    int NV : 4;
+    int ST : 4;
+    int AT : 4;
+    int IDS : 4;
+    int FWB : 4;
+    int : 4;
+    int TTL : 4;
+    int BBM : 4;
+    int EVT : 4;
+    int E0PD : 4;
+
+    static inline ID_AA64MMFR2_EL1 read()
+    {
+        ID_AA64MMFR2_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64MMFR2_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64MMFR2_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64MMFR3-EL1--AArch64-Memory-Model-Feature-Register-3
+// ID_AA64MMFR3_EL1, AArch64 Memory Model Feature Register 3
+struct alignas(u64) ID_AA64MMFR3_EL1 {
+    int TCRX : 4;
+    int SCTLRX : 4;
+    int S1PIE : 4;
+    int S2PIE : 4;
+    int S1POE : 4;
+    int S2POE : 4;
+    int AIE : 4;
+    int MEC : 4;
+    int D128 : 4;
+    int D128_2 : 4;
+    int SNERR : 4;
+    int ANERR : 4;
+    int : 4;
+    int SDERR : 4;
+    int ADERR : 4;
+    int Spec_FPACC : 4;
+
+    static inline ID_AA64MMFR3_EL1 read()
+    {
+        ID_AA64MMFR3_EL1 feature_register;
+
+        asm volatile("mrs %[value], s3_0_c0_c7_3" // encoded ID_AA64MMFR3_EL1 register
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64MMFR3_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64MMFR4-EL1--AArch64-Memory-Model-Feature-Register-4
+// ID_AA64MMFR4_EL1, AArch64 Memory Model Feature Register 4
+struct alignas(u64) ID_AA64MMFR4_EL1 {
+    int : 4;
+    int EIESB : 4;
+    int : 24;
+    int : 32;
+
+    static inline ID_AA64MMFR4_EL1 read()
+    {
+        ID_AA64MMFR4_EL1 feature_register;
+
+        asm volatile("mrs %[value], s3_0_c0_c7_4" // encoded ID_AA64MMFR4_EL1 register
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64MMFR4_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64SMFR0-EL1--SME-Feature-ID-register-0
+// ID_AA64SMFR0_EL1, AArch64 SME Feature ID register 0
+struct alignas(u64) ID_AA64SMFR0_EL1 {
+    int : 32;
+    int F32F32 : 1;
+    int BI32I32 : 1;
+    int B16F32 : 1;
+    int F16F32 : 1;
+    int I8I32 : 4;
+    int : 2;
+    int F16F16 : 1;
+    int B16B16 : 1;
+    int I16I32 : 4;
+    int F64F64 : 1;
+    int : 3;
+    int I16I64 : 4;
+    int SMEver : 4;
+    int : 3;
+    int FA64 : 1;
+
+    static inline ID_AA64SMFR0_EL1 read()
+    {
+        ID_AA64SMFR0_EL1 feature_register;
+
+        asm volatile("mrs %[value], s3_0_c0_c4_5" // encoded ID_AA64SMFR0_EL1 register
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64SMFR0_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64ZFR0-EL1--SVE-Feature-ID-register-0
+// ID_AA64ZFR0_EL1, AArch64 SVE Feature ID register 0
+struct alignas(u64) ID_AA64ZFR0_EL1 {
+    int SVEver : 4;
+    int AES : 4;
+    int : 8;
+    int BitPerm : 4;
+    int BF16 : 4;
+    int B16B16 : 4;
+    int : 4;
+    int SHA3 : 4;
+    int : 4;
+    int SM4 : 4;
+    int I8MM : 4;
+    int : 4;
+    int F32MM : 4;
+    int F64MM : 4;
+    int : 4;
+
+    static inline ID_AA64ZFR0_EL1 read()
+    {
+        ID_AA64ZFR0_EL1 feature_register;
+
+        asm volatile("mrs %[value], s3_0_c0_c4_4" // encoded ID_AA64ZFR0_EL1 register
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64ZFR0_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64DFR0-EL1--AArch64-Debug-Feature-Register-0
+// ID_AA64DFR0_EL1, AArch64 Debug Feature Register 0
+struct alignas(u64) ID_AA64DFR0_EL1 {
+    int DebugVer : 4;
+    int TraceVer : 4;
+    int PMUVer : 4;
+    int BRPs : 4;
+    int PMSS : 4;
+    int WRPs : 4;
+    int SEBEP : 4;
+    int CTX_CMPs : 4;
+    int PMSVer : 4;
+    int DoubleLock : 4;
+    int TraceFilt : 4;
+    int TraceBuffer : 4;
+    int MTPMU : 4;
+    int BRBE : 4;
+    int ExtTrcBuff : 4;
+    int HPMN0 : 4;
+
+    static inline ID_AA64DFR0_EL1 read()
+    {
+        ID_AA64DFR0_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64DFR0_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64DFR0_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-12/AArch64-Registers/ID-AA64DFR1-EL1--AArch64-Debug-Feature-Register-1
+// ID_AA64DFR1_EL1, AArch64 Debug Feature Register 1
+struct alignas(u64) ID_AA64DFR1_EL1 {
+    int SYSPMUID : 8;
+    int BRPs : 8;
+    int WRPs : 8;
+    int CTX_CMPs : 8;
+    int SPMU : 4;
+    int PMICNTR : 4;
+    int ABLE : 4;
+    int ITE : 4;
+    int EBEP : 4;
+    int : 4;
+    int ABL_CMPs : 8;
+
+    static inline ID_AA64DFR1_EL1 read()
+    {
+        ID_AA64DFR1_EL1 feature_register;
+
+        asm volatile("mrs %[value], ID_AA64DFR1_EL1"
+                     : [value] "=r"(feature_register));
+
+        return feature_register;
+    }
+};
+static_assert(sizeof(ID_AA64DFR1_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0595/2020-12/AArch64-Registers/CNTFRQ-EL0--Counter-timer-Frequency-register
+// CNTFRQ_EL0, Counter-timer Frequency register
+struct alignas(u64) CNTFRQ_EL0 {
+    int : 32;
+    int ClockFrequency : 32;
+
+    static inline CNTFRQ_EL0 read()
+    {
+        CNTFRQ_EL0 frequency;
+
+        asm volatile("mrs %[value], CNTFRQ_EL0"
+                     : [value] "=r"(frequency));
+
+        return frequency;
+    }
+};
+static_assert(sizeof(CNTFRQ_EL0) == 8);
 
 // https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/TCR-EL1--Translation-Control-Register--EL1-
 // Translation Control Register
@@ -135,15 +597,15 @@ struct alignas(u64) TCR_EL1 {
 
     static inline void write(TCR_EL1 tcr_el1)
     {
-        asm("msr tcr_el1, %[value]" ::[value] "r"(tcr_el1));
+        asm volatile("msr tcr_el1, %[value]" ::[value] "r"(tcr_el1));
     }
 
     static inline TCR_EL1 read()
     {
         TCR_EL1 tcr_el1;
 
-        asm("mrs %[value], tcr_el1_el1"
-            : [value] "=r"(tcr_el1));
+        asm volatile("mrs %[value], tcr_el1"
+                     : [value] "=r"(tcr_el1));
 
         return tcr_el1;
     }
@@ -210,15 +672,15 @@ struct alignas(u64) SCTLR_EL1 {
 
     static inline void write(SCTLR_EL1 sctlr_el1)
     {
-        asm("msr sctlr_el1, %[value]" ::[value] "r"(sctlr_el1));
+        asm volatile("msr sctlr_el1, %[value]" ::[value] "r"(sctlr_el1));
     }
 
     static inline SCTLR_EL1 read()
     {
         SCTLR_EL1 sctlr;
 
-        asm("mrs %[value], sctlr_el1"
-            : [value] "=r"(sctlr));
+        asm volatile("mrs %[value], sctlr_el1"
+                     : [value] "=r"(sctlr));
 
         return sctlr;
     }
@@ -234,6 +696,45 @@ struct alignas(u64) SCTLR_EL1 {
     }
 };
 static_assert(sizeof(SCTLR_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-09/AArch64-Registers/MIDR-EL1--Main-ID-Register?lang=en
+// MIDR_EL1, Main ID Register
+struct alignas(u64) MIDR_EL1 {
+    u8 Revision : 4;
+    u16 PartNum : 12;
+    u8 Architecture : 4;
+    u8 Variant : 4;
+    u8 Implementer : 8;
+    int : 32;
+
+    static inline MIDR_EL1 read()
+    {
+        MIDR_EL1 main_id_register;
+
+        asm volatile("mrs %[value], MIDR_EL1"
+                     : [value] "=r"(main_id_register));
+
+        return main_id_register;
+    }
+};
+static_assert(sizeof(MIDR_EL1) == 8);
+
+// https://developer.arm.com/documentation/ddi0601/2022-09/AArch64-Registers/AIDR-EL1--Auxiliary-ID-Register?lang=en
+// AIDR_EL1, Auxiliary ID Register
+struct alignas(u64) AIDR_EL1 {
+    u64 AIDR : 64;
+
+    static inline AIDR_EL1 read()
+    {
+        AIDR_EL1 auxiliary_id_register;
+
+        asm volatile("mrs %[value], AIDR_EL1"
+                     : [value] "=r"(auxiliary_id_register));
+
+        return auxiliary_id_register;
+    }
+};
+static_assert(sizeof(AIDR_EL1) == 8);
 
 // https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/HCR-EL2--Hypervisor-Configuration-Register
 // Hypervisor Configuration Register
@@ -285,15 +786,15 @@ struct alignas(u64) HCR_EL2 {
 
     static inline void write(HCR_EL2 hcr_el2)
     {
-        asm("msr hcr_el2, %[value]" ::[value] "r"(hcr_el2));
+        asm volatile("msr hcr_el2, %[value]" ::[value] "r"(hcr_el2));
     }
 
     static inline HCR_EL2 read()
     {
         HCR_EL2 spsr;
 
-        asm("mrs %[value], hcr_el2"
-            : [value] "=r"(spsr));
+        asm volatile("mrs %[value], hcr_el2"
+                     : [value] "=r"(spsr));
 
         return spsr;
     }
@@ -341,20 +842,68 @@ struct alignas(u64) SCR_EL3 {
 
     static inline void write(SCR_EL3 scr_el3)
     {
-        asm("msr scr_el3, %[value]" ::[value] "r"(scr_el3));
+        asm volatile("msr scr_el3, %[value]" ::[value] "r"(scr_el3));
     }
 
     static inline SCR_EL3 read()
     {
         SCR_EL3 scr;
 
-        asm("mrs %[value], scr_el3"
-            : [value] "=r"(scr));
+        asm volatile("mrs %[value], scr_el3"
+                     : [value] "=r"(scr));
 
         return scr;
     }
 };
 static_assert(sizeof(SCR_EL3) == 8);
+
+// C5.2.18 SPSR_EL1, Saved Program Status Register (EL1)
+struct alignas(u64) SPSR_EL1 {
+    enum Mode : u8 {
+        EL0t = 0b0000,
+        EL1t = 0b0100,
+        EL1h = 0b0101
+    };
+
+    Mode M : 4;
+    int M_4 : 1 = 0;
+    int _reserved5 : 1 = 0;
+    int F : 1;
+    int I : 1;
+    int A : 1;
+    int D : 1;
+    int BTYPE : 2;
+    int SSBS : 1;
+    int _reserved13 : 7 = 0;
+    int IL : 1;
+    int SS : 1;
+    int PAN : 1;
+    int UA0 : 1;
+    int DIT : 1;
+    int TCO : 1;
+    int _reserved26 : 2 = 0;
+    int V : 1;
+    int C : 1;
+    int Z : 1;
+    int N : 1;
+    int _reserved32 : 32 = 0;
+
+    static inline void write(SPSR_EL1 spsr_el1)
+    {
+        asm volatile("msr spsr_el1, %[value]" ::[value] "r"(spsr_el1));
+    }
+
+    static inline SPSR_EL1 read()
+    {
+        SPSR_EL1 spsr;
+
+        asm volatile("mrs %[value], spsr_el1"
+                     : [value] "=r"(spsr));
+
+        return spsr;
+    }
+};
+static_assert(sizeof(SPSR_EL1) == 8);
 
 struct alignas(u64) SPSR_EL2 {
     enum Mode : u16 {
@@ -390,15 +939,15 @@ struct alignas(u64) SPSR_EL2 {
 
     static inline void write(SPSR_EL2 spsr_el2)
     {
-        asm("msr spsr_el2, %[value]" ::[value] "r"(spsr_el2));
+        asm volatile("msr spsr_el2, %[value]" ::[value] "r"(spsr_el2));
     }
 
     static inline SPSR_EL2 read()
     {
         SPSR_EL2 spsr;
 
-        asm("mrs %[value], spsr_el2"
-            : [value] "=r"(spsr));
+        asm volatile("mrs %[value], spsr_el2"
+                     : [value] "=r"(spsr));
 
         return spsr;
     }
@@ -439,15 +988,15 @@ struct alignas(u64) SPSR_EL3 {
 
     static inline void write(SPSR_EL3 spsr_el3)
     {
-        asm("msr spsr_el3, %[value]" ::[value] "r"(spsr_el3));
+        asm volatile("msr spsr_el3, %[value]" ::[value] "r"(spsr_el3));
     }
 
     static inline SPSR_EL3 read()
     {
         SPSR_EL3 spsr;
 
-        asm("mrs %[value], spsr_el3"
-            : [value] "=r"(spsr));
+        asm volatile("mrs %[value], spsr_el3"
+                     : [value] "=r"(spsr));
 
         return spsr;
     }
@@ -462,7 +1011,7 @@ struct alignas(u64) MAIR_EL1 {
 
     static inline void write(MAIR_EL1 mair_el1)
     {
-        asm("msr mair_el1, %[value]" ::[value] "r"(mair_el1));
+        asm volatile("msr mair_el1, %[value]" ::[value] "r"(mair_el1));
     }
 };
 static_assert(sizeof(MAIR_EL1) == 8);
@@ -480,8 +1029,8 @@ struct ESR_EL1 {
     {
         ESR_EL1 esr_el1;
 
-        asm("mrs %[value], esr_el1"
-            : [value] "=r"(esr_el1));
+        asm volatile("mrs %[value], esr_el1"
+                     : [value] "=r"(esr_el1));
 
         return esr_el1;
     }
@@ -496,8 +1045,8 @@ struct FAR_EL1 {
     {
         FAR_EL1 far_el1;
 
-        asm("mrs %[value], far_el1"
-            : [value] "=r"(far_el1));
+        asm volatile("mrs %[value], far_el1"
+                     : [value] "=r"(far_el1));
 
         return far_el1;
     }
@@ -608,6 +1157,122 @@ static inline bool exception_class_has_set_far(u8 exception_class)
     }
 }
 
+static inline bool exception_class_is_data_abort(u8 exception_class)
+{
+    return exception_class == 0x24 || exception_class == 0x25;
+}
+
+static inline bool exception_class_is_instruction_abort(u8 exception_class)
+{
+    return exception_class == 0x20 || exception_class == 0x21;
+}
+
+static inline bool exception_class_is_data_or_instruction_abort_from_lower_exception_level(u8 exception_class)
+{
+    return exception_class == 0x20 || exception_class == 0x24;
+}
+
+static inline bool exception_class_is_svc_instruction_execution(u8 exception_class)
+{
+    return exception_class == 0x11 || exception_class == 0x15;
+}
+
+// D17.2.37 ESR_EL1, Exception Syndrome Register (EL1)
+// ISS encoding for an exception from a Data Abort
+// DFSC, bits [5:0]
+static inline StringView data_fault_status_code_to_string(u32 instruction_specific_syndrome)
+{
+    u8 data_fault_status_code = instruction_specific_syndrome & 0x3f;
+    switch (data_fault_status_code) {
+    case 0b000000:
+        return "Address size fault, level 0 of translation or translation table base register"sv;
+    case 0b000001:
+        return "Address size fault, level 1"sv;
+    case 0b000010:
+        return "Address size fault, level 2"sv;
+    case 0b000011:
+        return "Address size fault, level 3"sv;
+    case 0b000100:
+        return "Translation fault, level 0"sv;
+    case 0b000101:
+        return "Translation fault, level 1"sv;
+    case 0b000110:
+        return "Translation fault, level 2"sv;
+    case 0b000111:
+        return "Translation fault, level 3"sv;
+    case 0b001001:
+        return "Access flag fault, level 1"sv;
+    case 0b001010:
+        return "Access flag fault, level 2"sv;
+    case 0b001011:
+        return "Access flag fault, level 3"sv;
+    case 0b001000:
+        return "Access flag fault, level 0"sv;
+    case 0b001100:
+        return "Permission fault, level 0"sv;
+    case 0b001101:
+        return "Permission fault, level 1"sv;
+    case 0b001110:
+        return "Permission fault, level 2"sv;
+    case 0b001111:
+        return "Permission fault, level 3"sv;
+    case 0b010000:
+        return "Synchronous External abort, not on translation table walk or hardware update of translation table"sv;
+    case 0b010001:
+        return "Synchronous Tag Check Fault"sv;
+    case 0b010011:
+        return "Synchronous External abort on translation table walk or hardware update of translation table, level -1"sv;
+    case 0b010100:
+        return "Synchronous External abort on translation table walk or hardware update of translation table, level 0"sv;
+    case 0b010101:
+        return "Synchronous External abort on translation table walk or hardware update of translation table, level 1"sv;
+    case 0b010110:
+        return "Synchronous External abort on translation table walk or hardware update of translation table, level 2"sv;
+    case 0b010111:
+        return "Synchronous External abort on translation table walk or hardware update of translation table, level 3"sv;
+    case 0b011000:
+        return "Synchronous parity or ECC error on memory access, not on translation table walk"sv;
+    case 0b011011:
+        return "Synchronous parity or ECC error on memory access on translation table walk or hardware update of translation table, level -1"sv;
+    case 0b011100:
+        return "Synchronous parity or ECC error on memory access on translation table walk or hardware update of translation table, level 0"sv;
+    case 0b011101:
+        return "Synchronous parity or ECC error on memory access on translation table walk or hardware update of translation table, level 1"sv;
+    case 0b011110:
+        return "Synchronous parity or ECC error on memory access on translation table walk or hardware update of translation table, level 2"sv;
+    case 0b011111:
+        return "Synchronous parity or ECC error on memory access on translation table walk or hardware update of translation table, level 3"sv;
+    case 0b100001:
+        return "Alignment fault"sv;
+    case 0b100011:
+        return "Granule Protection Fault on translation table walk or hardware update of translation table, level -1"sv;
+    case 0b100100:
+        return "Granule Protection Fault on translation table walk or hardware update of translation table, level 0"sv;
+    case 0b100101:
+        return "Granule Protection Fault on translation table walk or hardware update of translation table, level 1"sv;
+    case 0b100110:
+        return "Granule Protection Fault on translation table walk or hardware update of translation table, level 2"sv;
+    case 0b100111:
+        return "Granule Protection Fault on translation table walk or hardware update of translation table, level 3"sv;
+    case 0b101000:
+        return "Granule Protection Fault, not on translation table walk or hardware update of translation table"sv;
+    case 0b101001:
+        return "Address size fault, level -1"sv;
+    case 0b101011:
+        return "Translation fault, level -1"sv;
+    case 0b110000:
+        return "TLB conflict abort"sv;
+    case 0b110001:
+        return "Unsupported atomic hardware update fault"sv;
+    case 0b110100:
+        return "IMPLEMENTATION DEFINED fault (Lockdown)"sv;
+    case 0b110101:
+        return "IMPLEMENTATION DEFINED fault (Unsupported Exclusive or Atomic access)"sv;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
 // https://developer.arm.com/documentation/ddi0601/2020-12/AArch64-Registers/DAIF--Interrupt-Mask-Bits?lang=en
 // DAIF, Interrupt Mask Bits
 struct DAIF {
@@ -622,8 +1287,8 @@ struct DAIF {
     {
         DAIF daif;
 
-        asm("mrs %[value], daif"
-            : [value] "=r"(daif));
+        asm volatile("mrs %[value], daif"
+                     : [value] "=r"(daif));
 
         return daif;
     }
@@ -643,4 +1308,60 @@ struct DAIF {
     }
 };
 static_assert(sizeof(DAIF) == 8);
+
+// https://developer.arm.com/documentation/ddi0595/2021-03/AArch64-Registers/NZCV--Condition-Flags
+// NZCV, Condition Flags
+struct alignas(u64) NZCV {
+    u64 : 28;
+    u64 V : 1;
+    u64 C : 1;
+    u64 Z : 1;
+    u64 N : 1;
+    u64 : 32;
+
+    static inline NZCV read()
+    {
+        NZCV nzcv;
+        asm volatile("mrs %[value], nzcv"
+                     : [value] "=r"(nzcv));
+        return nzcv;
+    }
+};
+static_assert(sizeof(NZCV) == 8);
+
+// https://developer.arm.com/documentation/ddi0595/2021-03/AArch64-Registers/PMCCNTR-EL0--Performance-Monitors-Cycle-Count-Register
+// PMCCNTR_EL0, Performance Monitors Cycle Count Register
+struct alignas(u64) PMCCNTR_EL0 {
+    u64 CCNT : 64;
+
+    static inline PMCCNTR_EL0 read()
+    {
+        PMCCNTR_EL0 pmccntr_el0;
+        asm volatile("mrs %[value], pmccntr_el0"
+                     : [value] "=r"(pmccntr_el0));
+        return pmccntr_el0;
+    }
+};
+static_assert(sizeof(PMCCNTR_EL0) == 8);
+
+// D17.2.30 CPACR_EL1, Architectural Feature Access Control Register
+struct alignas(u64) CPACR_EL1 {
+    u64 _reserved0 : 16 = 0;
+    u64 ZEN : 2;
+    u64 _reserved18 : 2 = 0;
+    u64 FPEN : 2;
+    u64 _reserved22 : 2 = 0;
+    u64 SMEN : 2;
+    u64 _reserved26 : 2 = 0;
+    u64 TTA : 1;
+    u64 _reserved29 : 3 = 0;
+    u64 _reserved32 : 32 = 0;
+
+    static inline void write(CPACR_EL1 cpacr_el1)
+    {
+        asm volatile("msr cpacr_el1, %[value]" ::[value] "r"(cpacr_el1));
+    }
+};
+static_assert(sizeof(CPACR_EL1) == 8);
+
 }

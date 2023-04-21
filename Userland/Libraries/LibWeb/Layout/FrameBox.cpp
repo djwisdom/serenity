@@ -7,7 +7,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/Layout/FrameBox.h>
-#include <LibWeb/Layout/InitialContainingBlock.h>
+#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/NestedBrowsingContextPaintable.h>
 
 namespace Web::Layout {
@@ -33,11 +33,10 @@ void FrameBox::did_set_rect()
     ReplacedBox::did_set_rect();
 
     VERIFY(dom_node().nested_browsing_context());
-    // FIXME: Pass CSSPixels here instead of int.
-    dom_node().nested_browsing_context()->set_size(paint_box()->content_size().to_type<float>().to_type<int>());
+    dom_node().nested_browsing_context()->set_size(paintable_box()->content_size());
 }
 
-RefPtr<Painting::Paintable> FrameBox::create_paintable() const
+JS::GCPtr<Painting::Paintable> FrameBox::create_paintable() const
 {
     return Painting::NestedBrowsingContextPaintable::create(*this);
 }

@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/OwnPtr.h>
 #include <AK/SinglyLinkedList.h>
 #include <LibJS/Bytecode/BasicBlock.h>
@@ -84,9 +83,9 @@ public:
     CodeGenerationErrorOr<void> emit_store_to_reference(JS::ASTNode const&);
     CodeGenerationErrorOr<void> emit_delete_reference(JS::ASTNode const&);
 
-    void begin_continuable_scope(Label continue_target, Vector<FlyString> const& language_label_set);
+    void begin_continuable_scope(Label continue_target, Vector<DeprecatedFlyString> const& language_label_set);
     void end_continuable_scope();
-    void begin_breakable_scope(Label breakable_target, Vector<FlyString> const& language_label_set);
+    void begin_breakable_scope(Label breakable_target, Vector<DeprecatedFlyString> const& language_label_set);
     void end_breakable_scope();
 
     [[nodiscard]] Label nearest_continuable_scope() const;
@@ -104,7 +103,7 @@ public:
         if (name.is_empty())
             name = DeprecatedString::number(m_next_block++);
         m_root_basic_blocks.append(BasicBlock::create(name));
-        return m_root_basic_blocks.last();
+        return *m_root_basic_blocks.last();
     }
 
     bool is_current_block_terminated() const
@@ -117,7 +116,7 @@ public:
         return m_string_table->insert(move(string));
     }
 
-    IdentifierTableIndex intern_identifier(FlyString string)
+    IdentifierTableIndex intern_identifier(DeprecatedFlyString string)
     {
         return m_identifier_table->insert(move(string));
     }
@@ -174,24 +173,16 @@ public:
         LeaveVariableEnvironment,
     };
     template<typename OpType>
-    void perform_needed_unwinds(bool is_break_node = false)
-    requires(OpType::IsTerminator)
+    void perform_needed_unwinds()
+    requires(OpType::IsTerminator && !IsSame<OpType, Op::Jump>)
     {
-        Optional<BlockBoundaryType> boundary_to_stop_at;
-        if constexpr (IsSame<OpType, Bytecode::Op::Return> || IsSame<OpType, Bytecode::Op::Yield>)
-            VERIFY(!is_break_node);
-        else if constexpr (IsSame<OpType, Bytecode::Op::Throw>)
-            boundary_to_stop_at = BlockBoundaryType::Unwind;
-        else
-            boundary_to_stop_at = is_break_node ? BlockBoundaryType::Break : BlockBoundaryType::Continue;
-
         for (size_t i = m_boundaries.size(); i > 0; --i) {
             auto boundary = m_boundaries[i - 1];
-            if (boundary_to_stop_at.has_value() && boundary == *boundary_to_stop_at)
-                break;
             using enum BlockBoundaryType;
             switch (boundary) {
             case Unwind:
+                if constexpr (IsSame<OpType, Bytecode::Op::Throw>)
+                    return;
                 emit<Bytecode::Op::LeaveUnwindContext>();
                 break;
             case LeaveLexicalEnvironment:
@@ -204,17 +195,16 @@ public:
             case Continue:
                 break;
             case ReturnToFinally:
-                // FIXME: In the case of breaks/continues we need to tell the `finally` to break/continue
-                //        For now let's ignore the finally to avoid a crash
-                if (IsSame<OpType, Bytecode::Op::Jump>)
-                    break;
                 return;
             };
         }
     }
 
-    Label perform_needed_unwinds_for_labelled_break_and_return_target_block(FlyString const& break_label);
-    Label perform_needed_unwinds_for_labelled_continue_and_return_target_block(FlyString const& continue_label);
+    void generate_break();
+    void generate_break(DeprecatedFlyString const& break_label);
+
+    void generate_continue();
+    void generate_continue(DeprecatedFlyString const& continue_label);
 
     void start_boundary(BlockBoundaryType type) { m_boundaries.append(type); }
     void end_boundary(BlockBoundaryType type)
@@ -232,11 +222,11 @@ private:
 
     struct LabelableScope {
         Label bytecode_target;
-        Vector<FlyString> language_label_set;
+        Vector<DeprecatedFlyString> language_label_set;
     };
 
     BasicBlock* m_current_basic_block { nullptr };
-    NonnullOwnPtrVector<BasicBlock> m_root_basic_blocks;
+    Vector<NonnullOwnPtr<BasicBlock>> m_root_basic_blocks;
     NonnullOwnPtr<StringTable> m_string_table;
     NonnullOwnPtr<IdentifierTable> m_identifier_table;
 

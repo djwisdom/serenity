@@ -19,17 +19,16 @@
 
 namespace Kernel {
 
-UNMAP_AFTER_INIT ErrorOr<NonnullLockRefPtr<NVMeController>> NVMeController::try_initialize(Kernel::PCI::DeviceIdentifier const& device_identifier, bool is_queue_polled)
+UNMAP_AFTER_INIT ErrorOr<NonnullRefPtr<NVMeController>> NVMeController::try_initialize(Kernel::PCI::DeviceIdentifier const& device_identifier, bool is_queue_polled)
 {
-    auto controller = TRY(adopt_nonnull_lock_ref_or_enomem(new NVMeController(device_identifier, StorageManagement::generate_relative_nvme_controller_id({}))));
+    auto controller = TRY(adopt_nonnull_ref_or_enomem(new NVMeController(device_identifier, StorageManagement::generate_relative_nvme_controller_id({}))));
     TRY(controller->initialize(is_queue_polled));
     return controller;
 }
 
 UNMAP_AFTER_INIT NVMeController::NVMeController(const PCI::DeviceIdentifier& device_identifier, u32 hardware_relative_controller_id)
-    : PCI::Device(device_identifier.address())
+    : PCI::Device(const_cast<PCI::DeviceIdentifier&>(device_identifier))
     , StorageController(hardware_relative_controller_id)
-    , m_pci_device_id(device_identifier)
 {
 }
 
@@ -37,11 +36,11 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::initialize(bool is_queue_polled)
 {
     // Nr of queues = one queue per core
     auto nr_of_queues = Processor::count();
-    auto irq = is_queue_polled ? Optional<u8> {} : m_pci_device_id.interrupt_line().value();
+    auto irq = is_queue_polled ? Optional<u8> {} : device_identifier().interrupt_line().value();
 
-    PCI::enable_memory_space(m_pci_device_id.address());
-    PCI::enable_bus_mastering(m_pci_device_id.address());
-    m_bar = PCI::get_BAR0(m_pci_device_id.address()) & BAR_ADDR_MASK;
+    PCI::enable_memory_space(device_identifier());
+    PCI::enable_bus_mastering(device_identifier());
+    m_bar = PCI::get_BAR0(device_identifier()) & BAR_ADDR_MASK;
     static_assert(sizeof(ControllerRegister) == REG_SQ0TDBL_START);
     static_assert(sizeof(NVMeSubmission) == (1 << SQ_WIDTH));
 
@@ -88,13 +87,13 @@ bool NVMeController::wait_for_ready(bool expected_ready_bit_value)
     return true;
 }
 
-bool NVMeController::reset_controller()
+ErrorOr<void> NVMeController::reset_controller()
 {
     if ((m_controller_regs->cc & (1 << CC_EN_BIT)) != 0) {
         // If the EN bit is already set, we need to wait
         // until the RDY bit is 1, otherwise the behavior is undefined
         if (!wait_for_ready(true))
-            return false;
+            return Error::from_errno(ETIMEDOUT);
     }
 
     auto cc = m_controller_regs->cc;
@@ -107,18 +106,18 @@ bool NVMeController::reset_controller()
 
     // Wait until the RDY bit is cleared
     if (!wait_for_ready(false))
-        return false;
+        return Error::from_errno(ETIMEDOUT);
 
-    return true;
+    return {};
 }
 
-bool NVMeController::start_controller()
+ErrorOr<void> NVMeController::start_controller()
 {
     if (!(m_controller_regs->cc & (1 << CC_EN_BIT))) {
         // If the EN bit is not already set, we need to wait
         // until the RDY bit is 0, otherwise the behavior is undefined
         if (!wait_for_ready(false))
-            return false;
+            return Error::from_errno(ETIMEDOUT);
     }
 
     auto cc = m_controller_regs->cc;
@@ -133,9 +132,9 @@ bool NVMeController::start_controller()
 
     // Wait until the RDY bit is set
     if (!wait_for_ready(true))
-        return false;
+        return Error::from_errno(ETIMEDOUT);
 
-    return true;
+    return {};
 }
 
 UNMAP_AFTER_INIT u32 NVMeController::get_admin_q_dept()
@@ -169,7 +168,7 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::identify_and_init_namespaces()
         sub.identify.cns = NVMe_CNS_ID_ACTIVE_NS & 0xff;
         status = submit_admin_command(sub, true);
         if (status) {
-            dmesgln("Failed to identify active namespace command");
+            dmesgln_pci(*this, "Failed to identify active namespace command");
             return EFAULT;
         }
         if (void* fault_at; !safe_memcpy(active_namespace_list, prp_dma_region->vaddr().as_ptr(), NVMe_IDENTIFY_SIZE, fault_at)) {
@@ -192,7 +191,7 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::identify_and_init_namespaces()
             sub.identify.nsid = nsid;
             status = submit_admin_command(sub, true);
             if (status) {
-                dmesgln("Failed identify namespace with nsid {}", nsid);
+                dmesgln_pci(*this, "Failed identify namespace with nsid {}", nsid);
                 return EFAULT;
             }
             static_assert(sizeof(IdentifyNamespace) == NVMe_IDENTIFY_SIZE);
@@ -233,19 +232,16 @@ size_t NVMeController::devices_count() const
     return m_device_count;
 }
 
-bool NVMeController::reset()
+ErrorOr<void> NVMeController::reset()
 {
-    if (!reset_controller())
-        return false;
-    if (!start_controller())
-        return false;
-    return true;
+    TRY(reset_controller());
+    TRY(start_controller());
+    return {};
 }
 
-bool NVMeController::shutdown()
+ErrorOr<void> NVMeController::shutdown()
 {
-    TODO();
-    return false;
+    return Error::from_errno(ENOTIMPL);
 }
 
 void NVMeController::complete_current_request([[maybe_unused]] AsyncDeviceRequest::RequestResult result)
@@ -257,14 +253,15 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_admin_queue(Optional<u8> i
 {
     auto qdepth = get_admin_q_dept();
     OwnPtr<Memory::Region> cq_dma_region;
-    NonnullRefPtrVector<Memory::PhysicalPage> cq_dma_pages;
+    Vector<NonnullRefPtr<Memory::PhysicalPage>> cq_dma_pages;
     OwnPtr<Memory::Region> sq_dma_region;
-    NonnullRefPtrVector<Memory::PhysicalPage> sq_dma_pages;
+    Vector<NonnullRefPtr<Memory::PhysicalPage>> sq_dma_pages;
     auto cq_size = round_up_to_power_of_two(CQ_SIZE(qdepth), 4096);
     auto sq_size = round_up_to_power_of_two(SQ_SIZE(qdepth), 4096);
-    if (!reset_controller()) {
-        dmesgln("Failed to reset the NVMe controller");
-        return EFAULT;
+    auto maybe_error = reset_controller();
+    if (maybe_error.is_error()) {
+        dmesgln_pci(*this, "Failed to reset the NVMe controller");
+        return maybe_error;
     }
     {
         auto buffer = TRY(MM.allocate_dma_buffer_pages(cq_size, "Admin CQ queue"sv, Memory::Region::Access::ReadWrite, cq_dma_pages));
@@ -281,12 +278,13 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_admin_queue(Optional<u8> i
     }
     auto doorbell_regs = TRY(Memory::map_typed_writable<DoorbellRegister volatile>(PhysicalAddress(m_bar + REG_SQ0TDBL_START)));
 
-    m_controller_regs->acq = reinterpret_cast<u64>(AK::convert_between_host_and_little_endian(cq_dma_pages.first().paddr().as_ptr()));
-    m_controller_regs->asq = reinterpret_cast<u64>(AK::convert_between_host_and_little_endian(sq_dma_pages.first().paddr().as_ptr()));
+    m_controller_regs->acq = reinterpret_cast<u64>(AK::convert_between_host_and_little_endian(cq_dma_pages.first()->paddr().as_ptr()));
+    m_controller_regs->asq = reinterpret_cast<u64>(AK::convert_between_host_and_little_endian(sq_dma_pages.first()->paddr().as_ptr()));
 
-    if (!start_controller()) {
-        dmesgln("Failed to restart the NVMe controller");
-        return EFAULT;
+    maybe_error = start_controller();
+    if (maybe_error.is_error()) {
+        dmesgln_pci(*this, "Failed to restart the NVMe controller");
+        return maybe_error;
     }
     set_admin_queue_ready_flag();
     m_admin_queue = TRY(NVMeQueue::try_create(0, irq, qdepth, move(cq_dma_region), cq_dma_pages, move(sq_dma_region), sq_dma_pages, move(doorbell_regs)));
@@ -298,9 +296,9 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_admin_queue(Optional<u8> i
 UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_io_queue(u8 qid, Optional<u8> irq)
 {
     OwnPtr<Memory::Region> cq_dma_region;
-    NonnullRefPtrVector<Memory::PhysicalPage> cq_dma_pages;
+    Vector<NonnullRefPtr<Memory::PhysicalPage>> cq_dma_pages;
     OwnPtr<Memory::Region> sq_dma_region;
-    NonnullRefPtrVector<Memory::PhysicalPage> sq_dma_pages;
+    Vector<NonnullRefPtr<Memory::PhysicalPage>> sq_dma_pages;
     auto cq_size = round_up_to_power_of_two(CQ_SIZE(IO_QUEUE_SIZE), 4096);
     auto sq_size = round_up_to_power_of_two(SQ_SIZE(IO_QUEUE_SIZE), 4096);
 
@@ -321,7 +319,7 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_io_queue(u8 qid, Optional<
     {
         NVMeSubmission sub {};
         sub.op = OP_ADMIN_CREATE_COMPLETION_QUEUE;
-        sub.create_cq.prp1 = reinterpret_cast<u64>(AK::convert_between_host_and_little_endian(cq_dma_pages.first().paddr().as_ptr()));
+        sub.create_cq.prp1 = reinterpret_cast<u64>(AK::convert_between_host_and_little_endian(cq_dma_pages.first()->paddr().as_ptr()));
         sub.create_cq.cqid = qid;
         // The queue size is 0 based
         sub.create_cq.qsize = AK::convert_between_host_and_little_endian(IO_QUEUE_SIZE - 1);
@@ -336,7 +334,7 @@ UNMAP_AFTER_INIT ErrorOr<void> NVMeController::create_io_queue(u8 qid, Optional<
     {
         NVMeSubmission sub {};
         sub.op = OP_ADMIN_CREATE_SUBMISSION_QUEUE;
-        sub.create_sq.prp1 = reinterpret_cast<u64>(AK::convert_between_host_and_little_endian(sq_dma_pages.first().paddr().as_ptr()));
+        sub.create_sq.prp1 = reinterpret_cast<u64>(AK::convert_between_host_and_little_endian(sq_dma_pages.first()->paddr().as_ptr()));
         sub.create_sq.sqid = qid;
         // The queue size is 0 based
         sub.create_sq.qsize = AK::convert_between_host_and_little_endian(IO_QUEUE_SIZE - 1);

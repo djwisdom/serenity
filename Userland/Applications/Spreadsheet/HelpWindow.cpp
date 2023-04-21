@@ -65,13 +65,13 @@ HelpWindow::HelpWindow(GUI::Window* parent)
 {
     resize(530, 365);
     set_title("Spreadsheet Functions Help");
-    set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-help.png"sv).release_value_but_fixme_should_propagate_errors());
+    set_icon(Gfx::Bitmap::load_from_file("/res/icons/16x16/app-help.png"sv).release_value_but_fixme_should_propagate_errors());
 
-    auto& widget = set_main_widget<GUI::Widget>();
-    widget.set_layout<GUI::VerticalBoxLayout>();
-    widget.set_fill_with_background_color(true);
+    auto widget = set_main_widget<GUI::Widget>().release_value_but_fixme_should_propagate_errors();
+    widget->set_layout<GUI::VerticalBoxLayout>();
+    widget->set_fill_with_background_color(true);
 
-    auto& splitter = widget.add<GUI::HorizontalSplitter>();
+    auto& splitter = widget->add<GUI::HorizontalSplitter>();
     auto& left_frame = splitter.add<GUI::Frame>();
     left_frame.set_layout<GUI::VerticalBoxLayout>();
     // FIXME: Get rid of the magic number, dynamically calculate initial size based on left frame contents
@@ -84,27 +84,28 @@ HelpWindow::HelpWindow(GUI::Window* parent)
     m_webview->on_link_click = [this](auto& url, auto&, auto&&) {
         VERIFY(url.scheme() == "spreadsheet");
         if (url.host() == "example") {
-            auto entry = LexicalPath::basename(url.path());
-            auto doc_option = m_docs.get(entry);
-            if (!doc_option.is_object()) {
-                GUI::MessageBox::show_error(this, DeprecatedString::formatted("No documentation entry found for '{}'", url.path()));
+            auto example_path = url.serialize_path();
+            auto entry = LexicalPath::basename(example_path);
+            auto doc_option = m_docs.get_object(entry);
+            if (!doc_option.has_value()) {
+                GUI::MessageBox::show_error(this, DeprecatedString::formatted("No documentation entry found for '{}'", example_path));
                 return;
             }
-            auto& doc = doc_option.as_object();
-            const auto& name = url.fragment();
+            auto& doc = doc_option.value();
+            auto name = url.fragment();
 
-            auto* example_data_ptr = doc.get_ptr("example_data"sv);
-            if (!example_data_ptr || !example_data_ptr->is_object()) {
-                GUI::MessageBox::show_error(this, DeprecatedString::formatted("No example data found for '{}'", url.path()));
+            auto maybe_example_data = doc.get_object("example_data"sv);
+            if (!maybe_example_data.has_value()) {
+                GUI::MessageBox::show_error(this, DeprecatedString::formatted("No example data found for '{}'", example_path));
                 return;
             }
-            auto& example_data = example_data_ptr->as_object();
+            auto& example_data = maybe_example_data.value();
 
             if (!example_data.has_object(name)) {
-                GUI::MessageBox::show_error(this, DeprecatedString::formatted("Example '{}' not found for '{}'", name, url.path()));
+                GUI::MessageBox::show_error(this, DeprecatedString::formatted("Example '{}' not found for '{}'", name, example_path));
                 return;
             }
-            auto& value = example_data.get(name);
+            auto& value = example_data.get_object(name).value();
 
             auto window = GUI::Window::construct(this);
             window->resize(size());
@@ -112,17 +113,17 @@ HelpWindow::HelpWindow(GUI::Window* parent)
             window->set_title(DeprecatedString::formatted("Spreadsheet Help - Example {} for {}", name, entry));
             window->on_close = [window = window.ptr()] { window->remove_from_parent(); };
 
-            auto& widget = window->set_main_widget<SpreadsheetWidget>(window, NonnullRefPtrVector<Sheet> {}, false);
-            auto sheet = Sheet::from_json(value.as_object(), widget.workbook());
+            auto widget = window->set_main_widget<SpreadsheetWidget>(window, Vector<NonnullRefPtr<Sheet>> {}, false).release_value_but_fixme_should_propagate_errors();
+            auto sheet = Sheet::from_json(value, widget->workbook());
             if (!sheet) {
-                GUI::MessageBox::show_error(this, DeprecatedString::formatted("Corrupted example '{}' in '{}'", name, url.path()));
+                GUI::MessageBox::show_error(this, DeprecatedString::formatted("Corrupted example '{}' in '{}'", name, example_path));
                 return;
             }
 
-            widget.add_sheet(sheet.release_nonnull());
+            widget->add_sheet(sheet.release_nonnull());
             window->show();
         } else if (url.host() == "doc") {
-            auto entry = LexicalPath::basename(url.path());
+            auto entry = LexicalPath::basename(url.serialize_path());
             m_webview->load(URL::create_with_data("text/html", render(entry)));
         } else {
             dbgln("Invalid spreadsheet action domain '{}'", url.host());
@@ -141,14 +142,14 @@ HelpWindow::HelpWindow(GUI::Window* parent)
 DeprecatedString HelpWindow::render(StringView key)
 {
     VERIFY(m_docs.has_object(key));
-    auto& doc = m_docs.get(key).as_object();
+    auto& doc = m_docs.get_object(key).value();
 
-    auto name = doc.get("name"sv).to_deprecated_string();
-    auto argc = doc.get("argc"sv).to_u32(0);
+    auto name = doc.get_deprecated_string("name"sv).value_or({});
+    auto argc = doc.get_u32("argc"sv).value_or(0);
     VERIFY(doc.has_array("argnames"sv));
-    auto& argnames = doc.get("argnames"sv).as_array();
+    auto& argnames = doc.get_array("argnames"sv).value();
 
-    auto docstring = doc.get("doc"sv).to_deprecated_string();
+    auto docstring = doc.get_deprecated_string("doc"sv).value_or({});
 
     StringBuilder markdown_builder;
 
@@ -181,10 +182,10 @@ DeprecatedString HelpWindow::render(StringView key)
     markdown_builder.append("\n\n"sv);
 
     if (doc.has("examples"sv)) {
-        auto& examples = doc.get("examples"sv);
-        VERIFY(examples.is_object());
+        auto examples = doc.get_object("examples"sv);
+        VERIFY(examples.has_value());
         markdown_builder.append("# EXAMPLES\n"sv);
-        examples.as_object().for_each_member([&](auto& text, auto& description_value) {
+        examples->for_each_member([&](auto& text, auto& description_value) {
             dbgln("```js\n{}\n```\n\n- {}\n", text, description_value.to_deprecated_string());
             markdown_builder.appendff("```js\n{}\n```\n\n- {}\n", text, description_value.to_deprecated_string());
         });

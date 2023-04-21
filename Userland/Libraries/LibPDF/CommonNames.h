@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <AK/FlyString.h>
+#include <AK/DeprecatedFlyString.h>
 
 #define ENUMERATE_COMMON_NAMES(A) \
     A(AIS)                        \
@@ -93,12 +93,14 @@
     A(Length1)                    \
     A(Length2)                    \
     A(Length3)                    \
+    A(Limits)                     \
     A(Linearized)                 \
     A(ML)                         \
     A(Matrix)                     \
     A(MediaBox)                   \
     A(MissingWidth)               \
     A(N)                          \
+    A(Names)                      \
     A(Next)                       \
     A(O)                          \
     A(OP)                         \
@@ -130,6 +132,7 @@
     A(Title)                      \
     A(ToUnicode)                  \
     A(Type)                       \
+    A(Type1C)                     \
     A(U)                          \
     A(UCR)                        \
     A(UseBlackPTComp)             \
@@ -148,11 +151,11 @@ namespace PDF {
 
 class CommonNames {
 public:
-#define ENUMERATE(name) static FlyString name;
+#define ENUMERATE(name) static DeprecatedFlyString name;
     ENUMERATE_COMMON_NAMES(ENUMERATE)
 #undef ENUMERATE
 
-    static FlyString IdentityH;
+    static DeprecatedFlyString IdentityH;
 };
 
 }

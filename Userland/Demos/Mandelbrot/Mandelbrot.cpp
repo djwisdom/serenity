@@ -16,10 +16,10 @@
 #include <LibGUI/Painter.h>
 #include <LibGUI/Widget.h>
 #include <LibGUI/Window.h>
-#include <LibGfx/BMPWriter.h>
 #include <LibGfx/Bitmap.h>
-#include <LibGfx/PNGWriter.h>
-#include <LibGfx/QOIWriter.h>
+#include <LibGfx/ImageFormats/BMPWriter.h>
+#include <LibGfx/ImageFormats/PNGWriter.h>
+#include <LibGfx/ImageFormats/QOIWriter.h>
 #include <LibMain/Main.h>
 #include <unistd.h>
 
@@ -39,7 +39,7 @@ public:
 
     void resize(Gfx::IntSize size)
     {
-        m_bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, size).release_value_but_fixme_should_propagate_errors();
+        m_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRx8888, size).release_value_but_fixme_should_propagate_errors();
         correct_aspect();
         calculate();
     }
@@ -371,16 +371,14 @@ ErrorOr<void> Mandelbrot::export_image(DeprecatedString const& export_path, Imag
     m_set.resize(Gfx::IntSize { 1920, 1080 });
     ByteBuffer encoded_data;
     switch (image_type) {
-    case ImageType::BMP: {
-        Gfx::BMPWriter dumper;
-        encoded_data = dumper.dump(m_set.bitmap());
+    case ImageType::BMP:
+        encoded_data = TRY(Gfx::BMPWriter::encode(m_set.bitmap()));
         break;
-    }
     case ImageType::PNG:
         encoded_data = TRY(Gfx::PNGWriter::encode(m_set.bitmap()));
         break;
     case ImageType::QOI:
-        encoded_data = Gfx::QOIWriter::encode(m_set.bitmap());
+        encoded_data = TRY(Gfx::QOIWriter::encode(m_set.bitmap()));
         break;
     default:
         VERIFY_NOT_REACHED();
@@ -413,11 +411,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_obey_widget_min_size(false);
     window->set_minimum_size(320, 240);
     window->resize(window->minimum_size() * 2);
-    auto mandelbrot = TRY(window->try_set_main_widget<Mandelbrot>());
+    auto mandelbrot = TRY(window->set_main_widget<Mandelbrot>());
 
-    auto file_menu = TRY(window->try_add_menu("&File"));
+    auto file_menu = TRY(window->try_add_menu("&File"_short_string));
 
-    auto& export_submenu = file_menu->add_submenu("&Export");
+    auto& export_submenu = file_menu->add_submenu("&Export"_short_string);
 
     TRY(export_submenu.try_add_action(GUI::Action::create("As &BMP",
         [&](GUI::Action&) {
@@ -444,7 +442,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 GUI::MessageBox::show_error(window, DeprecatedString::formatted("{}", result.error()));
         })));
 
-    export_submenu.set_icon(TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/save.png"sv)));
+    export_submenu.set_icon(TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/save.png"sv)));
 
     TRY(file_menu->try_add_separator());
     TRY(file_menu->try_add_action(GUI::CommonActions::make_quit_action([&](auto&) { app->quit(); })));
@@ -471,12 +469,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto app_icon = GUI::Icon::default_icon("app-mandelbrot"sv);
     window->set_icon(app_icon.bitmap_for_size(16));
 
-    auto view_menu = TRY(window->try_add_menu("&View"));
+    auto view_menu = TRY(window->try_add_menu("&View"_short_string));
     TRY(view_menu->try_add_action(zoom_in_action));
     TRY(view_menu->try_add_action(reset_zoom_action));
     TRY(view_menu->try_add_action(zoom_out_action));
 
-    auto help_menu = TRY(window->try_add_menu("&Help"));
+    auto help_menu = TRY(window->try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Mandelbrot Demo", app_icon, window)));
 

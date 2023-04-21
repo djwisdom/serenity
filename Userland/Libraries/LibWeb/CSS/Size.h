@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,7 +8,7 @@
 #pragma once
 
 #include <LibWeb/CSS/Length.h>
-#include <LibWeb/CSS/Percentage.h>
+#include <LibWeb/CSS/PercentageOr.h>
 
 namespace Web::CSS {
 
@@ -15,6 +16,7 @@ class Size {
 public:
     enum class Type {
         Auto,
+        Calculated,
         Length,
         Percentage,
         MinContent,
@@ -24,15 +26,17 @@ public:
     };
 
     static Size make_auto();
-    static Size make_px(float);
+    static Size make_px(CSSPixels);
     static Size make_length(Length);
     static Size make_percentage(Percentage);
+    static Size make_calculated(NonnullRefPtr<CalculatedStyleValue>);
     static Size make_min_content();
     static Size make_max_content();
     static Size make_fit_content(Length available_space);
     static Size make_none();
 
     bool is_auto() const { return m_type == Type::Auto; }
+    bool is_calculated() const { return m_type == Type::Calculated; }
     bool is_length() const { return m_type == Type::Length; }
     bool is_percentage() const { return m_type == Type::Percentage; }
     bool is_min_content() const { return m_type == Type::MinContent; }
@@ -44,6 +48,12 @@ public:
     CSS::Length resolved(Layout::Node const&, Length const& reference_value) const;
 
     bool contains_percentage() const;
+
+    CalculatedStyleValue const& calculated() const
+    {
+        VERIFY(is_calculated());
+        return m_length_percentage.calculated();
+    }
 
     CSS::Length const& length() const
     {
@@ -63,7 +73,7 @@ public:
         return m_length_percentage.length();
     }
 
-    DeprecatedString to_deprecated_string() const;
+    ErrorOr<String> to_string() const;
 
 private:
     Size(Type type, LengthPercentage);
@@ -78,6 +88,6 @@ template<>
 struct AK::Formatter<Web::CSS::Size> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Web::CSS::Size const& size)
     {
-        return Formatter<StringView>::format(builder, size.to_deprecated_string());
+        return Formatter<StringView>::format(builder, TRY(size.to_string()));
     }
 };

@@ -57,7 +57,7 @@ private:
 
 ComboBox::ComboBox()
 {
-    REGISTER_STRING_PROPERTY("placeholder", editor_placeholder, set_editor_placeholder);
+    REGISTER_DEPRECATED_STRING_PROPERTY("placeholder", editor_placeholder, set_editor_placeholder);
     REGISTER_BOOL_PROPERTY("model_only", only_allow_values_from_model, set_only_allow_values_from_model);
     REGISTER_INT_PROPERTY("max_visible_items", max_visible_items, set_max_visible_items);
 
@@ -102,7 +102,7 @@ ComboBox::ComboBox()
 
     m_open_button = add<Button>();
     m_open_button->set_button_style(Gfx::ButtonStyle::ThickCap);
-    m_open_button->set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/downward-triangle.png"sv).release_value_but_fixme_should_propagate_errors());
+    m_open_button->set_icon(Gfx::Bitmap::load_from_file("/res/icons/16x16/downward-triangle.png"sv).release_value_but_fixme_should_propagate_errors());
     m_open_button->set_focus_policy(GUI::FocusPolicy::NoFocus);
     m_open_button->on_click = [this](auto) {
         if (!m_list_view->item_count())
@@ -116,7 +116,7 @@ ComboBox::ComboBox()
     m_list_window = add<Window>(window());
     m_list_window->set_window_type(GUI::WindowType::Popup);
 
-    m_list_view = m_list_window->set_main_widget<ListView>();
+    m_list_view = m_list_window->set_main_widget<ListView>().release_value_but_fixme_should_propagate_errors();
     m_list_view->set_should_hide_unnecessary_scrollbars(true);
     m_list_view->set_alternating_row_colors(false);
     m_list_view->set_hover_highlighting(true);
@@ -245,21 +245,37 @@ void ComboBox::open()
 
     auto frame = m_list_view->frame_thickness() * 2;
     auto max_height = min(m_list_view->item_height() * m_max_visible_items, m_list_view->content_height());
-    Gfx::IntSize size { max(width(), m_list_view->content_width() + frame), max_height + frame };
+    auto min_width = m_list_view->content_width() + frame;
+    Gfx::IntSize size { max(width(), min_width), max_height + frame };
     Gfx::IntRect rect { screen_relative_rect().bottom_left(), size };
 
-    auto desktop = Desktop::the().rect().shrunken(0, 0, Desktop::the().taskbar_height(), 0);
+    auto desktop = Desktop::the().rect();
     auto min_height = 5 * m_list_view->item_height() + frame;
     auto go_upwards_instead = rect.bottom() >= desktop.height() && rect.intersected(desktop).height() < min_height;
     if (go_upwards_instead) {
         auto origin = screen_relative_rect().top_left();
         rect = { Gfx::IntPoint { origin.x(), origin.y() - size.height() }, size };
     }
-    rect.intersect(desktop);
-    m_list_window->set_rect(rect);
 
-    if (m_selected_index.has_value())
-        m_list_view->set_cursor(m_selected_index.value(), AbstractView::SelectionUpdate::Set);
+    auto intersection = rect.intersected(desktop);
+    rect.set_top(intersection.top());
+    rect.set_bottom(intersection.bottom());
+
+    auto remainder = (rect.height() - frame) % m_list_view->item_height();
+    go_upwards_instead ? rect.take_from_top(remainder) : rect.take_from_bottom(remainder);
+
+    auto scrollbar_width = m_list_view->vertical_scrollbar().width();
+    if (max_height > rect.height() && width() < min_width + scrollbar_width)
+        rect.set_width(rect.width() + scrollbar_width);
+
+    m_list_window->set_rect(rect);
+    m_list_view->set_min_size(rect.size());
+
+    if (m_selected_index.has_value()) {
+        m_list_view->set_cursor(m_selected_index.value(), AbstractView::SelectionUpdate::Set, false);
+        auto index_top = m_list_view->vertical_scrollbar().step() * m_selected_index.value().row();
+        m_list_view->vertical_scrollbar().set_value(index_top);
+    }
 
     m_list_window->show();
 }

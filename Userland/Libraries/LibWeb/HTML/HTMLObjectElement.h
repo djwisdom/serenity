@@ -8,19 +8,19 @@
 
 #include <LibCore/Forward.h>
 #include <LibGfx/Forward.h>
-#include <LibWeb/HTML/BrowsingContextContainer.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/Loader/ImageLoader.h>
 
 namespace Web::HTML {
 
 class HTMLObjectElement final
-    : public BrowsingContextContainer
+    : public NavigableContainer
     , public FormAssociatedElement
     , public ResourceClient {
-    WEB_PLATFORM_OBJECT(HTMLObjectElement, BrowsingContextContainer)
-    FORM_ASSOCIATED_ELEMENT(BrowsingContextContainer, HTMLObjectElement)
+    WEB_PLATFORM_OBJECT(HTMLObjectElement, NavigableContainer)
+    FORM_ASSOCIATED_ELEMENT(NavigableContainer, HTMLObjectElement)
 
     enum class Representation {
         Unknown,
@@ -32,7 +32,7 @@ class HTMLObjectElement final
 public:
     virtual ~HTMLObjectElement() override;
 
-    virtual void parse_attribute(FlyString const& name, DeprecatedString const& value) override;
+    virtual void parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value) override;
 
     DeprecatedString data() const;
     void set_data(DeprecatedString const& data) { MUST(set_attribute(HTML::AttributeNames::data, data)); }
@@ -45,6 +45,8 @@ public:
 
 private:
     HTMLObjectElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 
     virtual JS::GCPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>) override;
 

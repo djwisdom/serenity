@@ -19,10 +19,10 @@ class EscapeSequenceExecutor {
 public:
     virtual ~EscapeSequenceExecutor() = default;
 
-    using Parameters = Span<unsigned const>;
-    using Intermediates = Span<u8 const>;
-    using OscParameter = Span<u8 const>;
-    using OscParameters = Span<OscParameter const>;
+    using Parameters = ReadonlySpan<unsigned>;
+    using Intermediates = ReadonlyBytes;
+    using OscParameter = ReadonlyBytes;
+    using OscParameters = ReadonlySpan<OscParameter>;
 
     virtual void emit_code_point(u32) = 0;
     virtual void execute_control_code(u8) = 0;
@@ -69,7 +69,7 @@ private:
     Vector<unsigned, 4> m_param_vector;
     unsigned m_param { 0 };
 
-    Vector<u8> m_osc_parameter_indexes;
+    Vector<size_t> m_osc_parameter_indexes;
     Vector<u8, 16> m_osc_raw;
 
     bool m_ignoring { false };

@@ -6,8 +6,8 @@
  */
 
 #include <Kernel/API/Syscall.h>
+#include <Kernel/Arch/RegisterState.h>
 #include <Kernel/Arch/TrapFrame.h>
-#include <Kernel/Arch/x86/Interrupts.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Panic.h>
 #include <Kernel/PerformanceManager.h>
@@ -18,77 +18,7 @@
 
 namespace Kernel {
 
-extern "C" void syscall_handler(TrapFrame*) __attribute__((used));
-extern "C" void syscall_asm_entry();
-
-NEVER_INLINE NAKED void syscall_asm_entry()
-{
-    // clang-format off
-#if ARCH(I386)
-    asm(
-        "    pushl $0x0\n"
-        "    pusha\n"
-        "    pushl %ds\n"
-        "    pushl %es\n"
-        "    pushl %fs\n"
-        "    pushl %gs\n"
-        "    pushl %ss\n"
-        "    mov $" __STRINGIFY(GDT_SELECTOR_DATA0) ", %ax\n"
-        "    mov %ax, %ds\n"
-        "    mov %ax, %es\n"
-        "    mov $" __STRINGIFY(GDT_SELECTOR_PROC) ", %ax\n"
-        "    mov %ax, %gs\n"
-        "    cld\n"
-        "    xor %esi, %esi\n"
-        "    xor %edi, %edi\n"
-        "    pushl %esp \n" // set TrapFrame::regs
-        "    subl $" __STRINGIFY(TRAP_FRAME_SIZE - 4) ", %esp \n"
-        "    movl %esp, %ebx \n"
-        "    pushl %ebx \n" // push pointer to TrapFrame
-        "    call enter_trap_no_irq \n"
-        "    movl %ebx, 0(%esp) \n" // push pointer to TrapFrame
-        "    call syscall_handler \n"
-        "    movl %ebx, 0(%esp) \n" // push pointer to TrapFrame
-        "    jmp common_trap_exit \n");
-#elif ARCH(X86_64)
-    asm(
-        "    pushq $0x0\n"
-        "    pushq %r15\n"
-        "    pushq %r14\n"
-        "    pushq %r13\n"
-        "    pushq %r12\n"
-        "    pushq %r11\n"
-        "    pushq %r10\n"
-        "    pushq %r9\n"
-        "    pushq %r8\n"
-        "    pushq %rax\n"
-        "    pushq %rcx\n"
-        "    pushq %rdx\n"
-        "    pushq %rbx\n"
-        "    pushq %rsp\n"
-        "    pushq %rbp\n"
-        "    pushq %rsi\n"
-        "    pushq %rdi\n"
-        "    pushq %rsp \n" /* set TrapFrame::regs */
-        "    subq $" __STRINGIFY(TRAP_FRAME_SIZE - 8) ", %rsp \n"
-        "    movq %rsp, %rdi \n"
-        "    cld\n"
-        "    call enter_trap_no_irq \n"
-        "    movq %rsp, %rdi \n"
-        "    call syscall_handler\n"
-        "    jmp common_trap_exit \n");
-#endif
-    // clang-format on
-}
-
 namespace Syscall {
-
-static ErrorOr<FlatPtr> handle(RegisterState&, FlatPtr function, FlatPtr arg1, FlatPtr arg2, FlatPtr arg3, FlatPtr arg4);
-
-UNMAP_AFTER_INIT void initialize()
-{
-    register_user_callable_interrupt_handler(syscall_vector, syscall_asm_entry);
-}
 
 using Handler = auto(Process::*)(FlatPtr, FlatPtr, FlatPtr, FlatPtr) -> ErrorOr<FlatPtr>;
 using HandlerWithRegisterState = auto(Process::*)(RegisterState&) -> ErrorOr<FlatPtr>;
@@ -164,14 +94,21 @@ ErrorOr<FlatPtr> handle(RegisterState& regs, FlatPtr function, FlatPtr arg1, Fla
 
 }
 
+extern "C" NEVER_INLINE void syscall_handler(TrapFrame* trap);
 NEVER_INLINE void syscall_handler(TrapFrame* trap)
 {
+#if ARCH(X86_64)
     // Make sure SMAP protection is enabled on syscall entry.
     clac();
+#elif ARCH(AARCH64)
+    // FIXME: Implement the security mechanism for aarch64
+#else
+#    error Unknown architecture
+#endif
 
     auto& regs = *trap->regs;
     auto* current_thread = Thread::current();
-    VERIFY(current_thread->previous_mode() == Thread::PreviousMode::UserMode);
+    VERIFY(current_thread->previous_mode() == ExecutionMode::User);
     auto& process = current_thread->process();
     if (process.is_dying()) {
         // It's possible this thread is just about to make a syscall while another is
@@ -187,6 +124,7 @@ NEVER_INLINE void syscall_handler(TrapFrame* trap)
 
     current_thread->yield_if_stopped();
 
+#if ARCH(X86_64)
     // Apply a random offset in the range 0-255 to the stack pointer,
     // to make kernel stacks a bit less deterministic.
     u32 lsw;
@@ -203,6 +141,11 @@ NEVER_INLINE void syscall_handler(TrapFrame* trap)
     if ((flags & (iopl_mask)) != 0) {
         PANIC("Syscall from process with IOPL != 0");
     }
+#elif ARCH(AARCH64)
+    // FIXME: Implement the security mechanism for aarch64
+#else
+#    error Unknown architecture
+#endif
 
     Memory::MemoryManager::validate_syscall_preconditions(process, regs);
 
@@ -231,7 +174,7 @@ NEVER_INLINE void syscall_handler(TrapFrame* trap)
     current_thread->check_dispatch_pending_signal();
 
     // If the previous mode somehow changed something is seriously messed up...
-    VERIFY(current_thread->previous_mode() == Thread::PreviousMode::UserMode);
+    VERIFY(current_thread->previous_mode() == ExecutionMode::User);
 
     // Check if we're supposed to return to userspace or just die.
     current_thread->die_if_needed();
@@ -240,7 +183,7 @@ NEVER_INLINE void syscall_handler(TrapFrame* trap)
     if (result.is_error() && result.error().code() == EPROMISEVIOLATION) {
         VERIFY(current_thread->is_promise_violation_pending());
         current_thread->set_promise_violation_pending(false);
-        process.crash(SIGABRT, 0);
+        process.crash(SIGABRT, {});
     } else {
         VERIFY(!current_thread->is_promise_violation_pending());
     }

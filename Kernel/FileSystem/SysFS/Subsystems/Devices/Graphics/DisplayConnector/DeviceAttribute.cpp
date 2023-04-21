@@ -6,7 +6,6 @@
 
 #include <Kernel/Bus/PCI/API.h>
 #include <Kernel/Bus/PCI/Access.h>
-#include <Kernel/Debug.h>
 #include <Kernel/FileSystem/SysFS/Subsystems/Devices/Graphics/DisplayConnector/DeviceAttribute.h>
 #include <Kernel/Sections.h>
 
@@ -32,9 +31,9 @@ StringView DisplayConnectorAttributeSysFSComponent::name() const
     }
 }
 
-NonnullLockRefPtr<DisplayConnectorAttributeSysFSComponent> DisplayConnectorAttributeSysFSComponent::must_create(DisplayConnectorSysFSDirectory const& device_directory, Type type)
+NonnullRefPtr<DisplayConnectorAttributeSysFSComponent> DisplayConnectorAttributeSysFSComponent::must_create(DisplayConnectorSysFSDirectory const& device_directory, Type type)
 {
-    return adopt_lock_ref(*new (nothrow) DisplayConnectorAttributeSysFSComponent(device_directory, type));
+    return adopt_ref(*new (nothrow) DisplayConnectorAttributeSysFSComponent(device_directory, type));
 }
 
 DisplayConnectorAttributeSysFSComponent::DisplayConnectorAttributeSysFSComponent(DisplayConnectorSysFSDirectory const& device_directory, Type type)

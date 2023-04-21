@@ -6,13 +6,13 @@
 
 #pragma once
 
-#include "HitTestResult.h"
 #include <AK/Forward.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/RefPtr.h>
 #include <LibCore/Forward.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/WindowTheme.h>
+#include <WindowServer/HitTestResult.h>
+#include <WindowServer/ResizeDirection.h>
 
 namespace WindowServer {
 
@@ -42,6 +42,8 @@ public:
         bool m_dirty { true };
     };
     friend class RenderedCache;
+
+    static Gfx::IntRect frame_rect_for_window(Window&, Gfx::IntRect const&);
 
     static void reload_config();
 
@@ -125,6 +127,7 @@ private:
     void paint_menubar(Gfx::Painter&);
     MultiScaleBitmaps const* shadow_bitmap() const;
     Gfx::IntRect inflated_for_shadow(Gfx::IntRect const&) const;
+    void latch_window_to_screen_edge(ResizeDirection);
 
     void handle_menubar_mouse_event(MouseEvent const&);
     void handle_menu_mouse_event(Menu&, MouseEvent const&);
@@ -136,7 +139,7 @@ private:
     Gfx::IntRect leftmost_titlebar_button_rect() const;
 
     Window& m_window;
-    NonnullOwnPtrVector<Button> m_buttons;
+    Vector<NonnullOwnPtr<Button>> m_buttons;
     Button* m_close_button { nullptr };
     Button* m_maximize_button { nullptr };
     Button* m_minimize_button { nullptr };

@@ -67,6 +67,14 @@ DevicePixelPoint PaintContext::rounded_device_point(CSSPixelPoint point) const
     };
 }
 
+DevicePixelPoint PaintContext::floored_device_point(CSSPixelPoint point) const
+{
+    return {
+        floorf(point.x().value() * m_device_pixels_per_css_pixel),
+        floorf(point.y().value() * m_device_pixels_per_css_pixel)
+    };
+}
+
 DevicePixelRect PaintContext::enclosing_device_rect(CSSPixelRect rect) const
 {
     return {
@@ -113,6 +121,22 @@ CSSPixelPoint PaintContext::scale_to_css_point(DevicePixelPoint point) const
     return {
         scale_to_css_pixels(point.x()),
         scale_to_css_pixels(point.y())
+    };
+}
+
+CSSPixelSize PaintContext::scale_to_css_size(DevicePixelSize size) const
+{
+    return {
+        scale_to_css_pixels(size.width()),
+        scale_to_css_pixels(size.height())
+    };
+}
+
+CSSPixelRect PaintContext::scale_to_css_rect(DevicePixelRect rect) const
+{
+    return {
+        scale_to_css_point(rect.location()),
+        scale_to_css_size(rect.size())
     };
 }
 

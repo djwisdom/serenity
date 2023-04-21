@@ -22,7 +22,7 @@ class Plan9FS final : public FileBackedFileSystem {
 
 public:
     virtual ~Plan9FS() override;
-    static ErrorOr<NonnullLockRefPtr<FileSystem>> try_create(OpenFileDescription&);
+    static ErrorOr<NonnullRefPtr<FileSystem>> try_create(OpenFileDescription&);
 
     virtual bool supports_watchers() const override { return false; }
 
@@ -63,11 +63,11 @@ private:
 
     private:
         Plan9FS& m_fs;
-        mutable Spinlock m_lock { LockRank::None };
+        mutable Spinlock<LockRank::None> m_lock {};
     };
 
     struct ReceiveCompletion final : public AtomicRefCounted<ReceiveCompletion> {
-        mutable Spinlock lock { LockRank::None };
+        mutable Spinlock<LockRank::None> lock {};
         bool completed { false };
         const u16 tag;
         OwnPtr<Plan9FSMessage> message;
@@ -125,7 +125,7 @@ private:
     void thread_main();
     void ensure_thread();
 
-    LockRefPtr<Plan9FSInode> m_root_inode;
+    RefPtr<Plan9FSInode> m_root_inode;
     Atomic<u16> m_next_tag { (u16)-1 };
     Atomic<u32> m_next_fid { 1 };
 
@@ -136,8 +136,8 @@ private:
     Plan9FSBlockerSet m_completion_blocker;
     HashMap<u16, NonnullLockRefPtr<ReceiveCompletion>> m_completions;
 
-    Spinlock m_thread_lock { LockRank::None };
-    LockRefPtr<Thread> m_thread;
+    Spinlock<LockRank::None> m_thread_lock {};
+    RefPtr<Thread> m_thread;
     Atomic<bool> m_thread_running { false };
     Atomic<bool, AK::MemoryOrder::memory_order_relaxed> m_thread_shutdown { false };
 };

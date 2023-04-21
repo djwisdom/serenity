@@ -18,12 +18,11 @@ class AsyncBlockDeviceRequest;
 class IDEChannel;
 class IDEController : public ATAController {
 public:
-    static NonnullLockRefPtr<IDEController> initialize();
     virtual ~IDEController() override;
 
     virtual LockRefPtr<StorageDevice> device(u32 index) const override final;
-    virtual bool reset() override final;
-    virtual bool shutdown() override final;
+    virtual ErrorOr<void> reset() override final;
+    virtual ErrorOr<void> shutdown() override final;
     virtual size_t devices_count() const override final;
     virtual void start_request(ATADevice const&, AsyncBlockDeviceRequest&) override final;
     virtual void complete_current_request(AsyncDeviceRequest::RequestResult) override final;
@@ -32,6 +31,6 @@ protected:
     IDEController();
 
     LockRefPtr<StorageDevice> device_by_channel_and_position(u32 index) const;
-    NonnullLockRefPtrVector<IDEChannel> m_channels;
+    Array<RefPtr<IDEChannel>, 2> m_channels;
 };
 }

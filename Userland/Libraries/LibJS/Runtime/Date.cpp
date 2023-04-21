@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -21,9 +21,11 @@ static Crypto::SignedBigInteger const s_one_billion_bigint { 1'000'000'000 };
 static Crypto::SignedBigInteger const s_one_million_bigint { 1'000'000 };
 static Crypto::SignedBigInteger const s_one_thousand_bigint { 1'000 };
 
+Crypto::SignedBigInteger const ns_per_day_bigint { static_cast<i64>(ns_per_day) };
+
 NonnullGCPtr<Date> Date::create(Realm& realm, double date_value)
 {
-    return realm.heap().allocate<Date>(realm, date_value, *realm.intrinsics().date_prototype());
+    return realm.heap().allocate<Date>(realm, date_value, realm.intrinsics().date_prototype()).release_allocated_value_but_fixme_should_propagate_errors();
 }
 
 Date::Date(double date_value, Object& prototype)
@@ -57,7 +59,7 @@ DeprecatedString Date::iso_date_string() const
     builder.appendff("{:03}", ms_from_time(m_date_value));
     builder.append('Z');
 
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 // DayWithinYear(t), https://tc39.es/ecma262/#eqn-DayWithinYear
@@ -305,7 +307,7 @@ static i64 clip_bigint_to_sane_time(Crypto::SignedBigInteger const& value)
         return NumericLimits<i64>::max();
 
     // FIXME: Can we do this without string conversion?
-    return value.to_base(10).to_int<i64>().value();
+    return value.to_base_deprecated(10).to_int<i64>().value();
 }
 
 // 21.4.1.8 GetNamedTimeZoneEpochNanoseconds ( timeZoneIdentifier, year, month, day, hour, minute, second, millisecond, microsecond, nanosecond ), https://tc39.es/ecma262/#sec-getnamedtimezoneepochnanoseconds
@@ -482,10 +484,7 @@ double make_day(double year, double month, double date)
     // 8. Find a finite time value t such that YearFromTime(t) is ym and MonthFromTime(t) is mn and DateFromTime(t) is 1𝔽; but if this is not possible (because some argument is out of range), return NaN.
     if (!AK::is_within_range<int>(ym) || !AK::is_within_range<int>(mn + 1))
         return NAN;
-
-    // FIXME: We are avoiding AK::years_to_days_since_epoch here because it is implemented by looping over
-    //        the range [1970, ym), which will spin for any time value with an extremely large year.
-    auto t = time_from_year(ym) + (day_of_year(static_cast<int>(ym), static_cast<int>(mn) + 1, 1) * ms_per_day);
+    auto t = days_since_epoch(static_cast<int>(ym), static_cast<int>(mn) + 1, 1) * ms_per_day;
 
     // 9. Return Day(t) + dt - 1𝔽.
     return day(static_cast<double>(t)) + dt - 1;
@@ -571,7 +570,7 @@ double parse_time_zone_offset_string(StringView offset_string)
     auto parsed_hours = *parse_result->time_zone_utc_offset_hour;
 
     // 10. Let hours be ℝ(StringToNumber(CodePointsToString(parsedHours))).
-    auto hours = string_to_number(parsed_hours)->as_double();
+    auto hours = string_to_number(parsed_hours);
 
     double minutes { 0 };
     double seconds { 0 };
@@ -588,7 +587,7 @@ double parse_time_zone_offset_string(StringView offset_string)
         auto parsed_minutes = *parse_result->time_zone_utc_offset_minute;
 
         // b. Let minutes be ℝ(StringToNumber(CodePointsToString(parsedMinutes))).
-        minutes = string_to_number(parsed_minutes)->as_double();
+        minutes = string_to_number(parsed_minutes);
     }
 
     // 13. If parseResult does not contain two MinuteSecond Parse Nodes, then
@@ -602,7 +601,7 @@ double parse_time_zone_offset_string(StringView offset_string)
         auto parsed_seconds = *parse_result->time_zone_utc_offset_second;
 
         // b. Let seconds be ℝ(StringToNumber(CodePointsToString(parsedSeconds))).
-        seconds = string_to_number(parsed_seconds)->as_double();
+        seconds = string_to_number(parsed_seconds);
     }
 
     // 15. If parseResult does not contain a TemporalDecimalFraction Parse Node, then
@@ -622,7 +621,7 @@ double parse_time_zone_offset_string(StringView offset_string)
         auto nanoseconds_string = fraction.substring_view(1, 9);
 
         // d. Let nanoseconds be ℝ(StringToNumber(nanosecondsString)).
-        nanoseconds = string_to_number(nanoseconds_string)->as_double();
+        nanoseconds = string_to_number(nanoseconds_string);
     }
 
     // 17. Return sign × (((hours × 60 + minutes) × 60 + seconds) × 10^9 + nanoseconds).

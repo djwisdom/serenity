@@ -12,9 +12,16 @@ namespace Web::SVG {
 
 SVGElement::SVGElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : Element(document, move(qualified_name))
-    , m_dataset(HTML::DOMStringMap::create(*this))
+    , m_dataset(HTML::DOMStringMap::create(*this).release_value_but_fixme_should_propagate_errors())
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "SVGElement"));
+}
+
+JS::ThrowCompletionOr<void> SVGElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::SVGElementPrototype>(realm, "SVGElement"));
+
+    return {};
 }
 
 void SVGElement::visit_edges(Cell::Visitor& visitor)

@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/OwnPtr.h>
 #include <Kernel/Bus/PCI/Access.h>
 #include <Kernel/Bus/PCI/Device.h>
@@ -22,7 +21,9 @@ class RTL8168NetworkAdapter final : public NetworkAdapter
     , public PCI::Device
     , public IRQHandler {
 public:
-    static ErrorOr<LockRefPtr<RTL8168NetworkAdapter>> try_to_initialize(PCI::DeviceIdentifier const&);
+    static ErrorOr<bool> probe(PCI::DeviceIdentifier const&);
+    static ErrorOr<NonnullRefPtr<NetworkAdapter>> create(PCI::DeviceIdentifier const&);
+    virtual ErrorOr<void> initialize(Badge<NetworkingManagement>) override;
 
     virtual ~RTL8168NetworkAdapter() override;
 
@@ -32,13 +33,15 @@ public:
     virtual i32 link_speed() override;
 
     virtual StringView purpose() const override { return class_name(); }
+    virtual StringView device_name() const override { return class_name(); }
+    virtual Type adapter_type() const override { return Type::Ethernet; }
 
 private:
     // FIXME: should this be increased? (maximum allowed here is 1024) - memory usage vs packet loss chance tradeoff
     static constexpr size_t number_of_rx_descriptors = 64;
     static constexpr size_t number_of_tx_descriptors = 16;
 
-    RTL8168NetworkAdapter(PCI::Address, u8 irq, NonnullOwnPtr<IOWindow> registers_io_window, NonnullOwnPtr<KString>);
+    RTL8168NetworkAdapter(PCI::DeviceIdentifier const&, u8 irq, NonnullOwnPtr<IOWindow> registers_io_window, NonnullOwnPtr<KString>);
 
     virtual bool handle_irq(RegisterState const&) override;
     virtual StringView class_name() const override { return "RTL8168NetworkAdapter"sv; }
@@ -128,7 +131,6 @@ private:
     void read_mac_address();
     void set_phy_speed();
     void start_hardware();
-    void initialize();
     void startup();
 
     void configure_phy();
@@ -202,10 +204,10 @@ private:
     NonnullOwnPtr<IOWindow> m_registers_io_window;
     u32 m_ocp_base_address { 0 };
     OwnPtr<Memory::Region> m_rx_descriptors_region;
-    NonnullOwnPtrVector<Memory::Region> m_rx_buffers_regions;
+    Vector<NonnullOwnPtr<Memory::Region>> m_rx_buffers_regions;
     u16 m_rx_free_index { 0 };
     OwnPtr<Memory::Region> m_tx_descriptors_region;
-    NonnullOwnPtrVector<Memory::Region> m_tx_buffers_regions;
+    Vector<NonnullOwnPtr<Memory::Region>> m_tx_buffers_regions;
     u16 m_tx_free_index { 0 };
     bool m_link_up { false };
     EntropySource m_entropy_source;

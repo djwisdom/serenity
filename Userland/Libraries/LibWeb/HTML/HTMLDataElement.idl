@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLDataElement : HTMLElement {
 
-    [Reflect] attribute DOMString value;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString value;
 
 };

@@ -21,8 +21,8 @@ class UIEvent : public DOM::Event {
     WEB_PLATFORM_OBJECT(UIEvent, DOM::Event);
 
 public:
-    static UIEvent* create(JS::Realm&, FlyString const& type);
-    static UIEvent* construct_impl(JS::Realm&, FlyString const& event_name, UIEventInit const& event_init);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<UIEvent>> create(JS::Realm&, FlyString const& type);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<UIEvent>> construct_impl(JS::Realm&, FlyString const& event_name, UIEventInit const& event_init);
 
     virtual ~UIEvent() override;
 
@@ -30,7 +30,7 @@ public:
     int detail() const { return m_detail; }
     virtual u32 which() const { return 0; }
 
-    void init_ui_event(DeprecatedString const& type, bool bubbles, bool cancelable, HTML::Window* view, int detail)
+    void init_ui_event(String const& type, bool bubbles, bool cancelable, HTML::Window* view, int detail)
     {
         init_event(type, bubbles, cancelable);
         m_view = view;
@@ -41,6 +41,7 @@ protected:
     UIEvent(JS::Realm&, FlyString const& event_name);
     UIEvent(JS::Realm&, FlyString const& event_name, UIEventInit const& event_init);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     JS::GCPtr<HTML::Window> m_view;

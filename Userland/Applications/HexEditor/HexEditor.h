@@ -14,8 +14,6 @@
 #include <AK/ByteBuffer.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
-#include <AK/NonnullOwnPtrVector.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/StdLibExtras.h>
 #include <LibCore/Timer.h>
 #include <LibGUI/AbstractScrollableWidget.h>
@@ -35,11 +33,12 @@ public:
 
     size_t buffer_size() const { return m_document->size(); }
     ErrorOr<void> open_new_file(size_t size);
-    void open_file(NonnullRefPtr<Core::File> file);
+    void open_file(NonnullOwnPtr<Core::File> file);
     ErrorOr<void> fill_selection(u8 fill_byte);
     Optional<u8> get_byte(size_t position);
-    bool save_as(NonnullRefPtr<Core::File>);
-    bool save();
+    ByteBuffer get_selected_bytes();
+    ErrorOr<void> save_as(NonnullOwnPtr<Core::File>);
+    ErrorOr<void> save();
 
     bool undo();
     bool redo();
@@ -85,7 +84,7 @@ private:
     size_t m_position { 0 };
     bool m_cursor_at_low_nibble { false };
     EditMode m_edit_mode { Hex };
-    NonnullRefPtr<Core::Timer> m_blink_timer;
+    RefPtr<Core::Timer> m_blink_timer;
     bool m_cursor_blink_active { false };
     NonnullOwnPtr<HexDocument> m_document;
     GUI::UndoStack m_undo_stack;
@@ -96,7 +95,7 @@ private:
     void scroll_position_into_view(size_t position);
 
     size_t total_rows() const { return ceil_div(m_content_length, m_bytes_per_row); }
-    size_t line_height() const { return font().glyph_height() + m_line_spacing; }
+    size_t line_height() const { return font().pixel_size_rounded_up() + m_line_spacing; }
     size_t character_width() const { return font().glyph_width('W'); }
     size_t cell_width() const { return character_width() * 3; }
     size_t offset_margin_width() const { return 80; }

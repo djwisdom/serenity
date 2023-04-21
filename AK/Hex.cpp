@@ -5,7 +5,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Array.h>
 #include <AK/Hex.h>
 #include <AK/StringBuilder.h>
 #include <AK/Types.h>
@@ -16,18 +15,18 @@ namespace AK {
 ErrorOr<ByteBuffer> decode_hex(StringView input)
 {
     if ((input.length() % 2) != 0)
-        return Error::from_string_literal("Hex string was not an even length");
+        return Error::from_string_view_or_print_error_and_return_errno("Hex string was not an even length"sv, EINVAL);
 
     auto output = TRY(ByteBuffer::create_zeroed(input.length() / 2));
 
     for (size_t i = 0; i < input.length() / 2; ++i) {
         auto const c1 = decode_hex_digit(input[i * 2]);
         if (c1 >= 16)
-            return Error::from_string_literal("Hex string contains invalid digit");
+            return Error::from_string_view_or_print_error_and_return_errno("Hex string contains invalid digit"sv, EINVAL);
 
         auto const c2 = decode_hex_digit(input[i * 2 + 1]);
         if (c2 >= 16)
-            return Error::from_string_literal("Hex string contains invalid digit");
+            return Error::from_string_view_or_print_error_and_return_errno("Hex string contains invalid digit"sv, EINVAL);
 
         output[i] = (c1 << 4) + c2;
     }
@@ -53,7 +52,7 @@ DeprecatedString encode_hex(const ReadonlyBytes input)
     for (auto ch : input)
         output.appendff("{:02x}", ch);
 
-    return output.build();
+    return output.to_deprecated_string();
 }
 #endif
 

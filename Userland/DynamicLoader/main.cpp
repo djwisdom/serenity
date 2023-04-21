@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibC/sys/internals.h>
-#include <LibC/unistd.h>
 #include <LibELF/AuxiliaryVector.h>
 #include <LibELF/DynamicLinker.h>
 #include <LibELF/Relocation.h>
+#include <sys/internals.h>
+#include <unistd.h>
 
 char* __static_environ[] = { nullptr }; // We don't get the environment without some libc workarounds..
 
@@ -62,7 +62,7 @@ void _entry(int, char**, char**) __attribute__((used));
 
 NAKED void _start(int, char**, char**)
 {
-#ifdef AK_ARCH_AARCH64
+#if ARCH(AARCH64)
     asm(
         "bl _entry\n");
 #else

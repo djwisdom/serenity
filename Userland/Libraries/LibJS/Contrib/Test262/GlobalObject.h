@@ -15,7 +15,7 @@ class GlobalObject final : public JS::GlobalObject {
     JS_OBJECT(GlobalObject, JS::GlobalObject);
 
 public:
-    virtual void initialize(Realm&) override;
+    virtual ThrowCompletionOr<void> initialize(Realm&) override;
     virtual ~GlobalObject() override = default;
 
     $262Object* $262() const { return m_$262; }
@@ -28,7 +28,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    $262Object* m_$262 { nullptr };
+    GCPtr<$262Object> m_$262;
 
     JS_DECLARE_NATIVE_FUNCTION(print);
 };

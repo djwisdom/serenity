@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 
-SCRIPT="$(dirname "${0}")"
+SCRIPT="$(realpath $(dirname "${BASH_SOURCE[0]}"))"
 
 if [ -z "${SERENITY_STRIPPED_ENV:-}" ]; then
     exec "${SCRIPT}/.strip_env.sh" "${@}"
@@ -30,14 +30,16 @@ buildstep_intro() {
     echo -e "\x1b[1;32m=> $@\x1b[0m"
 }
 
-maybe_source() {
-    if [ -f "$1" ]; then
-        . "$1"
-    fi
-}
-
 target_env() {
-    maybe_source "${SCRIPT}/.hosted_defs.sh"
+    if [ -f "${SCRIPT}/.hosted_defs.sh" ]; then
+        . "${SCRIPT}/.hosted_defs.sh"
+    elif [ "$(uname -s)" = "SerenityOS" ]; then
+        export SERENITY_ARCH="$(uname -m)"
+        export SERENITY_INSTALL_ROOT=""
+    else
+        >&2 echo "Error: .hosted_defs.sh is missing and we are not running on Serenity."
+        exit 1
+    fi
 }
 
 target_env
@@ -64,6 +66,7 @@ enable_ccache
 host_env() {
     export CC="${HOST_CC}"
     export CXX="${HOST_CXX}"
+    export LD="${HOST_LD}"
     export AR="${HOST_AR}"
     export RANLIB="${HOST_RANLIB}"
     export PATH="${HOST_PATH}"
@@ -106,7 +109,12 @@ shift
 : "${workdir:=$port-$version}"
 
 PORT_META_DIR="$(pwd)"
-PORT_BUILD_DIR="${SERENITY_BUILD_DIR}/Ports/${port}"
+if [[ -z ${SERENITY_BUILD_DIR:-} ]]; then
+    PORT_BUILD_DIR="${PORT_META_DIR}"
+else
+    PORT_BUILD_DIR="${SERENITY_BUILD_DIR}/Ports/${port}"
+fi
+
 
 mkdir -p "${PORT_BUILD_DIR}"
 cd "${PORT_BUILD_DIR}"
@@ -138,6 +146,14 @@ run_replace_in_file() {
         run sed -i "$1" $2
     else
         run perl -p -i -e "$1" $2
+    fi
+}
+
+sed_in_place() {
+    if [ "$(uname -s)" = "Darwin" ]; then
+        sed -i '' "${@}"
+    else
+        sed -i "${@}"
     fi
 }
 
@@ -340,7 +356,7 @@ fetch() {
                 if [ "$calc_sum" != "$auth_sum" ]; then
                     # remove downloaded file to re-download on next run
                     rm -f "${PORT_META_DIR}/${filename}"
-                    echo "${auth_type}sums mismatching, removed erronous download."
+                    echo "${auth_type}sums mismatching, removed erroneous download."
                     if [ $tried_download_again -eq 1 ]; then
                         echo "Please run script again."
                         exit 1
@@ -446,7 +462,11 @@ func_defined pre_configure || pre_configure() {
 }
 func_defined configure || configure() {
     chmod +x "${workdir}"/"$configscript"
-    run ./"$configscript" --host="${SERENITY_ARCH}-pc-serenity" "${configopts[@]}"
+    if [[ -n "${SERENITY_SOURCE_DIR:-}" ]]; then
+        run ./"$configscript" --host="${SERENITY_ARCH}-pc-serenity" "${configopts[@]}"
+    else
+        run ./"$configscript" --build="${SERENITY_ARCH}-pc-serenity" "${configopts[@]}"
+    fi
 }
 func_defined post_configure || post_configure() {
     :
@@ -507,9 +527,21 @@ package_install_state() {
 }
 installdepends() {
     for depend in "${depends[@]}"; do
-        if [ -z "$(package_install_state $depend)" ]; then
-            (cd "${PORT_META_DIR}/../$depend" && ./package.sh --auto)
+        if [ -n "$(package_install_state $depend)" ]; then
+            continue
         fi
+
+        # Split colon separated string into a list
+        IFS=':' read -ra port_directories <<< "$SERENITY_PORT_DIRS"
+        for port_dir in "${port_directories[@]}"; do
+            if [ -d "${port_dir}/$depend" ]; then
+                (cd "${port_dir}/$depend" && ./package.sh --auto)
+                continue 2
+            fi
+        done
+
+        >&2 echo "Error: Dependency $depend could not be found."
+        exit 1
     done
 }
 uninstall() {
@@ -741,7 +773,9 @@ do_dev() {
         exit 1
     fi
 
-    [ -d "$workdir" ] || (
+    local force_patch_regeneration='false'
+
+    [ -d "$workdir" ] || {
         do_fetch
         pushd "$workdir"
         if [ ! -d ".git" ]; then
@@ -804,10 +838,11 @@ do_dev() {
                     else
                         # The patch didn't apply, oh no!
                         # Ask the user to figure it out :shrug:
-                        git am "$patch" || true
+                        git am --keep-cr --keep-non-patch --3way "$patch" || true
                         >&2 echo "- This patch does not apply, you'll be dropped into a shell to investigate and fix this, quit the shell when the problem is resolved."
                         >&2 echo "Note that the patch needs to be committed into the current repository!"
                         launch_user_shell
+                        force_patch_regeneration='true'
                     fi
 
                     if ! git diff --quiet >/dev/null 2>&1; then
@@ -828,7 +863,7 @@ do_dev() {
         git tag original
 
         popd
-    )
+    }
 
     [ -d "$workdir/.git" ] || {
         >&2 echo "$workdir does not appear to be a git repository."
@@ -844,7 +879,7 @@ do_dev() {
     local current_hash="$(git -C "$workdir" rev-parse HEAD)"
 
     # If the hashes are the same, we have no changes, otherwise generate patches
-    if [ "$original_hash" != "$current_hash" ]; then
+    if [ "$original_hash" != "$current_hash" ] || [ "${force_patch_regeneration}" = "true" ]; then
         >&2 echo "Note: Regenerating patches as there are changed commits in the port repo (started at $original_hash, now is $current_hash)"
         rm -fr "${PORT_META_DIR}"/patches/*.patch
         git -C "$workdir" format-patch --no-numbered --zero-commit --no-signature --full-index refs/tags/import -o "$(realpath "${PORT_META_DIR}/patches")"

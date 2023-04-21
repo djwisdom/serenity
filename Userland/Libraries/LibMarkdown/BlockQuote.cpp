@@ -5,6 +5,7 @@
  */
 
 #include <AK/StringBuilder.h>
+#include <AK/Vector.h>
 #include <LibMarkdown/BlockQuote.h>
 #include <LibMarkdown/Visitor.h>
 
@@ -16,13 +17,17 @@ DeprecatedString BlockQuote::render_to_html(bool) const
     builder.append("<blockquote>\n"sv);
     builder.append(m_contents->render_to_html());
     builder.append("</blockquote>\n"sv);
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
-DeprecatedString BlockQuote::render_for_terminal(size_t view_width) const
+Vector<DeprecatedString> BlockQuote::render_lines_for_terminal(size_t view_width) const
 {
-    // FIXME: Rewrite the whole terminal renderer to make blockquote rendering possible
-    return m_contents->render_for_terminal(view_width);
+    Vector<DeprecatedString> lines;
+    size_t child_width = view_width < 4 ? 0 : view_width - 4;
+    for (auto& line : m_contents->render_lines_for_terminal(child_width))
+        lines.append(DeprecatedString::formatted("    {}", line));
+
+    return lines;
 }
 
 RecursionDecision BlockQuote::walk(Visitor& visitor) const

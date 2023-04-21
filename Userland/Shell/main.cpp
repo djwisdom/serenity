@@ -5,11 +5,13 @@
  */
 
 #include "Shell.h"
+#include <AK/LexicalPath.h>
 #include <LibCore/ArgsParser.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/Event.h>
 #include <LibCore/EventLoop.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <signal.h>
 #include <stdio.h>
@@ -46,7 +48,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     RefPtr<::Shell::Shell> shell;
     bool attempt_interactive = false;
 
-    auto initialize = [&] {
+    auto initialize = [&](bool posix_mode) {
         auto configuration = Line::Configuration::from_config();
         if (!attempt_interactive) {
             configuration.set(Line::Configuration::Flags::None);
@@ -58,7 +60,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         editor = Line::Editor::construct(move(configuration));
         editor->initialize();
 
-        shell = Shell::Shell::construct(*editor, attempt_interactive);
+        shell = Shell::Shell::construct(*editor, attempt_interactive, posix_mode);
         s_shell = shell.ptr();
 
         s_shell->setup_signals();
@@ -82,7 +84,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 if (cursor >= 0)
                     editor.set_cursor(cursor);
             }
-            shell->highlight(editor);
+            (void)shell->highlight(editor);
         };
         editor->on_tab_complete = [&](const Line::Editor&) {
             return shell->complete();
@@ -164,11 +166,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     StringView command_to_run = {};
     StringView file_to_read_from = {};
-    Vector<DeprecatedString> script_args;
+    Vector<StringView> script_args;
     bool skip_rc_files = false;
-    char const* format = nullptr;
+    StringView format;
     bool should_format_live = false;
     bool keep_open = false;
+    bool posix_mode = (LexicalPath::basename(arguments.strings[0]) == "sh"sv);
 
     Core::ArgsParser parser;
     parser.add_option(command_to_run, "String to read commands from", "command-string", 'c', "command-string");
@@ -176,16 +179,20 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     parser.add_option(format, "Format the given file into stdout and exit", "format", 0, "file");
     parser.add_option(should_format_live, "Enable live formatting", "live-formatting", 'f');
     parser.add_option(keep_open, "Keep the shell open after running the specified command or file", "keep-open", 0);
+    parser.add_option(posix_mode, "Behave like a POSIX-compatible shell", "posix", 0);
     parser.add_positional_argument(file_to_read_from, "File to read commands from", "file", Core::ArgsParser::Required::No);
     parser.add_positional_argument(script_args, "Extra arguments to pass to the script (via $* and co)", "argument", Core::ArgsParser::Required::No);
 
     parser.set_stop_on_first_non_option(true);
     parser.parse(arguments);
 
-    if (format) {
-        auto file = TRY(Core::File::open(format, Core::OpenMode::ReadOnly));
+    if (!file_to_read_from.is_null())
+        skip_rc_files = true;
 
-        initialize();
+    if (!format.is_empty()) {
+        auto file = TRY(Core::DeprecatedFile::open(format, Core::OpenMode::ReadOnly));
+
+        initialize(posix_mode);
 
         ssize_t cursor = -1;
         puts(shell->format(file->read_all(), cursor).characters());
@@ -214,7 +221,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    initialize();
+    initialize(posix_mode);
 
     shell->set_live_formatting(should_format_live);
     shell->current_script = arguments.strings[0];
@@ -224,16 +231,26 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             DeprecatedString file_path = name;
             if (file_path.starts_with('~'))
                 file_path = shell->expand_tilde(file_path);
-            if (Core::File::exists(file_path)) {
+            if (FileSystem::exists(file_path)) {
                 shell->run_file(file_path, false);
             }
         };
-        run_rc_file(Shell::Shell::global_init_file_path);
-        run_rc_file(Shell::Shell::local_init_file_path);
+        if (posix_mode) {
+            run_rc_file(Shell::Shell::global_posix_init_file_path);
+            run_rc_file(Shell::Shell::local_posix_init_file_path);
+        } else {
+            run_rc_file(Shell::Shell::global_init_file_path);
+            run_rc_file(Shell::Shell::local_init_file_path);
+        }
         shell->cache_path();
     }
 
-    shell->set_local_variable("ARGV", adopt_ref(*new Shell::AST::ListValue(move(script_args))));
+    Vector<String> args_to_pass;
+    TRY(args_to_pass.try_ensure_capacity(script_args.size()));
+    for (auto& arg : script_args)
+        TRY(args_to_pass.try_append(TRY(String::from_utf8(arg))));
+
+    shell->set_local_variable("ARGV", adopt_ref(*new Shell::AST::ListValue(move(args_to_pass))));
 
     if (!command_to_run.is_empty()) {
         auto result = shell->run_command(command_to_run);

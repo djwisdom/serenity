@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,10 +8,17 @@
 
 #include <AK/Optional.h>
 #include <LibWeb/CSS/BackdropFilter.h>
+#include <LibWeb/CSS/CalculatedOr.h>
 #include <LibWeb/CSS/Clip.h>
+#include <LibWeb/CSS/Display.h>
+#include <LibWeb/CSS/GridTrackPlacement.h>
+#include <LibWeb/CSS/GridTrackSize.h>
 #include <LibWeb/CSS/LengthBox.h>
+#include <LibWeb/CSS/PercentageOr.h>
 #include <LibWeb/CSS/Size.h>
-#include <LibWeb/CSS/StyleValue.h>
+#include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
+#include <LibWeb/CSS/TransformFunctions.h>
 
 namespace Web::CSS {
 
@@ -72,10 +79,18 @@ public:
     static CSS::GridTrackPlacement grid_row_start() { return CSS::GridTrackPlacement::make_auto(); }
     static CSS::Size column_gap() { return CSS::Size::make_auto(); }
     static CSS::Size row_gap() { return CSS::Size::make_auto(); }
+    static CSS::BorderCollapse border_collapse() { return CSS::BorderCollapse::Separate; }
+    static Vector<Vector<String>> grid_template_areas() { return {}; }
+};
+
+enum class BackgroundSize {
+    Contain,
+    Cover,
+    LengthPercentage,
 };
 
 struct BackgroundLayerData {
-    RefPtr<CSS::AbstractImageStyleValue> background_image { nullptr };
+    RefPtr<CSS::AbstractImageStyleValue const> background_image { nullptr };
     CSS::BackgroundAttachment attachment { CSS::BackgroundAttachment::Scroll };
     CSS::BackgroundBox origin { CSS::BackgroundBox::PaddingBox };
     CSS::BackgroundBox clip { CSS::BackgroundBox::BorderBox };
@@ -97,7 +112,7 @@ public:
     float width { 0 };
 };
 
-using TransformValue = Variant<CSS::Angle, CSS::LengthPercentage, float>;
+using TransformValue = Variant<CSS::AngleOrCalculated, CSS::LengthPercentage, float>;
 
 struct Transformation {
     CSS::TransformFunction function;
@@ -107,6 +122,12 @@ struct Transformation {
 struct TransformOrigin {
     CSS::LengthPercentage x { Percentage(50) };
     CSS::LengthPercentage y { Percentage(50) };
+};
+
+enum class FlexBasis {
+    Content,
+    LengthPercentage,
+    Auto,
 };
 
 struct FlexBasisData {
@@ -131,14 +152,30 @@ struct ContentData {
     } type { Type::Normal };
 
     // FIXME: Data is a list of identifiers, strings and image values.
-    DeprecatedString data {};
-    DeprecatedString alt_text {};
+    String data {};
+    String alt_text {};
 };
 
 struct BorderRadiusData {
     CSS::LengthPercentage horizontal_radius { InitialValues::border_radius() };
     CSS::LengthPercentage vertical_radius { InitialValues::border_radius() };
 };
+
+// FIXME: Find a better place for this helper.
+inline Gfx::Painter::ScalingMode to_gfx_scaling_mode(CSS::ImageRendering css_value)
+{
+    switch (css_value) {
+    case CSS::ImageRendering::Auto:
+    case CSS::ImageRendering::HighQuality:
+    case CSS::ImageRendering::Smooth:
+        return Gfx::Painter::ScalingMode::BilinearBlend;
+    case CSS::ImageRendering::CrispEdges:
+        return Gfx::Painter::ScalingMode::NearestNeighbor;
+    case CSS::ImageRendering::Pixelated:
+        return Gfx::Painter::ScalingMode::SmoothPixels;
+    }
+    VERIFY_NOT_REACHED();
+}
 
 class ComputedValues {
 public:
@@ -166,6 +203,7 @@ public:
     float flex_grow() const { return m_noninherited.flex_grow; }
     float flex_shrink() const { return m_noninherited.flex_shrink; }
     int order() const { return m_noninherited.order; }
+    Optional<Color> accent_color() const { return m_inherited.accent_color; }
     CSS::AlignContent align_content() const { return m_noninherited.align_content; }
     CSS::AlignItems align_items() const { return m_noninherited.align_items; }
     CSS::AlignSelf align_self() const { return m_noninherited.align_self; }
@@ -192,6 +230,8 @@ public:
     CSS::GridTrackPlacement const& grid_row_start() const { return m_noninherited.grid_row_start; }
     CSS::Size const& column_gap() const { return m_noninherited.column_gap; }
     CSS::Size const& row_gap() const { return m_noninherited.row_gap; }
+    CSS::BorderCollapse border_collapse() const { return m_noninherited.border_collapse; }
+    Vector<Vector<String>> const& grid_template_areas() const { return m_noninherited.grid_template_areas; }
 
     CSS::LengthBox const& inset() const { return m_noninherited.inset; }
     const CSS::LengthBox& margin() const { return m_noninherited.margin; }
@@ -240,6 +280,7 @@ protected:
         int font_weight { InitialValues::font_weight() };
         CSS::FontVariant font_variant { InitialValues::font_variant() };
         Color color { InitialValues::color() };
+        Optional<Color> accent_color {};
         CSS::Cursor cursor { InitialValues::cursor() };
         CSS::ImageRendering image_rendering { InitialValues::image_rendering() };
         CSS::PointerEvents pointer_events { InitialValues::pointer_events() };
@@ -316,6 +357,8 @@ protected:
         CSS::GridTrackPlacement grid_row_start { InitialValues::grid_row_start() };
         CSS::Size column_gap { InitialValues::column_gap() };
         CSS::Size row_gap { InitialValues::row_gap() };
+        CSS::BorderCollapse border_collapse { InitialValues::border_collapse() };
+        Vector<Vector<String>> grid_template_areas { InitialValues::grid_template_areas() };
     } m_noninherited;
 };
 
@@ -376,6 +419,7 @@ public:
     void set_flex_grow(float value) { m_noninherited.flex_grow = value; }
     void set_flex_shrink(float value) { m_noninherited.flex_shrink = value; }
     void set_order(int value) { m_noninherited.order = value; }
+    void set_accent_color(Color value) { m_inherited.accent_color = value; }
     void set_align_content(CSS::AlignContent value) { m_noninherited.align_content = value; }
     void set_align_items(CSS::AlignItems value) { m_noninherited.align_items = value; }
     void set_align_self(CSS::AlignSelf value) { m_noninherited.align_self = value; }
@@ -396,6 +440,8 @@ public:
     void set_grid_row_start(CSS::GridTrackPlacement value) { m_noninherited.grid_row_start = value; }
     void set_column_gap(CSS::Size const& column_gap) { m_noninherited.column_gap = column_gap; }
     void set_row_gap(CSS::Size const& row_gap) { m_noninherited.row_gap = row_gap; }
+    void set_border_collapse(CSS::BorderCollapse const& border_collapse) { m_noninherited.border_collapse = border_collapse; }
+    void set_grid_template_areas(Vector<Vector<String>> const& grid_template_areas) { m_noninherited.grid_template_areas = grid_template_areas; }
 
     void set_fill(Color value) { m_inherited.fill = value; }
     void set_stroke(Color value) { m_inherited.stroke = value; }

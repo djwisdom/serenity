@@ -24,7 +24,7 @@
 
 MailWidget::MailWidget()
 {
-    load_from_gml(mail_window_gml);
+    load_from_gml(mail_window_gml).release_value_but_fixme_should_propagate_errors();
 
     m_mailbox_list = *find_descendant_of_type_named<GUI::TreeView>("mailbox_list");
     m_individual_mailbox_view = *find_descendant_of_type_named<GUI::TableView>("individual_mailbox_view");
@@ -132,9 +132,9 @@ bool MailWidget::connect_and_login()
 
     auto connection_promise = m_imap_client->connection_promise();
     VERIFY(!connection_promise.is_null());
-    connection_promise->await();
+    MUST(connection_promise->await());
 
-    auto response = m_imap_client->login(username, password)->await().release_value();
+    auto response = MUST(m_imap_client->login(username, password)->await()).release_value();
 
     if (response.status() != IMAP::ResponseStatus::OK) {
         dbgln("Failed to login. The server says: '{}'", response.response_text());
@@ -142,7 +142,7 @@ bool MailWidget::connect_and_login()
         return false;
     }
 
-    response = m_imap_client->list(""sv, "*"sv)->await().release_value();
+    response = MUST(m_imap_client->list(""sv, "*"sv)->await()).release_value();
 
     if (response.status() != IMAP::ResponseStatus::OK) {
         dbgln("Failed to retrieve mailboxes. The server says: '{}'", response.response_text());
@@ -163,7 +163,7 @@ bool MailWidget::connect_and_login()
 
 void MailWidget::on_window_close()
 {
-    auto response = move(m_imap_client->send_simple_command(IMAP::CommandType::Logout)->await().release_value().get<IMAP::SolidResponse>());
+    auto response = move(MUST(m_imap_client->send_simple_command(IMAP::CommandType::Logout)->await()).release_value().get<IMAP::SolidResponse>());
     VERIFY(response.status() == IMAP::ResponseStatus::OK);
 
     m_imap_client->close();
@@ -171,7 +171,7 @@ void MailWidget::on_window_close()
 
 IMAP::MultiPartBodyStructureData const* MailWidget::look_for_alternative_body_structure(IMAP::MultiPartBodyStructureData const& current_body_structure, Vector<u32>& position_stack) const
 {
-    if (current_body_structure.media_type.equals_ignoring_case("ALTERNATIVE"sv))
+    if (current_body_structure.media_type.equals_ignoring_ascii_case("ALTERNATIVE"sv))
         return &current_body_structure;
 
     u32 structure_index = 1;
@@ -227,7 +227,7 @@ Vector<MailWidget::Alternative> MailWidget::get_alternatives(IMAP::MultiPartBody
 
 bool MailWidget::is_supported_alternative(Alternative const& alternative) const
 {
-    return alternative.body_structure.type.equals_ignoring_case("text"sv) && (alternative.body_structure.subtype.equals_ignoring_case("plain"sv) || alternative.body_structure.subtype.equals_ignoring_case("html"sv));
+    return alternative.body_structure.type.equals_ignoring_ascii_case("text"sv) && (alternative.body_structure.subtype.equals_ignoring_ascii_case("plain"sv) || alternative.body_structure.subtype.equals_ignoring_ascii_case("html"sv));
 }
 
 void MailWidget::selected_mailbox()
@@ -253,7 +253,7 @@ void MailWidget::selected_mailbox()
     if (mailbox.flags & (unsigned)IMAP::MailboxFlag::NoSelect)
         return;
 
-    auto response = m_imap_client->select(mailbox.name)->await().release_value();
+    auto response = MUST(m_imap_client->select(mailbox.name)->await()).release_value();
 
     if (response.status() != IMAP::ResponseStatus::OK) {
         dbgln("Failed to select mailbox. The server says: '{}'", response.response_text());
@@ -280,7 +280,7 @@ void MailWidget::selected_mailbox()
         },
     };
 
-    auto fetch_response = m_imap_client->fetch(fetch_command, false)->await().release_value();
+    auto fetch_response = MUST(m_imap_client->fetch(fetch_command, false)->await()).release_value();
 
     if (response.status() != IMAP::ResponseStatus::OK) {
         dbgln("Failed to retrieve subject/from for e-mails. The server says: '{}'", response.response_text());
@@ -302,7 +302,7 @@ void MailWidget::selected_mailbox()
             if (!data_item.section->headers.has_value())
                 return false;
             auto header_iterator = data_item.section->headers->find_if([&search_header](auto& header) {
-                return header.equals_ignoring_case(search_header);
+                return header.equals_ignoring_ascii_case(search_header);
             });
             return header_iterator != data_item.section->headers->end();
         };
@@ -396,7 +396,7 @@ void MailWidget::selected_email_to_load()
         },
     };
 
-    auto fetch_response = m_imap_client->fetch(fetch_command, false)->await().release_value();
+    auto fetch_response = MUST(m_imap_client->fetch(fetch_command, false)->await()).release_value();
 
     if (fetch_response.status() != IMAP::ResponseStatus::OK) {
         dbgln("Failed to retrieve the body structure of the selected e-mail. The server says: '{}'", fetch_response.response_text());
@@ -457,7 +457,7 @@ void MailWidget::selected_email_to_load()
         },
     };
 
-    fetch_response = m_imap_client->fetch(fetch_command, false)->await().release_value();
+    fetch_response = MUST(m_imap_client->fetch(fetch_command, false)->await()).release_value();
 
     if (fetch_response.status() != IMAP::ResponseStatus::OK) {
         dbgln("Failed to retrieve the body of the selected e-mail. The server says: '{}'", fetch_response.response_text());
@@ -493,14 +493,14 @@ void MailWidget::selected_email_to_load()
 
     // FIXME: String uses char internally, so 8bit shouldn't be stored in it.
     //        However, it works for now.
-    if (selected_alternative_encoding.equals_ignoring_case("7bit"sv) || selected_alternative_encoding.equals_ignoring_case("8bit"sv)) {
+    if (selected_alternative_encoding.equals_ignoring_ascii_case("7bit"sv) || selected_alternative_encoding.equals_ignoring_ascii_case("8bit"sv)) {
         decoded_data = encoded_data;
-    } else if (selected_alternative_encoding.equals_ignoring_case("base64"sv)) {
+    } else if (selected_alternative_encoding.equals_ignoring_ascii_case("base64"sv)) {
         auto decoded_base64 = decode_base64(encoded_data);
         if (!decoded_base64.is_error())
             decoded_data = decoded_base64.release_value();
-    } else if (selected_alternative_encoding.equals_ignoring_case("quoted-printable"sv)) {
-        decoded_data = IMAP::decode_quoted_printable(encoded_data);
+    } else if (selected_alternative_encoding.equals_ignoring_ascii_case("quoted-printable"sv)) {
+        decoded_data = IMAP::decode_quoted_printable(encoded_data).release_value_but_fixme_should_propagate_errors();
     } else {
         dbgln("Mail: Unimplemented decoder for encoding: {}", selected_alternative_encoding);
         GUI::MessageBox::show(window(), DeprecatedString::formatted("The e-mail encoding '{}' is currently unsupported.", selected_alternative_encoding), "Unsupported"sv, GUI::MessageBox::Type::Information);

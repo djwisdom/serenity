@@ -1,10 +1,10 @@
 /*
  * Copyright (c) 2022, Dylan Katz <dykatz@uw.edu>
+ * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibCore/Stream.h>
 #include <LibGUI/Dialog.h>
 #include <LibGUI/FilePicker.h>
 #include <LibGUI/MessageBox.h>
@@ -28,7 +28,7 @@ void ScriptEditor::new_script_with_temp_name(DeprecatedString name)
 
 ErrorOr<void> ScriptEditor::open_script_from_file(LexicalPath const& file_path)
 {
-    auto file = TRY(Core::Stream::File::open(file_path.string(), Core::Stream::OpenMode::Read));
+    auto file = TRY(Core::File::open(file_path.string(), Core::File::OpenMode::Read));
     auto buffer = TRY(file->read_until_eof());
 
     set_text({ buffer.bytes() });
@@ -37,15 +37,22 @@ ErrorOr<void> ScriptEditor::open_script_from_file(LexicalPath const& file_path)
     return {};
 }
 
+static ErrorOr<void> save_text_to_file(StringView filename, DeprecatedString text)
+{
+    auto file = TRY(Core::File::open(filename, Core::File::OpenMode::Write));
+
+    if (!text.is_empty())
+        TRY(file->write_until_depleted(text.bytes()));
+
+    return {};
+}
+
 ErrorOr<bool> ScriptEditor::save()
 {
     if (m_path.is_empty())
         return save_as();
 
-    auto file = TRY(Core::Stream::File::open(m_path, Core::Stream::OpenMode::Write));
-    auto editor_text = text();
-    TRY(file->write_entire_buffer(editor_text.bytes()));
-
+    TRY(save_text_to_file(m_path, text()));
     document().set_unmodified();
     return true;
 }
@@ -55,12 +62,9 @@ ErrorOr<bool> ScriptEditor::save_as()
     auto maybe_save_path = GUI::FilePicker::get_save_filepath(window(), name(), "sql");
     if (!maybe_save_path.has_value())
         return false;
+
     auto save_path = maybe_save_path.release_value();
-
-    auto file = TRY(Core::Stream::File::open(save_path, Core::Stream::OpenMode::Write));
-    auto editor_text = text();
-    TRY(file->write_entire_buffer(editor_text.bytes()));
-
+    TRY(save_text_to_file(save_path, text()));
     m_path = save_path;
 
     auto lexical_path = LexicalPath(save_path);
@@ -68,7 +72,7 @@ ErrorOr<bool> ScriptEditor::save_as()
 
     auto parent = static_cast<GUI::TabWidget*>(parent_widget());
     if (parent)
-        parent->set_tab_title(*this, lexical_path.title());
+        parent->set_tab_title(*this, String::from_deprecated_string(lexical_path.title()).release_value_but_fixme_should_propagate_errors());
 
     document().set_unmodified();
     return true;

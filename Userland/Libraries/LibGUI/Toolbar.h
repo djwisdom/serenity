@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include <AK/NonnullOwnPtrVector.h>
 #include <LibGUI/Button.h>
 #include <LibGUI/Menu.h>
 #include <LibGUI/Widget.h>
@@ -53,7 +52,7 @@ private:
         RefPtr<Action> action;
         RefPtr<Widget> widget;
     };
-    NonnullOwnPtrVector<Item> m_items;
+    Vector<NonnullOwnPtr<Item>> m_items;
     RefPtr<Menu> m_overflow_menu;
     RefPtr<Action> m_overflow_action;
     RefPtr<Button> m_overflow_button;

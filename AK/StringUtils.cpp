@@ -7,7 +7,6 @@
 
 #include <AK/CharacterTypes.h>
 #include <AK/MemMem.h>
-#include <AK/Memory.h>
 #include <AK/Optional.h>
 #include <AK/String.h>
 #include <AK/StringBuilder.h>
@@ -15,9 +14,12 @@
 #include <AK/StringView.h>
 #include <AK/Vector.h>
 
-#ifndef KERNEL
+#ifdef KERNEL
+#    include <Kernel/StdLib.h>
+#else
 #    include <AK/DeprecatedString.h>
 #    include <AK/FloatingPointStringConversions.h>
+#    include <string.h>
 #endif
 
 namespace AK {
@@ -62,8 +64,11 @@ bool matches(StringView str, StringView mask, CaseSensitivity case_sensitivity, 
             record_span(string_ptr - string_start, 1);
             break;
         case '\\':
-            ++mask_ptr;
-            break;
+            // if backslash is last character in mask, just treat it as an exact match
+            // otherwise use it as escape for next character
+            if (mask_ptr + 1 < mask_end)
+                ++mask_ptr;
+            [[fallthrough]];
         default:
             auto p = *mask_ptr;
             auto ch = *string_ptr;
@@ -249,7 +254,7 @@ template Optional<double> convert_to_floating_point(StringView str, TrimWhitespa
 template Optional<float> convert_to_floating_point(StringView str, TrimWhitespace);
 #endif
 
-bool equals_ignoring_case(StringView a, StringView b)
+bool equals_ignoring_ascii_case(StringView a, StringView b)
 {
     if (a.length() != b.length())
         return false;
@@ -541,7 +546,7 @@ DeprecatedString replace(StringView str, StringView needle, StringView replaceme
         last_position = position + needle.length();
     }
     replaced_string.append(str.substring_view(last_position, str.length() - last_position));
-    return replaced_string.build();
+    return replaced_string.to_deprecated_string();
 }
 
 ErrorOr<String> replace(String const& haystack, StringView needle, StringView replacement, ReplaceMode replace_mode)

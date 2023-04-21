@@ -5,12 +5,13 @@
  */
 
 #include <Kernel/Process.h>
+#include <Kernel/Time/TimeManagement.h>
 
 namespace Kernel {
 
 ErrorOr<FlatPtr> Process::sys$getrusage(int who, Userspace<rusage*> user_usage)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
 
     rusage usage {};
 

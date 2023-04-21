@@ -6,7 +6,7 @@
  */
 
 #include <AK/LexicalPath.h>
-#include <LibCore/File.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/MessageBox.h>
@@ -23,97 +23,7 @@ Client& Client::the()
     return *s_the;
 }
 
-DeprecatedResult Client::try_request_file_read_only_approved(GUI::Window* parent_window, DeprecatedString const& path)
-{
-    auto const id = get_new_id();
-    m_promises.set(id, PromiseAndWindow { { Core::Promise<DeprecatedResult>::construct() }, parent_window });
-
-    auto parent_window_server_client_id = GUI::ConnectionToWindowServer::the().expose_client_id();
-    auto child_window_server_client_id = expose_window_server_client_id();
-    auto parent_window_id = parent_window->window_id();
-
-    GUI::ConnectionToWindowServer::the().add_window_stealing_for_client(child_window_server_client_id, parent_window_id);
-
-    ScopeGuard guard([parent_window_id, child_window_server_client_id] {
-        GUI::ConnectionToWindowServer::the().remove_window_stealing_for_client(child_window_server_client_id, parent_window_id);
-    });
-
-    if (path.starts_with('/')) {
-        async_request_file_read_only_approved(id, parent_window_server_client_id, parent_window_id, path);
-    } else {
-        auto full_path = LexicalPath::join(Core::File::current_working_directory(), path).string();
-        async_request_file_read_only_approved(id, parent_window_server_client_id, parent_window_id, full_path);
-    }
-
-    return handle_promise<DeprecatedResult>(id);
-}
-
-DeprecatedResult Client::try_request_file(GUI::Window* parent_window, DeprecatedString const& path, Core::OpenMode mode)
-{
-    auto const id = get_new_id();
-    m_promises.set(id, PromiseAndWindow { { Core::Promise<DeprecatedResult>::construct() }, parent_window });
-
-    auto parent_window_server_client_id = GUI::ConnectionToWindowServer::the().expose_client_id();
-    auto child_window_server_client_id = expose_window_server_client_id();
-    auto parent_window_id = parent_window->window_id();
-
-    GUI::ConnectionToWindowServer::the().add_window_stealing_for_client(child_window_server_client_id, parent_window_id);
-
-    ScopeGuard guard([parent_window_id, child_window_server_client_id] {
-        GUI::ConnectionToWindowServer::the().remove_window_stealing_for_client(child_window_server_client_id, parent_window_id);
-    });
-
-    if (path.starts_with('/')) {
-        async_request_file(id, parent_window_server_client_id, parent_window_id, path, mode);
-    } else {
-        auto full_path = LexicalPath::join(Core::File::current_working_directory(), path).string();
-        async_request_file(id, parent_window_server_client_id, parent_window_id, full_path, mode);
-    }
-
-    return handle_promise<DeprecatedResult>(id);
-}
-
-DeprecatedResult Client::try_open_file(GUI::Window* parent_window, DeprecatedString const& window_title, StringView path, Core::OpenMode requested_access)
-{
-    auto const id = get_new_id();
-    m_promises.set(id, PromiseAndWindow { { Core::Promise<DeprecatedResult>::construct() }, parent_window });
-
-    auto parent_window_server_client_id = GUI::ConnectionToWindowServer::the().expose_client_id();
-    auto child_window_server_client_id = expose_window_server_client_id();
-    auto parent_window_id = parent_window->window_id();
-
-    GUI::ConnectionToWindowServer::the().add_window_stealing_for_client(child_window_server_client_id, parent_window_id);
-
-    ScopeGuard guard([parent_window_id, child_window_server_client_id] {
-        GUI::ConnectionToWindowServer::the().remove_window_stealing_for_client(child_window_server_client_id, parent_window_id);
-    });
-
-    async_prompt_open_file(id, parent_window_server_client_id, parent_window_id, window_title, path, requested_access);
-
-    return handle_promise<DeprecatedResult>(id);
-}
-
-DeprecatedResult Client::try_save_file_deprecated(GUI::Window* parent_window, DeprecatedString const& name, DeprecatedString const ext, Core::OpenMode requested_access)
-{
-    auto const id = get_new_id();
-    m_promises.set(id, PromiseAndWindow { { Core::Promise<DeprecatedResult>::construct() }, parent_window });
-
-    auto parent_window_server_client_id = GUI::ConnectionToWindowServer::the().expose_client_id();
-    auto child_window_server_client_id = expose_window_server_client_id();
-    auto parent_window_id = parent_window->window_id();
-
-    GUI::ConnectionToWindowServer::the().add_window_stealing_for_client(child_window_server_client_id, parent_window_id);
-
-    ScopeGuard guard([parent_window_id, child_window_server_client_id] {
-        GUI::ConnectionToWindowServer::the().remove_window_stealing_for_client(child_window_server_client_id, parent_window_id);
-    });
-
-    async_prompt_save_file(id, parent_window_server_client_id, parent_window_id, name.is_null() ? "Untitled" : name, ext.is_null() ? "txt" : ext, Core::StandardPaths::home_directory(), requested_access);
-
-    return handle_promise<DeprecatedResult>(id);
-}
-
-Result Client::save_file(GUI::Window* parent_window, DeprecatedString const& name, DeprecatedString const ext, Core::Stream::OpenMode requested_access)
+Result Client::request_file_read_only_approved(GUI::Window* parent_window, DeprecatedString const& path)
 {
     auto const id = get_new_id();
     m_promises.set(id, PromiseAndWindow { { Core::Promise<Result>::construct() }, parent_window });
@@ -128,12 +38,79 @@ Result Client::save_file(GUI::Window* parent_window, DeprecatedString const& nam
         GUI::ConnectionToWindowServer::the().remove_window_stealing_for_client(child_window_server_client_id, parent_window_id);
     });
 
-    // The endpoint only cares about ReadOnly, WriteOnly and ReadWrite and both enum shares the same layout for these.
-    Core::OpenMode deprecated_requested_access = static_cast<Core::OpenMode>(requested_access);
+    if (path.starts_with('/')) {
+        async_request_file_read_only_approved(id, parent_window_server_client_id, parent_window_id, path);
+    } else {
+        auto full_path = LexicalPath::join(TRY(FileSystem::current_working_directory()), path).string();
+        async_request_file_read_only_approved(id, parent_window_server_client_id, parent_window_id, full_path);
+    }
 
-    async_prompt_save_file(id, parent_window_server_client_id, parent_window_id, name.is_null() ? "Untitled" : name, ext.is_null() ? "txt" : ext, Core::StandardPaths::home_directory(), deprecated_requested_access);
+    return handle_promise(id);
+}
 
-    return handle_promise<Result>(id);
+Result Client::request_file(GUI::Window* parent_window, DeprecatedString const& path, Core::File::OpenMode mode)
+{
+    auto const id = get_new_id();
+    m_promises.set(id, PromiseAndWindow { { Core::Promise<Result>::construct() }, parent_window });
+
+    auto parent_window_server_client_id = GUI::ConnectionToWindowServer::the().expose_client_id();
+    auto child_window_server_client_id = expose_window_server_client_id();
+    auto parent_window_id = parent_window->window_id();
+
+    GUI::ConnectionToWindowServer::the().add_window_stealing_for_client(child_window_server_client_id, parent_window_id);
+
+    ScopeGuard guard([parent_window_id, child_window_server_client_id] {
+        GUI::ConnectionToWindowServer::the().remove_window_stealing_for_client(child_window_server_client_id, parent_window_id);
+    });
+
+    if (path.starts_with('/')) {
+        async_request_file(id, parent_window_server_client_id, parent_window_id, path, mode);
+    } else {
+        auto full_path = LexicalPath::join(TRY(FileSystem::current_working_directory()), path).string();
+        async_request_file(id, parent_window_server_client_id, parent_window_id, full_path, mode);
+    }
+
+    return handle_promise(id);
+}
+
+Result Client::open_file(GUI::Window* parent_window, DeprecatedString const& window_title, StringView path, Core::File::OpenMode requested_access, Optional<Vector<GUI::FileTypeFilter>> const& allowed_file_types)
+{
+    auto const id = get_new_id();
+    m_promises.set(id, PromiseAndWindow { { Core::Promise<Result>::construct() }, parent_window });
+
+    auto parent_window_server_client_id = GUI::ConnectionToWindowServer::the().expose_client_id();
+    auto child_window_server_client_id = expose_window_server_client_id();
+    auto parent_window_id = parent_window->window_id();
+
+    GUI::ConnectionToWindowServer::the().add_window_stealing_for_client(child_window_server_client_id, parent_window_id);
+
+    ScopeGuard guard([parent_window_id, child_window_server_client_id] {
+        GUI::ConnectionToWindowServer::the().remove_window_stealing_for_client(child_window_server_client_id, parent_window_id);
+    });
+
+    async_prompt_open_file(id, parent_window_server_client_id, parent_window_id, window_title, path, requested_access, allowed_file_types);
+
+    return handle_promise(id);
+}
+
+Result Client::save_file(GUI::Window* parent_window, DeprecatedString const& name, DeprecatedString const ext, Core::File::OpenMode requested_access)
+{
+    auto const id = get_new_id();
+    m_promises.set(id, PromiseAndWindow { { Core::Promise<Result>::construct() }, parent_window });
+
+    auto parent_window_server_client_id = GUI::ConnectionToWindowServer::the().expose_client_id();
+    auto child_window_server_client_id = expose_window_server_client_id();
+    auto parent_window_id = parent_window->window_id();
+
+    GUI::ConnectionToWindowServer::the().add_window_stealing_for_client(child_window_server_client_id, parent_window_id);
+
+    ScopeGuard guard([parent_window_id, child_window_server_client_id] {
+        GUI::ConnectionToWindowServer::the().remove_window_stealing_for_client(child_window_server_client_id, parent_window_id);
+    });
+
+    async_prompt_save_file(id, parent_window_server_client_id, parent_window_id, name.is_null() ? "Untitled" : name, ext.is_null() ? "txt" : ext, Core::StandardPaths::home_directory(), requested_access);
+
+    return handle_promise(id);
 }
 
 void Client::handle_prompt_end(i32 request_id, i32 error, Optional<IPC::File> const& ipc_file, Optional<DeprecatedString> const& chosen_file)
@@ -142,51 +119,38 @@ void Client::handle_prompt_end(i32 request_id, i32 error, Optional<IPC::File> co
     VERIFY(potential_data.has_value());
     auto& request_data = potential_data.value();
 
-    auto const resolve_any_promise = [&promise = request_data.promise](Error&& error) {
-        if (promise.has<PromiseType<DeprecatedResult>>()) {
-            promise.get<PromiseType<DeprecatedResult>>()->resolve(move(error));
-            return;
-        }
-        promise.get<PromiseType<Result>>()->resolve(move(error));
-    };
-
     if (error != 0) {
         // We don't want to show an error message for non-existent files since some applications may want
         // to handle it as opening a new, named file.
         if (error != -1 && error != ENOENT)
             GUI::MessageBox::show_error(request_data.parent_window, DeprecatedString::formatted("Opening \"{}\" failed: {}", *chosen_file, strerror(error)));
-        resolve_any_promise(Error::from_errno(error));
+        request_data.promise->resolve(Error::from_errno(error)).release_value_but_fixme_should_propagate_errors();
         return;
     }
 
-    if (Core::File::is_device(ipc_file->fd())) {
+    if (FileSystem::is_device(ipc_file->fd())) {
         GUI::MessageBox::show_error(request_data.parent_window, DeprecatedString::formatted("Opening \"{}\" failed: Cannot open device files", *chosen_file));
-        resolve_any_promise(Error::from_string_literal("Cannot open device files"));
+        request_data.promise->resolve(Error::from_string_literal("Cannot open device files")).release_value_but_fixme_should_propagate_errors();
         return;
     }
 
-    if (Core::File::is_directory(ipc_file->fd())) {
+    if (FileSystem::is_directory(ipc_file->fd())) {
         GUI::MessageBox::show_error(request_data.parent_window, DeprecatedString::formatted("Opening \"{}\" failed: Cannot open directory", *chosen_file));
-        resolve_any_promise(Error::from_errno(EISDIR));
+        request_data.promise->resolve(Error::from_errno(EISDIR)).release_value_but_fixme_should_propagate_errors();
         return;
     }
 
-    if (request_data.promise.has<PromiseType<DeprecatedResult>>()) {
-        auto file = Core::File::construct();
-        auto fd = ipc_file->take_fd();
-        file->open(fd, Core::OpenMode::ReadWrite, Core::File::ShouldCloseFileDescriptor::Yes);
-        file->set_filename(*chosen_file);
-
-        request_data.promise.get<PromiseType<DeprecatedResult>>()->resolve(file);
-        return;
-    }
-
-    auto file_or_error = Core::Stream::File::adopt_fd(ipc_file->take_fd(), Core::Stream::OpenMode::ReadWrite);
+    auto file_or_error = [&]() -> ErrorOr<File> {
+        auto stream = TRY(Core::File::adopt_fd(ipc_file->take_fd(), Core::File::OpenMode::ReadWrite));
+        auto filename = TRY(String::from_deprecated_string(*chosen_file));
+        return File({}, move(stream), filename);
+    }();
     if (file_or_error.is_error()) {
-        resolve_any_promise(file_or_error.release_error());
+        request_data.promise->resolve(file_or_error.release_error()).release_value_but_fixme_should_propagate_errors();
+        return;
     }
 
-    request_data.promise.get<PromiseType<Result>>()->resolve(file_or_error.release_value());
+    request_data.promise->resolve(file_or_error.release_value()).release_value_but_fixme_should_propagate_errors();
 }
 
 void Client::die()
@@ -204,10 +168,9 @@ int Client::get_new_id()
     return new_id;
 }
 
-template<typename AnyResult>
-AnyResult Client::handle_promise(int id)
+Result Client::handle_promise(int id)
 {
-    auto result = m_promises.get(id)->promise.get<PromiseType<AnyResult>>()->await();
+    auto result = TRY(m_promises.get(id)->promise->await());
     m_promises.remove(id);
     return result;
 }

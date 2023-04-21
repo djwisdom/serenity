@@ -10,7 +10,6 @@
 #include "HardwareScreenBackend.h"
 #include "ScreenBackend.h"
 #include "ScreenLayout.h"
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/OwnPtr.h>
 #include <Kernel/API/KeyCode.h>
 #include <LibGfx/Bitmap.h>
@@ -98,22 +97,22 @@ public:
     {
         if (index >= s_screens.size())
             return nullptr;
-        return &s_screens[index];
+        return s_screens[index];
     }
 
     static Vector<Gfx::IntRect, 4> rects()
     {
         Vector<Gfx::IntRect, 4> rects;
         for (auto& screen : s_screens)
-            rects.append(screen.rect());
+            rects.append(screen->rect());
         return rects;
     }
 
     static Screen* find_by_location(Gfx::IntPoint point)
     {
         for (auto& screen : s_screens) {
-            if (screen.rect().contains(point))
-                return &screen;
+            if (screen->rect().contains(point))
+                return screen;
         }
         return nullptr;
     }
@@ -127,7 +126,7 @@ public:
     static IterationDecision for_each(F f)
     {
         for (auto& screen : s_screens) {
-            IterationDecision decision = f(screen);
+            IterationDecision decision = f(*screen);
             if (decision != IterationDecision::Continue)
                 return decision;
         }
@@ -164,6 +163,7 @@ public:
 
     Gfx::IntSize physical_size() const { return { physical_width(), physical_height() }; }
 
+    Gfx::IntPoint location() const { return m_virtual_rect.location(); }
     Gfx::IntSize size() const { return { m_virtual_rect.width(), m_virtual_rect.height() }; }
     Gfx::IntRect rect() const { return m_virtual_rect; }
 
@@ -180,14 +180,13 @@ private:
     Screen(size_t);
     bool open_device();
     void close_device();
-    void init();
     void scale_factor_changed();
     bool set_resolution(bool initial);
     void constrain_pending_flush_rects();
     static void update_indices()
     {
         for (size_t i = 0; i < s_screens.size(); i++)
-            s_screens[i].m_index = i;
+            s_screens[i]->m_index = i;
     }
     static void update_bounding_rect();
     static void update_scale_factors_in_use();
@@ -199,7 +198,7 @@ private:
     ScreenLayout::Screen& screen_layout_info() { return s_layout.screens[m_index]; }
     ScreenLayout::Screen const& screen_layout_info() const { return s_layout.screens[m_index]; }
 
-    static NonnullRefPtrVector<Screen, default_screen_count> s_screens;
+    static Vector<NonnullRefPtr<Screen>, default_screen_count> s_screens;
     static Screen* s_main_screen;
     static Gfx::IntRect s_bounding_screens_rect;
     static ScreenLayout s_layout;

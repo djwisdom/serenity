@@ -6,11 +6,11 @@
 
 #pragma once
 
-#include "AK/NonnullRefPtr.h"
-#include "AK/RefPtr.h"
 #include "NumericInput.h"
 #include "PDFViewer.h"
 #include "SidebarWidget.h"
+#include <AK/NonnullRefPtr.h>
+#include <AK/RefPtr.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/ActionGroup.h>
 #include <LibGUI/CheckBox.h>
@@ -25,14 +25,14 @@ class PDFViewerWidget final : public GUI::Widget {
 public:
     ~PDFViewerWidget() override = default;
 
-    void initialize_menubar(GUI::Window&);
-    void open_file(Core::File&);
+    ErrorOr<void> initialize_menubar(GUI::Window&);
+    void open_file(StringView path, NonnullOwnPtr<Core::File> file);
 
 private:
     PDFViewerWidget();
 
     void initialize_toolbar(GUI::Toolbar&);
-    PDF::PDFErrorOr<void> try_open_file(Core::File&);
+    PDF::PDFErrorOr<void> try_open_file(StringView path, NonnullOwnPtr<Core::File> file);
 
     RefPtr<PDFViewer> m_viewer;
     RefPtr<SidebarWidget> m_sidebar;

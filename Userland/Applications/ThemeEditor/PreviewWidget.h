@@ -24,21 +24,20 @@ class MiniWidgetGallery;
 class PreviewWidget final
     : public GUI::AbstractThemePreview
     , public GUI::ColorFilterer {
-    C_OBJECT(PreviewWidget);
+    C_OBJECT_ABSTRACT(PreviewWidget);
 
 public:
+    static ErrorOr<NonnullRefPtr<PreviewWidget>> try_create();
     virtual ~PreviewWidget() override = default;
 
     virtual void set_color_filter(OwnPtr<Gfx::ColorBlindnessFilter>) override;
 
 private:
-    explicit PreviewWidget(Gfx::Palette const& = GUI::Application::the()->palette());
+    PreviewWidget();
 
     virtual void paint_preview(GUI::PaintEvent&) override;
     virtual void second_paint_event(GUI::PaintEvent&) override;
     virtual void resize_event(GUI::ResizeEvent&) override;
-    virtual void drag_enter_event(GUI::DragEvent&) override;
-    virtual void drop_event(GUI::DropEvent&) override;
     virtual void palette_changed() override;
 
     void paint_hightlight_window();

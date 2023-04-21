@@ -23,16 +23,17 @@ public:
     {
     }
 
-    virtual NonnullRefPtrVector<Node>& children() const override
+    virtual ErrorOr<Span<NonnullRefPtr<Node const>>> children() const override
     {
-        MUST(reify_if_needed());
-        return m_children;
+        TRY(reify_if_needed());
+        return m_children.span();
     }
 
     virtual Node const* parent() const override { return nullptr; }
     virtual ErrorOr<String> name() const override;
     String const& section_name() const { return m_section; }
-    ErrorOr<String> path() const;
+    virtual ErrorOr<String> path() const override;
+    virtual PageNode const* document() const override { return nullptr; }
 
     virtual bool is_open() const override { return m_open; }
     void set_open(bool open);
@@ -40,13 +41,14 @@ public:
     static ErrorOr<NonnullRefPtr<SectionNode>> try_create_from_number(StringView section_number);
 
 protected:
+    // In this class, the section is a number, but in lower sections it might be the same as the name.
     String m_section;
     String m_name;
 
 private:
     ErrorOr<void> reify_if_needed() const;
 
-    mutable NonnullRefPtrVector<Node> m_children;
+    mutable Vector<NonnullRefPtr<Node const>> m_children;
     mutable bool m_reified { false };
     bool m_open { false };
 };

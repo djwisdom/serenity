@@ -2,6 +2,7 @@ set(SOURCES
     AST.cpp
     Bytecode/ASTCodegen.cpp
     Bytecode/BasicBlock.cpp
+    Bytecode/CodeGenerationError.cpp
     Bytecode/Executable.cpp
     Bytecode/Generator.cpp
     Bytecode/IdentifierTable.cpp
@@ -75,6 +76,9 @@ set(SOURCES
     Runtime/DateConstructor.cpp
     Runtime/DatePrototype.cpp
     Runtime/DeclarativeEnvironment.cpp
+    Runtime/DisposableStack.cpp
+    Runtime/DisposableStackConstructor.cpp
+    Runtime/DisposableStackPrototype.cpp
     Runtime/ECMAScriptFunctionObject.cpp
     Runtime/Environment.cpp
     Runtime/Error.cpp
@@ -193,6 +197,9 @@ set(SOURCES
     Runtime/StringIteratorPrototype.cpp
     Runtime/StringObject.cpp
     Runtime/StringPrototype.cpp
+    Runtime/SuppressedError.cpp
+    Runtime/SuppressedErrorConstructor.cpp
+    Runtime/SuppressedErrorPrototype.cpp
     Runtime/Symbol.cpp
     Runtime/SymbolConstructor.cpp
     Runtime/SymbolObject.cpp
@@ -231,6 +238,7 @@ set(SOURCES
     Runtime/Temporal/ZonedDateTime.cpp
     Runtime/Temporal/ZonedDateTimeConstructor.cpp
     Runtime/Temporal/ZonedDateTimePrototype.cpp
+    Runtime/ThrowableStringBuilder.cpp
     Runtime/TypedArray.cpp
     Runtime/TypedArrayConstructor.cpp
     Runtime/TypedArrayPrototype.cpp
@@ -257,4 +265,4 @@ set(SOURCES
 )
 
 serenity_lib(LibJS js)
-target_link_libraries(LibJS PRIVATE LibCore LibCrypto LibRegex LibSyntax LibLocale LibUnicode)
+target_link_libraries(LibJS PRIVATE LibCore LibCrypto LibFileSystem LibRegex LibSyntax LibLocale LibUnicode)

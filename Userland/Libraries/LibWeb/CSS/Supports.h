@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/DeprecatedString.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/RefCounted.h>
+#include <AK/String.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/GeneralEnclosed.h>
@@ -22,21 +22,23 @@ class Supports final : public RefCounted<Supports> {
 
 public:
     struct Declaration {
-        DeprecatedString declaration;
+        String declaration;
+        JS::Handle<JS::Realm> realm;
         bool evaluate() const;
-        DeprecatedString to_deprecated_string() const;
+        ErrorOr<String> to_string() const;
     };
 
     struct Selector {
-        DeprecatedString selector;
+        String selector;
+        JS::Handle<JS::Realm> realm;
         bool evaluate() const;
-        DeprecatedString to_deprecated_string() const;
+        ErrorOr<String> to_string() const;
     };
 
     struct Feature {
         Variant<Declaration, Selector> value;
         bool evaluate() const;
-        DeprecatedString to_deprecated_string() const;
+        ErrorOr<String> to_string() const;
     };
 
     struct Condition;
@@ -44,7 +46,7 @@ public:
         Variant<NonnullOwnPtr<Condition>, Feature, GeneralEnclosed> value;
 
         bool evaluate() const;
-        DeprecatedString to_deprecated_string() const;
+        ErrorOr<String> to_string() const;
     };
 
     struct Condition {
@@ -57,7 +59,7 @@ public:
         Vector<InParens> children;
 
         bool evaluate() const;
-        DeprecatedString to_deprecated_string() const;
+        ErrorOr<String> to_string() const;
     };
 
     static NonnullRefPtr<Supports> create(NonnullOwnPtr<Condition>&& condition)
@@ -66,7 +68,7 @@ public:
     }
 
     bool matches() const { return m_matches; }
-    DeprecatedString to_deprecated_string() const;
+    ErrorOr<String> to_string() const;
 
 private:
     Supports(NonnullOwnPtr<Condition>&&);
@@ -81,6 +83,6 @@ template<>
 struct AK::Formatter<Web::CSS::Supports::InParens> : AK::Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Web::CSS::Supports::InParens const& in_parens)
     {
-        return Formatter<StringView>::format(builder, in_parens.to_deprecated_string());
+        return Formatter<StringView>::format(builder, TRY(in_parens.to_string()));
     }
 };

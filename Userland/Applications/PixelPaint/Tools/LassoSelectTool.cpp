@@ -28,7 +28,7 @@ void LassoSelectTool::on_mousedown(Layer* layer, MouseEvent& event)
     if (!layer->rect().contains(layer_event.position()))
         return;
 
-    auto selection_bitmap_result = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, layer->content_bitmap().size());
+    auto selection_bitmap_result = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, layer->content_bitmap().size());
     if (selection_bitmap_result.is_error())
         return;
 
@@ -37,8 +37,8 @@ void LassoSelectTool::on_mousedown(Layer* layer, MouseEvent& event)
     m_most_recent_position = layer_event.position();
     m_top_left = m_start_position;
     m_bottom_right = m_start_position;
-    m_preview_path.clear();
-    m_preview_path.move_to(editor_stroke_position(m_most_recent_position, 1).to_type<float>());
+    m_preview_coords.clear();
+    m_preview_coords.append(m_most_recent_position);
     m_selection_bitmap->set_pixel(m_most_recent_position, Gfx::Color::Black);
 
     m_selecting = true;
@@ -69,8 +69,7 @@ void LassoSelectTool::on_mousemove(Layer* layer, MouseEvent& event)
     if (new_position.y() > m_bottom_right.y())
         m_bottom_right.set_y(new_position.y());
 
-    auto preview_end = editor_stroke_position(new_position, 1);
-    m_preview_path.line_to(preview_end.to_type<float>());
+    m_preview_coords.append(new_position);
 
     auto selection_painter = Gfx::Painter(*m_selection_bitmap);
     selection_painter.draw_line(m_most_recent_position, new_position, Gfx::Color::Black);
@@ -100,7 +99,7 @@ void LassoSelectTool::on_mouseup(Layer*, MouseEvent&)
     auto cropped_selection = cropped_selection_result.release_value();
 
     // We create a bitmap that is bigger by 1 pixel on each side
-    auto lasso_bitmap_or_error = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, { (m_bottom_right.x() - m_top_left.x()) + 2, (m_bottom_right.y() - m_top_left.y()) + 2 });
+    auto lasso_bitmap_or_error = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { (m_bottom_right.x() - m_top_left.x()) + 2, (m_bottom_right.y() - m_top_left.y()) + 2 });
     if (lasso_bitmap_or_error.is_error())
         return;
 
@@ -138,13 +137,23 @@ void LassoSelectTool::flood_lasso_selection(Gfx::Bitmap& lasso_bitmap, Gfx::IntP
 
 void LassoSelectTool::on_second_paint(Layer const* layer, GUI::PaintEvent& event)
 {
-    if (!m_selecting)
+    if (!m_selecting || m_preview_coords.size() < 2)
         return;
     GUI::Painter painter(*m_editor);
     painter.add_clip_rect(event.rect());
     if (layer)
         painter.translate(editor_layer_location(*layer));
-    painter.stroke_path(m_preview_path, Gfx::Color::Black, 1);
+
+    auto draw_preview_lines = [&](auto color, auto thickness) {
+        for (size_t i = 0; i < m_preview_coords.size() - 1; i++) {
+            auto preview_start = editor_stroke_position(m_preview_coords.at(i), 1);
+            auto preview_end = editor_stroke_position(m_preview_coords.at(i + 1), 1);
+            painter.draw_line(preview_start, preview_end, color, thickness);
+        }
+    };
+
+    draw_preview_lines(Gfx::Color::Black, 3);
+    draw_preview_lines(Gfx::Color::White, 1);
 }
 
 bool LassoSelectTool::on_keydown(GUI::KeyEvent& key_event)
@@ -154,7 +163,7 @@ bool LassoSelectTool::on_keydown(GUI::KeyEvent& key_event)
         if (m_selecting) {
             m_selecting = false;
             m_selection_bitmap.clear();
-            m_preview_path.clear();
+            m_preview_coords.clear();
             return true;
         }
     }
@@ -162,23 +171,23 @@ bool LassoSelectTool::on_keydown(GUI::KeyEvent& key_event)
     return Tool::on_keydown(key_event);
 }
 
-GUI::Widget* LassoSelectTool::get_properties_widget()
+ErrorOr<GUI::Widget*> LassoSelectTool::get_properties_widget()
 {
     if (m_properties_widget) {
         return m_properties_widget.ptr();
     }
 
-    m_properties_widget = GUI::Widget::construct();
-    m_properties_widget->set_layout<GUI::VerticalBoxLayout>();
+    auto properties_widget = TRY(GUI::Widget::try_create());
+    (void)TRY(properties_widget->try_set_layout<GUI::VerticalBoxLayout>());
 
-    auto& mode_container = m_properties_widget->add<GUI::Widget>();
-    mode_container.set_fixed_height(20);
-    mode_container.set_layout<GUI::HorizontalBoxLayout>();
+    auto mode_container = TRY(properties_widget->try_add<GUI::Widget>());
+    mode_container->set_fixed_height(20);
+    (void)TRY(mode_container->try_set_layout<GUI::HorizontalBoxLayout>());
 
-    auto& mode_label = mode_container.add<GUI::Label>();
-    mode_label.set_text("Mode:");
-    mode_label.set_text_alignment(Gfx::TextAlignment::CenterLeft);
-    mode_label.set_fixed_size(80, 20);
+    auto mode_label = TRY(mode_container->try_add<GUI::Label>());
+    mode_label->set_text("Mode:");
+    mode_label->set_text_alignment(Gfx::TextAlignment::CenterLeft);
+    mode_label->set_fixed_size(80, 20);
 
     static constexpr auto s_merge_mode_names = [] {
         Array<StringView, (int)Selection::MergeMode::__Count> names;
@@ -203,17 +212,18 @@ GUI::Widget* LassoSelectTool::get_properties_widget()
         return names;
     }();
 
-    auto& mode_combo = mode_container.add<GUI::ComboBox>();
-    mode_combo.set_only_allow_values_from_model(true);
-    mode_combo.set_model(*GUI::ItemListModel<StringView, decltype(s_merge_mode_names)>::create(s_merge_mode_names));
-    mode_combo.set_selected_index((int)m_merge_mode);
-    mode_combo.on_change = [this](auto&&, GUI::ModelIndex const& index) {
+    auto mode_combo = TRY(mode_container->try_add<GUI::ComboBox>());
+    mode_combo->set_only_allow_values_from_model(true);
+    mode_combo->set_model(*GUI::ItemListModel<StringView, decltype(s_merge_mode_names)>::create(s_merge_mode_names));
+    mode_combo->set_selected_index((int)m_merge_mode);
+    mode_combo->on_change = [this](auto&&, GUI::ModelIndex const& index) {
         VERIFY(index.row() >= 0);
         VERIFY(index.row() < (int)Selection::MergeMode::__Count);
 
         m_merge_mode = (Selection::MergeMode)index.row();
     };
 
+    m_properties_widget = properties_widget;
     return m_properties_widget.ptr();
 }
 

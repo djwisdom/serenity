@@ -20,11 +20,6 @@
 
 namespace Gfx {
 
-enum class FitWithinRect {
-    Yes,
-    No
-};
-
 // FIXME: This currently isn't an ideal way of doing things; ideally, TextLayout
 // would be doing the rendering by painting individual glyphs. However, this
 // would regress our Unicode bidirectional text support. Therefore, fixing this
@@ -44,36 +39,29 @@ enum class FitWithinRect {
 //   b) Taking the Lines from TextLayout and painting each glyph.
 class TextLayout {
 public:
-    TextLayout(Gfx::Font const* font, Utf8View const& text, IntRect const& rect)
+    TextLayout(Gfx::Font const& font, Utf8View const& text, FloatRect const& rect)
         : m_font(font)
+        , m_font_metrics(font.pixel_metrics())
         , m_text(text)
         , m_rect(rect)
     {
     }
 
-    Font const& font() const { return *m_font; }
-    void set_font(Font const* font) { m_font = font; }
-
-    Utf8View const& text() const { return m_text; }
-    void set_text(Utf8View const& text) { m_text = text; }
-
-    IntRect const& rect() const { return m_rect; }
-    void set_rect(IntRect const& rect) { m_rect = rect; }
-
-    Vector<DeprecatedString, 32> lines(TextElision elision, TextWrapping wrapping, int line_spacing) const
+    Vector<DeprecatedString, 32> lines(TextElision elision, TextWrapping wrapping) const
     {
-        return wrap_lines(elision, wrapping, line_spacing, FitWithinRect::Yes);
+        return wrap_lines(elision, wrapping);
     }
 
-    IntRect bounding_rect(TextWrapping wrapping, int line_spacing) const;
+    FloatRect bounding_rect(TextWrapping) const;
 
 private:
-    Vector<DeprecatedString, 32> wrap_lines(TextElision, TextWrapping, int line_spacing, FitWithinRect) const;
-    DeprecatedString elide_text_from_right(Utf8View, bool force_elision) const;
+    Vector<DeprecatedString, 32> wrap_lines(TextElision, TextWrapping) const;
+    DeprecatedString elide_text_from_right(Utf8View) const;
 
-    Font const* m_font;
+    Font const& m_font;
+    FontPixelMetrics m_font_metrics;
     Utf8View m_text;
-    IntRect m_rect;
+    FloatRect m_rect;
 };
 
 }

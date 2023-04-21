@@ -7,15 +7,16 @@
 
 #pragma once
 
-#include "Common.h"
 #include "PlaybackManager.h"
 #include "Player.h"
 #include "VisualizationWidget.h"
 #include <AK/FixedArray.h>
 #include <AK/NonnullRefPtr.h>
 #include <LibAudio/ConnectionToServer.h>
+#include <LibGUI/Slider.h>
 #include <LibGUI/Splitter.h>
 #include <LibGUI/Widget.h>
+#include <LibImageDecoderClient/Client.h>
 
 class SoundPlayerWidgetAdvancedView final : public GUI::Widget
     , public Player {
@@ -24,6 +25,7 @@ class SoundPlayerWidgetAdvancedView final : public GUI::Widget
 public:
     void set_nonlinear_volume_slider(bool nonlinear);
     void set_playlist_visible(bool visible);
+    RefPtr<Gfx::Bitmap> get_image_from_music_file();
 
     template<typename T, typename... Args>
     void set_visualization(Args... args)
@@ -53,13 +55,14 @@ protected:
     void keydown_event(GUI::KeyEvent&) override;
 
 private:
-    SoundPlayerWidgetAdvancedView(GUI::Window&, Audio::ConnectionToServer&);
+    SoundPlayerWidgetAdvancedView(GUI::Window&, Audio::ConnectionToServer&, ImageDecoderClient::Client&);
 
     void sync_previous_next_actions();
 
     void drag_enter_event(GUI::DragEvent& event) override;
     void drop_event(GUI::DropEvent& event) override;
     GUI::Window& m_window;
+    ImageDecoderClient::Client& m_image_decoder_client;
 
     RefPtr<GUI::HorizontalSplitter> m_splitter;
     RefPtr<GUI::Widget> m_player_view;
@@ -71,13 +74,16 @@ private:
     RefPtr<Gfx::Bitmap> m_stop_icon;
     RefPtr<Gfx::Bitmap> m_back_icon;
     RefPtr<Gfx::Bitmap> m_next_icon;
+    RefPtr<Gfx::Bitmap> m_volume_icon;
+    RefPtr<Gfx::Bitmap> m_muted_icon;
 
     RefPtr<GUI::Action> m_play_action;
     RefPtr<GUI::Action> m_stop_action;
     RefPtr<GUI::Action> m_back_action;
     RefPtr<GUI::Action> m_next_action;
+    RefPtr<GUI::Action> m_mute_action;
 
-    RefPtr<AutoSlider> m_playback_progress_slider;
+    RefPtr<GUI::HorizontalSlider> m_playback_progress_slider;
     RefPtr<GUI::Label> m_volume_label;
     RefPtr<GUI::HorizontalSlider> m_volume_slider;
     RefPtr<GUI::Label> m_timestamp_label;

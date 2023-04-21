@@ -31,19 +31,19 @@ public:
             FloatingElement,
         };
         Type type {};
-        Layout::Node const* node { nullptr };
+        JS::GCPtr<Layout::Node const> node {};
         size_t offset_in_node { 0 };
         size_t length_in_node { 0 };
-        float width { 0.0f };
-        float padding_start { 0.0f };
-        float padding_end { 0.0f };
-        float border_start { 0.0f };
-        float border_end { 0.0f };
-        float margin_start { 0.0f };
-        float margin_end { 0.0f };
+        CSSPixels width { 0.0f };
+        CSSPixels padding_start { 0.0f };
+        CSSPixels padding_end { 0.0f };
+        CSSPixels border_start { 0.0f };
+        CSSPixels border_end { 0.0f };
+        CSSPixels margin_start { 0.0f };
+        CSSPixels margin_end { 0.0f };
         bool is_collapsible_whitespace { false };
 
-        float border_box_width() const
+        CSSPixels border_box_width() const
         {
             return border_start + padding_start + width + padding_end + border_end;
         }
@@ -51,7 +51,7 @@ public:
 
     InlineLevelIterator(Layout::InlineFormattingContext&, LayoutState&, Layout::BlockContainer const&, LayoutMode);
 
-    Optional<Item> next(float available_width);
+    Optional<Item> next(CSSPixels available_width);
 
 private:
     void skip_to_next();
@@ -68,10 +68,10 @@ private:
 
     Layout::InlineFormattingContext& m_inline_formatting_context;
     Layout::LayoutState& m_layout_state;
-    Layout::BlockContainer const& m_container;
+    JS::NonnullGCPtr<Layout::BlockContainer const> m_container;
     Layout::LayoutState::UsedValues const& m_container_state;
-    Layout::Node const* m_current_node { nullptr };
-    Layout::Node const* m_next_node { nullptr };
+    JS::GCPtr<Layout::Node const> m_current_node;
+    JS::GCPtr<Layout::Node const> m_next_node;
     LayoutMode const m_layout_mode;
 
     struct TextNodeContext {
@@ -87,15 +87,15 @@ private:
     Optional<TextNodeContext> m_text_node_context;
 
     struct ExtraBoxMetrics {
-        float margin { 0 };
-        float border { 0 };
-        float padding { 0 };
+        CSSPixels margin { 0 };
+        CSSPixels border { 0 };
+        CSSPixels padding { 0 };
     };
 
     Optional<ExtraBoxMetrics> m_extra_leading_metrics;
     Optional<ExtraBoxMetrics> m_extra_trailing_metrics;
 
-    Vector<NodeWithStyleAndBoxModelMetrics const&> m_box_model_node_stack;
+    Vector<JS::NonnullGCPtr<NodeWithStyleAndBoxModelMetrics const>> m_box_model_node_stack;
 };
 
 }

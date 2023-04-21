@@ -41,8 +41,8 @@ void Cell::set_data(JS::Value new_data)
 
     StringBuilder builder;
 
-    builder.append(new_data.to_string_without_side_effects());
-    m_data = builder.build();
+    builder.append(new_data.to_string_without_side_effects().release_value_but_fixme_should_propagate_errors());
+    m_data = builder.to_deprecated_string();
 
     m_evaluated_data = move(new_data);
 }

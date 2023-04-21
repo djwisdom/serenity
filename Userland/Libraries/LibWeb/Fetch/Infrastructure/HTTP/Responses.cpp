@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,6 +8,7 @@
 #include <AK/TypeCasts.h>
 #include <AK/URLParser.h>
 #include <LibJS/Heap/Heap.h>
+#include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Fetch/Infrastructure/FetchParams.h>
@@ -43,9 +44,9 @@ JS::NonnullGCPtr<Response> Response::aborted_network_error(JS::VM& vm)
     return response;
 }
 
-JS::NonnullGCPtr<Response> Response::network_error(JS::VM& vm, DeprecatedString message)
+JS::NonnullGCPtr<Response> Response::network_error(JS::VM& vm, Variant<String, StringView> message)
 {
-    dbgln_if(WEB_FETCH_DEBUG, "Fetch: Creating network error response with message: {}", message);
+    dbgln_if(WEB_FETCH_DEBUG, "Fetch: Creating network error response with message: {}", message.visit([](auto const& s) -> StringView { return s; }));
     auto response = Response::create(vm);
     response->set_status(0);
     response->set_type(Type::Error);
@@ -93,7 +94,7 @@ Optional<AK::URL const&> Response::url() const
 }
 
 // https://fetch.spec.whatwg.org/#concept-response-location-url
-ErrorOr<Optional<AK::URL>> Response::location_url(Optional<DeprecatedString> const& request_fragment) const
+ErrorOr<Optional<AK::URL>> Response::location_url(Optional<String> const& request_fragment) const
 {
     // The location URL of a response response, given null or an ASCII string requestFragment, is the value returned by the following steps. They return null, failure, or a URL.
 
@@ -103,38 +104,40 @@ ErrorOr<Optional<AK::URL>> Response::location_url(Optional<DeprecatedString> con
         return Optional<AK::URL> {};
 
     // 2. Let location be the result of extracting header list values given `Location` and response’s header list.
-    auto location_values = TRY(extract_header_list_values("Location"sv.bytes(), m_header_list));
-    if (!location_values.has_value() || location_values->size() != 1)
+    auto location_values_or_failure = TRY(extract_header_list_values("Location"sv.bytes(), m_header_list));
+    if (location_values_or_failure.has<Infrastructure::ExtractHeaderParseFailure>() || location_values_or_failure.has<Empty>())
+        return Optional<AK::URL> {};
+
+    auto const& location_values = location_values_or_failure.get<Vector<ByteBuffer>>();
+    if (location_values.size() != 1)
         return Optional<AK::URL> {};
 
     // 3. If location is a header value, then set location to the result of parsing location with response’s URL.
-    auto base_url = *url();
-    auto location = AK::URLParser::parse(location_values->first(), &base_url);
+    auto location = AK::URLParser::parse(location_values.first(), url());
     if (!location.is_valid())
         return Error::from_string_view("Invalid 'Location' header URL"sv);
 
     // 4. If location is a URL whose fragment is null, then set location’s fragment to requestFragment.
     if (location.fragment().is_null())
-        location.set_fragment(request_fragment.value_or({}));
+        location.set_fragment(request_fragment.has_value() ? request_fragment->to_deprecated_string() : DeprecatedString {});
 
     // 5. Return location.
     return location;
 }
 
 // https://fetch.spec.whatwg.org/#concept-response-clone
-WebIDL::ExceptionOr<JS::NonnullGCPtr<Response>> Response::clone(JS::VM& vm) const
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Response>> Response::clone(JS::Realm& realm) const
 {
     // To clone a response response, run these steps:
-
-    auto& realm = *vm.current_realm();
+    auto& vm = realm.vm();
 
     // 1. If response is a filtered response, then return a new identical filtered response whose internal response is a clone of response’s internal response.
     if (is<FilteredResponse>(*this)) {
-        auto internal_response = TRY(static_cast<FilteredResponse const&>(*this).internal_response()->clone(vm));
+        auto internal_response = TRY(static_cast<FilteredResponse const&>(*this).internal_response()->clone(realm));
         if (is<BasicFilteredResponse>(*this))
-            return TRY_OR_RETURN_OOM(realm, BasicFilteredResponse::create(vm, internal_response));
+            return TRY_OR_THROW_OOM(vm, BasicFilteredResponse::create(vm, internal_response));
         if (is<CORSFilteredResponse>(*this))
-            return TRY_OR_RETURN_OOM(realm, CORSFilteredResponse::create(vm, internal_response));
+            return TRY_OR_THROW_OOM(vm, CORSFilteredResponse::create(vm, internal_response));
         if (is<OpaqueFilteredResponse>(*this))
             return OpaqueFilteredResponse::create(vm, internal_response);
         if (is<OpaqueRedirectFilteredResponse>(*this))
@@ -161,10 +164,18 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Response>> Response::clone(JS::VM& vm) cons
 
     // 3. If response’s body is non-null, then set newResponse’s body to the result of cloning response’s body.
     if (m_body.has_value())
-        new_response->set_body(TRY(m_body->clone()));
+        new_response->set_body(TRY(m_body->clone(realm)));
 
     // 4. Return newResponse.
     return new_response;
+}
+
+// Non-standard
+Optional<StringView> Response::network_error_message() const
+{
+    if (!m_network_error_message.has_value())
+        return {};
+    return m_network_error_message->visit([](auto const& s) -> StringView { return s; });
 }
 
 FilteredResponse::FilteredResponse(JS::NonnullGCPtr<Response> internal_response, JS::NonnullGCPtr<HeaderList> header_list)

@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
-#include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGAnimatedLength.h>
@@ -17,20 +18,32 @@ namespace Web::SVG {
 SVGForeignObjectElement::SVGForeignObjectElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : SVGGraphicsElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "SVGForeignObjectElement"));
 }
 
 SVGForeignObjectElement::~SVGForeignObjectElement() = default;
 
-void SVGForeignObjectElement::initialize(JS::Realm& realm)
+JS::ThrowCompletionOr<void> SVGForeignObjectElement::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
+    auto& vm = realm.vm();
+
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::SVGForeignObjectElementPrototype>(realm, "SVGForeignObjectElement"));
 
     // FIXME: These never actually get updated!
-    m_x = SVGAnimatedLength::create(realm, SVGLength::create(realm, 0, 0), SVGLength::create(realm, 0, 0));
-    m_y = SVGAnimatedLength::create(realm, SVGLength::create(realm, 0, 0), SVGLength::create(realm, 0, 0));
-    m_width = SVGAnimatedLength::create(realm, SVGLength::create(realm, 0, 0), SVGLength::create(realm, 0, 0));
-    m_height = SVGAnimatedLength::create(realm, SVGLength::create(realm, 0, 0), SVGLength::create(realm, 0, 0));
+    m_x = TRY(Bindings::throw_dom_exception_if_needed(vm, [&]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<SVGAnimatedLength>> {
+        return SVGAnimatedLength::create(realm, TRY(SVGLength::create(realm, 0, 0)), TRY(SVGLength::create(realm, 0, 0)));
+    }));
+    m_y = TRY(Bindings::throw_dom_exception_if_needed(vm, [&]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<SVGAnimatedLength>> {
+        return SVGAnimatedLength::create(realm, TRY(SVGLength::create(realm, 0, 0)), TRY(SVGLength::create(realm, 0, 0)));
+    }));
+    m_width = TRY(Bindings::throw_dom_exception_if_needed(vm, [&]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<SVGAnimatedLength>> {
+        return SVGAnimatedLength::create(realm, TRY(SVGLength::create(realm, 0, 0)), TRY(SVGLength::create(realm, 0, 0)));
+    }));
+    m_height = TRY(Bindings::throw_dom_exception_if_needed(vm, [&]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<SVGAnimatedLength>> {
+        return SVGAnimatedLength::create(realm, TRY(SVGLength::create(realm, 0, 0)), TRY(SVGLength::create(realm, 0, 0)));
+    }));
+
+    return {};
 }
 
 void SVGForeignObjectElement::visit_edges(Cell::Visitor& visitor)
@@ -50,11 +63,11 @@ JS::GCPtr<Layout::Node> SVGForeignObjectElement::create_layout_node(NonnullRefPt
 void SVGForeignObjectElement::apply_presentational_hints(CSS::StyleProperties& style) const
 {
     Base::apply_presentational_hints(style);
-
-    if (auto width_value = HTML::parse_dimension_value(attribute(SVG::AttributeNames::width)))
+    auto parsing_context = CSS::Parser::ParsingContext { document() };
+    if (auto width_value = parse_css_value(parsing_context, attribute(Web::HTML::AttributeNames::width), CSS::PropertyID::Width))
         style.set_property(CSS::PropertyID::Width, width_value.release_nonnull());
 
-    if (auto height_value = HTML::parse_dimension_value(attribute(SVG::AttributeNames::height)))
+    if (auto height_value = parse_css_value(parsing_context, attribute(Web::HTML::AttributeNames::height), CSS::PropertyID::Height))
         style.set_property(CSS::PropertyID::Height, height_value.release_nonnull());
 }
 

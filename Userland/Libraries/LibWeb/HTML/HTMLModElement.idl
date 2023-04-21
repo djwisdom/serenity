@@ -4,7 +4,9 @@
 [Exposed=Window]
 interface HTMLModElement : HTMLElement {
 
-    [Reflect] attribute USVString cite;
-    [Reflect=datetime] attribute DOMString dateTime;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute USVString cite;
+    [CEReactions, Reflect=datetime] attribute DOMString dateTime;
 
 };

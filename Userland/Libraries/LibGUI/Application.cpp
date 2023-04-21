@@ -1,10 +1,11 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/NeverDestroyed.h>
+#include <LibConfig/Client.h>
 #include <LibCore/EventLoop.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/Application.h>
@@ -29,8 +30,8 @@ public:
         m_label->set_text(Gfx::parse_ampersand_string(tooltip));
         int tooltip_width = m_label->effective_min_size().width().as_int() + 10;
         int line_count = m_label->text().count("\n"sv);
-        int glyph_height = m_label->font().glyph_height();
-        int tooltip_height = glyph_height * (1 + line_count) + ((glyph_height + 1) / 2) * line_count + 8;
+        int font_size = m_label->font().pixel_size_rounded_up();
+        int tooltip_height = font_size * (1 + line_count) + ((font_size + 1) / 2) * line_count + 8;
 
         Gfx::IntRect desktop_rect = Desktop::the().rect();
         if (tooltip_width > desktop_rect.width())
@@ -44,7 +45,7 @@ private:
     {
         set_window_type(WindowType::Tooltip);
         set_obey_widget_min_size(false);
-        m_label = set_main_widget<Label>();
+        m_label = set_main_widget<Label>().release_value_but_fixme_should_propagate_errors();
         m_label->set_background_role(Gfx::ColorRole::Tooltip);
         m_label->set_foreground_role(Gfx::ColorRole::TooltipText);
         m_label->set_fill_with_background_color(true);
@@ -95,11 +96,11 @@ Application::Application(int argc, char** argv, Core::EventLoop::MakeInspectable
 
     m_tooltip_show_timer = Core::Timer::create_single_shot(700, [this] {
         request_tooltip_show();
-    });
+    }).release_value_but_fixme_should_propagate_errors();
 
     m_tooltip_hide_timer = Core::Timer::create_single_shot(50, [this] {
         tooltip_hide_timer_did_fire();
-    });
+    }).release_value_but_fixme_should_propagate_errors();
 }
 
 static bool s_in_teardown;
@@ -211,7 +212,7 @@ void Application::set_system_palette(Core::AnonymousBuffer& buffer)
         m_palette = m_system_palette;
 }
 
-void Application::set_palette(Palette const& palette)
+void Application::set_palette(Palette& palette)
 {
     m_palette = palette.impl();
 }
@@ -322,6 +323,76 @@ void Application::event(Core::Event& event)
             on_theme_change();
     }
     Object::event(event);
+}
+
+void Application::set_config_domain(String config_domain)
+{
+    m_config_domain = move(config_domain);
+}
+
+void Application::register_recent_file_actions(Badge<GUI::Menu>, Vector<NonnullRefPtr<GUI::Action>> actions)
+{
+    m_recent_file_actions = move(actions);
+    update_recent_file_actions();
+}
+
+void Application::update_recent_file_actions()
+{
+    VERIFY(!m_config_domain.is_empty());
+
+    size_t number_of_recently_open_files = 0;
+    auto update_action = [&](size_t index) {
+        auto& action = m_recent_file_actions[index];
+        char buffer = static_cast<char>('0' + index);
+        auto key = StringView(&buffer, 1);
+        auto path = Config::read_string(m_config_domain, "RecentFiles"sv, key);
+
+        if (path.is_empty()) {
+            action->set_visible(false);
+            action->set_enabled(false);
+        } else {
+            action->set_visible(true);
+            action->set_enabled(true);
+            action->set_text(path);
+            ++number_of_recently_open_files;
+        }
+    };
+    for (size_t i = 0; i < max_recently_open_files(); ++i)
+        update_action(i);
+
+    // Hide or show the "(No recently open files)" placeholder.
+    m_recent_file_actions.last()->set_visible(number_of_recently_open_files == 0);
+}
+
+void Application::set_most_recently_open_file(String new_path)
+{
+    Vector<DeprecatedString> new_recent_files_list;
+
+    for (size_t i = 0; i < max_recently_open_files(); ++i) {
+        static_assert(max_recently_open_files() < 10);
+        char buffer = static_cast<char>('0' + i);
+        auto key = StringView(&buffer, 1);
+        new_recent_files_list.append(Config::read_string(m_config_domain, "RecentFiles"sv, key));
+    }
+
+    new_recent_files_list.remove_all_matching([&](auto& existing_path) {
+        return existing_path.view() == new_path;
+    });
+
+    new_recent_files_list.prepend(new_path.to_deprecated_string());
+
+    for (size_t i = 0; i < max_recently_open_files(); ++i) {
+        auto& path = new_recent_files_list[i];
+        char buffer = static_cast<char>('0' + i);
+        auto key = StringView(&buffer, 1);
+        Config::write_string(
+            m_config_domain,
+            "RecentFiles"sv,
+            key,
+            path);
+    }
+
+    update_recent_file_actions();
 }
 
 }

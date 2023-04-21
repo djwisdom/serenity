@@ -15,18 +15,18 @@ namespace JS::Intl {
 
 // 11.3 Properties of the Intl.DateTimeFormat Prototype Object, https://tc39.es/ecma402/#sec-properties-of-intl-datetimeformat-prototype-object
 DateTimeFormatPrototype::DateTimeFormatPrototype(Realm& realm)
-    : PrototypeObject(*realm.intrinsics().object_prototype())
+    : PrototypeObject(realm.intrinsics().object_prototype())
 {
 }
 
-void DateTimeFormatPrototype::initialize(Realm& realm)
+ThrowCompletionOr<void> DateTimeFormatPrototype::initialize(Realm& realm)
 {
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
     auto& vm = this->vm();
 
     // 11.3.2 Intl.DateTimeFormat.prototype [ @@toStringTag ], https://tc39.es/ecma402/#sec-intl.datetimeformat.prototype-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Intl.DateTimeFormat"), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), MUST_OR_THROW_OOM(PrimitiveString::create(vm, "Intl.DateTimeFormat"sv)), Attribute::Configurable);
 
     define_native_accessor(realm, vm.names.format, format, nullptr, Attribute::Configurable);
 
@@ -35,6 +35,8 @@ void DateTimeFormatPrototype::initialize(Realm& realm)
     define_native_function(realm, vm.names.formatRange, format_range, 2, attr);
     define_native_function(realm, vm.names.formatRangeToParts, format_range_to_parts, 2, attr);
     define_native_function(realm, vm.names.resolvedOptions, resolved_options, 0, attr);
+
+    return {};
 }
 
 // 11.3.3 get Intl.DateTimeFormat.prototype.format, https://tc39.es/ecma402/#sec-intl.datetimeformat.prototype.format
@@ -46,13 +48,13 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::format)
     // 2. If the implementation supports the normative optional constructor mode of 4.3 Note 1, then
     //     a. Set dtf to ? UnwrapDateTimeFormat(dtf).
     // 3. Perform ? RequireInternalSlot(dtf, [[InitializedDateTimeFormat]]).
-    auto* date_time_format = TRY(typed_this_object(vm));
+    auto date_time_format = TRY(typed_this_object(vm));
 
     // 4. If dtf.[[BoundFormat]] is undefined, then
     if (!date_time_format->bound_format()) {
         // a. Let F be a new built-in function object as defined in DateTime Format Functions (11.1.6).
         // b. Set F.[[DateTimeFormat]] to dtf.
-        auto bound_format = DateTimeFormatFunction::create(realm, *date_time_format);
+        auto bound_format = DateTimeFormatFunction::create(realm, date_time_format);
 
         // c. Set dtf.[[BoundFormat]] to F.
         date_time_format->set_bound_format(bound_format);
@@ -71,14 +73,14 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::format_to_parts)
 
     // 1. Let dtf be the this value.
     // 2. Perform ? RequireInternalSlot(dtf, [[InitializedDateTimeFormat]]).
-    auto* date_time_format = TRY(typed_this_object(vm));
+    auto date_time_format = TRY(typed_this_object(vm));
 
     double date_value;
 
     // 3. If date is undefined, then
     if (date.is_undefined()) {
         // a. Let x be ! Call(%Date.now%, undefined).
-        date_value = MUST(call(vm, realm.intrinsics().date_constructor_now_function(), js_undefined())).as_double();
+        date_value = MUST(call(vm, *realm.intrinsics().date_constructor_now_function(), js_undefined())).as_double();
     }
     // 4. Else,
     else {
@@ -87,7 +89,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::format_to_parts)
     }
 
     // 5. Return ? FormatDateTimeToParts(dtf, x).
-    return TRY(format_date_time_to_parts(vm, *date_time_format, date_value));
+    return TRY(format_date_time_to_parts(vm, date_time_format, date_value));
 }
 
 // 11.3.5 Intl.DateTimeFormat.prototype.formatRange ( startDate, endDate ), https://tc39.es/ecma402/#sec-intl.datetimeformat.prototype.formatRange
@@ -98,7 +100,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::format_range)
 
     // 1. Let dtf be this value.
     // 2. Perform ? RequireInternalSlot(dtf, [[InitializedDateTimeFormat]]).
-    auto* date_time_format = TRY(typed_this_object(vm));
+    auto date_time_format = TRY(typed_this_object(vm));
 
     // 3. If startDate is undefined or endDate is undefined, throw a TypeError exception.
     if (start_date.is_undefined())
@@ -113,7 +115,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::format_range)
     auto end_date_number = TRY(end_date.to_number(vm)).as_double();
 
     // 6. Return ? FormatDateTimeRange(dtf, x, y).
-    auto formatted = TRY(format_date_time_range(vm, *date_time_format, start_date_number, end_date_number));
+    auto formatted = TRY(format_date_time_range(vm, date_time_format, start_date_number, end_date_number));
     return PrimitiveString::create(vm, move(formatted));
 }
 
@@ -125,7 +127,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::format_range_to_parts)
 
     // 1. Let dtf be this value.
     // 2. Perform ? RequireInternalSlot(dtf, [[InitializedDateTimeFormat]]).
-    auto* date_time_format = TRY(typed_this_object(vm));
+    auto date_time_format = TRY(typed_this_object(vm));
 
     // 3. If startDate is undefined or endDate is undefined, throw a TypeError exception.
     if (start_date.is_undefined())
@@ -140,7 +142,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::format_range_to_parts)
     auto end_date_number = TRY(end_date.to_number(vm)).as_double();
 
     // 6. Return ? FormatDateTimeRangeToParts(dtf, x, y).
-    return TRY(format_date_time_range_to_parts(vm, *date_time_format, start_date_number, end_date_number));
+    return TRY(format_date_time_range_to_parts(vm, date_time_format, start_date_number, end_date_number));
 }
 
 // 11.3.7 Intl.DateTimeFormat.prototype.resolvedOptions ( ), https://tc39.es/ecma402/#sec-intl.datetimeformat.prototype.resolvedoptions
@@ -152,7 +154,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::resolved_options)
     // 2. If the implementation supports the normative optional constructor mode of 4.3 Note 1, then
     //     a. Set dtf to ? UnwrapDateTimeFormat(dtf).
     // 3. Perform ? RequireInternalSlot(dtf, [[InitializedDateTimeFormat]]).
-    auto* date_time_format = TRY(typed_this_object(vm));
+    auto date_time_format = TRY(typed_this_object(vm));
 
     // 4. Let options be OrdinaryObjectCreate(%Object.prototype%).
     auto options = Object::create(realm, realm.intrinsics().object_prototype());
@@ -177,7 +179,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::resolved_options)
     MUST(options->create_data_property_or_throw(vm.names.timeZone, PrimitiveString::create(vm, date_time_format->time_zone())));
 
     if (date_time_format->has_hour_cycle()) {
-        MUST(options->create_data_property_or_throw(vm.names.hourCycle, PrimitiveString::create(vm, date_time_format->hour_cycle_string())));
+        MUST(options->create_data_property_or_throw(vm.names.hourCycle, MUST_OR_THROW_OOM(PrimitiveString::create(vm, date_time_format->hour_cycle_string()))));
 
         switch (date_time_format->hour_cycle()) {
         case ::Locale::HourCycle::H11:
@@ -192,17 +194,17 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::resolved_options)
     }
 
     if (!date_time_format->has_date_style() && !date_time_format->has_time_style()) {
-        MUST(for_each_calendar_field(vm, *date_time_format, [&](auto& option, auto const& property, auto const&) -> ThrowCompletionOr<void> {
+        MUST(for_each_calendar_field(vm, date_time_format, [&](auto& option, auto const& property, auto const&) -> ThrowCompletionOr<void> {
             using ValueType = typename RemoveReference<decltype(option)>::ValueType;
 
             if (!option.has_value())
                 return {};
 
             if constexpr (IsIntegral<ValueType>) {
-                TRY(options->create_data_property_or_throw(property, Value(*option)));
+                MUST(options->create_data_property_or_throw(property, Value(*option)));
             } else {
                 auto name = ::Locale::calendar_pattern_style_to_string(*option);
-                TRY(options->create_data_property_or_throw(property, PrimitiveString::create(vm, name)));
+                MUST(options->create_data_property_or_throw(property, MUST_OR_THROW_OOM(PrimitiveString::create(vm, name))));
             }
 
             return {};
@@ -210,9 +212,9 @@ JS_DEFINE_NATIVE_FUNCTION(DateTimeFormatPrototype::resolved_options)
     }
 
     if (date_time_format->has_date_style())
-        MUST(options->create_data_property_or_throw(vm.names.dateStyle, PrimitiveString::create(vm, date_time_format->date_style_string())));
+        MUST(options->create_data_property_or_throw(vm.names.dateStyle, MUST_OR_THROW_OOM(PrimitiveString::create(vm, date_time_format->date_style_string()))));
     if (date_time_format->has_time_style())
-        MUST(options->create_data_property_or_throw(vm.names.timeStyle, PrimitiveString::create(vm, date_time_format->time_style_string())));
+        MUST(options->create_data_property_or_throw(vm.names.timeStyle, MUST_OR_THROW_OOM(PrimitiveString::create(vm, date_time_format->time_style_string()))));
 
     // 6. Return options.
     return options;

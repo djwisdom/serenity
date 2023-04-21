@@ -6,15 +6,12 @@
 
 #pragma once
 
+#include <AK/BitStream.h>
 #include <AK/CircularQueue.h>
 #include <AK/FixedArray.h>
-#include <LibCore/InputBitStream.h>
-#include <LibCore/Stream.h>
+#include <AK/Vector.h>
 
 namespace Compress {
-
-using Core::Stream::LittleEndianInputBitStream;
-using Core::Stream::Stream;
 
 class BrotliDecompressionStream : public Stream {
 public:
@@ -67,7 +64,7 @@ public:
     public:
         static ErrorOr<LookbackBuffer> try_create(size_t size)
         {
-            auto buffer = TRY(FixedArray<u8>::try_create(size));
+            auto buffer = TRY(FixedArray<u8>::create(size));
             return LookbackBuffer { buffer };
         }
 
@@ -107,8 +104,8 @@ public:
 public:
     BrotliDecompressionStream(Stream&);
 
-    ErrorOr<Bytes> read(Bytes output_buffer) override;
-    ErrorOr<size_t> write(ReadonlyBytes bytes) override { return m_input_stream.write(bytes); }
+    ErrorOr<Bytes> read_some(Bytes output_buffer) override;
+    ErrorOr<size_t> write_some(ReadonlyBytes bytes) override { return m_input_stream.write_some(bytes); }
     bool is_eof() const override;
     bool is_open() const override { return m_input_stream.is_open(); }
     void close() override { m_input_stream.close(); }

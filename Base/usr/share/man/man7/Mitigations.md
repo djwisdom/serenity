@@ -13,7 +13,7 @@ to collect and describe the mitigations in one centralized place.
 
 ### SMEP (Supervisor Mode Execution Protection)
 
-[Supervisor Mode Execution Protection](https://software.intel.com/security-software-guidance/best-practices/related-intel-security-features-technologies) is an Intel CPU feature which prevents execution
+[Supervisor Mode Execution Protection](https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/related-intel-security-features-technologies.html) is an Intel CPU feature which prevents execution
 of userspace code with kernel privileges.
 
 It was enabled in the following [commit](https://github.com/SerenityOS/serenity/commit/8602fa5b49aa4e2b039764a14698f0baa3ad0532):
@@ -105,6 +105,7 @@ Special restrictions on filesystem also apply:
 - Write access is forbidden to kernel variables (which are located in `/sys/kernel/variables`).
 - Open access is forbidden to all device nodes except for `/dev/full`, `/dev/null`, `/dev/zero`, `/dev/random` and various
     other TTY/PTY devices (not including Kernel virtual consoles).
+- Executing SUID binaries is forbidden.
 
 It was first added in the following [commit](https://github.com/SerenityOS/serenity/commit/5e062414c11df31ed595c363990005eef00fa263),
 for kernel support, and the following commits added basic userspace utilities:
@@ -392,12 +393,12 @@ The location of the kernel code is randomized at boot time, this ensures that at
 can not use a hardcoded kernel addresses when attempting ROP, instead they must first find
 an additional information leak to expose the KASLR offset.
 
-It was first enabled in the following [commit](https://github.com/SerenityOS/serenity/commit/ece5a9a1088012ca9fadfb7e0bc3edd8029d36ad):
+It was first enabled in the following [commit](https://github.com/SerenityOS/serenity/commit/1ad0e05ea1d3491e4724669d6f00f5668d8e0aa1):
 
 ```
-commit ece5a9a1088012ca9fadfb7e0bc3edd8029d36ad
-Author Idan Horowitz <idan.horowitz@gmail.com>
-Date:  Mon Mar 21 22:59:48 2022 +0200
+commit 1ad0e05ea1d3491e4724669d6f00f5668d8e0aa1
+Author: Idan Horowitz <idan.horowitz@gmail.com>
+Date:   Mon Mar 21 22:59:48 2022 +0200
 
 Kernel: Add an extremely primitive version of KASLR
 ```

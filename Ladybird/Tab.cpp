@@ -20,7 +20,7 @@
 extern DeprecatedString s_serenity_resource_root;
 extern Browser::Settings* s_settings;
 
-Tab::Tab(BrowserWindow* window, StringView webdriver_content_ipc_path)
+Tab::Tab(BrowserWindow* window, StringView webdriver_content_ipc_path, WebView::EnableCallgrindProfiling enable_callgrind_profiling)
     : QWidget(window)
     , m_window(window)
 {
@@ -28,9 +28,10 @@ Tab::Tab(BrowserWindow* window, StringView webdriver_content_ipc_path)
     m_layout->setSpacing(0);
     m_layout->setContentsMargins(0, 0, 0, 0);
 
-    m_view = new WebContentView(webdriver_content_ipc_path);
+    m_view = new WebContentView(webdriver_content_ipc_path, enable_callgrind_profiling);
     m_toolbar = new QToolBar(this);
-    m_location_edit = new QLineEdit(this);
+    m_location_edit = new LocationEdit(this);
+    m_reset_zoom_button = new QToolButton(m_toolbar);
 
     m_hover_label = new QLabel(this);
     m_hover_label->hide();
@@ -56,13 +57,33 @@ Tab::Tab(BrowserWindow* window, StringView webdriver_content_ipc_path)
     m_forward_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::Forward));
     m_home_action = make<QAction>(QIcon(home_icon_path), "Home");
     m_reload_action = make<QAction>(QIcon(reload_icon_path), "Reload");
-    m_reload_action->setShortcut(QKeySequence("Ctrl+R"));
+    m_reload_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::Refresh));
 
     m_toolbar->addAction(m_back_action);
     m_toolbar->addAction(m_forward_action);
     m_toolbar->addAction(m_reload_action);
     m_toolbar->addAction(m_home_action);
     m_toolbar->addWidget(m_location_edit);
+    m_reset_zoom_button->setToolTip("Reset zoom level");
+    m_reset_zoom_button_action = m_toolbar->addWidget(m_reset_zoom_button);
+    m_reset_zoom_button_action->setVisible(false);
+
+    QObject::connect(m_reset_zoom_button, &QAbstractButton::clicked, [this] {
+        view().reset_zoom();
+        update_reset_zoom_button();
+    });
+
+    QObject::connect(m_view, &WebContentView::link_unhovered, [this] {
+        m_hover_label->hide();
+    });
+
+    QObject::connect(m_view, &WebContentView::activate_tab, [this] {
+        m_window->activate_tab(tab_index());
+    });
+
+    QObject::connect(m_view, &WebContentView::close, [this] {
+        m_window->close_tab(tab_index());
+    });
 
     QObject::connect(m_view, &WebContentView::link_hovered, [this](QString const& title) {
         m_hover_label->setText(title);
@@ -89,6 +110,7 @@ Tab::Tab(BrowserWindow* window, StringView webdriver_content_ipc_path)
         }
 
         m_location_edit->setText(url.to_deprecated_string().characters());
+        m_location_edit->setCursorPosition(0);
 
         // Don't add to history if back or forward is pressed
         if (!m_is_history_navigation) {
@@ -144,16 +166,17 @@ Tab::Tab(BrowserWindow* window, StringView webdriver_content_ipc_path)
         m_window->showFullScreen();
         return Gfx::IntRect { m_window->x(), m_window->y(), m_window->width(), m_window->height() };
     });
+}
 
-    // FIXME: This is a hack to make the JS console usable in new windows.
-    //        Something else should ensure that there's an initial about:blank document loaded in the view.
-    //        We set m_is_history_navigation = true so that the initial about:blank doesn't get added to the history.
-    //
-    //        Note we *don't* do this if we are connected to a WebDriver, as the Set URL command may come in very
-    //        quickly, and become replaced by this load.
-    if (!webdriver_content_ipc_path.is_empty()) {
-        m_is_history_navigation = true;
-        m_view->load("about:blank"sv);
+void Tab::update_reset_zoom_button()
+{
+    auto zoom_level = view().zoom_level();
+    if (zoom_level != 1.0f) {
+        auto zoom_level_text = MUST(String::formatted("{}%", round_to<int>(zoom_level * 100)));
+        m_reset_zoom_button->setText(qstring_from_ak_string(zoom_level_text));
+        m_reset_zoom_button_action->setVisible(true);
+    } else {
+        m_reset_zoom_button_action->setVisible(false);
     }
 }
 
@@ -163,10 +186,11 @@ void Tab::focus_location_editor()
     m_location_edit->selectAll();
 }
 
-void Tab::navigate(QString url)
+void Tab::navigate(QString url, LoadType load_type)
 {
-    if (!url.startsWith("http://", Qt::CaseInsensitive) && !url.startsWith("https://", Qt::CaseInsensitive) && !url.startsWith("file://", Qt::CaseInsensitive))
+    if (!url.startsWith("http://", Qt::CaseInsensitive) && !url.startsWith("https://", Qt::CaseInsensitive) && !url.startsWith("file://", Qt::CaseInsensitive) && !url.startsWith("about:", Qt::CaseInsensitive))
         url = "http://" + url;
+    m_is_history_navigation = (load_type == LoadType::HistoryNavigation);
     view().load(ak_deprecated_string_from_qstring(url));
 }
 

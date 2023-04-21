@@ -19,7 +19,7 @@ public:
     static NonnullGCPtr<DateTimeFormatFunction> create(Realm&, DateTimeFormat&);
 
     virtual ~DateTimeFormatFunction() override = default;
-    virtual void initialize(Realm&) override;
+    virtual ThrowCompletionOr<void> initialize(Realm&) override;
 
     virtual ThrowCompletionOr<Value> call() override;
 
@@ -28,7 +28,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    DateTimeFormat& m_date_time_format; // [[DateTimeFormat]]
+    NonnullGCPtr<DateTimeFormat> m_date_time_format; // [[DateTimeFormat]]
 };
 
 }

@@ -7,8 +7,9 @@
 #include <LibTest/TestCase.h>
 
 #include <AK/IntrusiveRedBlackTree.h>
-#include <AK/NonnullOwnPtrVector.h>
+#include <AK/NonnullOwnPtr.h>
 #include <AK/Random.h>
+#include <AK/Vector.h>
 
 class IntrusiveTest {
 public:
@@ -72,7 +73,7 @@ TEST_CASE(key_ordered_iteration)
 {
     constexpr auto amount = 10000;
     IntrusiveRBTree test;
-    NonnullOwnPtrVector<IntrusiveTest> m_entries;
+    Vector<NonnullOwnPtr<IntrusiveTest>> m_entries;
     Array<int, amount> keys {};
 
     // generate random key order
@@ -105,7 +106,7 @@ TEST_CASE(key_ordered_iteration)
 TEST_CASE(clear)
 {
     IntrusiveRBTree test;
-    NonnullOwnPtrVector<IntrusiveTest> m_entries;
+    Vector<NonnullOwnPtr<IntrusiveTest>> m_entries;
     for (size_t i = 0; i < 1000; i++) {
         auto entry = make<IntrusiveTest>(i);
         test.insert(i, *entry);

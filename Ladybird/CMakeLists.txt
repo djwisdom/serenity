@@ -82,7 +82,9 @@ set(SOURCES
     ${BROWSER_SOURCE_DIR}/History.cpp
     BrowserWindow.cpp
     ConsoleWidget.cpp
+    HelperProcess.cpp
     InspectorWidget.cpp
+    LocationEdit.cpp
     ModelTranslator.cpp
     Settings.cpp
     SettingsDialog.cpp
@@ -95,19 +97,29 @@ set(SOURCES
 qt_add_executable(ladybird ${SOURCES}
     MANUAL_FINALIZATION
 )
-target_link_libraries(ladybird PRIVATE Qt::Core Qt::Gui Qt::Network Qt::Widgets LibCore LibGfx LibGUI LibIPC LibJS LibMain LibWeb LibWebView LibSQL)
+target_link_libraries(ladybird PRIVATE Qt::Core Qt::Gui Qt::Network Qt::Widgets LibCore LibFileSystem LibGfx LibGUI LibIPC LibJS LibMain LibWeb LibWebView LibSQL)
 
 target_include_directories(ladybird PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(ladybird PRIVATE ${SERENITY_SOURCE_DIR}/Userland/Applications/)
 target_include_directories(ladybird PRIVATE ${SERENITY_SOURCE_DIR}/Userland/Services/)
 
+qt_add_executable(headless-browser
+    ${SERENITY_SOURCE_DIR}/Userland/Utilities/headless-browser.cpp
+    ${SERENITY_SOURCE_DIR}/Userland/Services/WebContent/WebDriverConnection.cpp
+    HelperProcess.cpp
+    Utilities.cpp)
+
+target_include_directories(headless-browser PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(headless-browser PRIVATE Qt::Core LibWeb LibWebView LibWebSocket LibCrypto LibFileSystem LibGemini LibHTTP LibJS LibGfx LibMain LibTLS LibIPC LibJS)
+
 set_target_properties(ladybird PROPERTIES
-    MACOSX_BUNDLE_GUI_IDENTIFIER org.serenityos.ladybird
+    MACOSX_BUNDLE_GUI_IDENTIFIER org.SerenityOS.Ladybird
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist"
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
+    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.SerenityOS.Ladybird
 )
 
 if (ANDROID)
@@ -115,8 +127,9 @@ if (ANDROID)
 endif()
 
 add_custom_target(run${LADYBIRD_CUSTOM_TARGET_SUFFIX}
-    COMMAND "${CMAKE_COMMAND}" -E env "SERENITY_SOURCE_DIR=${SERENITY_SOURCE_DIR}" "$<TARGET_FILE:ladybird>"
+    COMMAND "${CMAKE_COMMAND}" -E env "SERENITY_SOURCE_DIR=${SERENITY_SOURCE_DIR}" "$<TARGET_FILE:ladybird>" $ENV{LAGOM_ARGS}
     USES_TERMINAL
+    VERBATIM
 )
 
 add_custom_target(debug${LADYBIRD_CUSTOM_TARGET_SUFFIX}
@@ -129,8 +142,29 @@ qt_finalize_executable(ladybird)
 add_subdirectory(SQLServer)
 add_subdirectory(WebContent)
 add_subdirectory(WebDriver)
-add_dependencies(ladybird SQLServer WebContent WebDriver)
+add_dependencies(ladybird SQLServer WebContent WebDriver headless-browser)
+
+if (APPLE)
+    # FIXME: Create a proper app bundle for each helper process
+    set(app_dir "$<TARGET_FILE_DIR:ladybird>")
+    set(bundle_dir "$<TARGET_BUNDLE_DIR:ladybird>")
+    add_custom_command(TARGET ladybird POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SQLServer>" "${app_dir}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:WebContent>" "${app_dir}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:WebDriver>" "${app_dir}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:headless-browser>" "${app_dir}"
+    )
+endif()
 
 if(NOT CMAKE_SKIP_INSTALL_RULES)
     include(cmake/InstallRules.cmake)
+endif()
+
+include(CTest)
+if (BUILD_TESTING)
+    add_test(
+        NAME Layout
+        COMMAND ${SERENITY_SOURCE_DIR}/Tests/LibWeb/Layout/layout_test.sh ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(Layout PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endif()

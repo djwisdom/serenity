@@ -7,7 +7,6 @@
 #include <AK/ByteBuffer.h>
 #include <AK/Checked.h>
 #include <AK/PrintfImplementation.h>
-#include <AK/StdLibExtras.h>
 #include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
@@ -16,6 +15,7 @@
 
 #ifndef KERNEL
 #    include <AK/DeprecatedString.h>
+#    include <AK/FlyString.h>
 #    include <AK/Utf16View.h>
 #endif
 
@@ -105,10 +105,9 @@ void StringBuilder::append_repeated(char ch, size_t n)
     MUST(try_append_repeated(ch, n));
 }
 
-ByteBuffer StringBuilder::to_byte_buffer() const
+ErrorOr<ByteBuffer> StringBuilder::to_byte_buffer() const
 {
-    // FIXME: Handle OOM failure.
-    return ByteBuffer::copy(data(), length()).release_value_but_fixme_should_propagate_errors();
+    return ByteBuffer::copy(data(), length());
 }
 
 #ifndef KERNEL
@@ -119,14 +118,14 @@ DeprecatedString StringBuilder::to_deprecated_string() const
     return DeprecatedString((char const*)data(), length());
 }
 
-DeprecatedString StringBuilder::build() const
-{
-    return to_deprecated_string();
-}
-
 ErrorOr<String> StringBuilder::to_string() const
 {
     return String::from_utf8(string_view());
+}
+
+ErrorOr<FlyString> StringBuilder::to_fly_string() const
+{
+    return FlyString::from_utf8(string_view());
 }
 #endif
 
@@ -142,7 +141,7 @@ void StringBuilder::clear()
 
 ErrorOr<void> StringBuilder::try_append_code_point(u32 code_point)
 {
-    auto nwritten = AK::UnicodeUtils::code_point_to_utf8(code_point, [this](char c) { append(c); });
+    auto nwritten = TRY(AK::UnicodeUtils::try_code_point_to_utf8(code_point, [this](char c) { return try_append(c); }));
     if (nwritten < 0) {
         TRY(try_append(0xef));
         TRY(try_append(0xbf));

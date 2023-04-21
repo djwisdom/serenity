@@ -14,22 +14,13 @@
 namespace Kernel {
 
 class ProcFSInode;
-class ProcFSProcessDirectoryInode;
-class ProcFSGlobalInode;
-class ProcFSAssociatedProcessInode;
-class ProcFSProcessSubDirectoryInode;
-
 class ProcFS final : public FileSystem {
     friend class ProcFSInode;
-    friend class ProcFSDirectoryInode;
-    friend class ProcFSProcessDirectoryInode;
-    friend class ProcFSGlobalInode;
-    friend class ProcFSAssociatedProcessInode;
-    friend class ProcFSProcessSubDirectoryInode;
+    friend class Process;
 
 public:
     virtual ~ProcFS() override;
-    static ErrorOr<NonnullLockRefPtr<FileSystem>> try_create();
+    static ErrorOr<NonnullRefPtr<FileSystem>> try_create();
 
     virtual ErrorOr<void> initialize() override;
     virtual StringView class_name() const override { return "ProcFS"sv; }
@@ -39,7 +30,9 @@ public:
 private:
     ProcFS();
 
-    LockRefPtr<ProcFSDirectoryInode> m_root_inode;
+    ErrorOr<NonnullRefPtr<Inode>> get_inode(InodeIdentifier) const;
+
+    RefPtr<ProcFSInode> m_root_inode;
 };
 
 }

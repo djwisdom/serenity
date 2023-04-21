@@ -10,6 +10,7 @@
 #include <AK/Function.h>
 #include <LibCore/ArgsParser.h>
 #include <LibTest/TestSuite.h>
+#include <math.h>
 #include <stdlib.h>
 #include <sys/time.h>
 
@@ -56,7 +57,7 @@ void set_suite_setup_function(Function<void()> setup)
     TestSuite::the().set_suite_setup(move(setup));
 }
 
-int TestSuite::main(DeprecatedString const& suite_name, int argc, char** argv)
+int TestSuite::main(DeprecatedString const& suite_name, Span<StringView> arguments)
 {
     m_suite_name = suite_name;
 
@@ -65,13 +66,14 @@ int TestSuite::main(DeprecatedString const& suite_name, int argc, char** argv)
     bool do_tests_only = getenv("TESTS_ONLY") != nullptr;
     bool do_benchmarks_only = false;
     bool do_list_cases = false;
-    char const* search_string = "*";
+    StringView search_string = "*"sv;
 
     args_parser.add_option(do_tests_only, "Only run tests.", "tests", 0);
     args_parser.add_option(do_benchmarks_only, "Only run benchmarks.", "bench", 0);
+    args_parser.add_option(m_benchmark_repetitions, "Number of times to repeat each benchmark (default 1)", "benchmark_repetitions", 0, "N");
     args_parser.add_option(do_list_cases, "List available test cases.", "list", 0);
     args_parser.add_positional_argument(search_string, "Only run matching cases.", "pattern", Core::ArgsParser::Required::No);
-    args_parser.parse(argc, argv);
+    args_parser.parse(arguments);
 
     if (m_setup)
         m_setup();
@@ -81,7 +83,7 @@ int TestSuite::main(DeprecatedString const& suite_name, int argc, char** argv)
     if (do_list_cases) {
         outln("Available cases for {}:", suite_name);
         for (auto const& test : matching_tests) {
-            outln("    {}", test.name());
+            outln("    {}", test->name());
         }
         return 0;
     }
@@ -91,18 +93,18 @@ int TestSuite::main(DeprecatedString const& suite_name, int argc, char** argv)
     return run(matching_tests);
 }
 
-NonnullRefPtrVector<TestCase> TestSuite::find_cases(DeprecatedString const& search, bool find_tests, bool find_benchmarks)
+Vector<NonnullRefPtr<TestCase>> TestSuite::find_cases(DeprecatedString const& search, bool find_tests, bool find_benchmarks)
 {
-    NonnullRefPtrVector<TestCase> matches;
-    for (auto const& t : m_cases) {
-        if (!search.is_empty() && !t.name().matches(search, CaseSensitivity::CaseInsensitive)) {
+    Vector<NonnullRefPtr<TestCase>> matches;
+    for (auto& t : m_cases) {
+        if (!search.is_empty() && !t->name().matches(search, CaseSensitivity::CaseInsensitive)) {
             continue;
         }
 
-        if (!find_tests && !t.is_benchmark()) {
+        if (!find_tests && !t->is_benchmark()) {
             continue;
         }
-        if (!find_benchmarks && t.is_benchmark()) {
+        if (!find_benchmarks && t->is_benchmark()) {
             continue;
         }
 
@@ -111,7 +113,7 @@ NonnullRefPtrVector<TestCase> TestSuite::find_cases(DeprecatedString const& sear
     return matches;
 }
 
-int TestSuite::run(NonnullRefPtrVector<TestCase> const& tests)
+int TestSuite::run(Vector<NonnullRefPtr<TestCase>> const& tests)
 {
     size_t test_count = 0;
     size_t test_failed_count = 0;
@@ -119,22 +121,44 @@ int TestSuite::run(NonnullRefPtrVector<TestCase> const& tests)
     TestElapsedTimer global_timer;
 
     for (auto const& t : tests) {
-        auto const test_type = t.is_benchmark() ? "benchmark" : "test";
+        auto const test_type = t->is_benchmark() ? "benchmark" : "test";
+        auto const repetitions = t->is_benchmark() ? m_benchmark_repetitions : 1;
 
-        warnln("Running {} '{}'.", test_type, t.name());
+        warnln("Running {} '{}'.", test_type, t->name());
         m_current_test_case_passed = true;
 
-        TestElapsedTimer timer;
-        t.func()();
-        auto const time = timer.elapsed_milliseconds();
+        u64 total_time = 0;
+        u64 sum_of_squared_times = 0;
+        u64 min_time = NumericLimits<u64>::max();
+        u64 max_time = 0;
 
-        dbgln("{} {} '{}' in {}ms", m_current_test_case_passed ? "Completed" : "Failed", test_type, t.name(), time);
+        for (u64 i = 0; i < repetitions; ++i) {
+            TestElapsedTimer timer;
+            t->func()();
+            auto const iteration_time = timer.elapsed_milliseconds();
+            total_time += iteration_time;
+            sum_of_squared_times += iteration_time * iteration_time;
+            min_time = min(min_time, iteration_time);
+            max_time = max(max_time, iteration_time);
+        }
 
-        if (t.is_benchmark()) {
-            m_benchtime += time;
+        if (repetitions != 1) {
+            double average = total_time / double(repetitions);
+            double average_squared = average * average;
+            double standard_deviation = sqrt((sum_of_squared_times + repetitions * average_squared - 2 * total_time * average) / (repetitions - 1));
+
+            dbgln("{} {} '{}' on average in {:.1f}±{:.1f}ms (min={}ms, max={}ms, total={}ms)",
+                m_current_test_case_passed ? "Completed" : "Failed", test_type, t->name(),
+                average, standard_deviation, min_time, max_time, total_time);
+        } else {
+            dbgln("{} {} '{}' in {}ms", m_current_test_case_passed ? "Completed" : "Failed", test_type, t->name(), total_time);
+        }
+
+        if (t->is_benchmark()) {
+            m_benchtime += total_time;
             benchmark_count++;
         } else {
-            m_testtime += time;
+            m_testtime += total_time;
             test_count++;
         }
 
@@ -150,7 +174,9 @@ int TestSuite::run(NonnullRefPtrVector<TestCase> const& tests)
         m_testtime,
         m_benchtime,
         global_timer.elapsed_milliseconds() - (m_testtime + m_benchtime));
-    dbgln("Out of {} tests, {} passed and {} failed.", test_count, test_count - test_failed_count, test_failed_count);
+
+    if (test_count != 0)
+        dbgln("Out of {} tests, {} passed and {} failed.", test_count, test_count - test_failed_count, test_failed_count);
 
     return (int)test_failed_count;
 }

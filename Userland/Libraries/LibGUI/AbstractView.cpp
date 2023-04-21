@@ -221,7 +221,7 @@ void AbstractView::notify_selection_changed(Badge<ModelSelection>)
         update();
 }
 
-NonnullRefPtr<Gfx::Font> AbstractView::font_for_index(ModelIndex const& index) const
+NonnullRefPtr<Gfx::Font const> AbstractView::font_for_index(ModelIndex const& index) const
 {
     if (!model())
         return font();
@@ -291,8 +291,10 @@ void AbstractView::mousemove_event(MouseEvent& event)
     if (!model())
         return AbstractScrollableWidget::mousemove_event(event);
 
-    auto hovered_index = index_at_event_position(event.position());
-    set_hovered_index(hovered_index);
+    if (widget_inner_rect().contains(event.position())) {
+        auto hovered_index = index_at_event_position(event.position());
+        set_hovered_index(hovered_index);
+    }
 
     auto data_type = m_model->drag_data_type();
     if (data_type.is_null())
@@ -493,6 +495,8 @@ void AbstractView::set_cursor(ModelIndex index, SelectionUpdate selection_update
             if (!m_selection.contains(index))
                 clear_selection();
         } else if (selection_update == SelectionUpdate::Shift) {
+            if (!selection_start_index().is_valid())
+                set_selection_start_index(index);
             select_range(index);
         }
 
@@ -725,10 +729,10 @@ void AbstractView::draw_item_text(Gfx::Painter& painter, ModelIndex const& index
 
         // Highlight the text background first
         auto background_searching_length = searching_length;
-        painter.draw_text([&](Gfx::IntRect const& rect, Utf8CodePointIterator&) {
+        painter.draw_text([&](Gfx::FloatRect const& rect, Utf8CodePointIterator&) {
             if (background_searching_length > 0) {
                 background_searching_length--;
-                painter.fill_rect(rect.inflated(0, 2), palette().highlight_searching());
+                painter.fill_rect(rect.to_type<int>().inflated(0, 2), palette().highlight_searching());
             }
         },
             text_rect, item_text, font, alignment, elision);
@@ -737,7 +741,7 @@ void AbstractView::draw_item_text(Gfx::Painter& painter, ModelIndex const& index
         auto text_searching_length = searching_length;
         auto highlight_text_color = palette().highlight_searching_text();
         searching_length = searching_text.length();
-        painter.draw_text([&](Gfx::IntRect const& rect, Utf8CodePointIterator& it) {
+        painter.draw_text([&](auto const& rect, Utf8CodePointIterator& it) {
             if (text_searching_length > 0) {
                 text_searching_length--;
                 painter.draw_glyph_or_emoji(rect.location(), it, font, highlight_text_color);
@@ -796,7 +800,7 @@ void AbstractView::drag_move_event(DragEvent& event)
 
     if (acceptable) {
         m_automatic_scroll_delta = automatic_scroll_delta_from_position(event.position());
-        set_automatic_scrolling_timer_active(!m_automatic_scroll_delta.is_null());
+        set_automatic_scrolling_timer_active(!m_automatic_scroll_delta.is_zero());
     }
 
     if (m_drop_candidate_index != new_drop_candidate_index) {
@@ -819,7 +823,7 @@ void AbstractView::drag_leave_event(Event&)
 
 void AbstractView::automatic_scrolling_timer_did_fire()
 {
-    if (m_automatic_scroll_delta.is_null())
+    if (m_automatic_scroll_delta.is_zero())
         return;
 
     vertical_scrollbar().increase_slider_by(m_automatic_scroll_delta.y());

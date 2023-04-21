@@ -5,8 +5,8 @@
  */
 
 #include "ChessEngine.h"
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/EventLoop.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 
@@ -16,6 +16,10 @@ ErrorOr<int> serenity_main(Main::Arguments)
     Core::EventLoop loop;
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    auto engine = TRY(ChessEngine::try_create(Core::File::standard_input(), Core::File::standard_output()));
+    auto engine = TRY(ChessEngine::try_create(Core::DeprecatedFile::standard_input(), Core::DeprecatedFile::standard_output()));
+    engine->on_quit = [&](auto status_code) {
+        loop.quit(status_code);
+    };
+
     return loop.exec();
 }

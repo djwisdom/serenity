@@ -11,9 +11,9 @@
 
 namespace Web::DOM {
 
-JS::NonnullGCPtr<MutationObserver> MutationObserver::construct_impl(JS::Realm& realm, JS::GCPtr<WebIDL::CallbackType> callback)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<MutationObserver>> MutationObserver::construct_impl(JS::Realm& realm, JS::GCPtr<WebIDL::CallbackType> callback)
 {
-    return realm.heap().allocate<MutationObserver>(realm, realm, callback);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<MutationObserver>(realm, realm, callback));
 }
 
 // https://dom.spec.whatwg.org/#dom-mutationobserver-mutationobserver
@@ -21,7 +21,6 @@ MutationObserver::MutationObserver(JS::Realm& realm, JS::GCPtr<WebIDL::CallbackT
     : PlatformObject(realm)
     , m_callback(move(callback))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "MutationObserver"));
 
     // 1. Set this’s callback to callback.
 
@@ -31,6 +30,14 @@ MutationObserver::MutationObserver(JS::Realm& realm, JS::GCPtr<WebIDL::CallbackT
 }
 
 MutationObserver::~MutationObserver() = default;
+
+JS::ThrowCompletionOr<void> MutationObserver::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::MutationObserverPrototype>(realm, "MutationObserver"));
+
+    return {};
+}
 
 void MutationObserver::visit_edges(Cell::Visitor& visitor)
 {
@@ -73,7 +80,7 @@ WebIDL::ExceptionOr<void> MutationObserver::observe(Node& target, MutationObserv
     // 7. For each registered of target’s registered observer list, if registered’s observer is this:
     bool updated_existing_observer = false;
     for (auto& registered_observer : target.registered_observers_list()) {
-        if (registered_observer.observer().ptr() != this)
+        if (registered_observer->observer().ptr() != this)
             continue;
 
         updated_existing_observer = true;
@@ -85,12 +92,12 @@ WebIDL::ExceptionOr<void> MutationObserver::observe(Node& target, MutationObserv
                 continue;
 
             node->registered_observers_list().remove_all_matching([&registered_observer](RegisteredObserver& observer) {
-                return is<TransientRegisteredObserver>(observer) && verify_cast<TransientRegisteredObserver>(observer).source().ptr() == &registered_observer;
+                return is<TransientRegisteredObserver>(observer) && verify_cast<TransientRegisteredObserver>(observer).source().ptr() == registered_observer;
             });
         }
 
         // 2. Set registered’s options to options.
-        registered_observer.set_options(options);
+        registered_observer->set_options(options);
         break;
     }
 

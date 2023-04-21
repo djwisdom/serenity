@@ -9,9 +9,7 @@
 #include <AK/NonnullOwnPtr.h>
 #include <AK/StringBuilder.h>
 #include <Kernel/API/SyscallString.h>
-#include <LibC/sys/arch/i386/regs.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibDebug/DebugSession.h>
 #include <LibELF/Image.h>
@@ -21,6 +19,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/arch/regs.h>
 #include <syscall.h>
 #include <unistd.h>
 
@@ -50,15 +49,7 @@ static void print_syscall(PtraceRegisters& regs, size_t depth)
     }
     StringView begin_color = g_should_output_color ? "\033[34;1m"sv : ""sv;
     StringView end_color = g_should_output_color ? "\033[0m"sv : ""sv;
-#if ARCH(I386)
-    outln("=> {}SC_{}({:#x}, {:#x}, {:#x}){}",
-        begin_color,
-        Syscall::to_string((Syscall::Function)regs.eax),
-        regs.edx,
-        regs.ecx,
-        regs.ebx,
-        end_color);
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
     outln("=> {}SC_{}({:#x}, {:#x}, {:#x}){}",
         begin_color,
         Syscall::to_string((Syscall::Function)regs.rax),
@@ -146,9 +137,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return Debug::DebugSession::DebugDecision::ContinueBreakAtSyscall;
         }
 
-#if ARCH(I386)
-        const FlatPtr ip = regs.value().eip;
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
         const FlatPtr ip = regs.value().rip;
 #elif ARCH(AARCH64)
         const FlatPtr ip = 0; // FIXME

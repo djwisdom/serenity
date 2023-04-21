@@ -8,7 +8,6 @@
 
 #include <AK/JsonPath.h>
 #include <AK/JsonValue.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <LibGUI/Model.h>
 
 namespace Inspector {
@@ -45,7 +44,7 @@ private:
     JsonPath const* find_cached_path(Vector<JsonPathElement> const& path) const;
 
     RemoteObject& m_object;
-    mutable NonnullOwnPtrVector<JsonPath> m_paths;
+    mutable Vector<NonnullOwnPtr<JsonPath>> m_paths;
 };
 
 }

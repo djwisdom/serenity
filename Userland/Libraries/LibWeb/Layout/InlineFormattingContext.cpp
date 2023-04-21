@@ -38,21 +38,21 @@ BlockFormattingContext const& InlineFormattingContext::parent() const
     return static_cast<BlockFormattingContext const&>(*FormattingContext::parent());
 }
 
-float InlineFormattingContext::leftmost_x_offset_at(float y) const
+CSSPixels InlineFormattingContext::leftmost_x_offset_at(CSSPixels y) const
 {
     // NOTE: Floats are relative to the BFC root box, not necessarily the containing block of this IFC.
     auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(containing_block(), parent().root(), m_state);
-    float y_in_root = box_in_root_rect.y() + y;
+    CSSPixels y_in_root = box_in_root_rect.y() + y;
     auto space = parent().space_used_by_floats(y_in_root);
     return space.left;
 }
 
-float InlineFormattingContext::available_space_for_line(float y) const
+CSSPixels InlineFormattingContext::available_space_for_line(CSSPixels y) const
 {
     // NOTE: Floats are relative to the BFC root box, not necessarily the containing block of this IFC.
     auto& root_block = parent().root();
     auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(containing_block(), root_block, m_state);
-    float y_in_root = box_in_root_rect.y() + y;
+    CSSPixels y_in_root = box_in_root_rect.y() + y;
     auto space = parent().space_used_by_floats(y_in_root);
 
     space.left = space.left;
@@ -61,12 +61,12 @@ float InlineFormattingContext::available_space_for_line(float y) const
     return space.right - space.left;
 }
 
-float InlineFormattingContext::automatic_content_width() const
+CSSPixels InlineFormattingContext::automatic_content_width() const
 {
     return m_automatic_content_width;
 }
 
-float InlineFormattingContext::automatic_content_height() const
+CSSPixels InlineFormattingContext::automatic_content_height() const
 {
     return m_automatic_content_height;
 }
@@ -77,8 +77,8 @@ void InlineFormattingContext::run(Box const&, LayoutMode layout_mode, AvailableS
     m_available_space = available_space;
     generate_line_boxes(layout_mode);
 
-    float max_line_width = 0;
-    float content_height = 0;
+    CSSPixels max_line_width = 0;
+    CSSPixels content_height = 0;
 
     for (auto& line_box : m_containing_block_state.line_boxes) {
         max_line_width = max(max_line_width, line_box.width());
@@ -115,7 +115,7 @@ void InlineFormattingContext::dimension_box_on_line(Box const& box, LayoutMode l
         auto& replaced = verify_cast<ReplacedBox>(box);
 
         if (is<SVGSVGBox>(box))
-            (void)layout_inside(replaced, layout_mode, *m_available_space);
+            (void)layout_inside(replaced, layout_mode, box_state.available_inner_space_or_constraints_from(*m_available_space));
 
         box_state.set_content_width(compute_width_for_replaced_element(m_state, replaced, *m_available_space));
         box_state.set_content_height(compute_height_for_replaced_element(m_state, replaced, *m_available_space));
@@ -123,10 +123,14 @@ void InlineFormattingContext::dimension_box_on_line(Box const& box, LayoutMode l
     }
 
     // Any box that has simple flow inside should have generated line box fragments already.
-    VERIFY(!box.display().is_flow_inside());
+    if (box.display().is_flow_inside()) {
+        dbgln("FIXME: InlineFormattingContext::dimension_box_on_line got unexpected box in inline context:");
+        dump_tree(box);
+        return;
+    }
 
     auto const& width_value = box.computed_values().width();
-    float unconstrained_width = 0;
+    CSSPixels unconstrained_width = 0;
     if (should_treat_width_as_auto(box, *m_available_space)) {
         auto result = calculate_shrink_to_fit_widths(box);
 
@@ -143,12 +147,12 @@ void InlineFormattingContext::dimension_box_on_line(Box const& box, LayoutMode l
         if (width_value.contains_percentage() && !m_available_space->width.is_definite()) {
             // NOTE: We can't resolve percentages yet. We'll have to wait until after inner layout.
         } else {
-            auto container_width = CSS::Length::make_px(m_available_space->width.to_px());
-            unconstrained_width = width_value.resolved(box, container_width).to_px(box);
+            auto inner_width = calculate_inner_width(box, m_available_space->width, width_value);
+            unconstrained_width = inner_width.to_px(box);
         }
     }
 
-    float width = unconstrained_width;
+    CSSPixels width = unconstrained_width;
     auto computed_max_width = box.computed_values().max_width();
     if (!computed_max_width.is_none()) {
         auto max_width = computed_max_width.resolved(box, width_of_containing_block).to_px(box);
@@ -157,7 +161,7 @@ void InlineFormattingContext::dimension_box_on_line(Box const& box, LayoutMode l
 
     auto computed_min_width = box.computed_values().min_width();
     if (!computed_min_width.is_auto()) {
-        auto min_width = computed_min_width.resolved(box, width_of_containing_block).to_px(box);
+        auto min_width = calculate_inner_width(box, m_available_space->width, computed_min_width).to_px(box);
         width = max(width, min_width);
     }
 
@@ -170,8 +174,8 @@ void InlineFormattingContext::dimension_box_on_line(Box const& box, LayoutMode l
         // FIXME: (10.6.6) If 'height' is 'auto', the height depends on the element's descendants per 10.6.7.
         parent().compute_height(box, AvailableSpace(AvailableSize::make_indefinite(), AvailableSize::make_indefinite()));
     } else {
-        auto container_height = CSS::Length::make_px(m_containing_block_state.content_height());
-        box_state.set_content_height(height_value.resolved(box, container_height).to_px(box));
+        auto inner_height = calculate_inner_height(box, AvailableSize::make_definite(m_containing_block_state.content_height()), height_value);
+        box_state.set_content_height(inner_height.to_px(box));
     }
 
     if (independent_formatting_context)
@@ -190,28 +194,28 @@ void InlineFormattingContext::apply_justification_to_fragments(CSS::TextJustify 
         break;
     }
 
-    float excess_horizontal_space = m_available_space->width.to_px() - line_box.width();
+    CSSPixels excess_horizontal_space = m_available_space->width.to_px() - line_box.width();
 
     // Only justify the text if the excess horizontal space is less than or
     // equal to 10%, or if we are not looking at the last line box.
-    if (is_last_line && excess_horizontal_space / m_available_space->width.to_px() > text_justification_threshold)
+    if (is_last_line && excess_horizontal_space / m_available_space->width.to_px().value() > text_justification_threshold)
         return;
 
-    float excess_horizontal_space_including_whitespace = excess_horizontal_space;
+    CSSPixels excess_horizontal_space_including_whitespace = excess_horizontal_space;
     size_t whitespace_count = 0;
     for (auto& fragment : line_box.fragments()) {
         if (fragment.is_justifiable_whitespace()) {
             ++whitespace_count;
-            excess_horizontal_space_including_whitespace += fragment.width().value();
+            excess_horizontal_space_including_whitespace += fragment.width();
         }
     }
 
-    float justified_space_width = whitespace_count > 0 ? (excess_horizontal_space_including_whitespace / static_cast<float>(whitespace_count)) : 0;
+    CSSPixels justified_space_width = whitespace_count > 0 ? (excess_horizontal_space_including_whitespace / static_cast<float>(whitespace_count)) : 0;
 
     // This is the amount that each fragment will be offset by. If a whitespace
     // fragment is shorter than the justified space width, it increases to push
     // subsequent fragments, and decreases to pull them back otherwise.
-    float running_diff = 0;
+    CSSPixels running_diff = 0;
     for (size_t i = 0; i < line_box.fragments().size(); ++i) {
         auto& fragment = line_box.fragments()[i];
 
@@ -221,7 +225,7 @@ void InlineFormattingContext::apply_justification_to_fragments(CSS::TextJustify 
 
         if (fragment.is_justifiable_whitespace()
             && fragment.width() != justified_space_width) {
-            running_diff += justified_space_width - fragment.width().value();
+            running_diff += justified_space_width - fragment.width();
             fragment.set_width(justified_space_width);
         }
     }
@@ -263,7 +267,7 @@ void InlineFormattingContext::generate_line_boxes(LayoutMode layout_mode)
 
         case InlineLevelIterator::Item::Type::FloatingElement:
             if (is<Box>(*item.node))
-                parent().layout_floating_box(static_cast<Layout::Box const&>(*item.node), containing_block(), layout_mode, *m_available_space, &line_builder);
+                parent().layout_floating_box(static_cast<Layout::Box const&>(*item.node), containing_block(), layout_mode, *m_available_space, 0, &line_builder);
             break;
 
         case InlineLevelIterator::Item::Type::Text: {
@@ -315,18 +319,18 @@ void InlineFormattingContext::generate_line_boxes(LayoutMode layout_mode)
     }
 }
 
-bool InlineFormattingContext::any_floats_intrude_at_y(float y) const
+bool InlineFormattingContext::any_floats_intrude_at_y(CSSPixels y) const
 {
     auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(containing_block(), parent().root(), m_state);
-    float y_in_root = box_in_root_rect.y() + y;
+    CSSPixels y_in_root = box_in_root_rect.y() + y;
     auto space = parent().space_used_by_floats(y_in_root);
     return space.left > 0 || space.right > 0;
 }
 
-bool InlineFormattingContext::can_fit_new_line_at_y(float y) const
+bool InlineFormattingContext::can_fit_new_line_at_y(CSSPixels y) const
 {
     auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(containing_block(), parent().root(), m_state);
-    float y_in_root = box_in_root_rect.y() + y;
+    CSSPixels y_in_root = box_in_root_rect.y() + y;
     auto space_top = parent().space_used_by_floats(y_in_root);
     auto space_bottom = parent().space_used_by_floats(y_in_root + containing_block().line_height() - 1);
 

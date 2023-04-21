@@ -13,7 +13,7 @@
 #include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
 #include <LibCore/Directory.h>
-#include <LibCore/File.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
 #include <LibGUI/FilePicker.h>
@@ -49,10 +49,10 @@ NewProjectDialog::NewProjectDialog(GUI::Window* parent)
     set_resizable(false);
     set_title("New project");
 
-    auto& main_widget = set_main_widget<GUI::Widget>();
-    main_widget.load_from_gml(new_project_dialog_gml);
+    auto main_widget = set_main_widget<GUI::Widget>().release_value_but_fixme_should_propagate_errors();
+    main_widget->load_from_gml(new_project_dialog_gml).release_value_but_fixme_should_propagate_errors();
 
-    m_icon_view_container = *main_widget.find_descendant_of_type_named<GUI::Widget>("icon_view_container");
+    m_icon_view_container = *main_widget->find_descendant_of_type_named<GUI::Widget>("icon_view_container");
     m_icon_view = m_icon_view_container->add<GUI::IconView>();
     m_icon_view->set_always_wrap_item_labels(true);
     m_icon_view->set_model(m_model);
@@ -65,24 +65,24 @@ NewProjectDialog::NewProjectDialog(GUI::Window* parent)
             do_create_project();
     };
 
-    m_description_label = *main_widget.find_descendant_of_type_named<GUI::Label>("description_label");
-    m_name_input = *main_widget.find_descendant_of_type_named<GUI::TextBox>("name_input");
+    m_description_label = *main_widget->find_descendant_of_type_named<GUI::Label>("description_label");
+    m_name_input = *main_widget->find_descendant_of_type_named<GUI::TextBox>("name_input");
     m_name_input->on_change = [&]() {
         update_dialog();
     };
-    m_create_in_input = *main_widget.find_descendant_of_type_named<GUI::TextBox>("create_in_input");
+    m_create_in_input = *main_widget->find_descendant_of_type_named<GUI::TextBox>("create_in_input");
     m_create_in_input->on_change = [&]() {
         update_dialog();
     };
-    m_full_path_label = *main_widget.find_descendant_of_type_named<GUI::Label>("full_path_label");
+    m_full_path_label = *main_widget->find_descendant_of_type_named<GUI::Label>("full_path_label");
 
-    m_ok_button = *main_widget.find_descendant_of_type_named<GUI::Button>("ok_button");
+    m_ok_button = *main_widget->find_descendant_of_type_named<GUI::Button>("ok_button");
     m_ok_button->set_default(true);
     m_ok_button->on_click = [this](auto) {
         do_create_project();
     };
 
-    m_cancel_button = *main_widget.find_descendant_of_type_named<GUI::Button>("cancel_button");
+    m_cancel_button = *main_widget->find_descendant_of_type_named<GUI::Button>("cancel_button");
     m_cancel_button->on_click = [this](auto) {
         done(ExecResult::Cancel);
     };
@@ -150,7 +150,7 @@ Optional<DeprecatedString> NewProjectDialog::get_available_project_name()
             ? chosen_name
             : DeprecatedString::formatted("{}-{}", chosen_name, i);
 
-        if (!Core::File::exists(DeprecatedString::formatted("{}/{}", create_in, candidate)))
+        if (!FileSystem::exists(DeprecatedString::formatted("{}/{}", create_in, candidate)))
             return candidate;
     }
 
@@ -188,7 +188,7 @@ void NewProjectDialog::do_create_project()
     }
 
     auto create_in = m_create_in_input->text();
-    if (!Core::File::exists(create_in) || !Core::File::is_directory(create_in)) {
+    if (!FileSystem::exists(create_in) || !FileSystem::is_directory(create_in)) {
         auto result = GUI::MessageBox::show(this, DeprecatedString::formatted("The directory {} does not exist yet, would you like to create it?", create_in), "New project"sv, GUI::MessageBox::Type::Question, GUI::MessageBox::InputType::YesNo);
         if (result != GUI::MessageBox::ExecResult::Yes)
             return;

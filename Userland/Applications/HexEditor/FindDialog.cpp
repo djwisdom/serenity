@@ -99,21 +99,20 @@ FindDialog::FindDialog()
     set_resizable(false);
     set_title("Find");
 
-    auto& main_widget = set_main_widget<GUI::Widget>();
-    if (!main_widget.load_from_gml(find_dialog_gml))
-        VERIFY_NOT_REACHED();
+    auto main_widget = set_main_widget<GUI::Widget>().release_value_but_fixme_should_propagate_errors();
+    main_widget->load_from_gml(find_dialog_gml).release_value_but_fixme_should_propagate_errors();
 
-    m_text_editor = *main_widget.find_descendant_of_type_named<GUI::TextBox>("text_editor");
-    m_find_button = *main_widget.find_descendant_of_type_named<GUI::Button>("find_button");
-    m_find_all_button = *main_widget.find_descendant_of_type_named<GUI::Button>("find_all_button");
-    m_cancel_button = *main_widget.find_descendant_of_type_named<GUI::Button>("cancel_button");
+    m_text_editor = *main_widget->find_descendant_of_type_named<GUI::TextBox>("text_editor");
+    m_find_button = *main_widget->find_descendant_of_type_named<GUI::Button>("find_button");
+    m_find_all_button = *main_widget->find_descendant_of_type_named<GUI::Button>("find_all_button");
+    m_cancel_button = *main_widget->find_descendant_of_type_named<GUI::Button>("cancel_button");
 
-    auto& radio_container = *main_widget.find_descendant_of_type_named<GUI::Widget>("radio_container");
+    auto& radio_container = *main_widget->find_descendant_of_type_named<GUI::Widget>("radio_container");
     for (size_t i = 0; i < options.size(); i++) {
         auto action = options[i];
         auto& radio = radio_container.add<GUI::RadioButton>();
         radio.set_enabled(action.enabled);
-        radio.set_text(action.title);
+        radio.set_text(String::from_deprecated_string(action.title).release_value_but_fixme_should_propagate_errors());
 
         radio.on_checked = [this, i](auto) {
             m_selected_option = options[i].opt;

@@ -51,7 +51,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-inspector"sv));
     if (gui_mode) {
     choose_pid:
-        auto process_chooser = TRY(GUI::ProcessChooser::try_create("Inspector"sv, "Inspect"sv, app_icon.bitmap_for_size(16)));
+        auto process_chooser = TRY(GUI::ProcessChooser::try_create("Inspector"sv, "Inspect"_short_string, app_icon.bitmap_for_size(16)));
         if (process_chooser->exec() == GUI::Dialog::ExecResult::Cancel)
             return 0;
         pid = process_chooser->pid();
@@ -89,17 +89,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->resize(685, 500);
     window->set_icon(app_icon.bitmap_for_size(16));
 
-    auto& file_menu = window->add_menu("&File");
+    auto& file_menu = window->add_menu("&File"_short_string);
     file_menu.add_action(GUI::CommonActions::make_quit_action([&](auto&) { app->quit(); }));
 
-    auto& help_menu = window->add_menu("&Help");
+    auto& help_menu = window->add_menu("&Help"_short_string);
     help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/Inspector.md"), "/bin/Help");
     }));
     help_menu.add_action(GUI::CommonActions::make_about_action("Inspector", app_icon, window));
 
-    auto widget = TRY(window->try_set_main_widget<GUI::Widget>());
+    auto widget = TRY(window->set_main_widget<GUI::Widget>());
     widget->set_fill_with_background_color(true);
     widget->set_layout<GUI::VerticalBoxLayout>();
 
@@ -128,9 +128,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         remote_process.set_inspected_object(remote_object->address);
     };
 
-    auto properties_tree_view_context_menu = TRY(GUI::Menu::try_create("Properties Tree View"));
+    auto properties_tree_view_context_menu = TRY(GUI::Menu::try_create(TRY("Properties Tree View"_string)));
 
-    auto copy_bitmap = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/edit-copy.png"sv).release_value_but_fixme_should_propagate_errors();
+    auto copy_bitmap = Gfx::Bitmap::load_from_file("/res/icons/16x16/edit-copy.png"sv).release_value_but_fixme_should_propagate_errors();
     auto copy_property_name_action = GUI::Action::create("Copy Property Name", copy_bitmap, [&](auto&) {
         GUI::Clipboard::the().set_plain_text(properties_tree_view.selection().first().data().to_deprecated_string());
     });

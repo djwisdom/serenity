@@ -21,7 +21,7 @@
 
 namespace Kernel {
 
-RecursiveSpinlock g_scheduler_lock { LockRank::None };
+RecursiveSpinlock<LockRank::None> g_scheduler_lock {};
 
 static u32 time_slice_for(Thread const& thread)
 {
@@ -46,9 +46,9 @@ struct ThreadReadyQueues {
     Array<ThreadReadyQueue, count> queues;
 };
 
-static Singleton<SpinlockProtected<ThreadReadyQueues>> g_ready_queues;
+static Singleton<SpinlockProtected<ThreadReadyQueues, LockRank::None>> g_ready_queues;
 
-static SpinlockProtected<TotalTimeScheduled> g_total_time_scheduled { LockRank::None };
+static SpinlockProtected<TotalTimeScheduled, LockRank::None> g_total_time_scheduled {};
 
 static void dump_thread_list(bool = false);
 
@@ -99,7 +99,10 @@ Thread& Scheduler::pull_next_runnable_thread()
             }
             priority_mask &= ~(1u << priority);
         }
-        return *Processor::idle_thread();
+
+        auto* idle_thread = Processor::idle_thread();
+        idle_thread->set_active(true);
+        return *idle_thread;
     });
 }
 
@@ -222,10 +225,10 @@ void Scheduler::pick_next()
 
     auto& thread_to_schedule = pull_next_runnable_thread();
     if constexpr (SCHEDULER_DEBUG) {
-        dbgln("Scheduler[{}]: Switch to {} @ {:#04x}:{:p}",
+        dbgln("Scheduler[{}]: Switch to {} @ {:p}",
             Processor::current_id(),
             thread_to_schedule,
-            thread_to_schedule.regs().cs, thread_to_schedule.regs().ip());
+            thread_to_schedule.regs().ip());
     }
 
     // We need to leave our first critical section before switching context,
@@ -270,11 +273,11 @@ void Scheduler::context_switch(Thread* thread)
         from_thread->set_state(Thread::State::Runnable);
 
 #ifdef LOG_EVERY_CONTEXT_SWITCH
-    auto const msg = "Scheduler[{}]: {} -> {} [prio={}] {:#04x}:{:p}";
+    auto const msg = "Scheduler[{}]: {} -> {} [prio={}] {:p}";
 
     dbgln(msg,
         Processor::current_id(), from_thread->tid().value(),
-        thread->tid().value(), thread->priority(), thread->regs().cs, thread->regs().ip());
+        thread->tid().value(), thread->priority(), thread->regs().ip());
 #endif
 
     auto& proc = Processor::current();
@@ -366,13 +369,11 @@ UNMAP_AFTER_INIT void Scheduler::initialize()
     VERIFY(Processor::is_initialized()); // sanity check
     VERIFY(TimeManagement::is_initialized());
 
-    LockRefPtr<Thread> idle_thread;
     g_finalizer_wait_queue = new WaitQueue;
 
     g_finalizer_has_work.store(false, AK::MemoryOrder::memory_order_release);
-    s_colonel_process = Process::create_kernel_process(idle_thread, KString::must_create("colonel"sv), idle_loop, nullptr, 1, Process::RegisterProcess::No).leak_ref();
-    VERIFY(s_colonel_process);
-    VERIFY(idle_thread);
+    auto [colonel_process, idle_thread] = MUST(Process::create_kernel_process(KString::must_create("colonel"sv), idle_loop, nullptr, 1, Process::RegisterProcess::No));
+    s_colonel_process = &colonel_process.leak_ref();
     idle_thread->set_priority(THREAD_PRIORITY_MIN);
     idle_thread->set_name(KString::must_create("Idle Task #0"sv));
 
@@ -393,7 +394,7 @@ UNMAP_AFTER_INIT Thread* Scheduler::create_ap_idle_thread(u32 cpu)
     VERIFY(Processor::is_bootstrap_processor());
 
     VERIFY(s_colonel_process);
-    Thread* idle_thread = s_colonel_process->create_kernel_thread(idle_loop, nullptr, THREAD_PRIORITY_MIN, MUST(KString::formatted("idle thread #{}", cpu)), 1 << cpu, false);
+    Thread* idle_thread = MUST(s_colonel_process->create_kernel_thread(idle_loop, nullptr, THREAD_PRIORITY_MIN, MUST(KString::formatted("idle thread #{}", cpu)), 1 << cpu, false));
     VERIFY(idle_thread);
     return idle_thread;
 }
@@ -427,7 +428,7 @@ void Scheduler::timer_tick(RegisterState const& regs)
         current_thread->update_time_scheduled(TimeManagement::scheduler_current_time(), true, false);
     }
 
-    if (current_thread->previous_mode() == Thread::PreviousMode::UserMode && current_thread->should_die() && !current_thread->is_blocked()) {
+    if (current_thread->previous_mode() == ExecutionMode::User && current_thread->should_die() && !current_thread->is_blocked()) {
         SpinlockLocker scheduler_lock(g_scheduler_lock);
         dbgln_if(SCHEDULER_DEBUG, "Scheduler[{}]: Terminating user mode thread {}", Processor::current_id(), *current_thread);
         current_thread->set_state(Thread::State::Dying);
@@ -479,8 +480,7 @@ void Scheduler::idle_loop(void*)
 
     for (;;) {
         proc.idle_begin();
-        asm("hlt");
-
+        proc.wait_for_interrupt();
         proc.idle_end();
         VERIFY_INTERRUPTS_ENABLED();
         yield();
@@ -507,19 +507,6 @@ void dump_thread_list(bool with_stack_traces)
 {
     dbgln("Scheduler thread list for processor {}:", Processor::current_id());
 
-    auto get_cs = [](Thread& thread) -> u16 {
-#if ARCH(I386) || ARCH(X86_64)
-        if (!thread.current_trap())
-            return thread.regs().cs;
-        return thread.get_register_dump_from_stack().cs;
-#elif ARCH(AARCH64)
-        (void)thread;
-        return 0;
-#else
-#    error Unknown architecture
-#endif
-    };
-
     auto get_eip = [](Thread& thread) -> u32 {
         if (!thread.current_trap())
             return thread.regs().ip();
@@ -530,20 +517,18 @@ void dump_thread_list(bool with_stack_traces)
         auto color = thread.process().is_kernel_process() ? "\x1b[34;1m"sv : "\x1b[33;1m"sv;
         switch (thread.state()) {
         case Thread::State::Dying:
-            dmesgln("  {}{:30}\x1b[0m @ {:04x}:{:08x} is {:14} (Finalizable: {}, nsched: {})",
+            dmesgln("  {}{:30}\x1b[0m @ {:08x} is {:14} (Finalizable: {}, nsched: {})",
                 color,
                 thread,
-                get_cs(thread),
                 get_eip(thread),
                 thread.state_string(),
                 thread.is_finalizable(),
                 thread.times_scheduled());
             break;
         default:
-            dmesgln("  {}{:30}\x1b[0m @ {:04x}:{:08x} is {:14} (Pr:{:2}, nsched: {})",
+            dmesgln("  {}{:30}\x1b[0m @ {:08x} is {:14} (Pr:{:2}, nsched: {})",
                 color,
                 thread,
-                get_cs(thread),
                 get_eip(thread),
                 thread.state_string(),
                 thread.priority(),

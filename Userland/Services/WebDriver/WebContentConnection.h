@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <LibCore/Stream.h>
 #include <LibIPC/ConnectionFromClient.h>
 #include <WebContent/WebDriverClientEndpoint.h>
 #include <WebContent/WebDriverServerEndpoint.h>
@@ -19,13 +18,11 @@ class WebContentConnection
     : public IPC::ConnectionFromClient<WebDriverClientEndpoint, WebDriverServerEndpoint> {
     C_OBJECT_ABSTRACT(WebContentConnection)
 public:
-    WebContentConnection(NonnullOwnPtr<Core::Stream::LocalSocket> socket, NonnullRefPtr<Client> client, unsigned session_id);
+    WebContentConnection(NonnullOwnPtr<Core::LocalSocket> socket);
+
+    Function<void()> on_close;
 
     virtual void die() override;
-
-private:
-    NonnullRefPtr<Client> m_client;
-    unsigned m_session_id { 0 };
 };
 
 }

@@ -20,13 +20,16 @@ Card::Card(Suit suit, Rank rank)
     VERIFY(to_underlying(rank) < card_count);
 }
 
-void Card::paint(GUI::Painter& painter) const
+void Card::paint(GUI::Painter& painter, bool highlighted) const
 {
     auto& card_painter = CardPainter::the();
     auto bitmap = [&]() {
         if (m_inverted)
             return m_upside_down ? card_painter.card_back_inverted() : card_painter.card_front_inverted(m_suit, m_rank);
-
+        if (highlighted) {
+            VERIFY(!m_upside_down);
+            return card_painter.card_front_highlighted(m_suit, m_rank);
+        }
         return m_upside_down ? card_painter.card_back() : card_painter.card_front(m_suit, m_rank);
     }();
     painter.blit(position(), bitmap, bitmap->rect());
@@ -43,49 +46,43 @@ void Card::save_old_position()
     m_old_position_valid = true;
 }
 
-void Card::clear_and_paint(GUI::Painter& painter, Color background_color)
+void Card::clear_and_paint(GUI::Painter& painter, Color background_color, bool highlighted)
 {
     if (is_old_position_valid())
         clear(painter, background_color);
 
-    paint(painter);
+    paint(painter, highlighted);
     save_old_position();
 }
 
-NonnullRefPtrVector<Card> create_standard_deck(Shuffle shuffle)
+ErrorOr<Vector<NonnullRefPtr<Card>>> create_standard_deck(Shuffle shuffle)
 {
     return create_deck(1, 1, 1, 1, shuffle);
 }
 
-NonnullRefPtrVector<Card> create_deck(unsigned full_club_suit_count, unsigned full_diamond_suit_count, unsigned full_heart_suit_count, unsigned full_spade_suit_count, Shuffle shuffle)
+ErrorOr<Vector<NonnullRefPtr<Card>>> create_deck(unsigned full_club_suit_count, unsigned full_diamond_suit_count, unsigned full_heart_suit_count, unsigned full_spade_suit_count, Shuffle shuffle)
 {
-    NonnullRefPtrVector<Card> deck;
-    deck.ensure_capacity(Card::card_count * (full_club_suit_count + full_diamond_suit_count + full_heart_suit_count + full_spade_suit_count));
+    Vector<NonnullRefPtr<Card>> deck;
+    TRY(deck.try_ensure_capacity(Card::card_count * (full_club_suit_count + full_diamond_suit_count + full_heart_suit_count + full_spade_suit_count)));
 
-    auto add_cards_for_suit = [&deck](Cards::Suit suit, unsigned number_of_suits) {
+    auto add_cards_for_suit = [&deck](Cards::Suit suit, unsigned number_of_suits) -> ErrorOr<void> {
         for (auto i = 0u; i < number_of_suits; ++i) {
             for (auto rank = 0; rank < Card::card_count; ++rank) {
-                deck.append(Card::construct(suit, static_cast<Cards::Rank>(rank)));
+                deck.unchecked_append(TRY(Card::try_create(suit, static_cast<Cards::Rank>(rank))));
             }
         }
+        return {};
     };
 
-    add_cards_for_suit(Cards::Suit::Clubs, full_club_suit_count);
-    add_cards_for_suit(Cards::Suit::Diamonds, full_diamond_suit_count);
-    add_cards_for_suit(Cards::Suit::Hearts, full_heart_suit_count);
-    add_cards_for_suit(Cards::Suit::Spades, full_spade_suit_count);
+    TRY(add_cards_for_suit(Cards::Suit::Clubs, full_club_suit_count));
+    TRY(add_cards_for_suit(Cards::Suit::Diamonds, full_diamond_suit_count));
+    TRY(add_cards_for_suit(Cards::Suit::Hearts, full_heart_suit_count));
+    TRY(add_cards_for_suit(Cards::Suit::Spades, full_spade_suit_count));
 
     if (shuffle == Shuffle::Yes)
-        shuffle_deck(deck);
+        AK::shuffle(deck);
 
     return deck;
-}
-
-void shuffle_deck(NonnullRefPtrVector<Card>& deck)
-{
-    auto iteration_count = deck.size() * 4;
-    for (auto i = 0u; i < iteration_count; ++i)
-        deck.append(deck.take(get_random_uniform(deck.size())));
 }
 
 }

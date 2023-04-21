@@ -26,10 +26,12 @@ depends=(
     'readline'
     'sqlite'
     'termcap'
+    'xz'
     'zlib'
 )
 configopts=(
     '--disable-ipv6'
+    '--enable-shared'
     '--without-ensurepip'
     '--with-build-python=python3'
     'ac_cv_file__dev_ptmx=no'

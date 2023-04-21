@@ -37,14 +37,14 @@ private:
 
     RefPtr<Custody> m_parent;
     NonnullOwnPtr<KString> m_name;
-    NonnullLockRefPtr<Inode> m_inode;
+    NonnullRefPtr<Inode> const m_inode;
     int m_mount_flags { 0 };
 
     mutable IntrusiveListNode<Custody> m_all_custodies_list_node;
 
 public:
     using AllCustodiesList = IntrusiveList<&Custody::m_all_custodies_list_node>;
-    static SpinlockProtected<Custody::AllCustodiesList>& all_instances();
+    static SpinlockProtected<Custody::AllCustodiesList, LockRank::None>& all_instances();
 };
 
 }

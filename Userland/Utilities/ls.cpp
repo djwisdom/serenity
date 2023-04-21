@@ -15,9 +15,10 @@
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DateTime.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/DirIterator.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -60,6 +61,7 @@ static bool flag_show_inode = false;
 static bool flag_print_numeric = false;
 static bool flag_hide_group = false;
 static bool flag_human_readable = false;
+static bool flag_human_readable_si = false;
 static bool flag_sort_by_timestamp = false;
 static bool flag_reverse_sort = false;
 static bool flag_disable_hyperlinks = false;
@@ -113,6 +115,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_option(flag_print_numeric, "In long format, display numeric UID/GID", "numeric-uid-gid", 'n');
     args_parser.add_option(flag_hide_group, "In long format, do not show group information", nullptr, 'o');
     args_parser.add_option(flag_human_readable, "Print human-readable sizes", "human-readable", 'h');
+    args_parser.add_option(flag_human_readable_si, "Print human-readable sizes in SI units", "si", 0);
     args_parser.add_option(flag_disable_hyperlinks, "Disable hyperlinks", "no-hyperlinks", 'K');
     args_parser.add_option(flag_recursive, "List subdirectories recursively", "recursive", 'R');
     args_parser.add_option(flag_force_newline, "List one file per line", nullptr, '1');
@@ -162,18 +165,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     for (size_t i = 0; i < files.size(); i++) {
         auto path = files[i].name;
 
-        if (flag_recursive && Core::File::is_directory(path)) {
+        if (flag_recursive && FileSystem::is_directory(path)) {
             size_t subdirs = 0;
             Core::DirIterator di(path, Core::DirIterator::SkipParentAndBaseDir);
 
             if (di.has_error()) {
                 status = 1;
-                fprintf(stderr, "%s: %s\n", path.characters(), di.error_string());
+                fprintf(stderr, "%s: %s\n", path.characters(), strerror(di.error().code()));
             }
 
             while (di.has_next()) {
                 DeprecatedString directory = di.next_full_path();
-                if (Core::File::is_directory(directory) && !Core::File::is_link(directory)) {
+                if (FileSystem::is_directory(directory) && !FileSystem::is_link(directory)) {
                     ++subdirs;
                     FileMetadata new_file;
                     new_file.name = move(directory);
@@ -182,7 +185,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             }
         }
 
-        bool show_dir_separator = files.size() > 1 && Core::File::is_directory(path) && !flag_list_directories_only;
+        bool show_dir_separator = files.size() > 1 && FileSystem::is_directory(path) && !flag_list_directories_only;
         if (show_dir_separator) {
             printf("%s:\n", path.characters());
         }
@@ -207,12 +210,12 @@ static int print_escaped(StringView name)
         return utf8_name.length();
     }
 
-    for (int i = 0; name[i] != '\0'; i++) {
-        if (isprint(name[i])) {
-            putchar(name[i]);
+    for (auto c : name) {
+        if (isprint(c)) {
+            putchar(c);
             printed++;
         } else {
-            printed += printf("\\%03d", name[i]);
+            printed += printf("\\%03d", c);
         }
     }
 
@@ -235,7 +238,7 @@ static DeprecatedString& hostname()
 static size_t print_name(const struct stat& st, DeprecatedString const& name, char const* path_for_link_resolution, char const* path_for_hyperlink)
 {
     if (!flag_disable_hyperlinks) {
-        auto full_path = Core::File::real_path_for(path_for_hyperlink);
+        auto full_path = Core::DeprecatedFile::real_path_for(path_for_hyperlink);
         if (!full_path.is_null()) {
             auto url = URL::create_with_file_scheme(full_path, {}, hostname());
             out("\033]8;;{}\033\\", url.serialize());
@@ -272,7 +275,7 @@ static size_t print_name(const struct stat& st, DeprecatedString const& name, ch
     }
     if (S_ISLNK(st.st_mode)) {
         if (path_for_link_resolution) {
-            auto link_destination_or_error = Core::File::read_link(path_for_link_resolution);
+            auto link_destination_or_error = Core::DeprecatedFile::read_link(path_for_link_resolution);
             if (link_destination_or_error.is_error()) {
                 perror("readlink");
             } else {
@@ -334,7 +337,7 @@ static bool print_filesystem_object(DeprecatedString const& path, DeprecatedStri
     else
         printf("%c", st.st_mode & S_IXOTH ? 'x' : '-');
 
-    printf(" %3u", st.st_nlink);
+    printf(" %3lu", st.st_nlink);
 
     auto username = users.get(st.st_uid);
     if (!flag_print_numeric && username.has_value()) {
@@ -357,6 +360,8 @@ static bool print_filesystem_object(DeprecatedString const& path, DeprecatedStri
     } else {
         if (flag_human_readable) {
             printf(" %10s ", human_readable_size(st.st_size).characters());
+        } else if (flag_human_readable_si) {
+            printf(" %10s ", human_readable_size(st.st_size, AK::HumanReadableBasedOn::Base10).characters());
         } else {
             printf(" %10" PRIu64 " ", (uint64_t)st.st_size);
         }
@@ -392,7 +397,8 @@ static int do_file_system_object_long(char const* path)
     Core::DirIterator di(path, flags);
 
     if (di.has_error()) {
-        if (di.error() == ENOTDIR) {
+        auto error = di.error();
+        if (error.code() == ENOTDIR) {
             struct stat stat {
             };
             int rc = lstat(path, &stat);
@@ -402,7 +408,7 @@ static int do_file_system_object_long(char const* path)
                 return 0;
             return 2;
         }
-        fprintf(stderr, "%s: %s\n", path, di.error_string());
+        fprintf(stderr, "%s: %s\n", path, strerror(di.error().code()));
         return 1;
     }
 
@@ -506,7 +512,8 @@ int do_file_system_object_short(char const* path)
 
     Core::DirIterator di(path, flags);
     if (di.has_error()) {
-        if (di.error() == ENOTDIR) {
+        auto error = di.error();
+        if (error.code() == ENOTDIR) {
             size_t nprinted = 0;
             bool status = print_filesystem_object_short(path, path, &nprinted);
             printf("\n");
@@ -514,7 +521,7 @@ int do_file_system_object_short(char const* path)
                 return 0;
             return 2;
         }
-        fprintf(stderr, "%s: %s\n", path, di.error_string());
+        fprintf(stderr, "%s: %s\n", path, strerror(di.error().code()));
         return 1;
     }
 

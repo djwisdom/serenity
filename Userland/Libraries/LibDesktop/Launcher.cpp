@@ -10,7 +10,6 @@
 #include <LaunchServer/LaunchServerEndpoint.h>
 #include <LibDesktop/Launcher.h>
 #include <LibIPC/ConnectionToServer.h>
-#include <stdlib.h>
 
 namespace Desktop {
 
@@ -19,10 +18,10 @@ auto Launcher::Details::from_details_str(DeprecatedString const& details_str) ->
     auto details = adopt_ref(*new Details);
     auto json = JsonValue::from_string(details_str).release_value_but_fixme_should_propagate_errors();
     auto const& obj = json.as_object();
-    details->executable = obj.get("executable"sv).to_deprecated_string();
-    details->name = obj.get("name"sv).to_deprecated_string();
-    if (auto type_value = obj.get_ptr("type"sv)) {
-        auto type_str = type_value->to_deprecated_string();
+    details->executable = obj.get_deprecated_string("executable"sv).value_or({});
+    details->name = obj.get_deprecated_string("name"sv).value_or({});
+    if (auto type_value = obj.get_deprecated_string("type"sv); type_value.has_value()) {
+        auto const& type_str = type_value.value();
         if (type_str == "app")
             details->launcher_type = LauncherType::Application;
         else if (type_str == "userpreferred")
@@ -38,7 +37,7 @@ class ConnectionToLaunchServer final
     , public LaunchClientEndpoint {
     IPC_CLIENT_CONNECTION(ConnectionToLaunchServer, "/tmp/session/%sid/portal/launch"sv)
 private:
-    ConnectionToLaunchServer(NonnullOwnPtr<Core::Stream::LocalSocket> socket)
+    ConnectionToLaunchServer(NonnullOwnPtr<Core::LocalSocket> socket)
         : IPC::ConnectionToServer<LaunchClientEndpoint, LaunchServerEndpoint>(*this, move(socket))
     {
     }
@@ -103,10 +102,10 @@ Vector<DeprecatedString> Launcher::get_handlers_for_url(const URL& url)
     return connection().get_handlers_for_url(url.to_deprecated_string());
 }
 
-auto Launcher::get_handlers_with_details_for_url(const URL& url) -> NonnullRefPtrVector<Details>
+auto Launcher::get_handlers_with_details_for_url(const URL& url) -> Vector<NonnullRefPtr<Details>>
 {
     auto details = connection().get_handlers_with_details_for_url(url.to_deprecated_string());
-    NonnullRefPtrVector<Details> handlers_with_details;
+    Vector<NonnullRefPtr<Details>> handlers_with_details;
     for (auto& value : details) {
         handlers_with_details.append(Details::from_details_str(value));
     }

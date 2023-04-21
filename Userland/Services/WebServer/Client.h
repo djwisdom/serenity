@@ -9,7 +9,7 @@
 
 #include <AK/String.h>
 #include <LibCore/Object.h>
-#include <LibCore/Stream.h>
+#include <LibCore/Socket.h>
 #include <LibHTTP/Forward.h>
 #include <LibHTTP/HttpRequest.h>
 
@@ -22,15 +22,18 @@ public:
     void start();
 
 private:
-    Client(NonnullOwnPtr<Core::Stream::BufferedTCPSocket>, Core::Object* parent);
+    Client(NonnullOwnPtr<Core::BufferedTCPSocket>, Core::Object* parent);
+
+    using WrappedError = Variant<AK::Error, HTTP::HttpRequest::ParseError>;
 
     struct ContentInfo {
         String type;
         size_t length {};
     };
 
-    ErrorOr<bool> handle_request(ReadonlyBytes);
-    ErrorOr<void> send_response(InputStream&, HTTP::HttpRequest const&, ContentInfo);
+    ErrorOr<void, WrappedError> on_ready_to_read();
+    ErrorOr<bool> handle_request(HTTP::HttpRequest const&);
+    ErrorOr<void> send_response(Stream&, HTTP::HttpRequest const&, ContentInfo);
     ErrorOr<void> send_redirect(StringView redirect, HTTP::HttpRequest const&);
     ErrorOr<void> send_error_response(unsigned code, HTTP::HttpRequest const&, Vector<String> const& headers = {});
     void die();
@@ -38,7 +41,8 @@ private:
     ErrorOr<void> handle_directory_listing(String const& requested_path, String const& real_path, HTTP::HttpRequest const&);
     bool verify_credentials(Vector<HTTP::HttpRequest::Header> const&);
 
-    NonnullOwnPtr<Core::Stream::BufferedTCPSocket> m_socket;
+    NonnullOwnPtr<Core::BufferedTCPSocket> m_socket;
+    StringBuilder m_remaining_request;
 };
 
 }

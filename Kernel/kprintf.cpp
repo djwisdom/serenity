@@ -8,8 +8,8 @@
 #include <AK/StringView.h>
 #include <AK/Types.h>
 #include <Kernel/Arch/DebugOutput.h>
-#if ARCH(I386) || ARCH(X86_64)
-#    include <Kernel/Arch/x86/common/BochsDebugOutput.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/BochsDebugOutput.h>
 #endif
 #include <Kernel/Devices/ConsoleDevice.h>
 #include <Kernel/Devices/DeviceManagement.h>
@@ -20,8 +20,6 @@
 #include <Kernel/TTY/ConsoleManagement.h>
 #include <Kernel/kstdio.h>
 
-#include <LibC/stdarg.h>
-
 namespace Kernel {
 extern Atomic<Graphics::Console*> g_boot_console;
 }
@@ -29,7 +27,7 @@ extern Atomic<Graphics::Console*> g_boot_console;
 static bool s_serial_debug_enabled;
 // A recursive spinlock allows us to keep writing in the case where a
 // page fault happens in the middle of a dbgln(), etc
-static RecursiveSpinlock s_log_lock { LockRank::None };
+static RecursiveSpinlock<LockRank::None> s_log_lock {};
 
 void set_serial_debug_enabled(bool desired_state)
 {
@@ -54,7 +52,7 @@ static void critical_console_out(char ch)
     if (s_serial_debug_enabled)
         serial_putch(ch);
 
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     // No need to output things to the real ConsoleDevice as no one is likely
     // to read it (because we are in a fatal situation, so only print things and halt)
     bochs_debug_output(ch);
@@ -79,7 +77,7 @@ static void console_out(char ch)
     if (DeviceManagement::the().is_console_device_attached()) {
         DeviceManagement::the().console_device().put_char(ch);
     } else {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
         bochs_debug_output(ch);
 #endif
     }
@@ -90,56 +88,20 @@ static void console_out(char ch)
     }
 }
 
-static void buffer_putch(char*& bufptr, char ch)
-{
-    *bufptr++ = ch;
-}
-
 // Declare it, so that the symbol is exported, because libstdc++ uses it.
 // However, *only* libstdc++ uses it, and none of the rest of the Kernel.
 extern "C" int sprintf(char* buffer, char const* fmt, ...);
 
-int sprintf(char* buffer, char const* fmt, ...)
+int sprintf(char*, char const*, ...)
 {
-    va_list ap;
-    va_start(ap, fmt);
-    int ret = printf_internal(buffer_putch, buffer, fmt, ap);
-    buffer[ret] = '\0';
-    va_end(ap);
-    return ret;
-}
-
-int snprintf(char* buffer, size_t size, char const* fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    size_t space_remaining = 0;
-    if (size) {
-        space_remaining = size - 1;
-    } else {
-        space_remaining = 0;
-    }
-    auto sized_buffer_putch = [&](char*& bufptr, char ch) {
-        if (space_remaining) {
-            *bufptr++ = ch;
-            --space_remaining;
-        }
-    };
-    int ret = printf_internal(sized_buffer_putch, buffer, fmt, ap);
-    if (space_remaining) {
-        buffer[ret] = '\0';
-    } else if (size > 0) {
-        buffer[size - 1] = '\0';
-    }
-    va_end(ap);
-    return ret;
+    VERIFY_NOT_REACHED();
 }
 
 static inline void internal_dbgputch(char ch)
 {
     if (s_serial_debug_enabled)
         serial_putch(ch);
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     bochs_debug_output(ch);
 #endif
 }

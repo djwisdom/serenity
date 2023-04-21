@@ -8,11 +8,13 @@
 #include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
 #include <AK/ScopeGuard.h>
+#include <AK/StringBuilder.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <LibRegex/Regex.h>
 #include <stdio.h>
@@ -33,6 +35,21 @@ void fail(StringView format, Ts... args)
     abort();
 }
 
+constexpr StringView ere_special_characters = ".^$*+?()[{\\|"sv;
+constexpr StringView basic_special_characters = ".^$*[\\"sv;
+
+static DeprecatedString escape_characters(StringView string, StringView characters)
+{
+    StringBuilder builder;
+    for (auto ch : string) {
+        if (characters.contains(ch))
+            builder.append('\\');
+
+        builder.append(ch);
+    }
+    return builder.to_deprecated_string();
+}
+
 ErrorOr<int> serenity_main(Main::Arguments args)
 {
     TRY(Core::System::pledge("stdio rpath"));
@@ -43,7 +60,9 @@ ErrorOr<int> serenity_main(Main::Arguments args)
 
     bool recursive = (program_name == "rgrep"sv);
     bool use_ere = (program_name == "egrep"sv);
+    bool fixed_strings = (program_name == "fgrep"sv);
     Vector<DeprecatedString> patterns;
+    StringView pattern_file;
     BinaryFileMode binary_mode { BinaryFileMode::Binary };
     bool case_insensitive = false;
     bool line_numbers = false;
@@ -58,14 +77,26 @@ ErrorOr<int> serenity_main(Main::Arguments args)
     Core::ArgsParser args_parser;
     args_parser.add_option(recursive, "Recursively scan files", "recursive", 'r');
     args_parser.add_option(use_ere, "Extended regular expressions", "extended-regexp", 'E');
+    args_parser.add_option(fixed_strings, "Treat pattern as a string, not a regexp", "fixed-strings", 'F');
     args_parser.add_option(Core::ArgsParser::Option {
         .argument_mode = Core::ArgsParser::OptionArgumentMode::Required,
         .help_string = "Pattern",
         .long_name = "regexp",
         .short_name = 'e',
         .value_name = "Pattern",
-        .accept_value = [&](auto* str) {
+        .accept_value = [&](StringView str) {
             patterns.append(str);
+            return true;
+        },
+    });
+    args_parser.add_option(Core::ArgsParser::Option {
+        .argument_mode = Core::ArgsParser::OptionArgumentMode::Required,
+        .help_string = "Read patterns from a file",
+        .long_name = "file",
+        .short_name = 'f',
+        .value_name = "File",
+        .accept_value = [&](StringView str) {
+            pattern_file = str;
             return true;
         },
     });
@@ -78,7 +109,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
         .argument_mode = Core::ArgsParser::OptionArgumentMode::Required,
         .help_string = "Action to take for binary files ([binary], text, skip)",
         .long_name = "binary-mode",
-        .accept_value = [&](auto* str) {
+        .accept_value = [&](StringView str) {
             if ("text"sv == str)
                 binary_mode = BinaryFileMode::Text;
             else if ("binary"sv == str)
@@ -116,7 +147,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
         .long_name = "color",
         .short_name = 0,
         .value_name = "WHEN",
-        .accept_value = [&](auto* str) {
+        .accept_value = [&](StringView str) {
             if ("never"sv == str)
                 colored_output = false;
             else if ("always"sv == str)
@@ -129,6 +160,20 @@ ErrorOr<int> serenity_main(Main::Arguments args)
     args_parser.add_option(count_lines, "Output line count instead of line contents", "count", 'c');
     args_parser.add_positional_argument(files, "File(s) to process", "file", Core::ArgsParser::Required::No);
     args_parser.parse(args);
+
+    if (!pattern_file.is_empty()) {
+        auto file = TRY(Core::File::open(pattern_file, Core::File::OpenMode::Read));
+        auto buffered_file = TRY(Core::BufferedFile::create(move(file)));
+        Array<u8, PAGE_SIZE> buffer;
+        while (!buffered_file->is_eof()) {
+            auto next_pattern = TRY(buffered_file->read_line(buffer));
+            // Empty lines represent a valid pattern, but the trailing newline
+            // should be ignored.
+            if (next_pattern.is_empty() && buffered_file->is_eof())
+                break;
+            patterns.append(next_pattern.to_deprecated_string());
+        }
+    }
 
     // mock grep behavior: if -e is omitted, use first positional argument as pattern
     if (patterns.size() == 0 && files.size())
@@ -144,6 +189,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
     auto grep_logic = [&](auto&& regular_expressions) {
         for (auto& re : regular_expressions) {
             if (re.parser_result.error != regex::Error::NoError) {
+                warnln("regex parse error: {}", regex::get_error_string(re.parser_result.error));
                 return 1;
             }
         }
@@ -193,27 +239,16 @@ ErrorOr<int> serenity_main(Main::Arguments args)
 
         bool did_match_something = false;
 
-        auto handle_file = [&matches, binary_mode, suppress_errors, count_lines, quiet_mode,
-                               user_specified_multiple_files, &matched_line_count, &did_match_something](StringView filename, bool print_filename) -> bool {
-            auto file = Core::File::construct(filename);
-            if (!file->open(Core::OpenMode::ReadOnly)) {
-                if (!suppress_errors)
-                    warnln("Failed to open {}: {}", filename, file->error_string());
-                return false;
-            }
+        auto handle_file = [&matches, binary_mode, count_lines, quiet_mode,
+                               user_specified_multiple_files, &matched_line_count, &did_match_something](StringView filename, bool print_filename) -> ErrorOr<void> {
+            auto file = TRY(Core::File::open(filename, Core::File::OpenMode::Read));
+            auto buffered_file = TRY(Core::BufferedFile::create(move(file)));
 
-            auto file_size_or_error = Core::File::size(filename);
-            if (file_size_or_error.is_error()) {
-                if (!suppress_errors)
-                    warnln("Failed to retrieve size of {}: {}", filename, strerror(file_size_or_error.error().code()));
-                return false;
-            }
+            for (size_t line_number = 1; TRY(buffered_file->can_read_line()); ++line_number) {
+                Array<u8, PAGE_SIZE> buffer;
+                auto line = TRY(buffered_file->read_line(buffer));
 
-            auto file_size = file_size_or_error.release_value();
-
-            for (size_t line_number = 1; file->can_read_line(); ++line_number) {
-                auto line = file->read_line(file_size);
-                auto is_binary = memchr(line.characters(), 0, line.length()) != nullptr;
+                auto is_binary = line.contains('\0');
 
                 auto matched = matches(line, filename, line_number, print_filename, is_binary);
                 did_match_something = did_match_something || matched;
@@ -229,16 +264,18 @@ ErrorOr<int> serenity_main(Main::Arguments args)
                 matched_line_count = 0;
             }
 
-            return true;
+            return {};
         };
 
-        auto add_directory = [&handle_file, user_has_specified_files](DeprecatedString base, Optional<DeprecatedString> recursive, auto handle_directory) -> void {
+        auto add_directory = [&handle_file, user_has_specified_files, suppress_errors](DeprecatedString base, Optional<DeprecatedString> recursive, auto handle_directory) -> void {
             Core::DirIterator it(recursive.value_or(base), Core::DirIterator::Flags::SkipDots);
             while (it.has_next()) {
                 auto path = it.next_full_path();
-                if (!Core::File::is_directory(path)) {
+                if (!FileSystem::is_directory(path)) {
                     auto key = user_has_specified_files ? path.view() : path.substring_view(base.length() + 1, path.length() - base.length() - 1);
-                    handle_file(key, true);
+                    if (auto result = handle_file(key, true); result.is_error() && !suppress_errors)
+                        warnln("Failed with file {}: {}", key, result.release_error());
+
                 } else {
                     handle_directory(base, path, handle_directory);
                 }
@@ -284,8 +321,12 @@ ErrorOr<int> serenity_main(Main::Arguments args)
             } else {
                 bool print_filename { files.size() > 1 };
                 for (auto& filename : files) {
-                    if (!handle_file(filename, print_filename))
+                    auto result = handle_file(filename, print_filename);
+                    if (result.is_error()) {
+                        if (!suppress_errors)
+                            warnln("Failed with file {}: {}", filename, result.release_error());
                         return 1;
+                    }
                 }
             }
         }
@@ -296,14 +337,16 @@ ErrorOr<int> serenity_main(Main::Arguments args)
     if (use_ere) {
         Vector<Regex<PosixExtended>> regular_expressions;
         for (auto pattern : patterns) {
-            regular_expressions.append(Regex<PosixExtended>(pattern, options));
+            auto escaped_pattern = (fixed_strings) ? escape_characters(pattern, ere_special_characters) : pattern;
+            regular_expressions.append(Regex<PosixExtended>(escaped_pattern, options));
         }
         return grep_logic(regular_expressions);
     }
 
     Vector<Regex<PosixBasic>> regular_expressions;
     for (auto pattern : patterns) {
-        regular_expressions.append(Regex<PosixBasic>(pattern, options));
+        auto escaped_pattern = (fixed_strings) ? escape_characters(pattern, basic_special_characters) : pattern;
+        regular_expressions.append(Regex<PosixBasic>(escaped_pattern, options));
     }
     return grep_logic(regular_expressions);
 }

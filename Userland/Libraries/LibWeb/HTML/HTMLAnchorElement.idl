@@ -4,22 +4,28 @@
 // https://html.spec.whatwg.org/multipage/text-level-semantics.html#htmlanchorelement
 [Exposed=Window]
 interface HTMLAnchorElement : HTMLElement {
-    // FIXME: [HTMLConstructor] constructor();
 
-    [Reflect] attribute DOMString target;
-    [Reflect] attribute DOMString download;
-    [Reflect] attribute DOMString ping;
-    [Reflect] attribute DOMString rel;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString target;
+    [CEReactions, Reflect] attribute DOMString download;
+    [CEReactions, Reflect] attribute DOMString ping;
+    [CEReactions, Reflect] attribute DOMString rel;
     // FIXME: [SameObject, PutForwards=value] readonly attribute DOMTokenList relList;
-    [Reflect] attribute DOMString hreflang;
-    [Reflect] attribute DOMString type;
+    [CEReactions, Reflect] attribute DOMString hreflang;
+    [CEReactions, Reflect] attribute DOMString type;
+
+    [CEReactions] attribute DOMString text;
+
+    [CEReactions] attribute DOMString referrerPolicy;
 
     // Obsolete
-    [Reflect] attribute DOMString coords;
-    [Reflect] attribute DOMString charset;
-    [Reflect] attribute DOMString name;
-    [Reflect] attribute DOMString rev;
-    [Reflect] attribute DOMString shape;
+    [CEReactions, Reflect] attribute DOMString coords;
+    [CEReactions, Reflect] attribute DOMString charset;
+    [CEReactions, Reflect] attribute DOMString name;
+    [CEReactions, Reflect] attribute DOMString rev;
+    [CEReactions, Reflect] attribute DOMString shape;
+
 };
 
 HTMLAnchorElement includes HTMLHyperlinkElementUtils;

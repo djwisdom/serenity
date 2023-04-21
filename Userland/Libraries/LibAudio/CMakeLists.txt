@@ -1,11 +1,16 @@
 set(SOURCES
+    GenericTypes.cpp
     SampleFormats.cpp
     Loader.cpp
     WavLoader.cpp
     FlacLoader.cpp
     WavWriter.cpp
+    Metadata.cpp
     MP3Loader.cpp
+    QOALoader.cpp
+    QOATypes.cpp
     UserSampleQueue.cpp
+    VorbisComment.cpp
 )
 
 if (SERENITYOS)
@@ -17,4 +22,4 @@ if (SERENITYOS)
 endif()
 
 serenity_lib(LibAudio audio)
-target_link_libraries(LibAudio PRIVATE LibCore LibIPC LibThreading)
+target_link_libraries(LibAudio PRIVATE LibCore LibIPC LibThreading LibUnicode)

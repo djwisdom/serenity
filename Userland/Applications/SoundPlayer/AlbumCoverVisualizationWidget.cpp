@@ -8,7 +8,7 @@
 
 #include "AlbumCoverVisualizationWidget.h"
 #include <AK/LexicalPath.h>
-#include <LibCore/File.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGUI/Painter.h>
 #include <LibGfx/Rect.h>
 
@@ -36,7 +36,7 @@ void AlbumCoverVisualizationWidget::paint_event(GUI::PaintEvent& event)
         painter.draw_scaled_bitmap(fitted_rect, *cover, cover->rect(), 1.0f);
     } else {
         if (!m_serenity_bg)
-            m_serenity_bg = Gfx::Bitmap::try_load_from_file("/res/wallpapers/sunset-retro.png"sv).release_value_but_fixme_should_propagate_errors();
+            m_serenity_bg = Gfx::Bitmap::load_from_file("/res/wallpapers/sunset-retro.png"sv).release_value_but_fixme_should_propagate_errors();
         painter.draw_scaled_bitmap(frame_inner_rect(), *m_serenity_bg, m_serenity_bg->rect(), 1.0f);
     }
 }
@@ -48,8 +48,8 @@ ErrorOr<NonnullRefPtr<Gfx::Bitmap>> AlbumCoverVisualizationWidget::get_album_cov
     static constexpr auto possible_cover_filenames = Array { "cover.png"sv, "cover.jpg"sv };
     for (auto& it : possible_cover_filenames) {
         LexicalPath cover_path = LexicalPath::join(directory, it);
-        if (Core::File::exists(cover_path.string()))
-            return Gfx::Bitmap::try_load_from_file(cover_path.string());
+        if (FileSystem::exists(cover_path.string()))
+            return Gfx::Bitmap::load_from_file(cover_path.string());
     }
 
     return Error::from_string_literal("No cover file found");

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2022, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -10,17 +10,15 @@
 
 #include <AK/Assertions.h>
 #include <AK/BitCast.h>
-#include <AK/Concepts.h>
 #include <AK/DeprecatedString.h>
 #include <AK/Format.h>
 #include <AK/Forward.h>
 #include <AK/Function.h>
 #include <AK/Result.h>
+#include <AK/String.h>
 #include <AK/Types.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/GCPtr.h>
-#include <LibJS/Runtime/BigInt.h>
-#include <LibJS/Runtime/Utf16String.h>
 #include <math.h>
 
 // 2 ** 53 - 1
@@ -368,14 +366,15 @@ public:
 
     u64 encoded() const { return m_value.encoded; }
 
-    ThrowCompletionOr<DeprecatedString> to_string(VM&) const;
+    ThrowCompletionOr<String> to_string(VM&) const;
+    ThrowCompletionOr<DeprecatedString> to_deprecated_string(VM&) const;
     ThrowCompletionOr<Utf16String> to_utf16_string(VM&) const;
-    ThrowCompletionOr<PrimitiveString*> to_primitive_string(VM&);
+    ThrowCompletionOr<NonnullGCPtr<PrimitiveString>> to_primitive_string(VM&);
     ThrowCompletionOr<Value> to_primitive(VM&, PreferredType preferred_type = PreferredType::Default) const;
-    ThrowCompletionOr<Object*> to_object(VM&) const;
+    ThrowCompletionOr<NonnullGCPtr<Object>> to_object(VM&) const;
     ThrowCompletionOr<Value> to_numeric(VM&) const;
     ThrowCompletionOr<Value> to_number(VM&) const;
-    ThrowCompletionOr<BigInt*> to_bigint(VM&) const;
+    ThrowCompletionOr<NonnullGCPtr<BigInt>> to_bigint(VM&) const;
     ThrowCompletionOr<i64> to_bigint_int64(VM&) const;
     ThrowCompletionOr<u64> to_bigint_uint64(VM&) const;
     ThrowCompletionOr<double> to_double(VM&) const;
@@ -393,9 +392,9 @@ public:
     bool to_boolean() const;
 
     ThrowCompletionOr<Value> get(VM&, PropertyKey const&) const;
-    ThrowCompletionOr<FunctionObject*> get_method(VM&, PropertyKey const&) const;
+    ThrowCompletionOr<GCPtr<FunctionObject>> get_method(VM&, PropertyKey const&) const;
 
-    DeprecatedString to_string_without_side_effects() const;
+    ErrorOr<String> to_string_without_side_effects() const;
 
     Value value_or(Value fallback) const
     {
@@ -404,7 +403,7 @@ public:
         return *this;
     }
 
-    DeprecatedString typeof() const;
+    StringView typeof() const;
 
     bool operator==(Value const&) const;
 
@@ -526,12 +525,6 @@ inline Value js_negative_infinity()
     return Value(-INFINITY);
 }
 
-inline void Cell::Visitor::visit(Value value)
-{
-    if (value.is_cell())
-        visit_impl(value.as_cell());
-}
-
 ThrowCompletionOr<Value> greater_than(VM&, Value lhs, Value rhs);
 ThrowCompletionOr<Value> greater_than_equals(VM&, Value lhs, Value rhs);
 ThrowCompletionOr<Value> less_than(VM&, Value lhs, Value rhs);
@@ -568,8 +561,9 @@ enum class NumberToStringMode {
     WithExponent,
     WithoutExponent,
 };
-DeprecatedString number_to_string(double, NumberToStringMode = NumberToStringMode::WithExponent);
-Optional<Value> string_to_number(StringView);
+ErrorOr<String> number_to_string(double, NumberToStringMode = NumberToStringMode::WithExponent);
+DeprecatedString number_to_deprecated_string(double, NumberToStringMode = NumberToStringMode::WithExponent);
+double string_to_number(StringView);
 
 inline bool Value::operator==(Value const& value) const { return same_value(*this, value); }
 
@@ -688,7 +682,9 @@ template<>
 struct Formatter<JS::Value> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, JS::Value value)
     {
-        return Formatter<StringView>::format(builder, value.is_empty() ? "<empty>" : value.to_string_without_side_effects());
+        if (value.is_empty())
+            return Formatter<StringView>::format(builder, "<empty>"sv);
+        return Formatter<StringView>::format(builder, TRY(value.to_string_without_side_effects()));
     }
 };
 

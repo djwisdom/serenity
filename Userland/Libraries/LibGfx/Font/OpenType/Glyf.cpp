@@ -208,7 +208,8 @@ Optional<Loca> Loca::from_slice(ReadonlyBytes slice, u32 num_glyphs, IndexToLocF
 
 u32 Loca::get_glyph_offset(u32 glyph_id) const
 {
-    VERIFY(glyph_id < m_num_glyphs);
+    // NOTE: The value of n is numGlyphs + 1.
+    VERIFY(glyph_id <= m_num_glyphs);
     switch (m_index_to_loc_format) {
     case IndexToLocFormat::Offset16:
         return ((u32)be_u16(m_slice.offset_pointer(glyph_id * 2))) * 2;
@@ -248,6 +249,13 @@ static void get_ttglyph_offsets(ReadonlyBytes slice, u32 num_points, u32 flags_o
     }
     *x_offset = flags_offset + flags_size;
     *y_offset = *x_offset + x_size;
+}
+
+ReadonlyBytes Glyf::Glyph::program() const
+{
+    auto instructions_start = m_num_contours * 2;
+    u16 num_instructions = be_u16(m_slice.offset_pointer(instructions_start));
+    return m_slice.slice(instructions_start + 2, num_instructions);
 }
 
 void Glyf::Glyph::rasterize_impl(Gfx::PathRasterizer& rasterizer, Gfx::AffineTransform const& transform) const
@@ -346,18 +354,23 @@ void Glyf::Glyph::rasterize_impl(Gfx::PathRasterizer& rasterizer, Gfx::AffineTra
     rasterizer.draw_path(path);
 }
 
-RefPtr<Gfx::Bitmap> Glyf::Glyph::rasterize_simple(i16 font_ascender, i16 font_descender, float x_scale, float y_scale) const
+RefPtr<Gfx::Bitmap> Glyf::Glyph::rasterize_simple(i16 font_ascender, i16 font_descender, float x_scale, float y_scale, Gfx::GlyphSubpixelOffset subpixel_offset) const
 {
     u32 width = (u32)(ceilf((m_xmax - m_xmin) * x_scale)) + 2;
     u32 height = (u32)(ceilf((font_ascender - font_descender) * y_scale)) + 2;
     Gfx::PathRasterizer rasterizer(Gfx::IntSize(width, height));
-    auto affine = Gfx::AffineTransform().scale(x_scale, -y_scale).translate(-m_xmin, -font_ascender);
+    auto affine = Gfx::AffineTransform()
+                      .translate(subpixel_offset.to_float_point())
+                      .scale(x_scale, -y_scale)
+                      .translate(-m_xmin, -font_ascender);
     rasterize_impl(rasterizer, affine);
     return rasterizer.accumulate();
 }
 
-Glyf::Glyph Glyf::glyph(u32 offset) const
+Optional<Glyf::Glyph> Glyf::glyph(u32 offset) const
 {
+    if (offset + sizeof(GlyphHeader) > m_slice.size())
+        return {};
     VERIFY(m_slice.size() >= offset + sizeof(GlyphHeader));
     auto const& glyph_header = *bit_cast<GlyphHeader const*>(m_slice.offset_pointer(offset));
     i16 num_contours = glyph_header.number_of_contours;

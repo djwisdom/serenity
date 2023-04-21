@@ -10,6 +10,7 @@
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/PropertyDescriptor.h>
 #include <LibJS/Runtime/PropertyKey.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/CrossOrigin/AbstractOperations.h>
 #include <LibWeb/HTML/CrossOrigin/Reporting.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
@@ -72,7 +73,7 @@ JS::ThrowCompletionOr<Optional<JS::PropertyDescriptor>> WindowProxy::internal_ge
         auto index = property_key.as_number();
 
         // 2. Let maxProperties be the number of document-tree child browsing contexts of W.
-        auto max_properties = TRY(m_window->document_tree_child_browsing_context_count());
+        auto max_properties = m_window->document_tree_child_browsing_context_count();
 
         // 3. Let value be undefined.
         Optional<JS::Value> value;
@@ -227,7 +228,7 @@ JS::ThrowCompletionOr<JS::MarkedVector<JS::Value>> WindowProxy::internal_own_pro
     auto keys = JS::MarkedVector<JS::Value> { vm.heap() };
 
     // 3. Let maxProperties be the number of document-tree child browsing contexts of W.
-    auto max_properties = TRY(m_window->document_tree_child_browsing_context_count());
+    auto max_properties = m_window->document_tree_child_browsing_context_count();
 
     // 4. Let index be 0.
     // 5. Repeat while index < maxProperties,
@@ -258,6 +259,11 @@ void WindowProxy::visit_edges(JS::Cell::Visitor& visitor)
 void WindowProxy::set_window(Badge<BrowsingContext>, JS::NonnullGCPtr<Window> window)
 {
     m_window = window;
+}
+
+JS::NonnullGCPtr<BrowsingContext> WindowProxy::associated_browsing_context() const
+{
+    return *m_window->associated_document().browsing_context();
 }
 
 }

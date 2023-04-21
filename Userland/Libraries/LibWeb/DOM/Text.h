@@ -6,8 +6,8 @@
 
 #pragma once
 
+#include <AK/DeprecatedFlyString.h>
 #include <AK/DeprecatedString.h>
-#include <AK/FlyString.h>
 #include <LibWeb/DOM/CharacterData.h>
 
 namespace Web::DOM {
@@ -18,10 +18,10 @@ class Text : public CharacterData {
 public:
     virtual ~Text() override = default;
 
-    static JS::NonnullGCPtr<Text> construct_impl(JS::Realm& realm, DeprecatedString const& data);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<Text>> construct_impl(JS::Realm& realm, DeprecatedString const& data);
 
     // ^Node
-    virtual FlyString node_name() const override { return "#text"; }
+    virtual DeprecatedFlyString node_name() const override { return "#text"; }
     virtual bool is_editable() const override { return m_always_editable || CharacterData::is_editable(); }
 
     void set_always_editable(bool b) { m_always_editable = b; }
@@ -38,6 +38,7 @@ protected:
     Text(Document&, DeprecatedString const&);
     Text(Document&, NodeType, DeprecatedString const&);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:

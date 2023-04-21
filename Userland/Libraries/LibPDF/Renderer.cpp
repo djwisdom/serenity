@@ -35,13 +35,6 @@ static void rect_path(Gfx::Path& path, float x, float y, float width, float heig
     path.close();
 }
 
-static Gfx::Path rect_path(float x, float y, float width, float height)
-{
-    Gfx::Path path;
-    rect_path(path, x, y, width, height);
-    return path;
-}
-
 template<typename T>
 static void rect_path(Gfx::Path& path, Gfx::Rect<T> rect)
 {
@@ -49,7 +42,7 @@ static void rect_path(Gfx::Path& path, Gfx::Rect<T> rect)
 }
 
 template<typename T>
-static Gfx::Path rect_path(Gfx::Rect<T> rect)
+static Gfx::Path rect_path(Gfx::Rect<T> const& rect)
 {
     Gfx::Path path;
     rect_path(path, rect);
@@ -84,7 +77,7 @@ Renderer::Renderer(RefPtr<Document> document, Page const& page, RefPtr<Gfx::Bitm
     userspace_matrix.multiply(horizontal_reflection_matrix);
     userspace_matrix.translate(0.0f, -height);
 
-    auto initial_clipping_path = rect_path(0, 0, width, height);
+    auto initial_clipping_path = rect_path(userspace_matrix.map(Gfx::FloatRect(0, 0, width, height)));
     m_graphics_state_stack.append(GraphicsState { userspace_matrix, { initial_clipping_path, initial_clipping_path } });
 
     m_bitmap->fill(Gfx::Color::NamedColor::White);
@@ -92,6 +85,9 @@ Renderer::Renderer(RefPtr<Document> document, Page const& page, RefPtr<Gfx::Bitm
 
 PDFErrorsOr<void> Renderer::render()
 {
+    if (m_page.contents.is_null())
+        return {};
+
     // Use our own vector, as the /Content can be an array with multiple
     // streams which gets concatenated
     // FIXME: Text operators are supposed to only have effects on the current
@@ -201,7 +197,7 @@ RENDERER_HANDLER(set_dash_pattern)
     Vector<int> pattern;
     for (auto& element : *dash_array)
         pattern.append(element.to_int());
-    state().line_dash_pattern = LineDashPattern { pattern, args[1].get<int>() };
+    state().line_dash_pattern = LineDashPattern { pattern, args[1].to_int() };
     return {};
 }
 
@@ -245,7 +241,7 @@ RENDERER_HANDLER(path_cubic_bezier_curve_no_first_control)
 {
     VERIFY(args.size() == 4);
     VERIFY(!m_current_path.segments().is_empty());
-    auto current_point = m_current_path.segments().rbegin()->point();
+    auto current_point = (*m_current_path.segments().rbegin())->point();
     m_current_path.cubic_bezier_curve_to(
         current_point,
         map(args[0].to_float(), args[1].to_float()),
@@ -285,7 +281,7 @@ RENDERER_HANDLER(path_append_rect)
 
 void Renderer::begin_path_paint()
 {
-    auto bounding_box = map(state().clipping_paths.current.bounding_box());
+    auto bounding_box = state().clipping_paths.current.bounding_box();
     m_painter.clear_clip_rect();
     if (m_rendering_preferences.show_clipping_paths) {
         m_painter.stroke_path(rect_path(bounding_box), Color::Black, 1);
@@ -303,7 +299,7 @@ void Renderer::end_path_paint()
 RENDERER_HANDLER(path_stroke)
 {
     begin_path_paint();
-    m_anti_aliasing_painter.stroke_path(m_current_path, state().stroke_color, state().line_width);
+    m_anti_aliasing_painter.stroke_path(m_current_path, state().stroke_color, state().ctm.x_scale() * state().line_width);
     end_path_paint();
     return {};
 }
@@ -338,13 +334,13 @@ RENDERER_HANDLER(path_fill_evenodd)
 
 RENDERER_HANDLER(path_fill_stroke_nonzero)
 {
-    m_anti_aliasing_painter.stroke_path(m_current_path, state().stroke_color, state().line_width);
+    m_anti_aliasing_painter.stroke_path(m_current_path, state().stroke_color, state().ctm.x_scale() * state().line_width);
     return handle_path_fill_nonzero(args);
 }
 
 RENDERER_HANDLER(path_fill_stroke_evenodd)
 {
-    m_anti_aliasing_painter.stroke_path(m_current_path, state().stroke_color, state().line_width);
+    m_anti_aliasing_painter.stroke_path(m_current_path, state().stroke_color, state().ctm.x_scale() * state().line_width);
     return handle_path_fill_evenodd(args);
 }
 
@@ -490,7 +486,7 @@ RENDERER_HANDLER(text_next_line)
 RENDERER_HANDLER(text_show_string)
 {
     auto text = MUST(m_document->resolve_to<StringObject>(args[0]))->string();
-    show_text(text);
+    TRY(show_text(text));
     return {};
 }
 
@@ -517,7 +513,7 @@ RENDERER_HANDLER(text_show_string_array)
             auto shift = next_shift / 1000.0f;
             m_text_matrix.translate(-shift * text_state().font_size * text_state().horizontal_scaling, 0.0f);
             auto str = element.get<NonnullRefPtr<Object>>()->cast<StringObject>()->string();
-            show_text(str);
+            TRY(show_text(str));
         }
     }
 
@@ -626,8 +622,8 @@ RENDERER_HANDLER(paint_xobject)
     VERIFY(args.size() > 0);
     auto resources = extra_resources.value_or(m_page.resources);
     auto xobject_name = args[0].get<NonnullRefPtr<Object>>()->cast<NameObject>()->name();
-    auto xobjects_dict = MUST(resources->get_dict(m_document, CommonNames::XObject));
-    auto xobject = MUST(xobjects_dict->get_stream(m_document, xobject_name));
+    auto xobjects_dict = TRY(resources->get_dict(m_document, CommonNames::XObject));
+    auto xobject = TRY(xobjects_dict->get_stream(m_document, xobject_name));
 
     Optional<NonnullRefPtr<DictObject>> xobject_resources {};
     if (xobject->dict()->contains(CommonNames::Resources)) {
@@ -731,39 +727,23 @@ PDFErrorOr<void> Renderer::set_graphics_state_from_dict(NonnullRefPtr<DictObject
     return {};
 }
 
-void Renderer::show_text(DeprecatedString const& string)
+PDFErrorOr<void> Renderer::show_text(DeprecatedString const& string)
 {
+    if (!text_state().font)
+        return Error::rendering_unsupported_error("Can't draw text because an invalid font was in use");
+
     auto& text_rendering_matrix = calculate_text_rendering_matrix();
 
     auto font_size = text_rendering_matrix.x_scale() * text_state().font_size;
 
-    auto glyph_position = text_rendering_matrix.map(Gfx::FloatPoint { 0.0f, 0.0f });
-
-    auto original_position = glyph_position;
-
-    for (auto char_code : string.bytes()) {
-        auto code_point = text_state().font->char_code_to_code_point(char_code);
-        auto char_width = text_state().font->get_char_width(char_code);
-        auto glyph_width = char_width * font_size;
-
-        if (code_point != 0x20)
-            text_state().font->draw_glyph(m_painter, glyph_position.to_type<int>(), glyph_width, char_code, state().paint_color);
-
-        auto tx = glyph_width;
-        tx += text_state().character_spacing;
-
-        if (code_point == ' ')
-            tx += text_state().word_spacing;
-
-        tx *= text_state().horizontal_scaling;
-
-        glyph_position += { tx, 0.0f };
-    }
+    auto start_position = text_rendering_matrix.map(Gfx::FloatPoint { 0.0f, 0.0f });
+    auto end_position = TRY(text_state().font->draw_string(m_painter, start_position, string, state().paint_color, font_size, text_state().character_spacing, text_state().horizontal_scaling));
 
     // Update text matrix
-    auto delta_x = glyph_position.x() - original_position.x();
+    auto delta_x = end_position.x() - start_position.x();
     m_text_rendering_matrix_is_dirty = true;
     m_text_matrix.translate(delta_x / text_rendering_matrix.x_scale(), 0.0f);
+    return {};
 }
 
 PDFErrorOr<NonnullRefPtr<Gfx::Bitmap>> Renderer::load_image(NonnullRefPtr<StreamObject> image)
@@ -773,7 +753,7 @@ PDFErrorOr<NonnullRefPtr<Gfx::Bitmap>> Renderer::load_image(NonnullRefPtr<Stream
     auto width = image_dict->get_value(CommonNames::Width).get<int>();
     auto height = image_dict->get_value(CommonNames::Height).get<int>();
 
-    auto is_filter = [&](FlyString const& name) {
+    auto is_filter = [&](DeprecatedFlyString const& name) {
         if (filter_object->is<NameObject>())
             return filter_object->cast<NameObject>()->name() == name;
         auto filters = filter_object->cast<ArrayObject>();
@@ -812,10 +792,10 @@ PDFErrorOr<NonnullRefPtr<Gfx::Bitmap>> Renderer::load_image(NonnullRefPtr<Stream
 
     if (is_filter(CommonNames::DCTDecode)) {
         // TODO: stream objects could store Variant<bytes/Bitmap> to avoid seialisation/deserialisation here
-        return TRY(Gfx::Bitmap::try_create_from_serialized_bytes(image->bytes()));
+        return TRY(Gfx::Bitmap::create_from_serialized_bytes(image->bytes()));
     }
 
-    auto bitmap = MUST(Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, { width, height }));
+    auto bitmap = MUST(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { width, height }));
     int x = 0;
     int y = 0;
     int const n_components = color_space->number_of_components();

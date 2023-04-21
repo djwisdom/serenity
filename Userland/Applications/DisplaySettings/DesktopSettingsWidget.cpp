@@ -15,15 +15,17 @@
 
 namespace DisplaySettings {
 
-DesktopSettingsWidget::DesktopSettingsWidget()
+ErrorOr<NonnullRefPtr<DesktopSettingsWidget>> DesktopSettingsWidget::try_create()
 {
-    create_frame();
-    load_current_settings();
+    auto desktop_settings_widget = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) DesktopSettingsWidget()));
+    TRY(desktop_settings_widget->create_frame());
+    desktop_settings_widget->load_current_settings();
+    return desktop_settings_widget;
 }
 
-void DesktopSettingsWidget::create_frame()
+ErrorOr<void> DesktopSettingsWidget::create_frame()
 {
-    load_from_gml(desktop_settings_gml);
+    TRY(load_from_gml(desktop_settings_gml));
 
     m_workspace_rows_spinbox = *find_descendant_of_type_named<GUI::SpinBox>("workspace_rows_spinbox");
     m_workspace_rows_spinbox->on_change = [&](auto) {
@@ -36,6 +38,8 @@ void DesktopSettingsWidget::create_frame()
 
     auto& keyboard_shortcuts_label = *find_descendant_of_type_named<GUI::Label>("keyboard_shortcuts_label");
     keyboard_shortcuts_label.set_text("\xE2\x84\xB9\tCtrl+Alt+{Shift}+Arrows moves between workspaces");
+
+    return {};
 }
 
 void DesktopSettingsWidget::load_current_settings()
@@ -52,8 +56,7 @@ void DesktopSettingsWidget::apply_settings()
     auto& desktop = GUI::Desktop::the();
     if (workspace_rows != desktop.workspace_rows() || workspace_columns != desktop.workspace_columns()) {
         if (!GUI::ConnectionToWindowServer::the().apply_workspace_settings(workspace_rows, workspace_columns, true)) {
-            GUI::MessageBox::show(window(), DeprecatedString::formatted("Error applying workspace settings"),
-                "Workspace settings"sv, GUI::MessageBox::Type::Error);
+            GUI::MessageBox::show_error(window(), "Error applying workspace settings"sv);
         }
     }
 }

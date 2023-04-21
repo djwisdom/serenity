@@ -11,22 +11,24 @@
 namespace JS {
 
 ArgumentsObject::ArgumentsObject(Realm& realm, Environment& environment)
-    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, realm.intrinsics().object_prototype())
     , m_environment(environment)
 {
 }
 
-void ArgumentsObject::initialize(Realm& realm)
+ThrowCompletionOr<void> ArgumentsObject::initialize(Realm& realm)
 {
-    Base::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     set_has_parameter_map();
     m_parameter_map = Object::create(realm, nullptr);
+
+    return {};
 }
 
 void ArgumentsObject::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(&m_environment);
+    visitor.visit(m_environment);
     visitor.visit(m_parameter_map);
 }
 

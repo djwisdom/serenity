@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/FlyString.h>
 #include <LibWeb/DOM/Event.h>
 
 namespace Web::XHR {
@@ -23,8 +24,8 @@ class ProgressEvent final : public DOM::Event {
     WEB_PLATFORM_OBJECT(ProgressEvent, DOM::Event);
 
 public:
-    static ProgressEvent* create(JS::Realm&, FlyString const& event_name, ProgressEventInit const& event_init);
-    static ProgressEvent* construct_impl(JS::Realm&, FlyString const& event_name, ProgressEventInit const& event_init);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<ProgressEvent>> create(JS::Realm&, FlyString const& event_name, ProgressEventInit const& event_init);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<ProgressEvent>> construct_impl(JS::Realm&, FlyString const& event_name, ProgressEventInit const& event_init);
 
     virtual ~ProgressEvent() override;
 
@@ -34,6 +35,8 @@ public:
 
 private:
     ProgressEvent(JS::Realm&, FlyString const& event_name, ProgressEventInit const& event_init);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 
     bool m_length_computable { false };
     u64 m_loaded { 0 };

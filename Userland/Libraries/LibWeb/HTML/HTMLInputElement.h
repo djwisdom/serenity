@@ -78,6 +78,9 @@ public:
     bool checked_binding() const { return checked(); }
     void set_checked_binding(bool);
 
+    bool indeterminate() const { return m_indeterminate; };
+    void set_indeterminate(bool);
+
     void did_edit_text_node(Badge<BrowsingContext>);
 
     JS::GCPtr<FileAPI::FileList> files();
@@ -87,6 +90,13 @@ public:
     // https://html.spec.whatwg.org/multipage/input.html#update-the-file-selection
     void update_the_file_selection(JS::NonnullGCPtr<FileAPI::FileList>);
 
+    WebIDL::ExceptionOr<bool> check_validity();
+    WebIDL::ExceptionOr<bool> report_validity();
+    void set_custom_validity(DeprecatedString const&);
+
+    WebIDL::ExceptionOr<void> select();
+    WebIDL::ExceptionOr<void> set_selection_range(u32 start, u32 end, DeprecatedString const& direction);
+
     WebIDL::ExceptionOr<void> show_picker();
 
     // ^EventTarget
@@ -94,8 +104,8 @@ public:
     virtual bool is_focusable() const override { return m_type != TypeAttributeState::Hidden; }
 
     // ^HTMLElement
-    virtual void parse_attribute(FlyString const&, DeprecatedString const&) override;
-    virtual void did_remove_attribute(FlyString const&) override;
+    virtual void parse_attribute(DeprecatedFlyString const&, DeprecatedString const&) override;
+    virtual void did_remove_attribute(DeprecatedFlyString const&) override;
 
     // ^FormAssociatedElement
     // https://html.spec.whatwg.org/multipage/forms.html#category-listed
@@ -110,14 +120,21 @@ public:
     // https://html.spec.whatwg.org/multipage/forms.html#category-autocapitalize
     virtual bool is_auto_capitalize_inheriting() const override { return true; }
 
+    virtual void reset_algorithm() override;
+
     virtual void form_associated_element_was_inserted() override;
 
     // ^HTMLElement
     // https://html.spec.whatwg.org/multipage/forms.html#category-label
     virtual bool is_labelable() const override { return type_state() != TypeAttributeState::Hidden; }
 
+    virtual Optional<ARIA::Role> default_role() const override;
+
 private:
     HTMLInputElement(DOM::Document&, DOM::QualifiedName);
+
+    // ^DOM::Node
+    virtual bool is_html_input_element() const final { return true; }
 
     // ^DOM::EventTarget
     virtual void did_receive_focus() override;
@@ -128,11 +145,12 @@ private:
     // ^DOM::Element
     virtual i32 default_tab_index_value() const override;
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     static TypeAttributeState parse_type_attribute(StringView);
     void create_shadow_tree_if_needed();
-    void run_input_activation_behavior();
+    ErrorOr<void> run_input_activation_behavior();
     void set_checked_within_group();
 
     // https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
@@ -140,6 +158,9 @@ private:
 
     JS::GCPtr<DOM::Text> m_text_node;
     bool m_checked { false };
+
+    // https://html.spec.whatwg.org/multipage/input.html#dom-input-indeterminate
+    bool m_indeterminate { false };
 
     // https://html.spec.whatwg.org/multipage/input.html#concept-input-checked-dirty-flag
     bool m_dirty_checkedness { false };
@@ -149,6 +170,7 @@ private:
 
     // https://html.spec.whatwg.org/multipage/input.html#the-input-element:legacy-pre-activation-behavior
     bool m_before_legacy_pre_activation_behavior_checked { false };
+    bool m_before_legacy_pre_activation_behavior_indeterminate { false };
     JS::GCPtr<HTMLInputElement> m_legacy_pre_activation_behavior_checked_element_in_group;
 
     // https://html.spec.whatwg.org/multipage/input.html#concept-input-type-file-selected
@@ -158,4 +180,9 @@ private:
     DeprecatedString m_value;
 };
 
+}
+
+namespace Web::DOM {
+template<>
+inline bool Node::fast_is<HTML::HTMLInputElement>() const { return is_html_input_element(); }
 }

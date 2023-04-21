@@ -7,6 +7,7 @@
 #include <LibCore/ArgsParser.h>
 #include <LibCore/Directory.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/Process.h>
 #include <LibCore/StandardPaths.h>
 #include <LibCore/System.h>
 #include <LibCore/TCPServer.h>
@@ -15,27 +16,21 @@
 
 static ErrorOr<pid_t> launch_browser(DeprecatedString const& socket_path)
 {
-    char const* argv[] = {
-        "/bin/Browser",
-        "--webdriver-content-path",
-        socket_path.characters(),
-        nullptr,
-    };
-
-    return Core::System::posix_spawn("/bin/Browser"sv, nullptr, nullptr, const_cast<char**>(argv), environ);
+    return Core::Process::spawn("/bin/Browser"sv,
+        Array {
+            "--webdriver-content-path",
+            socket_path.characters(),
+        });
 }
 
 static ErrorOr<pid_t> launch_headless_browser(DeprecatedString const& socket_path)
 {
-    char const* argv[] = {
-        "/bin/headless-browser",
-        "--webdriver-ipc-path",
-        socket_path.characters(),
-        "about:blank",
-        nullptr,
-    };
-
-    return Core::System::posix_spawn("/bin/headless-browser"sv, nullptr, nullptr, const_cast<char**>(argv), environ);
+    return Core::Process::spawn("/bin/headless-browser"sv,
+        Array {
+            "--webdriver-ipc-path",
+            socket_path.characters(),
+            "about:blank",
+        });
 }
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
@@ -79,7 +74,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return;
         }
 
-        auto maybe_buffered_socket = Core::Stream::BufferedTCPSocket::create(maybe_client_socket.release_value());
+        auto maybe_buffered_socket = Core::BufferedTCPSocket::create(maybe_client_socket.release_value());
         if (maybe_buffered_socket.is_error()) {
             warnln("Could not obtain a buffered socket for the client: {}", maybe_buffered_socket.error());
             return;
@@ -100,7 +95,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/bin/headless-browser", "rx"));
     TRY(Core::System::unveil("/etc/timezone", "r"));
     TRY(Core::System::unveil("/res/icons", "r"));
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil(webdriver_socket_path, "rwc"sv));
     TRY(Core::System::unveil(nullptr, nullptr));
 

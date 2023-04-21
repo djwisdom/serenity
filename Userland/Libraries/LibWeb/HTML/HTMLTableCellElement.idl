@@ -4,21 +4,23 @@
 [Exposed=Window]
 interface HTMLTableCellElement : HTMLElement {
 
-    attribute unsigned long colSpan;
-    attribute unsigned long rowSpan;
-    [Reflect] attribute DOMString headers;
-    [Reflect] attribute DOMString abbr;
+    [HTMLConstructor] constructor();
 
-    [Reflect] attribute DOMString align;
-    [Reflect] attribute DOMString axis;
-    [Reflect] attribute DOMString height;
-    [Reflect] attribute DOMString width;
+    [CEReactions] attribute unsigned long colSpan;
+    [CEReactions] attribute unsigned long rowSpan;
+    [CEReactions, Reflect] attribute DOMString headers;
+    [CEReactions, Reflect] attribute DOMString abbr;
 
-    [Reflect=char] attribute DOMString ch;
-    [Reflect=charoff] attribute DOMString chOff;
-    [Reflect=nowrap] attribute boolean noWrap;
-    [Reflect=valign] attribute DOMString vAlign;
+    [CEReactions, Reflect] attribute DOMString align;
+    [CEReactions, Reflect] attribute DOMString axis;
+    [CEReactions, Reflect] attribute DOMString height;
+    [CEReactions, Reflect] attribute DOMString width;
 
-    [LegacyNullToEmptyString, Reflect=bgcolor] attribute DOMString bgColor;
+    [CEReactions, Reflect=char] attribute DOMString ch;
+    [CEReactions, Reflect=charoff] attribute DOMString chOff;
+    [CEReactions, Reflect=nowrap] attribute boolean noWrap;
+    [CEReactions, Reflect=valign] attribute DOMString vAlign;
+
+    [CEReactions, LegacyNullToEmptyString, Reflect=bgcolor] attribute DOMString bgColor;
 
 };

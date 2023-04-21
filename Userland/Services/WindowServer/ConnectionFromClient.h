@@ -83,7 +83,7 @@ public:
     void notify_about_theme_change();
 
 private:
-    explicit ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSocket>, int client_id);
+    explicit ConnectionFromClient(NonnullOwnPtr<Core::LocalSocket>, int client_id);
 
     // ^ConnectionFromClient
     virtual void die() override;
@@ -93,7 +93,8 @@ private:
     void set_unresponsive(bool);
     void destroy_window(Window&, Vector<i32>& destroyed_window_ids);
 
-    virtual void create_menu(i32, DeprecatedString const&) override;
+    virtual void create_menu(i32, String const&) override;
+    virtual void set_menu_name(i32, String const&) override;
     virtual void destroy_menu(i32) override;
     virtual void add_menu(i32, i32) override;
     virtual void add_menu_item(i32, i32, i32, DeprecatedString const&, bool, bool, bool, bool, bool, DeprecatedString const&, Gfx::ShareableBitmap const&, bool) override;
@@ -121,7 +122,7 @@ private:
     virtual void did_finish_painting(i32, Vector<Gfx::IntRect> const&) override;
     virtual void set_global_mouse_tracking(bool) override;
     virtual void set_window_opacity(i32, float) override;
-    virtual void set_window_backing_store(i32, i32, i32, IPC::File const&, i32, bool, Gfx::IntSize, bool) override;
+    virtual void set_window_backing_store(i32, i32, i32, IPC::File const&, i32, bool, Gfx::IntSize, Gfx::IntSize, bool) override;
     virtual void set_window_has_alpha_channel(i32, bool) override;
     virtual void set_window_alpha_hit_threshold(i32, float) override;
     virtual void move_window_to_front(i32) override;
@@ -145,12 +146,13 @@ private:
     virtual void set_window_icon_bitmap(i32, Gfx::ShareableBitmap const&) override;
     virtual Messages::WindowServer::StartDragResponse start_drag(DeprecatedString const&, HashMap<DeprecatedString, ByteBuffer> const&, Gfx::ShareableBitmap const&) override;
     virtual void set_accepts_drag(bool) override;
-    virtual Messages::WindowServer::SetSystemThemeResponse set_system_theme(DeprecatedString const&, DeprecatedString const&, bool keep_desktop_background) override;
+    virtual Messages::WindowServer::SetSystemThemeResponse set_system_theme(DeprecatedString const&, DeprecatedString const&, bool keep_desktop_background, Optional<DeprecatedString> const& color_scheme_path) override;
     virtual Messages::WindowServer::GetSystemThemeResponse get_system_theme() override;
     virtual Messages::WindowServer::SetSystemThemeOverrideResponse set_system_theme_override(Core::AnonymousBuffer const&) override;
     virtual Messages::WindowServer::GetSystemThemeOverrideResponse get_system_theme_override() override;
     virtual void clear_system_theme_override() override;
     virtual Messages::WindowServer::IsSystemThemeOverriddenResponse is_system_theme_overridden() override;
+    virtual Messages::WindowServer::GetPreferredColorSchemeResponse get_preferred_color_scheme() override;
     virtual void apply_cursor_theme(DeprecatedString const&) override;
     virtual void set_cursor_highlight_radius(int radius) override;
     virtual Messages::WindowServer::GetCursorHighlightRadiusResponse get_cursor_highlight_radius() override;
@@ -158,7 +160,7 @@ private:
     virtual Messages::WindowServer::GetCursorHighlightColorResponse get_cursor_highlight_color() override;
     virtual Messages::WindowServer::GetCursorThemeResponse get_cursor_theme() override;
     virtual Messages::WindowServer::SetSystemFontsResponse set_system_fonts(DeprecatedString const&, DeprecatedString const&, DeprecatedString const&) override;
-    virtual void set_system_effects(Vector<bool> const&, u8) override;
+    virtual void set_system_effects(Vector<bool> const&, u8, u8) override;
     virtual void set_window_base_size_and_size_increment(i32, Gfx::IntSize, Gfx::IntSize) override;
     virtual void set_window_resize_aspect_ratio(i32, Optional<Gfx::IntSize> const&) override;
     virtual void enable_display_link() override;

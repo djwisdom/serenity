@@ -11,7 +11,7 @@
 #include <AK/DeprecatedString.h>
 #include <AK/Error.h>
 #include <AK/Span.h>
-#include <sys/ioctl_numbers.h>
+#include <sys/ioctl.h>
 
 namespace WindowServer {
 class HardwareScreenBackend : public ScreenBackend {
@@ -24,7 +24,7 @@ public:
 
     virtual void set_head_buffer(int index) override;
 
-    virtual ErrorOr<void> flush_framebuffer_rects(int buffer_index, Span<FBRect const> rects) override;
+    virtual ErrorOr<void> flush_framebuffer_rects(int buffer_index, ReadonlySpan<FBRect> rects) override;
 
     virtual ErrorOr<void> flush_framebuffer() override;
 

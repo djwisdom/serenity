@@ -5,7 +5,7 @@
  */
 
 #include <AK/JsonObjectSerializer.h>
-#include <Kernel/Devices/HID/HIDManagement.h>
+#include <Kernel/Devices/HID/Management.h>
 #include <Kernel/FileSystem/SysFS/Subsystems/Kernel/Keymap.h>
 #include <Kernel/Sections.h>
 
@@ -16,9 +16,9 @@ UNMAP_AFTER_INIT SysFSKeymap::SysFSKeymap(SysFSDirectory const& parent_directory
 {
 }
 
-UNMAP_AFTER_INIT NonnullLockRefPtr<SysFSKeymap> SysFSKeymap::must_create(SysFSDirectory const& parent_directory)
+UNMAP_AFTER_INIT NonnullRefPtr<SysFSKeymap> SysFSKeymap::must_create(SysFSDirectory const& parent_directory)
 {
-    return adopt_lock_ref_if_nonnull(new (nothrow) SysFSKeymap(parent_directory)).release_nonnull();
+    return adopt_ref_if_nonnull(new (nothrow) SysFSKeymap(parent_directory)).release_nonnull();
 }
 
 ErrorOr<void> SysFSKeymap::try_generate(KBufferBuilder& builder)

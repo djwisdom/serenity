@@ -16,7 +16,7 @@ class CSSFontFaceRule final : public CSSRule {
     WEB_PLATFORM_OBJECT(CSSFontFaceRule, CSSRule);
 
 public:
-    static CSSFontFaceRule* create(JS::Realm&, FontFace&&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<CSSFontFaceRule>> create(JS::Realm&, FontFace&&);
 
     virtual ~CSSFontFaceRule() override = default;
 
@@ -28,6 +28,7 @@ public:
 private:
     CSSFontFaceRule(JS::Realm&, FontFace&&);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual DeprecatedString serialized() const override;
 
     FontFace m_font_face;

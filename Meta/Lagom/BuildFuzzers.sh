@@ -14,11 +14,12 @@ die() {
 
 pick_clang() {
     local BEST_VERSION=0
-    for CLANG_CANDIDATE in clang clang-13 clang-14 /usr/local/bin/clang-13 /usr/local/bin/clang-14; do
+    for CLANG_CANDIDATE in clang clang-13 clang-14 clang-15 /opt/homebrew/opt/llvm/bin/clang ; do
         if ! command -v $CLANG_CANDIDATE >/dev/null 2>&1; then
             continue
         fi
         if $CLANG_CANDIDATE --version 2>&1 | grep "Apple clang" >/dev/null; then
+            echo "Skipping Apple clang, as Apple does not ship libfuzzer with Xcode..."
             continue
         fi
         if ! $CLANG_CANDIDATE -dumpversion >/dev/null 2>&1; then
@@ -73,6 +74,13 @@ if [ "$#" -gt "0" ] && [ "--oss-fuzz" = "$1" ] ; then
         -DCMAKE_PREFIX_PATH=Build/tool-install
     ninja -C Build/fuzzers
     cp Build/fuzzers/Fuzzers/Fuzz* "$OUT"/
+elif [ "$#" -gt "0" ] && [ "--standalone" = "$1" ] ; then
+    echo "Building for standalone fuzz configuration..."
+    cmake -GNinja -B Build/lagom-fuzzers-standalone \
+        -DBUILD_LAGOM=ON \
+        -DENABLE_FUZZERS=ON \
+        -DCMAKE_PREFIX_PATH=Build/tool-install
+    ninja -C Build/lagom-fuzzers-standalone
 else
     echo "Building for local fuzz configuration..."
     pick_clang

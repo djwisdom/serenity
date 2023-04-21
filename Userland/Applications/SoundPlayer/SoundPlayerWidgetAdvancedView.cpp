@@ -6,12 +6,15 @@
  */
 
 #include "SoundPlayerWidgetAdvancedView.h"
+#include "AlbumCoverVisualizationWidget.h"
 #include "BarsVisualizationWidget.h"
-#include "Common.h"
 #include "M3UParser.h"
 #include "PlaybackManager.h"
+#include "SampleWidget.h"
+#include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
 #include <AK/SIMD.h>
+#include <LibConfig/Client.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
@@ -24,9 +27,10 @@
 #include <LibGUI/Window.h>
 #include <LibGfx/Bitmap.h>
 
-SoundPlayerWidgetAdvancedView::SoundPlayerWidgetAdvancedView(GUI::Window& window, Audio::ConnectionToServer& connection)
+SoundPlayerWidgetAdvancedView::SoundPlayerWidgetAdvancedView(GUI::Window& window, Audio::ConnectionToServer& connection, ImageDecoderClient::Client& image_decoder_client)
     : Player(connection)
     , m_window(window)
+    , m_image_decoder_client(image_decoder_client)
 {
     window.resize(455, 350);
     window.set_resizable(true);
@@ -42,20 +46,35 @@ SoundPlayerWidgetAdvancedView::SoundPlayerWidgetAdvancedView(GUI::Window& window
 
     m_player_view->set_layout<GUI::VerticalBoxLayout>();
 
-    m_play_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/play.png"sv).release_value_but_fixme_should_propagate_errors();
-    m_pause_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/pause.png"sv).release_value_but_fixme_should_propagate_errors();
-    m_stop_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/stop.png"sv).release_value_but_fixme_should_propagate_errors();
-    m_back_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-back.png"sv).release_value_but_fixme_should_propagate_errors();
-    m_next_icon = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-forward.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_play_icon = Gfx::Bitmap::load_from_file("/res/icons/16x16/play.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_pause_icon = Gfx::Bitmap::load_from_file("/res/icons/16x16/pause.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_stop_icon = Gfx::Bitmap::load_from_file("/res/icons/16x16/stop.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_back_icon = Gfx::Bitmap::load_from_file("/res/icons/16x16/go-back.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_next_icon = Gfx::Bitmap::load_from_file("/res/icons/16x16/go-forward.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_volume_icon = Gfx::Bitmap::load_from_file("/res/icons/16x16/audio-volume-medium.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_muted_icon = Gfx::Bitmap::load_from_file("/res/icons/16x16/audio-volume-muted.png"sv).release_value_but_fixme_should_propagate_errors();
 
-    m_visualization = m_player_view->add<BarsVisualizationWidget>();
+    auto visualization = Config::read_string("SoundPlayer"sv, "Preferences"sv, "Visualization"sv, "bars"sv);
+    if (visualization == "samples") {
+        m_visualization = m_player_view->add<SampleWidget>();
+    } else if (visualization == "album_cover") {
+        m_visualization = m_player_view->add<AlbumCoverVisualizationWidget>([this]() {
+            return get_image_from_music_file();
+        });
+    } else {
+        m_visualization = m_player_view->add<BarsVisualizationWidget>();
+    }
 
-    m_playback_progress_slider = m_player_view->add<AutoSlider>(Orientation::Horizontal);
+    m_playback_progress_slider = m_player_view->add<GUI::HorizontalSlider>();
     m_playback_progress_slider->set_fixed_height(20);
     m_playback_progress_slider->set_jump_to_cursor(true);
     m_playback_progress_slider->set_min(0);
-    m_playback_progress_slider->on_knob_released = [&](int value) {
-        seek(value);
+    m_playback_progress_slider->on_change = [&](int value) {
+        if (!m_playback_progress_slider->knob_dragging())
+            seek(value);
+    };
+    m_playback_progress_slider->on_drag_end = [&]() {
+        seek(m_playback_progress_slider->value());
     };
 
     auto& toolbar_container = m_player_view->add<GUI::ToolbarContainer>();
@@ -94,6 +113,12 @@ SoundPlayerWidgetAdvancedView::SoundPlayerWidgetAdvancedView(GUI::Window& window
     menubar.add_action(*m_next_action);
 
     menubar.add_separator();
+
+    m_mute_action = GUI::Action::create("Mute", { Key_M }, m_volume_icon, [&](auto&) {
+        toggle_mute();
+    });
+    m_mute_action->set_enabled(true);
+    menubar.add_action(*m_mute_action);
 
     m_volume_label = &menubar.add<GUI::Label>();
     m_volume_label->set_fixed_width(30);
@@ -136,15 +161,12 @@ void SoundPlayerWidgetAdvancedView::drop_event(GUI::DropEvent& event)
             return;
         window()->move_to_front();
         // FIXME: Add all paths from drop event to the playlist
-        play_file_path(urls.first().path());
+        play_file_path(urls.first().serialize_path());
     }
 }
 
 void SoundPlayerWidgetAdvancedView::keydown_event(GUI::KeyEvent& event)
 {
-    if (event.key() == Key_M)
-        toggle_mute();
-
     if (event.key() == Key_Up)
         m_volume_slider->increase_slider_by_page_steps(1);
 
@@ -164,6 +186,22 @@ void SoundPlayerWidgetAdvancedView::set_playlist_visible(bool visible)
     }
 }
 
+RefPtr<Gfx::Bitmap> SoundPlayerWidgetAdvancedView::get_image_from_music_file()
+{
+    auto const& pictures = this->pictures();
+    if (pictures.is_empty())
+        return {};
+
+    // FIXME: We randomly select the first picture available for the track,
+    //        We might want to hardcode or let the user set a preference.
+    auto decoded_image_or_error = m_image_decoder_client.decode_image(pictures[0].data);
+    if (!decoded_image_or_error.has_value())
+        return {};
+
+    auto const decoded_image = decoded_image_or_error.release_value();
+    return decoded_image.frames[0].bitmap;
+}
+
 void SoundPlayerWidgetAdvancedView::play_state_changed(Player::PlayState state)
 {
     sync_previous_next_actions();
@@ -181,9 +219,11 @@ void SoundPlayerWidgetAdvancedView::loop_mode_changed(Player::LoopMode)
 {
 }
 
-void SoundPlayerWidgetAdvancedView::mute_changed(bool)
+void SoundPlayerWidgetAdvancedView::mute_changed(bool muted)
 {
-    // FIXME: Update the volume slider when player is muted
+    m_mute_action->set_text(muted ? "Unmute"sv : "Mute"sv);
+    m_mute_action->set_icon(muted ? m_muted_icon : m_volume_icon);
+    m_volume_slider->set_enabled(!muted);
 }
 
 void SoundPlayerWidgetAdvancedView::sync_previous_next_actions()
@@ -205,7 +245,17 @@ void SoundPlayerWidgetAdvancedView::time_elapsed(int seconds)
 void SoundPlayerWidgetAdvancedView::file_name_changed(StringView name)
 {
     m_visualization->start_new_file(name);
-    m_window.set_title(DeprecatedString::formatted("{} - Sound Player", name));
+    DeprecatedString title = name;
+    if (playback_manager().loader()) {
+        auto const& metadata = playback_manager().loader()->metadata();
+        if (auto artists_or_error = metadata.all_artists(" / "_short_string);
+            !artists_or_error.is_error() && artists_or_error.value().has_value() && metadata.title.has_value()) {
+            title = DeprecatedString::formatted("{} – {}", metadata.title.value(), artists_or_error.release_value().release_value());
+        } else if (metadata.title.has_value()) {
+            title = metadata.title.value().to_deprecated_string();
+        }
+    }
+    m_window.set_title(DeprecatedString::formatted("{} — Sound Player", title));
 }
 
 void SoundPlayerWidgetAdvancedView::total_samples_changed(int total_samples)
@@ -219,8 +269,8 @@ void SoundPlayerWidgetAdvancedView::sound_buffer_played(FixedArray<Audio::Sample
     m_visualization->set_buffer(buffer);
     m_visualization->set_samplerate(sample_rate);
     // If the user is currently dragging the slider, don't interfere.
-    if (!m_playback_progress_slider->mouse_is_down())
-        m_playback_progress_slider->set_value(samples_played);
+    if (!m_playback_progress_slider->knob_dragging())
+        m_playback_progress_slider->set_value(samples_played, GUI::AllowCallback::No);
 }
 
 void SoundPlayerWidgetAdvancedView::volume_changed(double volume)

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/IntegralMath.h>
 #include <AK/MemoryStream.h>
 #include <AK/Span.h>
 #include <AK/TypeCasts.h>
@@ -15,7 +16,7 @@ namespace Compress {
 
 constexpr static size_t Adler32Size = sizeof(u32);
 
-Optional<Zlib> Zlib::try_create(ReadonlyBytes data)
+Optional<ZlibDecompressor> ZlibDecompressor::try_create(ReadonlyBytes data)
 {
     if (data.size() < (sizeof(ZlibHeader) + Adler32Size))
         return {};
@@ -31,18 +32,18 @@ Optional<Zlib> Zlib::try_create(ReadonlyBytes data)
     if (header.as_u16 % 31 != 0)
         return {}; // error correction code doesn't match
 
-    Zlib zlib { header, data };
+    ZlibDecompressor zlib { header, data };
     zlib.m_data_bytes = data.slice(2, data.size() - sizeof(ZlibHeader) - Adler32Size);
     return zlib;
 }
 
-Zlib::Zlib(ZlibHeader header, ReadonlyBytes data)
+ZlibDecompressor::ZlibDecompressor(ZlibHeader header, ReadonlyBytes data)
     : m_header(header)
     , m_input_data(data)
 {
 }
 
-Optional<ByteBuffer> Zlib::decompress()
+Optional<ByteBuffer> ZlibDecompressor::decompress()
 {
     auto buffer_or_error = DeflateDecompressor::decompress_all(m_data_bytes);
     if (buffer_or_error.is_error())
@@ -50,7 +51,7 @@ Optional<ByteBuffer> Zlib::decompress()
     return buffer_or_error.release_value();
 }
 
-Optional<ByteBuffer> Zlib::decompress_all(ReadonlyBytes bytes)
+Optional<ByteBuffer> ZlibDecompressor::decompress_all(ReadonlyBytes bytes)
 {
     auto zlib = try_create(bytes);
     if (!zlib.has_value())
@@ -58,7 +59,7 @@ Optional<ByteBuffer> Zlib::decompress_all(ReadonlyBytes bytes)
     return zlib->decompress();
 }
 
-u32 Zlib::checksum()
+u32 ZlibDecompressor::checksum()
 {
     if (!m_checksum) {
         auto bytes = m_input_data.slice_from_end(Adler32Size);
@@ -68,16 +69,24 @@ u32 Zlib::checksum()
     return m_checksum;
 }
 
-ZlibCompressor::ZlibCompressor(OutputStream& stream, ZlibCompressionLevel compression_level)
-    : m_output_stream(stream)
+ErrorOr<NonnullOwnPtr<ZlibCompressor>> ZlibCompressor::construct(MaybeOwned<Stream> stream, ZlibCompressionLevel compression_level)
 {
     // Zlib only defines Deflate as a compression method.
     auto compression_method = ZlibCompressionMethod::Deflate;
 
-    write_header(compression_method, compression_level);
-
     // FIXME: Find a way to compress with Deflate's "Best" compression level.
-    m_compressor = make<DeflateCompressor>(stream, static_cast<DeflateCompressor::CompressionLevel>(compression_level));
+    auto compressor_stream = TRY(DeflateCompressor::construct(MaybeOwned(*stream), static_cast<DeflateCompressor::CompressionLevel>(compression_level)));
+
+    auto zlib_compressor = TRY(adopt_nonnull_own_or_enomem(new (nothrow) ZlibCompressor(move(stream), move(compressor_stream))));
+    TRY(zlib_compressor->write_header(compression_method, compression_level));
+
+    return zlib_compressor;
+}
+
+ZlibCompressor::ZlibCompressor(MaybeOwned<Stream> stream, NonnullOwnPtr<Stream> compressor_stream)
+    : m_output_stream(move(stream))
+    , m_compressor(move(compressor_stream))
+{
 }
 
 ZlibCompressor::~ZlibCompressor()
@@ -85,7 +94,7 @@ ZlibCompressor::~ZlibCompressor()
     VERIFY(m_finished);
 }
 
-void ZlibCompressor::write_header(ZlibCompressionMethod compression_method, ZlibCompressionLevel compression_level)
+ErrorOr<void> ZlibCompressor::write_header(ZlibCompressionMethod compression_method, ZlibCompressionLevel compression_level)
 {
     u8 compression_info = 0;
     if (compression_method == ZlibCompressionMethod::Deflate) {
@@ -104,54 +113,67 @@ void ZlibCompressor::write_header(ZlibCompressionMethod compression_method, Zlib
 
     // FIXME: Support pre-defined dictionaries.
 
-    m_output_stream << header.as_u16;
+    TRY(m_output_stream->write_value(header.as_u16));
+
+    return {};
 }
 
-size_t ZlibCompressor::write(ReadonlyBytes bytes)
+ErrorOr<Bytes> ZlibCompressor::read_some(Bytes)
+{
+    return Error::from_errno(EBADF);
+}
+
+ErrorOr<size_t> ZlibCompressor::write_some(ReadonlyBytes bytes)
 {
     VERIFY(!m_finished);
 
-    size_t n_written = m_compressor->write(bytes);
+    size_t n_written = TRY(m_compressor->write_some(bytes));
     m_adler32_checksum.update(bytes.trim(n_written));
     return n_written;
 }
 
-bool ZlibCompressor::write_or_error(ReadonlyBytes bytes)
+bool ZlibCompressor::is_eof() const
 {
-    if (write(bytes) < bytes.size()) {
-        set_fatal_error();
-        return false;
-    }
-
-    return true;
+    return false;
 }
 
-void ZlibCompressor::finish()
+bool ZlibCompressor::is_open() const
+{
+    return m_output_stream->is_open();
+}
+
+void ZlibCompressor::close()
+{
+}
+
+ErrorOr<void> ZlibCompressor::finish()
 {
     VERIFY(!m_finished);
 
     if (is<DeflateCompressor>(m_compressor.ptr()))
-        static_cast<DeflateCompressor*>(m_compressor.ptr())->final_flush();
+        TRY(static_cast<DeflateCompressor*>(m_compressor.ptr())->final_flush());
 
     NetworkOrdered<u32> adler_sum = m_adler32_checksum.digest();
-    m_output_stream << adler_sum;
+    TRY(m_output_stream->write_value(adler_sum));
 
     m_finished = true;
+
+    return {};
 }
 
-Optional<ByteBuffer> ZlibCompressor::compress_all(ReadonlyBytes bytes, ZlibCompressionLevel compression_level)
+ErrorOr<ByteBuffer> ZlibCompressor::compress_all(ReadonlyBytes bytes, ZlibCompressionLevel compression_level)
 {
-    DuplexMemoryStream output_stream;
-    ZlibCompressor zlib_stream { output_stream, compression_level };
+    auto output_stream = TRY(try_make<AllocatingMemoryStream>());
+    auto zlib_stream = TRY(ZlibCompressor::construct(MaybeOwned<Stream>(*output_stream), compression_level));
 
-    zlib_stream.write_or_error(bytes);
+    TRY(zlib_stream->write_until_depleted(bytes));
 
-    zlib_stream.finish();
+    TRY(zlib_stream->finish());
 
-    if (zlib_stream.handle_any_error())
-        return {};
+    auto buffer = TRY(ByteBuffer::create_uninitialized(output_stream->used_buffer_size()));
+    TRY(output_stream->read_until_filled(buffer.bytes()));
 
-    return output_stream.copy_into_contiguous_buffer();
+    return buffer;
 }
 
 }

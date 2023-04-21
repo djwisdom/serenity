@@ -6,13 +6,13 @@
 
 #include "ImageCodecPluginSerenity.h"
 #include <LibCore/EventLoop.h>
-#include <LibCore/File.h>
 #include <LibCore/LocalServer.h>
 #include <LibCore/StandardPaths.h>
-#include <LibCore/Stream.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibIPC/SingleServer.h>
 #include <LibMain/Main.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/Platform/EventLoopPluginSerenity.h>
@@ -29,10 +29,9 @@ ErrorOr<int> serenity_main(Main::Arguments)
 
     // This must be first; we can't check if /tmp/webdriver exists once we've unveiled other paths.
     auto webdriver_socket_path = DeprecatedString::formatted("{}/webdriver", TRY(Core::StandardPaths::runtime_directory()));
-    if (Core::File::exists(webdriver_socket_path))
+    if (FileSystem::exists(webdriver_socket_path))
         TRY(Core::System::unveil(webdriver_socket_path, "rw"sv));
 
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/etc/timezone", "r"));
     TRY(Core::System::unveil("/usr/lib", "r"));
@@ -47,6 +46,7 @@ ErrorOr<int> serenity_main(Main::Arguments)
 
     Web::WebSockets::WebSocketClientManager::initialize(TRY(WebView::WebSocketClientManagerAdapter::try_create()));
     Web::ResourceLoader::initialize(TRY(WebView::RequestServerAdapter::try_create()));
+    TRY(Web::Bindings::initialize_main_thread_vm());
 
     auto client = TRY(IPC::take_over_accepted_client_from_system_server<WebContent::ConnectionFromClient>());
     return event_loop.exec();

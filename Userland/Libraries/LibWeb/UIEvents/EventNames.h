@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <AK/Error.h>
 #include <AK/FlyString.h>
 
 namespace Web::UIEvents::EventNames {
@@ -14,6 +15,7 @@ namespace Web::UIEvents::EventNames {
 // FIXME: This is not all of the events
 
 #define ENUMERATE_UI_EVENTS          \
+    __ENUMERATE_UI_EVENT(auxclick)   \
     __ENUMERATE_UI_EVENT(click)      \
     __ENUMERATE_UI_EVENT(dblclick)   \
     __ENUMERATE_UI_EVENT(keydown)    \
@@ -32,5 +34,7 @@ namespace Web::UIEvents::EventNames {
 #define __ENUMERATE_UI_EVENT(name) extern FlyString name;
 ENUMERATE_UI_EVENTS
 #undef __ENUMERATE_UI_EVENT
+
+ErrorOr<void> initialize_strings();
 
 }

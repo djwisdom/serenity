@@ -21,6 +21,7 @@ public:
 
     size_t serialized_size() const;
     DeprecatedString const& as_string() const { return m_name; }
+    ErrorOr<void> write_to_stream(Stream&) const;
 
     void randomize_case();
 
@@ -35,8 +36,6 @@ public:
 private:
     DeprecatedString m_name;
 };
-
-OutputStream& operator<<(OutputStream& stream, Name const&);
 
 }
 

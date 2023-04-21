@@ -18,12 +18,12 @@ NonnullGCPtr<Segments> Segments::create(Realm& realm, Segmenter& segmenter, Utf1
     // 3. Set segments.[[SegmentsSegmenter]] to segmenter.
     // 4. Set segments.[[SegmentsString]] to string.
     // 5. Return segments.
-    return realm.heap().allocate<Segments>(realm, realm, segmenter, move(string));
+    return realm.heap().allocate<Segments>(realm, realm, segmenter, move(string)).release_allocated_value_but_fixme_should_propagate_errors();
 }
 
 // 18.5 Segments Objects, https://tc39.es/ecma402/#sec-segments-objects
 Segments::Segments(Realm& realm, Segmenter& segmenter, Utf16String string)
-    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().intl_segments_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, realm.intrinsics().intl_segments_prototype())
     , m_segments_segmenter(segmenter)
     , m_segments_string(move(string))
 {
@@ -32,7 +32,7 @@ Segments::Segments(Realm& realm, Segmenter& segmenter, Utf16String string)
 void Segments::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(&m_segments_segmenter);
+    visitor.visit(m_segments_segmenter);
 }
 
 }

@@ -7,7 +7,7 @@
 #include <AK/Base64.h>
 #include <AK/Checked.h>
 #include <LibGfx/Bitmap.h>
-#include <LibGfx/PNGWriter.h>
+#include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/CanvasRenderingContext2D.h>
@@ -21,10 +21,17 @@ static constexpr auto max_canvas_area = 16384 * 16384;
 HTMLCanvasElement::HTMLCanvasElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLCanvasElement"));
 }
 
 HTMLCanvasElement::~HTMLCanvasElement() = default;
+
+JS::ThrowCompletionOr<void> HTMLCanvasElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLCanvasElementPrototype>(realm, "HTMLCanvasElement"));
+
+    return {};
+}
 
 void HTMLCanvasElement::visit_edges(Cell::Visitor& visitor)
 {
@@ -88,7 +95,7 @@ HTMLCanvasElement::HasOrCreatedContext HTMLCanvasElement::create_2d_context()
     if (!m_context.has<Empty>())
         return m_context.has<JS::NonnullGCPtr<CanvasRenderingContext2D>>() ? HasOrCreatedContext::Yes : HasOrCreatedContext::No;
 
-    m_context = CanvasRenderingContext2D::create(realm(), *this);
+    m_context = CanvasRenderingContext2D::create(realm(), *this).release_value_but_fixme_should_propagate_errors();
     return HasOrCreatedContext::Yes;
 }
 
@@ -162,7 +169,7 @@ bool HTMLCanvasElement::create_bitmap(size_t minimum_width, size_t minimum_heigh
         return false;
     }
     if (!m_bitmap || m_bitmap->size() != size) {
-        auto bitmap_or_error = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, size);
+        auto bitmap_or_error = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, size);
         if (bitmap_or_error.is_error())
             return false;
         m_bitmap = bitmap_or_error.release_value_but_fixme_should_propagate_errors();

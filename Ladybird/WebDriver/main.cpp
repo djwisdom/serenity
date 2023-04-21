@@ -6,70 +6,63 @@
 
 #define AK_DONT_REPLACE_STD
 
+#include "../HelperProcess.h"
 #include "../Utilities.h"
 #include <AK/Platform.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/Directory.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/Process.h>
 #include <LibCore/StandardPaths.h>
 #include <LibCore/System.h>
 #include <LibCore/TCPServer.h>
 #include <LibMain/Main.h>
+#include <QCoreApplication>
 #include <WebDriver/Client.h>
-
-#if defined(AK_OS_MACOS)
-#    include <crt_externs.h>
-#endif
 
 extern DeprecatedString s_serenity_resource_root;
 
-static char** environment()
+static ErrorOr<pid_t> launch_process(StringView application, ReadonlySpan<char const*> arguments)
 {
-#if defined(AK_OS_MACOS)
-    return *_NSGetEnviron();
-#else
-    extern char** environ;
-    return environ;
-#endif
+    auto paths = TRY(get_paths_for_helper_process(application));
+
+    ErrorOr<pid_t> result = -1;
+    for (auto const& path : paths) {
+        auto path_view = path.bytes_as_string_view();
+        result = Core::Process::spawn(path_view, arguments, {}, Core::Process::KeepAsChild::Yes);
+        if (!result.is_error())
+            break;
+    }
+    return result;
 }
 
 static ErrorOr<pid_t> launch_browser(DeprecatedString const& socket_path)
 {
-    char const* argv[] = {
-        "ladybird",
-        "--webdriver-content-path",
-        socket_path.characters(),
-        nullptr,
-    };
-
-    return Core::System::posix_spawn("./ladybird"sv, nullptr, nullptr, const_cast<char**>(argv), environment());
+    return launch_process("ladybird"sv,
+        Array {
+            "--webdriver-content-path",
+            socket_path.characters(),
+        });
 }
 
 static ErrorOr<pid_t> launch_headless_browser(DeprecatedString const& socket_path)
 {
-    auto resouces = DeprecatedString::formatted("{}/res", s_serenity_resource_root);
-    auto error_page = DeprecatedString::formatted("{}/res/html/error.html", s_serenity_resource_root);
-    auto certs = DeprecatedString::formatted("{}/etc/ca_certs.ini", s_serenity_resource_root);
-
-    char const* argv[] = {
-        "headless-browser",
-        "--resources",
-        resouces.characters(),
-        "--error-page",
-        error_page.characters(),
-        "--certs",
-        certs.characters(),
-        "--webdriver-ipc-path",
-        socket_path.characters(),
-        "about:blank",
-        nullptr,
-    };
-
-    return Core::System::posix_spawn("./_deps/lagom-build/headless-browser"sv, nullptr, nullptr, const_cast<char**>(argv), environment());
+    auto resources = DeprecatedString::formatted("{}/res", s_serenity_resource_root);
+    return launch_process("headless-browser"sv,
+        Array {
+            "--resources",
+            resources.characters(),
+            "--webdriver-ipc-path",
+            socket_path.characters(),
+            "about:blank",
+        });
 }
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
+    // Note: only creating this to get access to its static methods in HelperProcess
+    QCoreApplication application(arguments.argc, arguments.argv);
+
     auto listen_address = "0.0.0.0"sv;
     int port = 8000;
 
@@ -105,7 +98,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             return;
         }
 
-        auto maybe_buffered_socket = Core::Stream::BufferedTCPSocket::create(maybe_client_socket.release_value());
+        auto maybe_buffered_socket = Core::BufferedTCPSocket::create(maybe_client_socket.release_value());
         if (maybe_buffered_socket.is_error()) {
             warnln("Could not obtain a buffered socket for the client: {}", maybe_buffered_socket.error());
             return;

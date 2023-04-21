@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,13 +15,13 @@ namespace JS::Temporal {
 
 // 10.1 The Temporal.PlainMonthDay Constructor, https://tc39.es/proposal-temporal/#sec-temporal-plainmonthday-constructor
 PlainMonthDayConstructor::PlainMonthDayConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.PlainMonthDay.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.PlainMonthDay.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void PlainMonthDayConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> PlainMonthDayConstructor::initialize(Realm& realm)
 {
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     auto& vm = this->vm();
 
@@ -32,6 +32,8 @@ void PlainMonthDayConstructor::initialize(Realm& realm)
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, vm.names.from, from, 1, attr);
+
+    return {};
 }
 
 // 10.1.1 Temporal.PlainMonthDay ( isoMonth, isoDay [ , calendarLike [ , referenceISOYear ] ] ), https://tc39.es/proposal-temporal/#sec-temporal.plainmonthday
@@ -59,17 +61,17 @@ ThrowCompletionOr<NonnullGCPtr<Object>> PlainMonthDayConstructor::construct(Func
         reference_iso_year = Value(1972);
     }
 
-    // 3. Let m be ? ToIntegerThrowOnInfinity(isoMonth).
-    auto m = TRY(to_integer_throw_on_infinity(vm, iso_month, ErrorType::TemporalInvalidPlainMonthDay));
+    // 3. Let m be ? ToIntegerWithTruncation(isoMonth).
+    auto m = TRY(to_integer_with_truncation(vm, iso_month, ErrorType::TemporalInvalidPlainMonthDay));
 
-    // 4. Let d be ? ToIntegerThrowOnInfinity(isoDay).
-    auto d = TRY(to_integer_throw_on_infinity(vm, iso_day, ErrorType::TemporalInvalidPlainMonthDay));
+    // 4. Let d be ? ToIntegerWithTruncation(isoDay).
+    auto d = TRY(to_integer_with_truncation(vm, iso_day, ErrorType::TemporalInvalidPlainMonthDay));
 
     // 5. Let calendar be ? ToTemporalCalendarWithISODefault(calendarLike).
     auto* calendar = TRY(to_temporal_calendar_with_iso_default(vm, calendar_like));
 
-    // 6. Let ref be ? ToIntegerThrowOnInfinity(referenceISOYear).
-    auto ref = TRY(to_integer_throw_on_infinity(vm, reference_iso_year, ErrorType::TemporalInvalidPlainMonthDay));
+    // 6. Let ref be ? ToIntegerWithTruncation(referenceISOYear).
+    auto ref = TRY(to_integer_with_truncation(vm, reference_iso_year, ErrorType::TemporalInvalidPlainMonthDay));
 
     // IMPLEMENTATION DEFINED: This is an optimization that allows us to treat these doubles as normal integers from this point onwards.
     // This does not change the exposed behavior as the call to CreateTemporalMonthDay will immediately check that these values are valid

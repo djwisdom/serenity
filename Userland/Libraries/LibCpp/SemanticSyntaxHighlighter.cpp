@@ -23,6 +23,24 @@ void SemanticSyntaxHighlighter::rehighlight(Palette const& palette)
         lexer.set_ignore_whitespace(true);
         auto current_tokens = lexer.lex();
 
+        // Identify folding regions
+        Vector<Token> folding_region_start_tokens;
+        Vector<GUI::TextDocumentFoldingRegion> folding_regions;
+        for (auto& token : current_tokens) {
+            if (token.type() == Token::Type::LeftCurly) {
+                folding_region_start_tokens.append(token);
+            } else if (token.type() == Token::Type::RightCurly) {
+                if (!folding_region_start_tokens.is_empty()) {
+                    auto start_token = folding_region_start_tokens.take_last();
+                    GUI::TextDocumentFoldingRegion folding_region;
+                    folding_region.range.set_start({ start_token.end().line, start_token.end().column });
+                    folding_region.range.set_end({ token.start().line, token.start().column });
+                    folding_regions.append(move(folding_region));
+                }
+            }
+        }
+        m_client->do_set_folding_regions(move(folding_regions));
+
         StringBuilder current_tokens_as_lines;
         StringBuilder previous_tokens_as_lines;
 
@@ -32,8 +50,8 @@ void SemanticSyntaxHighlighter::rehighlight(Palette const& palette)
         for (Cpp::Token const& token : m_saved_tokens)
             previous_tokens_as_lines.appendff("{}\n", token.type_as_deprecated_string());
 
-        auto previous = previous_tokens_as_lines.build();
-        auto current = current_tokens_as_lines.build();
+        auto previous = previous_tokens_as_lines.to_deprecated_string();
+        auto current = current_tokens_as_lines.to_deprecated_string();
 
         // FIXME: Computing the diff on the entire document's tokens is quite inefficient.
         //        An improvement over this could be only including the tokens that are in edited text ranges in the diff.
@@ -67,44 +85,44 @@ void SemanticSyntaxHighlighter::rehighlight(Palette const& palette)
     update_spans(new_tokens_info, palette);
 }
 
-static Syntax::TextStyle style_for_token_type(Gfx::Palette const& palette, CodeComprehension::TokenInfo::SemanticType type)
+static Gfx::TextAttributes style_for_token_type(Gfx::Palette const& palette, CodeComprehension::TokenInfo::SemanticType type)
 {
     switch (type) {
     case CodeComprehension::TokenInfo::SemanticType::Unknown:
-        return { palette.base_text(), false };
+        return { palette.base_text() };
     case CodeComprehension::TokenInfo::SemanticType::Keyword:
-        return { palette.syntax_keyword(), true };
+        return { palette.syntax_keyword(), {}, true };
     case CodeComprehension::TokenInfo::SemanticType::Type:
-        return { palette.syntax_type(), true };
+        return { palette.syntax_type(), {}, true };
     case CodeComprehension::TokenInfo::SemanticType::Identifier:
-        return { palette.syntax_identifier(), false };
+        return { palette.syntax_identifier() };
     case CodeComprehension::TokenInfo::SemanticType::String:
-        return { palette.syntax_string(), false };
+        return { palette.syntax_string() };
     case CodeComprehension::TokenInfo::SemanticType::Number:
-        return { palette.syntax_number(), false };
+        return { palette.syntax_number() };
     case CodeComprehension::TokenInfo::SemanticType::IncludePath:
-        return { palette.syntax_preprocessor_value(), false };
+        return { palette.syntax_preprocessor_value() };
     case CodeComprehension::TokenInfo::SemanticType::PreprocessorStatement:
-        return { palette.syntax_preprocessor_statement(), false };
+        return { palette.syntax_preprocessor_statement() };
     case CodeComprehension::TokenInfo::SemanticType::Comment:
-        return { palette.syntax_comment(), false };
+        return { palette.syntax_comment() };
     case CodeComprehension::TokenInfo::SemanticType::Function:
-        return { palette.syntax_function(), false };
+        return { palette.syntax_function() };
     case CodeComprehension::TokenInfo::SemanticType::Variable:
-        return { palette.syntax_variable(), false };
+        return { palette.syntax_variable() };
     case CodeComprehension::TokenInfo::SemanticType::CustomType:
-        return { palette.syntax_custom_type(), false };
+        return { palette.syntax_custom_type() };
     case CodeComprehension::TokenInfo::SemanticType::Namespace:
-        return { palette.syntax_namespace(), false };
+        return { palette.syntax_namespace() };
     case CodeComprehension::TokenInfo::SemanticType::Member:
-        return { palette.syntax_member(), false };
+        return { palette.syntax_member() };
     case CodeComprehension::TokenInfo::SemanticType::Parameter:
-        return { palette.syntax_parameter(), false };
+        return { palette.syntax_parameter() };
     case CodeComprehension::TokenInfo::SemanticType::PreprocessorMacro:
-        return { palette.syntax_preprocessor_value(), false };
+        return { palette.syntax_preprocessor_value() };
     default:
         VERIFY_NOT_REACHED();
-        return { palette.base_text(), false };
+        return { palette.base_text() };
     }
 }
 void SemanticSyntaxHighlighter::update_spans(Vector<CodeComprehension::TokenInfo> const& tokens_info, Gfx::Palette const& palette)
@@ -115,9 +133,7 @@ void SemanticSyntaxHighlighter::update_spans(Vector<CodeComprehension::TokenInfo
         GUI::TextDocumentSpan span;
         span.range.set_start({ token.start_line, token.start_column });
         span.range.set_end({ token.end_line, token.end_column + 1 });
-        auto style = style_for_token_type(palette, token.type);
-        span.attributes.color = style.color;
-        span.attributes.bold = style.bold;
+        span.attributes = style_for_token_type(palette, token.type);
         span.is_skippable = token.type == CodeComprehension::TokenInfo::SemanticType::Whitespace;
         span.data = static_cast<u64>(token.type);
         spans.append(span);

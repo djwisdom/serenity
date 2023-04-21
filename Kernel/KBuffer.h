@@ -16,9 +16,9 @@
 // severely limited kmalloc heap.
 
 #include <AK/Assertions.h>
-#include <AK/Memory.h>
 #include <AK/StringView.h>
 #include <Kernel/Memory/MemoryManager.h>
+#include <Kernel/StdLib.h> // For memcpy. FIXME: Make memcpy less expensive to access a declaration of in the Kernel.
 
 namespace Kernel {
 

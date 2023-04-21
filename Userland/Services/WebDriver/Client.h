@@ -9,9 +9,8 @@
 #pragma once
 
 #include <AK/Function.h>
-#include <AK/NonnullOwnPtrVector.h>
+#include <AK/NonnullRefPtr.h>
 #include <LibCore/Object.h>
-#include <LibCore/Stream.h>
 #include <LibWeb/WebDriver/Client.h>
 #include <LibWeb/WebDriver/Error.h>
 #include <LibWeb/WebDriver/Response.h>
@@ -28,16 +27,15 @@ class Client final : public Web::WebDriver::Client {
     C_OBJECT_ABSTRACT(Client);
 
 public:
-    static ErrorOr<NonnullRefPtr<Client>> try_create(NonnullOwnPtr<Core::Stream::BufferedTCPSocket>, LaunchBrowserCallbacks, Core::Object* parent);
+    static ErrorOr<NonnullRefPtr<Client>> try_create(NonnullOwnPtr<Core::BufferedTCPSocket>, LaunchBrowserCallbacks, Core::Object* parent);
     virtual ~Client() override;
 
     void close_session(unsigned session_id);
 
 private:
-    Client(NonnullOwnPtr<Core::Stream::BufferedTCPSocket>, LaunchBrowserCallbacks, Core::Object* parent);
+    Client(NonnullOwnPtr<Core::BufferedTCPSocket>, LaunchBrowserCallbacks, Core::Object* parent);
 
-    ErrorOr<Session*, Web::WebDriver::Error> find_session_with_id(StringView session_id);
-    ErrorOr<NonnullOwnPtr<Session>, Web::WebDriver::Error> take_session_with_id(StringView session_id);
+    ErrorOr<NonnullRefPtr<Session>, Web::WebDriver::Error> find_session_with_id(StringView session_id);
 
     virtual Web::WebDriver::Response new_session(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response delete_session(Web::WebDriver::Parameters parameters, JsonValue payload) override;
@@ -54,6 +52,7 @@ private:
     virtual Web::WebDriver::Response close_window(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response switch_to_window(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response get_window_handles(Web::WebDriver::Parameters parameters, JsonValue payload) override;
+    virtual Web::WebDriver::Response new_window(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response get_window_rect(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response set_window_rect(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response maximize_window(Web::WebDriver::Parameters parameters, JsonValue payload) override;
@@ -75,7 +74,9 @@ private:
     virtual Web::WebDriver::Response get_element_tag_name(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response get_element_rect(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response is_element_enabled(Web::WebDriver::Parameters parameters, JsonValue payload) override;
-    virtual Web::WebDriver::Response click(Web::WebDriver::Parameters parameters, JsonValue payload) override;
+    virtual Web::WebDriver::Response get_computed_role(Web::WebDriver::Parameters parameters, JsonValue payload) override;
+    virtual Web::WebDriver::Response get_computed_label(Web::WebDriver::Parameters parameters, JsonValue payload) override;
+    virtual Web::WebDriver::Response element_click(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response get_source(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response execute_script(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response execute_async_script(Web::WebDriver::Parameters parameters, JsonValue payload) override;
@@ -92,7 +93,7 @@ private:
     virtual Web::WebDriver::Response take_element_screenshot(Web::WebDriver::Parameters parameters, JsonValue payload) override;
     virtual Web::WebDriver::Response print_page(Web::WebDriver::Parameters parameters, JsonValue payload) override;
 
-    static NonnullOwnPtrVector<Session> s_sessions;
+    static HashMap<unsigned, NonnullRefPtr<Session>> s_sessions;
     static Atomic<unsigned> s_next_session_id;
 
     LaunchBrowserCallbacks m_callbacks;

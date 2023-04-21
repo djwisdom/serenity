@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "LibRegex/RegexMatcher.h"
 #include <LibTest/TestCase.h> // import first, to prevent warning of VERIFY* redefinition
 
+#include <AK/Debug.h>
 #include <AK/StringBuilder.h>
 #include <AK/Tuple.h>
 #include <LibRegex/Regex.h>
 #include <LibRegex/RegexDebug.h>
+#include <LibRegex/RegexMatcher.h>
 #include <stdio.h>
 
 static ECMAScriptOptions match_test_api_options(const ECMAScriptOptions options)
@@ -35,33 +36,33 @@ TEST_CASE(regex_options_ecmascript)
     ECMAScriptOptions eo;
     eo |= ECMAScriptFlags::Global;
 
-    EXPECT(eo & ECMAScriptFlags::Global);
-    EXPECT(!(eo & ECMAScriptFlags::Insensitive));
+    EXPECT(eo.has_flag_set(ECMAScriptFlags::Global));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Insensitive));
 
     eo = match_test_api_options(ECMAScriptFlags::Global | ECMAScriptFlags::Insensitive | ECMAScriptFlags::Sticky);
-    EXPECT(eo & ECMAScriptFlags::Global);
-    EXPECT(eo & ECMAScriptFlags::Insensitive);
-    EXPECT(eo & ECMAScriptFlags::Sticky);
-    EXPECT(!(eo & ECMAScriptFlags::Unicode));
-    EXPECT(!(eo & ECMAScriptFlags::Multiline));
-    EXPECT(!(eo & ECMAScriptFlags::SingleLine));
+    EXPECT(eo.has_flag_set(ECMAScriptFlags::Global));
+    EXPECT(eo.has_flag_set(ECMAScriptFlags::Insensitive));
+    EXPECT(eo.has_flag_set(ECMAScriptFlags::Sticky));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Unicode));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Multiline));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::SingleLine));
 
     eo &= ECMAScriptFlags::Insensitive;
-    EXPECT(!(eo & ECMAScriptFlags::Global));
-    EXPECT(eo & ECMAScriptFlags::Insensitive);
-    EXPECT(!(eo & ECMAScriptFlags::Multiline));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Global));
+    EXPECT(eo.has_flag_set(ECMAScriptFlags::Insensitive));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Multiline));
 
     eo &= ECMAScriptFlags::Sticky;
-    EXPECT(!(eo & ECMAScriptFlags::Global));
-    EXPECT(!(eo & ECMAScriptFlags::Insensitive));
-    EXPECT(!(eo & ECMAScriptFlags::Multiline));
-    EXPECT(!(eo & ECMAScriptFlags::Sticky));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Global));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Insensitive));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Multiline));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Sticky));
 
     eo = ~ECMAScriptFlags::Insensitive;
-    EXPECT(eo & ECMAScriptFlags::Global);
-    EXPECT(!(eo & ECMAScriptFlags::Insensitive));
-    EXPECT(eo & ECMAScriptFlags::Multiline);
-    EXPECT(eo & ECMAScriptFlags::Sticky);
+    EXPECT(eo.has_flag_set(ECMAScriptFlags::Global));
+    EXPECT(!eo.has_flag_set(ECMAScriptFlags::Insensitive));
+    EXPECT(eo.has_flag_set(ECMAScriptFlags::Multiline));
+    EXPECT(eo.has_flag_set(ECMAScriptFlags::Sticky));
 }
 
 TEST_CASE(regex_options_posix)
@@ -69,30 +70,30 @@ TEST_CASE(regex_options_posix)
     PosixOptions eo;
     eo |= PosixFlags::Global;
 
-    EXPECT(eo & PosixFlags::Global);
-    EXPECT(!(eo & PosixFlags::Insensitive));
+    EXPECT(eo.has_flag_set(PosixFlags::Global));
+    EXPECT(!eo.has_flag_set(PosixFlags::Insensitive));
 
     eo = match_test_api_options(PosixFlags::Global | PosixFlags::Insensitive | PosixFlags::MatchNotBeginOfLine);
-    EXPECT(eo & PosixFlags::Global);
-    EXPECT(eo & PosixFlags::Insensitive);
-    EXPECT(eo & PosixFlags::MatchNotBeginOfLine);
-    EXPECT(!(eo & PosixFlags::Unicode));
-    EXPECT(!(eo & PosixFlags::Multiline));
+    EXPECT(eo.has_flag_set(PosixFlags::Global));
+    EXPECT(eo.has_flag_set(PosixFlags::Insensitive));
+    EXPECT(eo.has_flag_set(PosixFlags::MatchNotBeginOfLine));
+    EXPECT(!eo.has_flag_set(PosixFlags::Unicode));
+    EXPECT(!eo.has_flag_set(PosixFlags::Multiline));
 
     eo &= PosixFlags::Insensitive;
-    EXPECT(!(eo & PosixFlags::Global));
-    EXPECT(eo & PosixFlags::Insensitive);
-    EXPECT(!(eo & PosixFlags::Multiline));
+    EXPECT(!eo.has_flag_set(PosixFlags::Global));
+    EXPECT(eo.has_flag_set(PosixFlags::Insensitive));
+    EXPECT(!eo.has_flag_set(PosixFlags::Multiline));
 
     eo &= PosixFlags::MatchNotBeginOfLine;
-    EXPECT(!(eo & PosixFlags::Global));
-    EXPECT(!(eo & PosixFlags::Insensitive));
-    EXPECT(!(eo & PosixFlags::Multiline));
+    EXPECT(!eo.has_flag_set(PosixFlags::Global));
+    EXPECT(!eo.has_flag_set(PosixFlags::Insensitive));
+    EXPECT(!eo.has_flag_set(PosixFlags::Multiline));
 
     eo = ~PosixFlags::Insensitive;
-    EXPECT(eo & PosixFlags::Global);
-    EXPECT(!(eo & PosixFlags::Insensitive));
-    EXPECT(eo & PosixFlags::Multiline);
+    EXPECT(eo.has_flag_set(PosixFlags::Global));
+    EXPECT(!eo.has_flag_set(PosixFlags::Insensitive));
+    EXPECT(eo.has_flag_set(PosixFlags::Multiline));
 }
 
 TEST_CASE(regex_lexer)
@@ -142,7 +143,7 @@ TEST_CASE(parser_error_special_characters_used_at_wrong_place)
         // First in ere
         b.clear();
         b.append(ch);
-        pattern = b.build();
+        pattern = b.to_deprecated_string();
         l.set_source(pattern);
         p.parse();
         EXPECT(p.has_error());
@@ -152,7 +153,7 @@ TEST_CASE(parser_error_special_characters_used_at_wrong_place)
         b.clear();
         b.append("a|"sv);
         b.append(ch);
-        pattern = b.build();
+        pattern = b.to_deprecated_string();
         l.set_source(pattern);
         p.parse();
         EXPECT(p.has_error());
@@ -162,7 +163,7 @@ TEST_CASE(parser_error_special_characters_used_at_wrong_place)
         b.clear();
         b.append('^');
         b.append(ch);
-        pattern = b.build();
+        pattern = b.to_deprecated_string();
         l.set_source(pattern);
         p.parse();
         EXPECT(p.has_error());
@@ -172,7 +173,7 @@ TEST_CASE(parser_error_special_characters_used_at_wrong_place)
         b.clear();
         b.append('$');
         b.append(ch);
-        pattern = b.build();
+        pattern = b.to_deprecated_string();
         l.set_source(pattern);
         p.parse();
         EXPECT(p.has_error());
@@ -183,7 +184,7 @@ TEST_CASE(parser_error_special_characters_used_at_wrong_place)
         b.append('(');
         b.append(ch);
         b.append(')');
-        pattern = b.build();
+        pattern = b.to_deprecated_string();
         l.set_source(pattern);
         p.parse();
         EXPECT(p.has_error());
@@ -605,6 +606,8 @@ TEST_CASE(ECMA262_parse)
         { "((?=lg)?[vl]k\\-?\\d{3}) bui| 3\\.[-\\w; ]{10}lg?-([06cv9]{3,4})"sv, regex::Error::NoError, ECMAScriptFlags::BrowserExtended }, // #12373, quantifiable assertions.
         { parse_test_case_long_disjunction_chain.view() },                                                                                 // A whole lot of disjunctions, should not overflow the stack.
         { "(\"|')(?:(?!\\2)[^\\\\\\r\\n]|\\\\.)*\\2"sv, regex::Error::NoError, ECMAScriptFlags::BrowserExtended },                         // LegacyOctalEscapeSequence should not consume too many chars (and should not crash)
+        // #18324, Capture group counter skipped past EOF.
+        { "\\1[\\"sv, regex::Error::InvalidNumber },
     };
 
     for (auto& test : tests) {
@@ -623,6 +626,8 @@ TEST_CASE(ECMA262_parse)
 
 TEST_CASE(ECMA262_match)
 {
+    constexpr auto global_multiline = ECMAScriptFlags::Global | ECMAScriptFlags::Multiline;
+
     struct _test {
         StringView pattern;
         StringView subject;
@@ -696,6 +701,10 @@ TEST_CASE(ECMA262_match)
         { "^[a-sy-z]$"sv, "b"sv, true, ECMAScriptFlags::Insensitive },
         { "^[a-sy-z]$"sv, "y"sv, true, ECMAScriptFlags::Insensitive },
         { "^[a-sy-z]$"sv, "u"sv, false, ECMAScriptFlags::Insensitive },
+        { "."sv, "\n\r\u2028\u2029"sv, false }, // Dot should not match any of CR/LF/LS/PS in ECMA262 mode without DotAll.
+        { "a$"sv, "a\r\n"sv, true, global_multiline.value() }, // $ should accept all LineTerminators in ECMA262 mode with Multiline.
+        { "^a"sv, "\ra"sv, true, global_multiline.value() },
+        { "^(.*?):[ \\t]*([^\\r\\n]*)$"sv, "content-length: 488\r\ncontent-type: application/json; charset=utf-8\r\n"sv, true, global_multiline.value() },
     };
     // clang-format on
 
@@ -721,7 +730,7 @@ TEST_CASE(ECMA262_unicode_match)
     StringBuilder builder;
     for (u32 code_point : space_and_line_terminator_code_points)
         builder.append_code_point(code_point);
-    auto space_and_line_terminators = builder.build();
+    auto space_and_line_terminators = builder.to_deprecated_string();
 
     struct _test {
         StringView pattern;
@@ -753,7 +762,7 @@ TEST_CASE(ECMA262_unicode_match)
     for (auto& test : tests) {
         Regex<ECMA262> re(test.pattern, (ECMAScriptFlags)regex::AllFlags::Global | test.options);
 
-        auto subject = AK::utf8_to_utf16(test.subject);
+        auto subject = MUST(AK::utf8_to_utf16(test.subject));
         Utf16View view { subject };
 
         if constexpr (REGEX_DEBUG) {
@@ -867,7 +876,7 @@ TEST_CASE(ECMA262_property_match)
     for (auto& test : tests) {
         Regex<ECMA262> re(test.pattern, (ECMAScriptFlags)regex::AllFlags::Global | regex::ECMAScriptFlags::BrowserExtended | test.options);
 
-        auto subject = AK::utf8_to_utf16(test.subject);
+        auto subject = MUST(AK::utf8_to_utf16(test.subject));
         Utf16View view { subject };
 
         if constexpr (REGEX_DEBUG) {
@@ -982,6 +991,10 @@ TEST_CASE(optimizer_atomic_groups)
         Tuple { "(1+)0"sv, "10"sv, true },
         // Rewrite should not skip over first required iteration of <x>+.
         Tuple { "a+"sv, ""sv, false },
+        // 'y' and [^x] have an overlap ('y'), the loop should not be rewritten here.
+        Tuple { "[^x]+y"sv, "ay"sv, true },
+        // .+ should not be rewritten here, as it's followed by something that would be matched by `.`.
+        Tuple { ".+(a|b|c)"sv, "xxa"sv, true },
     };
 
     for (auto& test : tests) {
@@ -1085,6 +1098,18 @@ TEST_CASE(single_match_flag)
         EXPECT_EQ(result.success, true);
         EXPECT_EQ(result.matches.size(), 1u);
         EXPECT_EQ(result.matches.first().view.to_deprecated_string(), "A"sv);
+    }
+}
+
+TEST_CASE(empty_string_wildcard_match)
+{
+    {
+        // Ensure that the wildcard ".*" matches the empty string exactly once
+        Regex<ECMA262> re(".*"sv, ECMAScriptFlags::Global);
+        auto result = re.match(""sv);
+        EXPECT_EQ(result.success, true);
+        EXPECT_EQ(result.matches.size(), 1u);
+        EXPECT_EQ(result.matches.first().view.to_deprecated_string(), ""sv);
     }
 }
 

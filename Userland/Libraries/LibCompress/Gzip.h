@@ -7,8 +7,10 @@
 
 #pragma once
 
+#include <AK/NonnullOwnPtr.h>
+#include <AK/OwnPtr.h>
+#include <AK/Stream.h>
 #include <LibCompress/Deflate.h>
-#include <LibCore/Stream.h>
 #include <LibCrypto/Checksum/CRC32.h>
 
 namespace Compress {
@@ -38,59 +40,63 @@ struct Flags {
     static constexpr u8 MAX = FTEXT | FHCRC | FEXTRA | FNAME | FCOMMENT;
 };
 
-class GzipDecompressor final : public Core::Stream::Stream {
+class GzipDecompressor final : public Stream {
 public:
-    GzipDecompressor(NonnullOwnPtr<Core::Stream::Stream>);
+    GzipDecompressor(NonnullOwnPtr<Stream>);
     ~GzipDecompressor();
 
-    virtual ErrorOr<Bytes> read(Bytes) override;
-    virtual ErrorOr<size_t> write(ReadonlyBytes) override;
+    virtual ErrorOr<Bytes> read_some(Bytes) override;
+    virtual ErrorOr<size_t> write_some(ReadonlyBytes) override;
     virtual bool is_eof() const override;
     virtual bool is_open() const override { return true; }
     virtual void close() override {};
 
     static ErrorOr<ByteBuffer> decompress_all(ReadonlyBytes);
+    static ErrorOr<void> decompress_file(StringView input_file, NonnullOwnPtr<Stream> output_stream);
+
     static Optional<DeprecatedString> describe_header(ReadonlyBytes);
     static bool is_likely_compressed(ReadonlyBytes bytes);
 
 private:
     class Member {
     public:
-        Member(BlockHeader header, Core::Stream::Stream& stream)
-            : m_header(header)
-            , m_stream(Core::Stream::Handle<Core::Stream::Stream>(stream))
-        {
-        }
+        static ErrorOr<NonnullOwnPtr<Member>> construct(BlockHeader header, LittleEndianInputBitStream&);
 
         BlockHeader m_header;
-        DeflateDecompressor m_stream;
+        NonnullOwnPtr<DeflateDecompressor> m_stream;
         Crypto::Checksum::CRC32 m_checksum;
         size_t m_nread { 0 };
+
+    private:
+        Member(BlockHeader, NonnullOwnPtr<DeflateDecompressor>);
     };
 
-    Member const& current_member() const { return m_current_member.value(); }
-    Member& current_member() { return m_current_member.value(); }
+    Member const& current_member() const { return *m_current_member; }
+    Member& current_member() { return *m_current_member; }
 
-    NonnullOwnPtr<Core::Stream::Stream> m_input_stream;
+    NonnullOwnPtr<LittleEndianInputBitStream> m_input_stream;
     u8 m_partial_header[sizeof(BlockHeader)];
     size_t m_partial_header_offset { 0 };
-    Optional<Member> m_current_member;
+    OwnPtr<Member> m_current_member {};
 
     bool m_eof { false };
 };
 
-class GzipCompressor final : public OutputStream {
+class GzipCompressor final : public Stream {
 public:
-    GzipCompressor(OutputStream&);
-    ~GzipCompressor() = default;
+    GzipCompressor(MaybeOwned<Stream>);
 
-    size_t write(ReadonlyBytes) override;
-    bool write_or_error(ReadonlyBytes) override;
+    virtual ErrorOr<Bytes> read_some(Bytes) override;
+    virtual ErrorOr<size_t> write_some(ReadonlyBytes) override;
+    virtual bool is_eof() const override;
+    virtual bool is_open() const override;
+    virtual void close() override;
 
-    static Optional<ByteBuffer> compress_all(ReadonlyBytes bytes);
+    static ErrorOr<ByteBuffer> compress_all(ReadonlyBytes bytes);
+    static ErrorOr<void> compress_file(StringView input_file, NonnullOwnPtr<Stream> output_stream);
 
 private:
-    OutputStream& m_output_stream;
+    MaybeOwned<Stream> m_output_stream;
 };
 
 }

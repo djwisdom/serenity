@@ -10,7 +10,7 @@
 #include <AK/IPv4Address.h>
 #include <AK/WeakPtr.h>
 #include <LibCore/Notifier.h>
-#include <LibCore/Stream.h>
+#include <LibCore/Socket.h>
 #include <LibCore/Timer.h>
 #include <LibCrypto/Authentication/HMAC.h>
 #include <LibCrypto/BigInt/UnsignedBigInteger.h>
@@ -40,55 +40,6 @@ inline void print_buffer(u8 const* buffer, size_t size)
 
 class Socket;
 
-#define ENUMERATE_ALERT_DESCRIPTIONS                        \
-    ENUMERATE_ALERT_DESCRIPTION(CloseNotify, 0)             \
-    ENUMERATE_ALERT_DESCRIPTION(UnexpectedMessage, 10)      \
-    ENUMERATE_ALERT_DESCRIPTION(BadRecordMAC, 20)           \
-    ENUMERATE_ALERT_DESCRIPTION(DecryptionFailed, 21)       \
-    ENUMERATE_ALERT_DESCRIPTION(RecordOverflow, 22)         \
-    ENUMERATE_ALERT_DESCRIPTION(DecompressionFailure, 30)   \
-    ENUMERATE_ALERT_DESCRIPTION(HandshakeFailure, 40)       \
-    ENUMERATE_ALERT_DESCRIPTION(NoCertificate, 41)          \
-    ENUMERATE_ALERT_DESCRIPTION(BadCertificate, 42)         \
-    ENUMERATE_ALERT_DESCRIPTION(UnsupportedCertificate, 43) \
-    ENUMERATE_ALERT_DESCRIPTION(CertificateRevoked, 44)     \
-    ENUMERATE_ALERT_DESCRIPTION(CertificateExpired, 45)     \
-    ENUMERATE_ALERT_DESCRIPTION(CertificateUnknown, 46)     \
-    ENUMERATE_ALERT_DESCRIPTION(IllegalParameter, 47)       \
-    ENUMERATE_ALERT_DESCRIPTION(UnknownCA, 48)              \
-    ENUMERATE_ALERT_DESCRIPTION(AccessDenied, 49)           \
-    ENUMERATE_ALERT_DESCRIPTION(DecodeError, 50)            \
-    ENUMERATE_ALERT_DESCRIPTION(DecryptError, 51)           \
-    ENUMERATE_ALERT_DESCRIPTION(ExportRestriction, 60)      \
-    ENUMERATE_ALERT_DESCRIPTION(ProtocolVersion, 70)        \
-    ENUMERATE_ALERT_DESCRIPTION(InsufficientSecurity, 71)   \
-    ENUMERATE_ALERT_DESCRIPTION(InternalError, 80)          \
-    ENUMERATE_ALERT_DESCRIPTION(InappropriateFallback, 86)  \
-    ENUMERATE_ALERT_DESCRIPTION(UserCanceled, 90)           \
-    ENUMERATE_ALERT_DESCRIPTION(NoRenegotiation, 100)       \
-    ENUMERATE_ALERT_DESCRIPTION(UnsupportedExtension, 110)  \
-    ENUMERATE_ALERT_DESCRIPTION(NoError, 255)
-
-enum class AlertDescription : u8 {
-#define ENUMERATE_ALERT_DESCRIPTION(name, value) name = value,
-    ENUMERATE_ALERT_DESCRIPTIONS
-#undef ENUMERATE_ALERT_DESCRIPTION
-};
-
-constexpr static StringView alert_name(AlertDescription descriptor)
-{
-#define ENUMERATE_ALERT_DESCRIPTION(name, value) \
-    case AlertDescription::name:                 \
-        return #name##sv;
-
-    switch (descriptor) {
-        ENUMERATE_ALERT_DESCRIPTIONS
-    }
-
-    return "Unknown"sv;
-#undef ENUMERATE_ALERT_DESCRIPTION
-}
-
 enum class Error : i8 {
     NoError = 0,
     UnknownError = -1,
@@ -113,37 +64,6 @@ enum class Error : i8 {
     OutOfMemory = -23,
 };
 
-enum class AlertLevel : u8 {
-    Warning = 0x01,
-    Critical = 0x02
-};
-
-enum HandshakeType {
-    HelloRequest = 0x00,
-    ClientHello = 0x01,
-    ServerHello = 0x02,
-    HelloVerifyRequest = 0x03,
-    CertificateMessage = 0x0b,
-    ServerKeyExchange = 0x0c,
-    CertificateRequest = 0x0d,
-    ServerHelloDone = 0x0e,
-    CertificateVerify = 0x0f,
-    ClientKeyExchange = 0x10,
-    Finished = 0x14
-};
-
-enum class HandshakeExtension : u16 {
-    ServerName = 0x00,
-    EllipticCurves = 0x0a,
-    ECPointFormats = 0x0b,
-    SignatureAlgorithms = 0x0d,
-    ApplicationLayerProtocolNegotiation = 0x10,
-};
-
-enum class NameType : u8 {
-    HostName = 0x00,
-};
-
 enum class WritePacketStage {
     Initial = 0,
     ClientHandshake = 1,
@@ -164,25 +84,21 @@ enum ClientVerificationStaus {
     VerificationNeeded,
 };
 
-enum class ECCurveType : u8 {
-    NamedCurve = 3,
-};
-
 // Note for the 16 iv length instead of 8:
 // 4 bytes of fixed IV, 8 random (nonce) bytes, 4 bytes for counter
 // GCM specifically asks us to transmit only the nonce, the counter is zero
 // and the fixed IV is derived from the premaster key.
-#define ENUMERATE_CIPHERS(C)                                                                                                                              \
-    C(true, CipherSuite::RSA_WITH_AES_128_CBC_SHA, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_128_CBC, Crypto::Hash::SHA1, 16, false)                \
-    C(true, CipherSuite::RSA_WITH_AES_256_CBC_SHA, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_256_CBC, Crypto::Hash::SHA1, 16, false)                \
-    C(true, CipherSuite::RSA_WITH_AES_128_CBC_SHA256, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_128_CBC, Crypto::Hash::SHA256, 16, false)           \
-    C(true, CipherSuite::RSA_WITH_AES_256_CBC_SHA256, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_256_CBC, Crypto::Hash::SHA256, 16, false)           \
-    C(true, CipherSuite::RSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true)             \
-    C(true, CipherSuite::RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true)             \
-    C(true, CipherSuite::DHE_RSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::DHE_RSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true)     \
-    C(true, CipherSuite::DHE_RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::DHE_RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true)     \
-    C(true, CipherSuite::ECDHE_RSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::ECDHE_RSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true) \
-    C(true, CipherSuite::ECDHE_RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::ECDHE_RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true)
+#define ENUMERATE_CIPHERS(C)                                                                                                                                  \
+    C(true, CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_128_CBC, Crypto::Hash::SHA1, 16, false)                \
+    C(true, CipherSuite::TLS_RSA_WITH_AES_256_CBC_SHA, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_256_CBC, Crypto::Hash::SHA1, 16, false)                \
+    C(true, CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA256, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_128_CBC, Crypto::Hash::SHA256, 16, false)           \
+    C(true, CipherSuite::TLS_RSA_WITH_AES_256_CBC_SHA256, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_256_CBC, Crypto::Hash::SHA256, 16, false)           \
+    C(true, CipherSuite::TLS_RSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true)             \
+    C(true, CipherSuite::TLS_RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true)             \
+    C(true, CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::DHE_RSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true)     \
+    C(true, CipherSuite::TLS_DHE_RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::DHE_RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true)     \
+    C(true, CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::ECDHE_RSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true) \
+    C(true, CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::ECDHE_RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true)
 
 constexpr KeyExchangeAlgorithm get_key_exchange_algorithm(CipherSuite suite)
 {
@@ -240,17 +156,17 @@ struct Options {
         return move(*this);                  \
     }
 
-    OPTION_WITH_DEFAULTS(Version, version, Version::V12)
+    OPTION_WITH_DEFAULTS(ProtocolVersion, version, ProtocolVersion::VERSION_1_2)
     OPTION_WITH_DEFAULTS(Vector<SignatureAndHashAlgorithm>, supported_signature_algorithms,
         { HashAlgorithm::SHA512, SignatureAlgorithm::RSA },
         { HashAlgorithm::SHA384, SignatureAlgorithm::RSA },
         { HashAlgorithm::SHA256, SignatureAlgorithm::RSA },
         { HashAlgorithm::SHA1, SignatureAlgorithm::RSA });
-    OPTION_WITH_DEFAULTS(Vector<NamedCurve>, elliptic_curves,
-        NamedCurve::x25519,
-        NamedCurve::secp256r1,
-        NamedCurve::x448)
-    OPTION_WITH_DEFAULTS(Vector<ECPointFormat>, supported_ec_point_formats, ECPointFormat::Uncompressed)
+    OPTION_WITH_DEFAULTS(Vector<SupportedGroup>, elliptic_curves,
+        SupportedGroup::X25519,
+        SupportedGroup::SECP256R1,
+        SupportedGroup::X448)
+    OPTION_WITH_DEFAULTS(Vector<ECPointFormat>, supported_ec_point_formats, ECPointFormat::UNCOMPRESSED)
 
     OPTION_WITH_DEFAULTS(bool, use_sni, true)
     OPTION_WITH_DEFAULTS(bool, use_compression, false)
@@ -344,15 +260,15 @@ struct Context {
     OwnPtr<Crypto::Curves::EllipticCurve> server_key_exchange_curve;
 };
 
-class TLSv12 final : public Core::Stream::Socket {
+class TLSv12 final : public Core::Socket {
 private:
-    Core::Stream::Socket& underlying_stream()
+    Core::Socket& underlying_stream()
     {
-        return *m_stream.visit([&](auto& stream) -> Core::Stream::Socket* { return stream; });
+        return *m_stream.visit([&](auto& stream) -> Core::Socket* { return stream; });
     }
-    Core::Stream::Socket const& underlying_stream() const
+    Core::Socket const& underlying_stream() const
     {
-        return *m_stream.visit([&](auto& stream) -> Core::Stream::Socket const* { return stream; });
+        return *m_stream.visit([&](auto& stream) -> Core::Socket const* { return stream; });
     }
 
 public:
@@ -360,12 +276,12 @@ public:
     /// The amount of bytes read can be smaller than the size of the buffer.
     /// Returns either the bytes that were read, or an errno in the case of
     /// failure.
-    virtual ErrorOr<Bytes> read(Bytes) override;
+    virtual ErrorOr<Bytes> read_some(Bytes) override;
 
     /// Tries to write the entire contents of the buffer. It is possible for
     /// less than the full buffer to be written. Returns either the amount of
     /// bytes written into the stream, or an errno in the case of failure.
-    virtual ErrorOr<size_t> write(ReadonlyBytes) override;
+    virtual ErrorOr<size_t> write_some(ReadonlyBytes) override;
 
     virtual bool is_eof() const override { return m_context.application_buffer.is_empty() && (m_context.connection_finished || underlying_stream().is_eof()); }
 
@@ -384,9 +300,9 @@ public:
     virtual void set_notifications_enabled(bool enabled) override { underlying_stream().set_notifications_enabled(enabled); }
 
     static ErrorOr<NonnullOwnPtr<TLSv12>> connect(DeprecatedString const& host, u16 port, Options = {});
-    static ErrorOr<NonnullOwnPtr<TLSv12>> connect(DeprecatedString const& host, Core::Stream::Socket& underlying_stream, Options = {});
+    static ErrorOr<NonnullOwnPtr<TLSv12>> connect(DeprecatedString const& host, Core::Socket& underlying_stream, Options = {});
 
-    using StreamVariantType = Variant<OwnPtr<Core::Stream::Socket>, Core::Stream::Socket*>;
+    using StreamVariantType = Variant<OwnPtr<Core::Socket>, Core::Socket*>;
     explicit TLSv12(StreamVariantType, Options);
 
     bool is_established() const { return m_context.connection_status == ConnectionStatus::Established; }
@@ -400,18 +316,11 @@ public:
         m_context.extensions.SNI = sni;
     }
 
-    bool load_certificates(ReadonlyBytes pem_buffer);
-    bool load_private_key(ReadonlyBytes pem_buffer);
-
     void set_root_certificates(Vector<Certificate>);
 
     static Vector<Certificate> parse_pem_certificate(ReadonlyBytes certificate_pem_buffer, ReadonlyBytes key_pem_buffer);
 
-    ByteBuffer finish_build();
-
     StringView alpn() const { return m_context.negotiated_alpn; }
-    void add_alpn(StringView alpn);
-    bool has_alpn(StringView alpn) const;
 
     bool supports_cipher(CipherSuite suite) const
     {
@@ -426,9 +335,9 @@ public:
         }
     }
 
-    bool supports_version(Version v) const
+    bool supports_version(ProtocolVersion v) const
     {
-        return v == Version::V12;
+        return v == ProtocolVersion::VERSION_1_2;
     }
 
     void alert(AlertLevel, AlertDescription);
@@ -461,10 +370,8 @@ private:
     ByteBuffer build_hello();
     ByteBuffer build_handshake_finished();
     ByteBuffer build_certificate();
-    ByteBuffer build_done();
     ByteBuffer build_alert(bool critical, u8 code);
     ByteBuffer build_change_cipher_spec();
-    ByteBuffer build_verify_request();
     void build_rsa_pre_master_secret(PacketBuilder&);
     void build_dhe_rsa_pre_master_secret(PacketBuilder&);
     void build_ecdhe_rsa_pre_master_secret(PacketBuilder&);
@@ -486,7 +393,6 @@ private:
     ssize_t handle_certificate_verify(ReadonlyBytes);
     ssize_t handle_handshake_payload(ReadonlyBytes);
     ssize_t handle_message(ReadonlyBytes);
-    ssize_t handle_random(ReadonlyBytes);
 
     void pseudorandom_function(Bytes output, ReadonlyBytes secret, u8 const* label, size_t label_length, ReadonlyBytes seed, ReadonlyBytes seed_b);
 

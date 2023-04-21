@@ -7,16 +7,16 @@
 
 #include <AK/ScopeGuard.h>
 #include <AK/StringView.h>
+#include <Kernel/API/Ioctl.h>
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/signal_numbers.h>
+#include <Kernel/API/ttydefaults.h>
+#include <Kernel/API/ttydefaultschars.h>
 #include <Kernel/Debug.h>
 #include <Kernel/InterruptDisabler.h>
 #include <Kernel/Process.h>
 #include <Kernel/TTY/TTY.h>
-#include <LibC/signal_numbers.h>
-#include <LibC/sys/ioctl_numbers.h>
-#define TTYDEFCHARS
-#include <LibC/sys/ttydefaults.h>
-#undef TTYDEFCHARS
+#include <Kernel/UnixTypes.h>
 
 namespace Kernel {
 
@@ -500,7 +500,7 @@ ErrorOr<void> TTY::ioctl(OpenFileDescription&, unsigned request, Userspace<void*
             return EPERM;
         if (process && pgid != process->pgid())
             return EPERM;
-        m_pg = process_group;
+        m_pg = TRY(process_group->try_make_weak_ptr());
 
         if (process) {
             if (auto parent = Process::from_pid_ignoring_jails(process->ppid())) {

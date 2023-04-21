@@ -4,8 +4,10 @@
 [Exposed=Window,  LegacyFactoryFunction=Option(optional DOMString text = "", optional DOMString value, optional boolean defaultSelected = false, optional boolean selected = false)]
 interface HTMLOptionElement : HTMLElement {
 
-    [Reflect] attribute boolean disabled;
-    [Reflect=selected] attribute boolean defaultSelected;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute boolean disabled;
+    [CEReactions, Reflect=selected] attribute boolean defaultSelected;
     attribute boolean selected;
     [CEReactions] attribute DOMString value;
 

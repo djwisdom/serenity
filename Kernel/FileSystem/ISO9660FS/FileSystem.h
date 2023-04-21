@@ -29,7 +29,7 @@ class ISO9660FS final : public BlockBasedFileSystem {
     friend ISO9660DirectoryIterator;
 
 public:
-    static ErrorOr<NonnullLockRefPtr<FileSystem>> try_create(OpenFileDescription&);
+    static ErrorOr<NonnullRefPtr<FileSystem>> try_create(OpenFileDescription&);
 
     virtual ~ISO9660FS() override;
     virtual StringView class_name() const override { return "ISO9660FS"sv; }
@@ -59,7 +59,7 @@ private:
     ErrorOr<void> visit_directory_record(ISO::DirectoryRecordHeader const& record, Function<ErrorOr<RecursionDecision>(ISO::DirectoryRecordHeader const*)> const& visitor) const;
 
     OwnPtr<ISO::PrimaryVolumeDescriptor> m_primary_volume;
-    LockRefPtr<ISO9660Inode> m_root_inode;
+    RefPtr<ISO9660Inode> m_root_inode;
 
     mutable u32 m_cached_inode_count { 0 };
     HashMap<u32, NonnullLockRefPtr<ISO9660FSDirectoryEntry>> m_directory_entry_cache;

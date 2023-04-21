@@ -9,6 +9,8 @@
 #include <AK/StringBuilder.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
+#include <Kernel/API/POSIX/signal_numbers.h>
+#include <Kernel/Arch/PageDirectory.h>
 #include <Kernel/Arch/SmapDisabler.h>
 #include <Kernel/Arch/TrapFrame.h>
 #include <Kernel/Debug.h>
@@ -17,41 +19,38 @@
 #include <Kernel/InterruptDisabler.h>
 #include <Kernel/KSyms.h>
 #include <Kernel/Memory/MemoryManager.h>
-#include <Kernel/Memory/PageDirectory.h>
 #include <Kernel/Memory/ScopedAddressSpaceSwitcher.h>
 #include <Kernel/Panic.h>
 #include <Kernel/PerformanceEventBuffer.h>
 #include <Kernel/Process.h>
-#include <Kernel/ProcessExposed.h>
 #include <Kernel/Scheduler.h>
 #include <Kernel/Sections.h>
 #include <Kernel/Thread.h>
 #include <Kernel/ThreadTracer.h>
 #include <Kernel/TimerQueue.h>
 #include <Kernel/kstdio.h>
-#include <LibC/signal_numbers.h>
 
 namespace Kernel {
 
-static Singleton<SpinlockProtected<Thread::GlobalList>> s_list;
+static Singleton<SpinlockProtected<Thread::GlobalList, LockRank::None>> s_list;
 
-SpinlockProtected<Thread::GlobalList>& Thread::all_instances()
+SpinlockProtected<Thread::GlobalList, LockRank::None>& Thread::all_instances()
 {
     return *s_list;
 }
 
-ErrorOr<NonnullLockRefPtr<Thread>> Thread::try_create(NonnullLockRefPtr<Process> process)
+ErrorOr<NonnullRefPtr<Thread>> Thread::create(NonnullRefPtr<Process> process)
 {
     auto kernel_stack_region = TRY(MM.allocate_kernel_region(default_kernel_stack_size, {}, Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow));
     kernel_stack_region->set_stack(true);
 
-    auto block_timer = TRY(try_make_lock_ref_counted<Timer>());
+    auto block_timer = TRY(try_make_ref_counted<Timer>());
 
-    auto name = TRY(KString::try_create(process->name()));
-    return adopt_nonnull_lock_ref_or_enomem(new (nothrow) Thread(move(process), move(kernel_stack_region), move(block_timer), move(name)));
+    auto name = TRY(process->name().with([](auto& name) { return name->try_clone(); }));
+    return adopt_nonnull_ref_or_enomem(new (nothrow) Thread(move(process), move(kernel_stack_region), move(block_timer), move(name)));
 }
 
-Thread::Thread(NonnullLockRefPtr<Process> process, NonnullOwnPtr<Memory::Region> kernel_stack_region, NonnullLockRefPtr<Timer> block_timer, NonnullOwnPtr<KString> name)
+Thread::Thread(NonnullRefPtr<Process> process, NonnullOwnPtr<Memory::Region> kernel_stack_region, NonnullRefPtr<Timer> block_timer, NonnullOwnPtr<KString> name)
     : m_process(move(process))
     , m_kernel_stack_region(move(kernel_stack_region))
     , m_name(move(name))
@@ -72,57 +71,20 @@ Thread::Thread(NonnullLockRefPtr<Process> process, NonnullOwnPtr<Memory::Region>
         list.append(*this);
     });
 
-    if constexpr (THREAD_DEBUG)
-        dbgln("Created new thread {}({}:{})", m_process->name(), m_process->pid().value(), m_tid.value());
+    if constexpr (THREAD_DEBUG) {
+        m_process->name().with([&](auto& process_name) {
+            dbgln("Created new thread {}({}:{})", process_name->view(), m_process->pid().value(), m_tid.value());
+        });
+    }
 
     reset_fpu_state();
-
-    // Only IF is set when a process boots.
-    m_regs.set_flags(0x0202);
-
-#if ARCH(I386)
-    if (m_process->is_kernel_process()) {
-        m_regs.cs = GDT_SELECTOR_CODE0;
-        m_regs.ds = GDT_SELECTOR_DATA0;
-        m_regs.es = GDT_SELECTOR_DATA0;
-        m_regs.fs = 0;
-        m_regs.ss = GDT_SELECTOR_DATA0;
-        m_regs.gs = GDT_SELECTOR_PROC;
-    } else {
-        m_regs.cs = GDT_SELECTOR_CODE3 | 3;
-        m_regs.ds = GDT_SELECTOR_DATA3 | 3;
-        m_regs.es = GDT_SELECTOR_DATA3 | 3;
-        m_regs.fs = GDT_SELECTOR_DATA3 | 3;
-        m_regs.ss = GDT_SELECTOR_DATA3 | 3;
-        m_regs.gs = GDT_SELECTOR_TLS | 3;
-    }
-#elif ARCH(X86_64)
-    if (m_process->is_kernel_process())
-        m_regs.cs = GDT_SELECTOR_CODE0;
-    else
-        m_regs.cs = GDT_SELECTOR_CODE3 | 3;
-#elif ARCH(AARCH64)
-    TODO_AARCH64();
-#else
-#    error Unknown architecture
-#endif
-
-    m_regs.cr3 = m_process->address_space().with([](auto& space) { return space->page_directory().cr3(); });
 
     m_kernel_stack_base = m_kernel_stack_region->vaddr().get();
     m_kernel_stack_top = m_kernel_stack_region->vaddr().offset(default_kernel_stack_size).get() & ~(FlatPtr)0x7u;
 
-    if (m_process->is_kernel_process()) {
-        m_regs.set_sp(m_kernel_stack_top);
-        m_regs.set_sp0(m_kernel_stack_top);
-    } else {
-        // Ring 3 processes get a separate stack for ring 0.
-        // The ring 3 stack will be assigned by exec().
-#if ARCH(I386)
-        m_regs.ss0 = GDT_SELECTOR_DATA0;
-#endif
-        m_regs.set_sp0(m_kernel_stack_top);
-    }
+    m_process->address_space().with([&](auto& space) {
+        m_regs.set_initial_state(m_process->is_kernel_process(), *space, m_kernel_stack_top);
+    });
 
     // We need to add another reference if we could successfully create
     // all the resources needed for this thread. The reason for this is that
@@ -255,7 +217,7 @@ Thread::BlockResult Thread::block_impl(BlockTimeout const& timeout, Blocker& blo
     return result;
 }
 
-void Thread::block(Kernel::Mutex& lock, SpinlockLocker<Spinlock>& lock_lock, u32 lock_count)
+void Thread::block(Kernel::Mutex& lock, SpinlockLocker<Spinlock<LockRank::None>>& lock_lock, u32 lock_count)
 {
     VERIFY(!Processor::current_in_irq());
     VERIFY(this == Thread::current());
@@ -634,7 +596,7 @@ void Thread::finalize_dying_threads()
         });
     }
     for (auto* thread : dying_threads) {
-        LockRefPtr<Process> process = thread->process();
+        RefPtr<Process> const process = thread->process();
         dbgln_if(PROCESS_DEBUG, "Before finalization, {} has {} refs and its process has {}",
             *thread, thread->ref_count(), thread->process().ref_count());
         thread->finalize();
@@ -671,7 +633,7 @@ void Thread::update_time_scheduled(u64 current_scheduler_time, bool is_kernel, b
 
 bool Thread::tick()
 {
-    if (previous_mode() == PreviousMode::KernelMode) {
+    if (previous_mode() == ExecutionMode::Kernel) {
         ++m_process->m_ticks_in_kernel;
         ++m_ticks_in_kernel;
     } else {
@@ -995,6 +957,8 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
     auto* tracer = process.tracer();
     if (signal == SIGSTOP || (tracer && default_signal_action(signal) == DefaultSignalAction::DumpCore)) {
         dbgln_if(SIGNAL_DEBUG, "Signal {} stopping this thread", signal);
+        if (tracer)
+            tracer->set_regs(get_register_dump_from_stack());
         set_state(Thread::State::Stopped, signal);
         return DispatchSignalResult::Yield;
     }
@@ -1151,25 +1115,20 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
         if (action.flags & SA_SIGINFO)
             fill_signal_info_for_signal(signal_info);
 
-#if ARCH(I386)
-        constexpr static FlatPtr thread_red_zone_size = 0;
-#elif ARCH(X86_64)
-        constexpr static FlatPtr thread_red_zone_size = 128;
-#elif ARCH(AARCH64)
-        constexpr static FlatPtr thread_red_zone_size = 0; // FIXME
-        TODO_AARCH64();
-#else
-#    error Unknown architecture in dispatch_signal
-#endif
-
         // Align the stack to 16 bytes.
         // Note that we push some elements on to the stack before the return address,
         // so we need to account for this here.
         constexpr static FlatPtr elements_pushed_on_stack_before_handler_address = 1; // one slot for a saved register
         FlatPtr const extra_bytes_pushed_on_stack_before_handler_address = sizeof(ucontext) + sizeof(signal_info);
         FlatPtr stack_alignment = (stack - elements_pushed_on_stack_before_handler_address * sizeof(FlatPtr) + extra_bytes_pushed_on_stack_before_handler_address) % 16;
+        stack -= stack_alignment;
+
+#if ARCH(X86_64)
         // Also note that we have to skip the thread red-zone (if needed), so do that here.
-        stack -= thread_red_zone_size + stack_alignment;
+        constexpr static FlatPtr thread_red_zone_size = 128;
+        stack -= thread_red_zone_size;
+#endif
+
         auto start_of_stack = stack;
 
         TRY(push_value_on_user_stack(stack, 0)); // syscall return value slot
@@ -1188,22 +1147,12 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
 
         VERIFY(stack % 16 == 0);
 
-#if ARCH(I386) || ARCH(X86_64)
         // Save the FPU/SSE state
         TRY(copy_value_on_user_stack(stack, fpu_state()));
-#endif
 
-#if ARCH(I386)
-        // Leave one empty slot to align the stack for a handler call.
-        TRY(push_value_on_user_stack(stack, 0));
-#endif
         TRY(push_value_on_user_stack(stack, pointer_to_ucontext));
         TRY(push_value_on_user_stack(stack, pointer_to_signal_info));
         TRY(push_value_on_user_stack(stack, signal));
-
-#if ARCH(I386)
-        VERIFY(stack % 16 == 0);
-#endif
 
         TRY(push_value_on_user_stack(stack, handler_vaddr.get()));
 
@@ -1234,16 +1183,14 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
     auto signal_trampoline_addr = process.signal_trampoline().get();
     regs.set_ip(signal_trampoline_addr);
 
+#if ARCH(X86_64)
     // Userspace flags might be invalid for function entry, according to SYSV ABI (section 3.2.1).
     // Set them to a known-good value to avoid weird handler misbehavior.
     // Only IF (and the reserved bit 1) are set.
-#if ARCH(I386)
-    regs.set_flags(2 | (regs.eflags & ~safe_eflags_mask));
-#elif ARCH(X86_64)
     regs.set_flags(2 | (regs.rflags & ~safe_eflags_mask));
 #endif
 
-    dbgln_if(SIGNAL_DEBUG, "Thread in state '{}' has been primed with signal handler {:#04x}:{:p} to deliver {}", state_string(), m_regs.cs, m_regs.ip(), signal);
+    dbgln_if(SIGNAL_DEBUG, "Thread in state '{}' has been primed with signal handler {:p} to deliver {}", state_string(), m_regs.ip(), signal);
 
     return DispatchSignalResult::Continue;
 }
@@ -1265,9 +1212,9 @@ RegisterState& Thread::get_register_dump_from_stack()
     return *trap->regs;
 }
 
-ErrorOr<NonnullLockRefPtr<Thread>> Thread::try_clone(Process& process)
+ErrorOr<NonnullRefPtr<Thread>> Thread::clone(NonnullRefPtr<Process> process)
 {
-    auto clone = TRY(Thread::try_create(process));
+    auto clone = TRY(Thread::create(move(process)));
     m_signal_action_masks.span().copy_to(clone->m_signal_action_masks);
     clone->m_signal_mask = m_signal_mask;
     clone->m_fpu_state = m_fpu_state;
@@ -1447,9 +1394,9 @@ ErrorOr<void> Thread::make_thread_specific_region(Badge<Process>)
     });
 }
 
-LockRefPtr<Thread> Thread::from_tid(ThreadID tid)
+RefPtr<Thread> Thread::from_tid(ThreadID tid)
 {
-    return Thread::all_instances().with([&](auto& list) -> LockRefPtr<Thread> {
+    return Thread::all_instances().with([&](auto& list) -> RefPtr<Thread> {
         for (Thread& thread : list) {
             if (thread.tid() == tid)
                 return thread;
@@ -1515,11 +1462,21 @@ void Thread::track_lock_release(LockRank rank)
 
     m_lock_rank_mask ^= rank;
 }
+
+void Thread::set_name(NonnullOwnPtr<KString> name)
+{
+    m_name.with([&](auto& this_name) {
+        this_name = move(name);
+    });
+}
+
 }
 
 ErrorOr<void> AK::Formatter<Kernel::Thread>::format(FormatBuilder& builder, Kernel::Thread const& value)
 {
-    return AK::Formatter<FormatString>::format(
-        builder,
-        "{}({}:{})"sv, value.process().name(), value.pid().value(), value.tid().value());
+    return value.process().name().with([&](auto& process_name) {
+        return AK::Formatter<FormatString>::format(
+            builder,
+            "{}({}:{})"sv, process_name->view(), value.pid().value(), value.tid().value());
+    });
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -20,11 +20,11 @@ REGISTER_WIDGET(GUI, DialogButton)
 
 namespace GUI {
 
-Button::Button(DeprecatedString text)
+Button::Button(String text)
     : AbstractButton(move(text))
 {
-    set_min_size({ 40, 22 });
-    set_preferred_size({ SpecialDimension::OpportunisticGrow, 22 });
+    set_min_size({ SpecialDimension::Shrink });
+    set_preferred_size({ SpecialDimension::OpportunisticGrow, SpecialDimension::Shrink });
     set_focus_policy(GUI::FocusPolicy::StrongFocus);
 
     on_focus_change = [this](bool has_focus, auto) {
@@ -57,7 +57,7 @@ void Button::paint_event(PaintEvent& event)
     Painter painter(*this);
     painter.add_clip_rect(event.rect());
 
-    bool paint_pressed = is_being_pressed() || is_mimic_pressed() || (m_menu && m_menu->is_visible());
+    bool paint_pressed = is_being_pressed() || m_mimic_pressed || (m_menu && m_menu->is_visible());
 
     Gfx::StylePainter::paint_button(painter, rect(), palette(), m_button_style, paint_pressed, is_hovered(), is_checked(), is_enabled(), is_focused(), is_default() && !another_button_has_focus());
 
@@ -89,18 +89,15 @@ void Button::paint_event(PaintEvent& event)
             // Reusing that threshold here as it seems to work reasonably well.
             should_invert_icon = contrast_ratio < 4.5f && contrast_ratio < palette().button().contrast_ratio(solid_color->inverted());
         }
-        if (should_invert_icon)
-            m_icon->invert();
+        auto icon = should_invert_icon ? m_icon->inverted().release_value_but_fixme_should_propagate_errors() : NonnullRefPtr { *m_icon };
         if (is_enabled()) {
             if (is_hovered())
-                painter.blit_brightened(icon_location, *m_icon, m_icon->rect());
+                painter.blit_brightened(icon_location, *icon, icon->rect());
             else
-                painter.blit(icon_location, *m_icon, m_icon->rect());
+                painter.blit(icon_location, *icon, icon->rect());
         } else {
-            painter.blit_disabled(icon_location, *m_icon, m_icon->rect(), palette());
+            painter.blit_disabled(icon_location, *icon, icon->rect(), palette());
         }
-        if (should_invert_icon)
-            m_icon->invert();
     }
     auto& font = is_checked() ? this->font().bold_variant() : this->font();
     if (m_icon && !text().is_empty()) {
@@ -108,7 +105,7 @@ void Button::paint_event(PaintEvent& event)
         content_rect.set_width(content_rect.width() - m_icon->width() - icon_spacing());
     }
 
-    Gfx::IntRect text_rect { 0, 0, font.width(text()), font.glyph_height() };
+    Gfx::IntRect text_rect { 0, 0, font.width_rounded_up(text()), font.pixel_size_rounded_up() };
     if (text_rect.width() > content_rect.width())
         text_rect.set_width(content_rect.width());
     text_rect.align_within(content_rect, text_alignment());
@@ -136,10 +133,19 @@ void Button::click(unsigned modifiers)
             return;
         set_checked(!is_checked());
     }
+
+    mimic_pressed();
+
     if (on_click)
         on_click(modifiers);
     if (m_action)
         m_action->activate(this);
+}
+
+void Button::double_click(unsigned int modifiers)
+{
+    if (on_double_click)
+        on_double_click(modifiers);
 }
 
 void Button::middle_mouse_click(unsigned int modifiers)
@@ -172,7 +178,7 @@ void Button::set_action(Action& action)
         set_checked(action.is_checked());
 }
 
-void Button::set_icon(RefPtr<Gfx::Bitmap> icon)
+void Button::set_icon(RefPtr<Gfx::Bitmap const> icon)
 {
     if (m_icon == icon)
         return;
@@ -182,7 +188,7 @@ void Button::set_icon(RefPtr<Gfx::Bitmap> icon)
 
 void Button::set_icon_from_path(DeprecatedString const& path)
 {
-    auto maybe_bitmap = Gfx::Bitmap::try_load_from_file(path);
+    auto maybe_bitmap = Gfx::Bitmap::load_from_file(path);
     if (maybe_bitmap.is_error()) {
         dbgln("Unable to load bitmap `{}` for button icon", path);
         return;
@@ -246,10 +252,10 @@ void Button::set_default(bool default_button)
     });
 }
 
-void Button::set_mimic_pressed(bool mimic_pressed)
+void Button::mimic_pressed()
 {
-    if (!is_being_pressed()) {
-        m_mimic_pressed = mimic_pressed;
+    if (!is_being_pressed() && !was_being_pressed()) {
+        m_mimic_pressed = true;
 
         stop_timer();
         start_timer(80, Core::TimerShouldFireWhenNotVisible::Yes);
@@ -260,7 +266,7 @@ void Button::set_mimic_pressed(bool mimic_pressed)
 
 void Button::timer_event(Core::TimerEvent&)
 {
-    if (is_mimic_pressed()) {
+    if (m_mimic_pressed) {
         m_mimic_pressed = false;
 
         update();
@@ -269,24 +275,30 @@ void Button::timer_event(Core::TimerEvent&)
 
 Optional<UISize> Button::calculated_min_size() const
 {
-    int horizontal = 0, vertical = 0;
-
+    int width = 22;
+    int height = 22;
+    int constexpr padding = 6;
     if (!text().is_empty()) {
-        auto& font = this->font();
-        horizontal = font.width(text()) + 2;
-        vertical = font.glyph_height() + 4; // FIXME: Use actual maximum total height
+        width = max(width, font().width_rounded_up("..."sv) + padding);
+        height = max(height, font().pixel_size_rounded_up() + padding);
+    }
+    if (icon()) {
+        int icon_width = icon()->width() + icon_spacing();
+        width = text().is_empty() ? max(width, icon_width) : width + icon_width;
+        height = max(height, icon()->height() + padding);
     }
 
-    if (m_icon) {
-        vertical = max(vertical, m_icon->height());
+    return UISize(width, height);
+}
 
-        horizontal += m_icon->width() + icon_spacing();
-    }
+Optional<UISize> DialogButton::calculated_min_size() const
+{
+    int constexpr scale = 8;
+    int constexpr padding = 6;
+    int width = max(80, font().presentation_size() * scale);
+    int height = max(22, font().pixel_size_rounded_up() + padding);
 
-    horizontal += 8;
-    vertical += 4;
-
-    return UISize(horizontal, vertical);
+    return UISize(width, height);
 }
 
 }

@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLMenuElement : HTMLElement {
 
-    [Reflect] attribute boolean compact;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute boolean compact;
 
 };

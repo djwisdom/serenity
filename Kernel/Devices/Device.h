@@ -43,14 +43,14 @@ public:
     MinorNumber minor() const { return m_minor; }
 
     virtual ErrorOr<NonnullOwnPtr<KString>> pseudo_path(OpenFileDescription const&) const override;
-    virtual ErrorOr<NonnullLockRefPtr<OpenFileDescription>> open(int options) override;
+    virtual ErrorOr<NonnullRefPtr<OpenFileDescription>> open(int options) override;
 
     UserID uid() const { return m_uid; }
     GroupID gid() const { return m_gid; }
 
     virtual bool is_device() const override { return true; }
     virtual void will_be_destroyed() override;
-    virtual void after_inserting();
+    virtual ErrorOr<void> after_inserting();
     virtual bool is_openable_by_jailed_processes() const { return false; }
     void process_next_queued_request(Badge<AsyncDeviceRequest>, AsyncDeviceRequest const&);
 
@@ -90,16 +90,16 @@ private:
 
     State m_state { State::Normal };
 
-    Spinlock m_requests_lock { LockRank::None };
+    Spinlock<LockRank::None> m_requests_lock {};
     DoublyLinkedList<LockRefPtr<AsyncDeviceRequest>> m_requests;
 
 protected:
     // FIXME: This pointer will be eventually removed after all nodes in /sys/dev/block/ and
     // /sys/dev/char/ are symlinks.
-    LockRefPtr<SysFSDeviceComponent> m_sysfs_component;
+    RefPtr<SysFSDeviceComponent> m_sysfs_component;
 
-    LockRefPtr<SysFSSymbolicLinkDeviceComponent> m_symlink_sysfs_component;
-    LockRefPtr<SysFSDirectory> m_sysfs_device_directory;
+    RefPtr<SysFSSymbolicLinkDeviceComponent> m_symlink_sysfs_component;
+    RefPtr<SysFSDirectory> m_sysfs_device_directory;
 };
 
 }

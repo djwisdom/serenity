@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2021, Idan Horowitz <idan.horowitz@serenityos.org>
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -36,13 +36,13 @@ private:
     virtual void visit_edges(Visitor&) override;
 
     // 4.4 Properties of Temporal.PlainTime Instances, https://tc39.es/proposal-temporal/#sec-properties-of-temporal-plaintime-instances
-    u8 m_iso_hour { 0 };         // [[ISOHour]]
-    u8 m_iso_minute { 0 };       // [[ISOMinute]]
-    u8 m_iso_second { 0 };       // [[ISOSecond]]
-    u16 m_iso_millisecond { 0 }; // [[ISOMillisecond]]
-    u16 m_iso_microsecond { 0 }; // [[ISOMicrosecond]]
-    u16 m_iso_nanosecond { 0 };  // [[ISONanosecond]]
-    Calendar& m_calendar;        // [[Calendar]] (always the built-in ISO 8601 calendar)
+    u8 m_iso_hour { 0 };               // [[ISOHour]]
+    u8 m_iso_minute { 0 };             // [[ISOMinute]]
+    u8 m_iso_second { 0 };             // [[ISOSecond]]
+    u16 m_iso_millisecond { 0 };       // [[ISOMillisecond]]
+    u16 m_iso_microsecond { 0 };       // [[ISOMicrosecond]]
+    u16 m_iso_nanosecond { 0 };        // [[ISONanosecond]]
+    NonnullGCPtr<Calendar> m_calendar; // [[Calendar]] (always the built-in ISO 8601 calendar)
 };
 
 struct DaysAndTime {
@@ -85,7 +85,7 @@ DaysAndTime balance_time(double hour, double minute, double second, double milli
 TemporalTime constrain_time(double hour, double minute, double second, double millisecond, double microsecond, double nanosecond);
 ThrowCompletionOr<PlainTime*> create_temporal_time(VM&, u8 hour, u8 minute, u8 second, u16 millisecond, u16 microsecond, u16 nanosecond, FunctionObject const* new_target = nullptr);
 ThrowCompletionOr<TemporalTimeLikeRecord> to_temporal_time_record(VM&, Object const& temporal_time_like, ToTemporalTimeRecordCompleteness = ToTemporalTimeRecordCompleteness::Complete);
-DeprecatedString temporal_time_to_string(u8 hour, u8 minute, u8 second, u16 millisecond, u16 microsecond, u16 nanosecond, Variant<StringView, u8> const& precision);
+ThrowCompletionOr<String> temporal_time_to_string(VM&, u8 hour, u8 minute, u8 second, u16 millisecond, u16 microsecond, u16 nanosecond, Variant<StringView, u8> const& precision);
 i8 compare_temporal_time(u8 hour1, u8 minute1, u8 second1, u16 millisecond1, u16 microsecond1, u16 nanosecond1, u8 hour2, u8 minute2, u8 second2, u16 millisecond2, u16 microsecond2, u16 nanosecond2);
 DaysAndTime add_time(u8 hour, u8 minute, u8 second, u16 millisecond, u16 microsecond, u16 nanosecond, double hours, double minutes, double seconds, double milliseconds, double microseconds, double nanoseconds);
 DaysAndTime round_time(u8 hour, u8 minute, u8 second, u16 millisecond, u16 microsecond, u16 nanosecond, u64 increment, StringView unit, StringView rounding_mode, Optional<double> day_length_ns = {});

@@ -9,10 +9,10 @@
 #include <AK/LexicalPath.h>
 #include <AK/URL.h>
 #include <Applications/Run/RunGML.h>
-#include <LibCore/File.h>
+#include <LibCore/Process.h>
 #include <LibCore/StandardPaths.h>
-#include <LibCore/Stream.h>
 #include <LibDesktop/Launcher.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGUI/Button.h>
 #include <LibGUI/Event.h>
 #include <LibGUI/FilePicker.h>
@@ -41,24 +41,24 @@ RunWindow::RunWindow()
     set_resizable(false);
     set_minimizable(false);
 
-    auto& main_widget = set_main_widget<GUI::Widget>();
-    main_widget.load_from_gml(run_gml);
+    auto main_widget = set_main_widget<GUI::Widget>().release_value_but_fixme_should_propagate_errors();
+    main_widget->load_from_gml(run_gml).release_value_but_fixme_should_propagate_errors();
 
-    m_icon_image_widget = *main_widget.find_descendant_of_type_named<GUI::ImageWidget>("icon");
+    m_icon_image_widget = *main_widget->find_descendant_of_type_named<GUI::ImageWidget>("icon");
     m_icon_image_widget->set_bitmap(app_icon.bitmap_for_size(32));
 
-    m_path_combo_box = *main_widget.find_descendant_of_type_named<GUI::ComboBox>("path");
+    m_path_combo_box = *main_widget->find_descendant_of_type_named<GUI::ComboBox>("path");
     m_path_combo_box->set_model(m_path_history_model);
     if (!m_path_history.is_empty())
         m_path_combo_box->set_selected_index(0);
 
-    m_ok_button = *main_widget.find_descendant_of_type_named<GUI::DialogButton>("ok_button");
+    m_ok_button = *main_widget->find_descendant_of_type_named<GUI::DialogButton>("ok_button");
     m_ok_button->on_click = [this](auto) {
         do_run();
     };
     m_ok_button->set_default(true);
 
-    m_cancel_button = *main_widget.find_descendant_of_type_named<GUI::DialogButton>("cancel_button");
+    m_cancel_button = *main_widget->find_descendant_of_type_named<GUI::DialogButton>("cancel_button");
     m_cancel_button->on_click = [this](auto) {
         close();
     };
@@ -111,14 +111,12 @@ void RunWindow::do_run()
 
 bool RunWindow::run_as_command(DeprecatedString const& run_input)
 {
-    pid_t child_pid;
-    char const* shell_executable = "/bin/Shell"; // TODO query and use the user's preferred shell.
-    char const* argv[] = { shell_executable, "-c", run_input.characters(), nullptr };
-
-    if ((errno = posix_spawn(&child_pid, shell_executable, nullptr, nullptr, const_cast<char**>(argv), environ))) {
-        perror("posix_spawn");
+    // TODO: Query and use the user's preferred shell.
+    auto maybe_child_pid = Core::Process::spawn("/bin/Shell"sv, Array { "-c", run_input.characters() }, {}, Core::Process::KeepAsChild::Yes);
+    if (maybe_child_pid.is_error())
         return false;
-    }
+
+    pid_t child_pid = maybe_child_pid.release_value();
 
     // Command spawned in child shell. Hide and wait for exit code.
     int status;
@@ -143,13 +141,13 @@ bool RunWindow::run_via_launch(DeprecatedString const& run_input)
     auto url = URL::create_with_url_or_path(run_input);
 
     if (url.scheme() == "file") {
-        auto real_path = Core::File::real_path_for(url.path());
-        if (real_path.is_null()) {
-            // errno *should* be preserved from Core::File::real_path_for().
-            warnln("Failed to launch '{}': {}", url.path(), strerror(errno));
+        auto file_path = url.serialize_path();
+        auto real_path_or_error = FileSystem::real_path(file_path);
+        if (real_path_or_error.is_error()) {
+            warnln("Failed to launch '{}': {}", file_path, real_path_or_error.error());
             return false;
         }
-        url = URL::create_with_url_or_path(real_path);
+        url = URL::create_with_url_or_path(real_path_or_error.release_value().to_deprecated_string());
     }
 
     if (!Desktop::Launcher::open(url)) {
@@ -170,8 +168,8 @@ DeprecatedString RunWindow::history_file_path()
 ErrorOr<void> RunWindow::load_history()
 {
     m_path_history.clear();
-    auto file = TRY(Core::Stream::File::open(history_file_path(), Core::Stream::OpenMode::Read));
-    auto buffered_file = TRY(Core::Stream::BufferedFile::create(move(file)));
+    auto file = TRY(Core::File::open(history_file_path(), Core::File::OpenMode::Read));
+    auto buffered_file = TRY(Core::BufferedFile::create(move(file)));
     Array<u8, PAGE_SIZE> line_buffer;
 
     while (!buffered_file->is_eof()) {
@@ -184,11 +182,11 @@ ErrorOr<void> RunWindow::load_history()
 
 ErrorOr<void> RunWindow::save_history()
 {
-    auto file = TRY(Core::Stream::File::open(history_file_path(), Core::Stream::OpenMode::Write));
+    auto file = TRY(Core::File::open(history_file_path(), Core::File::OpenMode::Write));
 
     // Write the first 25 items of history
     for (int i = 0; i < min(static_cast<int>(m_path_history.size()), 25); i++)
-        TRY(file->write(DeprecatedString::formatted("{}\n", m_path_history[i]).bytes()));
+        TRY(file->write_until_depleted(DeprecatedString::formatted("{}\n", m_path_history[i]).bytes()));
 
     return {};
 }

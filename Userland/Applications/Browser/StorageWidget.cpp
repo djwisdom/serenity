@@ -18,7 +18,7 @@ namespace Browser {
 
 StorageWidget::StorageWidget()
 {
-    load_from_gml(storage_widget_gml);
+    load_from_gml(storage_widget_gml).release_value_but_fixme_should_propagate_errors();
     auto& tab_widget = *find_descendant_of_type_named<GUI::TabWidget>("tab_widget");
 
     m_cookies_table_view = tab_widget.find_descendant_of_type_named<GUI::TableView>("cookies_tableview");
@@ -39,7 +39,7 @@ StorageWidget::StorageWidget()
     m_cookies_table_view->set_alternating_row_colors(true);
 
     auto delete_cookie_action = GUI::Action::create(
-        "&Delete Cookie", { Key_Delete }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/delete.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto const&) {
+        "&Delete Cookie", { Key_Delete }, Gfx::Bitmap::load_from_file("/res/icons/16x16/delete.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto const&) {
             auto cookie_index = m_cookies_table_view->selection().first();
             delete_cookie(m_cookies_model->take_cookie(cookie_index));
         },
@@ -130,7 +130,7 @@ void StorageWidget::clear_session_storage_entries()
 void StorageWidget::delete_cookie(Web::Cookie::Cookie cookie)
 {
     // Delete cookie by making its expiry time in the past.
-    cookie.expiry_time = Core::DateTime::from_timestamp(0);
+    cookie.expiry_time = Time::from_seconds(0);
     if (on_update_cookie)
         on_update_cookie(move(cookie));
 }

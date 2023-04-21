@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/DeprecatedString.h>
+#include <AK/Format.h>
 #include <AK/Function.h>
 #include <AK/StringView.h>
 #include <LibJS/Forward.h>
@@ -120,7 +120,7 @@ class TestRunnerGlobalObject final : public JS::GlobalObject {
 
 public:
     TestRunnerGlobalObject(JS::Realm&);
-    virtual void initialize(JS::Realm&) override;
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual ~TestRunnerGlobalObject() override;
 
 private:
@@ -160,18 +160,20 @@ JS_DEFINE_NATIVE_FUNCTION(TestRunnerGlobalObject::fuzzilli)
         }
 
         auto string = TRY(vm.argument(1).to_string(vm));
-        fprintf(fzliout, "%s\n", string.characters());
+        outln(fzliout, "{}", string);
         fflush(fzliout);
     }
 
     return JS::js_undefined();
 }
 
-void TestRunnerGlobalObject::initialize(JS::Realm& realm)
+JS::ThrowCompletionOr<void> TestRunnerGlobalObject::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     define_direct_property("global", this, JS::Attribute::Enumerable);
     define_native_function(realm, "fuzzilli", fuzzilli, 2, JS::default_attributes);
+
+    return {};
 }
 
 int main(int, char**)
@@ -187,7 +189,7 @@ int main(int, char**)
     reprl_input = (char*)mmap(0, REPRL_MAX_DATA_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, REPRL_DRFD, 0);
     VERIFY(reprl_input != MAP_FAILED);
 
-    auto vm = JS::VM::create();
+    auto vm = MUST(JS::VM::create());
     auto interpreter = JS::Interpreter::create<TestRunnerGlobalObject>(*vm);
 
     while (true) {
@@ -207,16 +209,20 @@ int main(int, char**)
 
         auto js = StringView(static_cast<unsigned char const*>(data_buffer.data()), script_size);
 
-        auto parse_result = JS::Script::parse(js, interpreter->realm());
-        if (parse_result.is_error()) {
+        // FIXME: https://github.com/SerenityOS/serenity/issues/17899
+        if (!Utf8View(js).validate()) {
             result = 1;
         } else {
-            auto completion = interpreter->run(parse_result.value());
-            if (completion.is_error()) {
+            auto parse_result = JS::Script::parse(js, interpreter->realm());
+            if (parse_result.is_error()) {
                 result = 1;
+            } else {
+                auto completion = interpreter->run(parse_result.value());
+                if (completion.is_error()) {
+                    result = 1;
+                }
             }
         }
-
         fflush(stdout);
         fflush(stderr);
 

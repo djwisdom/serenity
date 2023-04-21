@@ -6,6 +6,7 @@
 
 #include <AK/Singleton.h>
 #include <AK/StringBuilder.h>
+#include <Kernel/API/Ioctl.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Debug.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
@@ -16,7 +17,6 @@
 #include <Kernel/Process.h>
 #include <Kernel/StdLib.h>
 #include <Kernel/UnixTypes.h>
-#include <LibC/sys/ioctl_numbers.h>
 
 namespace Kernel {
 
@@ -43,11 +43,11 @@ ErrorOr<void> LocalSocket::try_for_each(Function<ErrorOr<void>(LocalSocket const
     });
 }
 
-ErrorOr<NonnullLockRefPtr<LocalSocket>> LocalSocket::try_create(int type)
+ErrorOr<NonnullRefPtr<LocalSocket>> LocalSocket::try_create(int type)
 {
     auto client_buffer = TRY(DoubleBuffer::try_create("LocalSocket: Client buffer"sv));
     auto server_buffer = TRY(DoubleBuffer::try_create("LocalSocket: Server buffer"sv));
-    return adopt_nonnull_lock_ref_or_enomem(new (nothrow) LocalSocket(type, move(client_buffer), move(server_buffer)));
+    return adopt_nonnull_ref_or_enomem(new (nothrow) LocalSocket(type, move(client_buffer), move(server_buffer)));
 }
 
 ErrorOr<SocketPair> LocalSocket::try_create_connected_pair(int type)
@@ -260,9 +260,8 @@ void LocalSocket::detach(OpenFileDescription& description)
         m_accept_side_fd_open = false;
 
         if (m_bound) {
-            auto inode = m_inode.strong_ref();
-            if (inode)
-                inode->unbind_socket();
+            if (m_inode)
+                m_inode->unbind_socket();
         }
     }
 
@@ -473,8 +472,9 @@ ErrorOr<void> LocalSocket::chown(Credentials const& credentials, OpenFileDescrip
     return {};
 }
 
-NonnullLockRefPtrVector<OpenFileDescription>& LocalSocket::recvfd_queue_for(OpenFileDescription const& description)
+Vector<NonnullRefPtr<OpenFileDescription>>& LocalSocket::recvfd_queue_for(OpenFileDescription const& description)
 {
+    VERIFY(mutex().is_exclusively_locked_by_current_thread());
     auto role = this->role(description);
     if (role == Role::Connected)
         return m_fds_for_client;
@@ -483,8 +483,9 @@ NonnullLockRefPtrVector<OpenFileDescription>& LocalSocket::recvfd_queue_for(Open
     VERIFY_NOT_REACHED();
 }
 
-NonnullLockRefPtrVector<OpenFileDescription>& LocalSocket::sendfd_queue_for(OpenFileDescription const& description)
+Vector<NonnullRefPtr<OpenFileDescription>>& LocalSocket::sendfd_queue_for(OpenFileDescription const& description)
 {
+    VERIFY(mutex().is_exclusively_locked_by_current_thread());
     auto role = this->role(description);
     if (role == Role::Connected)
         return m_fds_for_server;
@@ -493,7 +494,7 @@ NonnullLockRefPtrVector<OpenFileDescription>& LocalSocket::sendfd_queue_for(Open
     VERIFY_NOT_REACHED();
 }
 
-ErrorOr<void> LocalSocket::sendfd(OpenFileDescription const& socket_description, NonnullLockRefPtr<OpenFileDescription> passing_description)
+ErrorOr<void> LocalSocket::sendfd(OpenFileDescription const& socket_description, NonnullRefPtr<OpenFileDescription> passing_description)
 {
     MutexLocker locker(mutex());
     auto role = this->role(socket_description);
@@ -507,7 +508,7 @@ ErrorOr<void> LocalSocket::sendfd(OpenFileDescription const& socket_description,
     return {};
 }
 
-ErrorOr<NonnullLockRefPtr<OpenFileDescription>> LocalSocket::recvfd(OpenFileDescription const& socket_description)
+ErrorOr<NonnullRefPtr<OpenFileDescription>> LocalSocket::recvfd(OpenFileDescription const& socket_description)
 {
     MutexLocker locker(mutex());
     auto role = this->role(socket_description);
@@ -519,6 +520,26 @@ ErrorOr<NonnullLockRefPtr<OpenFileDescription>> LocalSocket::recvfd(OpenFileDesc
         return set_so_error(EAGAIN);
     }
     return queue.take_first();
+}
+
+ErrorOr<Vector<NonnullRefPtr<OpenFileDescription>>> LocalSocket::recvfds(OpenFileDescription const& socket_description, int n)
+{
+    MutexLocker locker(mutex());
+    Vector<NonnullRefPtr<OpenFileDescription>> fds;
+
+    auto role = this->role(socket_description);
+    if (role != Role::Connected && role != Role::Accepted)
+        return set_so_error(EINVAL);
+    auto& queue = recvfd_queue_for(socket_description);
+
+    for (int i = 0; i < n; ++i) {
+        if (queue.is_empty())
+            break;
+
+        fds.append(queue.take_first());
+    }
+
+    return fds;
 }
 
 ErrorOr<void> LocalSocket::try_set_path(StringView path)

@@ -8,6 +8,7 @@
 
 #include <AK/Variant.h>
 #include <LibWeb/CSS/StyleValue.h>
+#include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
 
 namespace Web::CSS {
 
@@ -25,7 +26,7 @@ public:
     bool has_filters() const { return m_filter_value_list; }
     bool is_none() const { return !has_filters(); }
 
-    Span<FilterFunction const> filters() const
+    ReadonlySpan<FilterFunction> filters() const
     {
         VERIFY(has_filters());
         return m_filter_value_list->filter_value_list().span();

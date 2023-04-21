@@ -10,13 +10,13 @@
 #include <LibWeb/Layout/FlexFormattingContext.h>
 #include <LibWeb/Layout/FormattingContext.h>
 #include <LibWeb/Layout/GridFormattingContext.h>
-#include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/ReplacedBox.h>
 #include <LibWeb/Layout/SVGFormattingContext.h>
 #include <LibWeb/Layout/SVGSVGBox.h>
 #include <LibWeb/Layout/TableBox.h>
 #include <LibWeb/Layout/TableCellBox.h>
 #include <LibWeb/Layout/TableFormattingContext.h>
+#include <LibWeb/Layout/Viewport.h>
 
 namespace Web::Layout {
 
@@ -127,7 +127,8 @@ OwnPtr<FormattingContext> FormattingContext::create_independent_formatting_conte
                 : FormattingContext(Type::Block, state, box)
             {
             }
-            virtual float automatic_content_height() const override { return 0; };
+            virtual CSSPixels automatic_content_width() const override { return 0; }
+            virtual CSSPixels automatic_content_height() const override { return 0; }
             virtual void run(Box const&, LayoutMode, AvailableSpace const&) override { }
         };
         return make<ReplacedFormattingContext>(state, child_box);
@@ -151,7 +152,7 @@ OwnPtr<FormattingContext> FormattingContext::create_independent_formatting_conte
         return make<TableFormattingContext>(state, verify_cast<TableBox>(child_box), this);
 
     if (child_display.is_grid_inside()) {
-        return make<GridFormattingContext>(state, verify_cast<BlockContainer>(child_box), this);
+        return make<GridFormattingContext>(state, child_box, this);
     }
 
     VERIFY(is_block_formatting_context());
@@ -161,7 +162,7 @@ OwnPtr<FormattingContext> FormattingContext::create_independent_formatting_conte
     // The child box is a block container that doesn't create its own BFC.
     // It will be formatted by this BFC.
     if (!child_display.is_flow_inside()) {
-        dbgln("FIXME: Child box doesn't create BFC, but inside is also not flow! display={}", child_display.to_deprecated_string());
+        dbgln("FIXME: Child box doesn't create BFC, but inside is also not flow! display={}", MUST(child_display.to_string()));
         // HACK: Instead of crashing, create a dummy formatting context that does nothing.
         // FIXME: Remove this once it's no longer needed. It currently swallows problem with standalone
         //        table-related boxes that don't get fixed up by CSS anonymous table box generation.
@@ -170,7 +171,8 @@ OwnPtr<FormattingContext> FormattingContext::create_independent_formatting_conte
                 : FormattingContext(Type::Block, state, box)
             {
             }
-            virtual float automatic_content_height() const override { return 0; };
+            virtual CSSPixels automatic_content_width() const override { return 0; }
+            virtual CSSPixels automatic_content_height() const override { return 0; }
             virtual void run(Box const&, LayoutMode, AvailableSpace const&) override { }
         };
         return make<DummyFormattingContext>(state, child_box);
@@ -208,9 +210,9 @@ OwnPtr<FormattingContext> FormattingContext::layout_inside(Box const& child_box,
     return independent_formatting_context;
 }
 
-float FormattingContext::greatest_child_width(Box const& box)
+CSSPixels FormattingContext::greatest_child_width(Box const& box) const
 {
-    float max_width = 0;
+    CSSPixels max_width = 0;
     if (box.children_are_inline()) {
         for (auto& line_box : m_state.get(box).line_boxes) {
             max_width = max(max_width, line_box.width());
@@ -232,7 +234,7 @@ FormattingContext::ShrinkToFitResult FormattingContext::calculate_shrink_to_fit_
     };
 }
 
-static Gfx::FloatSize solve_replaced_size_constraint(LayoutState const& state, float w, float h, ReplacedBox const& box)
+static CSSPixelSize solve_replaced_size_constraint(LayoutState const& state, CSSPixels w, CSSPixels h, ReplacedBox const& box)
 {
     // 10.4 Minimum and maximum widths: 'min-width' and 'max-width'
 
@@ -241,10 +243,10 @@ static Gfx::FloatSize solve_replaced_size_constraint(LayoutState const& state, f
     auto width_of_containing_block = CSS::Length::make_px(containing_block_state.content_width());
     auto height_of_containing_block = CSS::Length::make_px(containing_block_state.content_height());
 
-    auto specified_min_width = box.computed_values().min_width().is_auto() ? 0 : box.computed_values().min_width().resolved(box, width_of_containing_block).to_px(box);
-    auto specified_max_width = box.computed_values().max_width().is_none() ? w : box.computed_values().max_width().resolved(box, width_of_containing_block).to_px(box);
-    auto specified_min_height = box.computed_values().min_height().is_auto() ? 0 : box.computed_values().min_height().resolved(box, height_of_containing_block).to_px(box);
-    auto specified_max_height = box.computed_values().max_height().is_none() ? h : box.computed_values().max_height().resolved(box, height_of_containing_block).to_px(box);
+    CSSPixels specified_min_width = box.computed_values().min_width().is_auto() ? 0 : box.computed_values().min_width().resolved(box, width_of_containing_block).to_px(box);
+    CSSPixels specified_max_width = box.computed_values().max_width().is_none() ? w : box.computed_values().max_width().resolved(box, width_of_containing_block).to_px(box);
+    CSSPixels specified_min_height = box.computed_values().min_height().is_auto() ? 0 : box.computed_values().min_height().resolved(box, height_of_containing_block).to_px(box);
+    CSSPixels specified_max_height = box.computed_values().max_height().is_none() ? h : box.computed_values().max_height().resolved(box, height_of_containing_block).to_px(box);
 
     auto min_width = min(specified_min_width, specified_max_width);
     auto max_width = max(specified_min_width, specified_max_width);
@@ -252,21 +254,21 @@ static Gfx::FloatSize solve_replaced_size_constraint(LayoutState const& state, f
     auto max_height = max(specified_min_height, specified_max_height);
 
     if (w > max_width)
-        return { w, max(max_width * h / w, min_height) };
+        return { w, max(max_width * (h / w), min_height) };
     if (w < min_width)
-        return { max_width, min(min_width * h / w, max_height) };
+        return { max_width, min(min_width * (h / w), max_height) };
     if (h > max_height)
-        return { max(max_height * w / h, min_width), max_height };
+        return { max(max_height * (w / h), min_width), max_height };
     if (h < min_height)
-        return { min(min_height * w / h, max_width), min_height };
+        return { min(min_height * (w / h), max_width), min_height };
     if ((w > max_width && h > max_height) && (max_width / w < max_height / h))
-        return { max_width, max(min_height, max_width * h / w) };
+        return { max_width, max(min_height, max_width * (h / w)) };
     if ((w > max_width && h > max_height) && (max_width / w > max_height / h))
-        return { max(min_width, max_height * w / h), max_height };
+        return { max(min_width, max_height * (w / h)), max_height };
     if ((w < min_width && h < min_height) && (min_width / w < min_height / h))
-        return { min(max_width, min_height * w / h), min_height };
+        return { min(max_width, min_height * (w / h)), min_height };
     if ((w < min_width && h < min_height) && (min_width / w > min_height / h))
-        return { min_width, min(max_height, min_width * h / w) };
+        return { min_width, min(max_height, min_width * (h / w)) };
     if (w < min_width && h > max_height)
         return { min_width, max_height };
     if (w > max_width && h < min_height)
@@ -274,69 +276,12 @@ static Gfx::FloatSize solve_replaced_size_constraint(LayoutState const& state, f
     return { w, h };
 }
 
-float FormattingContext::compute_auto_height_for_block_level_element(Box const& box, AvailableSpace const& available_space) const
-{
-    if (creates_block_formatting_context(box))
-        return compute_auto_height_for_block_formatting_context_root(verify_cast<BlockContainer>(box));
-
-    auto const& box_state = m_state.get(box);
-
-    auto display = box.display();
-    if (display.is_flex_inside()) {
-        // https://drafts.csswg.org/css-flexbox-1/#algo-main-container
-        // NOTE: The automatic block size of a block-level flex container is its max-content size.
-        return calculate_max_content_height(box, available_space.width);
-    }
-    if (display.is_grid_inside()) {
-        // https://www.w3.org/TR/css-grid-2/#intrinsic-sizes
-        // In both inline and block formatting contexts, the grid container’s auto block size is its
-        // max-content size.
-        return calculate_max_content_height(box, available_space.width);
-    }
-
-    // https://www.w3.org/TR/CSS22/visudet.html#normal-block
-    // 10.6.3 Block-level non-replaced elements in normal flow when 'overflow' computes to 'visible'
-
-    // The element's height is the distance from its top content edge to the first applicable of the following:
-
-    // 1. the bottom edge of the last line box, if the box establishes a inline formatting context with one or more lines
-    if (box.children_are_inline() && !box_state.line_boxes.is_empty())
-        return box_state.line_boxes.last().bottom();
-
-    // 2. the bottom edge of the bottom (possibly collapsed) margin of its last in-flow child, if the child's bottom margin does not collapse with the element's bottom margin
-    // FIXME: 3. the bottom border edge of the last in-flow child whose top margin doesn't collapse with the element's bottom margin
-    if (!box.children_are_inline()) {
-        for (auto* child_box = box.last_child_of_type<Box>(); child_box; child_box = child_box->previous_sibling_of_type<Box>()) {
-            if (child_box->is_absolutely_positioned() || child_box->is_floating())
-                continue;
-
-            // FIXME: This is hack. If the last child is a list-item marker box, we ignore it for purposes of height calculation.
-            //        Perhaps markers should not be considered in-flow(?) Perhaps they should always be the first child of the list-item
-            //        box instead of the last child.
-            if (child_box->is_list_item_marker_box())
-                continue;
-
-            auto const& child_box_state = m_state.get(*child_box);
-
-            // Ignore anonymous block containers with no lines. These don't count as in-flow block boxes.
-            if (child_box->is_anonymous() && child_box->is_block_container() && child_box_state.line_boxes.is_empty())
-                continue;
-
-            // FIXME: Handle margin collapsing.
-            return max(0.0f, child_box_state.offset.y() + child_box_state.content_height() + child_box_state.margin_box_bottom());
-        }
-    }
-
-    // 4. zero, otherwise
-    return 0;
-}
-
 // https://www.w3.org/TR/CSS22/visudet.html#root-height
-float FormattingContext::compute_auto_height_for_block_formatting_context_root(BlockContainer const& root) const
+CSSPixels FormattingContext::compute_auto_height_for_block_formatting_context_root(Box const& root) const
 {
     // 10.6.7 'Auto' heights for block formatting context roots
-    Optional<float> top;
-    Optional<float> bottom;
+    Optional<CSSPixels> top;
+    Optional<CSSPixels> bottom;
 
     if (root.children_are_inline()) {
         // If it only has inline-level children, the height is the distance between
@@ -362,8 +307,8 @@ float FormattingContext::compute_auto_height_for_block_formatting_context_root(B
 
             auto const& child_box_state = m_state.get(child_box);
 
-            float child_box_top = child_box_state.offset.y() - child_box_state.margin_box_top();
-            float child_box_bottom = child_box_state.offset.y() + child_box_state.content_height() + child_box_state.margin_box_bottom();
+            CSSPixels child_box_top = child_box_state.offset.y() - child_box_state.margin_box_top();
+            CSSPixels child_box_bottom = child_box_state.offset.y() + child_box_state.content_height() + child_box_state.margin_box_bottom();
 
             if (!top.has_value() || child_box_top < top.value())
                 top = child_box_top;
@@ -378,20 +323,20 @@ float FormattingContext::compute_auto_height_for_block_formatting_context_root(B
     // In addition, if the element has any floating descendants
     // whose bottom margin edge is below the element's bottom content edge,
     // then the height is increased to include those edges.
-    for (auto* floating_box : m_state.get(root).floating_descendants()) {
+    for (auto floating_box : m_state.get(root).floating_descendants()) {
         // NOTE: Floating box coordinates are relative to their own containing block,
         //       which may or may not be the BFC root.
         auto margin_box = margin_box_rect_in_ancestor_coordinate_space(*floating_box, root, m_state);
-        float floating_box_bottom_margin_edge = margin_box.bottom() + 1;
+        CSSPixels floating_box_bottom_margin_edge = margin_box.bottom() + 1;
         if (!bottom.has_value() || floating_box_bottom_margin_edge > bottom.value())
             bottom = floating_box_bottom_margin_edge;
     }
 
-    return max(0.0f, bottom.value_or(0) - top.value_or(0));
+    return max(CSSPixels(0.0f), bottom.value_or(0) - top.value_or(0));
 }
 
 // 10.3.2 Inline, replaced elements, https://www.w3.org/TR/CSS22/visudet.html#inline-replaced-width
-float FormattingContext::tentative_width_for_replaced_element(LayoutState const& state, ReplacedBox const& box, CSS::Size const& computed_width, AvailableSpace const& available_space)
+CSSPixels FormattingContext::tentative_width_for_replaced_element(LayoutState const& state, ReplacedBox const& box, CSS::Size const& computed_width, AvailableSpace const& available_space)
 {
     // Treat percentages of indefinite containing block widths as 0 (the initial width).
     if (computed_width.is_percentage() && !state.get(*box.containing_block()).has_definite_width())
@@ -400,7 +345,7 @@ float FormattingContext::tentative_width_for_replaced_element(LayoutState const&
     auto height_of_containing_block = CSS::Length::make_px(containing_block_height_for(box, state));
     auto computed_height = should_treat_height_as_auto(box, available_space) ? CSS::Size::make_auto() : box.computed_values().height();
 
-    float used_width = computed_width.resolved(box, CSS::Length::make_px(available_space.width.to_px())).to_px(box);
+    CSSPixels used_width = computed_width.resolved(box, CSS::Length::make_px(available_space.width.to_px())).to_px(box);
 
     // If 'height' and 'width' both have computed values of 'auto' and the element also has an intrinsic width,
     // then that intrinsic width is the used value of 'width'.
@@ -443,15 +388,15 @@ void FormattingContext::compute_width_for_absolutely_positioned_element(Box cons
         compute_width_for_absolutely_positioned_non_replaced_element(box, available_space);
 }
 
-void FormattingContext::compute_height_for_absolutely_positioned_element(Box const& box, AvailableSpace const& available_space)
+void FormattingContext::compute_height_for_absolutely_positioned_element(Box const& box, AvailableSpace const& available_space, BeforeOrAfterInsideLayout before_or_after_inside_layout)
 {
     if (is<ReplacedBox>(box))
-        compute_height_for_absolutely_positioned_replaced_element(static_cast<ReplacedBox const&>(box), available_space);
+        compute_height_for_absolutely_positioned_replaced_element(static_cast<ReplacedBox const&>(box), available_space, before_or_after_inside_layout);
     else
-        compute_height_for_absolutely_positioned_non_replaced_element(box, available_space);
+        compute_height_for_absolutely_positioned_non_replaced_element(box, available_space, before_or_after_inside_layout);
 }
 
-float FormattingContext::compute_width_for_replaced_element(LayoutState const& state, ReplacedBox const& box, AvailableSpace const& available_space)
+CSSPixels FormattingContext::compute_width_for_replaced_element(LayoutState const& state, ReplacedBox const& box, AvailableSpace const& available_space)
 {
     // 10.3.4 Block-level, replaced elements in normal flow...
     // 10.3.2 Inline, replaced elements
@@ -496,7 +441,7 @@ float FormattingContext::compute_width_for_replaced_element(LayoutState const& s
 
 // 10.6.2 Inline replaced elements, block-level replaced elements in normal flow, 'inline-block' replaced elements in normal flow and floating replaced elements
 // https://www.w3.org/TR/CSS22/visudet.html#inline-replaced-height
-float FormattingContext::tentative_height_for_replaced_element(LayoutState const& state, ReplacedBox const& box, CSS::Size const& computed_height, AvailableSpace const& available_space)
+CSSPixels FormattingContext::tentative_height_for_replaced_element(LayoutState const& state, ReplacedBox const& box, CSS::Size const& computed_height, AvailableSpace const& available_space)
 {
     // If 'height' and 'width' both have computed values of 'auto' and the element also has
     // an intrinsic height, then that intrinsic height is the used value of 'height'.
@@ -522,7 +467,7 @@ float FormattingContext::tentative_height_for_replaced_element(LayoutState const
     return computed_height.resolved(box, CSS::Length::make_px(available_space.height.to_px())).to_px(box);
 }
 
-float FormattingContext::compute_height_for_replaced_element(LayoutState const& state, ReplacedBox const& box, AvailableSpace const& available_space)
+CSSPixels FormattingContext::compute_height_for_replaced_element(LayoutState const& state, ReplacedBox const& box, AvailableSpace const& available_space)
 {
     // 10.6.2 Inline replaced elements, block-level replaced elements in normal flow,
     // 'inline-block' replaced elements in normal flow and floating replaced elements
@@ -532,11 +477,11 @@ float FormattingContext::compute_height_for_replaced_element(LayoutState const& 
     auto computed_width = should_treat_width_as_auto(box, available_space) ? CSS::Size::make_auto() : box.computed_values().width();
     auto computed_height = should_treat_height_as_auto(box, available_space) ? CSS::Size::make_auto() : box.computed_values().height();
 
-    float used_height = tentative_height_for_replaced_element(state, box, computed_height, available_space);
+    CSSPixels used_height = tentative_height_for_replaced_element(state, box, computed_height, available_space);
 
     if (computed_width.is_auto() && computed_height.is_auto() && box.has_intrinsic_aspect_ratio()) {
-        float w = tentative_width_for_replaced_element(state, box, computed_width, available_space);
-        float h = used_height;
+        CSSPixels w = tentative_width_for_replaced_element(state, box, computed_width, available_space);
+        CSSPixels h = used_height;
         used_height = solve_replaced_size_constraint(state, w, h, box).height();
     }
 
@@ -566,15 +511,15 @@ void FormattingContext::compute_width_for_absolutely_positioned_non_replaced_ele
         auto width = a_width;
 
         auto solve_for_left = [&] {
-            return CSS::Length(width_of_containing_block - margin_left.to_px(box) - border_left - padding_left - width.to_px(box) - padding_right - border_right - margin_right.to_px(box) - right.to_px(box), CSS::Length::Type::Px);
+            return CSS::Length::make_px(width_of_containing_block - margin_left.to_px(box) - border_left - padding_left - width.to_px(box) - padding_right - border_right - margin_right.to_px(box) - right.to_px(box));
         };
 
         auto solve_for_width = [&] {
-            return CSS::Length(width_of_containing_block - left.to_px(box) - margin_left.to_px(box) - border_left - padding_left - padding_right - border_right - margin_right.to_px(box) - right.to_px(box), CSS::Length::Type::Px);
+            return CSS::Length::make_px(max(CSSPixels(0), width_of_containing_block - left.to_px(box) - margin_left.to_px(box) - border_left - padding_left - padding_right - border_right - margin_right.to_px(box) - right.to_px(box)));
         };
 
         auto solve_for_right = [&] {
-            return CSS::Length(width_of_containing_block - left.to_px(box) - margin_left.to_px(box) - border_left - padding_left - width.to_px(box) - padding_right - border_right - margin_right.to_px(box), CSS::Length::Type::Px);
+            return CSS::Length::make_px(width_of_containing_block - left.to_px(box) - margin_left.to_px(box) - border_left - padding_left - width.to_px(box) - padding_right - border_right - margin_right.to_px(box));
         };
 
         // If all three of 'left', 'width', and 'right' are 'auto':
@@ -607,7 +552,7 @@ void FormattingContext::compute_width_for_absolutely_positioned_non_replaced_ele
         if (left.is_auto() && width.is_auto() && !right.is_auto()) {
             auto result = calculate_shrink_to_fit_widths(box);
             auto available_width = solve_for_width();
-            width = CSS::Length(min(max(result.preferred_minimum_width, available_width.to_px(box)), result.preferred_width), CSS::Length::Type::Px);
+            width = CSS::Length::make_px(min(max(result.preferred_minimum_width, available_width.to_px(box)), result.preferred_width));
             left = solve_for_left();
         }
 
@@ -629,7 +574,7 @@ void FormattingContext::compute_width_for_absolutely_positioned_non_replaced_ele
         Rule3:
             auto result = calculate_shrink_to_fit_widths(box);
             auto available_width = solve_for_width();
-            width = CSS::Length(min(max(result.preferred_minimum_width, available_width.to_px(box)), result.preferred_width), CSS::Length::Type::Px);
+            width = CSS::Length::make_px(min(max(result.preferred_minimum_width, available_width.to_px(box)), result.preferred_width));
             right = solve_for_right();
         }
 
@@ -693,12 +638,16 @@ void FormattingContext::compute_width_for_absolutely_positioned_replaced_element
 }
 
 // https://drafts.csswg.org/css-position-3/#abs-non-replaced-height
-void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_element(Box const& box, AvailableSpace const& available_space)
+void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_element(Box const& box, AvailableSpace const& available_space, BeforeOrAfterInsideLayout before_or_after_inside_layout)
 {
     // 5.3. The Height Of Absolutely Positioned, Non-Replaced Elements
 
     // For absolutely positioned elements, the used values of the vertical dimensions must satisfy this constraint:
     // top + margin-top + border-top-width + padding-top + height + padding-bottom + border-bottom-width + margin-bottom + bottom = height of containing block
+
+    // NOTE: This function is called twice: both before and after inside layout.
+    //       In the before pass, if it turns out we need the automatic height of the box, we abort these steps.
+    //       This allows the box to retain an indefinite height from the perspective of inside layout.
 
     auto margin_top = box.computed_values().margin().top();
     auto margin_bottom = box.computed_values().margin().bottom();
@@ -711,9 +660,12 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
     auto height_of_containing_block = available_space.height.to_px();
     auto height_of_containing_block_as_length = CSS::Length::make_px(height_of_containing_block);
 
-    auto solve_for = [&](CSS::Length length) {
-        return CSS::Length::make_px(
-            height_of_containing_block
+    enum class ClampToZero {
+        No,
+        Yes,
+    };
+    auto solve_for = [&](CSS::Length length, ClampToZero clamp_to_zero = ClampToZero::No) {
+        auto unclamped_value = height_of_containing_block
             - top.resolved(box, height_of_containing_block_as_length).to_px(box)
             - margin_top.resolved(box, width_of_containing_block_as_length).to_px(box)
             - box.computed_values().border_top().width
@@ -723,7 +675,10 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
             - box.computed_values().border_bottom().width
             - margin_bottom.resolved(box, width_of_containing_block_as_length).to_px(box)
             - bottom.resolved(box, height_of_containing_block_as_length).to_px(box)
-            + length.to_px(box));
+            + length.to_px(box);
+        if (clamp_to_zero == ClampToZero::Yes)
+            return CSS::Length::make_px(max(CSSPixels(0), unclamped_value));
+        return CSS::Length::make_px(unclamped_value);
     };
 
     auto solve_for_top = [&] {
@@ -735,7 +690,7 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
     };
 
     auto solve_for_height = [&] {
-        height = CSS::Size::make_length(solve_for(height.resolved(box, height_of_containing_block_as_length)));
+        height = CSS::Size::make_length(solve_for(height.resolved(box, height_of_containing_block_as_length), ClampToZero::Yes));
     };
 
     auto solve_for_margin_top = [&] {
@@ -754,6 +709,10 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
 
     // If all three of top, height, and bottom are auto:
     if (top.is_auto() && height.is_auto() && bottom.is_auto()) {
+        // (If we haven't done inside layout yet, we can't compute the auto height.)
+        if (before_or_after_inside_layout == BeforeOrAfterInsideLayout::Before)
+            return;
+
         // First set any auto values for margin-top and margin-bottom to 0,
         if (margin_top.is_auto())
             margin_top = CSS::Length::make_px(0);
@@ -765,7 +724,7 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
         top = CSS::Length::make_px(static_position.y());
 
         // and finally apply rule number three below.
-        height = CSS::Size::make_px(compute_auto_height_for_block_formatting_context_root(verify_cast<BlockContainer>(box)));
+        height = CSS::Size::make_px(compute_auto_height_for_block_formatting_context_root(box));
         solve_for_bottom();
     }
 
@@ -805,8 +764,12 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
 
         // 1. If top and height are auto and bottom is not auto,
         if (top.is_auto() && height.is_auto() && !bottom.is_auto()) {
+            // (If we haven't done inside layout yet, we can't compute the auto height.)
+            if (before_or_after_inside_layout == BeforeOrAfterInsideLayout::Before)
+                return;
+
             // then the height is based on the Auto heights for block formatting context roots,
-            height = CSS::Size::make_px(compute_auto_height_for_block_formatting_context_root(verify_cast<BlockContainer>(box)));
+            height = CSS::Size::make_px(compute_auto_height_for_block_formatting_context_root(box));
 
             // and solve for top.
             solve_for_top();
@@ -823,8 +786,12 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
 
         // 3. If height and bottom are auto and top is not auto,
         else if (height.is_auto() && bottom.is_auto() && !top.is_auto()) {
+            // (If we haven't done inside layout yet, we can't compute the auto height.)
+            if (before_or_after_inside_layout == BeforeOrAfterInsideLayout::Before)
+                return;
+
             // then the height is based on the Auto heights for block formatting context roots,
-            height = CSS::Size::make_px(compute_auto_height_for_block_formatting_context_root(verify_cast<BlockContainer>(box)));
+            height = CSS::Size::make_px(compute_auto_height_for_block_formatting_context_root(box));
 
             // and solve for bottom.
             solve_for_bottom();
@@ -874,7 +841,7 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
 }
 
 // NOTE: This is different from content_box_rect_in_ancestor_coordinate_space() as this does *not* follow the containing block chain up, but rather the parent() chain.
-static Gfx::FloatRect content_box_rect_in_static_position_ancestor_coordinate_space(Box const& box, Box const& ancestor_box, LayoutState const& state)
+static CSSPixelRect content_box_rect_in_static_position_ancestor_coordinate_space(Box const& box, Box const& ancestor_box, LayoutState const& state)
 {
     auto rect = content_box_rect(box, state);
     if (&box == &ancestor_box)
@@ -890,14 +857,14 @@ static Gfx::FloatRect content_box_rect_in_static_position_ancestor_coordinate_sp
 }
 
 // https://www.w3.org/TR/css-position-3/#staticpos-rect
-Gfx::FloatPoint FormattingContext::calculate_static_position(Box const& box) const
+CSSPixelPoint FormattingContext::calculate_static_position(Box const& box) const
 {
     // NOTE: This is very ad-hoc.
     // The purpose of this function is to calculate the approximate position that `box`
     // would have had if it were position:static.
 
-    float x = 0.0f;
-    float y = 0.0f;
+    CSSPixels x = 0.0f;
+    CSSPixels y = 0.0f;
 
     VERIFY(box.parent());
     if (box.parent()->children_are_inline()) {
@@ -927,7 +894,7 @@ Gfx::FloatPoint FormattingContext::calculate_static_position(Box const& box) con
     } else {
         x = m_state.get(box).margin_box_left();
         // We're among block siblings, Y can be calculated easily.
-        y = compute_box_y_position_with_respect_to_siblings(box);
+        y = m_state.get(box).margin_box_top();
     }
     auto offset_to_static_parent = content_box_rect_in_static_position_ancestor_coordinate_space(box, *box.containing_block(), m_state);
     return offset_to_static_parent.location().translated(x, y);
@@ -950,10 +917,11 @@ void FormattingContext::layout_absolutely_positioned_element(Box const& box, Ava
     // NOTE: We compute height before *and* after doing inside layout.
     //       This is done so that inside layout can resolve percentage heights.
     //       In some situations, e.g with non-auto top & bottom values, the height can be determined early.
-    compute_height_for_absolutely_positioned_element(box, available_space);
+    compute_height_for_absolutely_positioned_element(box, available_space, BeforeOrAfterInsideLayout::Before);
 
     auto independent_formatting_context = layout_inside(box, LayoutMode::Normal, box_state.available_inner_space_or_constraints_from(available_space));
-    compute_height_for_absolutely_positioned_element(box, available_space);
+
+    compute_height_for_absolutely_positioned_element(box, available_space, BeforeOrAfterInsideLayout::After);
 
     box_state.margin_left = box.computed_values().margin().left().resolved(box, width_of_containing_block_as_length).to_px(box);
     box_state.margin_top = box.computed_values().margin().top().resolved(box, width_of_containing_block_as_length).to_px(box);
@@ -984,14 +952,14 @@ void FormattingContext::layout_absolutely_positioned_element(Box const& box, Ava
 
     auto static_position = calculate_static_position(box);
 
-    Gfx::FloatPoint used_offset;
+    CSSPixelPoint used_offset;
 
     if (!computed_left.is_auto()) {
-        float x_offset = box_state.inset_left
+        CSSPixels x_offset = box_state.inset_left
             + box_state.border_box_left();
         used_offset.set_x(x_offset + box_state.margin_left);
     } else if (!computed_right.is_auto()) {
-        float x_offset = 0
+        CSSPixels x_offset = CSSPixels(0)
             - box_state.inset_right
             - box_state.border_box_right();
         used_offset.set_x(width_of_containing_block + x_offset - box_state.content_width() - box_state.margin_right);
@@ -1001,11 +969,11 @@ void FormattingContext::layout_absolutely_positioned_element(Box const& box, Ava
     }
 
     if (!computed_top.is_auto()) {
-        float y_offset = box_state.inset_top
+        CSSPixels y_offset = box_state.inset_top
             + box_state.border_box_top();
         used_offset.set_y(y_offset + box_state.margin_top);
     } else if (!computed_bottom.is_auto()) {
-        float y_offset = 0
+        CSSPixels y_offset = CSSPixels(0)
             - box_state.inset_bottom
             - box_state.border_box_bottom();
         used_offset.set_y(height_of_containing_block + y_offset - box_state.content_height() - box_state.margin_bottom);
@@ -1023,7 +991,7 @@ void FormattingContext::layout_absolutely_positioned_element(Box const& box, Ava
         independent_formatting_context->parent_context_did_dimension_child_root_box();
 }
 
-void FormattingContext::compute_height_for_absolutely_positioned_replaced_element(ReplacedBox const& box, AvailableSpace const& available_space)
+void FormattingContext::compute_height_for_absolutely_positioned_replaced_element(ReplacedBox const& box, AvailableSpace const& available_space, BeforeOrAfterInsideLayout)
 {
     // 10.6.5 Absolutely positioned, replaced elements
     // The used value of 'height' is determined as for inline replaced elements.
@@ -1036,7 +1004,7 @@ void FormattingContext::compute_inset(Box const& box)
     if (box.computed_values().position() != CSS::Position::Relative)
         return;
 
-    auto resolve_two_opposing_insets = [&](CSS::LengthPercentage const& computed_start, CSS::LengthPercentage const& computed_end, float& used_start, float& used_end, float reference_for_percentage) {
+    auto resolve_two_opposing_insets = [&](CSS::LengthPercentage const& computed_start, CSS::LengthPercentage const& computed_end, CSSPixels& used_start, CSSPixels& used_end, CSSPixels reference_for_percentage) {
         auto resolved_first = computed_start.resolved(box, CSS::Length::make_px(reference_for_percentage)).resolved(box);
         auto resolved_second = computed_end.resolved(box, CSS::Length::make_px(reference_for_percentage)).resolved(box);
 
@@ -1049,16 +1017,16 @@ void FormattingContext::compute_inset(Box const& box)
             // If only one is auto, its used value becomes the negation of the other, and the box is shifted by the specified amount.
             if (resolved_first.is_auto()) {
                 used_end = resolved_second.to_px(box);
-                used_start = 0 - used_end;
+                used_start = -used_end;
             } else {
                 used_start = resolved_first.to_px(box);
-                used_end = 0 - used_start;
+                used_end = -used_start;
             }
         } else {
             // If neither is auto, the position is over-constrained; (with respect to the writing mode of its containing block)
             // the computed end side value is ignored, and its used value becomes the negation of the start side.
             used_start = resolved_first.to_px(box);
-            used_end = 0 - used_start;
+            used_end = -used_start;
         }
     };
 
@@ -1071,7 +1039,7 @@ void FormattingContext::compute_inset(Box const& box)
 }
 
 // https://drafts.csswg.org/css-sizing-3/#fit-content-size
-float FormattingContext::calculate_fit_content_width(Layout::Box const& box, AvailableSpace const& available_space) const
+CSSPixels FormattingContext::calculate_fit_content_width(Layout::Box const& box, AvailableSpace const& available_space) const
 {
     // If the available space in a given axis is definite,
     // equal to clamp(min-content size, stretch-fit size, max-content size)
@@ -1091,7 +1059,7 @@ float FormattingContext::calculate_fit_content_width(Layout::Box const& box, Ava
 }
 
 // https://drafts.csswg.org/css-sizing-3/#fit-content-size
-float FormattingContext::calculate_fit_content_height(Layout::Box const& box, AvailableSpace const& available_space) const
+CSSPixels FormattingContext::calculate_fit_content_height(Layout::Box const& box, AvailableSpace const& available_space) const
 {
     // If the available space in a given axis is definite,
     // equal to clamp(min-content size, stretch-fit size, max-content size)
@@ -1110,7 +1078,7 @@ float FormattingContext::calculate_fit_content_height(Layout::Box const& box, Av
     return calculate_max_content_height(box, available_space.width);
 }
 
-float FormattingContext::calculate_min_content_width(Layout::Box const& box) const
+CSSPixels FormattingContext::calculate_min_content_width(Layout::Box const& box) const
 {
     if (box.has_intrinsic_width())
         return *box.intrinsic_width();
@@ -1125,6 +1093,8 @@ float FormattingContext::calculate_min_content_width(Layout::Box const& box) con
 
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.width_constraint = SizeConstraint::MinContent;
+    box_state.set_indefinite_content_width();
+    box_state.set_indefinite_content_height();
 
     auto context = const_cast<FormattingContext*>(this)->create_independent_formatting_context_if_needed(throwaway_state, box);
     VERIFY(context);
@@ -1133,13 +1103,9 @@ float FormattingContext::calculate_min_content_width(Layout::Box const& box) con
     auto available_height = AvailableSize::make_indefinite();
     context->run(box, LayoutMode::IntrinsicSizing, AvailableSpace(available_width, available_height));
 
-    if (context->type() == FormattingContext::Type::Flex) {
-        cache.min_content_width = box_state.content_width();
-    } else {
-        cache.min_content_width = context->greatest_child_width(box);
-    }
+    cache.min_content_width = context->automatic_content_width();
 
-    if (!isfinite(*cache.min_content_width)) {
+    if (!isfinite(cache.min_content_width->value())) {
         // HACK: If layout calculates a non-finite result, something went wrong. Force it to zero and log a little whine.
         dbgln("FIXME: Calculated non-finite min-content width for {}", box.debug_description());
         cache.min_content_width = 0;
@@ -1148,7 +1114,7 @@ float FormattingContext::calculate_min_content_width(Layout::Box const& box) con
     return *cache.min_content_width;
 }
 
-float FormattingContext::calculate_max_content_width(Layout::Box const& box) const
+CSSPixels FormattingContext::calculate_max_content_width(Layout::Box const& box) const
 {
     if (box.has_intrinsic_width())
         return *box.intrinsic_width();
@@ -1163,6 +1129,8 @@ float FormattingContext::calculate_max_content_width(Layout::Box const& box) con
 
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.width_constraint = SizeConstraint::MaxContent;
+    box_state.set_indefinite_content_width();
+    box_state.set_indefinite_content_height();
 
     auto context = const_cast<FormattingContext*>(this)->create_independent_formatting_context_if_needed(throwaway_state, box);
     VERIFY(context);
@@ -1171,13 +1139,9 @@ float FormattingContext::calculate_max_content_width(Layout::Box const& box) con
     auto available_height = AvailableSize::make_indefinite();
     context->run(box, LayoutMode::IntrinsicSizing, AvailableSpace(available_width, available_height));
 
-    if (context->type() == FormattingContext::Type::Flex) {
-        cache.max_content_width = box_state.content_width();
-    } else {
-        cache.max_content_width = context->greatest_child_width(box);
-    }
+    cache.max_content_width = context->automatic_content_width();
 
-    if (!isfinite(*cache.max_content_width)) {
+    if (!isfinite(cache.max_content_width->value())) {
         // HACK: If layout calculates a non-finite result, something went wrong. Force it to zero and log a little whine.
         dbgln("FIXME: Calculated non-finite max-content width for {}", box.debug_description());
         cache.max_content_width = 0;
@@ -1186,13 +1150,18 @@ float FormattingContext::calculate_max_content_width(Layout::Box const& box) con
     return *cache.max_content_width;
 }
 
-float FormattingContext::calculate_min_content_height(Layout::Box const& box, AvailableSize const& available_width) const
+// https://www.w3.org/TR/css-sizing-3/#min-content-block-size
+CSSPixels FormattingContext::calculate_min_content_height(Layout::Box const& box, AvailableSize const& available_width) const
 {
+    // For block containers, tables, and inline boxes, this is equivalent to the max-content block size.
+    if (box.is_block_container() || box.is_table())
+        return calculate_max_content_height(box, available_width);
+
     if (box.has_intrinsic_height())
         return *box.intrinsic_height();
 
     bool is_cacheable = available_width.is_definite() || available_width.is_intrinsic_sizing_constraint();
-    Optional<float>* cache_slot = nullptr;
+    Optional<CSSPixels>* cache_slot = nullptr;
     if (is_cacheable) {
         auto& root_state = m_state.m_root;
         auto& cache = *root_state.intrinsic_sizes.ensure(&box, [] { return adopt_own(*new LayoutState::IntrinsicSizes); });
@@ -1212,6 +1181,9 @@ float FormattingContext::calculate_min_content_height(Layout::Box const& box, Av
 
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.height_constraint = SizeConstraint::MinContent;
+    box_state.set_indefinite_content_height();
+    if (available_width.is_definite())
+        box_state.set_content_width(available_width.to_px());
 
     auto context = const_cast<FormattingContext*>(this)->create_independent_formatting_context_if_needed(throwaway_state, box);
     VERIFY(context);
@@ -1219,7 +1191,7 @@ float FormattingContext::calculate_min_content_height(Layout::Box const& box, Av
     context->run(box, LayoutMode::IntrinsicSizing, AvailableSpace(available_width, AvailableSize::make_min_content()));
 
     auto min_content_height = context->automatic_content_height();
-    if (!isfinite(min_content_height)) {
+    if (!isfinite(min_content_height.value())) {
         // HACK: If layout calculates a non-finite result, something went wrong. Force it to zero and log a little whine.
         dbgln("FIXME: Calculated non-finite min-content height for {}", box.debug_description());
         min_content_height = 0;
@@ -1231,13 +1203,16 @@ float FormattingContext::calculate_min_content_height(Layout::Box const& box, Av
     return min_content_height;
 }
 
-float FormattingContext::calculate_max_content_height(Layout::Box const& box, AvailableSize const& available_width) const
+CSSPixels FormattingContext::calculate_max_content_height(Layout::Box const& box, AvailableSize const& available_width) const
 {
+    if (box.has_intrinsic_aspect_ratio() && available_width.is_definite())
+        return available_width.to_px() / *box.intrinsic_aspect_ratio();
+
     if (box.has_intrinsic_height())
         return *box.intrinsic_height();
 
     bool is_cacheable = available_width.is_definite() || available_width.is_intrinsic_sizing_constraint();
-    Optional<float>* cache_slot = nullptr;
+    Optional<CSSPixels>* cache_slot = nullptr;
     if (is_cacheable) {
         auto& root_state = m_state.m_root;
         auto& cache = *root_state.intrinsic_sizes.ensure(&box, [] { return adopt_own(*new LayoutState::IntrinsicSizes); });
@@ -1257,6 +1232,9 @@ float FormattingContext::calculate_max_content_height(Layout::Box const& box, Av
 
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.height_constraint = SizeConstraint::MaxContent;
+    box_state.set_indefinite_content_height();
+    if (available_width.is_definite())
+        box_state.set_content_width(available_width.to_px());
 
     auto context = const_cast<FormattingContext*>(this)->create_independent_formatting_context_if_needed(throwaway_state, box);
     VERIFY(context);
@@ -1265,7 +1243,7 @@ float FormattingContext::calculate_max_content_height(Layout::Box const& box, Av
 
     auto max_content_height = context->automatic_content_height();
 
-    if (!isfinite(max_content_height)) {
+    if (!isfinite(max_content_height.value())) {
         // HACK: If layout calculates a non-finite result, something went wrong. Force it to zero and log a little whine.
         dbgln("FIXME: Calculated non-finite max-content height for {}", box.debug_description());
         max_content_height = 0;
@@ -1280,7 +1258,7 @@ float FormattingContext::calculate_max_content_height(Layout::Box const& box, Av
 
 CSS::Length FormattingContext::calculate_inner_width(Layout::Box const& box, AvailableSize const& available_width, CSS::Size const& width) const
 {
-    float width_of_containing_block = available_width.to_px();
+    auto width_of_containing_block = available_width.to_px();
     auto width_of_containing_block_as_length_for_resolve = CSS::Length::make_px(width_of_containing_block);
     if (width.is_auto()) {
         return width.resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box);
@@ -1294,7 +1272,7 @@ CSS::Length FormattingContext::calculate_inner_width(Layout::Box const& box, Ava
         auto const padding_left = computed_values.padding().left().resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box);
         auto const padding_right = computed_values.padding().right().resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box);
 
-        float inner_width = width.resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box).to_px(box)
+        auto inner_width = width.resolved(box, width_of_containing_block_as_length_for_resolve).resolved(box).to_px(box)
             - computed_values.border_left().width
             - padding_left.to_px(box)
             - computed_values.border_right().width
@@ -1307,7 +1285,7 @@ CSS::Length FormattingContext::calculate_inner_width(Layout::Box const& box, Ava
 
 CSS::Length FormattingContext::calculate_inner_height(Layout::Box const& box, AvailableSize const& available_height, CSS::Size const& height) const
 {
-    float height_of_containing_block = available_height.to_px();
+    auto height_of_containing_block = available_height.to_px();
     auto height_of_containing_block_as_length_for_resolve = CSS::Length::make_px(height_of_containing_block);
     if (height.is_auto()) {
         return height.resolved(box, height_of_containing_block_as_length_for_resolve).resolved(box);
@@ -1318,10 +1296,12 @@ CSS::Length FormattingContext::calculate_inner_height(Layout::Box const& box, Av
 
     auto& computed_values = box.computed_values();
     if (computed_values.box_sizing() == CSS::BoxSizing::BorderBox) {
-        auto const padding_top = computed_values.padding().top().resolved(box, height_of_containing_block_as_length_for_resolve).resolved(box);
-        auto const padding_bottom = computed_values.padding().bottom().resolved(box, height_of_containing_block_as_length_for_resolve).resolved(box);
+        auto width_of_containing_block = CSS::Length::make_px(containing_block_width_for(box));
 
-        float inner_height = height.resolved(box, height_of_containing_block_as_length_for_resolve).resolved(box).to_px(box)
+        auto const padding_top = computed_values.padding().top().resolved(box, width_of_containing_block).resolved(box);
+        auto const padding_bottom = computed_values.padding().bottom().resolved(box, width_of_containing_block).resolved(box);
+
+        auto inner_height = height.resolved(box, height_of_containing_block_as_length_for_resolve).resolved(box).to_px(box)
             - computed_values.border_top().width
             - padding_top.to_px(box)
             - computed_values.border_bottom().width
@@ -1332,7 +1312,7 @@ CSS::Length FormattingContext::calculate_inner_height(Layout::Box const& box, Av
     return height.resolved(box, height_of_containing_block_as_length_for_resolve).resolved(box);
 }
 
-float FormattingContext::containing_block_width_for(Box const& box, LayoutState const& state)
+CSSPixels FormattingContext::containing_block_width_for(Box const& box, LayoutState const& state)
 {
     auto& containing_block_state = state.get(*box.containing_block());
     auto& box_state = state.get(box);
@@ -1348,7 +1328,7 @@ float FormattingContext::containing_block_width_for(Box const& box, LayoutState 
     VERIFY_NOT_REACHED();
 }
 
-float FormattingContext::containing_block_height_for(Box const& box, LayoutState const& state)
+CSSPixels FormattingContext::containing_block_height_for(Box const& box, LayoutState const& state)
 {
     auto& containing_block_state = state.get(*box.containing_block());
     auto& box_state = state.get(box);
@@ -1364,73 +1344,8 @@ float FormattingContext::containing_block_height_for(Box const& box, LayoutState
     VERIFY_NOT_REACHED();
 }
 
-static Box const* previous_block_level_sibling(Box const& box)
-{
-    for (auto* sibling = box.previous_sibling_of_type<Box>(); sibling; sibling = sibling->previous_sibling_of_type<Box>()) {
-        if (sibling->display().is_block_outside())
-            return sibling;
-    }
-    return nullptr;
-}
-
-float FormattingContext::compute_box_y_position_with_respect_to_siblings(Box const& box) const
-{
-    auto const& box_state = m_state.get(box);
-    float y = box_state.border_box_top();
-
-    Vector<float> collapsible_margins;
-
-    auto* relevant_sibling = previous_block_level_sibling(box);
-    while (relevant_sibling != nullptr) {
-        if (!relevant_sibling->is_absolutely_positioned() && !relevant_sibling->is_floating()) {
-            auto const& relevant_sibling_state = m_state.get(*relevant_sibling);
-            collapsible_margins.append(relevant_sibling_state.margin_bottom);
-            // NOTE: Empty (0-height) preceding siblings have their margins collapsed with *their* preceding sibling, etc.
-            if (relevant_sibling_state.border_box_height() > 0)
-                break;
-            collapsible_margins.append(relevant_sibling_state.margin_top);
-        }
-        relevant_sibling = previous_block_level_sibling(*relevant_sibling);
-    }
-
-    if (relevant_sibling) {
-        // Collapse top margin with the collapsed margin(s) of preceding siblings.
-        collapsible_margins.append(box_state.margin_top);
-
-        float smallest_margin = 0;
-        float largest_margin = 0;
-        size_t negative_margin_count = 0;
-        for (auto margin : collapsible_margins) {
-            if (margin < 0)
-                ++negative_margin_count;
-            largest_margin = max(largest_margin, margin);
-            smallest_margin = min(smallest_margin, margin);
-        }
-
-        float collapsed_margin = 0;
-        if (negative_margin_count == collapsible_margins.size()) {
-            // When all margins are negative, the size of the collapsed margin is the smallest (most negative) margin.
-            collapsed_margin = smallest_margin;
-        } else if (negative_margin_count > 0) {
-            // When negative margins are involved, the size of the collapsed margin is the sum of the largest positive margin and the smallest (most negative) negative margin.
-            collapsed_margin = largest_margin + smallest_margin;
-        } else {
-            // Otherwise, collapse all the adjacent margins by using only the largest one.
-            collapsed_margin = largest_margin;
-        }
-
-        auto const& relevant_sibling_state = m_state.get(*relevant_sibling);
-        return y + relevant_sibling_state.offset.y()
-            + relevant_sibling_state.content_height()
-            + relevant_sibling_state.border_box_bottom()
-            + collapsed_margin;
-    } else {
-        return y + box_state.margin_top;
-    }
-}
-
 // https://drafts.csswg.org/css-sizing-3/#stretch-fit-size
-float FormattingContext::calculate_stretch_fit_width(Box const& box, AvailableSize const& available_width) const
+CSSPixels FormattingContext::calculate_stretch_fit_width(Box const& box, AvailableSize const& available_width) const
 {
     // The size a box would take if its outer size filled the available space in the given axis;
     // in other words, the stretch fit into the available space, if that is definite.
@@ -1446,7 +1361,7 @@ float FormattingContext::calculate_stretch_fit_width(Box const& box, AvailableSi
 }
 
 // https://drafts.csswg.org/css-sizing-3/#stretch-fit-size
-float FormattingContext::calculate_stretch_fit_height(Box const& box, AvailableSize const& available_height) const
+CSSPixels FormattingContext::calculate_stretch_fit_height(Box const& box, AvailableSize const& available_height) const
 {
     // The size a box would take if its outer size filled the available space in the given axis;
     // in other words, the stretch fit into the available space, if that is definite.
@@ -1471,6 +1386,23 @@ bool FormattingContext::should_treat_height_as_auto(Box const& box, AvailableSpa
 {
     return box.computed_values().height().is_auto()
         || (box.computed_values().height().contains_percentage() && !available_space.height.is_definite());
+}
+
+bool FormattingContext::can_skip_is_anonymous_text_run(Box& box)
+{
+    if (box.is_anonymous() && !box.is_generated() && !box.first_child_of_type<BlockContainer>()) {
+        bool contains_only_white_space = true;
+        box.for_each_in_subtree([&](auto const& node) {
+            if (!is<TextNode>(node) || !static_cast<TextNode const&>(node).dom_node().data().is_whitespace()) {
+                contains_only_white_space = false;
+                return IterationDecision::Break;
+            }
+            return IterationDecision::Continue;
+        });
+        if (contains_only_white_space)
+            return true;
+    }
+    return false;
 }
 
 }

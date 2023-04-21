@@ -19,6 +19,7 @@
 #import <HTML/HTMLElement.idl>
 #import <HTML/HTMLHeadElement.idl>
 #import <HTML/HTMLScriptElement.idl>
+#import <HTML/Location.idl>
 #import <Selection/Selection.idl>
 
 // https://dom.spec.whatwg.org/#document
@@ -28,7 +29,6 @@ interface Document : Node {
 
     boolean hasFocus();
 
-    // FIXME: These attributes currently don't do anything.
     [PutForwards=href, LegacyUnforgeable] readonly attribute Location? location;
     attribute USVString domain;
 
@@ -74,12 +74,15 @@ interface Document : Node {
     // FIXME: Should return an HTMLAllCollection
     readonly attribute HTMLCollection all;
 
-    Element createElement(DOMString tagName);
-    Element createElementNS(DOMString? namespace, DOMString qualifiedName);
+    [CEReactions, NewObject] Element createElement(DOMString tagName, optional (DOMString or ElementCreationOptions) options = {});
+    [CEReactions, NewObject] Element createElementNS(DOMString? namespace, DOMString qualifiedName, optional (DOMString or ElementCreationOptions) options = {});
     DocumentFragment createDocumentFragment();
     Text createTextNode(DOMString data);
     Comment createComment(DOMString data);
     [NewObject] ProcessingInstruction createProcessingInstruction(DOMString target, DOMString data);
+
+    [NewObject] Attr createAttribute(DOMString localName);
+    [NewObject] Attr createAttributeNS(DOMString? namespace, DOMString qualifiedName);
 
     Range createRange();
     Event createEvent(DOMString interface);
@@ -93,13 +96,13 @@ interface Document : Node {
     readonly attribute DocumentType? doctype;
 
     readonly attribute Element? documentElement;
-    attribute HTMLElement? body;
+    [CEReactions] attribute HTMLElement? body;
     readonly attribute HTMLHeadElement? head;
     readonly attribute HTMLScriptElement? currentScript;
 
     readonly attribute DOMString readyState;
 
-    attribute DOMString title;
+    [CEReactions] attribute DOMString title;
 
     boolean queryCommandSupported(DOMString commandId);
     readonly boolean hidden;
@@ -111,5 +114,8 @@ interface Document : Node {
     Selection? getSelection();
 };
 
+dictionary ElementCreationOptions {
+    DOMString is;
+};
 Document includes ParentNode;
 Document includes GlobalEventHandlers;

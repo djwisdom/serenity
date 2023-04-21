@@ -36,7 +36,7 @@ jobs:
         value: g++-12
 
     - name: ndk_version # only relevant for Android
-      value: '24.0.8215888'
+      value: '25.2.9519653'
 
     pool:
       vmImage: $(job_pool)
@@ -64,6 +64,7 @@ jobs:
         displayName: "Install NDK $(ndk_version)"
 
       - script: |
+          set -e
           cmake -GNinja -B tools-build \
             -DBUILD_LAGOM=OFF \
             -DENABLE_LAGOM_CCACHE=ON \
@@ -74,7 +75,6 @@ jobs:
           ninja -C tools-build install
           cmake -GNinja -B Build \
             -DBUILD_LAGOM=ON \
-            -DENABLE_LAGOM_LADYBIRD=ON \
             -DENABLE_LAGOM_CCACHE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DANDROID_ABI=arm64-v8a \
@@ -90,6 +90,7 @@ jobs:
 
     - ${{ elseif eq(parameters.fuzzer, 'Fuzz') }}:
       - script: |
+          set -e
           cmake -GNinja -B tools-build \
               -DBUILD_LAGOM=OFF \
               -DENABLE_LAGOM_CCACHE=ON \
@@ -110,6 +111,7 @@ jobs:
           CCACHE_DIR: '$(SERENITY_CCACHE_DIR)'
     - ${{ elseif eq(parameters.fuzzer, 'NoFuzz') }}:
       - script: |
+          set -e
           cmake -GNinja -B Build \
             -DBUILD_LAGOM=ON \
             -DENABLE_LAGOM_CCACHE=ON \
@@ -127,6 +129,7 @@ jobs:
           CCACHE_DIR: '$(SERENITY_CCACHE_DIR)'
 
     - script: |
+        set -e
         cmake --build .
         cmake --install . --prefix $(Build.SourcesDirectory)/Meta/Lagom/Install
       displayName: 'Build'
@@ -136,6 +139,7 @@ jobs:
 
     - ${{ if and(eq(parameters.fuzzer, 'NoFuzz'), not(eq(parameters.os, 'Android')) ) }}:
       - script: |
+          set -e
           ninja test
         displayName: 'Test'
         workingDirectory: $(Build.SourcesDirectory)/Meta/Lagom/Build

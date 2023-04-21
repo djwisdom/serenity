@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -66,15 +66,15 @@ public:
         ApplicationGlobal,
     };
     static NonnullRefPtr<Action> create(DeprecatedString text, Function<void(Action&)> callback, Core::Object* parent = nullptr);
-    static NonnullRefPtr<Action> create(DeprecatedString text, RefPtr<Gfx::Bitmap> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
+    static NonnullRefPtr<Action> create(DeprecatedString text, RefPtr<Gfx::Bitmap const> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
     static NonnullRefPtr<Action> create(DeprecatedString text, Shortcut const& shortcut, Function<void(Action&)> callback, Core::Object* parent = nullptr);
     static NonnullRefPtr<Action> create(DeprecatedString text, Shortcut const& shortcut, Shortcut const& alternate_shortcut, Function<void(Action&)> callback, Core::Object* parent = nullptr);
-    static NonnullRefPtr<Action> create(DeprecatedString text, Shortcut const& shortcut, RefPtr<Gfx::Bitmap> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
-    static NonnullRefPtr<Action> create(DeprecatedString text, Shortcut const& shortcut, Shortcut const& alternate_shortcut, RefPtr<Gfx::Bitmap> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
+    static NonnullRefPtr<Action> create(DeprecatedString text, Shortcut const& shortcut, RefPtr<Gfx::Bitmap const> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
+    static NonnullRefPtr<Action> create(DeprecatedString text, Shortcut const& shortcut, Shortcut const& alternate_shortcut, RefPtr<Gfx::Bitmap const> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
     static NonnullRefPtr<Action> create_checkable(DeprecatedString text, Function<void(Action&)> callback, Core::Object* parent = nullptr);
-    static NonnullRefPtr<Action> create_checkable(DeprecatedString text, RefPtr<Gfx::Bitmap> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
+    static NonnullRefPtr<Action> create_checkable(DeprecatedString text, RefPtr<Gfx::Bitmap const> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
     static NonnullRefPtr<Action> create_checkable(DeprecatedString text, Shortcut const& shortcut, Function<void(Action&)> callback, Core::Object* parent = nullptr);
-    static NonnullRefPtr<Action> create_checkable(DeprecatedString text, Shortcut const& shortcut, RefPtr<Gfx::Bitmap> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
+    static NonnullRefPtr<Action> create_checkable(DeprecatedString text, Shortcut const& shortcut, RefPtr<Gfx::Bitmap const> icon, Function<void(Action&)> callback, Core::Object* parent = nullptr);
 
     static ErrorOr<NonnullRefPtr<Action>> try_create_checkable(DeprecatedString text, Shortcut const& shortcut, Function<void(Action&)> callback, Core::Object* parent = nullptr);
 
@@ -84,6 +84,9 @@ public:
 
     DeprecatedString text() const { return m_text; }
     void set_text(DeprecatedString);
+
+    DeprecatedString tooltip() const { return m_tooltip.value_or(m_text); }
+    void set_tooltip(DeprecatedString);
 
     DeprecatedString const& status_tip() const { return m_status_tip; }
     void set_status_tip(DeprecatedString status_tip) { m_status_tip = move(status_tip); }
@@ -135,8 +138,8 @@ private:
     Action(DeprecatedString, Function<void(Action&)> = nullptr, Core::Object* = nullptr, bool checkable = false);
     Action(DeprecatedString, Shortcut const&, Function<void(Action&)> = nullptr, Core::Object* = nullptr, bool checkable = false);
     Action(DeprecatedString, Shortcut const&, Shortcut const&, Function<void(Action&)> = nullptr, Core::Object* = nullptr, bool checkable = false);
-    Action(DeprecatedString, Shortcut const&, Shortcut const&, RefPtr<Gfx::Bitmap> icon, Function<void(Action&)> = nullptr, Core::Object* = nullptr, bool checkable = false);
-    Action(DeprecatedString, RefPtr<Gfx::Bitmap> icon, Function<void(Action&)> = nullptr, Core::Object* = nullptr, bool checkable = false);
+    Action(DeprecatedString, Shortcut const&, Shortcut const&, RefPtr<Gfx::Bitmap const> icon, Function<void(Action&)> = nullptr, Core::Object* = nullptr, bool checkable = false);
+    Action(DeprecatedString, RefPtr<Gfx::Bitmap const> icon, Function<void(Action&)> = nullptr, Core::Object* = nullptr, bool checkable = false);
 
     template<typename Callback>
     void for_each_toolbar_button(Callback);
@@ -144,8 +147,9 @@ private:
     void for_each_menu_item(Callback);
 
     DeprecatedString m_text;
+    Optional<DeprecatedString> m_tooltip;
     DeprecatedString m_status_tip;
-    RefPtr<Gfx::Bitmap> m_icon;
+    RefPtr<Gfx::Bitmap const> m_icon;
     Shortcut m_shortcut;
     Shortcut m_alternate_shortcut;
     bool m_enabled { true };

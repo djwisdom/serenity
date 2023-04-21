@@ -18,7 +18,7 @@
 
 CalculatorWidget::CalculatorWidget()
 {
-    load_from_gml(calculator_gml);
+    load_from_gml(calculator_gml).release_value_but_fixme_should_propagate_errors();
 
     m_entry = *find_descendant_of_type_named<GUI::TextBox>("entry_textbox");
     m_entry->set_relative_rect(5, 5, 244, 26);
@@ -97,19 +97,22 @@ CalculatorWidget::CalculatorWidget()
     add_operation_button(*m_percent_button, Calculator::Operation::Percent);
 
     m_equals_button = *find_descendant_of_type_named<GUI::Button>("equal_button");
-    m_equals_button->on_click = [this](auto) {
-        Crypto::BigFraction argument = m_keypad.value();
-        Crypto::BigFraction res = m_calculator.finish_operation(move(argument));
-        m_keypad.set_value(move(res));
-        update_display();
-    };
+    add_operation_button(*m_equals_button, Calculator::Operation::Equals);
 }
 
 void CalculatorWidget::perform_operation(Calculator::Operation operation)
 {
-    Crypto::BigFraction argument = m_keypad.value();
-    Crypto::BigFraction res = m_calculator.begin_operation(operation, move(argument));
-    m_keypad.set_value(move(res));
+    Optional<Crypto::BigFraction> res;
+    if (m_keypad.in_typing_state()) {
+        Crypto::BigFraction argument = m_keypad.value();
+        res = m_calculator.operation_with_literal_argument(operation, move(argument));
+    } else {
+        res = m_calculator.operation_without_argument(operation);
+    }
+
+    if (res.has_value()) {
+        m_keypad.set_value(move(res.value()));
+    }
     update_display();
 }
 
@@ -139,9 +142,10 @@ void CalculatorWidget::set_entry(Crypto::BigFraction value)
     update_display();
 }
 
-void CalculatorWidget::mimic_pressed_button(RefPtr<GUI::Button> button)
+void CalculatorWidget::set_typed_entry(Crypto::BigFraction value)
 {
-    button->set_mimic_pressed(true);
+    m_keypad.set_typed_value(move(value));
+    update_display();
 }
 
 void CalculatorWidget::update_display()
@@ -155,64 +159,34 @@ void CalculatorWidget::update_display()
 
 void CalculatorWidget::keydown_event(GUI::KeyEvent& event)
 {
-    if (event.key() == KeyCode::Key_Return || event.key() == KeyCode::Key_Equal) {
-        m_keypad.set_value(m_calculator.finish_operation(m_keypad.value()));
-        mimic_pressed_button(m_equals_button);
-    } else if (event.code_point() >= '0' && event.code_point() <= '9') {
-        auto const digit = m_keypad.type_digit(event.code_point() - '0');
-        mimic_pressed_button(m_digit_button[digit]);
-    } else if (event.code_point() == '.') {
-        m_keypad.type_decimal_point();
-        mimic_pressed_button(m_decimal_point_button);
-    } else if (event.key() == KeyCode::Key_Escape || event.key() == KeyCode::Key_Delete) {
-        m_keypad.set_to_0();
-        m_calculator.clear_operation();
-        mimic_pressed_button(m_clear_button);
-    } else if (event.key() == KeyCode::Key_Backspace) {
-        m_keypad.type_backspace();
-        mimic_pressed_button(m_backspace_button);
-    } else if (event.key() == KeyCode::Key_Backslash) {
-        perform_operation(Calculator::Operation::ToggleSign);
-        mimic_pressed_button(m_sign_button);
-    } else if (event.key() == KeyCode::Key_S) {
-        perform_operation(Calculator::Operation::Sqrt);
-        mimic_pressed_button(m_sqrt_button);
-    } else if (event.key() == KeyCode::Key_Percent) {
-        perform_operation(Calculator::Operation::Percent);
-        mimic_pressed_button(m_percent_button);
-    } else if (event.key() == KeyCode::Key_I) {
-        perform_operation(Calculator::Operation::Inverse);
-        mimic_pressed_button(m_inverse_button);
-    } else {
-        Calculator::Operation operation;
-
-        switch (event.code_point()) {
-        case '+':
-            operation = Calculator::Operation::Add;
-            mimic_pressed_button(m_add_button);
-            break;
-        case '-':
-            operation = Calculator::Operation::Subtract;
-            mimic_pressed_button(m_subtract_button);
-            break;
-        case '*':
-            operation = Calculator::Operation::Multiply;
-            mimic_pressed_button(m_multiply_button);
-            break;
-        case '/':
-            operation = Calculator::Operation::Divide;
-            mimic_pressed_button(m_divide_button);
-            break;
-        case '%':
-            operation = Calculator::Operation::Percent;
-            mimic_pressed_button(m_percent_button);
-            break;
-        default:
-            return;
-        }
-
-        m_keypad.set_value(m_calculator.begin_operation(operation, m_keypad.value()));
-    }
+    if (event.key() == KeyCode::Key_Return || event.key() == KeyCode::Key_Equal)
+        m_equals_button->click();
+    else if (event.code_point() >= '0' && event.code_point() <= '9')
+        m_digit_button[event.code_point() - '0']->click();
+    else if (event.code_point() == '.')
+        m_decimal_point_button->click();
+    else if (event.key() == KeyCode::Key_Escape || event.key() == KeyCode::Key_Delete)
+        m_clear_button->click();
+    else if (event.key() == KeyCode::Key_Backspace)
+        m_backspace_button->click();
+    else if (event.key() == KeyCode::Key_Backslash)
+        m_sign_button->click();
+    else if (event.key() == KeyCode::Key_S)
+        m_sqrt_button->click();
+    else if (event.key() == KeyCode::Key_Percent)
+        m_percent_button->click();
+    else if (event.key() == KeyCode::Key_I)
+        m_inverse_button->click();
+    else if (event.code_point() == '+')
+        m_add_button->click();
+    else if (event.code_point() == '-')
+        m_subtract_button->click();
+    else if (event.code_point() == '*')
+        m_multiply_button->click();
+    else if (event.code_point() == '/')
+        m_divide_button->click();
+    else if (event.code_point() == '%')
+        m_percent_button->click();
 
     update_display();
 }

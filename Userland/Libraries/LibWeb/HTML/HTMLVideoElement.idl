@@ -4,7 +4,11 @@
 [Exposed=Window]
 interface HTMLVideoElement : HTMLMediaElement {
 
-    [Reflect] attribute DOMString poster;
-    [Reflect=playsinline] attribute boolean playsInline;
+    [HTMLConstructor] constructor();
+
+    readonly attribute unsigned long videoWidth;
+    readonly attribute unsigned long videoHeight;
+    [CEReactions, Reflect] attribute USVString poster;
+    [CEReactions, Reflect=playsinline] attribute boolean playsInline;
 
 };

@@ -8,24 +8,33 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Geometry/DOMRect.h>
 #include <LibWeb/Geometry/DOMRectList.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::Geometry {
 
-JS::NonnullGCPtr<DOMRectList> DOMRectList::create(JS::Realm& realm, Vector<JS::Handle<DOMRect>> rect_handles)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<DOMRectList>> DOMRectList::create(JS::Realm& realm, Vector<JS::Handle<DOMRect>> rect_handles)
 {
     Vector<JS::NonnullGCPtr<DOMRect>> rects;
     for (auto& rect : rect_handles)
         rects.append(*rect);
-    return realm.heap().allocate<DOMRectList>(realm, realm, move(rects));
+    return MUST_OR_THROW_OOM(realm.heap().allocate<DOMRectList>(realm, realm, move(rects)));
 }
 
 DOMRectList::DOMRectList(JS::Realm& realm, Vector<JS::NonnullGCPtr<DOMRect>> rects)
-    : Bindings::LegacyPlatformObject(Bindings::cached_web_prototype(realm, "DOMRectList"))
+    : Bindings::LegacyPlatformObject(realm)
     , m_rects(move(rects))
 {
 }
 
 DOMRectList::~DOMRectList() = default;
+
+JS::ThrowCompletionOr<void> DOMRectList::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::DOMRectListPrototype>(realm, "DOMRectList"));
+
+    return {};
+}
 
 // https://drafts.fxtf.org/geometry-1/#dom-domrectlist-length
 u32 DOMRectList::length() const
@@ -49,7 +58,7 @@ bool DOMRectList::is_supported_property_index(u32 index) const
     return index < m_rects.size();
 }
 
-JS::Value DOMRectList::item_value(size_t index) const
+WebIDL::ExceptionOr<JS::Value> DOMRectList::item_value(size_t index) const
 {
     if (index >= m_rects.size())
         return JS::js_undefined();

@@ -19,7 +19,7 @@ class ResizeObserver : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(ResizeObserver, Bindings::PlatformObject);
 
 public:
-    static JS::NonnullGCPtr<ResizeObserver> construct_impl(JS::Realm&, WebIDL::CallbackType* callback);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<ResizeObserver>> construct_impl(JS::Realm&, WebIDL::CallbackType* callback);
 
     virtual ~ResizeObserver() override;
 
@@ -29,6 +29,8 @@ public:
 
 private:
     explicit ResizeObserver(JS::Realm&);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 };
 
 }

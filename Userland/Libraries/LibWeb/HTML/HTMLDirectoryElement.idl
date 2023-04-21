@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLDirectoryElement : HTMLElement {
 
-    [Reflect] attribute boolean compact;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute boolean compact;
 
 };

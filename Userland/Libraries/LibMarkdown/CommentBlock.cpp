@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Forward.h>
 #include <AK/StringBuilder.h>
 #include <LibMarkdown/CommentBlock.h>
 #include <LibMarkdown/Visitor.h>
@@ -19,12 +20,12 @@ DeprecatedString CommentBlock::render_to_html(bool) const
     // TODO: This is probably incorrect, because we technically need to escape "--" in some form. However, Browser does not care about this.
     builder.append("-->\n"sv);
 
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
-DeprecatedString CommentBlock::render_for_terminal(size_t) const
+Vector<DeprecatedString> CommentBlock::render_lines_for_terminal(size_t) const
 {
-    return "";
+    return Vector<DeprecatedString> {};
 }
 
 RecursionDecision CommentBlock::walk(Visitor& visitor) const
@@ -68,7 +69,7 @@ OwnPtr<CommentBlock> CommentBlock::parse(LineIterator& lines)
         line = *lines;
     }
 
-    return make<CommentBlock>(builder.build());
+    return make<CommentBlock>(builder.to_deprecated_string());
 }
 
 }

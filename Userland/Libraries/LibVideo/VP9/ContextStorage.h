@@ -212,7 +212,7 @@ struct FrameBlockContext {
     u8 segment_id { 0 };
 };
 
-// Block context that is kept between frames until explictly cleared.
+// Block context that is kept between frames until explicitly cleared.
 struct PersistentBlockContext {
     PersistentBlockContext()
         : available(false)
@@ -241,7 +241,7 @@ struct SegmentFeature {
 struct ColorConfig {
     u8 bit_depth { 8 };
     ColorSpace color_space { ColorSpace::Bt601 };
-    ColorRange color_range { ColorRange::Studio };
+    VideoFullRangeFlag color_range { VideoFullRangeFlag::Studio };
     bool subsampling_x { true };
     bool subsampling_y { true };
 };
@@ -265,7 +265,13 @@ struct ReferenceFrame {
     u8 bit_depth { 0 };
     Array<Vector<u16>, 3> frame_planes {};
 
-    bool is_valid() { return bit_depth > 0; }
+    bool is_valid() const { return bit_depth > 0; }
+
+    // These values are set at the start of each inter frame to be used during prediction.
+    i32 x_scale { 0 };
+    i32 y_scale { 0 };
+    i32 scaled_step_x { 0 };
+    i32 scaled_step_y { 0 };
 };
 
 }

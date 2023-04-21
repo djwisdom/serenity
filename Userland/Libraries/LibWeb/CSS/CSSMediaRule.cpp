@@ -12,32 +12,39 @@
 
 namespace Web::CSS {
 
-CSSMediaRule* CSSMediaRule::create(JS::Realm& realm, MediaList& media_queries, CSSRuleList& rules)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<CSSMediaRule>> CSSMediaRule::create(JS::Realm& realm, MediaList& media_queries, CSSRuleList& rules)
 {
-    return realm.heap().allocate<CSSMediaRule>(realm, realm, media_queries, rules);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<CSSMediaRule>(realm, realm, media_queries, rules));
 }
 
 CSSMediaRule::CSSMediaRule(JS::Realm& realm, MediaList& media, CSSRuleList& rules)
     : CSSConditionRule(realm, rules)
     , m_media(media)
 {
+}
+
+JS::ThrowCompletionOr<void> CSSMediaRule::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     set_prototype(&Bindings::ensure_web_prototype<Bindings::CSSMediaRulePrototype>(realm, "CSSMediaRule"));
+
+    return {};
 }
 
 void CSSMediaRule::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(&m_media);
+    visitor.visit(m_media);
 }
 
 DeprecatedString CSSMediaRule::condition_text() const
 {
-    return m_media.media_text();
+    return m_media->media_text();
 }
 
 void CSSMediaRule::set_condition_text(DeprecatedString text)
 {
-    m_media.set_media_text(text);
+    m_media->set_media_text(text);
 }
 
 // https://www.w3.org/TR/cssom-1/#serialize-a-css-rule

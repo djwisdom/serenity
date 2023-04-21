@@ -13,33 +13,33 @@
 
 namespace Cpp {
 
-static Syntax::TextStyle style_for_token_type(Gfx::Palette const& palette, Cpp::Token::Type type)
+static Gfx::TextAttributes style_for_token_type(Gfx::Palette const& palette, Cpp::Token::Type type)
 {
     switch (type) {
     case Cpp::Token::Type::Keyword:
-        return { palette.syntax_keyword(), true };
+        return { palette.syntax_keyword(), {}, true };
     case Cpp::Token::Type::KnownType:
-        return { palette.syntax_type(), true };
+        return { palette.syntax_type(), {}, true };
     case Cpp::Token::Type::Identifier:
-        return { palette.syntax_identifier(), false };
+        return { palette.syntax_identifier() };
     case Cpp::Token::Type::DoubleQuotedString:
     case Cpp::Token::Type::SingleQuotedString:
     case Cpp::Token::Type::RawString:
-        return { palette.syntax_string(), false };
+        return { palette.syntax_string() };
     case Cpp::Token::Type::Integer:
     case Cpp::Token::Type::Float:
-        return { palette.syntax_number(), false };
+        return { palette.syntax_number() };
     case Cpp::Token::Type::IncludePath:
-        return { palette.syntax_preprocessor_value(), false };
+        return { palette.syntax_preprocessor_value() };
     case Cpp::Token::Type::EscapeSequence:
-        return { palette.syntax_keyword(), true };
+        return { palette.syntax_keyword(), {}, true };
     case Cpp::Token::Type::PreprocessorStatement:
     case Cpp::Token::Type::IncludeStatement:
-        return { palette.syntax_preprocessor_statement(), false };
+        return { palette.syntax_preprocessor_statement() };
     case Cpp::Token::Type::Comment:
-        return { palette.syntax_comment(), false };
+        return { palette.syntax_comment() };
     default:
-        return { palette.base_text(), false };
+        return { palette.base_text() };
     }
 }
 
@@ -60,6 +60,8 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
     auto text = m_client->get_text();
     Cpp::Lexer lexer(text);
 
+    Vector<Token> folding_region_start_tokens;
+    Vector<GUI::TextDocumentFoldingRegion> folding_regions;
     Vector<GUI::TextDocumentSpan> spans;
     lexer.lex_iterable([&](auto token) {
         // FIXME: The +1 for the token end column is a quick hack due to not wanting to modify the lexer (which is also used by the parser). Maybe there's a better way to do this.
@@ -67,14 +69,25 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
         GUI::TextDocumentSpan span;
         span.range.set_start({ token.start().line, token.start().column });
         span.range.set_end({ token.end().line, token.end().column + 1 });
-        auto style = style_for_token_type(palette, token.type());
-        span.attributes.color = style.color;
-        span.attributes.bold = style.bold;
+        span.attributes = style_for_token_type(palette, token.type());
         span.is_skippable = token.type() == Cpp::Token::Type::Whitespace;
         span.data = static_cast<u64>(token.type());
         spans.append(span);
+
+        if (token.type() == Token::Type::LeftCurly) {
+            folding_region_start_tokens.append(token);
+        } else if (token.type() == Token::Type::RightCurly) {
+            if (!folding_region_start_tokens.is_empty()) {
+                auto start_token = folding_region_start_tokens.take_last();
+                GUI::TextDocumentFoldingRegion folding_region;
+                folding_region.range.set_start({ start_token.end().line, start_token.end().column });
+                folding_region.range.set_end({ token.start().line, token.start().column });
+                folding_regions.append(move(folding_region));
+            }
+        }
     });
     m_client->do_set_spans(move(spans));
+    m_client->do_set_folding_regions(move(folding_regions));
 
     m_has_brace_buddies = false;
     highlight_matching_token_pair();

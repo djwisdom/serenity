@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022-2023, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -8,6 +8,7 @@
 #include "CharacterSearchWidget.h"
 #include "SearchCharacters.h"
 #include <Applications/CharacterMap/CharacterSearchWindowGML.h>
+#include <LibCore/Debounce.h>
 
 struct SearchResult {
     u32 code_point;
@@ -53,17 +54,15 @@ private:
 
 CharacterSearchWidget::CharacterSearchWidget()
 {
-    load_from_gml(character_search_window_gml);
+    load_from_gml(character_search_window_gml).release_value_but_fixme_should_propagate_errors();
 
     m_search_input = find_descendant_of_type_named<GUI::TextBox>("search_input");
-    m_search_button = find_descendant_of_type_named<GUI::Button>("search_button");
     m_results_table = find_descendant_of_type_named<GUI::TableView>("results_table");
 
     m_search_input->on_up_pressed = [this] { m_results_table->move_cursor(GUI::AbstractView::CursorMovement::Up, GUI::AbstractView::SelectionUpdate::Set); };
     m_search_input->on_down_pressed = [this] { m_results_table->move_cursor(GUI::AbstractView::CursorMovement::Down, GUI::AbstractView::SelectionUpdate::Set); };
 
-    m_search_input->on_return_pressed = [this] { search(); };
-    m_search_button->on_click = [this](auto) { search(); };
+    m_search_input->on_change = Core::debounce([this] { search(); }, 100);
 
     m_results_table->horizontal_scrollbar().set_visible(false);
     m_results_table->set_column_headers_visible(false);
@@ -79,8 +78,12 @@ CharacterSearchWidget::CharacterSearchWidget()
 
 void CharacterSearchWidget::search()
 {
+    ScopeGuard guard { [&] { m_results_table->set_updates_enabled(true); } };
+    m_results_table->set_updates_enabled(false);
+
     // TODO: Sort the results nicely. They're sorted by code-point for now, which is easy, but not the most useful.
     //       Sorting intelligently in a style similar to Assistant would be nicer.
+    //       Note that this will mean limiting the number of results some other way.
     auto& model = static_cast<CharacterSearchModel&>(*m_results_table->model());
     model.clear();
     auto query = m_search_input->text();
@@ -90,6 +93,12 @@ void CharacterSearchWidget::search()
         StringBuilder builder;
         builder.append_code_point(code_point);
 
-        model.add_result({ code_point, builder.build(), move(display_name) });
+        model.add_result({ code_point, builder.to_deprecated_string(), move(display_name) });
+
+        // Stop when we reach 250 results.
+        // This is already too many for the search to be useful, and means we don't spend forever recalculating the column size.
+        if (model.row_count({}) >= 250)
+            return IterationDecision::Break;
+        return IterationDecision::Continue;
     });
 }

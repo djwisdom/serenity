@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -47,7 +47,7 @@ Widget::Widget()
     REGISTER_BOOL_PROPERTY("visible", is_visible, set_visible);
     REGISTER_BOOL_PROPERTY("focused", is_focused, set_focus);
     REGISTER_BOOL_PROPERTY("enabled", is_enabled, set_enabled);
-    REGISTER_STRING_PROPERTY("tooltip", tooltip, set_tooltip);
+    REGISTER_DEPRECATED_STRING_PROPERTY("tooltip", tooltip, set_tooltip);
 
     REGISTER_UI_SIZE_PROPERTY("min_size", min_size, set_min_size);
     REGISTER_READONLY_UI_SIZE_PROPERTY("effective_min_size", effective_min_size);
@@ -72,7 +72,7 @@ Widget::Widget()
     REGISTER_INT_PROPERTY("x", x, set_x);
     REGISTER_INT_PROPERTY("y", y, set_y);
 
-    REGISTER_STRING_PROPERTY("font", m_font->family, set_font_family);
+    REGISTER_DEPRECATED_STRING_PROPERTY("font", m_font->family, set_font_family);
     REGISTER_INT_PROPERTY("font_size", m_font->presentation_size, set_font_size);
     REGISTER_FONT_WEIGHT_PROPERTY("font_weight", m_font->weight, set_font_weight);
 
@@ -702,7 +702,7 @@ Widget* Widget::child_at(Gfx::IntPoint point) const
     for (int i = children().size() - 1; i >= 0; --i) {
         if (!is<Widget>(children()[i]))
             continue;
-        auto& child = verify_cast<Widget>(children()[i]);
+        auto& child = verify_cast<Widget>(*children()[i]);
         if (!child.is_visible())
             continue;
         if (child.relative_non_grabbable_rect().contains(point))
@@ -815,25 +815,25 @@ void Widget::set_font(Gfx::Font const* font)
 
 void Widget::set_font_family(DeprecatedString const& family)
 {
-    set_font(Gfx::FontDatabase::the().get(family, m_font->presentation_size(), m_font->weight(), m_font->slope()));
+    set_font(Gfx::FontDatabase::the().get(family, m_font->presentation_size(), m_font->weight(), m_font->width(), m_font->slope()));
 }
 
 void Widget::set_font_size(unsigned size)
 {
-    set_font(Gfx::FontDatabase::the().get(m_font->family(), size, m_font->weight(), m_font->slope()));
+    set_font(Gfx::FontDatabase::the().get(m_font->family(), size, m_font->weight(), m_font->width(), m_font->slope()));
 }
 
 void Widget::set_font_weight(unsigned weight)
 {
-    set_font(Gfx::FontDatabase::the().get(m_font->family(), m_font->presentation_size(), weight, m_font->slope()));
+    set_font(Gfx::FontDatabase::the().get(m_font->family(), m_font->presentation_size(), weight, m_font->width(), m_font->slope()));
 }
 
 void Widget::set_font_fixed_width(bool fixed_width)
 {
     if (fixed_width)
-        set_font(Gfx::FontDatabase::the().get(Gfx::FontDatabase::the().default_fixed_width_font().family(), m_font->presentation_size(), m_font->weight(), m_font->slope()));
+        set_font(Gfx::FontDatabase::the().get(Gfx::FontDatabase::the().default_fixed_width_font().family(), m_font->presentation_size(), m_font->weight(), m_font->width(), m_font->slope()));
     else
-        set_font(Gfx::FontDatabase::the().get(Gfx::FontDatabase::the().default_font().family(), m_font->presentation_size(), m_font->weight(), m_font->slope()));
+        set_font(Gfx::FontDatabase::the().get(Gfx::FontDatabase::the().default_font().family(), m_font->presentation_size(), m_font->weight(), m_font->width(), m_font->slope()));
 }
 
 void Widget::set_min_size(UISize const& size)
@@ -976,7 +976,7 @@ bool Widget::is_frontmost() const
     auto* parent = parent_widget();
     if (!parent)
         return true;
-    return &parent->children().last() == this;
+    return parent->children().last() == this;
 }
 
 bool Widget::is_backmost() const
@@ -984,7 +984,7 @@ bool Widget::is_backmost() const
     auto* parent = parent_widget();
     if (!parent)
         return true;
-    return &parent->children().first() == this;
+    return parent->children().first() == this;
 }
 
 Action* Widget::action_for_shortcut(Shortcut const& shortcut)
@@ -1036,19 +1036,19 @@ Vector<Widget&> Widget::child_widgets() const
     Vector<Widget&> widgets;
     widgets.ensure_capacity(children().size());
     for (auto& child : const_cast<Widget*>(this)->children()) {
-        if (is<Widget>(child))
-            widgets.append(static_cast<Widget&>(child));
+        if (is<Widget>(*child))
+            widgets.append(static_cast<Widget&>(*child));
     }
     return widgets;
 }
 
-void Widget::set_palette(Palette const& palette)
+void Widget::set_palette(Palette& palette)
 {
     m_palette = palette.impl();
     update();
 }
 
-void Widget::set_title(DeprecatedString title)
+void Widget::set_title(String title)
 {
     m_title = move(title);
     layout_relevant_change_occurred();
@@ -1057,7 +1057,7 @@ void Widget::set_title(DeprecatedString title)
         parent_widget()->update();
 }
 
-DeprecatedString Widget::title() const
+String Widget::title() const
 {
     return m_title;
 }
@@ -1126,14 +1126,14 @@ Gfx::IntRect Widget::children_clip_rect() const
     return rect();
 }
 
-void Widget::set_override_cursor(AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> cursor)
+void Widget::set_override_cursor(AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap const>> cursor)
 {
-    auto const& are_cursors_the_same = [](AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> const& a, AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> const& b) {
-        if (a.has<Gfx::StandardCursor>() != b.has<Gfx::StandardCursor>())
+    auto const& are_cursors_the_same = [](auto const& a, auto const& b) {
+        if (a.template has<Gfx::StandardCursor>() != b.template has<Gfx::StandardCursor>())
             return false;
-        if (a.has<Gfx::StandardCursor>())
-            return a.get<Gfx::StandardCursor>() == b.get<Gfx::StandardCursor>();
-        return a.get<NonnullRefPtr<Gfx::Bitmap>>().ptr() == b.get<NonnullRefPtr<Gfx::Bitmap>>().ptr();
+        if (a.template has<Gfx::StandardCursor>())
+            return a.template get<Gfx::StandardCursor>() == b.template get<Gfx::StandardCursor>();
+        return a.template get<NonnullRefPtr<Gfx::Bitmap const>>().ptr() == b.template get<NonnullRefPtr<Gfx::Bitmap const>>().ptr();
     };
 
     if (are_cursors_the_same(m_override_cursor, cursor))
@@ -1145,56 +1145,50 @@ void Widget::set_override_cursor(AK::Variant<Gfx::StandardCursor, NonnullRefPtr<
     }
 }
 
-bool Widget::load_from_gml(StringView gml_string)
+ErrorOr<void> Widget::load_from_gml(StringView gml_string)
 {
-    return load_from_gml(gml_string, [](DeprecatedString const& class_name) -> RefPtr<Core::Object> {
+    return load_from_gml(gml_string, [](DeprecatedString const& class_name) -> ErrorOr<NonnullRefPtr<Core::Object>> {
         dbgln("Class '{}' not registered", class_name);
-        return nullptr;
+        return Error::from_string_literal("Class not registered");
     });
 }
 
-bool Widget::load_from_gml(StringView gml_string, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&))
+ErrorOr<void> Widget::load_from_gml(StringView gml_string, UnregisteredChildHandler unregistered_child_handler)
 {
-    auto value = GML::parse_gml(gml_string);
-    if (value.is_error()) {
-        // FIXME: We don't report the error, so at least print it.
-        dbgln("Error while parsing GML: {}", value.error());
-        return false;
-    }
-    return load_from_gml_ast(value.release_value(), unregistered_child_handler);
+    auto value = TRY(GML::parse_gml(gml_string));
+    return load_from_gml_ast(value, unregistered_child_handler);
 }
 
-bool Widget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&))
+ErrorOr<void> Widget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node const> ast, UnregisteredChildHandler unregistered_child_handler)
 {
     if (is<GUI::GML::GMLFile>(ast.ptr()))
-        return load_from_gml_ast(static_ptr_cast<GUI::GML::GMLFile>(ast)->main_class(), unregistered_child_handler);
+        return load_from_gml_ast(static_cast<GUI::GML::GMLFile const&>(*ast).main_class(), unregistered_child_handler);
 
     VERIFY(is<GUI::GML::Object>(ast.ptr()));
-    auto object = static_ptr_cast<GUI::GML::Object>(ast);
+    auto const& object = static_cast<GUI::GML::Object const&>(*ast);
 
-    object->for_each_property([&](auto key, auto value) {
+    object.for_each_property([&](auto key, auto value) {
         set_property(key, value);
     });
 
-    auto layout = object->layout_object();
+    auto layout = object.layout_object();
     if (!layout.is_null()) {
         auto class_name = layout->name();
         if (class_name.is_null()) {
-            dbgln("Invalid layout class name");
-            return false;
+            return Error::from_string_literal("Invalid layout class name");
         }
 
         auto& layout_class = *Core::ObjectClassRegistration::find("GUI::Layout"sv);
         if (auto* registration = Core::ObjectClassRegistration::find(class_name)) {
-            auto layout = registration->construct();
-            if (!layout || !registration->is_derived_from(layout_class)) {
+            auto layout = TRY(registration->construct());
+            if (!registration->is_derived_from(layout_class)) {
                 dbgln("Invalid layout class: '{}'", class_name.to_deprecated_string());
-                return false;
+                return Error::from_string_literal("Invalid layout class");
             }
-            set_layout(static_ptr_cast<Layout>(layout).release_nonnull());
+            set_layout(static_ptr_cast<Layout>(layout));
         } else {
             dbgln("Unknown layout class: '{}'", class_name.to_deprecated_string());
-            return false;
+            return Error::from_string_literal("Unknown layout class");
         }
 
         layout->for_each_property([&](auto key, auto value) {
@@ -1204,33 +1198,32 @@ bool Widget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::O
 
     auto& widget_class = *Core::ObjectClassRegistration::find("GUI::Widget"sv);
     bool is_tab_widget = is<TabWidget>(*this);
-    object->for_each_child_object_interruptible([&](auto child_data) {
-        auto class_name = child_data->name();
+    TRY(object.try_for_each_child_object([&](auto const& child_data) -> ErrorOr<void> {
+        auto class_name = child_data.name();
 
         // It is very questionable if this pseudo object should exist, but it works fine like this for now.
         if (class_name == "GUI::Layout::Spacer") {
             if (!this->layout()) {
-                dbgln("Specified GUI::Layout::Spacer in GML, but the parent has no Layout.");
-                return IterationDecision::Break;
+                return Error::from_string_literal("Specified GUI::Layout::Spacer in GML, but the parent has no Layout.");
             }
             this->layout()->add_spacer();
         } else {
             RefPtr<Core::Object> child;
             if (auto* registration = Core::ObjectClassRegistration::find(class_name)) {
-                child = registration->construct();
-                if (!child || !registration->is_derived_from(widget_class)) {
+                child = TRY(registration->construct());
+                if (!registration->is_derived_from(widget_class)) {
                     dbgln("Invalid widget class: '{}'", class_name);
-                    return IterationDecision::Break;
+                    return Error::from_string_literal("Invalid widget class");
                 }
             } else {
-                child = unregistered_child_handler(class_name);
+                child = TRY(unregistered_child_handler(class_name));
             }
             if (!child)
-                return IterationDecision::Break;
+                return Error::from_string_literal("Unable to construct a Widget class for child");
             add_child(*child);
 
             // This is possible as we ensure that Widget is a base class above.
-            static_ptr_cast<Widget>(child)->load_from_gml_ast(child_data, unregistered_child_handler);
+            TRY(static_ptr_cast<Widget>(child)->load_from_gml_ast(child_data, unregistered_child_handler));
 
             if (is_tab_widget) {
                 // FIXME: We need to have the child added before loading it so that it can access us. But the TabWidget logic requires the child to not be present yet.
@@ -1239,10 +1232,10 @@ bool Widget::load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::O
             }
         }
 
-        return IterationDecision::Continue;
-    });
+        return {};
+    }));
 
-    return true;
+    return {};
 }
 
 bool Widget::has_focus_within() const
@@ -1271,6 +1264,12 @@ bool Widget::has_pending_drop() const
 bool Widget::is_visible_for_timer_purposes() const
 {
     return is_visible() && Object::is_visible_for_timer_purposes();
+}
+
+ErrorOr<void> Widget::add_spacer()
+{
+    VERIFY(layout());
+    return layout()->try_add_spacer();
 }
 
 }

@@ -8,6 +8,7 @@
 #include <Kernel/Arch/Delay.h>
 #include <Kernel/Devices/Audio/AC97.h>
 #include <Kernel/Devices/DeviceManagement.h>
+#include <Kernel/IOWindow.h>
 #include <Kernel/InterruptDisabler.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 
@@ -22,7 +23,7 @@ static constexpr u16 pcm_fixed_sample_rate = 48000;
 static constexpr u16 pcm_sample_rate_minimum = 8000;
 static constexpr u16 pcm_sample_rate_maximum = 48000;
 
-UNMAP_AFTER_INIT ErrorOr<NonnullLockRefPtr<AC97>> AC97::try_create(PCI::DeviceIdentifier const& pci_device_identifier)
+UNMAP_AFTER_INIT ErrorOr<NonnullRefPtr<AudioController>> AC97::create(PCI::DeviceIdentifier const& pci_device_identifier)
 {
     auto mixer_io_window = TRY(IOWindow::create_for_pci_device_bar(pci_device_identifier, PCI::HeaderType0BaseRegister::BAR0));
     auto bus_io_window = TRY(IOWindow::create_for_pci_device_bar(pci_device_identifier, PCI::HeaderType0BaseRegister::BAR1));
@@ -30,14 +31,17 @@ UNMAP_AFTER_INIT ErrorOr<NonnullLockRefPtr<AC97>> AC97::try_create(PCI::DeviceId
     auto pcm_out_channel_io_window = TRY(bus_io_window->create_from_io_window_with_offset(NativeAudioBusChannel::PCMOutChannel));
     auto pcm_out_channel = TRY(AC97Channel::create_with_parent_pci_device(pci_device_identifier.address(), "PCMOut"sv, move(pcm_out_channel_io_window)));
 
-    auto ac97 = adopt_nonnull_lock_ref_or_enomem(new (nothrow) AC97(pci_device_identifier, move(pcm_out_channel), move(mixer_io_window), move(bus_io_window)));
-    if (!ac97.is_error())
-        TRY(ac97.value()->initialize());
-    return ac97;
+    return TRY(adopt_nonnull_ref_or_enomem(new (nothrow) AC97(pci_device_identifier, move(pcm_out_channel), move(mixer_io_window), move(bus_io_window))));
+}
+
+UNMAP_AFTER_INIT ErrorOr<bool> AC97::probe(PCI::DeviceIdentifier const& device_identifier)
+{
+    VERIFY(device_identifier.class_code().value() == to_underlying(PCI::ClassID::Multimedia));
+    return device_identifier.subclass_code().value() == to_underlying(PCI::Multimedia::SubclassID::AudioController);
 }
 
 UNMAP_AFTER_INIT AC97::AC97(PCI::DeviceIdentifier const& pci_device_identifier, NonnullOwnPtr<AC97Channel> pcm_out_channel, NonnullOwnPtr<IOWindow> mixer_io_window, NonnullOwnPtr<IOWindow> bus_io_window)
-    : PCI::Device(pci_device_identifier.address())
+    : PCI::Device(const_cast<PCI::DeviceIdentifier&>(pci_device_identifier))
     , IRQHandler(pci_device_identifier.interrupt_line().value())
     , m_mixer_io_window(move(mixer_io_window))
     , m_bus_io_window(move(bus_io_window))
@@ -50,7 +54,7 @@ UNMAP_AFTER_INIT AC97::~AC97() = default;
 bool AC97::handle_irq(RegisterState const&)
 {
     auto pcm_out_status = m_pcm_out_channel->io_window().read16(AC97Channel::Register::Status);
-    dbgln_if(AC97_DEBUG, "AC97 @ {}: interrupt received - status: {:#05b}", pci_address(), pcm_out_status);
+    dbgln_if(AC97_DEBUG, "AC97 @ {}: interrupt received - status: {:#05b}", device_identifier().address(), pcm_out_status);
 
     bool is_dma_halted = (pcm_out_status & AudioStatusRegisterFlag::DMAControllerHalted) > 0;
     bool current_equals_last_valid = (pcm_out_status & AudioStatusRegisterFlag::CurrentEqualsLastValid) > 0;
@@ -79,25 +83,27 @@ bool AC97::handle_irq(RegisterState const&)
     return true;
 }
 
-UNMAP_AFTER_INIT ErrorOr<void> AC97::initialize()
+UNMAP_AFTER_INIT ErrorOr<void> AC97::initialize(Badge<AudioManagement>)
 {
-    dbgln_if(AC97_DEBUG, "AC97 @ {}: mixer base: {:#04x}", pci_address(), m_mixer_io_window);
-    dbgln_if(AC97_DEBUG, "AC97 @ {}: bus base: {:#04x}", pci_address(), m_bus_io_window);
+    dbgln_if(AC97_DEBUG, "AC97 @ {}: mixer base: {:#04x}", device_identifier().address(), m_mixer_io_window);
+    dbgln_if(AC97_DEBUG, "AC97 @ {}: bus base: {:#04x}", device_identifier().address(), m_bus_io_window);
+
+    m_audio_channel = TRY(AudioChannel::create(*this, 0));
 
     // Read out AC'97 codec revision and vendor
     auto extended_audio_id = m_mixer_io_window->read16(NativeAudioMixerRegister::ExtendedAudioID);
     m_codec_revision = static_cast<AC97Revision>(((extended_audio_id & ExtendedAudioMask::Revision) >> 10) & 0b11);
-    dbgln_if(AC97_DEBUG, "AC97 @ {}: codec revision {:#02b}", pci_address(), to_underlying(m_codec_revision));
+    dbgln_if(AC97_DEBUG, "AC97 @ {}: codec revision {:#02b}", device_identifier().address(), to_underlying(m_codec_revision));
     if (m_codec_revision == AC97Revision::Reserved)
         return ENOTSUP;
 
     // Report vendor / device ID
     u32 vendor_id = m_mixer_io_window->read16(NativeAudioMixerRegister::VendorID1) << 16 | m_mixer_io_window->read16(NativeAudioMixerRegister::VendorID2);
-    dbgln("AC97 @ {}: Vendor ID: {:#8x}", pci_address(), vendor_id);
+    dmesgln_pci(*this, "Vendor ID: {:#8x}", vendor_id);
 
     // Bus cold reset, enable interrupts
     enable_pin_based_interrupts();
-    PCI::enable_bus_mastering(pci_address());
+    PCI::enable_bus_mastering(device_identifier());
     auto control = m_bus_io_window->read32(NativeAudioBusRegister::GlobalControl);
     control |= GlobalControlFlag::GPIInterruptEnable;
     control |= GlobalControlFlag::AC97ColdReset;
@@ -154,7 +160,7 @@ ErrorOr<void> AC97::set_pcm_output_sample_rate(u32 sample_rate)
     m_mixer_io_window->write16(NativeAudioMixerRegister::PCMFrontDACRate, shifted_sample_rate);
     m_sample_rate = static_cast<u32>(m_mixer_io_window->read16(NativeAudioMixerRegister::PCMFrontDACRate)) << double_rate_shift;
 
-    dbgln("AC97 @ {}: PCM front DAC rate set to {} Hz", pci_address(), m_sample_rate);
+    dmesgln_pci(*this, "PCM front DAC rate set to {} Hz", m_sample_rate);
 
     // Setting the sample rate stops a running DMA engine, so restart it
     if (m_pcm_out_channel->dma_running())
@@ -171,16 +177,11 @@ void AC97::set_pcm_output_volume(u8 left_channel, u8 right_channel, Muted mute)
     m_mixer_io_window->write16(NativeAudioMixerRegister::SetPCMOutputVolume, volume_value);
 }
 
-LockRefPtr<AudioChannel> AC97::audio_channel(u32 index) const
+RefPtr<AudioChannel> AC97::audio_channel(u32 index) const
 {
     if (index == 0)
         return m_audio_channel;
     return {};
-}
-
-void AC97::detect_hardware_audio_channels(Badge<AudioManagement>)
-{
-    m_audio_channel = AudioChannel::must_create(*this, 0);
 }
 
 ErrorOr<void> AC97::set_pcm_output_sample_rate(size_t channel_index, u32 samples_per_second_rate)
@@ -251,7 +252,7 @@ ErrorOr<void> AC97::write_single_buffer(UserOrKernelBuffer const& data, size_t o
             if (head_distance < m_output_buffer_page_count)
                 break;
 
-            dbgln_if(AC97_DEBUG, "AC97 @ {}: waiting on interrupt - status: {:#05b} CI: {} LVI: {}", pci_address(), pcm_out_status, current_index, last_valid_index);
+            dbgln_if(AC97_DEBUG, "AC97 @ {}: waiting on interrupt - status: {:#05b} CI: {} LVI: {}", device_identifier().address(), pcm_out_status, current_index, last_valid_index);
             m_irq_queue.wait_forever("AC97"sv);
         } while (m_pcm_out_channel->dma_running());
     }

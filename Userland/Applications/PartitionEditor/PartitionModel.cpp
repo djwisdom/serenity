@@ -6,11 +6,17 @@
 
 #include <AK/NumberFormat.h>
 #include <Applications/PartitionEditor/PartitionModel.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibPartition/EBRPartitionTable.h>
 #include <LibPartition/GUIDPartitionTable.h>
 #include <LibPartition/MBRPartitionTable.h>
 
 namespace PartitionEditor {
+
+NonnullRefPtr<PartitionModel> PartitionModel::create()
+{
+    return adopt_ref(*new PartitionModel);
+}
 
 DeprecatedString PartitionModel::column_name(int column) const
 {
@@ -62,7 +68,7 @@ GUI::Variant PartitionModel::data(GUI::ModelIndex const& index, GUI::ModelRole r
 
 ErrorOr<void> PartitionModel::set_device_path(DeprecatedString const& path)
 {
-    auto file = TRY(Core::File::open(path, Core::OpenMode::ReadOnly));
+    auto file = TRY(Core::DeprecatedFile::open(path, Core::OpenMode::ReadOnly));
 
     auto mbr_table_or_error = Partition::MBRPartitionTable::try_to_initialize(file);
     if (!mbr_table_or_error.is_error()) {

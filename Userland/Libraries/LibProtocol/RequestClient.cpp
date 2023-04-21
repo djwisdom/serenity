@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/FileStream.h>
 #include <LibProtocol/Request.h>
 #include <LibProtocol/RequestClient.h>
 
 namespace Protocol {
 
-RequestClient::RequestClient(NonnullOwnPtr<Core::Stream::LocalSocket> socket)
+RequestClient::RequestClient(NonnullOwnPtr<Core::LocalSocket> socket)
     : IPC::ConnectionToServer<RequestClientEndpoint, RequestServerEndpoint>(*this, move(socket))
 {
 }

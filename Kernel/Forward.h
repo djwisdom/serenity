@@ -11,6 +11,8 @@
 
 namespace Kernel {
 
+enum class LockRank;
+
 class BlockDevice;
 class CharacterDevice;
 class Coredump;
@@ -38,16 +40,11 @@ class MasterPTY;
 class Mount;
 class PerformanceEventBuffer;
 class ProcFS;
-class ProcFSDirectoryInode;
-class ProcFSExposedComponent;
-class ProcFSExposedDirectory;
 class ProcFSInode;
-class ProcFSProcessInformation;
-class ProcFSRootDirectory;
-class ProcFSSystemBoolean;
-class ProcFSSystemDirectory;
 class Process;
 class ProcessGroup;
+class RAMFS;
+template<LockRank Rank>
 class RecursiveSpinlock;
 class Scheduler;
 class Socket;
@@ -62,7 +59,7 @@ class TCPSocket;
 class TTY;
 class Thread;
 class ThreadTracer;
-class TmpFSInode;
+class RAMFSInode;
 class UDPSocket;
 class UserOrKernelBuffer;
 class VirtualFileSystem;
@@ -85,6 +82,7 @@ class VMObject;
 class VirtualRange;
 }
 
+template<LockRank Rank>
 class Spinlock;
 template<typename LockType>
 class SpinlockLocker;

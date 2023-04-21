@@ -5,17 +5,17 @@
  */
 
 #include <AK/Debug.h>
-#include <LibWeb/HTML/BrowsingContextContainer.h>
+#include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/Layout/FrameBox.h>
-#include <LibWeb/Layout/InitialContainingBlock.h>
+#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BorderRadiusCornerClipper.h>
 #include <LibWeb/Painting/NestedBrowsingContextPaintable.h>
 
 namespace Web::Painting {
 
-NonnullRefPtr<NestedBrowsingContextPaintable> NestedBrowsingContextPaintable::create(Layout::FrameBox const& layout_box)
+JS::NonnullGCPtr<NestedBrowsingContextPaintable> NestedBrowsingContextPaintable::create(Layout::FrameBox const& layout_box)
 {
-    return adopt_ref(*new NestedBrowsingContextPaintable(layout_box));
+    return layout_box.heap().allocate_without_realm<NestedBrowsingContextPaintable>(layout_box);
 }
 
 NestedBrowsingContextPaintable::NestedBrowsingContextPaintable(Layout::FrameBox const& layout_box)
@@ -51,10 +51,12 @@ void NestedBrowsingContextPaintable::paint(PaintContext& context, PaintPhase pha
         auto old_viewport_rect = context.device_viewport_rect();
 
         context.painter().add_clip_rect(clip_rect.to_type<int>());
-        context.painter().translate(absolute_rect.x().value(), absolute_rect.y().value());
 
-        context.set_device_viewport_rect({ {}, layout_box().dom_node().nested_browsing_context()->size() });
-        const_cast<Layout::InitialContainingBlock*>(hosted_layout_tree)->paint_all_phases(context);
+        auto absolute_device_rect = context.enclosing_device_rect(absolute_rect);
+        context.painter().translate(absolute_device_rect.x().value(), absolute_device_rect.y().value());
+
+        context.set_device_viewport_rect({ {}, context.enclosing_device_size(layout_box().dom_node().nested_browsing_context()->size()) });
+        const_cast<Layout::Viewport*>(hosted_layout_tree)->paint_all_phases(context);
 
         context.set_device_viewport_rect(old_viewport_rect);
         context.painter().restore();

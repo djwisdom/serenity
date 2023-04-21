@@ -6,7 +6,7 @@
 
 #include <LibTest/TestCase.h>
 
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibWeb/HTML/Parser/HTMLTokenizer.h>
 
 using Tokenizer = Web::HTML::HTMLTokenizer;
@@ -201,10 +201,17 @@ TEST_CASE(doctype)
 //       If that changes, or something is added to the test HTML, the hash needs to be adjusted.
 TEST_CASE(regression)
 {
-    auto file = MUST(Core::Stream::File::open("/usr/Tests/LibWeb/tokenizer-test.html"sv, Core::Stream::OpenMode::Read));
+    // This makes sure that the tests will run both on target and in Lagom.
+#ifdef AK_OS_SERENITY
+    StringView path = "/usr/Tests/LibWeb/tokenizer-test.html"sv;
+#else
+    StringView path = "tokenizer-test.html"sv;
+#endif
+
+    auto file = MUST(Core::File::open(path, Core::File::OpenMode::Read));
     auto file_size = MUST(file->size());
     auto content = MUST(ByteBuffer::create_uninitialized(file_size));
-    MUST(file->read(content.bytes()));
+    MUST(file->read_until_filled(content.bytes()));
     DeprecatedString file_contents { content.bytes() };
     auto tokens = run_tokenizer(file_contents);
     u32 hash = hash_tokens(tokens);

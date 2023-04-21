@@ -9,7 +9,7 @@ echo "$DIR"
 
 PREFIX="$DIR/Local/clang/"
 BUILD="$DIR/../Build/"
-USERLAND_ARCHS="i686 x86_64"
+USERLAND_ARCHS="x86_64"
 ARCHS="$USERLAND_ARCHS aarch64"
 
 MD5SUM="md5sum"
@@ -255,7 +255,7 @@ for arch in $ARCHS; do
     pushd "$BUILD/${arch}clang"
         mkdir -p Root/usr/include/
         for header in $FILES; do
-            target=$(echo "$header" | "$SED" -e "s@$SRC_ROOT/Userland/Libraries/LibC@@" -e "s@$SRC_ROOT/Kernel/@Kernel/@")
+            target=$(echo "$header" | "$SED" -e "s|$SRC_ROOT/Userland/Libraries/LibC||" -e "s|$SRC_ROOT/Kernel/|Kernel/|")
             buildstep "system_headers" "$INSTALL" -D "$header" "Root/usr/include/$target"
         done
     popd
@@ -286,7 +286,6 @@ pushd "$DIR/Build/clang"
     pushd llvm
         buildstep "llvm/configure" cmake "$DIR/Tarballs/$LLVM_NAME/llvm" \
             -G Ninja \
-            -DSERENITY_i686-pc-serenity_SYSROOT="$BUILD/i686clang/Root" \
             -DSERENITY_x86_64-pc-serenity_SYSROOT="$BUILD/x86_64clang/Root" \
             -DSERENITY_aarch64-pc-serenity_SYSROOT="$BUILD/aarch64clang/Root" \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
@@ -326,6 +325,7 @@ pushd "$DIR/Local/clang/bin/"
     for arch in $ARCHS; do
         ln -s clang "$arch"-pc-serenity-clang
         ln -s clang++ "$arch"-pc-serenity-clang++
+        ln -s llvm-nm "$arch"-pc-serenity-nm
         echo "--sysroot=$BUILD/${arch}clang/Root" > "$arch"-pc-serenity.cfg
     done
 popd

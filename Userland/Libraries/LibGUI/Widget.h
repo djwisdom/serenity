@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,6 +11,7 @@
 #include <AK/JsonObject.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
+#include <AK/String.h>
 #include <AK/Variant.h>
 #include <LibCore/Object.h>
 #include <LibCore/Timer.h>
@@ -32,12 +33,12 @@ extern Core::ObjectClassRegistration registration_Widget;
 }
 }
 
-#define REGISTER_WIDGET(namespace_, class_name)                                                                                                       \
-    namespace Core {                                                                                                                                  \
-    namespace Registration {                                                                                                                          \
-    Core::ObjectClassRegistration registration_##class_name(                                                                                          \
-        #namespace_ "::" #class_name##sv, []() { return static_ptr_cast<Core::Object>(namespace_::class_name::construct()); }, &registration_Widget); \
-    }                                                                                                                                                 \
+#define REGISTER_WIDGET(namespace_, class_name)                                                                                                                                                     \
+    namespace Core {                                                                                                                                                                                \
+    namespace Registration {                                                                                                                                                                        \
+    Core::ObjectClassRegistration registration_##class_name(                                                                                                                                        \
+        #namespace_ "::" #class_name##sv, []() -> ErrorOr<NonnullRefPtr<Core::Object>> { return static_ptr_cast<Core::Object>(TRY(namespace_::class_name::try_create())); }, &registration_Widget); \
+    }                                                                                                                                                                                               \
     }
 
 namespace GUI {
@@ -83,19 +84,18 @@ public:
     void set_layout(NonnullRefPtr<Layout>);
 
     template<class T, class... Args>
-    ErrorOr<NonnullRefPtr<T>> try_set_layout(Args&&... args)
+    ErrorOr<void> try_set_layout(Args&&... args)
     {
         auto layout = TRY(T::try_create(forward<Args>(args)...));
         set_layout(*layout);
-        return layout;
+        return {};
     }
 
     template<class T, class... Args>
-    inline T& set_layout(Args&&... args)
+    inline void set_layout(Args&&... args)
     {
         auto layout = T::construct(forward<Args>(args)...);
         set_layout(*layout);
-        return layout;
     }
 
     UISize min_size() const { return m_min_size; }
@@ -333,10 +333,10 @@ public:
     void do_layout();
 
     Gfx::Palette palette() const;
-    void set_palette(Gfx::Palette const&);
+    void set_palette(Gfx::Palette&);
 
-    DeprecatedString title() const;
-    void set_title(DeprecatedString);
+    String title() const;
+    void set_title(String);
 
     Margins const& grabbable_margins() const { return m_grabbable_margins; }
     void set_grabbable_margins(Margins const&);
@@ -350,11 +350,12 @@ public:
 
     virtual Gfx::IntRect children_clip_rect() const;
 
-    AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> const& override_cursor() const { return m_override_cursor; }
-    void set_override_cursor(AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>>);
+    AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap const>> const& override_cursor() const { return m_override_cursor; }
+    void set_override_cursor(AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap const>>);
 
-    bool load_from_gml(StringView);
-    bool load_from_gml(StringView, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&));
+    using UnregisteredChildHandler = ErrorOr<NonnullRefPtr<Core::Object>>(DeprecatedString const&);
+    ErrorOr<void> load_from_gml(StringView);
+    ErrorOr<void> load_from_gml(StringView, UnregisteredChildHandler);
 
     // FIXME: remove this when all uses of shrink_to_fit are eliminated
     void set_shrink_to_fit(bool);
@@ -363,7 +364,9 @@ public:
     bool has_pending_drop() const;
 
     // In order for others to be able to call this, it needs to be public.
-    virtual bool load_from_gml_ast(NonnullRefPtr<GUI::GML::Node> ast, RefPtr<Core::Object> (*unregistered_child_handler)(DeprecatedString const&));
+    virtual ErrorOr<void> load_from_gml_ast(NonnullRefPtr<GUI::GML::Node const> ast, UnregisteredChildHandler);
+
+    ErrorOr<void> add_spacer();
 
 protected:
     Widget();
@@ -437,7 +440,7 @@ private:
     Gfx::IntRect m_relative_rect;
     Gfx::ColorRole m_background_role;
     Gfx::ColorRole m_foreground_role;
-    NonnullRefPtr<Gfx::Font> m_font;
+    NonnullRefPtr<Gfx::Font const> m_font;
     DeprecatedString m_tooltip;
 
     UISize m_min_size { SpecialDimension::Shrink };
@@ -456,13 +459,13 @@ private:
     bool m_default_font { true };
 
     NonnullRefPtr<Gfx::PaletteImpl> m_palette;
-    DeprecatedString m_title { DeprecatedString::empty() };
+    String m_title;
 
     WeakPtr<Widget> m_focus_proxy;
     Vector<WeakPtr<Widget>> m_focus_delegators;
     FocusPolicy m_focus_policy { FocusPolicy::NoFocus };
 
-    AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_override_cursor { Gfx::StandardCursor::None };
+    AK::Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap const>> m_override_cursor { Gfx::StandardCursor::None };
 };
 
 inline Widget* Widget::parent_widget()

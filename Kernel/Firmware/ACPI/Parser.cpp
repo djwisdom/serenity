@@ -11,8 +11,8 @@
 #include <AK/StringView.h>
 #include <AK/Try.h>
 #include <Kernel/InterruptDisabler.h>
-#if ARCH(I386) || ARCH(X86_64)
-#    include <Kernel/Arch/x86/IO.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/IO.h>
 #endif
 #include <Kernel/Bus/PCI/API.h>
 #include <Kernel/Debug.h>
@@ -234,7 +234,7 @@ void Parser::access_generic_address(Structures::GenericAddressStructure const& s
 {
     switch ((GenericAddressStructure::AddressSpace)structure.address_space) {
     case GenericAddressStructure::AddressSpace::SystemIO: {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
         IOAddress address(structure.address);
         dbgln("ACPI: Sending value {:x} to {}", value, address);
         switch (structure.access_size) {
@@ -290,7 +290,8 @@ void Parser::access_generic_address(Structures::GenericAddressStructure const& s
             VERIFY_NOT_REACHED();
         }
         VERIFY(structure.access_size != (u8)GenericAddressStructure::AccessSize::Undefined);
-        PCI::raw_access(pci_address, offset_in_pci_address, (1 << (structure.access_size - 1)), value);
+        auto& pci_device_identifier = PCI::get_device_identifier(pci_address);
+        PCI::raw_access(pci_device_identifier, offset_in_pci_address, (1 << (structure.access_size - 1)), value);
         return;
     }
     default:

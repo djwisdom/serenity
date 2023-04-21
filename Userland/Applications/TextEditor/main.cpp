@@ -24,14 +24,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Config::pledge_domain("TextEditor");
 
+    app->set_config_domain(TRY("TextEditor"_string));
+
     auto preview_mode = "auto"sv;
-    char const* file_to_edit = nullptr;
+    StringView file_to_edit;
     Core::ArgsParser parser;
     parser.add_option(preview_mode, "Preview mode, one of 'none', 'html', 'markdown', 'auto'", "preview-mode", '\0', "mode");
     parser.add_positional_argument(file_to_edit, "File to edit, with optional starting line and column number", "file[:line[:column]]", Core::ArgsParser::Required::No);
     parser.parse(arguments);
 
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/launch", "rw"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/webcontent", "rw"));
@@ -43,7 +44,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto window = TRY(GUI::Window::try_create());
     window->resize(640, 400);
 
-    auto text_widget = TRY(window->try_set_main_widget<MainWidget>());
+    auto text_widget = TRY(window->set_main_widget<MainWidget>());
 
     text_widget->editor().set_focus(true);
 
@@ -66,24 +67,24 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    text_widget->initialize_menubar(*window);
+    TRY(text_widget->initialize_menubar(*window));
     text_widget->update_title();
 
     window->show();
     window->set_icon(app_icon.bitmap_for_size(16));
 
-    if (file_to_edit) {
-        FileArgument parsed_argument(file_to_edit);
-        auto response = FileSystemAccessClient::Client::the().try_request_file_read_only_approved(window, parsed_argument.filename());
+    if (!file_to_edit.is_empty()) {
+        auto filename = TRY(String::from_utf8(file_to_edit));
+        FileArgument parsed_argument(filename);
+        auto response = FileSystemAccessClient::Client::the().request_file_read_only_approved(window, parsed_argument.filename().to_deprecated_string());
 
         if (response.is_error()) {
             if (response.error().code() == ENOENT)
-                text_widget->open_nonexistent_file(parsed_argument.filename());
+                text_widget->open_nonexistent_file(parsed_argument.filename().to_deprecated_string());
             else
                 return 1;
         } else {
-            if (!text_widget->read_file(*response.value()))
-                return 1;
+            TRY(text_widget->read_file(response.value().filename(), response.value().stream()));
             text_widget->editor().set_cursor_and_focus_line(parsed_argument.line().value_or(1) - 1, parsed_argument.column().value_or(0));
         }
 

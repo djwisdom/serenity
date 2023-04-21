@@ -20,17 +20,19 @@ class TextEncoder final : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(TextEncoder, Bindings::PlatformObject);
 
 public:
-    static JS::NonnullGCPtr<TextEncoder> construct_impl(JS::Realm&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<TextEncoder>> construct_impl(JS::Realm&);
 
     virtual ~TextEncoder() override;
 
     JS::Uint8Array* encode(DeprecatedString const& input) const;
 
-    static FlyString const& encoding();
+    static DeprecatedFlyString const& encoding();
 
 protected:
     // https://encoding.spec.whatwg.org/#dom-textencoder
     explicit TextEncoder(JS::Realm&);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 };
 
 }

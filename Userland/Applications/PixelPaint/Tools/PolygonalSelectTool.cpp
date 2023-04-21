@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, the SerenityOS developers.
+ * Copyright (c) 2022-2023, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -57,7 +57,7 @@ void PolygonalSelectTool::process_polygon()
 
     // We create a bitmap that is bigger by 1 pixel on each side (+2) and need to account for the 0 indexed
     // pixel positions (+1) so we make the bitmap size the delta of x/y min/max + 3.
-    auto polygon_bitmap_or_error = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, { (max_x_seen - min_x_seen) + 3, (max_y_seen - min_y_seen) + 3 });
+    auto polygon_bitmap_or_error = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { (max_x_seen - min_x_seen) + 3, (max_y_seen - min_y_seen) + 3 });
     if (polygon_bitmap_or_error.is_error())
         return;
 
@@ -92,6 +92,8 @@ void PolygonalSelectTool::on_mousedown(Layer*, MouseEvent& event)
     m_selecting = true;
 
     auto new_point = event.layer_event().position();
+    if (!m_polygon_points.is_empty() && event.layer_event().shift())
+        new_point = Tool::constrain_line_angle(m_polygon_points.last(), new_point);
 
     // This point matches the first point exactly. Consider this polygon finished.
     if (m_polygon_points.size() > 0 && new_point == m_polygon_points.at(0)) {
@@ -115,8 +117,14 @@ void PolygonalSelectTool::on_mousedown(Layer*, MouseEvent& event)
 
 void PolygonalSelectTool::on_mousemove(Layer*, MouseEvent& event)
 {
-    if (m_selecting)
+    if (!m_selecting)
+        return;
+
+    if (event.layer_event().shift())
+        m_last_selecting_cursor_position = Tool::constrain_line_angle(m_polygon_points.last(), event.layer_event().position());
+    else
         m_last_selecting_cursor_position = event.layer_event().position();
+
     m_editor->update();
 }
 
@@ -139,15 +147,20 @@ void PolygonalSelectTool::on_second_paint(Layer const* layer, GUI::PaintEvent& e
 
     painter.translate(editor_layer_location(*layer));
 
-    for (size_t i = 0; i < m_polygon_points.size() - 1; i++) {
-        auto preview_start = editor_stroke_position(m_polygon_points.at(i), 1);
-        auto preview_end = editor_stroke_position(m_polygon_points.at(i + 1), 1);
-        painter.draw_line(preview_start, preview_end, Color::Black, 1);
-    }
+    auto draw_preview_lines = [&](auto color, auto thickness) {
+        for (size_t i = 0; i < m_polygon_points.size() - 1; i++) {
+            auto preview_start = editor_stroke_position(m_polygon_points.at(i), 1);
+            auto preview_end = editor_stroke_position(m_polygon_points.at(i + 1), 1);
+            painter.draw_line(preview_start, preview_end, color, thickness);
+        }
 
-    auto last_line_start = editor_stroke_position(m_polygon_points.at(m_polygon_points.size() - 1), 1);
-    auto last_line_stop = editor_stroke_position(m_last_selecting_cursor_position, 1);
-    painter.draw_line(last_line_start, last_line_stop, Color::Black, 1);
+        auto last_line_start = editor_stroke_position(m_polygon_points.at(m_polygon_points.size() - 1), 1);
+        auto last_line_stop = editor_stroke_position(m_last_selecting_cursor_position, 1);
+        painter.draw_line(last_line_start, last_line_stop, color, thickness);
+    };
+
+    draw_preview_lines(Gfx::Color::Black, 3);
+    draw_preview_lines(Gfx::Color::White, 1);
 }
 
 bool PolygonalSelectTool::on_keydown(GUI::KeyEvent& key_event)
@@ -164,22 +177,22 @@ bool PolygonalSelectTool::on_keydown(GUI::KeyEvent& key_event)
     return Tool::on_keydown(key_event);
 }
 
-GUI::Widget* PolygonalSelectTool::get_properties_widget()
+ErrorOr<GUI::Widget*> PolygonalSelectTool::get_properties_widget()
 {
     if (m_properties_widget)
         return m_properties_widget.ptr();
 
-    m_properties_widget = GUI::Widget::construct();
-    m_properties_widget->set_layout<GUI::VerticalBoxLayout>();
+    auto properties_widget = TRY(GUI::Widget::try_create());
+    (void)TRY(properties_widget->try_set_layout<GUI::VerticalBoxLayout>());
 
-    auto& mode_container = m_properties_widget->add<GUI::Widget>();
-    mode_container.set_fixed_height(20);
-    mode_container.set_layout<GUI::HorizontalBoxLayout>();
+    auto mode_container = TRY(properties_widget->try_add<GUI::Widget>());
+    mode_container->set_fixed_height(20);
+    (void)TRY(mode_container->try_set_layout<GUI::HorizontalBoxLayout>());
 
-    auto& mode_label = mode_container.add<GUI::Label>();
-    mode_label.set_text("Mode:");
-    mode_label.set_text_alignment(Gfx::TextAlignment::CenterLeft);
-    mode_label.set_fixed_size(80, 20);
+    auto mode_label = TRY(mode_container->try_add<GUI::Label>());
+    mode_label->set_text("Mode:");
+    mode_label->set_text_alignment(Gfx::TextAlignment::CenterLeft);
+    mode_label->set_fixed_size(80, 20);
 
     static constexpr auto s_merge_mode_names = [] {
         Array<StringView, (int)Selection::MergeMode::__Count> names;
@@ -204,17 +217,18 @@ GUI::Widget* PolygonalSelectTool::get_properties_widget()
         return names;
     }();
 
-    auto& mode_combo = mode_container.add<GUI::ComboBox>();
-    mode_combo.set_only_allow_values_from_model(true);
-    mode_combo.set_model(*GUI::ItemListModel<StringView, decltype(s_merge_mode_names)>::create(s_merge_mode_names));
-    mode_combo.set_selected_index((int)m_merge_mode);
-    mode_combo.on_change = [this](auto&&, GUI::ModelIndex const& index) {
+    auto mode_combo = TRY(mode_container->try_add<GUI::ComboBox>());
+    mode_combo->set_only_allow_values_from_model(true);
+    mode_combo->set_model(*GUI::ItemListModel<StringView, decltype(s_merge_mode_names)>::create(s_merge_mode_names));
+    mode_combo->set_selected_index((int)m_merge_mode);
+    mode_combo->on_change = [this](auto&&, GUI::ModelIndex const& index) {
         VERIFY(index.row() >= 0);
         VERIFY(index.row() < (int)Selection::MergeMode::__Count);
 
         m_merge_mode = (Selection::MergeMode)index.row();
     };
 
+    m_properties_widget = properties_widget;
     return m_properties_widget.ptr();
 }
 

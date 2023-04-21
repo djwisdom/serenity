@@ -13,7 +13,7 @@ namespace Kernel {
 
 using BlockFlags = Thread::FileBlocker::BlockFlags;
 
-static ErrorOr<NonnullLockRefPtr<OpenFileDescription>> open_readable_file_description(auto& fds, int fd)
+static ErrorOr<NonnullRefPtr<OpenFileDescription>> open_readable_file_description(auto& fds, int fd)
 {
     auto description = TRY(fds.with_shared([&](auto& fds) { return fds.open_file_description(fd); }));
     if (!description->is_readable())
@@ -74,7 +74,7 @@ ErrorOr<FlatPtr> Process::sys$readv(int fd, Userspace<const struct iovec*> iov, 
 ErrorOr<FlatPtr> Process::sys$read(int fd, Userspace<u8*> buffer, size_t size)
 {
     auto const start_timestamp = TimeManagement::the().uptime_ms();
-    auto const result = read_impl(fd, buffer, size);
+    auto result = read_impl(fd, buffer, size);
 
     if (Thread::current()->is_profiling_suppressed())
         return result;

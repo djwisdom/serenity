@@ -17,13 +17,13 @@ DeprecatedString HorizontalRule::render_to_html(bool) const
     return "<hr />\n";
 }
 
-DeprecatedString HorizontalRule::render_for_terminal(size_t view_width) const
+Vector<DeprecatedString> HorizontalRule::render_lines_for_terminal(size_t view_width) const
 {
     StringBuilder builder(view_width + 1);
     for (size_t i = 0; i < view_width; ++i)
         builder.append('-');
     builder.append("\n\n"sv);
-    return builder.to_deprecated_string();
+    return Vector<DeprecatedString> { builder.to_deprecated_string() };
 }
 
 RecursionDecision HorizontalRule::walk(Visitor& visitor) const
@@ -35,7 +35,7 @@ RecursionDecision HorizontalRule::walk(Visitor& visitor) const
     return RecursionDecision::Continue;
 }
 
-static Regex<ECMA262> thematic_break_re("^ {0,3}([\\*\\-_])(\\s*\\1\\s*){2,}$");
+static Regex<ECMA262> thematic_break_re("^ {0,3}([\\*\\-_])\\s*(\\1\\s*){2,}$");
 
 OwnPtr<HorizontalRule> HorizontalRule::parse(LineIterator& lines)
 {

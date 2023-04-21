@@ -15,19 +15,26 @@
 namespace Web::HTML {
 
 HTMLIFrameElement::HTMLIFrameElement(DOM::Document& document, DOM::QualifiedName qualified_name)
-    : BrowsingContextContainer(document, move(qualified_name))
+    : NavigableContainer(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLIFrameElement"));
 }
 
 HTMLIFrameElement::~HTMLIFrameElement() = default;
+
+JS::ThrowCompletionOr<void> HTMLIFrameElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLIFrameElementPrototype>(realm, "HTMLIFrameElement"));
+
+    return {};
+}
 
 JS::GCPtr<Layout::Node> HTMLIFrameElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
 {
     return heap().allocate_without_realm<Layout::FrameBox>(document(), *this, move(style));
 }
 
-void HTMLIFrameElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
+void HTMLIFrameElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     HTMLElement::parse_attribute(name, value);
     if (name == HTML::AttributeNames::src)
@@ -158,7 +165,7 @@ void run_iframe_load_event_steps(HTML::HTMLIFrameElement& element)
     // FIXME: 4. Set childDocument's iframe load in progress flag.
 
     // 5. Fire an event named load at element.
-    element.dispatch_event(*DOM::Event::create(element.realm(), HTML::EventNames::load));
+    element.dispatch_event(DOM::Event::create(element.realm(), HTML::EventNames::load).release_value_but_fixme_should_propagate_errors());
 
     // FIXME: 6. Unset childDocument's iframe load in progress flag.
 }

@@ -9,12 +9,14 @@
 
 #define AK_DONT_REPLACE_STD
 
+#include "LocationEdit.h"
 #include "WebContentView.h"
 #include <Browser/History.h>
 #include <QBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QToolBar>
+#include <QToolButton>
 #include <QWidget>
 
 class BrowserWindow;
@@ -22,13 +24,19 @@ class BrowserWindow;
 class Tab final : public QWidget {
     Q_OBJECT
 public:
-    Tab(BrowserWindow* window, StringView webdriver_content_ipc_path);
+    Tab(BrowserWindow* window, StringView webdriver_content_ipc_path, WebView::EnableCallgrindProfiling);
 
     WebContentView& view() { return *m_view; }
 
-    void navigate(QString);
+    enum class LoadType {
+        Normal,
+        HistoryNavigation,
+    };
+    void navigate(QString, LoadType = LoadType::Normal);
 
     void debug_request(DeprecatedString const& request, DeprecatedString const& argument);
+
+    void update_reset_zoom_button();
 
 public slots:
     void focus_location_editor();
@@ -51,7 +59,9 @@ private:
 
     QBoxLayout* m_layout;
     QToolBar* m_toolbar { nullptr };
-    QLineEdit* m_location_edit { nullptr };
+    QToolButton* m_reset_zoom_button { nullptr };
+    QAction* m_reset_zoom_button_action { nullptr };
+    LocationEdit* m_location_edit { nullptr };
     WebContentView* m_view { nullptr };
     BrowserWindow* m_window { nullptr };
     Browser::History m_history;

@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibJS/Heap/GCPtr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Fetch/Headers.h>
 
@@ -15,18 +16,19 @@ class HeadersIterator final : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(HeadersIterator, Bindings::PlatformObject);
 
 public:
-    static JS::NonnullGCPtr<HeadersIterator> create(Headers const&, JS::Object::PropertyKind iteration_kind);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<HeadersIterator>> create(Headers const&, JS::Object::PropertyKind iteration_kind);
 
     virtual ~HeadersIterator() override;
 
     JS::ThrowCompletionOr<JS::Object*> next();
 
 private:
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
     HeadersIterator(Headers const&, JS::Object::PropertyKind iteration_kind);
 
-    Headers const& m_headers;
+    JS::NonnullGCPtr<Headers const> m_headers;
     JS::Object::PropertyKind m_iteration_kind;
     size_t m_index { 0 };
 };

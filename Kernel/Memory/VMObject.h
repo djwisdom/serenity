@@ -35,7 +35,7 @@ public:
 
     size_t page_count() const { return m_physical_pages.size(); }
 
-    virtual Span<RefPtr<PhysicalPage> const> physical_pages() const { return m_physical_pages.span(); }
+    virtual ReadonlySpan<RefPtr<PhysicalPage>> physical_pages() const { return m_physical_pages.span(); }
     virtual Span<RefPtr<PhysicalPage>> physical_pages() { return m_physical_pages.span(); }
 
     size_t size() const { return m_physical_pages.size() * PAGE_SIZE; }
@@ -65,7 +65,7 @@ protected:
     IntrusiveListNode<VMObject> m_list_node;
     FixedArray<RefPtr<PhysicalPage>> m_physical_pages;
 
-    mutable RecursiveSpinlock m_lock { LockRank::None };
+    mutable RecursiveSpinlock<LockRank::None> m_lock {};
 
 private:
     VMObject& operator=(VMObject const&) = delete;
@@ -76,7 +76,7 @@ private:
 
 public:
     using AllInstancesList = IntrusiveList<&VMObject::m_list_node>;
-    static SpinlockProtected<VMObject::AllInstancesList>& all_instances();
+    static SpinlockProtected<VMObject::AllInstancesList, LockRank::None>& all_instances();
 };
 
 template<typename Callback>

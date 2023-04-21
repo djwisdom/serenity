@@ -6,9 +6,9 @@
  */
 
 #include <AK/Platform.h>
-#if ARCH(I386) || ARCH(X86_64)
-#    include <Kernel/Arch/x86/common/I8042Reboot.h>
-#    include <Kernel/Arch/x86/common/Shutdown.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/I8042Reboot.h>
+#    include <Kernel/Arch/x86_64/Shutdown.h>
 #endif
 #include <Kernel/FileSystem/FileSystem.h>
 #include <Kernel/FileSystem/SysFS/Subsystems/Kernel/PowerStateSwitch.h>
@@ -16,7 +16,6 @@
 #include <Kernel/Process.h>
 #include <Kernel/Sections.h>
 #include <Kernel/TTY/ConsoleManagement.h>
-#include <Kernel/WorkQueue.h>
 
 namespace Kernel {
 
@@ -25,9 +24,9 @@ mode_t SysFSPowerStateSwitchNode::permissions() const
     return S_IRUSR | S_IRGRP | S_IWUSR | S_IWGRP;
 }
 
-UNMAP_AFTER_INIT NonnullLockRefPtr<SysFSPowerStateSwitchNode> SysFSPowerStateSwitchNode::must_create(SysFSDirectory const& parent_directory)
+UNMAP_AFTER_INIT NonnullRefPtr<SysFSPowerStateSwitchNode> SysFSPowerStateSwitchNode::must_create(SysFSDirectory const& parent_directory)
 {
-    return adopt_lock_ref_if_nonnull(new (nothrow) SysFSPowerStateSwitchNode(parent_directory)).release_nonnull();
+    return adopt_ref_if_nonnull(new (nothrow) SysFSPowerStateSwitchNode(parent_directory)).release_nonnull();
 }
 
 UNMAP_AFTER_INIT SysFSPowerStateSwitchNode::SysFSPowerStateSwitchNode(SysFSDirectory const& parent_directory)
@@ -46,12 +45,9 @@ ErrorOr<void> SysFSPowerStateSwitchNode::truncate(u64 size)
 
 ErrorOr<size_t> SysFSPowerStateSwitchNode::write_bytes(off_t offset, size_t count, UserOrKernelBuffer const& data, OpenFileDescription*)
 {
-    TRY(Process::current().jail().with([&](auto const& my_jail) -> ErrorOr<void> {
-        // Note: If we are in a jail, don't let the current process to change the power state.
-        if (my_jail)
-            return Error::from_errno(EPERM);
-        return {};
-    }));
+    // Note: If we are in a jail, don't let the current process to change the power state.
+    if (Process::current().is_currently_in_jail())
+        return Error::from_errno(EPERM);
     if (Checked<off_t>::addition_would_overflow(offset, count))
         return Error::from_errno(EOVERFLOW);
     if (offset > 0)
@@ -60,11 +56,7 @@ ErrorOr<size_t> SysFSPowerStateSwitchNode::write_bytes(off_t offset, size_t coun
         return Error::from_errno(EINVAL);
     char buf[1];
     TRY(data.read(buf, 1));
-    if (buf[0] == '0')
-        return Error::from_errno(EINVAL);
     switch (buf[0]) {
-    case '0':
-        VERIFY_NOT_REACHED();
     case '1':
         reboot();
         VERIFY_NOT_REACHED();
@@ -72,7 +64,7 @@ ErrorOr<size_t> SysFSPowerStateSwitchNode::write_bytes(off_t offset, size_t coun
         poweroff();
         VERIFY_NOT_REACHED();
     default:
-        VERIFY_NOT_REACHED();
+        return Error::from_errno(EINVAL);
     }
 }
 
@@ -87,7 +79,7 @@ void SysFSPowerStateSwitchNode::reboot()
     dbgln("attempting reboot via ACPI");
     if (ACPI::is_enabled())
         ACPI::Parser::the()->try_acpi_reboot();
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     i8042_reboot();
 #endif
     dbgln("reboot attempts failed, applications will stop responding.");
@@ -106,7 +98,7 @@ void SysFSPowerStateSwitchNode::poweroff()
     dbgln("syncing mounted filesystems...");
     FileSystem::sync();
     dbgln("attempting system shutdown...");
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     qemu_shutdown();
     virtualbox_shutdown();
 #endif

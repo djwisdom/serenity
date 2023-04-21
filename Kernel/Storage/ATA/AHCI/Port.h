@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/OwnPtr.h>
 #include <AK/RefPtr.h>
 #include <Kernel/Devices/Device.h>
@@ -61,8 +60,6 @@ private:
 
     ALWAYS_INLINE void clear_sata_error_register() const;
 
-    void eject();
-
     char const* try_disambiguate_sata_status();
     void try_disambiguate_sata_error();
 
@@ -107,13 +104,13 @@ private:
 
     EntropySource m_entropy_source;
     LockRefPtr<AsyncBlockDeviceRequest> m_current_request;
-    Spinlock m_hard_lock { LockRank::None };
+    Spinlock<LockRank::None> m_hard_lock {};
     Mutex m_lock { "AHCIPort"sv };
 
     mutable bool m_wait_for_completion { false };
 
-    NonnullRefPtrVector<Memory::PhysicalPage> m_dma_buffers;
-    NonnullRefPtrVector<Memory::PhysicalPage> m_command_table_pages;
+    Vector<NonnullRefPtr<Memory::PhysicalPage>> m_dma_buffers;
+    Vector<NonnullRefPtr<Memory::PhysicalPage>> m_command_table_pages;
     RefPtr<Memory::PhysicalPage> m_command_list_page;
     OwnPtr<Memory::Region> m_command_list_region;
     RefPtr<Memory::PhysicalPage> m_fis_receive_page;
@@ -126,7 +123,7 @@ private:
     // it's probably better to just "cache" this here instead.
     AHCI::HBADefinedCapabilities const m_hba_capabilities;
 
-    NonnullRefPtr<Memory::PhysicalPage> m_identify_buffer_page;
+    NonnullRefPtr<Memory::PhysicalPage> const m_identify_buffer_page;
 
     volatile AHCI::PortRegisters& m_port_registers;
     LockWeakPtr<AHCIController> m_parent_controller;

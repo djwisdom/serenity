@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,6 +9,9 @@
 
 #include "FontPluginQt.h"
 #include <AK/DeprecatedString.h>
+#include <AK/String.h>
+#include <LibCore/StandardPaths.h>
+#include <LibGfx/Font/Emoji.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <QFont>
 #include <QFontInfo>
@@ -21,20 +25,23 @@ FontPluginQt::FontPluginQt()
     // Load the default SerenityOS fonts...
     Gfx::FontDatabase::set_default_fonts_lookup_path(DeprecatedString::formatted("{}/res/fonts", s_serenity_resource_root));
 
-    // ...and also anything we can find in /usr/share/fonts
-    Gfx::FontDatabase::the().load_all_fonts_from_path("/usr/share/fonts");
+    // ...and also anything we can find in the system's font directories
+    for (auto const& path : Core::StandardPaths::font_directories().release_value_but_fixme_should_propagate_errors())
+        Gfx::FontDatabase::the().load_all_fonts_from_path(path.to_deprecated_string());
 
     Gfx::FontDatabase::set_default_font_query("Katica 10 400 0");
     Gfx::FontDatabase::set_fixed_width_font_query("Csilla 10 400 0");
 
+    Gfx::Emoji::set_emoji_lookup_path(String::formatted("{}/res/emoji", s_serenity_resource_root).release_value_but_fixme_should_propagate_errors());
+
     update_generic_fonts();
 
     auto default_font_name = generic_font_name(Web::Platform::GenericFont::UiSansSerif);
-    m_default_font = Gfx::FontDatabase::the().get(default_font_name, 12.0, 400, 0);
+    m_default_font = Gfx::FontDatabase::the().get(default_font_name, 12.0, 400, Gfx::FontWidth::Normal, 0);
     VERIFY(m_default_font);
 
     auto default_fixed_width_font_name = generic_font_name(Web::Platform::GenericFont::UiMonospace);
-    m_default_fixed_width_font = Gfx::FontDatabase::the().get(default_fixed_width_font_name, 12.0, 400, 0);
+    m_default_fixed_width_font = Gfx::FontDatabase::the().get(default_fixed_width_font_name, 12.0, 400, Gfx::FontWidth::Normal, 0);
     VERIFY(m_default_fixed_width_font);
 }
 
@@ -69,10 +76,10 @@ void FontPluginQt::update_generic_fonts()
         QFontInfo qt_info(qt_font);
         auto qt_font_family = qt_info.family();
 
-        auto gfx_font = Gfx::FontDatabase::the().get(qt_font_family.toUtf8().data(), 16, 400, 0, Gfx::Font::AllowInexactSizeMatch::Yes);
+        auto gfx_font = Gfx::FontDatabase::the().get(qt_font_family.toUtf8().data(), 16, 400, Gfx::FontWidth::Normal, 0, Gfx::Font::AllowInexactSizeMatch::Yes);
         if (!gfx_font) {
             for (auto& fallback : fallbacks) {
-                gfx_font = Gfx::FontDatabase::the().get(fallback, 16, 400, 0, Gfx::Font::AllowInexactSizeMatch::Yes);
+                gfx_font = Gfx::FontDatabase::the().get(fallback, 16, 400, Gfx::FontWidth::Normal, 0, Gfx::Font::AllowInexactSizeMatch::Yes);
                 if (gfx_font)
                     break;
             }

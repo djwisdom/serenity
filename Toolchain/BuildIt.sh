@@ -49,6 +49,9 @@ elif [ "$SYSTEM_NAME" = "FreeBSD" ]; then
     NPROC="sysctl -n hw.ncpu"
     export with_gmp=/usr/local
     export with_mpfr=/usr/local
+elif [ "$SYSTEM_NAME" = "Darwin" ]; then
+    MD5SUM="md5 -q"
+    NPROC="sysctl -n hw.ncpu"
 fi
 
 # On at least OpenBSD, the path must exist to call realpath(3) on it
@@ -71,17 +74,11 @@ echo SYSROOT is "$SYSROOT"
 
 mkdir -p "$DIR/Tarballs"
 
-BINUTILS_VERSION="2.39"
-BINUTILS_MD5SUM="ab6825df57514ec172331e988f55fc10"
+BINUTILS_VERSION="2.40"
+BINUTILS_MD5SUM="b200db2cdd2f49019ced4016e1f9bfe7"
 BINUTILS_NAME="binutils-$BINUTILS_VERSION"
 BINUTILS_PKG="${BINUTILS_NAME}.tar.gz"
 BINUTILS_BASE_URL="https://ftp.gnu.org/gnu/binutils"
-
-GDB_VERSION="12.1"
-GDB_MD5SUM="0c7339e33fa347ce4d7df222d8ce86af"
-GDB_NAME="gdb-$GDB_VERSION"
-GDB_PKG="${GDB_NAME}.tar.gz"
-GDB_BASE_URL="https://ftp.gnu.org/gnu/gdb"
 
 # Note: If you bump the gcc version, you also have to update the matching
 #       GCC_VERSION variable in the project's root CMakeLists.txt
@@ -179,21 +176,6 @@ popd
 # === DOWNLOAD AND PATCH ===
 
 pushd "$DIR/Tarballs"
-    # Build aarch64-gdb for cross-debugging support on x86 systems
-    if [ "$ARCH" = "aarch64" ]; then
-        md5=""
-        if [ -e "$GDB_PKG" ]; then
-            md5="$($MD5SUM $GDB_PKG | cut -f1 -d' ')"
-            echo "gdb md5='$md5'"
-        fi
-        if [ "$md5" != ${GDB_MD5SUM} ] ; then
-            rm -f $GDB_PKG
-            curl -LO "$GDB_BASE_URL/$GDB_PKG"
-        else
-            echo "Skipped downloading gdb"
-        fi
-    fi
-
     md5=""
     if [ -e "$BINUTILS_PKG" ]; then
         md5="$($MD5SUM $BINUTILS_PKG | cut -f1 -d' ')"
@@ -216,27 +198,6 @@ pushd "$DIR/Tarballs"
         curl -LO "$GCC_BASE_URL/$GCC_NAME/$GCC_PKG"
     else
         echo "Skipped downloading gcc"
-    fi
-
-    if [ "$ARCH" = "aarch64" ]; then
-        if [ -d ${GDB_NAME} ]; then
-            rm -rf "${GDB_NAME}"
-            rm -rf "$DIR/Build/$ARCH/$GDB_NAME"
-        fi
-        echo "Extracting GDB..."
-        tar -xzf ${GDB_PKG}
-
-        pushd ${GDB_NAME}
-            if [ "$git_patch" = "1" ]; then
-                git init > /dev/null
-                git add . > /dev/null
-                git commit -am "BASE" > /dev/null
-                git apply "$DIR"/Patches/gdb.patch > /dev/null
-            else
-                patch -p1 < "$DIR"/Patches/gdb.patch > /dev/null
-            fi
-            $MD5SUM "$DIR"/Patches/gdb.patch > .patch.applied
-        popd
     fi
 
     patch_md5="$(${MD5SUM} "${DIR}"/Patches/binutils/*.patch)"
@@ -314,42 +275,6 @@ mkdir -p "$DIR/Build/$ARCH"
 pushd "$DIR/Build/$ARCH"
     unset PKG_CONFIG_LIBDIR # Just in case
 
-    if [ "$ARCH" = "aarch64" ]; then
-        rm -rf gdb
-        mkdir -p gdb
-
-        pushd gdb
-            echo "XXX configure gdb"
-
-
-            if [ "$SYSTEM_NAME" = "Darwin" ]; then
-                buildstep "gdb/configure" "$DIR"/Tarballs/$GDB_NAME/configure --prefix="$PREFIX" \
-                                                        --target="$TARGET" \
-                                                        --with-sysroot="$SYSROOT" \
-                                                        --enable-shared \
-                                                        --disable-werror \
-                                                        --with-libgmp-prefix="$(brew --prefix gmp)" \
-                                                        --with-gmp="$(brew --prefix gmp)" \
-                                                        --with-isl="$(brew --prefix isl)" \
-                                                        --with-mpc="$(brew --prefix libmpc)" \
-                                                        --with-mpfr="$(brew --prefix mpfr)" \
-                                                        --disable-nls \
-                                                        ${TRY_USE_LOCAL_TOOLCHAIN:+"--quiet"} || exit 1
-            else
-                buildstep "gdb/configure" "$DIR"/Tarballs/$GDB_NAME/configure --prefix="$PREFIX" \
-                                                        --target="$TARGET" \
-                                                        --with-sysroot="$SYSROOT" \
-                                                        --enable-shared \
-                                                        --disable-nls \
-                                                        ${TRY_USE_LOCAL_TOOLCHAIN:+"--quiet"} || exit 1
-            fi
-
-            echo "XXX build gdb"
-            buildstep "gdb/build" "$MAKE" MAKEINFO=true -j "$MAKEJOBS" || exit 1
-            buildstep "gdb/install" "$MAKE" MAKEINFO=true install || exit 1
-        popd
-    fi
-
     rm -rf binutils
     mkdir -p binutils
 
@@ -393,10 +318,11 @@ pushd "$DIR/Build/$ARCH"
             -name '*.h' -print)
         for header in $FILES; do
             target=$(echo "$header" | sed \
-                -e "s@$SRC_ROOT/AK/@AK/@" \
-                -e "s@$SRC_ROOT/Userland/Libraries/LibC@@" \
-                -e "s@$SRC_ROOT/Kernel/@Kernel/@")
-            buildstep "system_headers" $INSTALL -D "$header" "Root/usr/include/$target"
+                -e "s|$SRC_ROOT/AK/|AK/|" \
+                -e "s|$SRC_ROOT/Userland/Libraries/LibC||" \
+                -e "s|$SRC_ROOT/Kernel/|Kernel/|")
+            buildstep "system_headers" mkdir -p "$(dirname "Root/usr/include/$target")"
+            buildstep "system_headers" $INSTALL "$header" "Root/usr/include/$target"
         done
         unset SRC_ROOT
     popd

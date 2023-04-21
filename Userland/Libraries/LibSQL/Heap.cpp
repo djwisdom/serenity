@@ -47,13 +47,13 @@ ErrorOr<void> Heap::open()
     if (file_size > 0)
         m_next_block = m_end_of_file = file_size / BLOCKSIZE;
 
-    auto file = TRY(Core::Stream::File::open(name(), Core::Stream::OpenMode::ReadWrite));
-    m_file = TRY(Core::Stream::BufferedFile::create(move(file)));
+    auto file = TRY(Core::File::open(name(), Core::File::OpenMode::ReadWrite));
+    m_file = TRY(Core::BufferedFile::create(move(file)));
 
     if (file_size > 0) {
         if (auto error_maybe = read_zero_block(); error_maybe.is_error()) {
             m_file = nullptr;
-            return error_maybe.error();
+            return error_maybe.release_error();
         }
     } else {
         initialize_zero_block();
@@ -91,10 +91,9 @@ ErrorOr<ByteBuffer> Heap::read_block(u32 block)
     TRY(seek_block(block));
 
     auto buffer = TRY(ByteBuffer::create_uninitialized(BLOCKSIZE));
-    auto bytes = TRY(m_file->read(buffer));
+    TRY(m_file->read_until_filled(buffer));
 
-    dbgln_if(SQL_DEBUG, "{:hex-dump}", bytes.trim(8));
-    TRY(buffer.try_resize(bytes.size()));
+    dbgln_if(SQL_DEBUG, "{:hex-dump}", buffer.bytes().trim(8));
 
     return buffer;
 }
@@ -123,7 +122,7 @@ ErrorOr<void> Heap::write_block(u32 block, ByteBuffer& buffer)
     }
 
     dbgln_if(SQL_DEBUG, "{:hex-dump}", buffer.bytes().trim(8));
-    TRY(m_file->write(buffer));
+    TRY(m_file->write_until_depleted(buffer));
 
     if (block == m_end_of_file)
         m_end_of_file++;
@@ -142,9 +141,9 @@ ErrorOr<void> Heap::seek_block(u32 block)
     }
 
     if (block == m_end_of_file)
-        TRY(m_file->seek(0, Core::Stream::SeekMode::FromEndPosition));
+        TRY(m_file->seek(0, SeekMode::FromEndPosition));
     else
-        TRY(m_file->seek(block * BLOCKSIZE, Core::Stream::SeekMode::SetPosition));
+        TRY(m_file->seek(block * BLOCKSIZE, SeekMode::SetPosition));
 
     return {};
 }

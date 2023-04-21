@@ -9,10 +9,13 @@
 
 #include "VideoFrameWidget.h"
 
+REGISTER_WIDGET(VideoPlayer, VideoFrameWidget);
+
 namespace VideoPlayer {
 
 VideoFrameWidget::VideoFrameWidget()
 {
+    REGISTER_BOOL_PROPERTY("auto_resize", auto_resize, set_auto_resize);
     set_auto_resize(true);
 }
 
@@ -24,6 +27,15 @@ void VideoFrameWidget::set_bitmap(Gfx::Bitmap const* bitmap)
     m_bitmap = bitmap;
     if (m_bitmap && m_auto_resize)
         set_fixed_size(m_bitmap->size());
+
+    update();
+}
+
+void VideoFrameWidget::set_sizing_mode(VideoSizingMode value)
+{
+    if (value == m_sizing_mode)
+        return;
+    m_sizing_mode = value;
 
     update();
 }
@@ -40,6 +52,12 @@ void VideoFrameWidget::mousedown_event(GUI::MouseEvent&)
 {
     if (on_click)
         on_click();
+}
+
+void VideoFrameWidget::doubleclick_event(GUI::MouseEvent&)
+{
+    if (on_doubleclick)
+        on_doubleclick();
 }
 
 void VideoFrameWidget::paint_event(GUI::PaintEvent& event)

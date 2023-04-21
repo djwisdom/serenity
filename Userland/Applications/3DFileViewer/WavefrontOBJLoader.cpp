@@ -8,6 +8,7 @@
 
 #include "WavefrontOBJLoader.h"
 #include <AK/FixedArray.h>
+#include <AK/String.h>
 #include <LibCore/File.h>
 #include <stdlib.h>
 
@@ -16,17 +17,22 @@ static inline GLuint get_index_value(StringView& representation)
     return representation.to_uint().value_or(1) - 1;
 }
 
-ErrorOr<NonnullRefPtr<Mesh>> WavefrontOBJLoader::load(Core::File& file)
+ErrorOr<NonnullRefPtr<Mesh>> WavefrontOBJLoader::load(String const& filename, NonnullOwnPtr<Core::File> file)
 {
+    auto buffered_file = TRY(Core::BufferedFile::create(move(file)));
+
     Vector<Vertex> vertices;
     Vector<Vertex> normals;
     Vector<TexCoord> tex_coords;
     Vector<Triangle> triangles;
 
-    dbgln("Wavefront: Loading {}...", file.name());
+    dbgln("Wavefront: Loading {}...", filename);
 
     // Start reading file line by line
-    for (auto object_line : file.lines()) {
+    auto buffer = TRY(ByteBuffer::create_uninitialized(PAGE_SIZE));
+    while (TRY(buffered_file->can_read_line())) {
+        auto object_line = TRY(buffered_file->read_line(buffer));
+
         // Ignore file comments
         if (object_line.starts_with('#'))
             continue;
@@ -78,9 +84,9 @@ ErrorOr<NonnullRefPtr<Mesh>> WavefrontOBJLoader::load(Core::File& file)
                 return Error::from_string_literal("Wavefront: Malformed face line.");
             }
 
-            auto vertex_indices = TRY(FixedArray<GLuint>::try_create(number_of_vertices));
-            auto tex_coord_indices = TRY(FixedArray<GLuint>::try_create(number_of_vertices));
-            auto normal_indices = TRY(FixedArray<GLuint>::try_create(number_of_vertices));
+            auto vertex_indices = TRY(FixedArray<GLuint>::create(number_of_vertices));
+            auto tex_coord_indices = TRY(FixedArray<GLuint>::create(number_of_vertices));
+            auto normal_indices = TRY(FixedArray<GLuint>::create(number_of_vertices));
 
             for (size_t i = 0; i < number_of_vertices; ++i) {
                 auto vertex_parts = face_line.at(i).split_view('/', SplitBehavior::KeepEmpty);

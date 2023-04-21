@@ -111,7 +111,7 @@ void ProjectTemplatesModel::rescan_templates()
     // Iterate over template manifest INI files in the templates path
     Core::DirIterator di(ProjectTemplate::templates_path(), Core::DirIterator::SkipDots);
     if (di.has_error()) {
-        warnln("DirIterator: {}", di.error_string());
+        warnln("DirIterator: {}", di.error());
         return;
     }
 
@@ -132,7 +132,7 @@ void ProjectTemplatesModel::rescan_templates()
     // Enumerate the loaded projects into a sorted mapping, by priority value descending.
     m_mapping.clear();
     for (auto& project_template : m_templates)
-        m_mapping.append(&project_template);
+        m_mapping.append(project_template);
     quick_sort(m_mapping, [](auto a, auto b) {
         return a->priority() > b->priority();
     });

@@ -12,6 +12,13 @@
 
 namespace JS {
 
+ErrorOr<String> ParserError::to_string() const
+{
+    if (!position.has_value())
+        return String::from_deprecated_string(message);
+    return String::formatted("{} (line: {}, column: {})", message, position.value().line, position.value().column);
+}
+
 DeprecatedString ParserError::to_deprecated_string() const
 {
     if (!position.has_value())
@@ -32,7 +39,7 @@ DeprecatedString ParserError::source_location_hint(StringView source, char const
     for (size_t i = 0; i < position.value().column - 1; ++i)
         builder.append(spacer);
     builder.append(indicator);
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 }

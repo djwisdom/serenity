@@ -35,22 +35,23 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     Config::pledge_domains({ "Games", "Hearts" });
     Config::monitor_domain("Games");
 
-    TRY(Core::System::pledge("stdio recvfd sendfd rpath unix"));
+    TRY(Core::System::pledge("stdio recvfd sendfd rpath unix proc exec"));
 
     TRY(Desktop::Launcher::add_allowed_handler_with_only_specific_urls("/bin/Help", { URL::create_with_file_scheme("/usr/share/man/man6/Hearts.md") }));
     TRY(Desktop::Launcher::seal_allowlist());
 
-    TRY(Core::System::pledge("stdio recvfd sendfd rpath"));
+    TRY(Core::System::pledge("stdio recvfd sendfd rpath proc exec"));
 
     TRY(Core::System::unveil("/tmp/session/%sid/portal/launch", "rw"));
     TRY(Core::System::unveil("/res", "r"));
+    TRY(Core::System::unveil("/bin/GamesSettings", "x"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
     auto window = TRY(GUI::Window::try_create());
     window->set_title("Hearts");
 
-    auto widget = TRY(window->try_set_main_widget<GUI::Widget>());
-    widget->load_from_gml(hearts_gml);
+    auto widget = TRY(window->set_main_widget<GUI::Widget>());
+    TRY(widget->load_from_gml(hearts_gml));
 
     auto& game = *widget->find_descendant_of_type_named<Hearts::Game>("game");
     game.set_focus(true);
@@ -87,19 +88,20 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         GUI::MessageBox::show(settings_dialog, "Settings have been successfully saved and will take effect in the next game."sv, "Settings Changed Successfully"sv, GUI::MessageBox::Type::Information);
     };
 
-    auto game_menu = TRY(window->try_add_menu("&Game"));
+    auto game_menu = TRY(window->try_add_menu("&Game"_short_string));
 
-    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png"sv)), [&](auto&) {
+    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/reload.png"sv)), [&](auto&) {
         game.setup(player_name);
     })));
     TRY(game_menu->try_add_separator());
-    TRY(game_menu->try_add_action(GUI::Action::create("&Settings", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/settings.png"sv)), [&](auto&) {
+    TRY(game_menu->try_add_action(TRY(Cards::make_cards_settings_action(window))));
+    TRY(game_menu->try_add_action(GUI::Action::create("Hearts &Settings", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/settings.png"sv)), [&](auto&) {
         change_settings();
     })));
     TRY(game_menu->try_add_separator());
     TRY(game_menu->try_add_action(GUI::CommonActions::make_quit_action([&](auto&) { app->quit(); })));
 
-    auto help_menu = TRY(window->try_add_menu("&Help"));
+    auto help_menu = TRY(window->try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man6/Hearts.md"), "/bin/Help");

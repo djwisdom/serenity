@@ -2,6 +2,8 @@ set(TEST_SOURCES
     TestBrotli.cpp
     TestDeflate.cpp
     TestGzip.cpp
+    TestLzma.cpp
+    TestXz.cpp
     TestZlib.cpp
 )
 

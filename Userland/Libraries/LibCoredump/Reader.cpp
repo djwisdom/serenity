@@ -6,14 +6,15 @@
  */
 
 #include <AK/ByteReader.h>
+#include <AK/Function.h>
 #include <AK/HashTable.h>
 #include <AK/JsonObject.h>
 #include <AK/JsonValue.h>
 #include <AK/LexicalPath.h>
 #include <LibCompress/Gzip.h>
-#include <LibCore/File.h>
 #include <LibCoredump/Reader.h>
-#include <signal_numbers.h>
+#include <LibFileSystem/FileSystem.h>
+#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -196,35 +197,34 @@ Optional<MemoryRegionInfo> Reader::region_containing(FlatPtr address) const
 int Reader::process_pid() const
 {
     auto process_info = this->process_info();
-    auto pid = process_info.get("pid"sv);
-    return pid.to_number<int>();
+    auto pid = process_info.get_integer<int>("pid"sv).value_or(0);
+    return pid;
 }
 
 u8 Reader::process_termination_signal() const
 {
     auto process_info = this->process_info();
-    auto termination_signal = process_info.get("termination_signal"sv);
-    auto signal_number = termination_signal.to_number<u8>();
-    if (signal_number <= SIGINVAL || signal_number >= NSIG)
+    auto termination_signal = process_info.get_u8("termination_signal"sv);
+    if (!termination_signal.has_value() || *termination_signal <= SIGINVAL || *termination_signal >= NSIG)
         return SIGINVAL;
-    return signal_number;
+    return *termination_signal;
 }
 
 DeprecatedString Reader::process_executable_path() const
 {
     auto process_info = this->process_info();
-    auto executable_path = process_info.get("executable_path"sv);
-    return executable_path.as_string_or({});
+    auto executable_path = process_info.get_deprecated_string("executable_path"sv);
+    return executable_path.value_or({});
 }
 
 Vector<DeprecatedString> Reader::process_arguments() const
 {
     auto process_info = this->process_info();
-    auto arguments = process_info.get("arguments"sv);
-    if (!arguments.is_array())
+    auto arguments = process_info.get_array("arguments"sv);
+    if (!arguments.has_value())
         return {};
     Vector<DeprecatedString> vector;
-    arguments.as_array().for_each([&](auto& value) {
+    arguments->for_each([&](auto& value) {
         if (value.is_string())
             vector.append(value.as_string());
     });
@@ -234,11 +234,11 @@ Vector<DeprecatedString> Reader::process_arguments() const
 Vector<DeprecatedString> Reader::process_environment() const
 {
     auto process_info = this->process_info();
-    auto environment = process_info.get("environment"sv);
-    if (!environment.is_array())
+    auto environment = process_info.get_array("environment"sv);
+    if (!environment.has_value())
         return {};
     Vector<DeprecatedString> vector;
-    environment.as_array().for_each([&](auto& value) {
+    environment->for_each([&](auto& value) {
         if (value.is_string())
             vector.append(value.as_string());
     });
@@ -298,7 +298,7 @@ DeprecatedString Reader::resolve_object_path(StringView name) const
     //       (e.g. UserspaceEmulator, LibSymbolication, Profiler, and DynamicLinker itself)
     //       We should consider creating unified implementation in the future.
 
-    if (name.starts_with('/') || !Core::File::looks_like_shared_library(name)) {
+    if (name.starts_with('/') || !FileSystem::looks_like_shared_library(name)) {
         return name;
     }
 

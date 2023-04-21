@@ -17,7 +17,7 @@ class Screen final : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(Screen, Bindings::PlatformObject);
 
 public:
-    static JS::NonnullGCPtr<Screen> create(HTML::Window&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<Screen>> create(HTML::Window&);
 
     i32 width() const { return screen_rect().width(); }
     i32 height() const { return screen_rect().height(); }
@@ -29,6 +29,7 @@ public:
 private:
     explicit Screen(HTML::Window&);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     HTML::Window const& window() const { return *m_window; }

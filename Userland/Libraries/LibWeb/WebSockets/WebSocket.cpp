@@ -4,18 +4,21 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/QuickSort.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventDispatcher.h>
 #include <LibWeb/DOM/IDLEventListener.h>
+#include <LibWeb/FileAPI/Blob.h>
 #include <LibWeb/HTML/CloseEvent.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/MessageEvent.h>
 #include <LibWeb/HTML/Origin.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/DOMException.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/WebSockets/WebSocket.h>
@@ -45,7 +48,7 @@ WebSocketClientSocket::~WebSocketClientSocket() = default;
 WebSocketClientManager::WebSocketClientManager() = default;
 
 // https://websockets.spec.whatwg.org/#dom-websocket-websocket
-WebIDL::ExceptionOr<JS::NonnullGCPtr<WebSocket>> WebSocket::construct_impl(JS::Realm& realm, DeprecatedString const& url)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<WebSocket>> WebSocket::construct_impl(JS::Realm& realm, DeprecatedString const& url, Optional<Variant<DeprecatedString, Vector<DeprecatedString>>> const& protocols)
 {
     auto& window = verify_cast<HTML::Window>(realm.global_object());
     AK::URL url_record(url);
@@ -55,20 +58,39 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<WebSocket>> WebSocket::construct_impl(JS::R
         return WebIDL::SyntaxError::create(realm, "Invalid protocol");
     if (!url_record.fragment().is_empty())
         return WebIDL::SyntaxError::create(realm, "Presence of URL fragment is invalid");
-    // 5. If `protocols` is a string, set `protocols` to a sequence consisting of just that string
-    // 6. If any of the values in `protocols` occur more than once or otherwise fail to match the requirements, throw SyntaxError
-    return realm.heap().allocate<WebSocket>(realm, window, url_record);
+    Vector<DeprecatedString> protocols_sequence;
+    if (protocols.has_value()) {
+        // 5. If `protocols` is a string, set `protocols` to a sequence consisting of just that string
+        if (protocols.value().has<DeprecatedString>())
+            protocols_sequence = { protocols.value().get<DeprecatedString>() };
+        else
+            protocols_sequence = protocols.value().get<Vector<DeprecatedString>>();
+        // 6. If any of the values in `protocols` occur more than once or otherwise fail to match the requirements, throw SyntaxError
+        auto sorted_protocols = protocols_sequence;
+        quick_sort(sorted_protocols);
+        for (size_t i = 0; i < sorted_protocols.size(); i++) {
+            // https://datatracker.ietf.org/doc/html/rfc6455
+            // The elements that comprise this value MUST be non-empty strings with characters in the range U+0021 to U+007E not including
+            // separator characters as defined in [RFC2616] and MUST all be unique strings.
+            auto protocol = sorted_protocols[i];
+            if (i < sorted_protocols.size() - 1 && protocol == sorted_protocols[i + 1])
+                return WebIDL::SyntaxError::create(realm, "Found a duplicate protocol name in the specified list");
+            for (auto character : protocol) {
+                if (character < '\x21' || character > '\x7E')
+                    return WebIDL::SyntaxError::create(realm, "Found invalid character in subprotocol name");
+            }
+        }
+    }
+    return MUST_OR_THROW_OOM(realm.heap().allocate<WebSocket>(realm, window, url_record, protocols_sequence));
 }
 
-WebSocket::WebSocket(HTML::Window& window, AK::URL& url)
+WebSocket::WebSocket(HTML::Window& window, AK::URL& url, Vector<DeprecatedString> const& protocols)
     : EventTarget(window.realm())
     , m_window(window)
 {
-    set_prototype(&Bindings::cached_web_prototype(window.realm(), "WebSocket"));
-
     // FIXME: Integrate properly with FETCH as per https://fetch.spec.whatwg.org/#websocket-opening-handshake
     auto origin_string = m_window->associated_document().origin().serialize();
-    m_websocket = WebSocketClientManager::the().connect(url, origin_string);
+    m_websocket = WebSocketClientManager::the().connect(url, origin_string, protocols);
     m_websocket->on_open = [weak_this = make_weak_ptr<WebSocket>()] {
         if (!weak_this)
             return;
@@ -96,6 +118,14 @@ WebSocket::WebSocket(HTML::Window& window, AK::URL& url)
 }
 
 WebSocket::~WebSocket() = default;
+
+JS::ThrowCompletionOr<void> WebSocket::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::WebSocketPrototype>(realm, "WebSocket"));
+
+    return {};
+}
 
 void WebSocket::visit_edges(Cell::Visitor& visitor)
 {
@@ -126,9 +156,7 @@ DeprecatedString WebSocket::protocol() const
 {
     if (!m_websocket)
         return DeprecatedString::empty();
-    // https://websockets.spec.whatwg.org/#feedback-from-the-protocol
-    // FIXME: Change the protocol attribute's value to the subprotocol in use, if it is not the null value.
-    return DeprecatedString::empty();
+    return m_websocket->subprotocol_in_use();
 }
 
 // https://websockets.spec.whatwg.org/#dom-websocket-close
@@ -159,13 +187,30 @@ WebIDL::ExceptionOr<void> WebSocket::close(Optional<u16> code, Optional<Deprecat
 }
 
 // https://websockets.spec.whatwg.org/#dom-websocket-send
-WebIDL::ExceptionOr<void> WebSocket::send(DeprecatedString const& data)
+WebIDL::ExceptionOr<void> WebSocket::send(Variant<JS::Handle<JS::Object>, JS::Handle<FileAPI::Blob>, DeprecatedString> const& data)
 {
     auto state = ready_state();
     if (state == WebSocket::ReadyState::Connecting)
         return WebIDL::InvalidStateError::create(realm(), "Websocket is still CONNECTING");
     if (state == WebSocket::ReadyState::Open) {
-        m_websocket->send(data);
+        TRY_OR_THROW_OOM(vm(),
+            data.visit(
+                [this](DeprecatedString const& string) -> ErrorOr<void> {
+                    m_websocket->send(string);
+                    return {};
+                },
+                [this](JS::Handle<JS::Object> const& buffer_source) -> ErrorOr<void> {
+                    // FIXME: While the spec doesn't say to do this, it's not observable except from potentially throwing OOM.
+                    //        Can we avoid this copy?
+                    auto data_buffer = TRY(WebIDL::get_buffer_source_copy(*buffer_source.cell()));
+                    m_websocket->send(data_buffer, false);
+                    return {};
+                },
+                [this](JS::Handle<FileAPI::Blob> const& blob) -> ErrorOr<void> {
+                    auto byte_buffer = TRY(ByteBuffer::copy(blob->bytes()));
+                    m_websocket->send(byte_buffer, false);
+                    return {};
+                }));
         // TODO : If the data cannot be sent, e.g. because it would need to be buffered but the buffer is full, the user agent must flag the WebSocket as full and then close the WebSocket connection.
         // TODO : Any invocation of this method with a string argument that does not throw an exception must increase the bufferedAmount attribute by the number of bytes needed to express the argument as UTF-8.
     }
@@ -178,13 +223,13 @@ void WebSocket::on_open()
     // 1. Change the readyState attribute's value to OPEN (1).
     // 2. Change the extensions attribute's value to the extensions in use, if it is not the null value. [WSP]
     // 3. Change the protocol attribute's value to the subprotocol in use, if it is not the null value. [WSP]
-    dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::open));
+    dispatch_event(DOM::Event::create(realm(), HTML::EventNames::open).release_value_but_fixme_should_propagate_errors());
 }
 
 // https://websockets.spec.whatwg.org/#feedback-from-the-protocol
 void WebSocket::on_error()
 {
-    dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
+    dispatch_event(DOM::Event::create(realm(), HTML::EventNames::error).release_value_but_fixme_should_propagate_errors());
 }
 
 // https://websockets.spec.whatwg.org/#feedback-from-the-protocol
@@ -195,8 +240,8 @@ void WebSocket::on_close(u16 code, DeprecatedString reason, bool was_clean)
     HTML::CloseEventInit event_init {};
     event_init.was_clean = was_clean;
     event_init.code = code;
-    event_init.reason = move(reason);
-    dispatch_event(*HTML::CloseEvent::create(realm(), HTML::EventNames::close, event_init));
+    event_init.reason = String::from_deprecated_string(reason).release_value_but_fixme_should_propagate_errors();
+    dispatch_event(HTML::CloseEvent::create(realm(), HTML::EventNames::close, event_init).release_value_but_fixme_should_propagate_errors());
 }
 
 // https://websockets.spec.whatwg.org/#feedback-from-the-protocol
@@ -208,8 +253,8 @@ void WebSocket::on_message(ByteBuffer message, bool is_text)
         auto text_message = DeprecatedString(ReadonlyBytes(message));
         HTML::MessageEventInit event_init;
         event_init.data = JS::PrimitiveString::create(vm(), text_message);
-        event_init.origin = url();
-        dispatch_event(*HTML::MessageEvent::create(realm(), HTML::EventNames::message, event_init));
+        event_init.origin = String::from_deprecated_string(url()).release_value_but_fixme_should_propagate_errors();
+        dispatch_event(HTML::MessageEvent::create(realm(), HTML::EventNames::message, event_init).release_value_but_fixme_should_propagate_errors());
         return;
     }
 
@@ -220,8 +265,8 @@ void WebSocket::on_message(ByteBuffer message, bool is_text)
         // type indicates that the data is Binary and binaryType is "arraybuffer"
         HTML::MessageEventInit event_init;
         event_init.data = JS::ArrayBuffer::create(realm(), message);
-        event_init.origin = url();
-        dispatch_event(*HTML::MessageEvent::create(realm(), HTML::EventNames::message, event_init));
+        event_init.origin = String::from_deprecated_string(url()).release_value_but_fixme_should_propagate_errors();
+        dispatch_event(HTML::MessageEvent::create(realm(), HTML::EventNames::message, event_init).release_value_but_fixme_should_propagate_errors());
         return;
     }
 

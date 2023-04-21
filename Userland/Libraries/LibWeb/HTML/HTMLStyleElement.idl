@@ -5,10 +5,10 @@
 // https://html.spec.whatwg.org/multipage/semantics.html#htmlstyleelement
 [Exposed=Window]
 interface HTMLStyleElement : HTMLElement {
-    // FIXME: [HTMLConstructor] constructor();
+    [HTMLConstructor] constructor();
 
     // FIXME: attribute boolean disabled;
-    [Reflect] attribute DOMString media;
+    [Reflect, CEReactions] attribute DOMString media;
     // FIXME: [SameObject, PutForwards=value] readonly attribute DOMTokenList blocking;
 
     // Obsolete

@@ -7,7 +7,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Debug.h>
 #include <AK/Optional.h>
 #include <AK/QuickSort.h>
 #include <AK/StringBuilder.h>
@@ -348,7 +347,6 @@ void DynamicLoader::load_program_headers()
     // (symbol tables/relocation information, executable instructions, read-only data)
     // and one of which is copied (modifiable data).
     // These are allocated in-line to cut down on the malloc calls.
-    Vector<ProgramHeaderRegion, 4> load_regions;
     Vector<ProgramHeaderRegion, 3> map_regions;
     Vector<ProgramHeaderRegion, 1> copy_regions;
     Optional<ProgramHeaderRegion> relro_region;
@@ -363,7 +361,6 @@ void DynamicLoader::load_program_headers()
         } else if (region.is_load()) {
             if (region.size_in_memory() == 0)
                 return;
-            load_regions.append(region);
             if (region.is_writable()) {
                 copy_regions.append(region);
             } else {
@@ -383,7 +380,6 @@ void DynamicLoader::load_program_headers()
         return a.desired_load_address().as_ptr() < b.desired_load_address().as_ptr();
     };
 
-    quick_sort(load_regions, compare_load_address);
     quick_sort(map_regions, compare_load_address);
     quick_sort(copy_regions, compare_load_address);
 
@@ -478,19 +474,13 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
     };
 
     switch (relocation.type()) {
-#if ARCH(I386)
-    case R_386_NONE:
-#else
+
     case R_X86_64_NONE:
-#endif
         // Apparently most loaders will just skip these?
         // Seems if the 'link editor' generates one something is funky with your code
         break;
-#if ARCH(I386)
-    case R_386_32: {
-#else
+    case R_AARCH64_ABS64:
     case R_X86_64_64: {
-#endif
         auto symbol = relocation.symbol();
         auto res = lookup_symbol(symbol);
         if (!res.has_value()) {
@@ -508,20 +498,8 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
             *patch_ptr = call_ifunc_resolver(VirtualAddress { *patch_ptr }).get();
         break;
     }
-#if ARCH(I386)
-    case R_386_PC32: {
-        auto symbol = relocation.symbol();
-        auto result = lookup_symbol(symbol);
-        if (!result.has_value())
-            return RelocationResult::Failed;
-        auto relative_offset = result.value().address - m_dynamic_object->base_address().offset(relocation.offset());
-        *patch_ptr += relative_offset.get();
-        break;
-    }
-    case R_386_GLOB_DAT: {
-#else
+    case R_AARCH64_GLOB_DAT:
     case R_X86_64_GLOB_DAT: {
-#endif
         auto symbol = relocation.symbol();
         auto res = lookup_symbol(symbol);
         VirtualAddress symbol_location;
@@ -549,11 +527,8 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
         *patch_ptr = symbol_location.get();
         break;
     }
-#if ARCH(I386)
-    case R_386_RELATIVE: {
-#else
+    case R_AARCH64_RELATIVE:
     case R_X86_64_RELATIVE: {
-#endif
         if (!image().is_dynamic())
             break;
         // FIXME: According to the spec, R_386_relative ones must be done first.
@@ -565,12 +540,8 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
             *patch_ptr += m_dynamic_object->base_address().get();
         break;
     }
-#if ARCH(I386)
-    case R_386_TLS_TPOFF32:
-    case R_386_TLS_TPOFF: {
-#else
+    case R_AARCH64_TLS_TPREL64:
     case R_X86_64_TPOFF64: {
-#endif
         auto symbol = relocation.symbol();
         FlatPtr symbol_value;
         DynamicObject const* dynamic_object_of_symbol;
@@ -595,11 +566,8 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
 
         break;
     }
-#if ARCH(I386)
-    case R_386_JMP_SLOT: {
-#else
+    case R_AARCH64_JUMP_SLOT:
     case R_X86_64_JUMP_SLOT: {
-#endif
         // FIXME: Or BIND_NOW flag passed in?
         if (m_dynamic_object->must_bind_now()) {
             // Eagerly BIND_NOW the PLT entries, doing all the symbol looking goodness
@@ -613,11 +581,7 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
         }
         break;
     }
-#if ARCH(I386)
-    case R_386_IRELATIVE: {
-#else
     case R_X86_64_IRELATIVE: {
-#endif
         VirtualAddress resolver;
         if (relocation.addend_used())
             resolver = m_dynamic_object->base_address().offset(relocation.addend());

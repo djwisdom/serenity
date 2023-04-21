@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -259,39 +259,39 @@ bool is_valid_duration(double years, double months, double weeks, double days, d
 // 7.5.12 DefaultTemporalLargestUnit ( years, months, weeks, days, hours, minutes, seconds, milliseconds, microseconds ), https://tc39.es/proposal-temporal/#sec-temporal-defaulttemporallargestunit
 StringView default_temporal_largest_unit(double years, double months, double weeks, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds)
 {
-    // 1. If years is not zero, return "year".
+    // 1. If years ≠ 0, return "year".
     if (years != 0)
         return "year"sv;
 
-    // 2. If months is not zero, return "month".
+    // 2. If months ≠ 0, return "month".
     if (months != 0)
         return "month"sv;
 
-    // 3. If weeks is not zero, return "week".
+    // 3. If weeks ≠ 0, return "week".
     if (weeks != 0)
         return "week"sv;
 
-    // 4. If days is not zero, return "day".
+    // 4. If days ≠ 0, return "day".
     if (days != 0)
         return "day"sv;
 
-    // 5. If hours is not zero, return "hour".
+    // 5. If hours ≠ 0, return "hour".
     if (hours != 0)
         return "hour"sv;
 
-    // 6. If minutes is not zero, return "minute".
+    // 6. If minutes ≠ 0, return "minute".
     if (minutes != 0)
         return "minute"sv;
 
-    // 7. If seconds is not zero, return "second".
+    // 7. If seconds ≠ 0, return "second".
     if (seconds != 0)
         return "second"sv;
 
-    // 8. If milliseconds is not zero, return "millisecond".
+    // 8. If milliseconds ≠ 0, return "millisecond".
     if (milliseconds != 0)
         return "millisecond"sv;
 
-    // 9. If microseconds is not zero, return "microsecond".
+    // 9. If microseconds ≠ 0, return "microsecond".
     if (microseconds != 0)
         return "microsecond"sv;
 
@@ -305,7 +305,7 @@ ThrowCompletionOr<PartialDurationRecord> to_temporal_partial_duration_record(VM&
     // 1. If Type(temporalDurationLike) is not Object, then
     if (!temporal_duration_like.is_object()) {
         // a. Throw a TypeError exception.
-        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, temporal_duration_like.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, TRY_OR_THROW_OOM(vm, temporal_duration_like.to_string_without_side_effects()));
     }
 
     // 2. Let result be a new partial Duration Record with each field set to undefined.
@@ -481,7 +481,7 @@ Crypto::SignedBigInteger total_duration_nanoseconds(double days, double hours, d
 }
 
 // 7.5.18 BalanceDuration ( days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds, largestUnit [ , relativeTo ] ), https://tc39.es/proposal-temporal/#sec-temporal-balanceduration
-ThrowCompletionOr<TimeDurationRecord> balance_duration(VM& vm, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, Crypto::SignedBigInteger const& nanoseconds, DeprecatedString const& largest_unit, Object* relative_to)
+ThrowCompletionOr<TimeDurationRecord> balance_duration(VM& vm, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, Crypto::SignedBigInteger const& nanoseconds, StringView largest_unit, Object* relative_to)
 {
     // 1. If relativeTo is not present, set relativeTo to undefined.
 
@@ -627,7 +627,7 @@ ThrowCompletionOr<TimeDurationRecord> balance_duration(VM& vm, double days, doub
 }
 
 // 7.5.19 UnbalanceDurationRelative ( years, months, weeks, days, largestUnit, relativeTo ), https://tc39.es/proposal-temporal/#sec-temporal-unbalancedurationrelative
-ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double years, double months, double weeks, double days, DeprecatedString const& largest_unit, Value relative_to)
+ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double years, double months, double weeks, double days, StringView largest_unit, Value relative_to)
 {
     auto& realm = *vm.current_realm();
 
@@ -678,10 +678,10 @@ ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double
         }
 
         // b. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
 
         // c. Let dateUntil be ? GetMethod(calendar, "dateUntil").
-        auto* date_until = TRY(Value(calendar).get_method(vm, vm.names.dateUntil));
+        auto date_until = TRY(Value(calendar).get_method(vm, vm.names.dateUntil));
 
         // d. Repeat, while years ≠ 0,
         while (years != 0) {
@@ -692,7 +692,7 @@ ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double
             auto until_options = Object::create(realm, nullptr);
 
             // iii. Perform ! CreateDataPropertyOrThrow(untilOptions, "largestUnit", "month").
-            MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, "month"sv)));
+            MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, MUST_OR_THROW_OOM(PrimitiveString::create(vm, "month"sv))));
 
             // iv. Let untilResult be ? CalendarDateUntil(calendar, relativeTo, newRelativeTo, untilOptions, dateUntil).
             auto* until_result = TRY(calendar_date_until(vm, *calendar, relative_to, new_relative_to, *until_options, date_until));
@@ -719,7 +719,7 @@ ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double
         }
 
         // b. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
 
         // c. Repeat, while years ≠ 0,
         while (years != 0) {
@@ -762,7 +762,7 @@ ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double
             }
 
             // ii. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-            auto* date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
+            auto date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
 
             // iii. Repeat, while years ≠ 0,
             while (years != 0) {
@@ -816,7 +816,7 @@ ThrowCompletionOr<DateDurationRecord> unbalance_duration_relative(VM& vm, double
 }
 
 // 7.5.20 BalanceDurationRelative ( years, months, weeks, days, largestUnit, relativeTo ), https://tc39.es/proposal-temporal/#sec-temporal-balancedurationrelative
-ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double years, double months, double weeks, double days, DeprecatedString const& largest_unit, Value relative_to_value)
+ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double years, double months, double weeks, double days, StringView largest_unit, Value relative_to_value)
 {
     auto& realm = *vm.current_realm();
 
@@ -856,7 +856,7 @@ ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double y
     // 10. If largestUnit is "year", then
     if (largest_unit == "year"sv) {
         // a. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(&calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(&calendar).get_method(vm, vm.names.dateAdd));
 
         // b. Let moveResult be ? MoveRelativeDate(calendar, relativeTo, oneYear, dateAdd).
         auto move_result = TRY(move_relative_date(vm, calendar, *relative_to, *one_year, date_add));
@@ -922,13 +922,13 @@ ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double y
         new_relative_to = TRY(calendar_date_add(vm, calendar, relative_to, *one_year, nullptr, date_add));
 
         // k. Let dateUntil be ? GetMethod(calendar, "dateUntil").
-        auto* date_until = TRY(Value(&calendar).get_method(vm, vm.names.dateUntil));
+        auto date_until = TRY(Value(&calendar).get_method(vm, vm.names.dateUntil));
 
         // l. Let untilOptions be OrdinaryObjectCreate(null).
         auto until_options = Object::create(realm, nullptr);
 
         // m. Perform ! CreateDataPropertyOrThrow(untilOptions, "largestUnit", "month").
-        MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, "month"sv)));
+        MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, MUST_OR_THROW_OOM(PrimitiveString::create(vm, "month"sv))));
 
         // n. Let untilResult be ? CalendarDateUntil(calendar, relativeTo, newRelativeTo, untilOptions, dateUntil).
         auto* until_result = TRY(calendar_date_until(vm, calendar, relative_to, new_relative_to, *until_options, date_until));
@@ -954,7 +954,7 @@ ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double y
             until_options = Object::create(realm, nullptr);
 
             // vi. Perform ! CreateDataPropertyOrThrow(untilOptions, "largestUnit", "month").
-            MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, "month"sv)));
+            MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, MUST_OR_THROW_OOM(PrimitiveString::create(vm, "month"sv))));
 
             // vii. Set untilResult to ? CalendarDateUntil(calendar, relativeTo, newRelativeTo, untilOptions, dateUntil).
             until_result = TRY(calendar_date_until(vm, calendar, relative_to, new_relative_to, *until_options, date_until));
@@ -966,7 +966,7 @@ ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double y
     // 11. Else if largestUnit is "month", then
     else if (largest_unit == "month"sv) {
         // a. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(&calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(&calendar).get_method(vm, vm.names.dateAdd));
 
         // b. Let moveResult be ? MoveRelativeDate(calendar, relativeTo, oneMonth, dateAdd).
         auto move_result = TRY(move_relative_date(vm, calendar, *relative_to, *one_month, date_add));
@@ -1004,7 +1004,7 @@ ThrowCompletionOr<DateDurationRecord> balance_duration_relative(VM& vm, double y
         VERIFY(largest_unit == "week"sv);
 
         // b. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(&calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(&calendar).get_method(vm, vm.names.dateAdd));
 
         // c. Let moveResult be ? MoveRelativeDate(calendar, relativeTo, oneWeek, dateAdd).
         auto move_result = TRY(move_relative_date(vm, calendar, *relative_to, *one_week, date_add));
@@ -1094,7 +1094,7 @@ ThrowCompletionOr<DurationRecord> add_duration(VM& vm, double years1, double mon
         auto* date_duration2 = MUST(create_temporal_duration(vm, years2, months2, weeks2, days2, 0, 0, 0, 0, 0, 0));
 
         // d. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(&calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(&calendar).get_method(vm, vm.names.dateAdd));
 
         // e. Let intermediate be ? CalendarDateAdd(calendar, relativeTo, dateDuration1, undefined, dateAdd).
         auto* intermediate = TRY(calendar_date_add(vm, calendar, &relative_to, *date_duration1, nullptr, date_add));
@@ -1109,7 +1109,7 @@ ThrowCompletionOr<DurationRecord> add_duration(VM& vm, double years1, double mon
         auto difference_options = Object::create(realm, nullptr);
 
         // i. Perform ! CreateDataPropertyOrThrow(differenceOptions, "largestUnit", dateLargestUnit).
-        MUST(difference_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, date_largest_unit)));
+        MUST(difference_options->create_data_property_or_throw(vm.names.largestUnit, MUST_OR_THROW_OOM(PrimitiveString::create(vm, date_largest_unit))));
 
         // j. Let dateDifference be ? CalendarDateUntil(calendar, relativeTo, end, differenceOptions).
         auto* date_difference = TRY(calendar_date_until(vm, calendar, &relative_to, end, *difference_options));
@@ -1282,7 +1282,7 @@ ThrowCompletionOr<RoundedDuration> round_duration(VM& vm, double years, double m
         auto* years_duration = MUST(create_temporal_duration(vm, years, 0, 0, 0, 0, 0, 0, 0, 0, 0));
 
         // b. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
 
         // c. Let yearsLater be ? CalendarDateAdd(calendar, relativeTo, yearsDuration, undefined, dateAdd).
         auto* years_later = TRY(calendar_date_add(vm, *calendar, relative_to, *years_duration, nullptr, date_add));
@@ -1302,20 +1302,20 @@ ThrowCompletionOr<RoundedDuration> round_duration(VM& vm, double years, double m
         // h. Let days be days + monthsWeeksInDays.
         days += months_weeks_in_days;
 
-        // i. Let daysDuration be ? CreateTemporalDuration(0, 0, 0, days, 0, 0, 0, 0, 0, 0).
-        auto* days_duration = TRY(create_temporal_duration(vm, 0, 0, 0, days, 0, 0, 0, 0, 0, 0));
+        // i. Let wholeDaysDuration be ? CreateTemporalDuration(0, 0, 0, truncate(days), 0, 0, 0, 0, 0, 0).
+        auto* whole_days_duration = TRY(create_temporal_duration(vm, 0, 0, 0, trunc(days), 0, 0, 0, 0, 0, 0));
 
-        // j. Let daysLater be ? CalendarDateAdd(calendar, relativeTo, daysDuration, undefined, dateAdd).
-        auto* days_later = TRY(calendar_date_add(vm, *calendar, relative_to, *days_duration, nullptr, date_add));
+        // j. Let wholeDaysLater be ? CalendarDateAdd(calendar, relativeTo, wholeDaysDuration, undefined, dateAdd).
+        auto* whole_days_later = TRY(calendar_date_add(vm, *calendar, relative_to, *whole_days_duration, nullptr, date_add));
 
         // k. Let untilOptions be OrdinaryObjectCreate(null).
         auto until_options = Object::create(realm, nullptr);
 
         // l. Perform ! CreateDataPropertyOrThrow(untilOptions, "largestUnit", "year").
-        MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, PrimitiveString::create(vm, "year"sv)));
+        MUST(until_options->create_data_property_or_throw(vm.names.largestUnit, MUST_OR_THROW_OOM(PrimitiveString::create(vm, "year"sv))));
 
-        // m. Let timePassed be ? CalendarDateUntil(calendar, relativeTo, daysLater, untilOptions).
-        auto* time_passed = TRY(calendar_date_until(vm, *calendar, relative_to, days_later, *until_options));
+        // m. Let timePassed be ? CalendarDateUntil(calendar, relativeTo, wholeDaysLater, untilOptions).
+        auto* time_passed = TRY(calendar_date_until(vm, *calendar, relative_to, whole_days_later, *until_options));
 
         // n. Let yearsPassed be timePassed.[[Years]].
         auto years_passed = time_passed->years();
@@ -1372,7 +1372,7 @@ ThrowCompletionOr<RoundedDuration> round_duration(VM& vm, double years, double m
         auto* years_months = MUST(create_temporal_duration(vm, years, months, 0, 0, 0, 0, 0, 0, 0, 0));
 
         // b. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
 
         // c. Let yearsMonthsLater be ? CalendarDateAdd(calendar, relativeTo, yearsMonths, undefined, dateAdd).
         auto* years_months_later = TRY(calendar_date_add(vm, *calendar, relative_to, *years_months, nullptr, date_add));
@@ -1449,7 +1449,7 @@ ThrowCompletionOr<RoundedDuration> round_duration(VM& vm, double years, double m
         auto* one_week = MUST(create_temporal_duration(vm, 0, 0, sign, 0, 0, 0, 0, 0, 0, 0));
 
         // c. Let dateAdd be ? GetMethod(calendar, "dateAdd").
-        auto* date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
+        auto date_add = TRY(Value(calendar).get_method(vm, vm.names.dateAdd));
 
         // d. Let moveResult be ? MoveRelativeDate(calendar, relativeTo, oneWeek, dateAdd).
         auto move_result = TRY(move_relative_date(vm, *calendar, *relative_to, *one_week, date_add));
@@ -1655,7 +1655,7 @@ ThrowCompletionOr<DurationRecord> adjust_rounded_duration_days(VM& vm, double ye
 }
 
 // 7.5.27 TemporalDurationToString ( years, months, weeks, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds, precision ), https://tc39.es/proposal-temporal/#sec-temporal-temporaldurationtostring
-DeprecatedString temporal_duration_to_string(double years, double months, double weeks, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, double nanoseconds, Variant<StringView, u8> const& precision)
+ThrowCompletionOr<String> temporal_duration_to_string(VM& vm, double years, double months, double weeks, double days, double hours, double minutes, double seconds, double milliseconds, double microseconds, double nanoseconds, Variant<StringView, u8> const& precision)
 {
     if (precision.has<StringView>())
         VERIFY(precision.get<StringView>() == "auto"sv);
@@ -1736,24 +1736,23 @@ DeprecatedString temporal_duration_to_string(double years, double months, double
 
         // b. Let decimalPart be ToZeroPaddedDecimalString(fraction, 9).
         // NOTE: padding with zeros leads to weird results when applied to a double. Not sure if that's a bug in AK/Format.h or if I'm doing this wrong.
-        auto decimal_part = DeprecatedString::formatted("{:09}", (u64)fraction);
+        auto decimal_part_string = TRY_OR_THROW_OOM(vm, String::formatted("{:09}", (u64)fraction));
+        StringView decimal_part;
 
         // c. If precision is "auto", then
         if (precision.has<StringView>() && precision.get<StringView>() == "auto"sv) {
             // i. Set decimalPart to the longest possible substring of decimalPart starting at position 0 and not ending with the code unit 0x0030 (DIGIT ZERO).
-            // NOTE: trim() would keep the left-most 0.
-            while (decimal_part.ends_with('0'))
-                decimal_part = decimal_part.substring(0, decimal_part.length() - 1);
+            decimal_part = decimal_part_string.bytes_as_string_view().trim("0"sv, TrimMode::Right);
         }
         // d. Else if precision = 0, then
         else if (precision.get<u8>() == 0) {
             // i. Set decimalPart to "".
-            decimal_part = DeprecatedString::empty();
+            decimal_part = ""sv;
         }
         // e. Else,
         else {
             // i. Set decimalPart to the substring of decimalPart from 0 to precision.
-            decimal_part = decimal_part.substring(0, precision.get<u8>());
+            decimal_part = decimal_part_string.bytes_as_string_view().substring_view(0, precision.get<u8>());
         }
 
         // f. Let secondsPart be abs(seconds) formatted as a decimal number.
@@ -1789,7 +1788,7 @@ DeprecatedString temporal_duration_to_string(double years, double months, double
     }
 
     // 20. Return result.
-    return result.to_deprecated_string();
+    return TRY_OR_THROW_OOM(vm, result.to_string());
 }
 
 // 7.5.28 AddDurationToOrSubtractDurationFromDuration ( operation, duration, other, options ), https://tc39.es/proposal-temporal/#sec-temporal-adddurationtoorsubtractdurationfromduration

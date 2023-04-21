@@ -9,10 +9,12 @@
 #include <AK/Forward.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibJS/Heap/GCPtr.h>
 #include <LibWeb/Fetch/Infrastructure/FetchAlgorithms.h>
 #include <LibWeb/Fetch/Infrastructure/FetchController.h>
 #include <LibWeb/Fetch/Infrastructure/FetchTimingInfo.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Fetch/Infrastructure/Task.h>
 
 namespace Web::Fetch::Infrastructure {
 
@@ -21,9 +23,6 @@ class FetchParams : public JS::Cell {
     JS_CELL(FetchParams, JS::Cell);
 
 public:
-    // FIXME: 'or a parallel queue'
-    using TaskDestination = Variant<Empty, JS::NonnullGCPtr<JS::Object>>;
-
     struct PreloadedResponseCandidatePendingTag { };
     using PreloadedResponseCandidate = Variant<Empty, PreloadedResponseCandidatePendingTag, JS::NonnullGCPtr<Response>>;
 
@@ -33,8 +32,8 @@ public:
     [[nodiscard]] JS::NonnullGCPtr<FetchController> controller() const { return m_controller; }
     [[nodiscard]] JS::NonnullGCPtr<FetchTimingInfo> timing_info() const { return m_timing_info; }
 
-    [[nodiscard]] JS::NonnullGCPtr<FetchAlgorithms> algorithms() const { return m_algorithms; }
-    void set_algorithms(JS::NonnullGCPtr<FetchAlgorithms> algorithms) { m_algorithms = algorithms; }
+    [[nodiscard]] JS::NonnullGCPtr<FetchAlgorithms const> algorithms() const { return m_algorithms; }
+    void set_algorithms(JS::NonnullGCPtr<FetchAlgorithms const> algorithms) { m_algorithms = algorithms; }
 
     [[nodiscard]] TaskDestination& task_destination() { return m_task_destination; }
     [[nodiscard]] TaskDestination const& task_destination() const { return m_task_destination; }
@@ -73,7 +72,7 @@ private:
     // https://fetch.spec.whatwg.org/#fetch-params-process-response-consume-body
     // process response consume body (default null)
     //     Null or an algorithm.
-    JS::NonnullGCPtr<FetchAlgorithms> m_algorithms;
+    JS::NonnullGCPtr<FetchAlgorithms const> m_algorithms;
 
     // https://fetch.spec.whatwg.org/#fetch-params-task-destination
     // task destination (default null)

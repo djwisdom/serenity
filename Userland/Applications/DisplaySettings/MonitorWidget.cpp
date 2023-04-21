@@ -7,6 +7,7 @@
 
 #include "MonitorWidget.h"
 #include <LibGUI/Desktop.h>
+#include <LibGUI/MessageBox.h>
 #include <LibGUI/Painter.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Font/Font.h>
@@ -16,56 +17,59 @@ REGISTER_WIDGET(DisplaySettings, MonitorWidget)
 
 namespace DisplaySettings {
 
-MonitorWidget::MonitorWidget()
+ErrorOr<NonnullRefPtr<MonitorWidget>> MonitorWidget::try_create()
 {
-    m_desktop_resolution = GUI::Desktop::the().rect().size();
-    m_monitor_bitmap = Gfx::Bitmap::try_load_from_file("/res/graphics/monitor.png"sv).release_value_but_fixme_should_propagate_errors();
-    m_desktop_bitmap = Gfx::Bitmap::try_create(m_monitor_bitmap->format(), { 280, 158 }).release_value_but_fixme_should_propagate_errors();
-    m_monitor_rect = { { 12, 13 }, m_desktop_bitmap->size() };
-    set_fixed_size(304, 201);
+    auto monitor_widget = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) MonitorWidget()));
+    monitor_widget->m_desktop_resolution = GUI::Desktop::the().rect().size();
+    monitor_widget->m_monitor_bitmap = TRY(Gfx::Bitmap::load_from_file("/res/graphics/monitor.png"sv));
+    monitor_widget->m_desktop_bitmap = TRY(Gfx::Bitmap::create(monitor_widget->m_monitor_bitmap->format(), { 280, 158 }));
+    monitor_widget->m_monitor_rect = { { 12, 13 }, monitor_widget->m_desktop_bitmap->size() };
+    monitor_widget->set_fixed_size(304, 201);
+    return monitor_widget;
 }
 
-bool MonitorWidget::set_wallpaper(DeprecatedString path)
+bool MonitorWidget::set_wallpaper(String path)
 {
     if (!is_different_to_current_wallpaper_path(path))
         return false;
 
-    (void)Threading::BackgroundAction<ErrorOr<NonnullRefPtr<Gfx::Bitmap>>>::construct(
+    (void)Threading::BackgroundAction<NonnullRefPtr<Gfx::Bitmap>>::construct(
         [path](auto&) -> ErrorOr<NonnullRefPtr<Gfx::Bitmap>> {
             if (path.is_empty())
                 return Error::from_errno(ENOENT);
-            return Gfx::Bitmap::try_load_from_file(path);
+            return Gfx::Bitmap::load_from_file(path);
         },
 
-        [this, path](ErrorOr<NonnullRefPtr<Gfx::Bitmap>> bitmap_or_error) -> ErrorOr<void> {
+        [this, path](NonnullRefPtr<Gfx::Bitmap> bitmap) -> ErrorOr<void> {
             // If we've been requested to change while we were loading the bitmap, don't bother spending the cost to
             // move and render the now stale bitmap.
             if (is_different_to_current_wallpaper_path(path))
                 return {};
-            if (bitmap_or_error.is_error())
-                m_wallpaper_bitmap = nullptr;
-            else
-                m_wallpaper_bitmap = bitmap_or_error.release_value();
+            m_wallpaper_bitmap = move(bitmap);
             m_desktop_dirty = true;
             update();
-
-            return bitmap_or_error.is_error() ? bitmap_or_error.release_error() : ErrorOr<void> {};
+            return {};
+        },
+        [this, path](Error) -> void {
+            m_wallpaper_bitmap = nullptr;
         });
 
     if (path.is_empty())
-        m_desktop_wallpaper_path = nullptr;
+        m_desktop_wallpaper_path = OptionalNone();
     else
-        m_desktop_wallpaper_path = move(path);
+        m_desktop_wallpaper_path = path;
 
     return true;
 }
 
-StringView MonitorWidget::wallpaper() const
+Optional<StringView> MonitorWidget::wallpaper() const
 {
-    return m_desktop_wallpaper_path;
+    if (m_desktop_wallpaper_path.has_value())
+        return m_desktop_wallpaper_path->bytes_as_string_view();
+    return OptionalNone();
 }
 
-void MonitorWidget::set_wallpaper_mode(DeprecatedString mode)
+void MonitorWidget::set_wallpaper_mode(String mode)
 {
     if (m_desktop_wallpaper_mode == mode)
         return;
@@ -124,14 +128,19 @@ void MonitorWidget::redraw_desktop_if_needed()
     float sh = (float)m_desktop_bitmap->height() / (float)m_desktop_resolution.height();
 
     auto scaled_size = m_wallpaper_bitmap->size().to_type<float>().scaled_by(sw, sh).to_type<int>();
-    auto scaled_bitmap = m_wallpaper_bitmap->scaled(sw, sh).release_value_but_fixme_should_propagate_errors();
+    auto scaled_bitmap_or_error = m_wallpaper_bitmap->scaled(sw, sh);
+    if (scaled_bitmap_or_error.is_error()) {
+        GUI::MessageBox::show_error(window(), "There was an error updating the desktop preview"sv);
+        return;
+    }
+    auto scaled_bitmap = scaled_bitmap_or_error.release_value();
 
-    if (m_desktop_wallpaper_mode == "Center") {
+    if (m_desktop_wallpaper_mode == "Center"sv) {
         auto centered_rect = Gfx::IntRect({}, scaled_size).centered_within(m_desktop_bitmap->rect());
         painter.blit(centered_rect.location(), *scaled_bitmap, scaled_bitmap->rect());
-    } else if (m_desktop_wallpaper_mode == "Tile") {
+    } else if (m_desktop_wallpaper_mode == "Tile"sv) {
         painter.draw_tiled_bitmap(m_desktop_bitmap->rect(), *scaled_bitmap);
-    } else if (m_desktop_wallpaper_mode == "Stretch") {
+    } else if (m_desktop_wallpaper_mode == "Stretch"sv) {
         painter.draw_scaled_bitmap(m_desktop_bitmap->rect(), *m_wallpaper_bitmap, m_wallpaper_bitmap->rect());
     } else {
         VERIFY_NOT_REACHED();
@@ -155,7 +164,7 @@ void MonitorWidget::paint_event(GUI::PaintEvent& event)
         // Render text label scaled with scale factor to hint at its effect.
         // FIXME: Once bitmaps have intrinsic scale factors, we could create a bitmap with an intrinsic scale factor of m_desktop_scale_factor
         // and that should give us the same effect with less code.
-        auto text_bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, Gfx::IntSize { painter.font().width(displayed_resolution_string) + 1, painter.font().glyph_height() + 1 });
+        auto text_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, Gfx::IntSize { painter.font().width(displayed_resolution_string) + 1, painter.font().pixel_size_rounded_up() + 1 });
         GUI::Painter text_painter(*text_bitmap);
         text_painter.set_font(painter.font());
 

@@ -1,10 +1,13 @@
 /*
  * Copyright (c) 2021, Ali Mohammad Pur <mpfard@serenityos.org>
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/Debug.h>
+#include <AK/Endian.h>
+#include <AK/MemoryStream.h>
 #include <LibWasm/AbstractMachine/AbstractMachine.h>
 #include <LibWasm/AbstractMachine/BytecodeInterpreter.h>
 #include <LibWasm/AbstractMachine/Configuration.h>
@@ -31,7 +34,7 @@ namespace Wasm {
 
 void BytecodeInterpreter::interpret(Configuration& configuration)
 {
-    m_trap.clear();
+    m_trap = Empty {};
     auto& instructions = configuration.frame().expression().instructions();
     auto max_ip_value = InstructionPointer { instructions.size() };
     auto& current_ip_value = configuration.ip();
@@ -48,7 +51,7 @@ void BytecodeInterpreter::interpret(Configuration& configuration)
         auto& instruction = instructions[current_ip_value.value()];
         auto old_ip = current_ip_value;
         interpret(configuration, current_ip_value, instruction);
-        if (m_trap.has_value())
+        if (did_trap())
             return;
         if (current_ip_value == old_ip) // If no jump occurred
             ++current_ip_value;
@@ -137,6 +140,11 @@ void BytecodeInterpreter::call_address(Configuration& configuration, FunctionAdd
         return;
     }
 
+    if (result.is_completion()) {
+        m_trap = move(result.completion());
+        return;
+    }
+
     configuration.stack().entries().ensure_capacity(configuration.stack().size() + result.values().size());
     for (auto& entry : result.values().in_reverse())
         configuration.stack().entries().unchecked_append(move(entry));
@@ -199,11 +207,9 @@ template<>
 struct ConvertToRaw<float> {
     u32 operator()(float value)
     {
-        LittleEndian<u32> res;
         ReadonlyBytes bytes { &value, sizeof(float) };
-        InputMemoryStream stream { bytes };
-        stream >> res;
-        VERIFY(!stream.has_any_error());
+        FixedMemoryStream stream { bytes };
+        auto res = stream.read_value<LittleEndian<u32>>().release_value_but_fixme_should_propagate_errors();
         return static_cast<u32>(res);
     }
 };
@@ -212,11 +218,9 @@ template<>
 struct ConvertToRaw<double> {
     u64 operator()(double value)
     {
-        LittleEndian<u64> res;
         ReadonlyBytes bytes { &value, sizeof(double) };
-        InputMemoryStream stream { bytes };
-        stream >> res;
-        VERIFY(!stream.has_any_error());
+        FixedMemoryStream stream { bytes };
+        auto res = stream.read_value<LittleEndian<u64>>().release_value_but_fixme_should_propagate_errors();
         return static_cast<u64>(res);
     }
 };
@@ -252,35 +256,34 @@ void BytecodeInterpreter::store_to_memory(Configuration& configuration, Instruct
 template<typename T>
 T BytecodeInterpreter::read_value(ReadonlyBytes data)
 {
-    LittleEndian<T> value;
-    InputMemoryStream stream { data };
-    stream >> value;
-    if (stream.handle_any_error()) {
+    FixedMemoryStream stream { data };
+    auto value_or_error = stream.read_value<LittleEndian<T>>();
+    if (value_or_error.is_error()) {
         dbgln("Read from {} failed", data.data());
         m_trap = Trap { "Read from memory failed" };
     }
-    return value;
+    return value_or_error.release_value();
 }
 
 template<>
 float BytecodeInterpreter::read_value<float>(ReadonlyBytes data)
 {
-    InputMemoryStream stream { data };
-    LittleEndian<u32> raw_value;
-    stream >> raw_value;
-    if (stream.handle_any_error())
+    FixedMemoryStream stream { data };
+    auto raw_value_or_error = stream.read_value<LittleEndian<u32>>();
+    if (raw_value_or_error.is_error())
         m_trap = Trap { "Read from memory failed" };
+    auto raw_value = raw_value_or_error.release_value();
     return bit_cast<float>(static_cast<u32>(raw_value));
 }
 
 template<>
 double BytecodeInterpreter::read_value<double>(ReadonlyBytes data)
 {
-    InputMemoryStream stream { data };
-    LittleEndian<u64> raw_value;
-    stream >> raw_value;
-    if (stream.handle_any_error())
+    FixedMemoryStream stream { data };
+    auto raw_value_or_error = stream.read_value<LittleEndian<u64>>();
+    if (raw_value_or_error.is_error())
         m_trap = Trap { "Read from memory failed" };
+    auto raw_value = raw_value_or_error.release_value();
     return bit_cast<double>(static_cast<u64>(raw_value));
 }
 
@@ -616,6 +619,93 @@ void BytecodeInterpreter::interpret(Configuration& configuration, InstructionPoi
             configuration.stack().peek() = Value((i32)-1);
         return;
     }
+    // https://webassembly.github.io/spec/core/bikeshed/#exec-memory-fill
+    case Instructions::memory_fill.value(): {
+        auto address = configuration.frame().module().memories()[0];
+        auto instance = configuration.store().get(address);
+        auto count = configuration.stack().pop().get<Value>().to<i32>().value();
+        auto value = configuration.stack().pop().get<Value>().to<i32>().value();
+        auto destination_offset = configuration.stack().pop().get<Value>().to<i32>().value();
+
+        TRAP_IF_NOT(static_cast<size_t>(destination_offset + count) <= instance->data().size());
+
+        if (count == 0)
+            return;
+
+        Instruction synthetic_store_instruction {
+            Instructions::i32_store8,
+            Instruction::MemoryArgument { 0, 0 }
+        };
+
+        for (auto i = 0; i < count; ++i) {
+            store_to_memory(configuration, synthetic_store_instruction, { &value, sizeof(value) }, destination_offset);
+        }
+        return;
+    }
+    // https://webassembly.github.io/spec/core/bikeshed/#exec-memory-copy
+    case Instructions::memory_copy.value(): {
+        auto address = configuration.frame().module().memories()[0];
+        auto instance = configuration.store().get(address);
+        auto count = configuration.stack().pop().get<Value>().to<i32>().value();
+        auto source_offset = configuration.stack().pop().get<Value>().to<i32>().value();
+        auto destination_offset = configuration.stack().pop().get<Value>().to<i32>().value();
+
+        TRAP_IF_NOT(static_cast<size_t>(source_offset + count) <= instance->data().size());
+        TRAP_IF_NOT(static_cast<size_t>(destination_offset + count) <= instance->data().size());
+
+        if (count == 0)
+            return;
+
+        Instruction synthetic_store_instruction {
+            Instructions::i32_store8,
+            Instruction::MemoryArgument { 0, 0 }
+        };
+
+        if (destination_offset <= source_offset) {
+            for (auto i = 0; i < count; ++i) {
+                auto value = instance->data()[source_offset + i];
+                store_to_memory(configuration, synthetic_store_instruction, { &value, sizeof(value) }, destination_offset + i);
+            }
+        } else {
+            for (auto i = count - 1; i >= 0; --i) {
+                auto value = instance->data()[source_offset + i];
+                store_to_memory(configuration, synthetic_store_instruction, { &value, sizeof(value) }, destination_offset + i);
+            }
+        }
+
+        return;
+    }
+    // https://webassembly.github.io/spec/core/bikeshed/#exec-memory-init
+    case Instructions::memory_init.value(): {
+        auto data_index = instruction.arguments().get<DataIndex>();
+        auto& data_address = configuration.frame().module().datas()[data_index.value()];
+        auto& data = *configuration.store().get(data_address);
+        auto count = *configuration.stack().pop().get<Value>().to<i32>();
+        auto source_offset = *configuration.stack().pop().get<Value>().to<i32>();
+        auto destination_offset = *configuration.stack().pop().get<Value>().to<i32>();
+
+        TRAP_IF_NOT(count > 0);
+        TRAP_IF_NOT(source_offset + count > 0);
+        TRAP_IF_NOT(static_cast<size_t>(source_offset + count) <= data.size());
+
+        Instruction synthetic_store_instruction {
+            Instructions::i32_store8,
+            Instruction::MemoryArgument { 0, 0 }
+        };
+
+        for (size_t i = 0; i < (size_t)count; ++i) {
+            auto value = data.data()[source_offset + i];
+            store_to_memory(configuration, synthetic_store_instruction, { &value, sizeof(value) }, destination_offset + i);
+        }
+        return;
+    }
+    // https://webassembly.github.io/spec/core/bikeshed/#exec-data-drop
+    case Instructions::data_drop.value(): {
+        auto data_index = instruction.arguments().get<DataIndex>();
+        auto data_address = configuration.frame().module().datas()[data_index.value()];
+        *configuration.store().get(data_address) = DataInstance({});
+        return;
+    }
     case Instructions::table_get.value():
     case Instructions::table_set.value():
         goto unimplemented;
@@ -926,32 +1016,6 @@ void BytecodeInterpreter::interpret(Configuration& configuration, InstructionPoi
         return unary_operation<double, i64, Operators::SaturatingTruncate<i64>>(configuration);
     case Instructions::i64_trunc_sat_f64_u.value():
         return unary_operation<double, i64, Operators::SaturatingTruncate<u64>>(configuration);
-    case Instructions::memory_init.value(): {
-        auto data_index = instruction.arguments().get<DataIndex>();
-        auto& data_address = configuration.frame().module().datas()[data_index.value()];
-        auto& data = *configuration.store().get(data_address);
-        auto count = *configuration.stack().pop().get<Value>().to<i32>();
-        auto source_offset = *configuration.stack().pop().get<Value>().to<i32>();
-        auto destination_offset = *configuration.stack().pop().get<Value>().to<i32>();
-
-        TRAP_IF_NOT(count > 0);
-        TRAP_IF_NOT(source_offset + count > 0);
-        TRAP_IF_NOT(static_cast<size_t>(source_offset + count) <= data.size());
-
-        Instruction synthetic_store_instruction {
-            Instructions::i32_store8,
-            Instruction::MemoryArgument { 0, 0 }
-        };
-
-        for (size_t i = 0; i < (size_t)count; ++i) {
-            auto value = data.data()[source_offset + i];
-            store_to_memory(configuration, synthetic_store_instruction, { &value, sizeof(value) }, destination_offset + i);
-        }
-        return;
-    }
-    case Instructions::data_drop.value():
-    case Instructions::memory_copy.value():
-    case Instructions::memory_fill.value():
     case Instructions::table_init.value():
     case Instructions::elem_drop.value():
     case Instructions::table_copy.value():

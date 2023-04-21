@@ -8,14 +8,18 @@
 #include <AK/BinarySearch.h>
 #include <AK/Debug.h>
 #include <AK/Demangle.h>
-#include <AK/Memory.h>
 #include <AK/QuickSort.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
 #include <Kernel/API/serenity_limits.h>
 #include <LibELF/Image.h>
 #include <LibELF/Validation.h>
-#include <limits.h>
+
+#ifdef KERNEL
+#    include <Kernel/StdLib.h>
+#else
+#    include <string.h>
+#endif
 
 namespace ELF {
 

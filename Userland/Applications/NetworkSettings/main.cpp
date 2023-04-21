@@ -9,7 +9,6 @@
 #include <LibGUI/MessageBox.h>
 #include <unistd.h>
 
-#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/Icon.h>
@@ -22,7 +21,6 @@ ErrorOr<int> serenity_main(Main::Arguments args)
 
     TRY(Core::System::unveil("/bin/NetworkServer", "x"));
     TRY(Core::System::unveil("/etc/Network.ini", "rwc"));
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/sys/kernel/net/adapters", "r"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/clipboard", "rw"));
@@ -46,7 +44,7 @@ ErrorOr<int> serenity_main(Main::Arguments args)
 
     auto app_icon = GUI::Icon::default_icon("network"sv);
     auto window = TRY(GUI::SettingsWindow::create("Network Settings", GUI::SettingsWindow::ShowDefaultsButton::No));
-    auto network_settings_widget = TRY(window->add_tab<NetworkSettings::NetworkSettingsWidget>("Network"sv, "network"sv));
+    auto network_settings_widget = TRY(window->add_tab<NetworkSettings::NetworkSettingsWidget>("Network"_short_string, "network"sv));
     if (!adapter.is_null()) {
         network_settings_widget->switch_adapter(adapter);
     }

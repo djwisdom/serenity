@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/Bindings/AudioConstructor.h>
+#include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/HTMLAudioElementPrototype.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
@@ -14,17 +15,19 @@
 namespace Web::Bindings {
 
 AudioConstructor::AudioConstructor(JS::Realm& realm)
-    : NativeFunction(*realm.intrinsics().function_prototype())
+    : NativeFunction(realm.intrinsics().function_prototype())
 {
 }
 
-void AudioConstructor::initialize(JS::Realm& realm)
+JS::ThrowCompletionOr<void> AudioConstructor::initialize(JS::Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
-    define_direct_property(vm.names.prototype, &cached_web_prototype(realm, "HTMLAudioElement"), 0);
+    define_direct_property(vm.names.prototype, &ensure_web_prototype<Bindings::HTMLAudioElementPrototype>(realm, "HTMLAudioElement"), 0);
     define_direct_property(vm.names.length, JS::Value(0), JS::Attribute::Configurable);
+
+    return {};
 }
 
 JS::ThrowCompletionOr<JS::Value> AudioConstructor::call()
@@ -42,7 +45,7 @@ JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Object>> AudioConstructor::construct(
     auto& document = window.associated_document();
 
     // 2. Let audio be the result of creating an element given document, audio, and the HTML namespace.
-    auto audio = DOM::create_element(document, HTML::TagNames::audio, Namespace::HTML);
+    auto audio = TRY(Bindings::throw_dom_exception_if_needed(vm, [&]() { return DOM::create_element(document, HTML::TagNames::audio, Namespace::HTML); }));
 
     // 3. Set an attribute value for audio using "preload" and "auto".
     MUST(audio->set_attribute(HTML::AttributeNames::preload, "auto"sv));
@@ -52,7 +55,7 @@ JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Object>> AudioConstructor::construct(
     // 4. If src is given, then set an attribute value for audio using "src" and src.
     //    (This will cause the user agent to invoke the object's resource selection algorithm before returning.)
     if (!src_value.is_undefined()) {
-        auto src = TRY(src_value.to_string(vm));
+        auto src = TRY(src_value.to_deprecated_string(vm));
         MUST(audio->set_attribute(HTML::AttributeNames::src, move(src)));
     }
 

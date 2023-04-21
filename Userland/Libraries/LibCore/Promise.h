@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Kyle Pereira <hey@xylepereira.me>
+ * Copyright (c) 2022, kleines Filmröllchen <filmroellchen@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,31 +11,44 @@
 #include <LibCore/Object.h>
 
 namespace Core {
+
 template<typename Result>
 class Promise : public Object {
     C_OBJECT(Promise);
 
 public:
-    Function<void(Result&)> on_resolved;
+    Function<ErrorOr<void>(Result&)> on_resolved;
 
-    void resolve(Result&& result)
+    ErrorOr<void> resolve(Result&& result)
     {
-        m_pending = move(result);
+        m_pending_or_error = move(result);
+
         if (on_resolved)
-            on_resolved(m_pending.value());
+            return on_resolved(m_pending_or_error->value());
+        return {};
     }
 
-    bool is_resolved()
+    void cancel(Error error)
     {
-        return m_pending.has_value();
-    };
+        m_pending_or_error = move(error);
+    }
 
-    Result await()
+    bool is_canceled()
     {
-        while (!is_resolved()) {
+        return m_pending_or_error.has_value() && m_pending_or_error->is_error();
+    }
+
+    bool is_resolved() const
+    {
+        return m_pending_or_error.has_value() && !m_pending_or_error->is_error();
+    }
+
+    ErrorOr<Result> await()
+    {
+        while (!m_pending_or_error.has_value())
             Core::EventLoop::current().pump();
-        }
-        return m_pending.release_value();
+
+        return m_pending_or_error.release_value();
     }
 
     // Converts a Promise<A> to a Promise<B> using a function func: A -> B
@@ -44,14 +58,19 @@ public:
         RefPtr<Promise<T>> new_promise = Promise<T>::construct();
         on_resolved = [new_promise, func](Result& result) {
             auto t = func(result);
-            new_promise->resolve(move(t));
+            return new_promise->resolve(move(t));
         };
         return new_promise;
     }
 
 private:
     Promise() = default;
+    Promise(Object* parent)
+        : Object(parent)
+    {
+    }
 
-    Optional<Result> m_pending;
+    Optional<ErrorOr<Result>> m_pending_or_error;
 };
+
 }

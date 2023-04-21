@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/OwnPtr.h>
+#include <AK/Vector.h>
 #include <Kernel/Memory/PhysicalPage.h>
 #include <Kernel/Memory/PhysicalZone.h>
 
@@ -34,7 +35,7 @@ public:
     OwnPtr<PhysicalRegion> try_take_pages_from_beginning(size_t);
 
     RefPtr<PhysicalPage> take_free_page();
-    NonnullRefPtrVector<PhysicalPage> take_contiguous_free_pages(size_t count);
+    Vector<NonnullRefPtr<PhysicalPage>> take_contiguous_free_pages(size_t count);
     void return_page(PhysicalAddress);
 
 private:
@@ -43,7 +44,7 @@ private:
     static constexpr size_t large_zone_size = 16 * MiB;
     static constexpr size_t small_zone_size = 1 * MiB;
 
-    NonnullOwnPtrVector<PhysicalZone> m_zones;
+    Vector<NonnullOwnPtr<PhysicalZone>> m_zones;
 
     size_t m_large_zones { 0 };
 

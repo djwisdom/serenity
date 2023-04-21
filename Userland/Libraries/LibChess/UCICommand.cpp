@@ -105,7 +105,7 @@ DeprecatedString SetOptionCommand::to_deprecated_string() const
         builder.append(value().value());
     }
     builder.append('\n');
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 PositionCommand PositionCommand::from_string(StringView command)
@@ -141,7 +141,7 @@ DeprecatedString PositionCommand::to_deprecated_string() const
         builder.append(move.to_long_algebraic());
     }
     builder.append('\n');
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 GoCommand GoCommand::from_string(StringView command)
@@ -227,7 +227,7 @@ DeprecatedString GoCommand::to_deprecated_string() const
         builder.append(" infinite"sv);
 
     builder.append('\n');
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 StopCommand StopCommand::from_string(StringView command)
@@ -256,9 +256,9 @@ IdCommand IdCommand::from_string(StringView command)
     }
 
     if (tokens[1] == "name") {
-        return IdCommand(Type::Name, value.build());
+        return IdCommand(Type::Name, value.to_deprecated_string());
     } else if (tokens[1] == "author") {
-        return IdCommand(Type::Author, value.build());
+        return IdCommand(Type::Author, value.to_deprecated_string());
     }
     VERIFY_NOT_REACHED();
 }
@@ -274,7 +274,7 @@ DeprecatedString IdCommand::to_deprecated_string() const
     }
     builder.append(value());
     builder.append('\n');
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 UCIOkCommand UCIOkCommand::from_string(StringView command)
@@ -317,7 +317,7 @@ DeprecatedString BestMoveCommand::to_deprecated_string() const
     builder.append("bestmove "sv);
     builder.append(move().to_long_algebraic());
     builder.append('\n');
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 InfoCommand InfoCommand::from_string([[maybe_unused]] StringView command)
@@ -331,6 +331,19 @@ DeprecatedString InfoCommand::to_deprecated_string() const
     // FIXME: Implement this.
     VERIFY_NOT_REACHED();
     return "info";
+}
+
+QuitCommand QuitCommand::from_string([[maybe_unused]] StringView command)
+{
+    auto tokens = command.split_view(' ');
+    VERIFY(tokens[0] == "quit");
+    VERIFY(tokens.size() == 1);
+    return QuitCommand();
+}
+
+DeprecatedString QuitCommand::to_deprecated_string() const
+{
+    return "quit\n";
 }
 
 }

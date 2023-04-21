@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLQuoteElement : HTMLElement {
 
-    [Reflect] attribute DOMString cite;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute USVString cite;
 
 };

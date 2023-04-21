@@ -170,6 +170,8 @@ PDFErrorOr<NonnullRefPtr<IndirectValue>> Parser::parse_indirect_value()
 
 PDFErrorOr<Value> Parser::parse_number()
 {
+    m_reader.consume_whitespace();
+
     size_t start_offset = m_reader.offset();
     bool is_float = false;
     bool consumed_digit = false;
@@ -265,7 +267,7 @@ NonnullRefPtr<StringObject> Parser::parse_string()
 
     if (unencrypted_string.bytes().starts_with(Array<u8, 2> { 0xfe, 0xff })) {
         // The string is encoded in UTF16-BE
-        string_object->set_string(TextCodec::decoder_for("utf-16be")->to_utf8(unencrypted_string));
+        string_object->set_string(TextCodec::decoder_for("utf-16be"sv)->to_utf8(unencrypted_string).release_value_but_fixme_should_propagate_errors().to_deprecated_string());
     } else if (unencrypted_string.bytes().starts_with(Array<u8, 3> { 239, 187, 191 })) {
         // The string is encoded in UTF-8. This is the default anyways, but if these bytes
         // are explicitly included, we have to trim them
@@ -416,7 +418,7 @@ PDFErrorOr<NonnullRefPtr<DictObject>> Parser::parse_dict()
         return error("Expected dict to start with \"<<\"");
 
     m_reader.consume_whitespace();
-    HashMap<FlyString, Value> map;
+    HashMap<DeprecatedFlyString, Value> map;
 
     while (!m_reader.done()) {
         if (m_reader.matches(">>"))
@@ -444,7 +446,7 @@ PDFErrorOr<NonnullRefPtr<StreamObject>> Parser::parse_stream(NonnullRefPtr<DictO
     ReadonlyBytes bytes;
 
     auto maybe_length = dict->get(CommonNames::Length);
-    if (maybe_length.has_value() && (!maybe_length->has<Reference>())) {
+    if (maybe_length.has_value() && m_document->can_resolve_refefences()) {
         // The PDF writer has kindly provided us with the direct length of the stream
         m_reader.save();
         auto length = TRY(m_document->resolve_to<int>(maybe_length.value()));
@@ -455,17 +457,13 @@ PDFErrorOr<NonnullRefPtr<StreamObject>> Parser::parse_stream(NonnullRefPtr<DictO
     } else {
         // We have to look for the endstream keyword
         auto stream_start = m_reader.offset();
-
-        while (true) {
-            m_reader.move_until([&](auto) { return m_reader.matches_eol(); });
-            auto potential_stream_end = m_reader.offset();
-            m_reader.consume_eol();
-            if (!m_reader.matches("endstream"))
-                continue;
-
-            bytes = m_reader.bytes().slice(stream_start, potential_stream_end - stream_start);
-            break;
+        while (!m_reader.matches("endstream")) {
+            m_reader.consume();
+            m_reader.move_until('e');
         }
+        auto stream_end = m_reader.offset();
+        m_reader.consume_eol();
+        bytes = m_reader.bytes().slice(stream_start, stream_end - stream_start);
     }
 
     m_reader.move_by(9);
@@ -477,7 +475,7 @@ PDFErrorOr<NonnullRefPtr<StreamObject>> Parser::parse_stream(NonnullRefPtr<DictO
         m_document->security_handler()->decrypt(stream_object, m_current_reference_stack.last());
 
     if (dict->contains(CommonNames::Filter)) {
-        Vector<FlyString> filters;
+        Vector<DeprecatedFlyString> filters;
 
         // We may either get a single filter or an array of cascading filters
         auto filter_object = TRY(dict->get_object(m_document, CommonNames::Filter));
@@ -497,8 +495,10 @@ PDFErrorOr<NonnullRefPtr<StreamObject>> Parser::parse_stream(NonnullRefPtr<DictO
             if (decode_parms_object->is<ArrayObject>()) {
                 auto decode_parms_array = decode_parms_object->cast<ArrayObject>();
                 for (size_t i = 0; i < decode_parms_array->size(); ++i) {
-                    // FIXME: This entry may be the null object instead
-                    RefPtr<DictObject> decode_parms = decode_parms_array->at(i).get<NonnullRefPtr<Object>>()->cast<DictObject>();
+                    RefPtr<DictObject> decode_parms;
+                    auto entry = decode_parms_array->at(i);
+                    if (entry.has<NonnullRefPtr<Object>>())
+                        decode_parms = entry.get<NonnullRefPtr<Object>>()->cast<DictObject>();
                     decode_parms_vector.append(decode_parms);
                 }
             } else {

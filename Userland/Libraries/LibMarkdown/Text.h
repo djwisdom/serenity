@@ -10,9 +10,9 @@
 
 #include <AK/DeprecatedString.h>
 #include <AK/Noncopyable.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/OwnPtr.h>
 #include <AK/RecursionDecision.h>
+#include <AK/Vector.h>
 #include <LibMarkdown/Forward.h>
 
 namespace Markdown {
@@ -121,7 +121,7 @@ public:
 
     class MultiNode : public Node {
     public:
-        NonnullOwnPtrVector<Node> children;
+        Vector<NonnullOwnPtr<Node>> children;
 
         virtual void render_to_html(StringBuilder& builder) const override;
         virtual void render_for_terminal(StringBuilder& builder) const override;

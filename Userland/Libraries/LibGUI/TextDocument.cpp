@@ -1,12 +1,14 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, the SerenityOS developers.
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/Badge.h>
 #include <AK/CharacterTypes.h>
+#include <AK/Debug.h>
 #include <AK/QuickSort.h>
 #include <AK/ScopeGuard.h>
 #include <AK/StdLibExtras.h>
@@ -15,6 +17,8 @@
 #include <LibCore/Timer.h>
 #include <LibGUI/TextDocument.h>
 #include <LibRegex/Regex.h>
+#include <LibUnicode/CharacterTypes.h>
+#include <LibUnicode/Segmentation.h>
 
 namespace GUI {
 
@@ -43,6 +47,7 @@ bool TextDocument::set_text(StringView text, AllowCallback allow_callback)
     m_client_notifications_enabled = false;
     m_undo_stack.clear();
     m_spans.clear();
+    m_folding_regions.clear();
     remove_all_lines();
 
     ArmedScopeGuard clear_text_guard([this]() {
@@ -382,6 +387,34 @@ DeprecatedString TextDocument::text_in_range(TextRange const& a_range) const
     return builder.to_deprecated_string();
 }
 
+// This function will return the position of the previous grapheme cluster
+// break, relative to the cursor, for "correct looking" parsing of unicode based
+// on grapheme cluster boundary algorithm.
+size_t TextDocument::get_previous_grapheme_cluster_boundary(TextPosition const& cursor) const
+{
+    if (!cursor.is_valid())
+        return 0;
+
+    auto const& line = this->line(cursor.line());
+
+    auto index = Unicode::previous_grapheme_segmentation_boundary(line.view(), cursor.column());
+    return index.value_or(cursor.column() - 1);
+}
+
+// This function will return the position of the next grapheme cluster break,
+// relative to the cursor, for "correct looking" parsing of unicode based on
+// grapheme cluster boundary algorithm.
+size_t TextDocument::get_next_grapheme_cluster_boundary(TextPosition const& cursor) const
+{
+    if (!cursor.is_valid())
+        return 0;
+
+    auto const& line = this->line(cursor.line());
+
+    auto index = Unicode::next_grapheme_segmentation_boundary(line.view(), cursor.column());
+    return index.value_or(cursor.column() + 1);
+}
+
 u32 TextDocument::code_point_at(TextPosition const& position) const
 {
     VERIFY(position.line() < line_count());
@@ -429,7 +462,7 @@ void TextDocument::update_regex_matches(StringView needle)
         Vector<RegexStringView> views;
 
         for (size_t line = 0; line < m_lines.size(); ++line) {
-            views.append(m_lines.at(line).view());
+            views.append(m_lines[line]->view());
         }
         re.search(views, m_regex_result);
         m_regex_needs_update = false;
@@ -499,14 +532,27 @@ TextRange TextDocument::find_next(StringView needle, TextPosition const& start, 
     TextPosition start_of_potential_match;
     size_t needle_index = 0;
 
+    Utf8View unicode_needle(needle);
+    Vector<u32> needle_code_points;
+    for (u32 code_point : unicode_needle)
+        needle_code_points.append(code_point);
+
     do {
         auto ch = code_point_at(position);
-        // FIXME: This is not the right way to use a Unicode needle!
-        if (match_case ? ch == (u32)needle[needle_index] : tolower(ch) == tolower((u32)needle[needle_index])) {
+
+        bool code_point_matches = false;
+        if (needle_index >= needle_code_points.size())
+            code_point_matches = false;
+        else if (match_case)
+            code_point_matches = ch == needle_code_points[needle_index];
+        else
+            code_point_matches = Unicode::to_unicode_lowercase(ch) == Unicode::to_unicode_lowercase(needle_code_points[needle_index]);
+
+        if (code_point_matches) {
             if (needle_index == 0)
                 start_of_potential_match = position;
             ++needle_index;
-            if (needle_index >= needle.length())
+            if (needle_index >= needle_code_points.size())
                 return { start_of_potential_match, next_position_after(position, should_wrap) };
         } else {
             if (needle_index > 0)
@@ -580,22 +626,35 @@ TextRange TextDocument::find_previous(StringView needle, TextPosition const& sta
         return {};
     TextPosition original_position = position;
 
+    Utf8View unicode_needle(needle);
+    Vector<u32> needle_code_points;
+    for (u32 code_point : unicode_needle)
+        needle_code_points.append(code_point);
+
     TextPosition end_of_potential_match;
-    size_t needle_index = needle.length() - 1;
+    size_t needle_index = needle_code_points.size() - 1;
 
     do {
         auto ch = code_point_at(position);
-        // FIXME: This is not the right way to use a Unicode needle!
-        if (match_case ? ch == (u32)needle[needle_index] : tolower(ch) == tolower((u32)needle[needle_index])) {
-            if (needle_index == needle.length() - 1)
+
+        bool code_point_matches = false;
+        if (needle_index >= needle_code_points.size())
+            code_point_matches = false;
+        else if (match_case)
+            code_point_matches = ch == needle_code_points[needle_index];
+        else
+            code_point_matches = Unicode::to_unicode_lowercase(ch) == Unicode::to_unicode_lowercase(needle_code_points[needle_index]);
+
+        if (code_point_matches) {
+            if (needle_index == needle_code_points.size() - 1)
                 end_of_potential_match = position;
             if (needle_index == 0)
                 return { position, next_position_after(end_of_potential_match, should_wrap) };
             --needle_index;
         } else {
-            if (needle_index < needle.length() - 1)
+            if (needle_index < needle_code_points.size() - 1)
                 position = end_of_potential_match;
-            needle_index = needle.length() - 1;
+            needle_index = needle_code_points.size() - 1;
         }
         position = previous_position_before(position, should_wrap);
     } while (position.is_valid() && position != original_position);
@@ -656,6 +715,26 @@ Optional<TextDocumentSpan> TextDocument::first_non_skippable_span_after(TextPosi
     return {};
 }
 
+static bool should_continue_beyond_word(Utf32View const& view)
+{
+    static auto punctuation = Unicode::general_category_from_string("Punctuation"sv);
+    static auto separator = Unicode::general_category_from_string("Separator"sv);
+
+    if (!punctuation.has_value() || !separator.has_value())
+        return false;
+
+    auto has_any_gc = [&](auto code_point, auto&&... categories) {
+        return (Unicode::code_point_has_general_category(code_point, *categories) || ...);
+    };
+
+    for (auto code_point : view) {
+        if (!has_any_gc(code_point, punctuation, separator))
+            return false;
+    }
+
+    return true;
+}
+
 TextPosition TextDocument::first_word_break_before(TextPosition const& position, bool start_at_column_before) const
 {
     if (position.column() == 0) {
@@ -667,20 +746,26 @@ TextPosition TextDocument::first_word_break_before(TextPosition const& position,
     }
 
     auto target = position;
-    auto line = this->line(target.line());
+    auto const& line = this->line(target.line());
+
     auto modifier = start_at_column_before ? 1 : 0;
     if (target.column() == line.length())
         modifier = 1;
 
-    while (target.column() > 0 && is_ascii_blank(line.code_points()[target.column() - modifier]))
-        target.set_column(target.column() - 1);
-    auto is_start_alphanumeric = is_ascii_alphanumeric(line.code_points()[target.column() - modifier]);
+    target.set_column(target.column() - modifier);
 
-    while (target.column() > 0) {
-        auto prev_code_point = line.code_points()[target.column() - 1];
-        if ((is_start_alphanumeric && !is_ascii_alphanumeric(prev_code_point)) || (!is_start_alphanumeric && is_ascii_alphanumeric(prev_code_point)))
+    while (target.column() < line.length()) {
+        if (auto index = Unicode::previous_word_segmentation_boundary(line.view(), target.column()); index.has_value()) {
+            auto view_between_target_and_index = line.view().substring_view(*index, target.column() - *index);
+
+            if (should_continue_beyond_word(view_between_target_and_index)) {
+                target.set_column(*index - 1);
+                continue;
+            }
+
+            target.set_column(*index);
             break;
-        target.set_column(target.column() - 1);
+        }
     }
 
     return target;
@@ -689,7 +774,7 @@ TextPosition TextDocument::first_word_break_before(TextPosition const& position,
 TextPosition TextDocument::first_word_break_after(TextPosition const& position) const
 {
     auto target = position;
-    auto line = this->line(target.line());
+    auto const& line = this->line(target.line());
 
     if (position.column() >= line.length()) {
         if (position.line() >= this->line_count() - 1) {
@@ -698,15 +783,18 @@ TextPosition TextDocument::first_word_break_after(TextPosition const& position) 
         return TextPosition(position.line() + 1, 0);
     }
 
-    while (target.column() < line.length() && is_ascii_space(line.code_points()[target.column()]))
-        target.set_column(target.column() + 1);
-    auto is_start_alphanumeric = is_ascii_alphanumeric(line.code_points()[target.column()]);
-
     while (target.column() < line.length()) {
-        auto next_code_point = line.code_points()[target.column()];
-        if ((is_start_alphanumeric && !is_ascii_alphanumeric(next_code_point)) || (!is_start_alphanumeric && is_ascii_alphanumeric(next_code_point)))
+        if (auto index = Unicode::next_word_segmentation_boundary(line.view(), target.column()); index.has_value()) {
+            auto view_between_target_and_index = line.view().substring_view(target.column(), *index - target.column());
+
+            if (should_continue_beyond_word(view_between_target_and_index)) {
+                target.set_column(*index + 1);
+                continue;
+            }
+
+            target.set_column(*index);
             break;
-        target.set_column(target.column() + 1);
+        }
     }
 
     return target;
@@ -854,7 +942,7 @@ void InsertTextCommand::perform_formatting(TextDocument::Client const& client)
             ++column;
         }
     }
-    m_text = builder.build();
+    m_text = builder.to_deprecated_string();
 }
 
 void InsertTextCommand::redo()
@@ -970,7 +1058,8 @@ DeprecatedString InsertLineCommand::action_text() const
 
 ReplaceAllTextCommand::ReplaceAllTextCommand(GUI::TextDocument& document, DeprecatedString const& text, GUI::TextRange const& range, DeprecatedString const& action_text)
     : TextDocumentUndoCommand(document)
-    , m_text(text)
+    , m_original_text(document.text())
+    , m_new_text(text)
     , m_range(range)
     , m_action_text(action_text)
 {
@@ -980,7 +1069,7 @@ void ReplaceAllTextCommand::redo()
 {
     m_document.remove(m_range);
     m_document.set_all_cursors(m_range.start());
-    auto new_cursor = m_document.insert_at(m_range.start(), m_text, m_client);
+    auto new_cursor = m_document.insert_at(m_range.start(), m_new_text, m_client);
     m_range.set_end(new_cursor);
     m_document.set_all_cursors(new_cursor);
 }
@@ -989,7 +1078,7 @@ void ReplaceAllTextCommand::undo()
 {
     m_document.remove(m_range);
     m_document.set_all_cursors(m_range.start());
-    auto new_cursor = m_document.insert_at(m_range.start(), m_text);
+    auto new_cursor = m_document.insert_at(m_range.start(), m_original_text, m_client);
     m_range.set_end(new_cursor);
     m_document.set_all_cursors(new_cursor);
 }
@@ -1302,9 +1391,8 @@ void TextDocument::merge_span_collections()
         merged_span.span.attributes.color = span_and_collection_index.collection_index > last_span_and_collection_index.collection_index ? span.attributes.color : last_span.attributes.color;
         merged_span.span.attributes.bold = span.attributes.bold | last_span.attributes.bold;
         merged_span.span.attributes.background_color = span.attributes.background_color.has_value() ? span.attributes.background_color.value() : last_span.attributes.background_color;
-        merged_span.span.attributes.underline = span.attributes.underline | last_span.attributes.underline;
         merged_span.span.attributes.underline_color = span.attributes.underline_color.has_value() ? span.attributes.underline_color.value() : last_span.attributes.underline_color;
-        merged_span.span.attributes.underline_style = span.attributes.underline_style;
+        merged_span.span.attributes.underline_style = span.attributes.underline_style.has_value() ? span.attributes.underline_style : last_span.attributes.underline_style;
         merged_spans.append(move(merged_span));
 
         if (span.range.end() == last_span.range.end())
@@ -1323,9 +1411,109 @@ void TextDocument::merge_span_collections()
     }
 
     m_spans.clear();
+    TextDocumentSpan previous_span { .range = { TextPosition(0, 0), TextPosition(0, 0) }, .attributes = {} };
     for (auto span : merged_spans) {
+        // Validate spans
+        if (!span.span.range.is_valid()) {
+            dbgln_if(TEXTEDITOR_DEBUG, "Invalid span {} => ignoring", span.span.range);
+            continue;
+        }
+        if (span.span.range.end() < span.span.range.start()) {
+            dbgln_if(TEXTEDITOR_DEBUG, "Span {} has negative length => ignoring", span.span.range);
+            continue;
+        }
+        if (span.span.range.end() < previous_span.range.start()) {
+            dbgln_if(TEXTEDITOR_DEBUG, "Spans not sorted (Span {} ends before previous span {}) => ignoring", span.span.range, previous_span.range);
+            continue;
+        }
+        if (span.span.range.start() < previous_span.range.end()) {
+            dbgln_if(TEXTEDITOR_DEBUG, "Span {} overlaps previous span {} => ignoring", span.span.range, previous_span.range);
+            continue;
+        }
+
+        previous_span = span.span;
         m_spans.append(move(span.span));
     }
+}
+
+void TextDocument::set_folding_regions(Vector<TextDocumentFoldingRegion> folding_regions)
+{
+    // Remove any regions that don't span at least 3 lines.
+    // Currently, we can't do anything useful with them, and our implementation gets very confused by
+    // single-line regions, so drop them.
+    folding_regions.remove_all_matching([](TextDocumentFoldingRegion const& region) {
+        return region.range.line_count() < 3;
+    });
+
+    quick_sort(folding_regions, [](TextDocumentFoldingRegion const& a, TextDocumentFoldingRegion const& b) {
+        return a.range.start() < b.range.start();
+    });
+
+    for (auto& folding_region : folding_regions) {
+        folding_region.line_ptr = &line(folding_region.range.start().line());
+
+        // Map the new folding region to an old one, to preserve which regions were folded.
+        // FIXME: This is O(n*n).
+        for (auto const& existing_folding_region : m_folding_regions) {
+            // We treat two folding regions as the same if they start on the same TextDocumentLine,
+            // and have the same line count. The actual line *numbers* might change, but the pointer
+            // and count should not.
+            if (existing_folding_region.line_ptr
+                && existing_folding_region.line_ptr == folding_region.line_ptr
+                && existing_folding_region.range.line_count() == folding_region.range.line_count()) {
+                folding_region.is_folded = existing_folding_region.is_folded;
+                break;
+            }
+        }
+    }
+
+    // FIXME: Remove any regions that partially overlap another region, since these are invalid.
+
+    m_folding_regions = move(folding_regions);
+
+    if constexpr (TEXTEDITOR_DEBUG) {
+        dbgln("TextDocument got {} fold regions:", m_folding_regions.size());
+        for (auto const& item : m_folding_regions) {
+            dbgln("- {} (ptr: {:p}, folded: {})", item.range, item.line_ptr, item.is_folded);
+        }
+    }
+}
+
+Optional<TextDocumentFoldingRegion&> TextDocument::folding_region_starting_on_line(size_t line)
+{
+    return m_folding_regions.first_matching([line](auto& region) {
+        return region.range.start().line() == line;
+    });
+}
+
+bool TextDocument::line_is_visible(size_t line) const
+{
+    // FIXME: line_is_visible() gets called a lot.
+    //        We could avoid a lot of repeated work if we saved this state on the TextDocumentLine.
+    return !any_of(m_folding_regions, [line](auto& region) {
+        return region.is_folded
+            && line > region.range.start().line()
+            && line < region.range.end().line();
+    });
+}
+
+Vector<TextDocumentFoldingRegion const&> TextDocument::currently_folded_regions() const
+{
+    Vector<TextDocumentFoldingRegion const&> folded_regions;
+
+    for (auto& region : m_folding_regions) {
+        if (region.is_folded) {
+            // Only add this region if it's not contained within a previous folded region.
+            // Because regions are sorted by their start position, and regions cannot partially overlap,
+            // we can just see if it starts inside the last region we appended.
+            if (!folded_regions.is_empty() && folded_regions.last().range.contains(region.range.start()))
+                continue;
+
+            folded_regions.append(region);
+        }
+    }
+
+    return folded_regions;
 }
 
 }

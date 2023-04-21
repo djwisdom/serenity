@@ -11,6 +11,7 @@
 #include <LibGfx/Filters/StackBlurFilter.h>
 #include <LibGfx/Painter.h>
 #include <LibWeb/Layout/LineBoxFragment.h>
+#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BorderPainting.h>
 #include <LibWeb/Painting/BorderRadiusCornerClipper.h>
 #include <LibWeb/Painting/PaintContext.h>
@@ -164,7 +165,7 @@ void paint_box_shadow(PaintContext& context, CSSPixelRect const& content_rect, B
         DevicePixelRect top_edge_rect { top_left_corner_rect.width(), 0, 1, horizontal_top_edge_width };
         DevicePixelRect bottom_edge_rect { bottom_left_corner_rect.width(), shadow_bitmap_rect.height() - horizontal_edge_width, 1, horizontal_edge_width };
 
-        auto shadows_bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, shadow_bitmap_rect.size().to_type<int>());
+        auto shadows_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, shadow_bitmap_rect.size().to_type<int>());
         if (shadows_bitmap.is_error()) {
             dbgln("Unable to allocate temporary bitmap {} for box-shadow rendering: {}", shadow_bitmap_rect, shadows_bitmap.error());
             return;
@@ -361,7 +362,7 @@ void paint_text_shadow(PaintContext& context, Layout::LineBoxFragment const& fra
             text_rect.height() + margin + margin
         };
         // FIXME: Figure out the maximum bitmap size for all shadows and then allocate it once and reuse it?
-        auto maybe_shadow_bitmap = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, bounding_rect.size().to_type<int>());
+        auto maybe_shadow_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, bounding_rect.size().to_type<int>());
         if (maybe_shadow_bitmap.is_error()) {
             dbgln("Unable to allocate temporary bitmap {} for text-shadow rendering: {}", bounding_rect.size(), maybe_shadow_bitmap.error());
             return;
@@ -369,10 +370,9 @@ void paint_text_shadow(PaintContext& context, Layout::LineBoxFragment const& fra
         auto shadow_bitmap = maybe_shadow_bitmap.release_value();
 
         Gfx::Painter shadow_painter { *shadow_bitmap };
-        shadow_painter.set_font(context.painter().font());
         // FIXME: "Spread" the shadow somehow.
         DevicePixelPoint baseline_start(text_rect.x(), text_rect.y() + context.rounded_device_pixels(fragment.baseline()));
-        shadow_painter.draw_text_run(baseline_start.to_type<int>(), Utf8View(fragment.text()), context.painter().font(), layer.color);
+        shadow_painter.draw_text_run(baseline_start.to_type<int>(), Utf8View(fragment.text()), fragment.layout_node().scaled_font(context), layer.color);
 
         // Blur
         Gfx::StackBlurFilter filter(*shadow_bitmap);

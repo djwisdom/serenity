@@ -17,19 +17,46 @@
 namespace Web::HTML {
 
 HTMLObjectElement::HTMLObjectElement(DOM::Document& document, DOM::QualifiedName qualified_name)
-    : BrowsingContextContainer(document, move(qualified_name))
+    : NavigableContainer(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLObjectElement"));
+    // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#the-object-element
+    // Whenever one of the following conditions occur:
+    // - the element is created,
+    // ...the user agent must queue an element task on the DOM manipulation task source given
+    // the object element to run the following steps to (re)determine what the object element represents.
+    // This task being queued or actively running must delay the load event of the element's node document.
+    queue_element_task_to_run_object_representation_steps();
 }
 
 HTMLObjectElement::~HTMLObjectElement() = default;
 
-void HTMLObjectElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
+JS::ThrowCompletionOr<void> HTMLObjectElement::initialize(JS::Realm& realm)
 {
-    BrowsingContextContainer::parse_attribute(name, value);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLObjectElementPrototype>(realm, "HTMLObjectElement"));
 
-    if (name == HTML::AttributeNames::data)
+    return {};
+}
+
+void HTMLObjectElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
+{
+    NavigableContainer::parse_attribute(name, value);
+
+    // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#the-object-element
+    // Whenever one of the following conditions occur:
+    if (
+        // - the element's classid attribute is set, changed, or removed,
+        (name == HTML::AttributeNames::classid) ||
+        // - the element's classid attribute is not present, and its data attribute is set, changed, or removed,
+        (!has_attribute(HTML::AttributeNames::classid) && name == HTML::AttributeNames::data) ||
+        // - neither the element's classid attribute nor its data attribute are present, and its type attribute is set, changed, or removed,
+        (!has_attribute(HTML::AttributeNames::classid) && !has_attribute(HTML::AttributeNames::data) && name == HTML::AttributeNames::type)) {
+
+        // ...the user agent must queue an element task on the DOM manipulation task source given
+        // the object element to run the following steps to (re)determine what the object element represents.
+        // This task being queued or actively running must delay the load event of the element's node document.
         queue_element_task_to_run_object_representation_steps();
+    }
 }
 
 // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#attr-object-data
@@ -43,7 +70,7 @@ JS::GCPtr<Layout::Node> HTMLObjectElement::create_layout_node(NonnullRefPtr<CSS:
 {
     switch (m_representation) {
     case Representation::Children:
-        return BrowsingContextContainer::create_layout_node(move(style));
+        return NavigableContainer::create_layout_node(move(style));
     case Representation::NestedBrowsingContext:
         // FIXME: Actually paint the nested browsing context's document, similar to how iframes are painted with FrameBox and NestedBrowsingContextPaintable.
         return nullptr;
@@ -97,7 +124,7 @@ void HTMLObjectElement::queue_element_task_to_run_object_representation_steps()
 
             // 3. If that failed, fire an event named error at the element, then jump to the step below labeled fallback.
             if (!url.is_valid()) {
-                dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
+                dispatch_event(DOM::Event::create(realm(), HTML::EventNames::error).release_value_but_fixme_should_propagate_errors());
                 return run_object_representation_fallback_steps();
             }
 
@@ -124,7 +151,7 @@ void HTMLObjectElement::queue_element_task_to_run_object_representation_steps()
 void HTMLObjectElement::resource_did_fail()
 {
     // 4.7. If the load failed (e.g. there was an HTTP 404 error, there was a DNS error), fire an event named error at the element, then jump to the step below labeled fallback.
-    dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
+    dispatch_event(DOM::Event::create(realm(), HTML::EventNames::error).release_value_but_fixme_should_propagate_errors());
     run_object_representation_fallback_steps();
 }
 
@@ -191,12 +218,12 @@ void HTMLObjectElement::resource_did_load()
 
 static bool is_xml_mime_type(StringView resource_type)
 {
-    auto mime_type = MimeSniff::MimeType::from_string(resource_type);
+    auto mime_type = MimeSniff::MimeType::parse(resource_type).release_value_but_fixme_should_propagate_errors();
     if (!mime_type.has_value())
         return false;
 
     // An XML MIME type is any MIME type whose subtype ends in "+xml" or whose essence is "text/xml" or "application/xml". [RFC7303]
-    if (mime_type->subtype().ends_with("+xml"sv))
+    if (mime_type->subtype().ends_with_bytes("+xml"sv))
         return true;
 
     return mime_type->essence().is_one_of("text/xml"sv, "application/xml"sv);
@@ -262,7 +289,7 @@ void HTMLObjectElement::run_object_representation_completed_steps(Representation
     // 4.11. If the object element does not represent its nested browsing context, then once the resource is completely loaded, queue an element task on the DOM manipulation task source given the object element to fire an event named load at the element.
     if (representation != Representation::NestedBrowsingContext) {
         queue_an_element_task(HTML::Task::Source::DOMManipulation, [&]() {
-            dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::load));
+            dispatch_event(DOM::Event::create(realm(), HTML::EventNames::load).release_value_but_fixme_should_propagate_errors());
         });
     }
 
