@@ -610,7 +610,8 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
 
     TRY(view_menu->try_add_action(*m_relative_line_number_action));
 
-    view_menu.add_separator();
+    //view_menu.add_separator();
+    TRY(view_menu->try_add_separator());
 
     m_auto_detect_preview_mode_action = GUI::Action::create_checkable("Enable Autodetect Preview", [&](auto&) {
         Config::write_bool("TextEditor"sv, "View"sv, "PreviewAutoDetect"sv, m_auto_detect_preview_mode_action->is_checked());
@@ -620,7 +621,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
     m_auto_detect_preview_mode_action->set_status_tip("Enable autodetecting supported filetypes");
     set_auto_detect_preview_mode(m_auto_detect_preview_mode_action->is_checked());
 
-    view_menu.add_action(*m_auto_detect_preview_mode_action);
+    TRY(view_menu->try_add_action(*m_auto_detect_preview_mode_action));
     TRY(view_menu->try_add_separator());
     TRY(view_menu->try_add_action(*m_no_preview_action));
     TRY(view_menu->try_add_action(*m_markdown_preview_action));

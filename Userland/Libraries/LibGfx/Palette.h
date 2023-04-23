@@ -117,15 +117,12 @@ public:
     Color ruler_inactive_text() const { return color(ColorRole::RulerInactiveText); }
     Color text_cursor() const { return color(ColorRole::TextCursor); }
     Color focus_outline() const { return color(ColorRole::FocusOutline); }
-<<<<<<< HEAD
     Color active_slider_gradient1() const { return color(ColorRole::ActiveSliderGradient1); }
     Color active_slider_gradient2() const { return color(ColorRole::ActiveSliderGradient2); }
     Color inactive_slider_gradient1() const { return color(ColorRole::InactiveSliderGradient1); }
     Color inactive_slider_gradient2() const { return color(ColorRole::InactiveSliderGradient2); }
-=======
     Color tray() const { return color(ColorRole::Tray); }
     Color tray_text() const { return color(ColorRole::TrayText); }
->>>>>>> master
 
     Color link() const { return color(ColorRole::Link); }
     Color active_link() const { return color(ColorRole::ActiveLink); }
