@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Peter Elliott <pelliott@serenityos.org>
  * Copyright (c) 2022, Cameron Youell <cameronyouell@gmail.com>
  * Copyright (c) 2022, the SerenityOS developers.
@@ -321,7 +321,7 @@ void TabWidget::paint_event(PaintEvent& event)
         painter.draw_text(tab_button_content_rect, m_tabs[i].title, m_text_alignment, palette().button_text(), Gfx::TextElision::Right);
 
         if (is_focused()) {
-            Gfx::IntRect focus_rect { 0, 0, min(tab_button_content_rect.width(), font().width(m_tabs[i].title)), font().glyph_height() };
+            Gfx::IntRect focus_rect { 0, 0, min(tab_button_content_rect.width(), font().width(m_tabs[i].title)), font().pixel_size_rounded_up() };
             focus_rect.align_within(tab_button_content_rect, m_text_alignment);
             focus_rect.inflate(6, 4);
 
@@ -452,7 +452,7 @@ Gfx::IntRect TabWidget::close_button_rect(size_t index) const
 
 int TabWidget::TabData::width(Gfx::Font const& font) const
 {
-    auto width = 16 + font.width(title) + (icon ? (16 + 4) : 0);
+    auto width = 16 + font.width_rounded_up(title) + (icon ? (16 + 4) : 0);
     // NOTE: This needs to always be an odd number, because the button rect
     //       includes 3px of light and shadow on the left and right edges. If
     //       the button rect width is not an odd number, the area left for the
@@ -591,12 +591,12 @@ Optional<size_t> TabWidget::active_tab_index() const
     return {};
 }
 
-void TabWidget::set_tab_title(Widget& tab, StringView title)
+void TabWidget::set_tab_title(Widget& tab, String title)
 {
     for (auto& t : m_tabs) {
         if (t.widget == &tab) {
             if (t.title != title) {
-                t.title = title;
+                t.title = move(title);
                 update();
             }
             return;

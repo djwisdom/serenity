@@ -8,8 +8,8 @@
 
 #include <AK/Platform.h>
 
-#if ARCH(X86_64) || ARCH(I386)
-#    include <Kernel/Arch/x86/TrapFrame.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/TrapFrame.h>
 #elif ARCH(AARCH64)
 #    include <Kernel/Arch/aarch64/TrapFrame.h>
 #else

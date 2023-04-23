@@ -58,6 +58,7 @@ ErrorOr<NonnullRefPtr<TaskbarWindow>> TaskbarWindow::create()
 {
     auto window = TRY(AK::adopt_nonnull_ref_or_enomem(new (nothrow) TaskbarWindow()));
     TRY(window->populate_taskbar());
+    TRY(window->load_assistant());
     return window;
 }
 
@@ -67,40 +68,34 @@ TaskbarWindow::TaskbarWindow()
     set_title("Taskbar");
 
     on_screen_rects_change(GUI::Desktop::the().rects(), GUI::Desktop::the().main_screen_index());
-
-    auto& main_widget = set_main_widget<TaskbarWidget>();
-    main_widget.set_layout<GUI::HorizontalBoxLayout>();
-    main_widget.layout()->set_margins({ 2, 3, 0, 3 });
 }
 
 ErrorOr<void> TaskbarWindow::populate_taskbar()
 {
-    if (!main_widget())
-        return Error::from_string_literal("TaskbarWindow::populate_taskbar: main_widget is not set");
+    auto main_widget = TRY(set_main_widget<TaskbarWidget>());
+    TRY(main_widget->try_set_layout<GUI::HorizontalBoxLayout>(GUI::Margins { 2, 3, 0, 3 }));
 
     m_quick_launch = TRY(Taskbar::QuickLaunchWidget::create());
-    main_widget()->add_child(*m_quick_launch);
+    TRY(main_widget->try_add_child(*m_quick_launch));
 
-    m_task_button_container = main_widget()->add<GUI::Widget>();
-    m_task_button_container->set_layout<GUI::HorizontalBoxLayout>();
-    m_task_button_container->layout()->set_spacing(3);
+    m_task_button_container = TRY(main_widget->try_add<GUI::Widget>());
+    TRY(m_task_button_container->try_set_layout<GUI::HorizontalBoxLayout>(GUI::Margins {}, 3));
 
-    m_default_icon = TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/window.png"sv));
+    m_default_icon = TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/window.png"sv));
 
-    m_applet_area_container = main_widget()->add<GUI::Frame>();
+    m_applet_area_container = TRY(main_widget->try_add<GUI::Frame>());
     m_applet_area_container->set_frame_thickness(1);
     m_applet_area_container->set_frame_shape(Gfx::FrameShape::Box);
     m_applet_area_container->set_frame_shadow(Gfx::FrameShadow::Sunken);
 
-    m_clock_widget = main_widget()->add<Taskbar::ClockWidget>();
+    m_clock_widget = TRY(main_widget->try_add<Taskbar::ClockWidget>());
 
-    m_show_desktop_button = GUI::Button::construct();
+    m_show_desktop_button = TRY(main_widget->try_add<GUI::Button>());
     m_show_desktop_button->set_tooltip("Show Desktop");
-    m_show_desktop_button->set_icon(GUI::Icon::default_icon("desktop"sv).bitmap_for_size(16));
+    m_show_desktop_button->set_icon(TRY(GUI::Icon::try_create_default_icon("desktop"sv)).bitmap_for_size(16));
     m_show_desktop_button->set_button_style(Gfx::ButtonStyle::Coolbar);
     m_show_desktop_button->set_fixed_size(24, 24);
     m_show_desktop_button->on_click = TaskbarWindow::show_desktop_button_clicked;
-    main_widget()->add_child(*m_show_desktop_button);
 
     return {};
 }
@@ -117,7 +112,7 @@ void TaskbarWindow::add_system_menu(NonnullRefPtr<GUI::Menu> system_menu)
 {
     m_system_menu = move(system_menu);
 
-    m_start_button = GUI::Button::construct("Serenity");
+    m_start_button = GUI::Button::construct("Serenity"_string.release_value_but_fixme_should_propagate_errors());
     set_start_button_font(Gfx::FontDatabase::default_font().bold_variant());
     m_start_button->set_icon_spacing(0);
     auto app_icon = GUI::Icon::default_icon("ladyball"sv);
@@ -205,7 +200,7 @@ void TaskbarWindow::update_window_button(::Window& window, bool show_as_active)
     auto* button = window.button();
     if (!button)
         return;
-    button->set_text(window.title());
+    button->set_text(String::from_deprecated_string(window.title()).release_value_but_fixme_should_propagate_errors());
     button->set_tooltip(window.title());
     button->set_checked(show_as_active);
     button->set_visible(is_window_on_current_workspace(window));

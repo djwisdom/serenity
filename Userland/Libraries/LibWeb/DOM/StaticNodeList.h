@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <AK/NonnullRefPtrVector.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/NodeList.h>
 
@@ -16,7 +15,7 @@ class StaticNodeList final : public NodeList {
     WEB_PLATFORM_OBJECT(StaticNodeList, NodeList);
 
 public:
-    static JS::NonnullGCPtr<NodeList> create(JS::Realm&, Vector<JS::Handle<Node>>);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<NodeList>> create(JS::Realm&, Vector<JS::Handle<Node>>);
 
     virtual ~StaticNodeList() override;
 
@@ -30,7 +29,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    Vector<Node&> m_static_nodes;
+    Vector<JS::NonnullGCPtr<Node>> m_static_nodes;
 };
 
 }

@@ -61,9 +61,9 @@ private:
 
     void do_queue(WorkItem&);
 
-    LockRefPtr<Thread> m_thread;
+    RefPtr<Thread> m_thread;
     WaitQueue m_wait_queue;
-    SpinlockProtected<IntrusiveList<&WorkItem::m_node>> m_items { LockRank::None };
+    SpinlockProtected<IntrusiveList<&WorkItem::m_node>, LockRank::None> m_items {};
 };
 
 }

@@ -57,7 +57,7 @@ public:
         VERIFY(m_mode != Mode::Shared); // This method should only be used on exclusively-held locks
         if (m_mode == Mode::Unlocked)
             return false;
-        return m_holder == Thread::current();
+        return m_holder == bit_cast<uintptr_t>(Thread::current());
     }
 
     [[nodiscard]] StringView name() const { return m_name; }
@@ -82,7 +82,8 @@ private:
     // FIXME: remove this after annihilating Process::m_big_lock
     using BigLockBlockedThreadList = IntrusiveList<&Thread::m_big_lock_blocked_threads_list_node>;
 
-    void block(Thread&, Mode, SpinlockLocker<Spinlock>&, u32);
+    // FIXME: Allow any lock rank.
+    void block(Thread&, Mode, SpinlockLocker<Spinlock<LockRank::None>>&, u32);
     void unblock_waiters(Mode);
 
     StringView m_name;
@@ -95,12 +96,11 @@ private:
     // lock it again. When locked in shared mode, any thread can do that.
     u32 m_times_locked { 0 };
 
-    // One of the threads that hold this lock, or nullptr. When locked in shared
-    // mode, this is stored on best effort basis: nullptr value does *not* mean
+    // The address of one of the threads that hold this lock, or 0.
+    // When locked in shared mode, this is stored on best effort basis: 0 does *not* mean
     // the lock is unlocked, it just means we don't know which threads hold it.
-    // When locked exclusively, this is always the one thread that holds the
-    // lock.
-    LockRefPtr<Thread> m_holder;
+    // When locked exclusively, this is always the one thread that holds the lock.
+    uintptr_t m_holder { 0 };
     size_t m_shared_holders { 0 };
 
     struct BlockedThreadLists {
@@ -117,13 +117,13 @@ private:
         }
     };
     // FIXME: Use a specific lock rank passed by constructor.
-    SpinlockProtected<BlockedThreadLists> m_blocked_thread_lists { LockRank::None };
+    SpinlockProtected<BlockedThreadLists, LockRank::None> m_blocked_thread_lists {};
 
     // FIXME: See above.
-    mutable Spinlock m_lock { LockRank::None };
+    mutable Spinlock<LockRank::None> m_lock {};
 
 #if LOCK_SHARED_UPGRADE_DEBUG
-    HashMap<Thread*, u32> m_shared_holders_map;
+    HashMap<uintptr_t, u32> m_shared_holders_map;
 #endif
 };
 

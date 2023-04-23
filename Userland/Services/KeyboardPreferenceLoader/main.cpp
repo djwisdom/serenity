@@ -5,7 +5,8 @@
  */
 
 #include <LibCore/ConfigFile.h>
-#include <LibCore/File.h>
+#include <LibCore/DeprecatedFile.h>
+#include <LibCore/Process.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <errno.h>
@@ -30,15 +31,10 @@ ErrorOr<int> serenity_main(Main::Arguments)
     if (keymaps_vector.size() == 0)
         exit(1);
 
-    pid_t child_pid;
-    char const* argv[] = { "/bin/keymap", "-m", keymaps_vector.first().characters(), nullptr };
-    if ((errno = posix_spawn(&child_pid, "/bin/keymap", nullptr, nullptr, const_cast<char**>(argv), environ))) {
-        perror("posix_spawn");
-        exit(1);
-    }
+    TRY(Core::Process::spawn("/bin/keymap"sv, Array { "-m", keymaps_vector.first().characters() }, {}, Core::Process::KeepAsChild::Yes));
 
     bool enable_num_lock = keyboard_settings_config->read_bool_entry("StartupEnable", "NumLock", true);
-    auto keyboard_device = TRY(Core::File::open("/dev/input/keyboard/0", Core::OpenMode::ReadOnly));
+    auto keyboard_device = TRY(Core::DeprecatedFile::open("/dev/input/keyboard/0", Core::OpenMode::ReadOnly));
     TRY(Core::System::ioctl(keyboard_device->fd(), KEYBOARD_IOCTL_SET_NUM_LOCK, enable_num_lock));
 
     return 0;

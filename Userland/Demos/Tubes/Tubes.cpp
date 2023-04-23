@@ -12,11 +12,9 @@
 #include <LibGUI/Application.h>
 #include <LibGUI/Event.h>
 #include <LibGUI/Painter.h>
-#include <LibGUI/Widget.h>
 #include <LibGfx/Bitmap.h>
 
 constexpr size_t grid_resolution = 15;
-constexpr int mouse_max_distance_move = 10;
 constexpr int reset_every_ticks = 900;
 constexpr double rotation_range = 35.;
 constexpr u8 tube_maximum_count = 12;
@@ -76,8 +74,9 @@ static IntVector3 vector_for_direction(Direction direction)
 }
 
 Tubes::Tubes(int interval)
-    : m_grid(MUST(FixedArray<u8>::try_create(grid_resolution * grid_resolution * grid_resolution)))
+    : m_grid(MUST(FixedArray<u8>::create(grid_resolution * grid_resolution * grid_resolution)))
 {
+    on_screensaver_exit = []() { GUI::Application::the()->quit(); };
     start_timer(interval);
 }
 
@@ -124,7 +123,7 @@ void Tubes::choose_new_direction_for_tube(Tube& tube)
 
 ErrorOr<void> Tubes::create_buffer(Gfx::IntSize size)
 {
-    m_bitmap = TRY(Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, size));
+    m_bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRx8888, size));
     m_gl_context = TRY(GL::create_context(*m_bitmap));
     return {};
 }
@@ -147,25 +146,6 @@ bool Tubes::is_valid_grid_position(Gfx::IntVector3 position)
 void Tubes::set_grid(IntVector3 position, u8 value)
 {
     m_grid[position.z() * grid_resolution * grid_resolution + position.y() * grid_resolution + position.x()] = value;
-}
-
-void Tubes::mousemove_event(GUI::MouseEvent& event)
-{
-    if (m_mouse_origin.is_null()) {
-        m_mouse_origin = event.position();
-    } else if (event.position().distance_from(m_mouse_origin) > mouse_max_distance_move) {
-        GUI::Application::the()->quit();
-    }
-}
-
-void Tubes::mousedown_event(GUI::MouseEvent&)
-{
-    GUI::Application::the()->quit();
-}
-
-void Tubes::keydown_event(GUI::KeyEvent&)
-{
-    GUI::Application::the()->quit();
 }
 
 void Tubes::paint_event(GUI::PaintEvent& event)

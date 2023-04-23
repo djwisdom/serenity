@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <AK/FlyString.h>
+#include <AK/DeprecatedFlyString.h>
 #include <LibWeb/DOM/ChildNode.h>
 #include <LibWeb/DOM/Node.h>
 
@@ -18,11 +18,11 @@ class DocumentType final
     WEB_PLATFORM_OBJECT(DocumentType, Node);
 
 public:
-    static JS::NonnullGCPtr<DocumentType> create(Document&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<DocumentType>> create(Document&);
 
     virtual ~DocumentType() override = default;
 
-    virtual FlyString node_name() const override { return "#doctype"; }
+    virtual DeprecatedFlyString node_name() const override { return "#doctype"; }
 
     DeprecatedString const& name() const { return m_name; }
     void set_name(DeprecatedString const& name) { m_name = name; }
@@ -35,6 +35,8 @@ public:
 
 private:
     explicit DocumentType(Document&);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 
     DeprecatedString m_name;
     DeprecatedString m_public_id;

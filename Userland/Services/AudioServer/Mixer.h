@@ -12,12 +12,10 @@
 #include <AK/Atomic.h>
 #include <AK/Badge.h>
 #include <AK/ByteBuffer.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/Queue.h>
 #include <AK/RefCounted.h>
 #include <AK/WeakPtr.h>
 #include <LibAudio/Queue.h>
-#include <LibCore/File.h>
 #include <LibCore/Timer.h>
 #include <LibThreading/ConditionVariable.h>
 #include <LibThreading/Mutex.h>
@@ -47,7 +45,7 @@ public:
             return false;
 
         if (m_in_chunk_location >= m_current_audio_chunk.size()) {
-            auto result = m_buffer->try_dequeue();
+            auto result = m_buffer->dequeue();
             if (result.is_error()) {
                 if (result.error() == Audio::AudioQueue::QueueStatus::Empty) {
                     dbgln("Audio client {} can't keep up!", m_client->client_id());
@@ -79,7 +77,7 @@ public:
     {
         ErrorOr<Array<Audio::Sample, Audio::AUDIO_BUFFER_SIZE>, Audio::AudioQueue::QueueStatus> result = Audio::AudioQueue::QueueStatus::Invalid;
         do {
-            result = m_buffer->try_dequeue();
+            result = m_buffer->dequeue();
         } while (result.is_error() && result.error() != Audio::AudioQueue::QueueStatus::Empty);
     }
 
@@ -129,7 +127,7 @@ private:
     Threading::Mutex m_pending_mutex;
     Threading::ConditionVariable m_mixing_necessary { m_pending_mutex };
 
-    RefPtr<Core::File> m_device;
+    RefPtr<Core::DeprecatedFile> m_device;
 
     NonnullRefPtr<Threading::Thread> m_sound_thread;
 

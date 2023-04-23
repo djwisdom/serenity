@@ -7,8 +7,6 @@
 #include "GitWidget.h"
 #include "../Dialogs/Git/GitCommitDialog.h"
 #include "GitFilesModel.h"
-#include <LibCore/File.h>
-#include <LibCore/Stream.h>
 #include <LibDiff/Format.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
@@ -32,7 +30,7 @@ GitWidget::GitWidget()
     unstaged_header.set_layout<GUI::HorizontalBoxLayout>();
 
     auto& refresh_button = unstaged_header.add<GUI::Button>();
-    refresh_button.set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png"sv).release_value_but_fixme_should_propagate_errors());
+    refresh_button.set_icon(Gfx::Bitmap::load_from_file("/res/icons/16x16/reload.png"sv).release_value_but_fixme_should_propagate_errors());
     refresh_button.set_fixed_size(16, 16);
     refresh_button.set_tooltip("refresh");
     refresh_button.on_click = [this](int) { refresh(); };
@@ -43,7 +41,7 @@ GitWidget::GitWidget()
     unstaged_header.set_fixed_height(20);
     m_unstaged_files = unstaged.add<GitFilesView>(
         [this](auto const& file) { stage_file(file); },
-        Gfx::Bitmap::try_load_from_file("/res/icons/16x16/plus.png"sv).release_value_but_fixme_should_propagate_errors());
+        Gfx::Bitmap::load_from_file("/res/icons/16x16/plus.png"sv).release_value_but_fixme_should_propagate_errors());
     m_unstaged_files->on_selection_change = [this] {
         const auto& index = m_unstaged_files->selection().first();
         if (!index.is_valid())
@@ -60,7 +58,7 @@ GitWidget::GitWidget()
     staged_header.set_layout<GUI::HorizontalBoxLayout>();
 
     auto& commit_button = staged_header.add<GUI::Button>();
-    commit_button.set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/commit.png"sv).release_value_but_fixme_should_propagate_errors());
+    commit_button.set_icon(Gfx::Bitmap::load_from_file("/res/icons/16x16/commit.png"sv).release_value_but_fixme_should_propagate_errors());
     commit_button.set_fixed_size(16, 16);
     commit_button.set_tooltip("commit");
     commit_button.on_click = [this](int) { commit(); };
@@ -71,7 +69,7 @@ GitWidget::GitWidget()
     staged_header.set_fixed_height(20);
     m_staged_files = staged.add<GitFilesView>(
         [this](auto const& file) { unstage_file(file); },
-        Gfx::Bitmap::try_load_from_file("/res/icons/16x16/minus.png"sv).release_value_but_fixme_should_propagate_errors());
+        Gfx::Bitmap::load_from_file("/res/icons/16x16/minus.png"sv).release_value_but_fixme_should_propagate_errors());
 }
 
 bool GitWidget::initialize()
@@ -156,7 +154,7 @@ void GitWidget::set_view_diff_callback(ViewDiffCallback callback)
 void GitWidget::show_diff(DeprecatedString const& file_path)
 {
     if (!m_git_repo->is_tracked(file_path)) {
-        auto file = Core::Stream::File::open(file_path, Core::Stream::OpenMode::Read).release_value_but_fixme_should_propagate_errors();
+        auto file = Core::File::open(file_path, Core::File::OpenMode::Read).release_value_but_fixme_should_propagate_errors();
         auto content = file->read_until_eof().release_value_but_fixme_should_propagate_errors();
         m_view_diff_callback("", Diff::generate_only_additions(content));
         return;

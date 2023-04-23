@@ -6,13 +6,13 @@
 
 #include <AK/Assertions.h>
 #include <AK/Format.h>
+#include <AK/HashTable.h>
 #include <AK/IPv4Address.h>
 #include <AK/StdLibExtras.h>
 #include <AK/Types.h>
 #include <Kernel/API/SyscallString.h>
-#include <LibC/sys/arch/i386/regs.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <errno.h>
@@ -20,8 +20,8 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
+#include <sys/arch/regs.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
@@ -157,6 +157,8 @@ HANDLE(KEYBOARD_IOCTL_SET_CAPS_LOCK)
 HANDLE(SIOCSIFADDR)
 HANDLE(SIOCGIFADDR)
 HANDLE(SIOCGIFHWADDR)
+HANDLE(SIOCGIFNAME)
+HANDLE(SIOCGIFINDEX)
 HANDLE(SIOCGIFNETMASK)
 HANDLE(SIOCSIFNETMASK)
 HANDLE(SIOCGIFBRDADDR)
@@ -210,11 +212,7 @@ END_VALUES_TO_NAMES()
 
 static int g_pid = -1;
 
-#if ARCH(I386)
-using syscall_arg_t = u32;
-#elif ARCH(X86_64) || ARCH(AARCH64)
 using syscall_arg_t = u64;
-#endif
 
 static void handle_sigint(int)
 {
@@ -452,10 +450,11 @@ static void format_getrandom(FormattedSyscallBuilder& builder, void* buffer, siz
     builder.add_arguments(buffer, size, flags);
 }
 
-static void format_realpath(FormattedSyscallBuilder& builder, Syscall::SC_realpath_params* params_p, size_t length)
+static ErrorOr<void> format_realpath(FormattedSyscallBuilder& builder, Syscall::SC_realpath_params* params_p, size_t length)
 {
-    auto params = copy_from_process(params_p).release_value_but_fixme_should_propagate_errors();
+    auto params = TRY(copy_from_process(params_p));
     builder.add_arguments(StringArgument { params.path }, StringArgument { { params.buffer.data, min(params.buffer.size, length) } });
+    return {};
 }
 
 static void format_exit(FormattedSyscallBuilder& builder, int status)
@@ -472,9 +471,9 @@ struct OpenOptions : BitflagBase {
     };
 };
 
-static void format_open(FormattedSyscallBuilder& builder, Syscall::SC_open_params* params_p)
+static ErrorOr<void> format_open(FormattedSyscallBuilder& builder, Syscall::SC_open_params* params_p)
 {
-    auto params = copy_from_process(params_p).release_value_but_fixme_should_propagate_errors();
+    auto params = TRY(copy_from_process(params_p));
 
     if (params.dirfd == AT_FDCWD)
         builder.add_argument("AT_FDCWD");
@@ -485,6 +484,7 @@ static void format_open(FormattedSyscallBuilder& builder, Syscall::SC_open_param
 
     if (params.options & O_CREAT)
         builder.add_argument("{:04o}", params.mode);
+    return {};
 }
 
 static void format_ioctl(FormattedSyscallBuilder& builder, int fd, unsigned request, void* arg)
@@ -492,7 +492,7 @@ static void format_ioctl(FormattedSyscallBuilder& builder, int fd, unsigned requ
     builder.add_arguments(fd, ioctl_request_name(request));
     if (request == FIONBIO) {
         auto value = copy_from_process(reinterpret_cast<int*>(arg));
-        builder.add_argument(value);
+        builder.add_argument(value.release_value_but_fixme_should_propagate_errors());
     } else
         builder.add_argument(PointerArgument { arg });
 }
@@ -545,17 +545,18 @@ static void format_chdir(FormattedSyscallBuilder& builder, char const* path_p, s
 static void format_fstat(FormattedSyscallBuilder& builder, int fd, struct stat* buf_p)
 {
     auto buf = copy_from_process(buf_p);
-    builder.add_arguments(fd, buf);
+    builder.add_arguments(fd, buf.release_value_but_fixme_should_propagate_errors());
 }
 
-static void format_stat(FormattedSyscallBuilder& builder, Syscall::SC_stat_params* params_p)
+static ErrorOr<void> format_stat(FormattedSyscallBuilder& builder, Syscall::SC_stat_params* params_p)
 {
-    auto params = copy_from_process(params_p).release_value_but_fixme_should_propagate_errors();
+    auto params = TRY(copy_from_process(params_p));
     if (params.dirfd == AT_FDCWD)
         builder.add_argument("AT_FDCWD");
     else
         builder.add_argument(params.dirfd);
-    builder.add_arguments(StringArgument { params.path }, copy_from_process(params.statbuf), params.follow_symlinks);
+    builder.add_arguments(StringArgument { params.path }, TRY(copy_from_process(params.statbuf)), params.follow_symlinks);
+    return {};
 }
 
 static void format_lseek(FormattedSyscallBuilder& builder, int fd, off_t offset, int whence)
@@ -578,15 +579,16 @@ static void format_close(FormattedSyscallBuilder& builder, int fd)
     builder.add_arguments(fd);
 }
 
-static void format_poll(FormattedSyscallBuilder& builder, Syscall::SC_poll_params* params_p)
+static ErrorOr<void> format_poll(FormattedSyscallBuilder& builder, Syscall::SC_poll_params* params_p)
 {
     // TODO: format fds and sigmask properly
-    auto params = copy_from_process(params_p).release_value_but_fixme_should_propagate_errors();
+    auto params = TRY(copy_from_process(params_p));
     builder.add_arguments(
         params.nfds,
         PointerArgument { params.fds },
-        copy_from_process(params.timeout),
+        TRY(copy_from_process(params.timeout)),
         PointerArgument { params.sigmask });
+    return {};
 }
 
 namespace AK {
@@ -623,7 +625,7 @@ static void format_socket(FormattedSyscallBuilder& builder, int domain, int type
 
 static void format_connect(FormattedSyscallBuilder& builder, int socket, const struct sockaddr* address_p, socklen_t address_len)
 {
-    builder.add_arguments(socket, copy_from_process(address_p), address_len);
+    builder.add_arguments(socket, copy_from_process(address_p).release_value_but_fixme_should_propagate_errors(), address_len);
 }
 
 struct MsgOptions : BitflagBase {
@@ -656,10 +658,11 @@ struct MemoryProtectionFlags : BitflagBase {
     static constexpr StringView default_ = "PROT_NONE"sv;
 };
 
-static void format_mmap(FormattedSyscallBuilder& builder, Syscall::SC_mmap_params* params_p)
+static ErrorOr<void> format_mmap(FormattedSyscallBuilder& builder, Syscall::SC_mmap_params* params_p)
 {
-    auto params = copy_from_process(params_p).release_value_but_fixme_should_propagate_errors();
+    auto params = TRY(copy_from_process(params_p));
     builder.add_arguments(params.addr, params.size, MemoryProtectionFlags { params.prot }, MmapFlags { params.flags }, params.fd, params.offset, params.alignment, StringArgument { params.name });
+    return {};
 }
 
 static void format_munmap(FormattedSyscallBuilder& builder, void* addr, size_t size)
@@ -672,15 +675,16 @@ static void format_mprotect(FormattedSyscallBuilder& builder, void* addr, size_t
     builder.add_arguments(addr, size, MemoryProtectionFlags { prot });
 }
 
-static void format_set_mmap_name(FormattedSyscallBuilder& builder, Syscall::SC_set_mmap_name_params* params_p)
+static ErrorOr<void> format_set_mmap_name(FormattedSyscallBuilder& builder, Syscall::SC_set_mmap_name_params* params_p)
 {
-    auto params = copy_from_process(params_p).release_value_but_fixme_should_propagate_errors();
+    auto params = TRY(copy_from_process(params_p));
     builder.add_arguments(params.addr, params.size, StringArgument { params.name });
+    return {};
 }
 
 static void format_clock_gettime(FormattedSyscallBuilder& builder, clockid_t clockid, struct timespec* time)
 {
-    builder.add_arguments(clockid_name(clockid), copy_from_process(time));
+    builder.add_arguments(clockid_name(clockid), copy_from_process(time).release_value_but_fixme_should_propagate_errors());
 }
 
 static void format_dbgputstr(FormattedSyscallBuilder& builder, char* characters, size_t size)
@@ -688,12 +692,7 @@ static void format_dbgputstr(FormattedSyscallBuilder& builder, char* characters,
     builder.add_argument(StringArgument { { characters, size }, "\0\n"sv });
 }
 
-static void format_get_process_name(FormattedSyscallBuilder& builder, char* buffer, size_t buffer_size)
-{
-    builder.add_argument(StringArgument { { buffer, buffer_size }, "\0"sv });
-}
-
-static void format_syscall(FormattedSyscallBuilder& builder, Syscall::Function syscall_function, syscall_arg_t arg1, syscall_arg_t arg2, syscall_arg_t arg3, syscall_arg_t res)
+static ErrorOr<void> format_syscall(FormattedSyscallBuilder& builder, Syscall::Function syscall_function, syscall_arg_t arg1, syscall_arg_t arg2, syscall_arg_t arg3, syscall_arg_t res)
 {
     enum ResultType {
         Int,
@@ -728,9 +727,6 @@ static void format_syscall(FormattedSyscallBuilder& builder, Syscall::Function s
         format_chdir(builder, (char const*)arg1, (size_t)arg2);
         result_type = Int;
         break;
-    case SC_get_process_name:
-        format_get_process_name(builder, (char*)arg1, (size_t)arg2);
-        break;
     case SC_getrandom:
         format_getrandom(builder, (void*)arg1, (size_t)arg2, (unsigned)arg3);
         break;
@@ -741,7 +737,7 @@ static void format_syscall(FormattedSyscallBuilder& builder, Syscall::Function s
         format_lseek(builder, (int)arg1, (off_t)arg2, (int)arg3);
         break;
     case SC_mmap:
-        format_mmap(builder, (Syscall::SC_mmap_params*)arg1);
+        TRY(format_mmap(builder, (Syscall::SC_mmap_params*)arg1));
         result_type = VoidP;
         break;
     case SC_mprotect:
@@ -751,30 +747,30 @@ static void format_syscall(FormattedSyscallBuilder& builder, Syscall::Function s
         format_munmap(builder, (void*)arg1, (size_t)arg2);
         break;
     case SC_open:
-        format_open(builder, (Syscall::SC_open_params*)arg1);
+        TRY(format_open(builder, (Syscall::SC_open_params*)arg1));
         break;
     case SC_poll:
-        format_poll(builder, (Syscall::SC_poll_params*)arg1);
+        TRY(format_poll(builder, (Syscall::SC_poll_params*)arg1));
         break;
     case SC_read:
         format_read(builder, (int)arg1, (void*)arg2, (size_t)arg3);
         result_type = Ssize;
         break;
     case SC_realpath:
-        format_realpath(builder, (Syscall::SC_realpath_params*)arg1, (size_t)res);
+        TRY(format_realpath(builder, (Syscall::SC_realpath_params*)arg1, (size_t)res));
         break;
     case SC_recvmsg:
         format_recvmsg(builder, (int)arg1, (struct msghdr*)arg2, (int)arg3);
         result_type = Ssize;
         break;
     case SC_set_mmap_name:
-        format_set_mmap_name(builder, (Syscall::SC_set_mmap_name_params*)arg1);
+        TRY(format_set_mmap_name(builder, (Syscall::SC_set_mmap_name_params*)arg1));
         break;
     case SC_socket:
         format_socket(builder, (int)arg1, (int)arg2, (int)arg3);
         break;
     case SC_stat:
-        format_stat(builder, (Syscall::SC_stat_params*)arg1);
+        TRY(format_stat(builder, (Syscall::SC_stat_params*)arg1));
         break;
     case SC_write:
         format_write(builder, (int)arg1, (void*)arg2, (size_t)arg3);
@@ -807,6 +803,7 @@ static void format_syscall(FormattedSyscallBuilder& builder, Syscall::Function s
         builder.format_result();
         break;
     }
+    return {};
 }
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
@@ -816,8 +813,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     Vector<StringView> child_argv;
 
     StringView output_filename;
-    char const* exclude_syscalls_option = nullptr;
-    char const* include_syscalls_option = nullptr;
+    StringView exclude_syscalls_option;
+    StringView include_syscalls_option;
     HashTable<StringView> exclude_syscalls;
     HashTable<StringView> include_syscalls;
 
@@ -834,12 +831,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     parser.parse(arguments);
 
     auto trace_file = output_filename.is_empty()
-        ? TRY(Core::Stream::File::standard_error())
-        : TRY(Core::Stream::File::open(output_filename, Core::Stream::OpenMode::Write));
+        ? TRY(Core::File::standard_error())
+        : TRY(Core::File::open(output_filename, Core::File::OpenMode::Write));
 
-    auto parse_syscalls = [](char const* option, auto& hash_table) {
-        if (option != nullptr) {
-            for (auto syscall : StringView { option, strlen(option) }.split_view(','))
+    auto parse_syscalls = [](StringView option, auto& hash_table) {
+        if (!option.is_empty()) {
+            for (auto syscall : option.split_view(','))
                 hash_table.set(syscall);
         }
     };
@@ -887,12 +884,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
         PtraceRegisters regs = {};
         TRY(Core::System::ptrace(PT_GETREGS, g_pid, &regs, 0));
-#if ARCH(I386)
-        syscall_arg_t syscall_index = regs.eax;
-        syscall_arg_t arg1 = regs.edx;
-        syscall_arg_t arg2 = regs.ecx;
-        syscall_arg_t arg3 = regs.ebx;
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
         syscall_arg_t syscall_index = regs.rax;
         syscall_arg_t arg1 = regs.rdx;
         syscall_arg_t arg2 = regs.rcx;
@@ -915,9 +907,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
         TRY(Core::System::ptrace(PT_GETREGS, g_pid, &regs, 0));
 
-#if ARCH(I386)
-        u32 res = regs.eax;
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
         u64 res = regs.rax;
 #elif ARCH(AARCH64)
         u64 res = 0; // FIXME
@@ -934,8 +924,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             continue;
 
         FormattedSyscallBuilder builder(syscall_name);
-        format_syscall(builder, syscall_function, arg1, arg2, arg3, res);
+        TRY(format_syscall(builder, syscall_function, arg1, arg2, arg3, res));
 
-        TRY(trace_file->write(builder.string_view().bytes()));
+        TRY(trace_file->write_until_depleted(builder.string_view().bytes()));
     }
 }

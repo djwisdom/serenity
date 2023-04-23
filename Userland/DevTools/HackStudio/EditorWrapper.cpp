@@ -50,7 +50,8 @@ void EditorWrapper::set_mode_displayable()
 {
     editor().set_mode(GUI::TextEditor::Editable);
     editor().set_background_role(Gfx::ColorRole::Base);
-    editor().set_palette(GUI::Application::the()->palette());
+    auto palette = GUI::Application::the()->palette();
+    editor().set_palette(palette);
 }
 
 void EditorWrapper::set_mode_non_displayable()
@@ -79,15 +80,17 @@ void EditorWrapper::save()
         });
         file_picker_action->activate();
     }
-    editor().write_to_file(filename());
+    editor().write_to_file(filename()).release_value_but_fixme_should_propagate_errors();
     update_diff();
     editor().update();
 }
 
 void EditorWrapper::update_diff()
 {
-    if (m_git_repo)
+    if (m_git_repo) {
         m_hunks = Diff::parse_hunks(m_git_repo->unstaged_diff(filename()).value());
+        editor().update_git_diff_indicators().release_value_but_fixme_should_propagate_errors();
+    }
 }
 
 void EditorWrapper::set_project_root(DeprecatedString const& project_root)

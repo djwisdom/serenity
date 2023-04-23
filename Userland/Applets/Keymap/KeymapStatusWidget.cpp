@@ -1,17 +1,21 @@
 /*
  * Copyright (c) 2022, the SerenityOS developers.
+ * Copyright (c) 2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "KeymapStatusWidget.h"
-#include "LibGUI/ActionGroup.h"
 #include <LibGUI/Action.h>
+#include <LibGUI/ActionGroup.h>
 #include <LibGUI/ConnectionToWindowManagerServer.h>
+#include <LibGUI/Menu.h>
 #include <LibGUI/Painter.h>
 #include <LibGUI/Process.h>
 #include <LibGfx/Point.h>
-#include <LibKeyboard/CharacterMap.h>
+
+KeymapStatusWidget::KeymapStatusWidget() = default;
+KeymapStatusWidget::~KeymapStatusWidget() = default;
 
 void KeymapStatusWidget::mousedown_event(GUI::MouseEvent& event)
 {
@@ -48,7 +52,7 @@ ErrorOr<void> KeymapStatusWidget::refresh_menu()
 
     m_context_menu->add_separator();
 
-    auto settings_icon = TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/settings.png"sv));
+    auto settings_icon = TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/settings.png"sv));
 
     m_context_menu->add_action(GUI::Action::create("Keyboard &Settings",
         settings_icon,
@@ -59,15 +63,17 @@ ErrorOr<void> KeymapStatusWidget::refresh_menu()
     return {};
 }
 
-void KeymapStatusWidget::set_current_keymap(DeprecatedString const& keymap, ClearBackground clear_background)
+void KeymapStatusWidget::set_current_keymap(DeprecatedString const& keymap)
 {
-    if (clear_background == ClearBackground::Yes) {
-        GUI::Painter painter(*this);
-        painter.clear_rect(rect(), Color::Transparent);
-    }
-
     m_current_keymap = keymap;
-
     set_tooltip(keymap);
-    set_text(keymap.substring(0, 2));
+    update();
+}
+
+void KeymapStatusWidget::paint_event(GUI::PaintEvent& event)
+{
+    GUI::Painter painter(*this);
+    painter.add_clip_rect(event.rect());
+    painter.clear_rect(event.rect(), Gfx::Color::Transparent);
+    painter.draw_text(rect(), m_current_keymap.substring_view(0, 2), Gfx::TextAlignment::Center);
 }

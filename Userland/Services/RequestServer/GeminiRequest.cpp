@@ -12,7 +12,7 @@
 
 namespace RequestServer {
 
-GeminiRequest::GeminiRequest(ConnectionFromClient& client, NonnullRefPtr<Gemini::Job> job, NonnullOwnPtr<Core::Stream::File>&& output_stream)
+GeminiRequest::GeminiRequest(ConnectionFromClient& client, NonnullRefPtr<Gemini::Job> job, NonnullOwnPtr<Core::File>&& output_stream)
     : Request(client, move(output_stream))
     , m_job(move(job))
 {
@@ -21,7 +21,7 @@ GeminiRequest::GeminiRequest(ConnectionFromClient& client, NonnullRefPtr<Gemini:
             ConnectionCache::request_did_finish(url, socket);
         });
         if (auto* response = m_job->response()) {
-            set_downloaded_size(MUST(const_cast<Core::Stream::File&>(this->output_stream()).size()));
+            set_downloaded_size(MUST(m_job->response_length()));
             if (!response->meta().is_empty()) {
                 HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> headers;
                 headers.set("meta", response->meta());
@@ -57,7 +57,7 @@ GeminiRequest::~GeminiRequest()
     m_job->cancel();
 }
 
-NonnullOwnPtr<GeminiRequest> GeminiRequest::create_with_job(Badge<GeminiProtocol>, ConnectionFromClient& client, NonnullRefPtr<Gemini::Job> job, NonnullOwnPtr<Core::Stream::File>&& output_stream)
+NonnullOwnPtr<GeminiRequest> GeminiRequest::create_with_job(Badge<GeminiProtocol>, ConnectionFromClient& client, NonnullRefPtr<Gemini::Job> job, NonnullOwnPtr<Core::File>&& output_stream)
 {
     return adopt_own(*new GeminiRequest(client, move(job), move(output_stream)));
 }

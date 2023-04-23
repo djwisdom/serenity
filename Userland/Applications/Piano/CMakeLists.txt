@@ -5,19 +5,26 @@ serenity_component(
     DEPENDS AudioServer
 )
 
+compile_gml(ExportProgressWidget.gml ExportProgressWidget.h export_progress_widget)
+
 set(SOURCES
     AudioPlayerLoop.cpp
+    ExportProgressWindow.cpp
     KeysWidget.cpp
-    KnobsWidget.cpp
     main.cpp
     MainWidget.cpp
     PlayerWidget.cpp
     RollWidget.cpp
     SamplerWidget.cpp
+    TrackControlsWidget.cpp
     TrackManager.cpp
     WaveWidget.cpp
     ProcessorParameterWidget/ParameterWidget.cpp
     ProcessorParameterWidget/Slider.cpp
+)
+
+set(GENERATED_SOURCES
+    ExportProgressWidget.h
 )
 
 serenity_app(Piano ICON app-piano)

@@ -6,15 +6,16 @@
  */
 
 #include <AK/DeprecatedString.h>
+#include <AK/String.h>
 #include <LibSQL/SQLClient.h>
 
 #if !defined(AK_OS_SERENITY)
 #    include <LibCore/Directory.h>
-#    include <LibCore/File.h>
 #    include <LibCore/SocketAddress.h>
 #    include <LibCore/StandardPaths.h>
-#    include <LibCore/Stream.h>
 #    include <LibCore/System.h>
+#    include <LibFileSystem/FileSystem.h>
+#    include <signal.h>
 #endif
 
 namespace SQL {
@@ -24,7 +25,7 @@ namespace SQL {
 // This is heavily based on how SystemServer's Service creates its socket.
 static ErrorOr<int> create_database_socket(DeprecatedString const& socket_path)
 {
-    if (Core::File::exists(socket_path))
+    if (FileSystem::exists(socket_path))
         TRY(Core::System::unlink(socket_path));
 
 #    ifdef SOCK_NONBLOCK
@@ -37,7 +38,7 @@ static ErrorOr<int> create_database_socket(DeprecatedString const& socket_path)
     TRY(Core::System::fcntl(socket_fd, F_SETFD, FD_CLOEXEC));
 #    endif
 
-#    ifndef AK_OS_MACOS
+#    if !defined(AK_OS_BSD_GENERIC)
     TRY(Core::System::fchmod(socket_fd, 0600));
 #    endif
 
@@ -50,7 +51,7 @@ static ErrorOr<int> create_database_socket(DeprecatedString const& socket_path)
     return socket_fd;
 }
 
-static ErrorOr<void> launch_server(DeprecatedString const& socket_path, DeprecatedString const& pid_path, StringView server_path)
+static ErrorOr<void> launch_server(DeprecatedString const& socket_path, DeprecatedString const& pid_path, Vector<String> candidate_server_paths)
 {
     auto server_fd_or_error = create_database_socket(socket_path);
     if (server_fd_or_error.is_error()) {
@@ -58,18 +59,23 @@ static ErrorOr<void> launch_server(DeprecatedString const& socket_path, Deprecat
         return server_fd_or_error.release_error();
     }
     auto server_fd = server_fd_or_error.value();
+    sigset_t original_set;
+    sigset_t setting_set;
+    sigfillset(&setting_set);
+    (void)pthread_sigmask(SIG_BLOCK, &setting_set, &original_set);
     auto server_pid = TRY(Core::System::fork());
 
     if (server_pid == 0) {
+        (void)pthread_sigmask(SIG_SETMASK, &original_set, nullptr);
         TRY(Core::System::setsid());
         TRY(Core::System::signal(SIGCHLD, SIG_IGN));
         server_pid = TRY(Core::System::fork());
 
         if (server_pid != 0) {
-            auto server_pid_file = TRY(Core::Stream::File::open(pid_path, Core::Stream::OpenMode::Write));
-            TRY(server_pid_file->write(DeprecatedString::number(server_pid).bytes()));
+            auto server_pid_file = TRY(Core::File::open(pid_path, Core::File::OpenMode::Write));
+            TRY(server_pid_file->write_until_depleted(DeprecatedString::number(server_pid).bytes()));
 
-            exit(0);
+            TRY(Core::System::kill(getpid(), SIGTERM));
         }
 
         server_fd = TRY(Core::System::dup(server_fd));
@@ -77,33 +83,41 @@ static ErrorOr<void> launch_server(DeprecatedString const& socket_path, Deprecat
         auto takeover_string = DeprecatedString::formatted("SQLServer:{}", server_fd);
         TRY(Core::System::setenv("SOCKET_TAKEOVER"sv, takeover_string, true));
 
-        auto arguments = Array {
-            server_path,
-            "--pid-file"sv,
-            pid_path,
-        };
-
-        auto result = Core::System::exec(arguments[0], arguments, Core::System::SearchInPath::Yes);
+        ErrorOr<void> result;
+        for (auto const& server_path : candidate_server_paths) {
+            auto arguments = Array {
+                server_path.bytes_as_string_view(),
+                "--pid-file"sv,
+                pid_path,
+            };
+            result = Core::System::exec(arguments[0], arguments, Core::System::SearchInPath::Yes);
+            if (!result.is_error())
+                break;
+        }
         if (result.is_error()) {
-            warnln("Could not launch {}: {}", server_path, result.error());
+            warnln("Could not launch any of {}: {}", candidate_server_paths, result.error());
             TRY(Core::System::unlink(pid_path));
         }
 
         VERIFY_NOT_REACHED();
     }
+    VERIFY(server_pid > 0);
 
-    TRY(Core::System::waitpid(server_pid));
+    auto wait_err = Core::System::waitpid(server_pid);
+    (void)pthread_sigmask(SIG_SETMASK, &original_set, nullptr);
+    if (wait_err.is_error())
+        return wait_err.release_error();
     return {};
 }
 
 static ErrorOr<bool> should_launch_server(DeprecatedString const& pid_path)
 {
-    if (!Core::File::exists(pid_path))
+    if (!FileSystem::exists(pid_path))
         return true;
 
     Optional<pid_t> pid;
     {
-        auto server_pid_file = Core::Stream::File::open(pid_path, Core::Stream::OpenMode::Read);
+        auto server_pid_file = Core::File::open(pid_path, Core::File::OpenMode::Read);
         if (server_pid_file.is_error()) {
             warnln("Could not open SQLServer PID file '{}': {}", pid_path, server_pid_file.error());
             return server_pid_file.release_error();
@@ -132,16 +146,16 @@ static ErrorOr<bool> should_launch_server(DeprecatedString const& pid_path)
     return false;
 }
 
-ErrorOr<NonnullRefPtr<SQLClient>> SQLClient::launch_server_and_create_client(StringView server_path)
+ErrorOr<NonnullRefPtr<SQLClient>> SQLClient::launch_server_and_create_client(Vector<String> candidate_server_paths)
 {
     auto runtime_directory = TRY(Core::StandardPaths::runtime_directory());
     auto socket_path = DeprecatedString::formatted("{}/SQLServer.socket", runtime_directory);
     auto pid_path = DeprecatedString::formatted("{}/SQLServer.pid", runtime_directory);
 
     if (TRY(should_launch_server(pid_path)))
-        TRY(launch_server(socket_path, pid_path, server_path));
+        TRY(launch_server(socket_path, pid_path, move(candidate_server_paths)));
 
-    auto socket = TRY(Core::Stream::LocalSocket::connect(move(socket_path)));
+    auto socket = TRY(Core::LocalSocket::connect(move(socket_path)));
     TRY(socket->set_blocking(true));
 
     return adopt_nonnull_ref_or_enomem(new (nothrow) SQLClient(move(socket)));
@@ -149,45 +163,75 @@ ErrorOr<NonnullRefPtr<SQLClient>> SQLClient::launch_server_and_create_client(Str
 
 #endif
 
-void SQLClient::execution_error(u64 statement_id, u64 execution_id, SQLErrorCode const& code, DeprecatedString const& message)
+void SQLClient::execution_success(u64 statement_id, u64 execution_id, Vector<DeprecatedString> const& column_names, bool has_results, size_t created, size_t updated, size_t deleted)
 {
-    if (on_execution_error)
-        on_execution_error(statement_id, execution_id, code, message);
-    else
-        warnln("Execution error for statement_id {}: {} ({})", statement_id, message, to_underlying(code));
-}
-
-void SQLClient::execution_success(u64 statement_id, u64 execution_id, bool has_results, size_t created, size_t updated, size_t deleted)
-{
-    if (on_execution_success)
-        on_execution_success(statement_id, execution_id, has_results, created, updated, deleted);
-    else
+    if (!on_execution_success) {
         outln("{} row(s) created, {} updated, {} deleted", created, updated, deleted);
-}
-
-void SQLClient::next_result(u64 statement_id, u64 execution_id, Vector<SQL::Value> const& row)
-{
-    if (on_next_result) {
-        on_next_result(statement_id, execution_id, row);
         return;
     }
 
-    bool first = true;
-    for (auto& column : row) {
-        if (!first)
-            out(", ");
-        out("\"{}\"", column);
-        first = false;
+    ExecutionSuccess success {
+        .statement_id = statement_id,
+        .execution_id = execution_id,
+        .column_names = move(const_cast<Vector<DeprecatedString>&>(column_names)),
+        .has_results = has_results,
+        .rows_created = created,
+        .rows_updated = updated,
+        .rows_deleted = deleted,
+    };
+
+    on_execution_success(move(success));
+}
+
+void SQLClient::execution_error(u64 statement_id, u64 execution_id, SQLErrorCode const& code, DeprecatedString const& message)
+{
+    if (!on_execution_error) {
+        warnln("Execution error for statement_id {}: {} ({})", statement_id, message, to_underlying(code));
+        return;
     }
-    outln();
+
+    ExecutionError error {
+        .statement_id = statement_id,
+        .execution_id = execution_id,
+        .error_code = code,
+        .error_message = move(const_cast<DeprecatedString&>(message)),
+    };
+
+    on_execution_error(move(error));
+}
+
+void SQLClient::next_result(u64 statement_id, u64 execution_id, Vector<Value> const& row)
+{
+    if (!on_next_result) {
+        StringBuilder builder;
+        builder.join(", "sv, row, "\"{}\""sv);
+        outln("{}", builder.string_view());
+        return;
+    }
+
+    ExecutionResult result {
+        .statement_id = statement_id,
+        .execution_id = execution_id,
+        .values = move(const_cast<Vector<Value>&>(row)),
+    };
+
+    on_next_result(move(result));
 }
 
 void SQLClient::results_exhausted(u64 statement_id, u64 execution_id, size_t total_rows)
 {
-    if (on_results_exhausted)
-        on_results_exhausted(statement_id, execution_id, total_rows);
-    else
+    if (!on_results_exhausted) {
         outln("{} total row(s)", total_rows);
+        return;
+    }
+
+    ExecutionComplete success {
+        .statement_id = statement_id,
+        .execution_id = execution_id,
+        .total_rows = total_rows,
+    };
+
+    on_results_exhausted(move(success));
 }
 
 }

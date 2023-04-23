@@ -88,10 +88,22 @@ TEST_CASE(gzip_decompress_repeat_around_buffer)
 TEST_CASE(gzip_round_trip)
 {
     auto original = ByteBuffer::create_uninitialized(1024).release_value();
-    fill_with_random(original.data(), 1024);
+    fill_with_random(original);
     auto compressed = Compress::GzipCompressor::compress_all(original);
-    EXPECT(compressed.has_value());
+    EXPECT(!compressed.is_error());
     auto uncompressed = Compress::GzipDecompressor::decompress_all(compressed.value());
     EXPECT(!uncompressed.is_error());
     EXPECT(uncompressed.value() == original);
+}
+
+TEST_CASE(gzip_truncated_uncompressed_block)
+{
+    Array<u8, 38> const compressed {
+        0x1F, 0x8B, 0x08, 0x13, 0x5D, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x85, 0x1C,
+        0x1C, 0xFF, 0xDB, 0xFB, 0xFF, 0xDB
+    };
+
+    auto const decompressed_or_error = Compress::GzipDecompressor::decompress_all(compressed);
+    EXPECT(decompressed_or_error.is_error());
 }

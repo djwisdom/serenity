@@ -1,19 +1,55 @@
 /*
  * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/FlyString.h>
+#include <AK/DeprecatedFlyString.h>
 #include <AK/Optional.h>
 #include <AK/Try.h>
+#include <AK/TypeCasts.h>
 #include <AK/Variant.h>
+#include <LibJS/Runtime/ErrorTypes.h>
 #include <LibJS/Runtime/Value.h>
 
 namespace JS {
+
+#define TRY_OR_THROW_OOM(vm, expression)                                                                              \
+    ({                                                                                                                \
+        /* Ignore -Wshadow to allow nesting the macro. */                                                             \
+        AK_IGNORE_DIAGNOSTIC("-Wshadow",                                                                              \
+            auto&& _temporary_result = (expression));                                                                 \
+        if (_temporary_result.is_error()) {                                                                           \
+            VERIFY(_temporary_result.error().code() == ENOMEM);                                                       \
+            return (vm).throw_completion<JS::InternalError>((vm).error_message(::JS::VM::ErrorMessage::OutOfMemory)); \
+        }                                                                                                             \
+        static_assert(!::AK::Detail::IsLvalueReference<decltype(_temporary_result.release_value())>,                  \
+            "Do not return a reference from a fallible expression");                                                  \
+        _temporary_result.release_value();                                                                            \
+    })
+
+#define MUST_OR_THROW_OOM(expression)                                                                  \
+    ({                                                                                                 \
+        /* Ignore -Wshadow to allow nesting the macro. */                                              \
+        AK_IGNORE_DIAGNOSTIC("-Wshadow",                                                               \
+            auto&& _temporary_result = (expression));                                                  \
+        if (_temporary_result.is_error()) {                                                            \
+            auto _completion = _temporary_result.release_error();                                      \
+                                                                                                       \
+            /* We can't explicitly check for OOM because InternalError does not store the ErrorType */ \
+            VERIFY(_completion.value().has_value());                                                   \
+            VERIFY(_completion.value()->is_object());                                                  \
+            VERIFY(::AK::is<JS::InternalError>(_completion.value()->as_object()));                     \
+                                                                                                       \
+            return _completion;                                                                        \
+        }                                                                                              \
+        static_assert(!::AK::Detail::IsLvalueReference<decltype(_temporary_result.release_value())>,   \
+            "Do not return a reference from a fallible expression");                                   \
+        _temporary_result.release_value();                                                             \
+    })
 
 // 6.2.3 The Completion Record Specification Type, https://tc39.es/ecma262/#sec-completion-record-specification-type
 class [[nodiscard]] Completion {
@@ -27,7 +63,7 @@ public:
         Throw,
     };
 
-    ALWAYS_INLINE Completion(Type type, Optional<Value> value, Optional<FlyString> target)
+    ALWAYS_INLINE Completion(Type type, Optional<Value> value, Optional<DeprecatedFlyString> target)
         : m_type(type)
         , m_value(move(value))
         , m_target(move(target))
@@ -68,8 +104,8 @@ public:
     }
     [[nodiscard]] Optional<Value>& value() { return m_value; }
     [[nodiscard]] Optional<Value> const& value() const { return m_value; }
-    [[nodiscard]] Optional<FlyString>& target() { return m_target; }
-    [[nodiscard]] Optional<FlyString> const& target() const { return m_target; }
+    [[nodiscard]] Optional<DeprecatedFlyString>& target() { return m_target; }
+    [[nodiscard]] Optional<DeprecatedFlyString> const& target() const { return m_target; }
 
     // "abrupt completion refers to any completion with a [[Type]] value other than normal"
     [[nodiscard]] bool is_abrupt() const { return m_type != Type::Normal; }
@@ -114,9 +150,9 @@ private:
         return m_type == Type::Empty;
     }
 
-    Type m_type { Type::Normal }; // [[Type]]
-    Optional<Value> m_value;      // [[Value]]
-    Optional<FlyString> m_target; // [[Target]]
+    Type m_type { Type::Normal };           // [[Type]]
+    Optional<Value> m_value;                // [[Value]]
+    Optional<DeprecatedFlyString> m_target; // [[Target]]
 };
 
 }
@@ -140,7 +176,7 @@ public:
     }
 
     Optional(Optional&& other)
-        : m_value(other.m_value)
+        : m_value(move(other.m_value))
     {
     }
 
@@ -233,27 +269,28 @@ private:
 namespace JS {
 
 template<typename ValueType>
+requires(!IsLvalueReference<ValueType>)
 class [[nodiscard]] ThrowCompletionOr {
 public:
     ThrowCompletionOr()
     requires(IsSame<ValueType, Empty>)
-        : m_value(Empty {})
+        : m_value_or_throw_completion(Empty {})
     {
     }
 
     // Not `explicit` on purpose so that `return vm.throw_completion<Error>(...);` is possible.
     ThrowCompletionOr(Completion throw_completion)
-        : m_throw_completion(move(throw_completion))
+        : m_value_or_throw_completion(move(throw_completion))
     {
-        VERIFY(m_throw_completion->is_error());
+        VERIFY(m_value_or_throw_completion.template get<Completion>().is_error());
     }
 
     // Not `explicit` on purpose so that `return value;` is possible.
     ThrowCompletionOr(ValueType value)
-        : m_value(move(value))
+        : m_value_or_throw_completion(move(value))
     {
         if constexpr (IsSame<ValueType, Value>)
-            VERIFY(!m_value->is_empty());
+            VERIFY(!m_value_or_throw_completion.template get<ValueType>().is_empty());
     }
 
     ThrowCompletionOr(ThrowCompletionOr const&) = default;
@@ -261,55 +298,66 @@ public:
     ThrowCompletionOr(ThrowCompletionOr&&) = default;
     ThrowCompletionOr& operator=(ThrowCompletionOr&&) = default;
 
+    ThrowCompletionOr(OptionalNone value)
+        : m_value_or_throw_completion(ValueType { value })
+    {
+    }
+
     // Allows implicit construction of ThrowCompletionOr<T> from a type U if T(U) is a supported constructor.
     // Most commonly: Value from Object* or similar, so we can omit the curly braces from "return { TRY(...) };".
     // Disabled for POD types to avoid weird conversion shenanigans.
     template<typename WrappedValueType>
-    ThrowCompletionOr(WrappedValueType const& value)
+    ThrowCompletionOr(WrappedValueType&& value)
     requires(!IsPOD<ValueType>)
-        : m_value(value)
+        : m_value_or_throw_completion(ValueType { value })
     {
     }
 
-    [[nodiscard]] bool is_throw_completion() const { return m_throw_completion.has_value(); }
-    Completion const& throw_completion() const { return *m_throw_completion; }
+    [[nodiscard]] bool is_throw_completion() const { return m_value_or_throw_completion.template has<Completion>(); }
+    Completion const& throw_completion() const { return m_value_or_throw_completion.template get<Completion>(); }
 
     [[nodiscard]] bool has_value() const
     requires(!IsSame<ValueType, Empty>)
     {
-        return m_value.has_value();
+        return m_value_or_throw_completion.template has<ValueType>();
     }
     [[nodiscard]] ValueType const& value() const
     requires(!IsSame<ValueType, Empty>)
     {
-        return *m_value;
+        return m_value_or_throw_completion.template get<ValueType>();
     }
 
     // These are for compatibility with the TRY() macro in AK.
-    [[nodiscard]] bool is_error() const { return m_throw_completion.has_value(); }
-    [[nodiscard]] ValueType release_value() { return m_value.release_value(); }
-    Completion release_error() { return m_throw_completion.release_value(); }
+    [[nodiscard]] bool is_error() const { return m_value_or_throw_completion.template has<Completion>(); }
+    [[nodiscard]] ValueType release_value() { return move(m_value_or_throw_completion.template get<ValueType>()); }
+    Completion release_error() { return move(m_value_or_throw_completion.template get<Completion>()); }
+
+    ValueType release_allocated_value_but_fixme_should_propagate_errors()
+    {
+        VERIFY(!is_error());
+        return release_value();
+    }
 
 private:
-    Optional<Completion> m_throw_completion;
-    Optional<ValueType> m_value;
+    Variant<ValueType, Completion> m_value_or_throw_completion;
 };
 
 template<>
-class ThrowCompletionOr<void> : public ThrowCompletionOr<Empty> {
+class [[nodiscard]] ThrowCompletionOr<void> : public ThrowCompletionOr<Empty> {
 public:
     using ThrowCompletionOr<Empty>::ThrowCompletionOr;
 };
 
 ThrowCompletionOr<Value> await(VM&, Value);
 
-// 6.2.3.2 NormalCompletion ( value ), https://tc39.es/ecma262/#sec-normalcompletion
+// 6.2.4.1 NormalCompletion ( value ), https://tc39.es/ecma262/#sec-normalcompletion
 inline Completion normal_completion(Optional<Value> value)
 {
+    // 1. Return Completion Record { [[Type]]: normal, [[Value]]: value, [[Target]]: empty }.
     return { Completion::Type::Normal, move(value), {} };
 }
 
-// 6.2.3.3 ThrowCompletion ( value ), https://tc39.es/ecma262/#sec-throwcompletion
+// 6.2.4.2 ThrowCompletion ( value ), https://tc39.es/ecma262/#sec-throwcompletion
 Completion throw_completion(Value);
 
 }

@@ -79,7 +79,7 @@ struct FlacFrameHeader {
     u32 sample_count;
     u32 sample_rate;
     FlacFrameChannelType channels;
-    PcmSampleFormat bit_depth;
+    u8 bit_depth;
 };
 
 // 11.25. SUBFRAME_HEADER
@@ -89,13 +89,6 @@ struct FlacSubframeHeader {
     u8 order;
     u8 wasted_bits_per_sample;
     u8 bits_per_sample;
-};
-
-// 11.14. SEEKPOINT
-struct FlacSeekPoint {
-    u64 sample_index;
-    u64 byte_offset;
-    u16 num_samples;
 };
 
 }

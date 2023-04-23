@@ -5,14 +5,16 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/IterationDecision.h>
 #include <AK/Platform.h>
 #include <AK/Singleton.h>
 #include <AK/StringView.h>
 #include <AK/UUID.h>
-#if ARCH(I386) || ARCH(X86_64)
-#    include <Kernel/Arch/x86/ISABus/IDEController.h>
-#    include <Kernel/Arch/x86/PCI/IDELegacyModeController.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/ISABus/IDEController.h>
+#    include <Kernel/Arch/x86_64/PCI/IDELegacyModeController.h>
+#endif
+#if ARCH(AARCH64)
+#    include <Kernel/Arch/aarch64/RPi/SDHostController.h>
 #endif
 #include <Kernel/Bus/PCI/API.h>
 #include <Kernel/Bus/PCI/Access.h>
@@ -26,6 +28,8 @@
 #include <Kernel/Storage/ATA/AHCI/Controller.h>
 #include <Kernel/Storage/ATA/GenericIDE/Controller.h>
 #include <Kernel/Storage/NVMe/NVMeController.h>
+#include <Kernel/Storage/SD/PCISDHostController.h>
+#include <Kernel/Storage/SD/SDHostController.h>
 #include <Kernel/Storage/StorageManagement.h>
 #include <LibPartition/EBRPartitionTable.h>
 #include <LibPartition/GUIDPartitionTable.h>
@@ -40,6 +44,7 @@ static Atomic<u32> s_controller_id;
 
 static Atomic<u32> s_relative_ata_controller_id;
 static Atomic<u32> s_relative_nvme_controller_id;
+static Atomic<u32> s_relative_sd_controller_id;
 
 static constexpr StringView partition_uuid_prefix = "PARTUUID:"sv;
 
@@ -49,6 +54,7 @@ static constexpr StringView block_device_prefix = "block"sv;
 static constexpr StringView ata_device_prefix = "ata"sv;
 static constexpr StringView nvme_device_prefix = "nvme"sv;
 static constexpr StringView logical_unit_number_device_prefix = "lun"sv;
+static constexpr StringView sd_device_prefix = "sd"sv;
 
 UNMAP_AFTER_INIT StorageManagement::StorageManagement()
 {
@@ -60,10 +66,18 @@ u32 StorageManagement::generate_relative_nvme_controller_id(Badge<NVMeController
     s_relative_nvme_controller_id++;
     return controller_id;
 }
+
 u32 StorageManagement::generate_relative_ata_controller_id(Badge<ATAController>)
 {
     auto controller_id = s_relative_ata_controller_id.load();
     s_relative_ata_controller_id++;
+    return controller_id;
+}
+
+u32 StorageManagement::generate_relative_sd_controller_id(Badge<SDHostController>)
+{
+    auto controller_id = s_relative_sd_controller_id.load();
+    s_relative_sd_controller_id++;
     return controller_id;
 }
 
@@ -76,36 +90,27 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_pci_controllers(bool force_pi
 {
     VERIFY(m_controllers.is_empty());
 
-    using SubclassID = PCI::MassStorage::SubclassID;
     if (!kernel_command_line().disable_physical_storage()) {
-
+        // NOTE: Search for VMD devices before actually searching for storage controllers
+        // because the VMD device is only a bridge to such (NVMe) controllers.
         MUST(PCI::enumerate([&](PCI::DeviceIdentifier const& device_identifier) -> void {
-            if (device_identifier.class_code().value() != to_underlying(PCI::ClassID::MassStorage)) {
-                return;
+            constexpr PCI::HardwareID vmd_device = { 0x8086, 0x9a0b };
+            if (device_identifier.hardware_id() == vmd_device) {
+                auto controller = PCI::VolumeManagementDevice::must_create(device_identifier);
+                MUST(PCI::Access::the().add_host_controller_and_scan_for_devices(move(controller)));
             }
+        }));
 
-            {
-                constexpr PCI::HardwareID vmd_device = { 0x8086, 0x9a0b };
-                if (device_identifier.hardware_id() == vmd_device) {
-                    auto controller = PCI::VolumeManagementDevice::must_create(device_identifier);
-                    MUST(PCI::Access::the().add_host_controller_and_enumerate_attached_devices(move(controller), [this, nvme_poll](PCI::DeviceIdentifier const& device_identifier) -> void {
-                        auto subclass_code = static_cast<SubclassID>(device_identifier.subclass_code().value());
-                        if (subclass_code == SubclassID::NVMeController) {
-                            auto controller = NVMeController::try_initialize(device_identifier, nvme_poll);
-                            if (controller.is_error()) {
-                                dmesgln("Unable to initialize NVMe controller: {}", controller.error());
-                            } else {
-                                m_controllers.append(controller.release_value());
-                            }
-                        }
-                    }));
-                }
-            }
+        auto const& handle_mass_storage_device = [&](PCI::DeviceIdentifier const& device_identifier) {
+            using SubclassID = PCI::MassStorage::SubclassID;
 
             auto subclass_code = static_cast<SubclassID>(device_identifier.subclass_code().value());
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
             if (subclass_code == SubclassID::IDEController && kernel_command_line().is_ide_enabled()) {
-                m_controllers.append(PCIIDELegacyModeController::initialize(device_identifier, force_pio));
+                if (auto ide_controller_or_error = PCIIDELegacyModeController::initialize(device_identifier, force_pio); !ide_controller_or_error.is_error())
+                    m_controllers.append(ide_controller_or_error.release_value());
+                else
+                    dmesgln("Unable to initialize IDE controller: {}", ide_controller_or_error.error());
             }
 #elif ARCH(AARCH64)
             (void)force_pio;
@@ -116,7 +121,10 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_pci_controllers(bool force_pi
 
             if (subclass_code == SubclassID::SATAController
                 && device_identifier.prog_if().value() == to_underlying(PCI::MassStorage::SATAProgIF::AHCI)) {
-                m_controllers.append(AHCIController::initialize(device_identifier));
+                if (auto ahci_controller_or_error = AHCIController::initialize(device_identifier); !ahci_controller_or_error.is_error())
+                    m_controllers.append(ahci_controller_or_error.value());
+                else
+                    dmesgln("Unable to initialize AHCI controller: {}", ahci_controller_or_error.error());
             }
             if (subclass_code == SubclassID::NVMeController) {
                 auto controller = NVMeController::try_initialize(device_identifier, nvme_poll);
@@ -126,6 +134,30 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_pci_controllers(bool force_pi
                     m_controllers.append(controller.release_value());
                 }
             }
+        };
+
+        auto const& handle_base_device = [&](PCI::DeviceIdentifier const& device_identifier) {
+            using SubclassID = PCI::Base::SubclassID;
+
+            auto subclass_code = static_cast<SubclassID>(device_identifier.subclass_code().value());
+            if (subclass_code == SubclassID::SDHostController) {
+
+                auto sdhc_or_error = PCISDHostController::try_initialize(device_identifier);
+                if (sdhc_or_error.is_error()) {
+                    dmesgln("PCI: Failed to initialize SD Host Controller ({} - {}): {}", device_identifier.address(), device_identifier.hardware_id(), sdhc_or_error.error());
+                } else {
+                    m_controllers.append(sdhc_or_error.release_value());
+                }
+            }
+        };
+
+        MUST(PCI::enumerate([&](PCI::DeviceIdentifier const& device_identifier) -> void {
+            auto class_code = device_identifier.class_code().value();
+            if (class_code == to_underlying(PCI::ClassID::MassStorage)) {
+                handle_mass_storage_device(device_identifier);
+            } else if (class_code == to_underlying(PCI::ClassID::Base)) {
+                handle_base_device(device_identifier);
+            }
         }));
     }
 }
@@ -134,8 +166,8 @@ UNMAP_AFTER_INIT void StorageManagement::enumerate_storage_devices()
 {
     VERIFY(!m_controllers.is_empty());
     for (auto& controller : m_controllers) {
-        for (size_t device_index = 0; device_index < controller.devices_count(); device_index++) {
-            auto device = controller.device(device_index);
+        for (size_t device_index = 0; device_index < controller->devices_count(); device_index++) {
+            auto device = controller->device(device_index);
             if (device.is_null())
                 continue;
             m_storage_devices.append(device.release_nonnull());
@@ -154,14 +186,14 @@ UNMAP_AFTER_INIT void StorageManagement::dump_storage_devices_and_partitions() c
             dbgln("  Device: block{}:{} ({} partitions)", storage_device.major(), storage_device.minor(), partitions.size());
             unsigned partition_number = 1;
             for (auto const& partition : partitions) {
-                dbgln("    Partition: {}, block{}:{} (UUID {})", partition_number, partition.major(), partition.minor(), partition.metadata().unique_guid().to_string());
+                dbgln("    Partition: {}, block{}:{} (UUID {})", partition_number, partition->major(), partition->minor(), partition->metadata().unique_guid().to_string());
                 partition_number++;
             }
         }
     }
 }
 
-UNMAP_AFTER_INIT ErrorOr<NonnullOwnPtr<Partition::PartitionTable>> StorageManagement::try_to_initialize_partition_table(StorageDevice const& device) const
+UNMAP_AFTER_INIT ErrorOr<NonnullOwnPtr<Partition::PartitionTable>> StorageManagement::try_to_initialize_partition_table(StorageDevice& device) const
 {
     auto mbr_table_or_error = Partition::MBRPartitionTable::try_to_initialize(device);
     if (!mbr_table_or_error.is_error())
@@ -293,6 +325,13 @@ UNMAP_AFTER_INIT void StorageManagement::determine_nvme_boot_device()
     });
 }
 
+UNMAP_AFTER_INIT void StorageManagement::determine_sd_boot_device()
+{
+    determine_hardware_relative_boot_device(sd_device_prefix, [](StorageDevice const& device) -> bool {
+        return device.command_set() == StorageDevice::CommandSet::SD;
+    });
+}
+
 UNMAP_AFTER_INIT void StorageManagement::determine_block_boot_device()
 {
     VERIFY(m_boot_argument.starts_with(block_device_prefix));
@@ -356,6 +395,11 @@ UNMAP_AFTER_INIT void StorageManagement::determine_boot_device()
         determine_nvme_boot_device();
         return;
     }
+
+    if (m_boot_argument.starts_with(sd_device_prefix)) {
+        determine_sd_boot_device();
+        return;
+    }
     PANIC("StorageManagement: Invalid root boot parameter.");
 }
 
@@ -368,9 +412,9 @@ UNMAP_AFTER_INIT void StorageManagement::determine_boot_device_with_partition_uu
 
     for (auto& storage_device : m_storage_devices) {
         for (auto& partition : storage_device.partitions()) {
-            if (partition.metadata().unique_guid().is_zero())
+            if (partition->metadata().unique_guid().is_zero())
                 continue;
-            if (partition.metadata().unique_guid() == partition_uuid) {
+            if (partition->metadata().unique_guid() == partition_uuid) {
                 m_boot_block_device = partition;
                 break;
             }
@@ -402,7 +446,7 @@ u32 StorageManagement::generate_controller_id()
     return s_controller_id.fetch_add(1);
 }
 
-NonnullLockRefPtr<FileSystem> StorageManagement::root_filesystem() const
+NonnullRefPtr<FileSystem> StorageManagement::root_filesystem() const
 {
     auto boot_device_description = boot_block_device();
     if (!boot_device_description) {
@@ -426,7 +470,7 @@ UNMAP_AFTER_INIT void StorageManagement::initialize(StringView root_device, bool
     VERIFY(s_storage_device_minor_number == 0);
     m_boot_argument = root_device;
     if (PCI::Access::is_disabled()) {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
         // Note: If PCI is disabled, we assume that at least we have an ISA IDE controller
         // to probe and use
         auto isa_ide_controller = MUST(ISAIDEController::initialize());
@@ -435,6 +479,16 @@ UNMAP_AFTER_INIT void StorageManagement::initialize(StringView root_device, bool
     } else {
         enumerate_pci_controllers(force_pio, poll);
     }
+
+#if ARCH(AARCH64)
+    auto& rpi_sdhc = RPi::SDHostController::the();
+    if (auto maybe_error = rpi_sdhc.initialize(); maybe_error.is_error()) {
+        dmesgln("Unable to initialize RaspberryPi's SD Host Controller: {}", maybe_error.error());
+    } else {
+        m_controllers.append(rpi_sdhc);
+    }
+#endif
+
     enumerate_storage_devices();
     enumerate_disk_partitions();
 

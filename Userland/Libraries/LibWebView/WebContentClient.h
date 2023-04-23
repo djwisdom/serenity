@@ -8,6 +8,7 @@
 
 #include <AK/HashMap.h>
 #include <LibIPC/ConnectionToServer.h>
+#include <LibWeb/HTML/ActivateTab.h>
 #include <WebContent/WebContentClientEndpoint.h>
 #include <WebContent/WebContentServerEndpoint.h>
 
@@ -21,7 +22,7 @@ class WebContentClient final
     IPC_CLIENT_CONNECTION(WebContentClient, "/tmp/session/%sid/portal/webcontent"sv);
 
 public:
-    WebContentClient(NonnullOwnPtr<Core::Stream::LocalSocket>, ViewImplementation&);
+    WebContentClient(NonnullOwnPtr<Core::LocalSocket>, ViewImplementation&);
 
     Function<void()> on_web_content_process_crash;
 
@@ -54,13 +55,14 @@ private:
     virtual void did_get_source(AK::URL const&, DeprecatedString const&) override;
     virtual void did_get_dom_tree(DeprecatedString const&) override;
     virtual void did_get_dom_node_properties(i32 node_id, DeprecatedString const& computed_style, DeprecatedString const& resolved_style, DeprecatedString const& custom_properties, DeprecatedString const& node_box_sizing) override;
+    virtual void did_get_accessibility_tree(DeprecatedString const&) override;
     virtual void did_output_js_console_message(i32 message_index) override;
     virtual void did_get_js_console_messages(i32 start_index, Vector<DeprecatedString> const& message_types, Vector<DeprecatedString> const& messages) override;
     virtual void did_change_favicon(Gfx::ShareableBitmap const&) override;
-    virtual void did_request_alert(DeprecatedString const&) override;
-    virtual void did_request_confirm(DeprecatedString const&) override;
-    virtual void did_request_prompt(DeprecatedString const&, DeprecatedString const&) override;
-    virtual void did_request_set_prompt_text(DeprecatedString const& message) override;
+    virtual void did_request_alert(String const&) override;
+    virtual void did_request_confirm(String const&) override;
+    virtual void did_request_prompt(String const&, String const&) override;
+    virtual void did_request_set_prompt_text(String const& message) override;
     virtual void did_request_accept_dialog() override;
     virtual void did_request_dismiss_dialog() override;
     virtual Messages::WebContentClient::DidRequestAllCookiesResponse did_request_all_cookies(AK::URL const&) override;
@@ -68,6 +70,9 @@ private:
     virtual Messages::WebContentClient::DidRequestCookieResponse did_request_cookie(AK::URL const&, u8) override;
     virtual void did_set_cookie(AK::URL const&, Web::Cookie::ParsedCookie const&, u8) override;
     virtual void did_update_cookie(Web::Cookie::Cookie const&) override;
+    virtual Messages::WebContentClient::DidRequestNewTabResponse did_request_new_tab(Web::HTML::ActivateTab const& activate_tab) override;
+    virtual void did_request_activate_tab() override;
+    virtual void did_close_browsing_context() override;
     virtual void did_update_resource_count(i32 count_waiting) override;
     virtual void did_request_restore_window() override;
     virtual Messages::WebContentClient::DidRequestRepositionWindowResponse did_request_reposition_window(Gfx::IntPoint) override;

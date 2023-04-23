@@ -12,11 +12,13 @@ set(SOURCES
     Job.cpp
     NodeVisitor.cpp
     Parser.cpp
+    PosixLexer.cpp
+    PosixParser.cpp
     Shell.cpp
 )
 
 serenity_lib(LibShell shell)
-target_link_libraries(LibShell PRIVATE LibCore LibLine LibSyntax LibRegex)
+target_link_libraries(LibShell PRIVATE LibCore LibFileSystem LibLine LibSyntax LibRegex)
 
 if (SERENITYOS)
     target_sources(LibShell PRIVATE SyntaxHighlighter.cpp)
@@ -29,7 +31,7 @@ else()
     set(SOURCES main.cpp)
 
     serenity_bin(Shell)
-    target_link_libraries(Shell PRIVATE LibCore LibLine LibShell LibMain)
+    target_link_libraries(Shell PRIVATE LibCore LibFileSystem LibLine LibShell LibMain)
 
     install(DIRECTORY Tests/ DESTINATION usr/Tests/Shell
             PATTERN "Tests/*"

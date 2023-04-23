@@ -11,20 +11,22 @@
 #    define USING_AK_GLOBALLY 1
 #endif
 
-#ifdef __i386__
-#    define AK_ARCH_I386 1
-#endif
-
 #ifdef __x86_64__
-#    define AK_ARCH_X86_64 1
+#    define AK_IS_ARCH_X86_64() 1
+#else
+#    define AK_IS_ARCH_X86_64() 0
 #endif
 
 #ifdef __aarch64__
-#    define AK_ARCH_AARCH64 1
+#    define AK_IS_ARCH_AARCH64() 1
+#else
+#    define AK_IS_ARCH_AARCH64() 0
 #endif
 
 #ifdef __wasm32__
-#    define AK_ARCH_WASM32 1
+#    define AK_IS_ARCH_WASM32() 1
+#else
+#    define AK_IS_ARCH_WASM32() 0
 #endif
 
 #if (defined(__SIZEOF_POINTER__) && __SIZEOF_POINTER__ == 8) || defined(_WIN64)
@@ -33,7 +35,7 @@
 #    define AK_ARCH_32_BIT
 #endif
 
-#if defined(__clang__)
+#if defined(__clang__) || defined(__CLION_IDE__) || defined(__CLION_IDE_)
 #    define AK_COMPILER_CLANG
 #elif defined(__GNUC__)
 #    define AK_COMPILER_GCC
@@ -72,6 +74,11 @@
 #    define AK_OS_DRAGONFLY
 #endif
 
+#if defined(__sun)
+#    define AK_OS_BSD_GENERIC
+#    define AK_OS_SOLARIS
+#endif
+
 #if defined(_WIN32) || defined(_WIN64)
 #    define AK_OS_WINDOWS
 #endif
@@ -92,9 +99,9 @@
 #    define AK_OS_EMSCRIPTEN
 #endif
 
-#define ARCH(arch) (defined(AK_ARCH_##arch) && AK_ARCH_##arch)
+#define ARCH(arch) (AK_IS_ARCH_##arch())
 
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
 #    define VALIDATE_IS_X86()
 #else
 #    define VALIDATE_IS_X86() static_assert(false, "Trying to include x86 only header on non x86 platform");
@@ -106,7 +113,7 @@
 #    define VALIDATE_IS_AARCH64() static_assert(false, "Trying to include aarch64 only header on non aarch64 platform");
 #endif
 
-#if !defined(AK_COMPILER_CLANG) && !defined(__CLION_IDE_) && !defined(__CLION_IDE__)
+#if !defined(AK_COMPILER_CLANG)
 #    define AK_HAS_CONDITIONALLY_TRIVIAL
 #endif
 
@@ -138,7 +145,7 @@
 #ifdef NAKED
 #    undef NAKED
 #endif
-#ifndef AK_ARCH_AARCH64
+#if !ARCH(AARCH64)
 #    define NAKED __attribute__((naked))
 #else
 #    define NAKED
@@ -171,18 +178,10 @@
 #    ifdef AK_OS_WINDOWS
 // FIXME: No idea where to get this, but it's 4096 anyway :^)
 #        define PAGE_SIZE 4096
-// On macOS (at least Mojave), Apple's version of this header is not wrapped
-// in extern "C".
 #    else
-#        if defined(AK_OS_MACOS)
-extern "C" {
-#        endif
 #        include <unistd.h>
 #        undef PAGE_SIZE
 #        define PAGE_SIZE sysconf(_SC_PAGESIZE)
-#        ifdef AK_OS_MACOS
-}
-#        endif
 #    endif
 #endif
 
@@ -196,7 +195,7 @@ extern "C" {
 #endif
 
 #ifndef AK_SYSTEM_CACHE_ALIGNMENT_SIZE
-#    if ARCH(AARCH64) || ARCH(x86_64)
+#    if ARCH(AARCH64) || ARCH(X86_64)
 #        define AK_SYSTEM_CACHE_ALIGNMENT_SIZE 64
 #    else
 #        define AK_SYSTEM_CACHE_ALIGNMENT_SIZE 128

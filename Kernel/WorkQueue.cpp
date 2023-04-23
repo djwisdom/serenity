@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <Kernel/Arch/Processor.h>
 #include <Kernel/Process.h>
 #include <Kernel/Sections.h>
 #include <Kernel/WaitQueue.h>
@@ -23,11 +24,10 @@ UNMAP_AFTER_INIT void WorkQueue::initialize()
 
 UNMAP_AFTER_INIT WorkQueue::WorkQueue(StringView name)
 {
-    LockRefPtr<Thread> thread;
     auto name_kstring = KString::try_create(name);
     if (name_kstring.is_error())
         TODO();
-    (void)Process::create_kernel_process(thread, name_kstring.release_value(), [this] {
+    auto [_, thread] = Process::create_kernel_process(name_kstring.release_value(), [this] {
         for (;;) {
             WorkItem* item;
             bool have_more;
@@ -44,9 +44,8 @@ UNMAP_AFTER_INIT WorkQueue::WorkQueue(StringView name)
             }
             [[maybe_unused]] auto result = m_wait_queue.wait_on({});
         }
-    });
-    // If we can't create the thread we're in trouble...
-    m_thread = thread.release_nonnull();
+    }).release_value_but_fixme_should_propagate_errors();
+    m_thread = move(thread);
 }
 
 void WorkQueue::do_queue(WorkItem& item)

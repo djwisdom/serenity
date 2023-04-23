@@ -8,7 +8,6 @@
 
 #include <AK/Function.h>
 #include <LibCore/Promise.h>
-#include <LibCore/Stream.h>
 #include <LibIMAP/Parser.h>
 #include <LibTLS/TLSv12.h>
 
@@ -60,11 +59,10 @@ public:
     Function<void(ResponseData&&)> unrequested_response_callback;
 
 private:
-    Client(StringView host, u16 port, NonnullOwnPtr<Core::Stream::Socket>);
+    Client(StringView host, u16 port, NonnullOwnPtr<Core::Socket>);
     void setup_callbacks();
 
     ErrorOr<void> on_ready_to_receive();
-    ErrorOr<void> on_tls_ready_to_receive();
 
     ErrorOr<void> handle_parsed_response(ParseStatus&& parse_status);
     ErrorOr<void> send_next_command();
@@ -72,7 +70,7 @@ private:
     StringView m_host;
     u16 m_port;
 
-    NonnullOwnPtr<Core::Stream::Socket> m_socket;
+    NonnullOwnPtr<Core::Socket> m_socket;
     RefPtr<Promise<Empty>> m_connect_pending {};
 
     int m_current_command = 1;

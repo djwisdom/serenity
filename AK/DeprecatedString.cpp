@@ -5,18 +5,18 @@
  */
 
 #include <AK/ByteBuffer.h>
+#include <AK/DeprecatedFlyString.h>
 #include <AK/DeprecatedString.h>
-#include <AK/FlyString.h>
 #include <AK/Format.h>
 #include <AK/Function.h>
-#include <AK/Memory.h>
 #include <AK/StdLibExtras.h>
 #include <AK/StringView.h>
+#include <AK/Utf8View.h>
 #include <AK/Vector.h>
 
 namespace AK {
 
-bool DeprecatedString::operator==(FlyString const& fly_string) const
+bool DeprecatedString::operator==(DeprecatedFlyString const& fly_string) const
 {
     return m_impl == fly_string.impl() || view() == fly_string.view();
 }
@@ -246,6 +246,7 @@ DeprecatedString DeprecatedString::repeated(StringView string, size_t count)
 
 DeprecatedString DeprecatedString::bijective_base_from(size_t value, unsigned base, StringView map)
 {
+    value++;
     if (map.is_null())
         map = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"sv;
 
@@ -255,15 +256,16 @@ DeprecatedString DeprecatedString::bijective_base_from(size_t value, unsigned ba
     Array<char, round_up_to_power_of_two(sizeof(size_t) * 8 + 1, 2)> buffer;
     size_t i = 0;
     do {
-        buffer[i++] = map[value % base];
-        value /= base;
-    } while (value > 0);
+        auto remainder = value % base;
+        auto new_value = value / base;
+        if (remainder == 0) {
+            new_value--;
+            remainder = map.length();
+        }
 
-    // NOTE: Weird as this may seem, the thing that comes after 'Z' is 'AA', which as a number would be '00'
-    //       to make this work, only the most significant digit has to be in a range of (1..25) as opposed to (0..25),
-    //       but only if it's not the only digit in the string.
-    if (i > 1)
-        --buffer[i - 1];
+        buffer[i++] = map[remainder - 1];
+        value = new_value;
+    } while (value > 0);
 
     for (size_t j = 0; j < i / 2; ++j)
         swap(buffer[j], buffer[i - j - 1]);
@@ -344,9 +346,9 @@ bool DeprecatedString::contains(char needle, CaseSensitivity case_sensitivity) c
     return StringUtils::contains(*this, StringView(&needle, 1), case_sensitivity);
 }
 
-bool DeprecatedString::equals_ignoring_case(StringView other) const
+bool DeprecatedString::equals_ignoring_ascii_case(StringView other) const
 {
-    return StringUtils::equals_ignoring_case(view(), other);
+    return StringUtils::equals_ignoring_ascii_case(view(), other);
 }
 
 DeprecatedString DeprecatedString::reverse() const
@@ -376,7 +378,7 @@ DeprecatedString escape_html_entities(StringView html)
     return builder.to_deprecated_string();
 }
 
-DeprecatedString::DeprecatedString(FlyString const& string)
+DeprecatedString::DeprecatedString(DeprecatedFlyString const& string)
     : m_impl(string.impl())
 {
 }
@@ -415,29 +417,6 @@ bool DeprecatedString::operator==(char const* cstring) const
     return view() == cstring;
 }
 
-InputStream& operator>>(InputStream& stream, DeprecatedString& string)
-{
-    StringBuilder builder;
-
-    for (;;) {
-        char next_char;
-        stream >> next_char;
-
-        if (stream.has_any_error()) {
-            stream.set_fatal_error();
-            string = nullptr;
-            return stream;
-        }
-
-        if (next_char) {
-            builder.append(next_char);
-        } else {
-            string = builder.to_deprecated_string();
-            return stream;
-        }
-    }
-}
-
 DeprecatedString DeprecatedString::vformatted(StringView fmtstr, TypeErasedFormatParams& params)
 {
     StringBuilder builder;
@@ -448,6 +427,18 @@ DeprecatedString DeprecatedString::vformatted(StringView fmtstr, TypeErasedForma
 Vector<size_t> DeprecatedString::find_all(StringView needle) const
 {
     return StringUtils::find_all(*this, needle);
+}
+
+DeprecatedStringCodePointIterator DeprecatedString::code_points() const
+{
+    return DeprecatedStringCodePointIterator(*this);
+}
+
+ErrorOr<DeprecatedString> DeprecatedString::from_utf8(ReadonlyBytes bytes)
+{
+    if (!Utf8View(bytes).validate())
+        return Error::from_string_literal("DeprecatedString::from_utf8: Input was not valid UTF-8");
+    return DeprecatedString { StringImpl::create(bytes) };
 }
 
 }

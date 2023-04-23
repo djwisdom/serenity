@@ -10,7 +10,6 @@
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -46,8 +45,8 @@ ErrorOr<int> serenity_main(Main::Arguments args)
     TRY(Core::System::unveil(nullptr, nullptr));
 
     bool single_shot = false;
-    char const* omit_pid_value = nullptr;
-    char const* process_name = nullptr;
+    StringView omit_pid_value;
+    StringView process_name;
 
     Core::ArgsParser args_parser;
     args_parser.add_option(single_shot, "Only return one pid", nullptr, 's');
@@ -57,18 +56,18 @@ ErrorOr<int> serenity_main(Main::Arguments args)
     args_parser.parse(args);
 
     pid_t pid_to_omit = 0;
-    if (omit_pid_value) {
-        if (!strcmp(omit_pid_value, "%PPID")) {
+    if (!omit_pid_value.is_empty()) {
+        if (omit_pid_value == "%PPID"sv) {
             pid_to_omit = getppid();
         } else {
-            auto number = StringView { omit_pid_value, strlen(omit_pid_value) }.to_uint();
+            auto number = omit_pid_value.to_uint();
             if (!number.has_value()) {
                 warnln("Invalid value for -o");
-                args_parser.print_usage(stderr, args.argv[0]);
+                args_parser.print_usage(stderr, args.strings[0]);
                 return 1;
             }
             pid_to_omit = number.value();
         }
     }
-    return pid_of(process_name, single_shot, omit_pid_value != nullptr, pid_to_omit);
+    return pid_of(process_name, single_shot, !omit_pid_value.is_empty(), pid_to_omit);
 }

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, kleines Filmröllchen <filmroellchen@serenityos.org>
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,16 +9,18 @@
 
 #include <AK/Error.h>
 #include <AK/Format.h>
+#include <AK/Function.h>
+#include <AK/IterationDecision.h>
 #include <AK/LexicalPath.h>
 #include <AK/Noncopyable.h>
 #include <AK/Optional.h>
-#include <LibCore/Stream.h>
+#include <LibCore/DirIterator.h>
+#include <LibCore/DirectoryEntry.h>
+#include <LibCore/File.h>
 #include <dirent.h>
 #include <sys/stat.h>
 
 namespace Core {
-
-class DirIterator;
 
 // Deal with real system directories. Any Directory instance always refers to a valid existing directory.
 class Directory {
@@ -35,23 +38,27 @@ public:
 
     static ErrorOr<Directory> create(LexicalPath path, CreateDirectories, mode_t creation_mode = 0755);
     static ErrorOr<Directory> create(DeprecatedString path, CreateDirectories, mode_t creation_mode = 0755);
-    static ErrorOr<Directory> adopt_fd(int fd, Optional<LexicalPath> path = {});
+    static ErrorOr<Directory> adopt_fd(int fd, LexicalPath path);
 
-    ErrorOr<NonnullOwnPtr<Stream::File>> open(StringView filename, Stream::OpenMode mode) const;
+    ErrorOr<NonnullOwnPtr<File>> open(StringView filename, File::OpenMode mode) const;
     ErrorOr<struct stat> stat() const;
-    ErrorOr<DirIterator> create_iterator() const;
+    int fd() const { return m_directory_fd; }
 
-    ErrorOr<LexicalPath> path() const;
+    LexicalPath const& path() const { return m_path; }
+
+    using ForEachEntryCallback = Function<ErrorOr<IterationDecision>(DirectoryEntry const&, Directory const& parent)>;
+    static ErrorOr<void> for_each_entry(StringView path, DirIterator::Flags, ForEachEntryCallback);
+    ErrorOr<void> for_each_entry(DirIterator::Flags, ForEachEntryCallback);
 
     ErrorOr<void> chown(uid_t, gid_t);
 
     static ErrorOr<bool> is_valid_directory(int fd);
 
 private:
-    Directory(int directory_fd, Optional<LexicalPath> path);
+    Directory(int directory_fd, LexicalPath path);
     static ErrorOr<void> ensure_directory(LexicalPath const& path, mode_t creation_mode = 0755);
 
-    Optional<LexicalPath> m_path;
+    LexicalPath m_path;
     int m_directory_fd;
 };
 
@@ -62,10 +69,7 @@ template<>
 struct Formatter<Core::Directory> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Core::Directory const& directory)
     {
-        auto path = directory.path();
-        if (path.is_error())
-            TRY(builder.put_string("<unknown>"sv));
-        TRY(builder.put_string(path.release_value().string()));
+        TRY(builder.put_string(directory.path().string()));
         return {};
     }
 };

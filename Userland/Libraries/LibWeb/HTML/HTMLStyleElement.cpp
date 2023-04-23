@@ -8,16 +8,24 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/HTMLStyleElement.h>
+#include <LibWeb/Infra/Strings.h>
 
 namespace Web::HTML {
 
 HTMLStyleElement::HTMLStyleElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLStyleElement"));
 }
 
 HTMLStyleElement::~HTMLStyleElement() = default;
+
+JS::ThrowCompletionOr<void> HTMLStyleElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLStyleElementPrototype>(realm, "HTMLStyleElement"));
+
+    return {};
+}
 
 void HTMLStyleElement::visit_edges(Cell::Visitor& visitor)
 {
@@ -124,7 +132,7 @@ void HTMLStyleElement::update_a_style_block()
 
     // 4. If element's type attribute is present and its value is neither the empty string nor an ASCII case-insensitive match for "text/css", then return.
     auto type_attribute = attribute(HTML::AttributeNames::type);
-    if (!type_attribute.is_null() && !type_attribute.is_empty() && !type_attribute.equals_ignoring_case("text/css"sv))
+    if (!type_attribute.is_null() && !type_attribute.is_empty() && !Infra::is_ascii_case_insensitive_match(type_attribute, "text/css"sv))
         return;
 
     // FIXME: 5. If the Should element's inline behavior be blocked by Content Security Policy? algorithm returns "Blocked" when executed upon the style element, "style", and the style element's child text content, then return. [CSP]

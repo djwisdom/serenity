@@ -12,18 +12,18 @@ namespace Web::XHR::EventNames {
 ENUMERATE_XHR_EVENTS
 #undef __ENUMERATE_XHR_EVENT
 
-[[gnu::constructor]] static void initialize()
+ErrorOr<void> initialize_strings()
 {
     static bool s_initialized = false;
-    if (s_initialized)
-        return;
+    VERIFY(!s_initialized);
 
 #define __ENUMERATE_XHR_EVENT(name) \
-    name = #name;
+    name = TRY(#name##_fly_string);
     ENUMERATE_XHR_EVENTS
 #undef __ENUMERATE_XHR_EVENT
 
     s_initialized = true;
+    return {};
 }
 
 }

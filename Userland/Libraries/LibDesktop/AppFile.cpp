@@ -112,6 +112,11 @@ bool AppFile::requires_root() const
     return m_config->read_bool_entry("App", "RequiresRoot", false);
 }
 
+bool AppFile::exclude_from_system_menu() const
+{
+    return m_config->read_bool_entry("App", "ExcludeFromSystemMenu", false);
+}
+
 Vector<DeprecatedString> AppFile::launcher_mime_types() const
 {
     Vector<DeprecatedString> mime_types;
@@ -145,12 +150,12 @@ Vector<DeprecatedString> AppFile::launcher_protocols() const
     return protocols;
 }
 
-bool AppFile::spawn() const
+bool AppFile::spawn(ReadonlySpan<StringView> arguments) const
 {
     if (!is_valid())
         return false;
 
-    auto pid = Core::Process::spawn(executable(), Span<DeprecatedString const> {}, working_directory());
+    auto pid = Core::Process::spawn(executable(), arguments, working_directory());
     if (pid.is_error())
         return false;
 

@@ -9,10 +9,10 @@
 
 #include <AK/RedBlackTree.h>
 #include <AK/Vector.h>
+#include <Kernel/Arch/PageDirectory.h>
 #include <Kernel/Library/LockWeakPtr.h>
 #include <Kernel/Locking/SpinlockProtected.h>
 #include <Kernel/Memory/AllocationStrategy.h>
-#include <Kernel/Memory/PageDirectory.h>
 #include <Kernel/Memory/Region.h>
 #include <Kernel/Memory/RegionTree.h>
 #include <Kernel/UnixTypes.h>
@@ -21,7 +21,7 @@ namespace Kernel::Memory {
 
 class AddressSpace {
 public:
-    static ErrorOr<NonnullOwnPtr<AddressSpace>> try_create(AddressSpace const* parent);
+    static ErrorOr<NonnullOwnPtr<AddressSpace>> try_create(Process&, AddressSpace const* parent);
     ~AddressSpace();
 
     PageDirectory& page_directory() { return *m_page_directory; }

@@ -11,8 +11,8 @@
 #include <LibCore/ArgsParser.h>
 #include <LibMain/Main.h>
 
-ErrorOr<void> generate_header_file(JsonObject& properties, Core::Stream::File& file);
-ErrorOr<void> generate_implementation_file(JsonObject& properties, Core::Stream::File& file);
+ErrorOr<void> generate_header_file(JsonObject& properties, Core::File& file);
+ErrorOr<void> generate_implementation_file(JsonObject& properties, Core::File& file);
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
@@ -30,8 +30,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     VERIFY(json.is_object());
     auto properties = json.as_object();
 
-    auto generated_header_file = TRY(Core::Stream::File::open(generated_header_path, Core::Stream::OpenMode::Write));
-    auto generated_implementation_file = TRY(Core::Stream::File::open(generated_implementation_path, Core::Stream::OpenMode::Write));
+    auto generated_header_file = TRY(Core::File::open(generated_header_path, Core::File::OpenMode::Write));
+    auto generated_implementation_file = TRY(Core::File::open(generated_implementation_path, Core::File::OpenMode::Write));
 
     TRY(generate_header_file(properties, *generated_header_file));
     TRY(generate_implementation_file(properties, *generated_implementation_file));
@@ -39,7 +39,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     return 0;
 }
 
-ErrorOr<void> generate_header_file(JsonObject& properties, Core::Stream::File& file)
+ErrorOr<void> generate_header_file(JsonObject& properties, Core::File& file)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -49,6 +49,7 @@ ErrorOr<void> generate_header_file(JsonObject& properties, Core::Stream::File& f
 #include <AK/NonnullRefPtr.h>
 #include <AK/StringView.h>
 #include <AK/Traits.h>
+#include <LibJS/Forward.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::CSS {
@@ -106,7 +107,7 @@ PropertyID property_id_from_camel_case_string(StringView);
 PropertyID property_id_from_string(StringView);
 StringView string_from_property_id(PropertyID);
 bool is_inherited_property(PropertyID);
-NonnullRefPtr<StyleValue> property_initial_value(PropertyID);
+NonnullRefPtr<StyleValue> property_initial_value(JS::Realm&, PropertyID);
 
 bool property_accepts_value(PropertyID, StyleValue&);
 size_t property_maximum_value_count(PropertyID);
@@ -139,11 +140,11 @@ struct Traits<Web::CSS::PropertyID> : public GenericTraits<Web::CSS::PropertyID>
 } // namespace AK
 )~~~");
 
-    TRY(file.write(generator.as_string_view().bytes()));
+    TRY(file.write_until_depleted(generator.as_string_view().bytes()));
     return {};
 }
 
-ErrorOr<void> generate_implementation_file(JsonObject& properties, Core::Stream::File& file)
+ErrorOr<void> generate_implementation_file(JsonObject& properties, Core::File& file)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -154,6 +155,8 @@ ErrorOr<void> generate_implementation_file(JsonObject& properties, Core::Stream:
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleValue.h>
+#include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
+#include <LibWeb/Infra/Strings.h>
 
 namespace Web::CSS {
 
@@ -169,7 +172,7 @@ PropertyID property_id_from_camel_case_string(StringView string)
         member_generator.set("name:titlecase", title_casify(name));
         member_generator.set("name:camelcase", camel_casify(name));
         member_generator.append(R"~~~(
-    if (string.equals_ignoring_case("@name:camelcase@"sv))
+    if (string.equals_ignoring_ascii_case("@name:camelcase@"sv))
         return PropertyID::@name:titlecase@;
 )~~~");
     });
@@ -189,7 +192,7 @@ PropertyID property_id_from_string(StringView string)
         member_generator.set("name", name);
         member_generator.set("name:titlecase", title_casify(name));
         member_generator.append(R"~~~(
-    if (string.equals_ignoring_case("@name@"sv))
+    if (Infra::is_ascii_case_insensitive_match(string, "@name@"sv))
         return PropertyID::@name:titlecase@;
 )~~~");
     });
@@ -230,9 +233,9 @@ bool is_inherited_property(PropertyID property_id)
 
         bool inherited = false;
         if (value.as_object().has("inherited"sv)) {
-            auto& inherited_value = value.as_object().get("inherited"sv);
-            VERIFY(inherited_value.is_bool());
-            inherited = inherited_value.as_bool();
+            auto inherited_value = value.as_object().get_bool("inherited"sv);
+            VERIFY(inherited_value.has_value());
+            inherited = inherited_value.value();
         }
 
         if (inherited) {
@@ -261,7 +264,7 @@ bool property_affects_layout(PropertyID property_id)
 
         bool affects_layout = true;
         if (value.as_object().has("affects-layout"sv))
-            affects_layout = value.as_object().get("affects-layout"sv).to_bool();
+            affects_layout = value.as_object().get_bool("affects-layout"sv).value_or(false);
 
         if (affects_layout) {
             auto member_generator = generator.fork();
@@ -289,7 +292,7 @@ bool property_affects_stacking_context(PropertyID property_id)
 
         bool affects_stacking_context = false;
         if (value.as_object().has("affects-stacking-context"sv))
-            affects_stacking_context = value.as_object().get("affects-stacking-context"sv).to_bool();
+            affects_stacking_context = value.as_object().get_bool("affects-stacking-context"sv).value_or(false);
 
         if (affects_stacking_context) {
             auto member_generator = generator.fork();
@@ -307,59 +310,53 @@ bool property_affects_stacking_context(PropertyID property_id)
     }
 }
 
-NonnullRefPtr<StyleValue> property_initial_value(PropertyID property_id)
+NonnullRefPtr<StyleValue> property_initial_value(JS::Realm& context_realm, PropertyID property_id)
 {
     static Array<RefPtr<StyleValue>, to_underlying(last_property_id) + 1> initial_values;
-    static bool initialized = false;
-    if (!initialized) {
-        initialized = true;
-        Parser::ParsingContext parsing_context;
-)~~~");
+    if (auto initial_value = initial_values[to_underlying(property_id)])
+        return initial_value.release_nonnull();
 
-    // NOTE: Parsing a shorthand property requires that its longhands are already available here.
-    //       So, we do this in two passes: First longhands, then shorthands.
-    //       Probably we should build a dependency graph and then handle them in order, but this
-    //       works for now! :^)
+    // Lazily parse initial values as needed.
+    // This ensures the shorthands will always be able to get the initial values of their longhands.
+    // This also now allows a longhand have its own longhand (like background-position-x).
+
+    Parser::ParsingContext parsing_context(context_realm);
+    switch (property_id) {
+)~~~");
 
     auto output_initial_value_code = [&](auto& name, auto& object) {
         if (!object.has("initial"sv)) {
             dbgln("No initial value specified for property '{}'", name);
             VERIFY_NOT_REACHED();
         }
-        auto& initial_value = object.get("initial"sv);
-        VERIFY(initial_value.is_string());
-        auto initial_value_string = initial_value.as_string();
+        auto initial_value = object.get_deprecated_string("initial"sv);
+        VERIFY(initial_value.has_value());
+        auto& initial_value_string = initial_value.value();
 
         auto member_generator = generator.fork();
         member_generator.set("name:titlecase", title_casify(name));
         member_generator.set("initial_value_string", initial_value_string);
-        member_generator.append(R"~~~(
+        member_generator.append(
+            R"~~~(        case PropertyID::@name:titlecase@:
         {
             auto parsed_value = parse_css_value(parsing_context, "@initial_value_string@"sv, PropertyID::@name:titlecase@);
             VERIFY(!parsed_value.is_null());
-            initial_values[to_underlying(PropertyID::@name:titlecase@)] = parsed_value.release_nonnull();
+            auto initial_value = parsed_value.release_nonnull();
+            initial_values[to_underlying(PropertyID::@name:titlecase@)] = initial_value;
+            return initial_value;
         }
 )~~~");
     };
 
     properties.for_each_member([&](auto& name, auto& value) {
         VERIFY(value.is_object());
-        if (value.as_object().has("longhands"sv))
-            return;
         output_initial_value_code(name, value.as_object());
     });
 
-    properties.for_each_member([&](auto& name, auto& value) {
-        VERIFY(value.is_object());
-        if (!value.as_object().has("longhands"sv))
-            return;
-        output_initial_value_code(name, value.as_object());
-    });
-
-    generator.append(R"~~~(
+    generator.append(
+        R"~~~(        default: VERIFY_NOT_REACHED();
     }
-
-    return *initial_values[to_underlying(property_id)];
+    VERIFY_NOT_REACHED();
 }
 
 bool property_has_quirk(PropertyID property_id, Quirk quirk)
@@ -370,9 +367,9 @@ bool property_has_quirk(PropertyID property_id, Quirk quirk)
     properties.for_each_member([&](auto& name, auto& value) {
         VERIFY(value.is_object());
         if (value.as_object().has("quirks"sv)) {
-            auto& quirks_value = value.as_object().get("quirks"sv);
-            VERIFY(quirks_value.is_array());
-            auto& quirks = quirks_value.as_array();
+            auto quirks_value = value.as_object().get_array("quirks"sv);
+            VERIFY(quirks_value.has_value());
+            auto& quirks = quirks_value.value();
 
             if (!quirks.is_empty()) {
                 auto property_generator = generator.fork();
@@ -461,9 +458,9 @@ bool property_accepts_value(PropertyID property_id, StyleValue& style_value)
             };
 
             if (has_valid_types) {
-                auto valid_types_value = object.get("valid-types"sv);
-                VERIFY(valid_types_value.is_array());
-                auto valid_types = valid_types_value.as_array();
+                auto valid_types_value = object.get_array("valid-types"sv);
+                VERIFY(valid_types_value.has_value());
+                auto& valid_types = valid_types_value.value();
                 if (!valid_types.is_empty()) {
                     for (auto& type : valid_types.values()) {
                         VERIFY(type.is_string());
@@ -536,9 +533,9 @@ bool property_accepts_value(PropertyID property_id, StyleValue& style_value)
             }
 
             if (has_valid_identifiers) {
-                auto valid_identifiers_value = object.get("valid-identifiers"sv);
-                VERIFY(valid_identifiers_value.is_array());
-                auto valid_identifiers = valid_identifiers_value.as_array();
+                auto valid_identifiers_value = object.get_array("valid-identifiers"sv);
+                VERIFY(valid_identifiers_value.has_value());
+                auto& valid_identifiers = valid_identifiers_value.value();
                 if (!valid_identifiers.is_empty()) {
                     property_generator.append(R"~~~(
         switch (style_value.to_identifier()) {
@@ -582,10 +579,10 @@ size_t property_maximum_value_count(PropertyID property_id)
         VERIFY(value.is_object());
         if (value.as_object().has("max-values"sv)) {
             auto max_values = value.as_object().get("max-values"sv);
-            VERIFY(max_values.is_number() && !max_values.is_double());
+            VERIFY(max_values.has_value() && max_values->is_number() && !max_values->is_double());
             auto property_generator = generator.fork();
             property_generator.set("name:titlecase", title_casify(name));
-            property_generator.set("max_values", max_values.to_deprecated_string());
+            property_generator.set("max_values", max_values->to_deprecated_string());
             property_generator.append(R"~~~(
     case PropertyID::@name:titlecase@:
         return @max_values@;
@@ -603,6 +600,6 @@ size_t property_maximum_value_count(PropertyID property_id)
 
 )~~~");
 
-    TRY(file.write(generator.as_string_view().bytes()));
+    TRY(file.write_until_depleted(generator.as_string_view().bytes()));
     return {};
 }

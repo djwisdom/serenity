@@ -18,17 +18,16 @@
 #include <LibGUI/Menubar.h>
 #include <LibGUI/MessageBox.h>
 #include <LibGUI/Window.h>
-#include <LibGfx/BMPWriter.h>
 #include <LibGfx/Filters/ColorBlindnessFilter.h>
-#include <LibGfx/PNGWriter.h>
-#include <LibGfx/QOIWriter.h>
+#include <LibGfx/ImageFormats/BMPWriter.h>
+#include <LibGfx/ImageFormats/PNGWriter.h>
+#include <LibGfx/ImageFormats/QOIWriter.h>
 #include <LibMain/Main.h>
 
 static ErrorOr<ByteBuffer> dump_bitmap(RefPtr<Gfx::Bitmap> bitmap, AK::StringView extension)
 {
     if (extension == "bmp") {
-        Gfx::BMPWriter dumper;
-        return dumper.dump(bitmap);
+        return Gfx::BMPWriter::encode(*bitmap);
     } else if (extension == "png") {
         return Gfx::PNGWriter::encode(*bitmap);
     } else if (extension == "qoi") {
@@ -47,7 +46,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Desktop::Launcher::seal_allowlist());
     Config::pledge_domain("Magnifier");
 
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
@@ -61,23 +59,21 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->resize(window_dimensions, window_dimensions);
     window->set_minimizable(false);
     window->set_icon(app_icon.bitmap_for_size(16));
-    auto magnifier = TRY(window->try_set_main_widget<MagnifierWidget>());
+    auto magnifier = TRY(window->set_main_widget<MagnifierWidget>());
 
-    auto file_menu = TRY(window->try_add_menu("&File"));
+    auto file_menu = TRY(window->try_add_menu("&File"_short_string));
     TRY(file_menu->try_add_action(GUI::CommonActions::make_save_as_action([&](auto&) {
         AK::DeprecatedString filename = "file for saving";
         auto do_save = [&]() -> ErrorOr<void> {
-            auto response = FileSystemAccessClient::Client::the().try_save_file_deprecated(window, "Capture", "png");
+            auto response = FileSystemAccessClient::Client::the().save_file(window, "Capture", "png");
             if (response.is_error())
                 return {};
-            auto file = response.release_value();
-            auto path = AK::LexicalPath(file->filename());
+            auto file = response.value().release_stream();
+            auto path = AK::LexicalPath(response.value().filename().to_deprecated_string());
             filename = path.basename();
             auto encoded = TRY(dump_bitmap(magnifier->current_bitmap(), path.extension()));
 
-            if (!file->write(encoded.data(), encoded.size())) {
-                return Error::from_errno(file->error());
-            }
+            TRY(file->write_until_depleted(encoded));
             return {};
         };
 
@@ -144,7 +140,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     size_action_group->add_action(eight_x_action);
     size_action_group->set_exclusive(true);
 
-    auto view_menu = TRY(window->try_add_menu("&View"));
+    auto view_menu = TRY(window->try_add_menu("&View"_short_string));
     TRY(view_menu->try_add_action(two_x_action));
     TRY(view_menu->try_add_action(four_x_action));
     TRY(view_menu->try_add_action(eight_x_action));
@@ -156,15 +152,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(view_menu->try_add_action(show_grid_action));
     TRY(view_menu->try_add_action(choose_grid_color_action));
 
-    auto timeline_menu = TRY(window->try_add_menu("&Timeline"));
+    auto timeline_menu = TRY(window->try_add_menu(TRY("&Timeline"_string)));
     auto previous_frame_action = GUI::Action::create(
-        "&Previous frame", { Key_Left }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-back.png"sv)), [&](auto&) {
+        "&Previous frame", { Key_Left }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/go-back.png"sv)), [&](auto&) {
             pause_action->set_checked(true);
             magnifier->pause_capture(true);
             magnifier->display_previous_frame();
         });
     auto next_frame_action = GUI::Action::create(
-        "&Next frame", { Key_Right }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-forward.png"sv)), [&](auto&) {
+        "&Next frame", { Key_Right }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/go-forward.png"sv)), [&](auto&) {
             pause_action->set_checked(true);
             magnifier->pause_capture(true);
             magnifier->display_next_frame();
@@ -174,7 +170,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(window->try_add_menu(TRY(GUI::CommonMenus::make_accessibility_menu(magnifier))));
 
-    auto help_menu = TRY(window->try_add_menu("&Help"));
+    auto help_menu = TRY(window->try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/Magnifier.md"), "/bin/Help");

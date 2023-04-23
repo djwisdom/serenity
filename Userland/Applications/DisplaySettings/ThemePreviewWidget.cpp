@@ -6,7 +6,6 @@
 
 #include "ThemePreviewWidget.h"
 #include <AK/Array.h>
-#include <LibCore/File.h>
 #include <LibGUI/Painter.h>
 #include <LibGfx/Painter.h>
 #include <LibGfx/StylePainter.h>
@@ -19,10 +18,10 @@ ThemePreviewWidget::ThemePreviewWidget(Gfx::Palette const& palette)
     set_fixed_size(304, 201);
 }
 
-ErrorOr<void> ThemePreviewWidget::set_theme(DeprecatedString path)
+ErrorOr<void> ThemePreviewWidget::set_theme(String path)
 {
-    auto config_file = TRY(Core::File::open(path, Core::OpenMode::ReadOnly));
-    TRY(set_theme_from_file(config_file));
+    auto config_file = TRY(Core::File::open(path.to_deprecated_string(), Core::File::OpenMode::Read));
+    TRY(set_theme_from_file(path.to_deprecated_string(), move(config_file)));
     return {};
 }
 

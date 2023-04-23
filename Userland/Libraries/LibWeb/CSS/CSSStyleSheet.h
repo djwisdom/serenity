@@ -7,7 +7,6 @@
 #pragma once
 
 #include <AK/Function.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <LibWeb/CSS/CSSRule.h>
 #include <LibWeb/CSS/CSSRuleList.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
@@ -24,7 +23,7 @@ class CSSStyleSheet final
     WEB_PLATFORM_OBJECT(CSSStyleSheet, StyleSheet);
 
 public:
-    static CSSStyleSheet* create(JS::Realm&, CSSRuleList& rules, MediaList& media, Optional<AK::URL> location);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<CSSStyleSheet>> create(JS::Realm&, CSSRuleList& rules, MediaList& media, Optional<AK::URL> location);
 
     virtual ~CSSStyleSheet() override = default;
 
@@ -52,12 +51,13 @@ public:
 private:
     CSSStyleSheet(JS::Realm&, CSSRuleList&, MediaList&, Optional<AK::URL> location);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    CSSRuleList* m_rules { nullptr };
+    JS::GCPtr<CSSRuleList> m_rules;
 
     JS::GCPtr<StyleSheetList> m_style_sheet_list;
-    CSSRule* m_owner_css_rule { nullptr };
+    JS::GCPtr<CSSRule> m_owner_css_rule;
 };
 
 }

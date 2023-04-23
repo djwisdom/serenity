@@ -6,21 +6,29 @@
 
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Geometry/DOMRectReadOnly.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::Geometry {
 
-JS::NonnullGCPtr<DOMRectReadOnly> DOMRectReadOnly::construct_impl(JS::Realm& realm, double x, double y, double width, double height)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<DOMRectReadOnly>> DOMRectReadOnly::construct_impl(JS::Realm& realm, double x, double y, double width, double height)
 {
-    return realm.heap().allocate<DOMRectReadOnly>(realm, realm, x, y, width, height);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<DOMRectReadOnly>(realm, realm, x, y, width, height));
 }
 
 DOMRectReadOnly::DOMRectReadOnly(JS::Realm& realm, double x, double y, double width, double height)
     : PlatformObject(realm)
     , m_rect(x, y, width, height)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "DOMRectReadOnly"));
 }
 
 DOMRectReadOnly::~DOMRectReadOnly() = default;
+
+JS::ThrowCompletionOr<void> DOMRectReadOnly::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::DOMRectReadOnlyPrototype>(realm, "DOMRectReadOnly"));
+
+    return {};
+}
 
 }

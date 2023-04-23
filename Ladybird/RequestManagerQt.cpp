@@ -24,7 +24,7 @@ void RequestManagerQt::reply_finished(QNetworkReply* reply)
 
 RefPtr<Web::ResourceLoaderConnectorRequest> RequestManagerQt::start_request(DeprecatedString const& method, AK::URL const& url, HashMap<DeprecatedString, DeprecatedString> const& request_headers, ReadonlyBytes request_body, Core::ProxyData const& proxy)
 {
-    if (!url.scheme().is_one_of_ignoring_case("http"sv, "https"sv)) {
+    if (!url.scheme().is_one_of_ignoring_ascii_case("http"sv, "https"sv)) {
         return nullptr;
     }
     auto request_or_error = Request::create(*m_qnam, method, url, request_headers, request_body, proxy);
@@ -41,6 +41,8 @@ ErrorOr<NonnullRefPtr<RequestManagerQt::Request>> RequestManagerQt::Request::cre
     QNetworkRequest request { QString(url.to_deprecated_string().characters()) };
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setAttribute(QNetworkRequest::HttpPipeliningAllowedAttribute, true);
+    request.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
+    request.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);
 
     // NOTE: We disable HTTP2 as it's significantly slower (up to 5x, possibly more)
     request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
@@ -56,12 +58,18 @@ ErrorOr<NonnullRefPtr<RequestManagerQt::Request>> RequestManagerQt::Request::cre
         request.setRawHeader(QByteArray(it.key.characters()), QByteArray(it.value.characters()));
     }
 
-    if (method.equals_ignoring_case("head"sv)) {
+    if (method.equals_ignoring_ascii_case("head"sv)) {
         reply = qnam.head(request);
-    } else if (method.equals_ignoring_case("get"sv)) {
+    } else if (method.equals_ignoring_ascii_case("get"sv)) {
         reply = qnam.get(request);
-    } else if (method.equals_ignoring_case("post"sv)) {
+    } else if (method.equals_ignoring_ascii_case("post"sv)) {
         reply = qnam.post(request, QByteArray((char const*)request_body.data(), request_body.size()));
+    } else if (method.equals_ignoring_ascii_case("put"sv)) {
+        reply = qnam.put(request, QByteArray((char const*)request_body.data(), request_body.size()));
+    } else if (method.equals_ignoring_ascii_case("delete"sv)) {
+        reply = qnam.deleteResource(request);
+    } else {
+        reply = qnam.sendCustomRequest(request, QByteArray(method.characters()), QByteArray((char const*)request_body.data(), request_body.size()));
     }
 
     return adopt_ref(*new Request(*reply));
@@ -76,7 +84,6 @@ RequestManagerQt::Request::~Request() = default;
 
 void RequestManagerQt::Request::did_finish()
 {
-    bool success = m_reply.error() == QNetworkReply::NetworkError::NoError;
     auto buffer = m_reply.readAll();
     auto http_status_code = m_reply.attribute(QNetworkRequest::Attribute::HttpStatusCodeAttribute).toInt();
     HashMap<DeprecatedString, DeprecatedString, CaseInsensitiveStringTraits> response_headers;
@@ -84,7 +91,7 @@ void RequestManagerQt::Request::did_finish()
     for (auto& it : m_reply.rawHeaderPairs()) {
         auto name = DeprecatedString(it.first.data(), it.first.length());
         auto value = DeprecatedString(it.second.data(), it.second.length());
-        if (name.equals_ignoring_case("set-cookie"sv)) {
+        if (name.equals_ignoring_ascii_case("set-cookie"sv)) {
             // NOTE: Qt may have bundled multiple Set-Cookie headers into a single one.
             //       We have to extract the full list of cookies via QNetworkReply::header().
             auto set_cookie_list = m_reply.header(QNetworkRequest::SetCookieHeader).value<QList<QNetworkCookie>>();
@@ -98,5 +105,6 @@ void RequestManagerQt::Request::did_finish()
     if (!set_cookie_headers.is_empty()) {
         response_headers.set("set-cookie"sv, JsonArray { set_cookie_headers }.to_deprecated_string());
     }
+    bool success = http_status_code != 0;
     on_buffered_request_finish(success, buffer.length(), response_headers, http_status_code, ReadonlyBytes { buffer.data(), (size_t)buffer.size() });
 }

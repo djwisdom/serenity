@@ -7,9 +7,10 @@
 #include <AK/LexicalPath.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/ConfigFile.h>
-#include <LibCore/File.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/System.h>
 #include <LibCoredump/Backtrace.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <LibRegex/Regex.h>
 #include <LibTest/TestRunner.h>
@@ -315,7 +316,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     bool print_all_output = false;
     bool run_benchmarks = false;
     bool run_skipped_tests = false;
-    char const* specified_test_root = nullptr;
+    StringView specified_test_root;
     DeprecatedString test_glob;
     DeprecatedString exclude_pattern;
     DeprecatedString config_file;
@@ -326,7 +327,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         .help_string = "Show progress with OSC 9 (true, false)",
         .long_name = "show-progress",
         .short_name = 'p',
-        .accept_value = [&](auto* str) {
+        .accept_value = [&](StringView str) {
             if ("true"sv == str)
                 print_progress = true;
             else if ("false"sv == str)
@@ -360,17 +361,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     DeprecatedString test_root;
 
-    if (specified_test_root) {
+    if (!specified_test_root.is_empty()) {
         test_root = DeprecatedString { specified_test_root };
     } else {
         test_root = "/usr/Tests";
     }
-    if (!Core::File::is_directory(test_root)) {
+    if (!FileSystem::is_directory(test_root)) {
         warnln("Test root is not a directory: {}", test_root);
         return 1;
     }
 
-    test_root = Core::File::real_path_for(test_root);
+    test_root = Core::DeprecatedFile::real_path_for(test_root);
 
     auto void_or_error = Core::System::chdir(test_root);
     if (void_or_error.is_error()) {

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -36,7 +36,7 @@ NonnullGCPtr<NativeFunction> NativeFunction::create(Realm& allocating_realm, Saf
     // 7. Set func.[[Extensible]] to true.
     // 8. Set func.[[Realm]] to realm.
     // 9. Set func.[[InitialName]] to null.
-    auto function = allocating_realm.heap().allocate<NativeFunction>(allocating_realm, move(behaviour), prototype.value(), *realm.value());
+    auto function = allocating_realm.heap().allocate<NativeFunction>(allocating_realm, move(behaviour), prototype.value(), *realm.value()).release_allocated_value_but_fixme_should_propagate_errors();
 
     // 10. Perform SetFunctionLength(func, length).
     function->set_function_length(length);
@@ -51,9 +51,9 @@ NonnullGCPtr<NativeFunction> NativeFunction::create(Realm& allocating_realm, Saf
     return function;
 }
 
-NonnullGCPtr<NativeFunction> NativeFunction::create(Realm& realm, FlyString const& name, SafeFunction<ThrowCompletionOr<Value>(VM&)> function)
+NonnullGCPtr<NativeFunction> NativeFunction::create(Realm& realm, DeprecatedFlyString const& name, SafeFunction<ThrowCompletionOr<Value>(VM&)> function)
 {
-    return realm.heap().allocate<NativeFunction>(realm, name, move(function), *realm.intrinsics().function_prototype());
+    return realm.heap().allocate<NativeFunction>(realm, name, move(function), realm.intrinsics().function_prototype()).release_allocated_value_but_fixme_should_propagate_errors();
 }
 
 NativeFunction::NativeFunction(SafeFunction<ThrowCompletionOr<Value>(VM&)> native_function, Object* prototype, Realm& realm)
@@ -73,7 +73,7 @@ NativeFunction::NativeFunction(Object& prototype)
 {
 }
 
-NativeFunction::NativeFunction(FlyString name, SafeFunction<ThrowCompletionOr<Value>(VM&)> native_function, Object& prototype)
+NativeFunction::NativeFunction(DeprecatedFlyString name, SafeFunction<ThrowCompletionOr<Value>(VM&)> native_function, Object& prototype)
     : FunctionObject(prototype)
     , m_name(move(name))
     , m_native_function(move(native_function))
@@ -81,7 +81,7 @@ NativeFunction::NativeFunction(FlyString name, SafeFunction<ThrowCompletionOr<Va
 {
 }
 
-NativeFunction::NativeFunction(FlyString name, Object& prototype)
+NativeFunction::NativeFunction(DeprecatedFlyString name, Object& prototype)
     : FunctionObject(prototype)
     , m_name(move(name))
     , m_realm(&prototype.shape().realm())
@@ -111,7 +111,7 @@ ThrowCompletionOr<Value> NativeFunction::internal_call(Value this_argument, Mark
     callee_context.function_name = m_name;
 
     // 5. Let calleeRealm be F.[[Realm]].
-    auto* callee_realm = m_realm;
+    auto callee_realm = m_realm;
     // NOTE: This non-standard fallback is needed until we can guarantee that literally
     // every function has a realm - especially in LibWeb that's sometimes not the case
     // when a function is created while no JS is running, as we currently need to rely on
@@ -178,7 +178,7 @@ ThrowCompletionOr<NonnullGCPtr<Object>> NativeFunction::internal_construct(Marke
     callee_context.function_name = m_name;
 
     // 5. Let calleeRealm be F.[[Realm]].
-    auto* callee_realm = m_realm;
+    auto callee_realm = m_realm;
     // NOTE: This non-standard fallback is needed until we can guarantee that literally
     // every function has a realm - especially in LibWeb that's sometimes not the case
     // when a function is created while no JS is running, as we currently need to rely on

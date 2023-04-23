@@ -52,8 +52,8 @@ public:
     DeprecatedString const& path() const { return m_path; }
     void set_path(DeprecatedString);
 
-    DeprecatedString const& title() const { return m_title; }
-    void set_title(DeprecatedString);
+    String const& title() const { return m_title; }
+    void set_title(String);
 
     void add_guide(NonnullRefPtr<Guide> guide) { m_guides.append(guide); }
     void remove_guide(Guide const& guide)
@@ -82,7 +82,7 @@ public:
 
     Function<void(Layer*)> on_active_layer_change;
 
-    Function<void(DeprecatedString const&)> on_title_change;
+    Function<void(String const&)> on_title_change;
 
     Function<void(Gfx::IntPoint)> on_image_mouse_position_change;
 
@@ -94,7 +94,7 @@ public:
     void save_project_as();
     void save_project();
 
-    NonnullRefPtrVector<Guide> const& guides() const { return m_guides; }
+    Vector<NonnullRefPtr<Guide>> const& guides() const { return m_guides; }
     bool guide_visibility() { return m_show_guides; }
     void set_guide_visibility(bool show_guides);
     Function<void(bool)> on_set_guide_visibility;
@@ -118,11 +118,16 @@ public:
 
     Core::EventLoop& gui_event_loop() { return m_gui_event_loop; }
 
+    void set_status_info_to_color_at_mouse_position(Gfx::IntPoint position, bool sample_all_layers);
     void set_editor_color_to_color_at_mouse_position(GUI::MouseEvent const& event, bool sample_all_layers);
 
     void set_modified(DeprecatedString action_text);
     void set_unmodified();
     void update_modified();
+    Function<void(DeprecatedString)> on_appended_status_info_change;
+    DeprecatedString appended_status_info() { return m_appended_status_info; };
+    void set_appended_status_info(DeprecatedString);
+    DeprecatedString generate_unique_layer_name(DeprecatedString const& original_layer_name);
 
 private:
     explicit ImageEditor(NonnullRefPtr<Image>);
@@ -145,10 +150,12 @@ private:
 
     virtual void selection_did_change() override;
 
+    Gfx::IntRect subtract_rulers_from_rect(Gfx::IntRect const& rect) const;
+
     GUI::MouseEvent event_adjusted_for_layer(GUI::MouseEvent const&, Layer const&) const;
     GUI::MouseEvent event_with_pan_and_scale_applied(GUI::MouseEvent const&) const;
 
-    ErrorOr<void> save_project_to_file(Core::File&) const;
+    ErrorOr<void> save_project_to_file(NonnullOwnPtr<Core::File>) const;
 
     int calculate_ruler_step_size() const;
     Gfx::IntRect mouse_indicator_rect_x() const;
@@ -156,14 +163,16 @@ private:
 
     void paint_selection(Gfx::Painter&);
 
+    Optional<Color> color_from_position(Gfx::IntPoint position, bool sample_all_layers);
+
     NonnullRefPtr<Image> m_image;
     RefPtr<Layer> m_active_layer;
     GUI::UndoStack m_undo_stack;
 
     DeprecatedString m_path;
-    DeprecatedString m_title;
+    String m_title;
 
-    NonnullRefPtrVector<Guide> m_guides;
+    Vector<NonnullRefPtr<Guide>> m_guides;
     bool m_show_guides { true };
     bool m_show_rulers { true };
     bool m_show_pixel_grid { true };
@@ -182,7 +191,7 @@ private:
 
     float m_pixel_grid_threshold { 15.0f };
 
-    Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> m_active_cursor { Gfx::StandardCursor::None };
+    Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap const>> m_active_cursor { Gfx::StandardCursor::None };
 
     bool m_loaded_from_image { true };
 
@@ -192,6 +201,7 @@ private:
     void draw_marching_ants_pixel(Gfx::Painter&, int x, int y) const;
 
     Core::EventLoop& m_gui_event_loop;
+    DeprecatedString m_appended_status_info;
 };
 
 }

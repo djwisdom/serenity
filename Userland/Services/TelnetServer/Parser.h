@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <AK/DeprecatedString.h>
 #include <AK/Function.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
@@ -30,8 +29,6 @@ protected:
         ReadSubcommand,
         Error,
     };
-
-    void write(DeprecatedString const& str);
 
 private:
     State m_state { State::Free };

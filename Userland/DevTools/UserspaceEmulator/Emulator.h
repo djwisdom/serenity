@@ -11,7 +11,6 @@
 #include "RangeAllocator.h"
 #include "Report.h"
 #include "SoftMMU.h"
-#include <AK/FileStream.h>
 #include <AK/Types.h>
 #include <LibCore/MappedFile.h>
 #include <LibDebug/DebugInfo.h>
@@ -33,7 +32,7 @@ public:
 
     Emulator(DeprecatedString const& executable_path, Vector<StringView> const& arguments, Vector<DeprecatedString> const& environment);
 
-    void set_profiling_details(bool should_dump_profile, size_t instruction_interval, OutputFileStream* profile_stream, NonnullOwnPtrVector<DeprecatedString>* profiler_strings, Vector<int>* profiler_string_id_map)
+    void set_profiling_details(bool should_dump_profile, size_t instruction_interval, Stream* profile_stream, Vector<NonnullOwnPtr<DeprecatedString>>* profiler_strings, Vector<int>* profiler_string_id_map)
     {
         m_is_profiling = should_dump_profile;
         m_profile_instruction_interval = instruction_interval;
@@ -47,8 +46,8 @@ public:
         m_is_in_region_of_interest = value;
     }
 
-    OutputFileStream& profile_stream() { return *m_profile_stream; }
-    NonnullOwnPtrVector<DeprecatedString>& profiler_strings() { return *m_profiler_strings; }
+    Stream& profile_stream() { return *m_profile_stream; }
+    Vector<NonnullOwnPtr<DeprecatedString>>& profiler_strings() { return *m_profiler_strings; }
     Vector<int>& profiler_string_id_map() { return *m_profiler_string_id_map; }
 
     bool is_profiling() const { return m_is_profiling; }
@@ -140,8 +139,8 @@ private:
 
     void send_signal(int);
 
-    void emit_profile_sample(AK::OutputStream&);
-    void emit_profile_event(AK::OutputStream&, StringView event_name, DeprecatedString const& contents);
+    void emit_profile_sample(Stream&);
+    void emit_profile_event(Stream&, StringView event_name, DeprecatedString const& contents);
 
     int virt$accept4(FlatPtr);
     u32 virt$allocate_tls(FlatPtr, size_t);
@@ -172,7 +171,6 @@ private:
     int virt$ftruncate(int fd, FlatPtr length_addr);
     int virt$futex(FlatPtr);
     int virt$get_dir_entries(int fd, FlatPtr buffer, ssize_t);
-    int virt$get_process_name(FlatPtr buffer, int size);
     int virt$get_stack_bounds(FlatPtr, FlatPtr);
     int virt$getcwd(FlatPtr buffer, size_t buffer_size);
     gid_t virt$getegid();
@@ -226,7 +224,6 @@ private:
     int virt$scheduler_set_parameters(FlatPtr);
     int virt$sendfd(int, int);
     int virt$sendmsg(int sockfd, FlatPtr msg_addr, int flags);
-    int virt$set_coredump_metadata(FlatPtr address);
     int virt$set_mmap_name(FlatPtr);
     int virt$set_process_name(FlatPtr buffer, int size);
     int virt$set_thread_name(pid_t, FlatPtr, size_t);
@@ -296,9 +293,9 @@ private:
 
     RangeAllocator m_range_allocator;
 
-    OutputFileStream* m_profile_stream { nullptr };
+    Stream* m_profile_stream { nullptr };
     Vector<int>* m_profiler_string_id_map { nullptr };
-    NonnullOwnPtrVector<DeprecatedString>* m_profiler_strings { nullptr };
+    Vector<NonnullOwnPtr<DeprecatedString>>* m_profiler_strings { nullptr };
 
     bool m_is_profiling { false };
     size_t m_profile_instruction_interval { 0 };

@@ -7,6 +7,7 @@
 
 #include <AK/ScopeGuard.h>
 #include <AK/TemporaryChange.h>
+#include <Kernel/Arch/CPU.h>
 #include <Kernel/Debug.h>
 #include <Kernel/FileSystem/Custody.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
@@ -20,7 +21,6 @@
 #include <Kernel/Random.h>
 #include <Kernel/Scheduler.h>
 #include <Kernel/Time/TimeManagement.h>
-#include <LibC/limits.h>
 #include <LibELF/AuxiliaryVector.h>
 #include <LibELF/Image.h>
 #include <LibELF/Validation.h>
@@ -30,7 +30,6 @@ namespace Kernel {
 extern Memory::Region* g_signal_trampoline_region;
 
 struct LoadResult {
-    OwnPtr<Memory::AddressSpace> space;
     FlatPtr load_base { 0 };
     FlatPtr entry_eip { 0 };
     size_t size { 0 };
@@ -43,16 +42,16 @@ struct LoadResult {
 static constexpr size_t auxiliary_vector_size = 15;
 static Array<ELF::AuxiliaryValue, auxiliary_vector_size> generate_auxiliary_vector(FlatPtr load_base, FlatPtr entry_eip, UserID uid, UserID euid, GroupID gid, GroupID egid, StringView executable_path, Optional<Process::ScopedDescriptionAllocation> const& main_program_fd_allocation);
 
-static bool validate_stack_size(NonnullOwnPtrVector<KString> const& arguments, NonnullOwnPtrVector<KString>& environment, Array<ELF::AuxiliaryValue, auxiliary_vector_size> const& auxiliary)
+static bool validate_stack_size(Vector<NonnullOwnPtr<KString>> const& arguments, Vector<NonnullOwnPtr<KString>>& environment, Array<ELF::AuxiliaryValue, auxiliary_vector_size> const& auxiliary)
 {
     size_t total_arguments_size = 0;
     size_t total_environment_size = 0;
     size_t total_auxiliary_size = 0;
 
     for (auto const& a : arguments)
-        total_arguments_size += a.length() + 1;
+        total_arguments_size += a->length() + 1;
     for (auto const& e : environment)
-        total_environment_size += e.length() + 1;
+        total_environment_size += e->length() + 1;
     for (auto const& v : auxiliary) {
         if (!v.optional_string.is_empty())
             total_auxiliary_size += round_up_to_power_of_two(v.optional_string.length() + 1, sizeof(FlatPtr));
@@ -77,8 +76,8 @@ static bool validate_stack_size(NonnullOwnPtrVector<KString> const& arguments, N
     return true;
 }
 
-static ErrorOr<FlatPtr> make_userspace_context_for_main_thread([[maybe_unused]] ThreadRegisters& regs, Memory::Region& region, NonnullOwnPtrVector<KString> const& arguments,
-    NonnullOwnPtrVector<KString> const& environment, Array<ELF::AuxiliaryValue, auxiliary_vector_size> auxiliary_values)
+static ErrorOr<FlatPtr> make_userspace_context_for_main_thread([[maybe_unused]] ThreadRegisters& regs, Memory::Region& region, Vector<NonnullOwnPtr<KString>> const& arguments,
+    Vector<NonnullOwnPtr<KString>> const& environment, Array<ELF::AuxiliaryValue, auxiliary_vector_size> auxiliary_values)
 {
     FlatPtr new_sp = region.range().end().get();
 
@@ -108,13 +107,13 @@ static ErrorOr<FlatPtr> make_userspace_context_for_main_thread([[maybe_unused]] 
 
     Vector<FlatPtr> argv_entries;
     for (auto const& argument : arguments) {
-        push_string_on_new_stack(argument.view());
+        push_string_on_new_stack(argument->view());
         TRY(argv_entries.try_append(new_sp));
     }
 
     Vector<FlatPtr> env_entries;
     for (auto const& variable : environment) {
-        push_string_on_new_stack(variable.view());
+        push_string_on_new_stack(variable->view());
         TRY(env_entries.try_append(new_sp));
     }
 
@@ -149,19 +148,14 @@ static ErrorOr<FlatPtr> make_userspace_context_for_main_thread([[maybe_unused]] 
     // NOTE: The stack needs to be 16-byte aligned.
     new_sp -= new_sp % 16;
 
-#if ARCH(I386)
-    // GCC assumes that the return address has been pushed to the stack when it enters the function,
-    // so we need to reserve an extra pointer's worth of bytes below this to make GCC's stack alignment
-    // calculations work
-    new_sp -= sizeof(void*);
-
-    push_on_new_stack(envp);
-    push_on_new_stack(argv);
-    push_on_new_stack(argv_entries.size());
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
     regs.rdi = argv_entries.size();
     regs.rsi = argv;
     regs.rdx = envp;
+#elif ARCH(AARCH64)
+    regs.x[0] = argv_entries.size();
+    regs.x[1] = argv;
+    regs.x[2] = envp;
 #else
 #    error Unknown architecture
 #endif
@@ -266,8 +260,8 @@ enum class ShouldAllowSyscalls {
     Yes,
 };
 
-static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> new_space, OpenFileDescription& object_description,
-    FlatPtr load_offset, ShouldAllocateTls should_allocate_tls, ShouldAllowSyscalls should_allow_syscalls)
+static ErrorOr<LoadResult> load_elf_object(Memory::AddressSpace& new_space, OpenFileDescription& object_description,
+    FlatPtr load_offset, ShouldAllocateTls should_allocate_tls, ShouldAllowSyscalls should_allow_syscalls, Optional<size_t> minimum_stack_size = {})
 {
     auto& inode = *(object_description.inode());
     auto vmobject = TRY(Memory::SharedInodeVMObject::try_create_with_inode(inode));
@@ -290,12 +284,12 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
     size_t master_tls_size = 0;
     size_t master_tls_alignment = 0;
     FlatPtr load_base_address = 0;
-    size_t stack_size = 0;
+    size_t stack_size = Thread::default_userspace_stack_size;
 
     auto elf_name = TRY(object_description.pseudo_path());
     VERIFY(!Processor::in_critical());
 
-    Memory::MemoryManager::enter_address_space(*new_space);
+    Memory::MemoryManager::enter_address_space(new_space);
 
     auto load_tls_section = [&](auto& program_header) -> ErrorOr<void> {
         VERIFY(should_allocate_tls == ShouldAllocateTls::Yes);
@@ -307,7 +301,7 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
         }
 
         auto region_name = TRY(KString::formatted("{} (master-tls)", elf_name));
-        master_tls_region = TRY(new_space->allocate_region(Memory::RandomizeVirtualAddress::Yes, {}, program_header.size_in_memory(), PAGE_SIZE, region_name->view(), PROT_READ | PROT_WRITE, AllocationStrategy::Reserve));
+        master_tls_region = TRY(new_space.allocate_region(Memory::RandomizeVirtualAddress::Yes, {}, program_header.size_in_memory(), PAGE_SIZE, region_name->view(), PROT_READ | PROT_WRITE, AllocationStrategy::Reserve));
         master_tls_size = program_header.size_in_memory();
         master_tls_alignment = program_header.alignment();
 
@@ -335,7 +329,7 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
         size_t rounded_range_end = TRY(Memory::page_round_up(program_header.vaddr().offset(load_offset).offset(program_header.size_in_memory()).get()));
         auto range_end = VirtualAddress { rounded_range_end };
 
-        auto region = TRY(new_space->allocate_region(Memory::RandomizeVirtualAddress::Yes, range_base, range_end.get() - range_base.get(), PAGE_SIZE, region_name->view(), prot, AllocationStrategy::Reserve));
+        auto region = TRY(new_space.allocate_region(Memory::RandomizeVirtualAddress::Yes, range_base, range_end.get() - range_base.get(), PAGE_SIZE, region_name->view(), prot, AllocationStrategy::Reserve));
 
         // It's not always the case with PIE executables (and very well shouldn't be) that the
         // virtual address in the program header matches the one we end up giving the process.
@@ -370,7 +364,7 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
         auto range_base = VirtualAddress { Memory::page_round_down(program_header.vaddr().offset(load_offset).get()) };
         size_t rounded_range_end = TRY(Memory::page_round_up(program_header.vaddr().offset(load_offset).offset(program_header.size_in_memory()).get()));
         auto range_end = VirtualAddress { rounded_range_end };
-        auto region = TRY(new_space->allocate_region_with_vmobject(Memory::RandomizeVirtualAddress::Yes, range_base, range_end.get() - range_base.get(), program_header.alignment(), *vmobject, program_header.offset(), elf_name->view(), prot, true));
+        auto region = TRY(new_space.allocate_region_with_vmobject(Memory::RandomizeVirtualAddress::Yes, range_base, range_end.get() - range_base.get(), program_header.alignment(), *vmobject, program_header.offset(), elf_name->view(), prot, true));
 
         if (should_allow_syscalls == ShouldAllowSyscalls::Yes)
             region->set_syscall_region(true);
@@ -387,7 +381,10 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
             return load_section(program_header);
 
         if (program_header.type() == PT_GNU_STACK) {
-            stack_size = program_header.size_in_memory();
+            auto new_stack_size = program_header.size_in_memory();
+
+            if (new_stack_size > stack_size)
+                stack_size = new_stack_size;
         }
 
         // NOTE: We ignore other program header types.
@@ -403,20 +400,18 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
         return result;
     }());
 
-    if (stack_size == 0) {
-        stack_size = Thread::default_userspace_stack_size;
-    }
-
     if (!elf_image.entry().offset(load_offset).get()) {
         dbgln("do_exec: Failure loading program, entry pointer is invalid! {})", elf_image.entry().offset(load_offset));
         return ENOEXEC;
     }
 
-    auto* stack_region = TRY(new_space->allocate_region(Memory::RandomizeVirtualAddress::Yes, {}, stack_size, PAGE_SIZE, "Stack (Main thread)"sv, PROT_READ | PROT_WRITE, AllocationStrategy::Reserve));
+    if (minimum_stack_size.has_value() && minimum_stack_size.value() > stack_size)
+        stack_size = minimum_stack_size.value();
+
+    auto* stack_region = TRY(new_space.allocate_region(Memory::RandomizeVirtualAddress::Yes, {}, stack_size, PAGE_SIZE, "Stack (Main thread)"sv, PROT_READ | PROT_WRITE, AllocationStrategy::Reserve));
     stack_region->set_stack(true);
 
     return LoadResult {
-        move(new_space),
         load_base_address,
         elf_image.entry().offset(load_offset).get(),
         executable_size,
@@ -428,26 +423,43 @@ static ErrorOr<LoadResult> load_elf_object(NonnullOwnPtr<Memory::AddressSpace> n
 }
 
 ErrorOr<LoadResult>
-Process::load(NonnullLockRefPtr<OpenFileDescription> main_program_description,
-    LockRefPtr<OpenFileDescription> interpreter_description, const ElfW(Ehdr) & main_program_header)
+Process::load(Memory::AddressSpace& new_space, NonnullRefPtr<OpenFileDescription> main_program_description,
+    RefPtr<OpenFileDescription> interpreter_description, const ElfW(Ehdr) & main_program_header)
 {
-    auto new_space = TRY(Memory::AddressSpace::try_create(nullptr));
-
-    ScopeGuard space_guard([&]() {
-        Memory::MemoryManager::enter_process_address_space(*this);
-    });
-
     auto load_offset = TRY(get_load_offset(main_program_header, main_program_description, interpreter_description));
 
     if (interpreter_description.is_null()) {
-        auto load_result = TRY(load_elf_object(move(new_space), main_program_description, load_offset, ShouldAllocateTls::Yes, ShouldAllowSyscalls::No));
+        auto load_result = TRY(load_elf_object(new_space, main_program_description, load_offset, ShouldAllocateTls::Yes, ShouldAllowSyscalls::No));
         m_master_tls_region = load_result.tls_region;
         m_master_tls_size = load_result.tls_size;
         m_master_tls_alignment = load_result.tls_alignment;
         return load_result;
     }
 
-    auto interpreter_load_result = TRY(load_elf_object(move(new_space), *interpreter_description, load_offset, ShouldAllocateTls::No, ShouldAllowSyscalls::Yes));
+    Optional<size_t> requested_main_program_stack_size;
+    {
+        auto main_program_size = main_program_description->inode()->size();
+        auto main_program_rounded_size = TRY(Memory::page_round_up(main_program_size));
+
+        auto main_program_vmobject = TRY(Memory::SharedInodeVMObject::try_create_with_inode(*main_program_description->inode()));
+        auto main_program_region = TRY(MM.allocate_kernel_region_with_vmobject(*main_program_vmobject, main_program_rounded_size, "Loaded Main Program ELF"sv, Memory::Region::Access::Read));
+
+        auto main_program_image = ELF::Image(main_program_region->vaddr().as_ptr(), main_program_size);
+        if (!main_program_image.is_valid())
+            return EINVAL;
+
+        main_program_image.for_each_program_header([&requested_main_program_stack_size](ELF::Image::ProgramHeader const& program_header) {
+            if (program_header.type() != PT_GNU_STACK)
+                return;
+
+            if (program_header.size_in_memory() == 0)
+                return;
+
+            requested_main_program_stack_size = program_header.size_in_memory();
+        });
+    }
+
+    auto interpreter_load_result = TRY(load_elf_object(new_space, *interpreter_description, load_offset, ShouldAllocateTls::No, ShouldAllowSyscalls::Yes, requested_main_program_stack_size));
 
     // TLS allocation will be done in userspace by the loader
     VERIFY(!interpreter_load_result.tls_region);
@@ -476,11 +488,20 @@ void Process::clear_signal_handlers_for_exec()
     }
 }
 
-ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_program_description, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment,
-    LockRefPtr<OpenFileDescription> interpreter_description, Thread*& new_main_thread, u32& prev_flags, const ElfW(Ehdr) & main_program_header)
+ErrorOr<void> Process::do_exec(NonnullRefPtr<OpenFileDescription> main_program_description, Vector<NonnullOwnPtr<KString>> arguments, Vector<NonnullOwnPtr<KString>> environment,
+    RefPtr<OpenFileDescription> interpreter_description, Thread*& new_main_thread, InterruptsState& previous_interrupts_state, const ElfW(Ehdr) & main_program_header)
 {
     VERIFY(is_user_process());
     VERIFY(!Processor::in_critical());
+    auto main_program_metadata = main_program_description->metadata();
+    // NOTE: Don't allow running SUID binaries at all if we are in a jail.
+    TRY(Process::current().jail().with([&](auto const& my_jail) -> ErrorOr<void> {
+        if (my_jail && (main_program_metadata.is_setuid() || main_program_metadata.is_setgid())) {
+            return Error::from_errno(EPERM);
+        }
+        return {};
+    }));
+
     // Although we *could* handle a pseudo_path here, trying to execute something that doesn't have
     // a custody (e.g. BlockDevice or RandomDevice) is pretty suspicious anyway.
     auto path = TRY(main_program_description->original_absolute_path());
@@ -492,7 +513,31 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     auto new_process_name = TRY(KString::try_create(last_part));
     auto new_main_thread_name = TRY(new_process_name->try_clone());
 
-    auto load_result = TRY(load(main_program_description, interpreter_description, main_program_header));
+    auto allocated_space = TRY(Memory::AddressSpace::try_create(*this, nullptr));
+    OwnPtr<Memory::AddressSpace> old_space;
+    auto old_master_tls_region = m_master_tls_region;
+    auto old_master_tls_size = m_master_tls_size;
+    auto old_master_tls_alignment = m_master_tls_alignment;
+    auto& new_space = m_space.with([&](auto& space) -> Memory::AddressSpace& {
+        old_space = move(space);
+        space = move(allocated_space);
+        return *space;
+    });
+    m_master_tls_region = nullptr;
+    m_master_tls_size = 0;
+    m_master_tls_alignment = 0;
+    ArmedScopeGuard space_guard([&]() {
+        // If we failed at any point from now on we have to revert back to the old address space
+        m_space.with([&](auto& space) {
+            space = old_space.release_nonnull();
+        });
+        m_master_tls_region = old_master_tls_region;
+        m_master_tls_size = old_master_tls_size;
+        m_master_tls_alignment = old_master_tls_alignment;
+        Memory::MemoryManager::enter_process_address_space(*this);
+    });
+
+    auto load_result = TRY(load(new_space, main_program_description, interpreter_description, main_program_header));
 
     // NOTE: We don't need the interpreter executable description after this point.
     //       We destroy it here to prevent it from getting destroyed when we return from this function.
@@ -501,7 +546,7 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     bool has_interpreter = interpreter_description;
     interpreter_description = nullptr;
 
-    auto* signal_trampoline_region = TRY(load_result.space->allocate_region_with_vmobject(Memory::RandomizeVirtualAddress::Yes, {}, PAGE_SIZE, PAGE_SIZE, g_signal_trampoline_region->vmobject(), 0, "Signal trampoline"sv, PROT_READ | PROT_EXEC, true));
+    auto* signal_trampoline_region = TRY(new_space.allocate_region_with_vmobject(Memory::RandomizeVirtualAddress::Yes, {}, PAGE_SIZE, PAGE_SIZE, g_signal_trampoline_region->vmobject(), 0, "Signal trampoline"sv, PROT_READ | PROT_EXEC, true));
     signal_trampoline_region->set_syscall_region(true);
 
     // (For dynamically linked executable) Allocate an FD for passing the main executable to the dynamic loader.
@@ -512,12 +557,11 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     auto old_credentials = this->credentials();
     auto new_credentials = old_credentials;
     auto old_process_attached_jail = m_attached_jail.with([&](auto& jail) -> RefPtr<Jail> { return jail; });
+    auto old_scoped_list = m_jail_process_list.with([&](auto& list) -> RefPtr<ProcessList> { return list; });
 
     bool executable_is_setid = false;
 
     if (!(main_program_description->custody()->mount_flags() & MS_NOSUID)) {
-        auto main_program_metadata = main_program_description->metadata();
-
         auto new_euid = old_credentials->euid();
         auto new_egid = old_credentials->egid();
         auto new_suid = old_credentials->suid();
@@ -542,11 +586,14 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
                 new_egid,
                 new_suid,
                 new_sgid,
-                old_credentials->extra_gids()));
+                old_credentials->extra_gids(),
+                old_credentials->sid(),
+                old_credentials->pgid()));
         }
     }
 
     // We commit to the new executable at this point. There is no turning back!
+    space_guard.disarm();
 
     // Prevent other processes from attaching to us with ptrace while we're doing this.
     MutexLocker ptrace_locker(ptrace_lock());
@@ -560,19 +607,19 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     with_mutable_protected_data([&](auto& protected_data) {
         protected_data.credentials = move(new_credentials);
         protected_data.dumpable = !executable_is_setid;
+        protected_data.executable_is_setid = executable_is_setid;
     });
-
-    // We make sure to enter the new address space before destroying the old one.
-    // This ensures that the process always has a valid page directory.
-    Memory::MemoryManager::enter_address_space(*load_result.space);
-
-    m_space.with([&](auto& space) { space = load_result.space.release_nonnull(); });
 
     m_executable.with([&](auto& executable) { executable = main_program_description->custody(); });
     m_arguments = move(arguments);
     m_attached_jail.with([&](auto& jail) {
         jail = old_process_attached_jail;
     });
+
+    m_jail_process_list.with([&](auto& list) {
+        list = old_scoped_list;
+    });
+
     m_environment = move(environment);
 
     TRY(m_unveil_data.with([&](auto& unveil_data) -> ErrorOr<void> {
@@ -642,7 +689,7 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     //       and we don't want to deal with faults after this point.
     auto new_userspace_sp = TRY(make_userspace_context_for_main_thread(new_main_thread->regs(), *load_result.stack_region.unsafe_ptr(), m_arguments, m_environment, move(auxv)));
 
-    m_name = move(new_process_name);
+    set_name(move(new_process_name));
     new_main_thread->set_name(move(new_main_thread_name));
 
     if (wait_for_tracer_at_next_execve()) {
@@ -657,10 +704,10 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
 
     // We enter a critical section here because we don't want to get interrupted between do_exec()
     // and Processor::assume_context() or the next context switch.
-    // If we used an InterruptDisabler that sti()'d on exit, we might timer tick'd too soon in exec().
+    // If we used an InterruptDisabler that calls enable_interrupts() on exit, we might timer tick'd too soon in exec().
     Processor::enter_critical();
-    prev_flags = cpu_flags();
-    cli();
+    previous_interrupts_state = processor_interrupts_state();
+    Processor::disable_interrupts();
 
     // NOTE: Be careful to not trigger any page faults below!
 
@@ -685,20 +732,9 @@ ErrorOr<void> Process::do_exec(NonnullLockRefPtr<OpenFileDescription> main_progr
     new_main_thread->reset_fpu_state();
 
     auto& regs = new_main_thread->m_regs;
-    regs.cs = GDT_SELECTOR_CODE3 | 3;
-#if ARCH(I386)
-    regs.ds = GDT_SELECTOR_DATA3 | 3;
-    regs.es = GDT_SELECTOR_DATA3 | 3;
-    regs.ss = GDT_SELECTOR_DATA3 | 3;
-    regs.fs = GDT_SELECTOR_DATA3 | 3;
-    regs.gs = GDT_SELECTOR_TLS | 3;
-    regs.eip = load_result.entry_eip;
-    regs.esp = new_userspace_sp;
-#else
-    regs.rip = load_result.entry_eip;
-    regs.rsp = new_userspace_sp;
-#endif
-    regs.cr3 = address_space().with([](auto& space) { return space->page_directory().cr3(); });
+    address_space().with([&](auto& space) {
+        regs.set_exec_state(load_result.entry_eip, new_userspace_sp, *space);
+    });
 
     {
         TemporaryChange profiling_disabler(m_profiling, was_profiling);
@@ -728,8 +764,14 @@ static Array<ELF::AuxiliaryValue, auxiliary_vector_size> generate_auxiliary_vect
         { ELF::AuxiliaryValue::EGid, (long)egid.value() },
 
         { ELF::AuxiliaryValue::Platform, Processor::platform_string() },
-        // FIXME: This is platform specific
+    // FIXME: This is platform specific
+#if ARCH(X86_64)
         { ELF::AuxiliaryValue::HwCap, (long)CPUID(1).edx() },
+#elif ARCH(AARCH64)
+        { ELF::AuxiliaryValue::HwCap, (long)0 },
+#else
+#    error "Unknown architecture"
+#endif
 
         { ELF::AuxiliaryValue::ClockTick, (long)TimeManagement::the().ticks_per_second() },
 
@@ -746,12 +788,12 @@ static Array<ELF::AuxiliaryValue, auxiliary_vector_size> generate_auxiliary_vect
     } };
 }
 
-static ErrorOr<NonnullOwnPtrVector<KString>> find_shebang_interpreter_for_executable(char const first_page[], size_t nread)
+static ErrorOr<Vector<NonnullOwnPtr<KString>>> find_shebang_interpreter_for_executable(char const first_page[], size_t nread)
 {
     int word_start = 2;
     size_t word_length = 0;
     if (nread > 2 && first_page[0] == '#' && first_page[1] == '!') {
-        NonnullOwnPtrVector<KString> interpreter_words;
+        Vector<NonnullOwnPtr<KString>> interpreter_words;
 
         for (size_t i = 2; i < nread; ++i) {
             if (first_page[i] == '\n') {
@@ -784,7 +826,7 @@ static ErrorOr<NonnullOwnPtrVector<KString>> find_shebang_interpreter_for_execut
     return ENOEXEC;
 }
 
-ErrorOr<LockRefPtr<OpenFileDescription>> Process::find_elf_interpreter_for_executable(StringView path, ElfW(Ehdr) const& main_executable_header, size_t main_executable_header_size, size_t file_size)
+ErrorOr<RefPtr<OpenFileDescription>> Process::find_elf_interpreter_for_executable(StringView path, ElfW(Ehdr) const& main_executable_header, size_t main_executable_header_size, size_t file_size)
 {
     // Not using ErrorOr here because we'll want to do the same thing in userspace in the RTLD
     StringBuilder interpreter_path_builder;
@@ -851,7 +893,7 @@ ErrorOr<LockRefPtr<OpenFileDescription>> Process::find_elf_interpreter_for_execu
     return nullptr;
 }
 
-ErrorOr<void> Process::exec(NonnullOwnPtr<KString> path, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment, Thread*& new_main_thread, u32& prev_flags, int recursion_depth)
+ErrorOr<void> Process::exec(NonnullOwnPtr<KString> path, Vector<NonnullOwnPtr<KString>> arguments, Vector<NonnullOwnPtr<KString>> environment, Thread*& new_main_thread, InterruptsState& previous_interrupts_state, int recursion_depth)
 {
     if (recursion_depth > 2) {
         dbgln("exec({}): SHENANIGANS! recursed too far trying to find #! interpreter", path);
@@ -886,10 +928,10 @@ ErrorOr<void> Process::exec(NonnullOwnPtr<KString> path, NonnullOwnPtrVector<KSt
     auto shebang_result = find_shebang_interpreter_for_executable(first_page, nread);
     if (!shebang_result.is_error()) {
         auto shebang_words = shebang_result.release_value();
-        auto shebang_path = TRY(shebang_words.first().try_clone());
-        arguments.ptr_at(0) = move(path);
+        auto shebang_path = TRY(shebang_words.first()->try_clone());
+        arguments[0] = move(path);
         TRY(arguments.try_prepend(move(shebang_words)));
-        return exec(move(shebang_path), move(arguments), move(environment), new_main_thread, prev_flags, ++recursion_depth);
+        return exec(move(shebang_path), move(arguments), move(environment), new_main_thread, previous_interrupts_state, ++recursion_depth);
     }
 
     // #2) ELF32 for i386
@@ -904,7 +946,7 @@ ErrorOr<void> Process::exec(NonnullOwnPtr<KString> path, NonnullOwnPtrVector<KSt
     }
 
     auto interpreter_description = TRY(find_elf_interpreter_for_executable(path->view(), *main_program_header, nread, metadata.size));
-    return do_exec(move(description), move(arguments), move(environment), move(interpreter_description), new_main_thread, prev_flags, *main_program_header);
+    return do_exec(move(description), move(arguments), move(environment), move(interpreter_description), new_main_thread, previous_interrupts_state, *main_program_header);
 }
 
 ErrorOr<FlatPtr> Process::sys$execve(Userspace<Syscall::SC_execve_params const*> user_params)
@@ -913,7 +955,7 @@ ErrorOr<FlatPtr> Process::sys$execve(Userspace<Syscall::SC_execve_params const*>
     TRY(require_promise(Pledge::exec));
 
     Thread* new_main_thread = nullptr;
-    u32 prev_flags = 0;
+    InterruptsState previous_interrupts_state = InterruptsState::Enabled;
 
     // NOTE: Be extremely careful with allocating any kernel memory in this function.
     //       On success, the kernel stack will be lost.
@@ -949,13 +991,13 @@ ErrorOr<FlatPtr> Process::sys$execve(Userspace<Syscall::SC_execve_params const*>
             return {};
         };
 
-        NonnullOwnPtrVector<KString> arguments;
+        Vector<NonnullOwnPtr<KString>> arguments;
         TRY(copy_user_strings(params.arguments, arguments));
 
-        NonnullOwnPtrVector<KString> environment;
+        Vector<NonnullOwnPtr<KString>> environment;
         TRY(copy_user_strings(params.environment, environment));
 
-        TRY(exec(move(path), move(arguments), move(environment), new_main_thread, prev_flags));
+        TRY(exec(move(path), move(arguments), move(environment), new_main_thread, previous_interrupts_state));
     }
 
     // NOTE: If we're here, the exec has succeeded and we've got a new executable image!
@@ -974,15 +1016,14 @@ ErrorOr<FlatPtr> Process::sys$execve(Userspace<Syscall::SC_execve_params const*>
         VERIFY(Processor::in_critical() == 1);
         g_scheduler_lock.lock();
         current_thread->set_state(Thread::State::Running);
-        Processor::assume_context(*current_thread, prev_flags);
+        Processor::assume_context(*current_thread, previous_interrupts_state);
         VERIFY_NOT_REACHED();
     }
 
     // NOTE: This code path is taken in the non-syscall case, i.e when the kernel spawns
     //       a userspace process directly (such as /bin/SystemServer on startup)
 
-    if (prev_flags & 0x200)
-        sti();
+    restore_processor_interrupts_state(previous_interrupts_state);
     Processor::leave_critical();
     return 0;
 }

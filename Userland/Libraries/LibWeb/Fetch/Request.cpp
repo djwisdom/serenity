@@ -1,10 +1,11 @@
 /*
- * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/URLParser.h>
+#include <LibJS/Runtime/Completion.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/RequestPrototype.h>
 #include <LibWeb/DOM/AbortSignal.h>
@@ -24,10 +25,17 @@ Request::Request(JS::Realm& realm, JS::NonnullGCPtr<Infrastructure::Request> req
     : PlatformObject(realm)
     , m_request(request)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "Request"));
 }
 
 Request::~Request() = default;
+
+JS::ThrowCompletionOr<void> Request::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::RequestPrototype>(realm, "Request"));
+
+    return {};
+}
 
 void Request::visit_edges(Cell::Visitor& visitor)
 {
@@ -39,7 +47,7 @@ void Request::visit_edges(Cell::Visitor& visitor)
 
 // https://fetch.spec.whatwg.org/#concept-body-mime-type
 // https://fetch.spec.whatwg.org/#ref-for-concept-body-mime-type%E2%91%A0
-Optional<MimeSniff::MimeType> Request::mime_type_impl() const
+ErrorOr<Optional<MimeSniff::MimeType>> Request::mime_type_impl() const
 {
     // Objects including the Body interface mixin need to define an associated MIME type algorithm which takes no arguments and returns failure or a MIME type.
     // A Request object’s MIME type is to return the result of extracting a MIME type from its request’s header list.
@@ -73,18 +81,18 @@ Optional<Infrastructure::Body&> Request::body_impl()
 }
 
 // https://fetch.spec.whatwg.org/#request-create
-JS::NonnullGCPtr<Request> Request::create(JS::Realm& realm, JS::NonnullGCPtr<Infrastructure::Request> request, Headers::Guard guard)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::create(JS::Realm& realm, JS::NonnullGCPtr<Infrastructure::Request> request, Headers::Guard guard)
 {
     // 1. Let requestObject be a new Request object with realm.
     // 2. Set requestObject’s request to request.
-    auto request_object = realm.heap().allocate<Request>(realm, realm, request);
+    auto request_object = MUST_OR_THROW_OOM(realm.heap().allocate<Request>(realm, realm, request));
 
     // 3. Set requestObject’s headers to a new Headers object with realm, whose headers list is request’s headers list and guard is guard.
-    request_object->m_headers = realm.heap().allocate<Headers>(realm, realm, request->header_list());
+    request_object->m_headers = MUST_OR_THROW_OOM(realm.heap().allocate<Headers>(realm, realm, request->header_list()));
     request_object->m_headers->set_guard(guard);
 
     // 4. Set requestObject’s signal to a new AbortSignal object with realm.
-    request_object->m_signal = realm.heap().allocate<DOM::AbortSignal>(realm, realm);
+    request_object->m_signal = MUST_OR_THROW_OOM(realm.heap().allocate<DOM::AbortSignal>(realm, realm));
 
     // 5. Return requestObject.
     return request_object;
@@ -96,7 +104,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
     auto& vm = realm.vm();
 
     // Referred to as 'this' in the spec.
-    auto request_object = realm.heap().allocate<Request>(realm, realm, Infrastructure::Request::create(vm));
+    auto request_object = MUST_OR_THROW_OOM(realm.heap().allocate<Request>(realm, realm, Infrastructure::Request::create(vm)));
 
     // 1. Let request be null.
     JS::GCPtr<Infrastructure::Request> input_request;
@@ -108,12 +116,12 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
     auto base_url = HTML::relevant_settings_object(*request_object).api_base_url();
 
     // 4. Let signal be null.
-    DOM::AbortSignal const* input_signal = nullptr;
+    DOM::AbortSignal* input_signal = nullptr;
 
     // 5. If input is a string, then:
-    if (input.has<DeprecatedString>()) {
+    if (input.has<String>()) {
         // 1. Let parsedURL be the result of parsing input with baseURL.
-        auto parsed_url = URLParser::parse(input.get<DeprecatedString>(), &base_url);
+        auto parsed_url = URLParser::parse(input.get<String>(), base_url);
 
         // 2. If parsedURL is failure, then throw a TypeError.
         if (!parsed_url.is_valid())
@@ -149,8 +157,8 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
     auto window = Infrastructure::Request::WindowType { Infrastructure::Request::Window::Client };
 
     // 9. If request’s window is an environment settings object and its origin is same origin with origin, then set window to request’s window.
-    if (input_request->window().has<HTML::EnvironmentSettingsObject*>()) {
-        auto* eso = input_request->window().get<HTML::EnvironmentSettingsObject*>();
+    if (input_request->window().has<JS::GCPtr<HTML::EnvironmentSettingsObject>>()) {
+        auto eso = input_request->window().get<JS::GCPtr<HTML::EnvironmentSettingsObject>>();
         if (eso->origin().is_same_origin(origin))
             window = input_request->window();
     }
@@ -174,13 +182,13 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
 
     // method
     //     request’s method.
-    request->set_method(TRY_OR_RETURN_OOM(realm, ByteBuffer::copy(input_request->method())));
+    request->set_method(TRY_OR_THROW_OOM(vm, ByteBuffer::copy(input_request->method())));
 
     // header list
     //     A copy of request’s header list.
     auto header_list_copy = Infrastructure::HeaderList::create(vm);
     for (auto& header : *input_request->header_list())
-        TRY_OR_RETURN_OOM(realm, header_list_copy->append(header));
+        TRY_OR_THROW_OOM(vm, header_list_copy->append(header));
     request->set_header_list(header_list_copy);
 
     // unsafe-request flag
@@ -291,7 +299,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
         // 3. Otherwise:
         else {
             // 1. Let parsedReferrer be the result of parsing referrer with baseURL.
-            auto parsed_referrer = URLParser::parse(referrer, &base_url);
+            auto parsed_referrer = URLParser::parse(referrer, base_url);
 
             // 2. If parsedReferrer is failure, then throw a TypeError.
             if (!parsed_referrer.is_valid())
@@ -302,7 +310,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
             // - parsedReferrer’s origin is not same origin with origin
             // then set request’s referrer to "client".
             // FIXME: Actually use the given origin once we have https://url.spec.whatwg.org/#concept-url-origin.
-            if ((parsed_referrer.scheme() == "about"sv && parsed_referrer.path() == "client"sv) || !HTML::Origin().is_same_origin(origin)) {
+            if ((parsed_referrer.scheme() == "about"sv && parsed_referrer.serialize_path() == "client"sv) || !HTML::Origin().is_same_origin(origin)) {
                 request->set_referrer(Infrastructure::Request::Referrer::Client);
             }
             // 4. Otherwise, set request’s referrer to parsedReferrer.
@@ -365,7 +373,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
             return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Method must not be one of CONNECT, TRACE, or TRACK"sv };
 
         // 3. Normalize method.
-        method = TRY_OR_RETURN_OOM(realm, Infrastructure::normalize_method(method.bytes()));
+        method = TRY_OR_THROW_OOM(vm, String::from_utf8(TRY_OR_THROW_OOM(vm, Infrastructure::normalize_method(method.bytes()))));
 
         // 4. Set request’s method to method.
         request->set_method(MUST(ByteBuffer::copy(method.bytes())));
@@ -381,14 +389,14 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
 
     // 28. Set this’s signal to a new AbortSignal object with this’s relevant Realm.
     auto& this_relevant_realm = HTML::relevant_realm(*request_object);
-    request_object->m_signal = realm.heap().allocate<DOM::AbortSignal>(this_relevant_realm, this_relevant_realm);
+    request_object->m_signal = MUST_OR_THROW_OOM(realm.heap().allocate<DOM::AbortSignal>(this_relevant_realm, this_relevant_realm));
 
     // 29. If signal is not null, then make this’s signal follow signal.
     if (input_signal != nullptr)
         request_object->m_signal->follow(*input_signal);
 
     // 30. Set this’s headers to a new Headers object with this’s relevant Realm, whose header list is request’s header list and guard is "request".
-    request_object->m_headers = realm.heap().allocate<Headers>(realm, realm, request->header_list());
+    request_object->m_headers = MUST_OR_THROW_OOM(realm.heap().allocate<Headers>(realm, realm, request->header_list()));
     request_object->m_headers->set_guard(Headers::Guard::Request);
 
     // 31. If this’s request’s mode is "no-cors", then:
@@ -416,7 +424,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
         // 4. If headers is a Headers object, then for each header of its header list, append header to this’s headers.
         if (auto* header_list = headers.get_pointer<JS::NonnullGCPtr<Infrastructure::HeaderList>>()) {
             for (auto& header : *header_list->ptr())
-                TRY(request_object->headers()->append(DeprecatedString::copy(header.name), DeprecatedString::copy(header.value)));
+                TRY(request_object->headers()->append(TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair(header.name, header.value))));
         }
         // 5. Otherwise, fill this’s headers with headers.
         else {
@@ -449,7 +457,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
 
         // 4. If type is non-null and this’s headers’s header list does not contain `Content-Type`, then append (`Content-Type`, type) to this’s headers.
         if (type.has_value() && !request_object->headers()->header_list()->contains("Content-Type"sv.bytes()))
-            TRY(request_object->headers()->append("Content-Type"sv, DeprecatedString::copy(type->span())));
+            TRY(request_object->headers()->append(TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Content-Type"sv, type->span()))));
     }
 
     // 37. Let inputOrInitBody be initBody if it is non-null; otherwise inputBody.
@@ -492,17 +500,21 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::construct_impl(JS::Realm
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-method
-DeprecatedString Request::method() const
+WebIDL::ExceptionOr<String> Request::method() const
 {
+    auto& vm = this->vm();
+
     // The method getter steps are to return this’s request’s method.
-    return DeprecatedString::copy(m_request->method());
+    return TRY_OR_THROW_OOM(vm, String::from_utf8(m_request->method()));
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-url
-DeprecatedString Request::url() const
+WebIDL::ExceptionOr<String> Request::url() const
 {
+    auto& vm = this->vm();
+
     // The url getter steps are to return this’s request’s URL, serialized.
-    return m_request->url().serialize();
+    return TRY_OR_THROW_OOM(vm, String::from_deprecated_string(m_request->url().serialize()));
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-headers
@@ -520,24 +532,25 @@ Bindings::RequestDestination Request::destination() const
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-referrer
-DeprecatedString Request::referrer() const
+WebIDL::ExceptionOr<String> Request::referrer() const
 {
+    auto& vm = this->vm();
     return m_request->referrer().visit(
-        [&](Infrastructure::Request::Referrer const& referrer) {
+        [&](Infrastructure::Request::Referrer const& referrer) -> WebIDL::ExceptionOr<String> {
             switch (referrer) {
             // 1. If this’s request’s referrer is "no-referrer", then return the empty string.
             case Infrastructure::Request::Referrer::NoReferrer:
-                return DeprecatedString::empty();
+                return String {};
             // 2. If this’s request’s referrer is "client", then return "about:client".
             case Infrastructure::Request::Referrer::Client:
-                return DeprecatedString { "about:client"sv };
+                return TRY_OR_THROW_OOM(vm, "about:client"_string);
             default:
                 VERIFY_NOT_REACHED();
             }
         },
-        [&](AK::URL const& url) {
+        [&](AK::URL const& url) -> WebIDL::ExceptionOr<String> {
             // 3. Return this’s request’s referrer, serialized.
-            return url.serialize();
+            return TRY_OR_THROW_OOM(vm, String::from_deprecated_string(url.serialize()));
         });
 }
 
@@ -577,7 +590,7 @@ Bindings::RequestRedirect Request::redirect() const
 }
 
 // https://fetch.spec.whatwg.org/#dom-request-integrity
-DeprecatedString Request::integrity() const
+String Request::integrity() const
 {
     // The integrity getter steps are to return this’s request’s integrity metadata.
     return m_request->integrity_metadata();
@@ -621,17 +634,17 @@ Bindings::RequestDuplex Request::duplex() const
 // https://fetch.spec.whatwg.org/#dom-request-clone
 WebIDL::ExceptionOr<JS::NonnullGCPtr<Request>> Request::clone() const
 {
-    auto& vm = this->vm();
+    auto& realm = this->realm();
 
     // 1. If this is unusable, then throw a TypeError.
     if (is_unusable())
         return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Request is unusable"sv };
 
     // 2. Let clonedRequest be the result of cloning this’s request.
-    auto cloned_request = TRY(m_request->clone(vm));
+    auto cloned_request = TRY(m_request->clone(realm));
 
     // 3. Let clonedRequestObject be the result of creating a Request object, given clonedRequest, this’s headers’s guard, and this’s relevant Realm.
-    auto cloned_request_object = Request::create(HTML::relevant_realm(*this), cloned_request, m_headers->guard());
+    auto cloned_request_object = TRY(Request::create(HTML::relevant_realm(*this), cloned_request, m_headers->guard()));
 
     // 4. Make clonedRequestObject’s signal follow this’s signal.
     cloned_request_object->m_signal->follow(*m_signal);

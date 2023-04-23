@@ -6,6 +6,7 @@
 
 #include <AK/Debug.h>
 #include <AK/ExtraMathConstants.h>
+#include <AK/Optional.h>
 #include <LibGfx/Painter.h>
 #include <LibGfx/Path.h>
 #include <LibWeb/DOM/Document.h>
@@ -86,10 +87,17 @@ namespace Web::SVG {
 SVGPathElement::SVGPathElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : SVGGeometryElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "SVGPathElement"));
 }
 
-void SVGPathElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
+JS::ThrowCompletionOr<void> SVGPathElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::SVGPathElementPrototype>(realm, "SVGPathElement"));
+
+    return {};
+}
+
+void SVGPathElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     SVGGeometryElement::parse_attribute(name, value);
 
@@ -99,15 +107,15 @@ void SVGPathElement::parse_attribute(FlyString const& name, DeprecatedString con
     }
 }
 
-Gfx::Path path_from_path_instructions(Span<PathInstruction const> instructions)
+Gfx::Path path_from_path_instructions(ReadonlySpan<PathInstruction> instructions)
 {
     Gfx::Path path;
-    Gfx::FloatPoint previous_control_point;
+    Optional<Gfx::FloatPoint> previous_control_point;
     PathInstructionType last_instruction = PathInstructionType::Invalid;
 
     for (auto& instruction : instructions) {
         // If the first path element uses relative coordinates, we treat them as absolute by making them relative to (0, 0).
-        auto last_point = path.segments().is_empty() ? Gfx::FloatPoint { 0, 0 } : path.segments().last().point();
+        auto last_point = path.segments().is_empty() ? Gfx::FloatPoint { 0, 0 } : path.segments().last()->point();
 
         auto& absolute = instruction.absolute;
         auto& data = instruction.data;
@@ -190,13 +198,13 @@ Gfx::Path path_from_path_instructions(Span<PathInstruction const> instructions)
         case PathInstructionType::SmoothQuadraticBezierCurve: {
             clear_last_control_point = false;
 
-            if (previous_control_point.is_null()
+            if (!previous_control_point.has_value()
                 || ((last_instruction != PathInstructionType::QuadraticBezierCurve) && (last_instruction != PathInstructionType::SmoothQuadraticBezierCurve))) {
                 previous_control_point = last_point;
             }
 
-            auto dx_end_control = last_point.dx_relative_to(previous_control_point);
-            auto dy_end_control = last_point.dy_relative_to(previous_control_point);
+            auto dx_end_control = last_point.dx_relative_to(previous_control_point.value());
+            auto dy_end_control = last_point.dy_relative_to(previous_control_point.value());
             auto control_point = Gfx::FloatPoint { last_point.x() + dx_end_control, last_point.y() + dy_end_control };
 
             Gfx::FloatPoint end_point = { data[0], data[1] };
@@ -231,7 +239,7 @@ Gfx::Path path_from_path_instructions(Span<PathInstruction const> instructions)
         case PathInstructionType::SmoothCurve: {
             clear_last_control_point = false;
 
-            if (previous_control_point.is_null()
+            if (!previous_control_point.has_value()
                 || ((last_instruction != PathInstructionType::Curve) && (last_instruction != PathInstructionType::SmoothCurve))) {
                 previous_control_point = last_point;
             }
@@ -240,8 +248,8 @@ Gfx::Path path_from_path_instructions(Span<PathInstruction const> instructions)
             // If the current point is (curx, cury) and the final control point of the previous path segment is (oldx2, oldy2),
             // then the reflected point (i.e., (newx1, newy1), the first control point of the current path segment) is:
             // (newx1, newy1) = (curx - (oldx2 - curx), cury - (oldy2 - cury))
-            auto reflected_previous_control_x = last_point.x() - previous_control_point.dx_relative_to(last_point);
-            auto reflected_previous_control_y = last_point.y() - previous_control_point.dy_relative_to(last_point);
+            auto reflected_previous_control_x = last_point.x() - previous_control_point.value().dx_relative_to(last_point);
+            auto reflected_previous_control_y = last_point.y() - previous_control_point.value().dy_relative_to(last_point);
             Gfx::FloatPoint c1 = Gfx::FloatPoint { reflected_previous_control_x, reflected_previous_control_y };
             Gfx::FloatPoint c2 = { data[0], data[1] };
             Gfx::FloatPoint p2 = { data[2], data[3] };

@@ -35,12 +35,12 @@ GUI::ModelIndex VariablesModel::parent_index(const GUI::ModelIndex& index) const
 
     if (parent->parent == nullptr) {
         for (size_t row = 0; row < m_variables.size(); row++)
-            if (m_variables.ptr_at(row).ptr() == parent)
+            if (m_variables[row].ptr() == parent)
                 return create_index(row, 0, parent);
         VERIFY_NOT_REACHED();
     }
     for (size_t row = 0; row < parent->parent->members.size(); row++) {
-        Debug::DebugInfo::VariableInfo* child_at_row = parent->parent->members.ptr_at(row).ptr();
+        Debug::DebugInfo::VariableInfo* child_at_row = parent->parent->members[row].ptr();
         if (child_at_row == parent)
             return create_index(row, 0, parent);
     }
@@ -168,7 +168,7 @@ RefPtr<VariablesModel> VariablesModel::create(Debug::ProcessInspector& inspector
     auto lib = inspector.library_at(regs.ip());
     if (!lib)
         return nullptr;
-    auto variables = lib->debug_info->get_variables_in_current_scope(regs);
+    auto variables = lib->debug_info->get_variables_in_current_scope(regs).release_value_but_fixme_should_propagate_errors();
     return adopt_ref(*new VariablesModel(inspector, move(variables), regs));
 }
 

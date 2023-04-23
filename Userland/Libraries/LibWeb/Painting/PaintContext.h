@@ -42,12 +42,15 @@ public:
     DevicePixels floored_device_pixels(CSSPixels css_pixels) const;
     DevicePixels rounded_device_pixels(CSSPixels css_pixels) const;
     DevicePixelPoint rounded_device_point(CSSPixelPoint) const;
+    DevicePixelPoint floored_device_point(CSSPixelPoint) const;
     DevicePixelRect enclosing_device_rect(CSSPixelRect) const;
     DevicePixelRect rounded_device_rect(CSSPixelRect) const;
     DevicePixelSize enclosing_device_size(CSSPixelSize) const;
     DevicePixelSize rounded_device_size(CSSPixelSize) const;
     CSSPixels scale_to_css_pixels(DevicePixels) const;
     CSSPixelPoint scale_to_css_point(DevicePixelPoint) const;
+    CSSPixelSize scale_to_css_size(DevicePixelSize) const;
+    CSSPixelRect scale_to_css_rect(DevicePixelRect) const;
 
     PaintContext clone(Gfx::Painter& painter) const
     {
@@ -58,6 +61,8 @@ public:
         clone.m_svg_context = m_svg_context;
         return clone;
     }
+
+    float device_pixels_per_css_pixel() const { return m_device_pixels_per_css_pixel; }
 
 private:
     Gfx::Painter& m_painter;

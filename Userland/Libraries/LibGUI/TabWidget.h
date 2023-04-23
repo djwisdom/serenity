@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -56,7 +56,7 @@ public:
     void remove_widget(Widget&);
 
     template<class T, class... Args>
-    ErrorOr<NonnullRefPtr<T>> try_add_tab(DeprecatedString title, Args&&... args)
+    ErrorOr<NonnullRefPtr<T>> try_add_tab(String title, Args&&... args)
     {
         auto t = TRY(T::try_create(forward<Args>(args)...));
         t->set_title(move(title));
@@ -65,7 +65,7 @@ public:
     }
 
     template<class T, class... Args>
-    T& add_tab(DeprecatedString title, Args&&... args)
+    T& add_tab(String title, Args&&... args)
     {
         auto t = T::construct(forward<Args>(args)...);
         t->set_title(move(title));
@@ -73,7 +73,7 @@ public:
         return *t;
     }
 
-    ErrorOr<void> add_tab(NonnullRefPtr<Widget> const& tab, DeprecatedString title)
+    ErrorOr<void> add_tab(NonnullRefPtr<Widget> const& tab, String title)
     {
         tab->set_title(move(title));
         TRY(try_add_widget(*tab));
@@ -83,7 +83,7 @@ public:
     void remove_tab(Widget& tab) { remove_widget(tab); }
     void remove_all_tabs_except(Widget& tab);
 
-    void set_tab_title(Widget& tab, StringView title);
+    void set_tab_title(Widget& tab, String title);
     void set_tab_icon(Widget& tab, Gfx::Bitmap const*);
 
     bool is_tab_modified(Widget& tab);
@@ -147,8 +147,8 @@ private:
 
     struct TabData {
         int width(Gfx::Font const&) const;
-        DeprecatedString title;
-        RefPtr<Gfx::Bitmap> icon;
+        String title;
+        RefPtr<Gfx::Bitmap const> icon;
         Widget* widget { nullptr };
         bool modified { false };
     };

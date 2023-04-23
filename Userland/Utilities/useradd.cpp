@@ -7,6 +7,7 @@
  */
 
 #include <AK/Base64.h>
+#include <AK/CharacterTypes.h>
 #include <AK/DeprecatedString.h>
 #include <AK/Random.h>
 #include <LibCore/ArgsParser.h>
@@ -31,7 +32,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     TRY(Core::System::pledge("stdio wpath rpath cpath chown"));
 
-    char const* home_path = nullptr;
+    StringView home_path;
     int uid = 0;
     int gid = USERS_GID;
     bool create_home_dir = false;
@@ -53,13 +54,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     // Let's run a quick sanity check on username
-    if (strpbrk(username.characters(), "\\/!@#$%^&*()~+=`:\n")) {
+    if (username.find_any_of("\\/!@#$%^&*()~+=`:\n"sv, DeprecatedString::SearchDirection::Forward).has_value()) {
         warnln("invalid character in username, {}", username);
         return 1;
     }
 
     // Disallow names starting with _ and -
-    if (username[0] == '_' || username[0] == '-' || !isalpha(username[0])) {
+    if (username[0] == '_' || username[0] == '-' || !is_ascii_alpha(username[0])) {
         warnln("invalid username, {}", username);
         return 1;
     }
@@ -108,7 +109,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     }
 
     DeprecatedString home;
-    if (!home_path)
+    if (home_path.is_empty())
         home = DeprecatedString::formatted("/home/{}", username);
     else
         home = home_path;
@@ -136,13 +137,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto get_salt = []() -> ErrorOr<DeprecatedString> {
         char random_data[12];
-        fill_with_random(random_data, sizeof(random_data));
+        fill_with_random({ random_data, sizeof(random_data) });
 
         StringBuilder builder;
         builder.append("$5$"sv);
         builder.append(TRY(encode_base64({ random_data, sizeof(random_data) })));
 
-        return builder.build();
+        return builder.to_deprecated_string();
     };
 
     char* hash = crypt(password.characters(), TRY(get_salt()).characters());

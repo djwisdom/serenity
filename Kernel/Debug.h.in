@@ -131,6 +131,10 @@
 #cmakedefine01 INTEL_GRAPHICS_DEBUG
 #endif
 
+#ifndef INTEL_HDA_DEBUG
+#cmakedefine01 INTEL_HDA_DEBUG
+#endif
+
 #ifndef INTERRUPT_DEBUG
 #cmakedefine01 INTERRUPT_DEBUG
 #endif
@@ -219,10 +223,6 @@
 #cmakedefine01 MULTIPROCESSOR_DEBUG
 #endif
 
-#ifndef NE2000_DEBUG
-#cmakedefine01 NE2000_DEBUG
-#endif
-
 #ifndef NETWORK_TASK_DEBUG
 #cmakedefine01 NETWORK_TASK_DEBUG
 #endif
@@ -269,10 +269,6 @@
 
 #ifndef ROUTING_DEBUG
 #cmakedefine01 ROUTING_DEBUG
-#endif
-
-#ifndef RTL8139_DEBUG
-#cmakedefine01 RTL8139_DEBUG
 #endif
 
 #ifndef RTL8168_DEBUG

@@ -16,23 +16,36 @@ namespace Kernel::Aarch64::Asm {
 
 inline void set_ttbr1_el1(FlatPtr ttbr1_el1)
 {
-    asm("msr ttbr1_el1, %[value]" ::[value] "r"(ttbr1_el1));
+    asm volatile("msr ttbr1_el1, %[value]" ::[value] "r"(ttbr1_el1));
 }
 
 inline void set_ttbr0_el1(FlatPtr ttbr0_el1)
 {
-    asm("msr ttbr0_el1, %[value]" ::[value] "r"(ttbr0_el1));
+    asm volatile("msr ttbr0_el1, %[value]" ::[value] "r"(ttbr0_el1));
+}
+
+inline FlatPtr get_ttbr0_el1()
+{
+    FlatPtr ttbr0_el1;
+    asm volatile("mrs %[value], ttbr0_el1\n"
+                 : [value] "=r"(ttbr0_el1));
+    return ttbr0_el1;
 }
 
 inline void set_sp_el1(FlatPtr sp_el1)
 {
-    asm("msr sp_el1, %[value]" ::[value] "r"(sp_el1));
+    asm volatile("msr sp_el1, %[value]" ::[value] "r"(sp_el1));
+}
+
+inline void set_tpidr_el0(FlatPtr tpidr_el0)
+{
+    asm volatile("msr tpidr_el0, %[value]" ::[value] "r"(tpidr_el0));
 }
 
 inline void flush()
 {
-    asm("dsb ish");
-    asm("isb");
+    asm volatile("dsb ish");
+    asm volatile("isb");
 }
 
 [[noreturn]] inline void halt()
@@ -53,8 +66,8 @@ inline ExceptionLevel get_current_exception_level()
 {
     u64 current_exception_level;
 
-    asm("mrs  %[value], CurrentEL"
-        : [value] "=r"(current_exception_level));
+    asm volatile("mrs  %[value], CurrentEL"
+                 : [value] "=r"(current_exception_level));
 
     current_exception_level = (current_exception_level >> 2) & 0x3;
     return static_cast<ExceptionLevel>(current_exception_level);
@@ -62,23 +75,24 @@ inline ExceptionLevel get_current_exception_level()
 
 inline void wait_cycles(int n)
 {
-    // This is probably too fast when caching and branch prediction is turned on.
     // FIXME: Make timer-based.
-    asm("mov x0, %[value]\n"
-        "0:\n"
-        "    subs x0, x0, #1\n"
-        "    bne 0b" ::[value] "r"(n)
-        : "x0");
+    for (int i = 0; i < n; i = i + 1) {
+        Processor::pause();
+    }
 }
 
-inline void el1_vector_table_install(void* vector_table)
+inline void load_el1_vector_table(void* vector_table)
 {
-    asm("msr VBAR_EL1, %[value]" ::[value] "r"(vector_table));
+    asm volatile("msr VBAR_EL1, %[value]" ::[value] "r"(vector_table));
 }
 
 inline void enter_el2_from_el3()
 {
-    asm volatile("    adr x0, entered_el2\n"
+    // NOTE: This also copies the current stack pointer into SP_EL2, as
+    //       the processor is set up to use SP_EL2 when jumping into EL2.
+    asm volatile("    mov x0, sp\n"
+                 "    msr sp_el2, x0\n"
+                 "    adr x0, entered_el2\n"
                  "    msr elr_el3, x0\n"
                  "    eret\n"
                  "entered_el2:" ::
@@ -87,11 +101,28 @@ inline void enter_el2_from_el3()
 
 inline void enter_el1_from_el2()
 {
-    asm volatile("    adr x0, entered_el1\n"
+    // NOTE: This also copies the current stack pointer into SP_EL1, as
+    //       the processor is set up to use SP_EL1 when jumping into EL1.
+    asm volatile("    mov x0, sp\n"
+                 "    msr sp_el1, x0\n"
+                 "    adr x0, entered_el1\n"
                  "    msr elr_el2, x0\n"
                  "    eret\n"
                  "entered_el1:" ::
                      : "x0");
+}
+
+inline u64 read_rndrrs()
+{
+    u64 value = 0;
+
+    asm volatile(
+        "retry:\n"
+        "mrs %[value], s3_3_c2_c4_1 \n" // encoded RNDRRS register
+        "b.eq retry\n"
+        : [value] "=r"(value));
+
+    return value;
 }
 
 }

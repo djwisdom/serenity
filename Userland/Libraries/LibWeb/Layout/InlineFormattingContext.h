@@ -24,15 +24,15 @@ public:
     BlockContainer const& containing_block() const { return static_cast<BlockContainer const&>(context_box()); }
 
     virtual void run(Box const&, LayoutMode, AvailableSpace const&) override;
-    virtual float automatic_content_height() const override;
-    virtual float automatic_content_width() const override;
+    virtual CSSPixels automatic_content_height() const override;
+    virtual CSSPixels automatic_content_width() const override;
 
     void dimension_box_on_line(Box const&, LayoutMode);
 
-    float leftmost_x_offset_at(float y) const;
-    float available_space_for_line(float y) const;
-    bool any_floats_intrude_at_y(float y) const;
-    bool can_fit_new_line_at_y(float y) const;
+    CSSPixels leftmost_x_offset_at(CSSPixels y) const;
+    CSSPixels available_space_for_line(CSSPixels y) const;
+    bool any_floats_intrude_at_y(CSSPixels y) const;
+    bool can_fit_new_line_at_y(CSSPixels y) const;
 
 private:
     void generate_line_boxes(LayoutMode);
@@ -42,8 +42,8 @@ private:
 
     Optional<AvailableSpace> m_available_space;
 
-    float m_automatic_content_width { 0 };
-    float m_automatic_content_height { 0 };
+    CSSPixels m_automatic_content_width { 0 };
+    CSSPixels m_automatic_content_height { 0 };
 };
 
 }

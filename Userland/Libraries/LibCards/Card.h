@@ -98,18 +98,20 @@ public:
     bool is_moving() const { return m_moving; }
     bool is_upside_down() const { return m_upside_down; }
     bool is_inverted() const { return m_inverted; }
+    bool is_previewed() const { return m_previewed; }
     Gfx::Color color() const { return (m_suit == Suit::Diamonds || m_suit == Suit::Hearts) ? Color::Red : Color::Black; }
 
     void set_position(const Gfx::IntPoint p) { m_rect.set_location(p); }
     void set_moving(bool moving) { m_moving = moving; }
     void set_upside_down(bool upside_down) { m_upside_down = upside_down; }
     void set_inverted(bool inverted) { m_inverted = inverted; }
+    void set_previewed(bool previewed) { m_previewed = previewed; }
 
     void save_old_position();
 
-    void paint(GUI::Painter&) const;
+    void paint(GUI::Painter&, bool highlighted = false) const;
     void clear(GUI::Painter&, Color background_color) const;
-    void clear_and_paint(GUI::Painter& painter, Color background_color);
+    void clear_and_paint(GUI::Painter& painter, Color background_color, bool highlighted);
 
 private:
     Card(Suit, Rank);
@@ -122,15 +124,15 @@ private:
     bool m_moving { false };
     bool m_upside_down { false };
     bool m_inverted { false };
+    bool m_previewed { false };
 };
 
 enum class Shuffle {
     No,
     Yes,
 };
-NonnullRefPtrVector<Card> create_standard_deck(Shuffle);
-NonnullRefPtrVector<Card> create_deck(unsigned full_club_suit_count, unsigned full_diamond_suit_count, unsigned full_heart_suit_count, unsigned full_spade_suit_count, Shuffle);
-void shuffle_deck(NonnullRefPtrVector<Card>&);
+ErrorOr<Vector<NonnullRefPtr<Card>>> create_standard_deck(Shuffle);
+ErrorOr<Vector<NonnullRefPtr<Card>>> create_deck(unsigned full_club_suit_count, unsigned full_diamond_suit_count, unsigned full_heart_suit_count, unsigned full_spade_suit_count, Shuffle);
 
 }
 

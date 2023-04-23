@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLTimeElement : HTMLElement {
 
-    [Reflect=datetime] attribute DOMString dateTime;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect=datetime] attribute DOMString dateTime;
 
 };

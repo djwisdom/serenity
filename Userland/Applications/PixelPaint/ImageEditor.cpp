@@ -30,7 +30,7 @@ constexpr int marching_ant_length = 4;
 
 ImageEditor::ImageEditor(NonnullRefPtr<Image> image)
     : m_image(move(image))
-    , m_title("Untitled")
+    , m_title("Untitled"_string.release_value_but_fixme_should_propagate_errors())
     , m_gui_event_loop(Core::EventLoop::current())
 {
     set_focus_policy(GUI::FocusPolicy::StrongFocus);
@@ -51,7 +51,7 @@ ImageEditor::ImageEditor(NonnullRefPtr<Image> image)
         m_marching_ants_offset %= (marching_ant_length * 2);
         if (!m_image->selection().is_empty() || m_image->selection().in_interactive_selection())
             update();
-    });
+    }).release_value_but_fixme_should_propagate_errors();
     m_marching_ants_timer->start();
 }
 
@@ -103,7 +103,7 @@ bool ImageEditor::redo()
     return true;
 }
 
-void ImageEditor::set_title(DeprecatedString title)
+void ImageEditor::set_title(String title)
 {
     m_title = move(title);
     if (on_title_change)
@@ -113,7 +113,7 @@ void ImageEditor::set_title(DeprecatedString title)
 void ImageEditor::set_path(DeprecatedString path)
 {
     m_path = move(path);
-    set_title(LexicalPath::title(m_path));
+    set_title(String::from_deprecated_string(LexicalPath::title(m_path)).release_value_but_fixme_should_propagate_errors());
 }
 
 void ImageEditor::set_modified(DeprecatedString action_text)
@@ -132,6 +132,16 @@ void ImageEditor::update_modified()
 {
     if (on_modified_change)
         on_modified_change(is_modified());
+}
+
+Gfx::IntRect ImageEditor::subtract_rulers_from_rect(Gfx::IntRect const& rect) const
+{
+    Gfx::IntRect clipped_rect {};
+    clipped_rect.set_top(max(rect.y(), m_ruler_thickness + 1));
+    clipped_rect.set_left(max(rect.x(), m_ruler_thickness + 1));
+    clipped_rect.set_bottom(rect.bottom());
+    clipped_rect.set_right(rect.right());
+    return clipped_rect;
 }
 
 void ImageEditor::paint_event(GUI::PaintEvent& event)
@@ -153,10 +163,10 @@ void ImageEditor::paint_event(GUI::PaintEvent& event)
     Gfx::StylePainter::paint_transparency_grid(painter, content_rect(), palette());
 
     painter.draw_rect(content_rect().inflated(2, 2), Color::Black);
-    m_image->paint_into(painter, content_rect());
+    m_image->paint_into(painter, content_rect(), scale());
 
     if (m_active_layer && m_show_active_layer_boundary)
-        painter.draw_rect(content_to_frame_rect(m_active_layer->relative_rect()).to_rounded<int>().inflated(2, 2), Color::Black);
+        painter.draw_rect(content_to_frame_rect(m_active_layer->relative_rect()).to_type<int>().inflated(2, 2), Color::Black);
 
     if (m_show_pixel_grid && scale() > m_pixel_grid_threshold) {
         auto event_image_rect = enclosing_int_rect(frame_to_content_rect(event.rect())).inflated(1, 1);
@@ -177,11 +187,11 @@ void ImageEditor::paint_event(GUI::PaintEvent& event)
 
     if (m_show_guides) {
         for (auto& guide : m_guides) {
-            if (guide.orientation() == Guide::Orientation::Horizontal) {
-                int y_coordinate = (int)content_to_frame_position({ 0.0f, guide.offset() }).y();
+            if (guide->orientation() == Guide::Orientation::Horizontal) {
+                int y_coordinate = (int)content_to_frame_position({ 0.0f, guide->offset() }).y();
                 painter.draw_line({ 0, y_coordinate }, { rect().width(), y_coordinate }, Color::Cyan, 1, Gfx::Painter::LineStyle::Dashed, Color::LightGray);
-            } else if (guide.orientation() == Guide::Orientation::Vertical) {
-                int x_coordinate = (int)content_to_frame_position({ guide.offset(), 0.0f }).x();
+            } else if (guide->orientation() == Guide::Orientation::Vertical) {
+                int x_coordinate = (int)content_to_frame_position({ guide->offset(), 0.0f }).x();
                 painter.draw_line({ x_coordinate, 0 }, { x_coordinate, rect().height() }, Color::Cyan, 1, Gfx::Painter::LineStyle::Dashed, Color::LightGray);
             }
         }
@@ -217,7 +227,7 @@ void ImageEditor::paint_event(GUI::PaintEvent& event)
 
             int const editor_x = content_to_frame_position({ x, 0 }).x();
             painter.draw_line({ editor_x, 0 }, { editor_x, m_ruler_thickness }, ruler_fg_color);
-            painter.draw_text({ { editor_x + 2, 0 }, { m_ruler_thickness, m_ruler_thickness - 2 } }, DeprecatedString::formatted("{}", x), painter.font(), Gfx::TextAlignment::CenterLeft, ruler_text_color);
+            painter.draw_text(Gfx::IntRect { { editor_x + 2, 0 }, { m_ruler_thickness, m_ruler_thickness - 2 } }, DeprecatedString::formatted("{}", x), painter.font(), Gfx::TextAlignment::CenterLeft, ruler_text_color);
         }
 
         // Vertical ruler
@@ -234,7 +244,7 @@ void ImageEditor::paint_event(GUI::PaintEvent& event)
 
             int const editor_y = content_to_frame_position({ 0, y }).y();
             painter.draw_line({ 0, editor_y }, { m_ruler_thickness, editor_y }, ruler_fg_color);
-            painter.draw_text({ { 0, editor_y - m_ruler_thickness }, { m_ruler_thickness, m_ruler_thickness } }, DeprecatedString::formatted("{}", y), painter.font(), Gfx::TextAlignment::BottomRight, ruler_text_color);
+            painter.draw_text(Gfx::IntRect { { 0, editor_y - m_ruler_thickness }, { m_ruler_thickness, m_ruler_thickness } }, DeprecatedString::formatted("{}", y), painter.font(), Gfx::TextAlignment::BottomRight, ruler_text_color);
         }
 
         // Mouse position indicator
@@ -282,11 +292,7 @@ void ImageEditor::second_paint_event(GUI::PaintEvent& event)
 {
     if (m_active_tool) {
         if (m_show_rulers) {
-            auto clipped_event = GUI::PaintEvent(Gfx::IntRect { event.rect().x() + m_ruler_thickness,
-                                                     event.rect().y() + m_ruler_thickness,
-                                                     event.rect().width() - m_ruler_thickness,
-                                                     event.rect().height() - m_ruler_thickness },
-                event.window_size());
+            auto clipped_event = GUI::PaintEvent(subtract_rulers_from_rect(event.rect()), event.window_size());
             m_active_tool->on_second_paint(m_active_layer, clipped_event);
         } else {
             m_active_tool->on_second_paint(m_active_layer, event);
@@ -331,27 +337,44 @@ GUI::MouseEvent ImageEditor::event_adjusted_for_layer(GUI::MouseEvent const& eve
     };
 }
 
-void ImageEditor::set_editor_color_to_color_at_mouse_position(GUI::MouseEvent const& event, bool sample_all_layers = false)
+Optional<Color> ImageEditor::color_from_position(Gfx::IntPoint position, bool sample_all_layers)
 {
-    auto position = event.position();
     Color color;
-    auto layer = active_layer();
+    auto* layer = active_layer();
     if (sample_all_layers) {
         color = image().color_at(position);
     } else {
         if (!layer || !layer->rect().contains(position))
-            return;
+            return {};
         color = layer->currently_edited_bitmap().get_pixel(position);
     }
+    return color;
+}
 
-    // We picked a transparent pixel, do nothing.
-    if (!color.alpha())
+void ImageEditor::set_status_info_to_color_at_mouse_position(Gfx::IntPoint position, bool sample_all_layers)
+{
+    auto const color = color_from_position(position, sample_all_layers);
+    if (!color.has_value())
         return;
 
-    if (event.button() == GUI::MouseButton::Primary)
-        set_primary_color(color);
-    else if (event.button() == GUI::MouseButton::Secondary)
-        set_secondary_color(color);
+    set_appended_status_info(DeprecatedString::formatted("R:{}, G:{}, B:{}, A:{} [{}]", color->red(), color->green(), color->blue(), color->alpha(), color->to_deprecated_string()));
+}
+
+void ImageEditor::set_editor_color_to_color_at_mouse_position(GUI::MouseEvent const& event, bool sample_all_layers = false)
+{
+    auto const color = color_from_position(event.position(), sample_all_layers);
+
+    if (!color.has_value())
+        return;
+
+    // We picked a transparent pixel, do nothing.
+    if (!color->alpha())
+        return;
+
+    if (event.buttons() & GUI::MouseButton::Primary)
+        set_primary_color(*color);
+    if (event.buttons() & GUI::MouseButton::Secondary)
+        set_secondary_color(*color);
 }
 
 void ImageEditor::mousedown_event(GUI::MouseEvent& event)
@@ -362,21 +385,20 @@ void ImageEditor::mousedown_event(GUI::MouseEvent& event)
         return;
     }
 
-    if (event.alt() && !m_active_tool->is_overriding_alt()) {
-        set_editor_color_to_color_at_mouse_position(event);
-        return; // Pick Color instead of acivating active tool when holding alt.
-    }
-
     if (!m_active_tool)
         return;
 
-    if (is<MoveTool>(*m_active_tool)) {
-        if (auto* other_layer = layer_at_editor_position(event.position())) {
-            set_active_layer(other_layer);
-        }
+    if (auto* tool = dynamic_cast<MoveTool*>(m_active_tool); tool && tool->layer_selection_mode() == MoveTool::LayerSelectionMode::ForegroundLayer) {
+        if (auto* foreground_layer = layer_at_editor_position(event.position()); foreground_layer && !tool->cursor_is_within_resize_anchor())
+            set_active_layer(foreground_layer);
     }
 
     auto layer_event = m_active_layer ? event_adjusted_for_layer(event, *m_active_layer) : event;
+    if (event.alt() && !m_active_tool->is_overriding_alt()) {
+        set_editor_color_to_color_at_mouse_position(layer_event);
+        return; // Pick Color instead of acivating active tool when holding alt.
+    }
+
     auto image_event = event_with_pan_and_scale_applied(event);
     Tool::MouseEvent tool_event(Tool::MouseEvent::Action::MouseDown, layer_event, image_event, event);
     m_active_tool->on_mousedown(m_active_layer.ptr(), tool_event);
@@ -384,6 +406,8 @@ void ImageEditor::mousedown_event(GUI::MouseEvent& event)
 
 void ImageEditor::doubleclick_event(GUI::MouseEvent& event)
 {
+    if (!m_active_tool || (event.alt() && !m_active_tool->is_overriding_alt()))
+        return;
     auto layer_event = m_active_layer ? event_adjusted_for_layer(event, *m_active_layer) : event;
     auto image_event = event_with_pan_and_scale_applied(event);
     Tool::MouseEvent tool_event(Tool::MouseEvent::Action::DoubleClick, layer_event, image_event, event);
@@ -403,28 +427,33 @@ void ImageEditor::mousemove_event(GUI::MouseEvent& event)
         return;
     }
 
-    if (!m_active_tool)
-        return;
-
     auto image_event = event_with_pan_and_scale_applied(event);
     if (on_image_mouse_position_change) {
         on_image_mouse_position_change(image_event.position());
     }
 
     auto layer_event = m_active_layer ? event_adjusted_for_layer(event, *m_active_layer) : event;
+    if (m_active_tool && event.alt() && !m_active_tool->is_overriding_alt()) {
+        set_override_cursor(Gfx::StandardCursor::Eyedropper);
+        set_editor_color_to_color_at_mouse_position(layer_event);
+        return;
+    }
+
     Tool::MouseEvent tool_event(Tool::MouseEvent::Action::MouseDown, layer_event, image_event, event);
     m_active_tool->on_mousemove(m_active_layer.ptr(), tool_event);
 }
 
 void ImageEditor::mouseup_event(GUI::MouseEvent& event)
 {
-    set_override_cursor(m_active_cursor);
+    if (!(m_active_tool && event.alt() && !m_active_tool->is_overriding_alt()))
+        set_override_cursor(m_active_cursor);
+
     if (event.button() == GUI::MouseButton::Middle) {
         stop_panning();
         return;
     }
 
-    if (!m_active_tool)
+    if (!m_active_tool || (event.alt() && !m_active_tool->is_overriding_alt()))
         return;
     auto layer_event = m_active_layer ? event_adjusted_for_layer(event, *m_active_layer) : event;
     auto image_event = event_with_pan_and_scale_applied(event);
@@ -447,7 +476,13 @@ void ImageEditor::keydown_event(GUI::KeyEvent& event)
         return;
     }
 
-    if (m_active_tool && m_active_tool->on_keydown(event))
+    if (!m_active_tool)
+        return;
+
+    if (!m_active_tool->is_overriding_alt() && event.key() == Key_Alt)
+        set_override_cursor(Gfx::StandardCursor::Eyedropper);
+
+    if (m_active_tool->on_keydown(event))
         return;
 
     if (event.key() == Key_Escape && !m_image->selection().is_empty()) {
@@ -461,8 +496,13 @@ void ImageEditor::keydown_event(GUI::KeyEvent& event)
 
 void ImageEditor::keyup_event(GUI::KeyEvent& event)
 {
-    if (m_active_tool)
-        m_active_tool->on_keyup(event);
+    if (!m_active_tool)
+        return;
+
+    if (!m_active_tool->is_overriding_alt() && event.key() == Key_Alt)
+        update_tool_cursor();
+
+    m_active_tool->on_keyup(event);
 }
 
 void ImageEditor::enter_event(Core::Event&)
@@ -510,11 +550,11 @@ ErrorOr<void> ImageEditor::add_new_layer_from_selection()
     // save offsets of selection so we know where to place the new layer
     auto selection_offset = current_layer_selection.bounding_rect().location();
 
-    auto selection_bitmap = active_layer()->try_copy_bitmap(current_layer_selection);
+    auto selection_bitmap = active_layer()->copy_bitmap(current_layer_selection);
     if (selection_bitmap.is_null())
         return Error::from_string_literal("Unable to create bitmap from selection.");
 
-    auto layer_or_error = PixelPaint::Layer::try_create_with_bitmap(image(), selection_bitmap.release_nonnull(), "New Layer"sv);
+    auto layer_or_error = PixelPaint::Layer::create_with_bitmap(image(), selection_bitmap.release_nonnull(), "New Layer"sv);
     if (layer_or_error.is_error())
         return Error::from_string_literal("Unable to create layer from selection.");
 
@@ -708,12 +748,12 @@ void ImageEditor::save_project()
         save_project_as();
         return;
     }
-    auto response = FileSystemAccessClient::Client::the().try_request_file(window(), path(), Core::OpenMode::Truncate | Core::OpenMode::WriteOnly);
+    auto response = FileSystemAccessClient::Client::the().request_file(window(), path(), Core::File::OpenMode::Truncate | Core::File::OpenMode::Write);
     if (response.is_error())
         return;
-    auto result = save_project_to_file(*response.value());
+    auto result = save_project_to_file(response.value().release_stream());
     if (result.is_error()) {
-        GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Could not save {}: {}", path(), result.error()));
+        GUI::MessageBox::show_error(window(), MUST(String::formatted("Could not save {}: {}", path(), result.release_error())));
         return;
     }
     set_unmodified();
@@ -721,21 +761,21 @@ void ImageEditor::save_project()
 
 void ImageEditor::save_project_as()
 {
-    auto response = FileSystemAccessClient::Client::the().try_save_file_deprecated(window(), m_title, "pp");
+    auto response = FileSystemAccessClient::Client::the().save_file(window(), m_title.to_deprecated_string(), "pp");
     if (response.is_error())
         return;
-    auto file = response.value();
-    auto result = save_project_to_file(*file);
+    auto file = response.release_value();
+    auto result = save_project_to_file(file.release_stream());
     if (result.is_error()) {
-        GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Could not save {}: {}", file->filename(), result.error()));
+        GUI::MessageBox::show_error(window(), MUST(String::formatted("Could not save {}: {}", file.filename(), result.release_error())));
         return;
     }
-    set_path(file->filename());
+    set_path(file.filename().to_deprecated_string());
     set_loaded_from_image(false);
     set_unmodified();
 }
 
-ErrorOr<void> ImageEditor::save_project_to_file(Core::File& file) const
+ErrorOr<void> ImageEditor::save_project_to_file(NonnullOwnPtr<Core::File> file) const
 {
     StringBuilder builder;
     auto json = TRY(JsonObjectSerializer<>::try_create(builder));
@@ -743,18 +783,17 @@ ErrorOr<void> ImageEditor::save_project_to_file(Core::File& file) const
     auto json_guides = TRY(json.add_array("guides"sv));
     for (auto const& guide : m_guides) {
         auto json_guide = TRY(json_guides.add_object());
-        TRY(json_guide.add("offset"sv, (double)guide.offset()));
-        if (guide.orientation() == Guide::Orientation::Vertical)
+        TRY(json_guide.add("offset"sv, (double)guide->offset()));
+        if (guide->orientation() == Guide::Orientation::Vertical)
             TRY(json_guide.add("orientation"sv, "vertical"));
-        else if (guide.orientation() == Guide::Orientation::Horizontal)
+        else if (guide->orientation() == Guide::Orientation::Horizontal)
             TRY(json_guide.add("orientation"sv, "horizontal"));
         TRY(json_guide.finish());
     }
     TRY(json_guides.finish());
     TRY(json.finish());
 
-    if (!file.write(builder.string_view()))
-        return Error::from_errno(file.error());
+    TRY(file->write_until_depleted(builder.string_view().bytes()));
     return {};
 }
 
@@ -866,6 +905,46 @@ void ImageEditor::draw_marching_ants_pixel(Gfx::Painter& painter, int x, int y) 
 void ImageEditor::selection_did_change()
 {
     update();
+}
+
+void ImageEditor::set_appended_status_info(DeprecatedString new_status_info)
+{
+    m_appended_status_info = new_status_info;
+    if (on_appended_status_info_change)
+        on_appended_status_info_change(m_appended_status_info);
+}
+
+DeprecatedString ImageEditor::generate_unique_layer_name(DeprecatedString const& original_layer_name)
+{
+    constexpr StringView copy_string_view = " copy"sv;
+    auto copy_suffix_index = original_layer_name.find_last(copy_string_view);
+    if (!copy_suffix_index.has_value())
+        return DeprecatedString::formatted("{}{}", original_layer_name, copy_string_view);
+
+    auto after_copy_suffix_view = original_layer_name.substring_view(copy_suffix_index.value() + copy_string_view.length());
+    if (!after_copy_suffix_view.is_empty()) {
+        auto after_copy_suffix_number = after_copy_suffix_view.trim_whitespace().to_int();
+        if (!after_copy_suffix_number.has_value())
+            return DeprecatedString::formatted("{}{}", original_layer_name, copy_string_view);
+    }
+
+    auto layer_with_name_exists = [this](auto name) {
+        for (size_t i = 0; i < image().layer_count(); ++i) {
+            if (image().layer(i).name() == name)
+                return true;
+        }
+        return false;
+    };
+
+    auto base_layer_name = original_layer_name.substring_view(0, copy_suffix_index.value());
+    StringBuilder new_layer_name;
+    auto duplicate_name_count = 0;
+    do {
+        new_layer_name.clear();
+        new_layer_name.appendff("{}{} {}", base_layer_name, copy_string_view, ++duplicate_name_count);
+    } while (layer_with_name_exists(new_layer_name.string_view()));
+
+    return new_layer_name.to_deprecated_string();
 }
 
 }

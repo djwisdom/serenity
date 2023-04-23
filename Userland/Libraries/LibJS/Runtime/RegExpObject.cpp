@@ -89,7 +89,11 @@ ErrorOr<DeprecatedString, ParseRegexPatternError> parse_regex_pattern(StringView
     if (unicode && unicode_sets)
         return ParseRegexPatternError { DeprecatedString::formatted(ErrorType::RegExpObjectIncompatibleFlags.message(), 'u', 'v') };
 
-    auto utf16_pattern = AK::utf8_to_utf16(pattern);
+    auto utf16_pattern_result = AK::utf8_to_utf16(pattern);
+    if (utf16_pattern_result.is_error())
+        return ParseRegexPatternError { "Out of memory"sv };
+
+    auto utf16_pattern = utf16_pattern_result.release_value();
     Utf16View utf16_pattern_view { utf16_pattern };
     StringBuilder builder;
 
@@ -112,7 +116,7 @@ ErrorOr<DeprecatedString, ParseRegexPatternError> parse_regex_pattern(StringView
             builder.append_code_point(code_unit);
     }
 
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 ThrowCompletionOr<DeprecatedString> parse_regex_pattern(VM& vm, StringView pattern, bool unicode, bool unicode_sets)
@@ -126,12 +130,12 @@ ThrowCompletionOr<DeprecatedString> parse_regex_pattern(VM& vm, StringView patte
 
 NonnullGCPtr<RegExpObject> RegExpObject::create(Realm& realm)
 {
-    return realm.heap().allocate<RegExpObject>(realm, *realm.intrinsics().regexp_prototype());
+    return realm.heap().allocate<RegExpObject>(realm, realm.intrinsics().regexp_prototype()).release_allocated_value_but_fixme_should_propagate_errors();
 }
 
 NonnullGCPtr<RegExpObject> RegExpObject::create(Realm& realm, Regex<ECMA262> regex, DeprecatedString pattern, DeprecatedString flags)
 {
-    return realm.heap().allocate<RegExpObject>(realm, move(regex), move(pattern), move(flags), *realm.intrinsics().regexp_prototype());
+    return realm.heap().allocate<RegExpObject>(realm, move(regex), move(pattern), move(flags), realm.intrinsics().regexp_prototype()).release_allocated_value_but_fixme_should_propagate_errors();
 }
 
 RegExpObject::RegExpObject(Object& prototype)
@@ -148,12 +152,14 @@ RegExpObject::RegExpObject(Regex<ECMA262> regex, DeprecatedString pattern, Depre
     VERIFY(m_regex->parser_result.error == regex::Error::NoError);
 }
 
-void RegExpObject::initialize(Realm& realm)
+ThrowCompletionOr<void> RegExpObject::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
     define_direct_property(vm.names.lastIndex, Value(0), Attribute::Writable);
+
+    return {};
 }
 
 // 22.2.3.2.2 RegExpInitialize ( obj, pattern, flags ), https://tc39.es/ecma262/#sec-regexpinitialize
@@ -165,13 +171,13 @@ ThrowCompletionOr<NonnullGCPtr<RegExpObject>> RegExpObject::regexp_initialize(VM
     // 2. Else, let P be ? ToString(pattern).
     auto pattern = pattern_value.is_undefined()
         ? DeprecatedString::empty()
-        : TRY(pattern_value.to_string(vm));
+        : TRY(pattern_value.to_deprecated_string(vm));
 
     // 3. If flags is undefined, let F be the empty String.
     // 4. Else, let F be ? ToString(flags).
     auto flags = flags_value.is_undefined()
         ? DeprecatedString::empty()
-        : TRY(flags_value.to_string(vm));
+        : TRY(flags_value.to_deprecated_string(vm));
 
     // 5. If F contains any code unit other than "d", "g", "i", "m", "s", "u", or "y" or if it contains the same code unit more than once, throw a SyntaxError exception.
     // 6. If F contains "i", let i be true; else let i be false.
@@ -242,8 +248,47 @@ DeprecatedString RegExpObject::escape_regexp_pattern() const
     // 3. Return S.
     if (m_pattern.is_empty())
         return "(?:)";
+
     // FIXME: Check the 'u' and 'v' flags and escape accordingly
-    return m_pattern.replace("\n"sv, "\\n"sv, ReplaceMode::All).replace("\r"sv, "\\r"sv, ReplaceMode::All).replace(LINE_SEPARATOR_STRING, "\\u2028"sv, ReplaceMode::All).replace(PARAGRAPH_SEPARATOR_STRING, "\\u2029"sv, ReplaceMode::All).replace("/"sv, "\\/"sv, ReplaceMode::All);
+    StringBuilder builder;
+    auto pattern = Utf8View { m_pattern };
+    auto escaped = false;
+    for (auto code_point : pattern) {
+        if (escaped) {
+            escaped = false;
+            builder.append_code_point('\\');
+            builder.append_code_point(code_point);
+            continue;
+        }
+
+        if (code_point == '\\') {
+            escaped = true;
+            continue;
+        }
+
+        switch (code_point) {
+        case '/':
+            builder.append("\\/"sv);
+            break;
+        case '\n':
+            builder.append("\\n"sv);
+            break;
+        case '\r':
+            builder.append("\\r"sv);
+            break;
+        case LINE_SEPARATOR:
+            builder.append("\\u2028"sv);
+            break;
+        case PARAGRAPH_SEPARATOR:
+            builder.append("\\u2029"sv);
+            break;
+        default:
+            builder.append_code_point(code_point);
+            break;
+        }
+    }
+
+    return builder.to_deprecated_string();
 }
 
 // 22.2.3.2.4 RegExpCreate ( P, F ), https://tc39.es/ecma262/#sec-regexpcreate
@@ -252,7 +297,7 @@ ThrowCompletionOr<NonnullGCPtr<RegExpObject>> regexp_create(VM& vm, Value patter
     auto& realm = *vm.current_realm();
 
     // 1. Let obj be ! RegExpAlloc(%RegExp%).
-    auto regexp_object = MUST(regexp_alloc(vm, *realm.intrinsics().regexp_constructor()));
+    auto regexp_object = MUST(regexp_alloc(vm, realm.intrinsics().regexp_constructor()));
 
     // 2. Return ? RegExpInitialize(obj, P, F).
     return TRY(regexp_object->regexp_initialize(vm, pattern, flags));
@@ -272,8 +317,7 @@ ThrowCompletionOr<NonnullGCPtr<RegExpObject>> regexp_alloc(VM& vm, FunctionObjec
     regexp_object->set_realm(this_realm);
 
     // 4. If SameValue(newTarget, thisRealm.[[Intrinsics]].[[%RegExp%]]) is true, then
-    auto* regexp_constructor = this_realm.intrinsics().regexp_constructor();
-    if (same_value(&new_target, regexp_constructor)) {
+    if (same_value(&new_target, this_realm.intrinsics().regexp_constructor())) {
         // i. Set the value of obj’s [[LegacyFeaturesEnabled]] internal slot to true.
         regexp_object->set_legacy_features_enabled(true);
     }

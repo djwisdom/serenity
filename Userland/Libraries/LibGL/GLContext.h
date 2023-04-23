@@ -1,13 +1,15 @@
 /*
  * Copyright (c) 2021, Stephan Unverwerth <s.unverwerth@serenityos.org>
  * Copyright (c) 2021-2022, Jesse Buhagiar <jooster669@gmail.com>
- * Copyright (c) 2022, Jelle Raaijmakers <jelle@gmta.nl>
+ * Copyright (c) 2022-2023, Jelle Raaijmakers <jelle@gmta.nl>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
+#include <AK/ByteBuffer.h>
+#include <AK/Debug.h>
 #include <AK/HashMap.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Optional.h>
@@ -110,9 +112,9 @@ public:
     void gl_begin(GLenum mode);
     void gl_clear(GLbitfield mask);
     void gl_clear_color(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
-    void gl_clear_depth(GLdouble depth);
+    void gl_clear_depth(GLfloat depth);
     void gl_clear_stencil(GLint s);
-    void gl_color(GLdouble r, GLdouble g, GLdouble b, GLdouble a);
+    void gl_color(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
     void gl_delete_textures(GLsizei n, GLuint const* textures);
     void gl_end();
     void gl_frustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble near_val, GLdouble far_val);
@@ -127,9 +129,9 @@ public:
     void gl_pop_matrix();
     void gl_mult_matrix(FloatMatrix4x4 const& matrix);
     void gl_rotate(GLfloat angle, GLfloat x, GLfloat y, GLfloat z);
-    void gl_scale(GLdouble x, GLdouble y, GLdouble z);
-    void gl_translate(GLdouble x, GLdouble y, GLdouble z);
-    void gl_vertex(GLdouble x, GLdouble y, GLdouble z, GLdouble w);
+    void gl_scale(GLfloat x, GLfloat y, GLfloat z);
+    void gl_translate(GLfloat x, GLfloat y, GLfloat z);
+    void gl_vertex(GLfloat x, GLfloat y, GLfloat z, GLfloat w);
     void gl_viewport(GLint x, GLint y, GLsizei width, GLsizei height);
     void gl_enable(GLenum);
     void gl_disable(GLenum);
@@ -159,7 +161,8 @@ public:
     void gl_tex_parameterfv(GLenum target, GLenum pname, GLfloat const* params);
     void gl_tex_coord(GLfloat s, GLfloat t, GLfloat r, GLfloat q);
     void gl_multi_tex_coord(GLenum target, GLfloat s, GLfloat t, GLfloat r, GLfloat q);
-    void gl_tex_env(GLenum target, GLenum pname, GLfloat param);
+    void gl_tex_env(GLenum target, GLenum pname, FloatVector4 params);
+    void gl_tex_envv(GLenum target, GLenum pname, void const* params, GLenum type);
     void gl_bind_texture(GLenum target, GLuint texture);
     GLboolean gl_is_texture(GLuint texture);
     void gl_active_texture(GLenum texture);
@@ -246,7 +249,7 @@ private:
     void sync_stencil_configuration();
     void sync_clip_planes();
 
-    void build_extension_string();
+    ErrorOr<ByteBuffer> build_extension_string();
 
     template<typename T>
     T* store_in_listing(T value)
@@ -487,6 +490,7 @@ private:
             decltype(&GLContext::gl_bitmap),
             decltype(&GLContext::gl_copy_tex_image_2d),
             decltype(&GLContext::gl_rect),
+            decltype(&GLContext::gl_tex_env),
             decltype(&GLContext::gl_tex_gen),
             decltype(&GLContext::gl_tex_gen_floatv),
             decltype(&GLContext::gl_fogf),
@@ -559,7 +563,7 @@ private:
     GLenum m_color_material_mode { GL_AMBIENT_AND_DIFFUSE };
 
     // GL Extension string
-    DeprecatedString m_extensions;
+    ByteBuffer m_extensions;
 
     // Buffer objects
     NameAllocator m_buffer_name_allocator;

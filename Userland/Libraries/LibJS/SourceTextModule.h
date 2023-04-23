@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, David Tuin <davidot@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -22,8 +22,8 @@ public:
 
     Program const& parse_node() const { return *m_ecmascript_code; }
 
-    virtual ThrowCompletionOr<Vector<FlyString>> get_exported_names(VM& vm, Vector<Module*> export_star_set) override;
-    virtual ThrowCompletionOr<ResolvedBinding> resolve_export(VM& vm, FlyString const& export_name, Vector<ResolvedBinding> resolve_set = {}) override;
+    virtual ThrowCompletionOr<Vector<DeprecatedFlyString>> get_exported_names(VM& vm, Vector<Module*> export_star_set) override;
+    virtual ThrowCompletionOr<ResolvedBinding> resolve_export(VM& vm, DeprecatedFlyString const& export_name, Vector<ResolvedBinding> resolve_set = {}) override;
 
     Object* import_meta() { return m_import_meta; }
     void set_import_meta(Badge<MetaProperty>, Object* import_meta) { m_import_meta = import_meta; }
@@ -36,7 +36,7 @@ private:
     SourceTextModule(Realm&, StringView filename, Script::HostDefined* host_defined, bool has_top_level_await, NonnullRefPtr<Program> body, Vector<ModuleRequest> requested_modules,
         Vector<ImportEntry> import_entries, Vector<ExportEntry> local_export_entries,
         Vector<ExportEntry> indirect_export_entries, Vector<ExportEntry> star_export_entries,
-        RefPtr<ExportStatement> default_export);
+        RefPtr<ExportStatement const> default_export);
 
     virtual void visit_edges(Cell::Visitor&) override;
 
@@ -48,7 +48,7 @@ private:
     Vector<ExportEntry> m_indirect_export_entries; // [[IndirectExportEntries]]
     Vector<ExportEntry> m_star_export_entries;     // [[StarExportEntries]]
 
-    RefPtr<ExportStatement> m_default_export; // Note: Not from the spec
+    RefPtr<ExportStatement const> m_default_export; // Note: Not from the spec
 };
 
 }

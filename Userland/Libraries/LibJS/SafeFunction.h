@@ -51,14 +51,14 @@ public:
 
     template<typename CallableType>
     SafeFunction(CallableType&& callable)
-    requires((AK::IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, In...> && !IsSame<RemoveCVReference<CallableType>, SafeFunction>))
+    requires((AK::IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, Out, In...> && !IsSame<RemoveCVReference<CallableType>, SafeFunction>))
     {
         init_with_callable(forward<CallableType>(callable), CallableKind::FunctionObject);
     }
 
     template<typename FunctionType>
     SafeFunction(FunctionType f)
-    requires((AK::IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, In...> && !IsSame<RemoveCVReference<FunctionType>, SafeFunction>))
+    requires((AK::IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, Out, In...> && !IsSame<RemoveCVReference<FunctionType>, SafeFunction>))
     {
         init_with_callable(move(f), CallableKind::FunctionPointer);
     }
@@ -85,20 +85,20 @@ public:
 
     template<typename CallableType>
     SafeFunction& operator=(CallableType&& callable)
-    requires((AK::IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, In...>))
+    requires((AK::IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, Out, In...>))
     {
         clear();
-        init_with_callable(forward<CallableType>(callable));
+        init_with_callable(forward<CallableType>(callable), CallableKind::FunctionObject);
         return *this;
     }
 
     template<typename FunctionType>
     SafeFunction& operator=(FunctionType f)
-    requires((AK::IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, In...>))
+    requires((AK::IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, Out, In...>))
     {
         clear();
         if (f)
-            init_with_callable(move(f));
+            init_with_callable(move(f), CallableKind::FunctionPointer);
         return *this;
     }
 

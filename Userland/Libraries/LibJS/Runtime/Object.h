@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,7 +8,6 @@
 #pragma once
 
 #include <AK/Badge.h>
-#include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
 #include <AK/StringView.h>
 #include <LibJS/Forward.h>
@@ -46,7 +45,7 @@ class Object : public Cell {
 public:
     static NonnullGCPtr<Object> create(Realm&, Object* prototype);
 
-    virtual void initialize(Realm&) override;
+    virtual ThrowCompletionOr<void> initialize(Realm&) override;
     virtual ~Object();
 
     enum class PropertyKind {
@@ -90,7 +89,7 @@ public:
     ThrowCompletionOr<Value> get(PropertyKey const&) const;
     ThrowCompletionOr<void> set(PropertyKey const&, Value, ShouldThrowExceptions);
     ThrowCompletionOr<bool> create_data_property(PropertyKey const&, Value);
-    ThrowCompletionOr<void> create_method_property(PropertyKey const&, Value);
+    void create_method_property(PropertyKey const&, Value);
     ThrowCompletionOr<bool> create_data_property_or_throw(PropertyKey const&, Value);
     void create_non_enumerable_data_property_or_throw(PropertyKey const&, Value);
     ThrowCompletionOr<void> define_property_or_throw(PropertyKey const&, PropertyDescriptor const&);
@@ -213,7 +212,7 @@ private:
     Object* prototype() { return shape().prototype(); }
     Object const* prototype() const { return shape().prototype(); }
 
-    Shape* m_shape { nullptr };
+    GCPtr<Shape> m_shape;
     Vector<Value> m_storage;
     IndexedProperties m_indexed_properties;
     OwnPtr<Vector<PrivateElement>> m_private_elements; // [[PrivateElements]]

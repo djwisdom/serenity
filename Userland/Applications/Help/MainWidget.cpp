@@ -14,7 +14,6 @@
 #include <AK/URL.h>
 #include <Applications/Help/HelpWindowGML.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibDesktop/Launcher.h>
 #include <LibGUI/Action.h>
@@ -42,7 +41,7 @@ namespace Help {
 
 MainWidget::MainWidget()
 {
-    load_from_gml(help_window_gml);
+    load_from_gml(help_window_gml).release_value_but_fixme_should_propagate_errors();
     m_toolbar = find_descendant_of_type_named<GUI::Toolbar>("toolbar");
     m_tab_widget = find_descendant_of_type_named<GUI::TabWidget>("tab_widget");
     m_search_container = find_descendant_of_type_named<GUI::Widget>("search_container");
@@ -99,7 +98,7 @@ MainWidget::MainWidget()
     m_web_view = find_descendant_of_type_named<WebView::OutOfProcessWebView>("web_view");
     m_web_view->on_link_click = [this](auto& url, auto&, unsigned) {
         if (url.scheme() == "file") {
-            auto path = LexicalPath { url.path() };
+            auto path = LexicalPath { url.serialize_path() };
             if (!path.is_child_of(Manual::manual_base_path)) {
                 open_external(url);
                 return;
@@ -116,35 +115,15 @@ MainWidget::MainWidget()
                 return;
             open_page(string_path.value());
         } else if (url.scheme() == "help") {
-            if (url.host() == "man") {
-                if (url.paths().size() != 2) {
-                    dbgln("Bad help page URL '{}'", url);
-                    return;
-                }
-                auto const section = url.paths()[0];
-                auto maybe_section_number = section.to_uint();
-                if (!maybe_section_number.has_value()) {
-                    dbgln("Bad section number '{}'", section);
-                    return;
-                }
-                auto section_number = maybe_section_number.value();
-                auto page = String::from_utf8(url.paths()[1]);
-                if (page.is_error())
-                    return;
-
-                auto const page_object = try_make_ref_counted<Manual::PageNode>(Manual::sections[section_number - 1], page.release_value());
-                if (page_object.is_error())
-                    return;
-                auto const maybe_path = page_object.value()->path();
-                if (maybe_path.is_error())
-                    return;
-
-                auto path = maybe_path.value().to_deprecated_string();
-                m_history.push(path);
-                open_url(URL::create_with_file_scheme(path, url.fragment()));
-            } else {
-                dbgln("Bad help operation '{}' in URL '{}'", url.host(), url);
+            auto maybe_page = Manual::Node::try_find_from_help_url(url);
+            if (maybe_page.is_error()) {
+                dbgln("Error opening page: {}", maybe_page.error());
+                return;
             }
+            auto maybe_path = maybe_page.value()->path();
+            if (maybe_path.is_error())
+                return;
+            open_page(maybe_path.release_value());
         } else {
             open_external(url);
         }
@@ -223,20 +202,20 @@ ErrorOr<void> MainWidget::initialize_fallibles(GUI::Window& window)
     (void)TRY(m_toolbar->try_add_action(*m_go_forward_action));
     (void)TRY(m_toolbar->try_add_action(*m_go_home_action));
 
-    auto file_menu = TRY(window.try_add_menu("&File"));
+    auto file_menu = TRY(window.try_add_menu("&File"_short_string));
     TRY(file_menu->try_add_action(GUI::CommonActions::make_quit_action([](auto&) {
         GUI::Application::the()->quit();
     })));
 
-    auto go_menu = TRY(window.try_add_menu("&Go"));
+    auto go_menu = TRY(window.try_add_menu("&Go"_short_string));
     TRY(go_menu->try_add_action(*m_go_back_action));
     TRY(go_menu->try_add_action(*m_go_forward_action));
     TRY(go_menu->try_add_action(*m_go_home_action));
 
-    auto help_menu = TRY(window.try_add_menu("&Help"));
-    String help_page_path = TRY(TRY(try_make_ref_counted<Manual::PageNode>(Manual::sections[1 - 1], TRY(String::from_utf8("Help"sv))))->path());
+    auto help_menu = TRY(window.try_add_menu("&Help"_short_string));
+    String help_page_path = TRY(TRY(try_make_ref_counted<Manual::PageNode>(Manual::sections[1 - 1], TRY("Help"_string)))->path());
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(&window)));
-    TRY(help_menu->try_add_action(GUI::Action::create("&Contents", { Key_F1 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/filetype-unknown.png"sv)), [this, help_page_path = move(help_page_path)](auto&) {
+    TRY(help_menu->try_add_action(GUI::Action::create("&Contents", { Key_F1 }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/filetype-unknown.png"sv)), [this, help_page_path = move(help_page_path)](auto&) {
         open_page(help_page_path);
     })));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Help", TRY(GUI::Icon::try_create_default_icon("app-help"sv)), &window)));
@@ -267,21 +246,22 @@ void MainWidget::open_url(URL const& url)
         m_web_view->load(url);
         m_web_view->scroll_to_top();
 
-        GUI::Application::the()->deferred_invoke([&, path = url.path()] {
-            auto browse_view_index = m_manual_model->index_from_path(path);
-            if (browse_view_index.has_value()) {
-                m_browse_view->expand_tree(browse_view_index.value().parent());
-
-                auto page_and_section = m_manual_model->page_and_section(browse_view_index.value());
-                if (!page_and_section.has_value())
-                    return;
-                auto title = String::formatted("{} - Help", page_and_section.value());
-                if (!title.is_error())
-                    window()->set_title(title.release_value().to_deprecated_string());
-            } else {
-                window()->set_title("Help");
+        auto browse_view_index = m_manual_model->index_from_path(url.serialize_path());
+        if (browse_view_index.has_value()) {
+            if (browse_view_index.value() != m_browse_view->selection_start_index()) {
+                m_browse_view->expand_all_parents_of(browse_view_index.value());
+                m_browse_view->set_cursor(browse_view_index.value(), GUI::AbstractView::SelectionUpdate::Set);
             }
-        });
+
+            auto page_and_section = m_manual_model->page_and_section(browse_view_index.value());
+            if (!page_and_section.has_value())
+                return;
+            auto title = String::formatted("{} - Help", page_and_section.value());
+            if (!title.is_error())
+                window()->set_title(title.release_value().to_deprecated_string());
+        } else {
+            window()->set_title("Help");
+        }
     }
 }
 

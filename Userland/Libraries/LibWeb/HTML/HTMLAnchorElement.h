@@ -23,6 +23,12 @@ public:
     DeprecatedString target() const { return attribute(HTML::AttributeNames::target); }
     DeprecatedString download() const { return attribute(HTML::AttributeNames::download); }
 
+    DeprecatedString text() const;
+    void set_text(DeprecatedString const&);
+
+    DeprecatedString referrer_policy() const;
+    WebIDL::ExceptionOr<void> set_referrer_policy(DeprecatedString const&);
+
     // ^EventTarget
     // https://html.spec.whatwg.org/multipage/interaction.html#the-tabindex-attribute:the-a-element
     virtual bool is_focusable() const override { return has_attribute(HTML::AttributeNames::href); }
@@ -32,10 +38,12 @@ public:
 private:
     HTMLAnchorElement(DOM::Document&, DOM::QualifiedName);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
+
     void run_activation_behavior(Web::DOM::Event const&);
 
     // ^DOM::Element
-    virtual void parse_attribute(FlyString const& name, DeprecatedString const& value) override;
+    virtual void parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value) override;
     virtual i32 default_tab_index_value() const override;
 
     // ^HTML::HTMLHyperlinkElementUtils
@@ -50,6 +58,8 @@ private:
     {
         queue_an_element_task(source, move(steps));
     }
+
+    virtual Optional<ARIA::Role> default_role() const override;
 };
 
 }

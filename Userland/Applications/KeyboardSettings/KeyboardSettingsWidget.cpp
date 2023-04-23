@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020, Hüseyin Aslıtürk <asliturk@hotmail.com>
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022, Sam Cohen <sbcohen2000@gmail.com>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -12,8 +13,8 @@
 #include <Applications/KeyboardSettings/KeyboardWidgetGML.h>
 #include <Applications/KeyboardSettings/KeymapDialogGML.h>
 #include <LibConfig/Client.h>
-#include <LibCore/DirIterator.h>
-#include <LibCore/File.h>
+#include <LibCore/Directory.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/ComboBox.h>
 #include <LibGUI/Dialog.h>
@@ -51,33 +52,31 @@ private:
     KeymapSelectionDialog(Window* parent_window, Vector<DeprecatedString> const& selected_keymaps)
         : Dialog(parent_window)
     {
-        auto& widget = set_main_widget<GUI::Widget>();
-        if (!widget.load_from_gml(keymap_dialog_gml))
-            VERIFY_NOT_REACHED();
+        auto widget = set_main_widget<GUI::Widget>().release_value_but_fixme_should_propagate_errors();
+        widget->load_from_gml(keymap_dialog_gml).release_value_but_fixme_should_propagate_errors();
 
         set_resizable(false);
         resize(190, 54);
 
         set_icon(parent_window->icon());
 
-        Core::DirIterator iterator("/res/keymaps/", Core::DirIterator::Flags::SkipDots);
-        if (iterator.has_error()) {
-            GUI::MessageBox::show(nullptr, DeprecatedString::formatted("Error on reading mapping file list: {}", iterator.error_string()), "Keyboard settings"sv, GUI::MessageBox::Type::Error);
+        auto iterator_result = Core::Directory::for_each_entry("/res/keymaps/"sv, Core::DirIterator::Flags::SkipDots, [&](auto const& entry, auto&) -> ErrorOr<IterationDecision> {
+            auto basename = entry.name.replace(".json"sv, ""sv, ReplaceMode::FirstOnly);
+            if (selected_keymaps.find(basename).is_end())
+                m_character_map_files.append(basename);
+            return IterationDecision::Continue;
+        });
+
+        if (iterator_result.is_error()) {
+            GUI::MessageBox::show(nullptr, DeprecatedString::formatted("Error on reading mapping file list: {}", iterator_result.error()), "Keyboard settings"sv, GUI::MessageBox::Type::Error);
             GUI::Application::the()->quit(-1);
         }
 
-        while (iterator.has_next()) {
-            auto name = iterator.next_path();
-            auto basename = name.replace(".json"sv, ""sv, ReplaceMode::FirstOnly);
-            if (!selected_keymaps.find(basename).is_end())
-                continue;
-            m_character_map_files.append(basename);
-        }
         quick_sort(m_character_map_files);
 
         m_selected_keymap = m_character_map_files.first();
 
-        m_keymaps_combobox = *widget.find_descendant_of_type_named<GUI::ComboBox>("keymaps_combobox");
+        m_keymaps_combobox = *widget->find_descendant_of_type_named<GUI::ComboBox>("keymaps_combobox");
         m_keymaps_combobox->set_only_allow_values_from_model(true);
         m_keymaps_combobox->set_model(*GUI::ItemListModel<DeprecatedString>::create(m_character_map_files));
         m_keymaps_combobox->set_selected_index(0);
@@ -86,12 +85,12 @@ private:
             m_selected_keymap = keymap;
         };
 
-        auto& ok_button = *widget.find_descendant_of_type_named<GUI::Button>("ok_button");
+        auto& ok_button = *widget->find_descendant_of_type_named<GUI::Button>("ok_button");
         ok_button.on_click = [this](auto) {
             done(ExecResult::OK);
         };
 
-        auto& cancel_button = *widget.find_descendant_of_type_named<GUI::Button>("cancel_button");
+        auto& cancel_button = *widget->find_descendant_of_type_named<GUI::Button>("cancel_button");
         cancel_button.on_click = [this](auto) {
             done(ExecResult::Cancel);
         };
@@ -152,16 +151,14 @@ private:
 
 KeyboardSettingsWidget::KeyboardSettingsWidget()
 {
-    load_from_gml(keyboard_widget_gml);
+    load_from_gml(keyboard_widget_gml).release_value_but_fixme_should_propagate_errors();
+    auto proc_keymap = MUST(Core::File::open("/sys/kernel/keymap"sv, Core::File::OpenMode::Read));
 
-    auto proc_keymap = Core::File::construct("/sys/kernel/keymap");
-    if (!proc_keymap->open(Core::OpenMode::ReadOnly))
-        VERIFY_NOT_REACHED();
-
-    auto json = JsonValue::from_string(proc_keymap->read_all()).release_value_but_fixme_should_propagate_errors();
+    auto keymap = proc_keymap->read_until_eof().release_value_but_fixme_should_propagate_errors();
+    auto json = JsonValue::from_string(keymap).release_value_but_fixme_should_propagate_errors();
     auto const& keymap_object = json.as_object();
     VERIFY(keymap_object.has("keymap"sv));
-    m_initial_active_keymap = keymap_object.get("keymap"sv).to_deprecated_string();
+    m_initial_active_keymap = keymap_object.get_deprecated_string("keymap"sv).value();
     dbgln("KeyboardSettings thinks the current keymap is: {}", m_initial_active_keymap);
 
     auto mapper_config(Core::ConfigFile::open("/etc/Keyboard.ini").release_value_but_fixme_should_propagate_errors());
@@ -257,6 +254,19 @@ KeyboardSettingsWidget::KeyboardSettingsWidget()
     m_num_lock_checkbox->on_checked = [&](auto) {
         set_modified(true);
     };
+
+    m_caps_lock_checkbox = find_descendant_of_type_named<GUI::CheckBox>("caps_lock_remapped_to_ctrl_checkbox");
+    auto caps_lock_is_remapped = read_caps_lock_to_ctrl_sys_variable();
+    if (caps_lock_is_remapped.is_error()) {
+        auto error_message = DeprecatedString::formatted("Could not determine if Caps Lock is remapped to Ctrl: {}", caps_lock_is_remapped.error());
+        GUI::MessageBox::show_error(window(), error_message);
+    } else {
+        m_caps_lock_checkbox->set_checked(caps_lock_is_remapped.value());
+    }
+    m_caps_lock_checkbox->set_enabled(getuid() == 0);
+    m_caps_lock_checkbox->on_checked = [&](auto) {
+        set_modified(true);
+    };
 }
 
 KeyboardSettingsWidget::~KeyboardSettingsWidget()
@@ -284,10 +294,28 @@ void KeyboardSettingsWidget::apply_settings()
     }
     m_initial_active_keymap = m_keymaps_list_model.active_keymap();
     Config::write_bool("KeyboardSettings"sv, "StartupEnable"sv, "NumLock"sv, m_num_lock_checkbox->is_checked());
+    write_caps_lock_to_ctrl_sys_variable(m_caps_lock_checkbox->is_checked());
 }
 
 void KeyboardSettingsWidget::set_keymaps(Vector<DeprecatedString> const& keymaps, DeprecatedString const& active_keymap)
 {
     auto keymaps_string = DeprecatedString::join(',', keymaps);
     GUI::Process::spawn_or_show_error(window(), "/bin/keymap"sv, Array { "-s", keymaps_string.characters(), "-m", active_keymap.characters() });
+}
+
+void KeyboardSettingsWidget::write_caps_lock_to_ctrl_sys_variable(bool caps_lock_to_ctrl)
+{
+    if (getuid() != 0)
+        return;
+
+    auto write_command = DeprecatedString::formatted("caps_lock_to_ctrl={}", caps_lock_to_ctrl ? "1" : "0");
+    GUI::Process::spawn_or_show_error(window(), "/bin/sysctl"sv, Array { "-w", write_command.characters() });
+}
+
+ErrorOr<bool> KeyboardSettingsWidget::read_caps_lock_to_ctrl_sys_variable()
+{
+    auto file = TRY(Core::File::open("/sys/kernel/variables/caps_lock_to_ctrl"sv, Core::File::OpenMode::Read));
+    auto buffer = TRY(file->read_until_eof());
+    StringView contents_string((char const*)buffer.data(), min(1, buffer.size()));
+    return contents_string == "1";
 }

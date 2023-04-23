@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,13 +14,13 @@ namespace JS::Temporal {
 
 // 8.1 The Temporal.Instant Constructor, https://tc39.es/proposal-temporal/#sec-temporal-instant-constructor
 InstantConstructor::InstantConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.Instant.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.Instant.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void InstantConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> InstantConstructor::initialize(Realm& realm)
 {
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     auto& vm = this->vm();
 
@@ -36,6 +36,8 @@ void InstantConstructor::initialize(Realm& realm)
     define_native_function(realm, vm.names.compare, compare, 2, attr);
 
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
+
+    return {};
 }
 
 // 8.1.1 Temporal.Instant ( epochNanoseconds ), https://tc39.es/proposal-temporal/#sec-temporal.instant
@@ -54,14 +56,14 @@ ThrowCompletionOr<NonnullGCPtr<Object>> InstantConstructor::construct(FunctionOb
     auto& vm = this->vm();
 
     // 2. Let epochNanoseconds be ? ToBigInt(epochNanoseconds).
-    auto* epoch_nanoseconds = TRY(vm.argument(0).to_bigint(vm));
+    auto epoch_nanoseconds = TRY(vm.argument(0).to_bigint(vm));
 
     // 3. If ! IsValidEpochNanoseconds(epochNanoseconds) is false, throw a RangeError exception.
-    if (!is_valid_epoch_nanoseconds(*epoch_nanoseconds))
+    if (!is_valid_epoch_nanoseconds(epoch_nanoseconds))
         return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidEpochNanoseconds);
 
     // 4. Return ? CreateTemporalInstant(epochNanoseconds, NewTarget).
-    return *TRY(create_temporal_instant(vm, *epoch_nanoseconds, &new_target));
+    return *TRY(create_temporal_instant(vm, epoch_nanoseconds, &new_target));
 }
 
 // 8.2.2 Temporal.Instant.from ( item ), https://tc39.es/proposal-temporal/#sec-temporal.instant.from
@@ -123,7 +125,7 @@ JS_DEFINE_NATIVE_FUNCTION(InstantConstructor::from_epoch_milliseconds)
 JS_DEFINE_NATIVE_FUNCTION(InstantConstructor::from_epoch_microseconds)
 {
     // 1. Set epochMicroseconds to ? ToBigInt(epochMicroseconds).
-    auto* epoch_microseconds = TRY(vm.argument(0).to_bigint(vm));
+    auto epoch_microseconds = TRY(vm.argument(0).to_bigint(vm));
 
     // 2. Let epochNanoseconds be epochMicroseconds × 1000ℤ.
     auto epoch_nanoseconds = BigInt::create(vm, epoch_microseconds->big_integer().multiplied_by(Crypto::UnsignedBigInteger { 1'000 }));
@@ -140,14 +142,14 @@ JS_DEFINE_NATIVE_FUNCTION(InstantConstructor::from_epoch_microseconds)
 JS_DEFINE_NATIVE_FUNCTION(InstantConstructor::from_epoch_nanoseconds)
 {
     // 1. Set epochNanoseconds to ? ToBigInt(epochNanoseconds).
-    auto* epoch_nanoseconds = TRY(vm.argument(0).to_bigint(vm));
+    auto epoch_nanoseconds = TRY(vm.argument(0).to_bigint(vm));
 
     // 2. If ! IsValidEpochNanoseconds(epochNanoseconds) is false, throw a RangeError exception.
-    if (!is_valid_epoch_nanoseconds(*epoch_nanoseconds))
+    if (!is_valid_epoch_nanoseconds(epoch_nanoseconds))
         return vm.throw_completion<RangeError>(ErrorType::TemporalInvalidEpochNanoseconds);
 
     // 3. Return ! CreateTemporalInstant(epochNanoseconds).
-    return MUST(create_temporal_instant(vm, *epoch_nanoseconds));
+    return MUST(create_temporal_instant(vm, epoch_nanoseconds));
 }
 
 // 8.2.7 Temporal.Instant.compare ( one, two ), https://tc39.es/proposal-temporal/#sec-temporal.instant.compare

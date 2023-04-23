@@ -7,7 +7,6 @@
 #pragma once
 
 #include <AK/HashMap.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/Optional.h>
 #include <AK/Vector.h>
 #include <Kernel/KString.h>
@@ -24,6 +23,13 @@ enum class HPETMode {
     NonPeriodic
 };
 
+enum class I8042PresenceMode {
+    Automatic,
+    AggressiveTest,
+    Force,
+    None,
+};
+
 enum class AcpiFeatureLevel {
     Enabled,
     Limited,
@@ -32,7 +38,7 @@ enum class AcpiFeatureLevel {
 
 enum class PCIAccessLevel {
     None,
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     IOAddressing,
 #endif
     MemoryAddressing,
@@ -77,20 +83,20 @@ public:
     [[nodiscard]] bool is_legacy_time_enabled() const;
     [[nodiscard]] bool is_pc_speaker_enabled() const;
     [[nodiscard]] GraphicsSubsystemMode graphics_subsystem_mode() const;
+    [[nodiscard]] I8042PresenceMode i8042_presence_mode() const;
     [[nodiscard]] bool is_force_pio() const;
     [[nodiscard]] AcpiFeatureLevel acpi_feature_level() const;
     [[nodiscard]] StringView system_mode() const;
     [[nodiscard]] PanicMode panic_mode(Validate should_validate = Validate::No) const;
     [[nodiscard]] HPETMode hpet_mode() const;
     [[nodiscard]] bool disable_physical_storage() const;
-    [[nodiscard]] bool disable_ps2_controller() const;
     [[nodiscard]] bool disable_uhci_controller() const;
     [[nodiscard]] bool disable_usb() const;
     [[nodiscard]] bool disable_virtio() const;
     [[nodiscard]] bool is_early_boot_console_disabled() const;
     [[nodiscard]] AHCIResetMode ahci_reset_mode() const;
     [[nodiscard]] StringView userspace_init() const;
-    [[nodiscard]] NonnullOwnPtrVector<KString> userspace_init_args() const;
+    [[nodiscard]] Vector<NonnullOwnPtr<KString>> userspace_init_args() const;
     [[nodiscard]] StringView root_device() const;
     [[nodiscard]] bool is_nvme_polling_enabled() const;
     [[nodiscard]] size_t switch_to_tty() const;

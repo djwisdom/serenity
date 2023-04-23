@@ -10,22 +10,23 @@
 #include <AK/Debug.h>
 #include <AK/Endian.h>
 #include <AK/FixedArray.h>
+#include <AK/MemoryStream.h>
 #include <AK/NumericLimits.h>
 #include <AK/Try.h>
-#include <LibCore/MemoryStream.h>
+#include <LibCore/File.h>
 
 namespace Audio {
 
 static constexpr size_t const maximum_wav_size = 1 * GiB; // FIXME: is there a more appropriate size limit?
 
-WavLoaderPlugin::WavLoaderPlugin(NonnullOwnPtr<Core::Stream::SeekableStream> stream)
+WavLoaderPlugin::WavLoaderPlugin(NonnullOwnPtr<SeekableStream> stream)
     : LoaderPlugin(move(stream))
 {
 }
 
-Result<NonnullOwnPtr<WavLoaderPlugin>, LoaderError> WavLoaderPlugin::try_create(StringView path)
+Result<NonnullOwnPtr<WavLoaderPlugin>, LoaderError> WavLoaderPlugin::create(StringView path)
 {
-    auto stream = LOADER_TRY(Core::Stream::BufferedFile::create(LOADER_TRY(Core::Stream::File::open(path, Core::Stream::OpenMode::Read))));
+    auto stream = LOADER_TRY(Core::BufferedFile::create(LOADER_TRY(Core::File::open(path, Core::File::OpenMode::Read))));
     auto loader = make<WavLoaderPlugin>(move(stream));
 
     LOADER_TRY(loader->initialize());
@@ -33,9 +34,9 @@ Result<NonnullOwnPtr<WavLoaderPlugin>, LoaderError> WavLoaderPlugin::try_create(
     return loader;
 }
 
-Result<NonnullOwnPtr<WavLoaderPlugin>, LoaderError> WavLoaderPlugin::try_create(Bytes buffer)
+Result<NonnullOwnPtr<WavLoaderPlugin>, LoaderError> WavLoaderPlugin::create(Bytes buffer)
 {
-    auto stream = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(buffer));
+    auto stream = LOADER_TRY(try_make<FixedMemoryStream>(buffer));
     auto loader = make<WavLoaderPlugin>(move(stream));
 
     LOADER_TRY(loader->initialize());
@@ -51,7 +52,7 @@ MaybeLoaderError WavLoaderPlugin::initialize()
 }
 
 template<typename SampleReader>
-MaybeLoaderError WavLoaderPlugin::read_samples_from_stream(Core::Stream::Stream& stream, SampleReader read_sample, FixedArray<Sample>& samples) const
+MaybeLoaderError WavLoaderPlugin::read_samples_from_stream(Stream& stream, SampleReader read_sample, FixedArray<Sample>& samples) const
 {
     switch (m_num_channels) {
     case 1:
@@ -72,15 +73,11 @@ MaybeLoaderError WavLoaderPlugin::read_samples_from_stream(Core::Stream::Stream&
 }
 
 // There's no i24 type + we need to do the endianness conversion manually anyways.
-static ErrorOr<double> read_sample_int24(Core::Stream::Stream& stream)
+static ErrorOr<double> read_sample_int24(Stream& stream)
 {
-    u8 byte = 0;
-    TRY(stream.read(Bytes { &byte, 1 }));
-    i32 sample1 = byte;
-    TRY(stream.read(Bytes { &byte, 1 }));
-    i32 sample2 = byte;
-    TRY(stream.read(Bytes { &byte, 1 }));
-    i32 sample3 = byte;
+    i32 sample1 = TRY(stream.read_value<u8>());
+    i32 sample2 = TRY(stream.read_value<u8>());
+    i32 sample3 = TRY(stream.read_value<u8>());
 
     i32 value = 0;
     value = sample1;
@@ -93,10 +90,10 @@ static ErrorOr<double> read_sample_int24(Core::Stream::Stream& stream)
 }
 
 template<typename T>
-static ErrorOr<double> read_sample(Core::Stream::Stream& stream)
+static ErrorOr<double> read_sample(Stream& stream)
 {
     T sample { 0 };
-    TRY(stream.read(Bytes { &sample, sizeof(T) }));
+    TRY(stream.read_until_filled(Bytes { &sample, sizeof(T) }));
     // Remap integer samples to normalized floating-point range of -1 to 1.
     if constexpr (IsIntegral<T>) {
         if constexpr (NumericLimits<T>::is_signed()) {
@@ -114,24 +111,24 @@ static ErrorOr<double> read_sample(Core::Stream::Stream& stream)
 
 LoaderSamples WavLoaderPlugin::samples_from_pcm_data(Bytes const& data, size_t samples_to_read) const
 {
-    FixedArray<Sample> samples = LOADER_TRY(FixedArray<Sample>::try_create(samples_to_read));
-    auto stream = LOADER_TRY(Core::Stream::FixedMemoryStream::construct(move(data)));
+    FixedArray<Sample> samples = LOADER_TRY(FixedArray<Sample>::create(samples_to_read));
+    FixedMemoryStream stream { data };
 
     switch (m_sample_format) {
     case PcmSampleFormat::Uint8:
-        TRY(read_samples_from_stream(*stream, read_sample<u8>, samples));
+        TRY(read_samples_from_stream(stream, read_sample<u8>, samples));
         break;
     case PcmSampleFormat::Int16:
-        TRY(read_samples_from_stream(*stream, read_sample<i16>, samples));
+        TRY(read_samples_from_stream(stream, read_sample<i16>, samples));
         break;
     case PcmSampleFormat::Int24:
-        TRY(read_samples_from_stream(*stream, read_sample_int24, samples));
+        TRY(read_samples_from_stream(stream, read_sample_int24, samples));
         break;
     case PcmSampleFormat::Float32:
-        TRY(read_samples_from_stream(*stream, read_sample<float>, samples));
+        TRY(read_samples_from_stream(stream, read_sample<float>, samples));
         break;
     case PcmSampleFormat::Float64:
-        TRY(read_samples_from_stream(*stream, read_sample<double>, samples));
+        TRY(read_samples_from_stream(stream, read_sample<double>, samples));
         break;
     default:
         VERIFY_NOT_REACHED();
@@ -140,20 +137,18 @@ LoaderSamples WavLoaderPlugin::samples_from_pcm_data(Bytes const& data, size_t s
     return samples;
 }
 
-LoaderSamples WavLoaderPlugin::get_more_samples(size_t max_samples_to_read_from_input)
+ErrorOr<Vector<FixedArray<Sample>>, LoaderError> WavLoaderPlugin::load_chunks(size_t samples_to_read_from_input)
 {
     auto remaining_samples = m_total_samples - m_loaded_samples;
     if (remaining_samples <= 0)
-        return FixedArray<Sample> {};
+        return Vector<FixedArray<Sample>> {};
 
     // One "sample" contains data from all channels.
     // In the Wave spec, this is also called a block.
     size_t bytes_per_sample
         = m_num_channels * pcm_bits_per_sample(m_sample_format) / 8;
 
-    // Might truncate if not evenly divisible by the sample size
-    auto max_samples_to_read = max_samples_to_read_from_input / bytes_per_sample;
-    auto samples_to_read = min(max_samples_to_read, remaining_samples);
+    auto samples_to_read = min(samples_to_read_from_input, remaining_samples);
     auto bytes_to_read = samples_to_read * bytes_per_sample;
 
     dbgln_if(AWAVLOADER_DEBUG, "Read {} bytes WAV with num_channels {} sample rate {}, "
@@ -162,11 +157,13 @@ LoaderSamples WavLoaderPlugin::get_more_samples(size_t max_samples_to_read_from_
         pcm_bits_per_sample(m_sample_format), sample_format_name(m_sample_format));
 
     auto sample_data = LOADER_TRY(ByteBuffer::create_zeroed(bytes_to_read));
-    LOADER_TRY(m_stream->read(sample_data.bytes()));
+    LOADER_TRY(m_stream->read_until_filled(sample_data.bytes()));
 
     // m_loaded_samples should contain the amount of actually loaded samples
     m_loaded_samples += samples_to_read;
-    return samples_from_pcm_data(sample_data.bytes(), samples_to_read);
+    Vector<FixedArray<Sample>> samples;
+    TRY(samples.try_append(TRY(samples_from_pcm_data(sample_data.bytes(), samples_to_read))));
+    return samples;
 }
 
 MaybeLoaderError WavLoaderPlugin::seek(int sample_index)
@@ -177,7 +174,7 @@ MaybeLoaderError WavLoaderPlugin::seek(int sample_index)
 
     size_t sample_offset = m_byte_offset_of_data_samples + static_cast<size_t>(sample_index * m_num_channels * (pcm_bits_per_sample(m_sample_format) / 8));
 
-    LOADER_TRY(m_stream->seek(sample_offset, Core::Stream::SeekMode::SetPosition));
+    LOADER_TRY(m_stream->seek(sample_offset, SeekMode::SetPosition));
 
     m_loaded_samples = sample_index;
     return {};
@@ -190,22 +187,19 @@ MaybeLoaderError WavLoaderPlugin::parse_header()
     size_t bytes_read = 0;
 
     auto read_u8 = [&]() -> ErrorOr<u8, LoaderError> {
-        u8 value;
-        LOADER_TRY(m_stream->read(Bytes { &value, 1 }));
+        u8 value = LOADER_TRY(m_stream->read_value<LittleEndian<u8>>());
         bytes_read += 1;
         return value;
     };
 
     auto read_u16 = [&]() -> ErrorOr<u16, LoaderError> {
-        u16 value;
-        LOADER_TRY(m_stream->read(Bytes { &value, 2 }));
+        u16 value = LOADER_TRY(m_stream->read_value<LittleEndian<u16>>());
         bytes_read += 2;
         return value;
     };
 
     auto read_u32 = [&]() -> ErrorOr<u32, LoaderError> {
-        u32 value;
-        LOADER_TRY(m_stream->read(Bytes { &value, 4 }));
+        u32 value = LOADER_TRY(m_stream->read_value<LittleEndian<u32>>());
         bytes_read += 4;
         return value;
     };

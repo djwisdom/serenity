@@ -17,14 +17,14 @@ REGISTER_WIDGET(GUI, ValueSlider)
 
 namespace GUI {
 
-ValueSlider::ValueSlider(Gfx::Orientation orientation, DeprecatedString suffix)
+ValueSlider::ValueSlider(Gfx::Orientation orientation, String suffix)
     : AbstractSlider(orientation)
     , m_suffix(move(suffix))
 {
     // FIXME: Implement vertical mode
     VERIFY(orientation == Orientation::Horizontal);
 
-    set_fixed_height(20);
+    set_preferred_size(SpecialDimension::Fit);
 
     m_textbox = add<GUI::TextBox>();
     m_textbox->set_relative_rect({ 0, 0, 34, 20 });
@@ -34,7 +34,7 @@ ValueSlider::ValueSlider(Gfx::Orientation orientation, DeprecatedString suffix)
     m_textbox->on_change = [&]() {
         DeprecatedString value = m_textbox->text();
         if (value.ends_with(m_suffix, AK::CaseSensitivity::CaseInsensitive))
-            value = value.substring_view(0, value.length() - m_suffix.length());
+            value = value.substring_view(0, value.length() - m_suffix.bytes_as_string_view().length());
         auto integer_value = value.to_int();
         if (integer_value.has_value())
             AbstractSlider::set_value(integer_value.value());
@@ -119,9 +119,14 @@ Gfx::IntRect ValueSlider::bar_rect() const
     return bar_rect;
 }
 
+int ValueSlider::knob_length() const
+{
+    return m_knob_style == KnobStyle::Wide ? 13 : 7;
+}
+
 Gfx::IntRect ValueSlider::knob_rect() const
 {
-    int knob_thickness = m_knob_style == KnobStyle::Wide ? 13 : 7;
+    int knob_thickness = knob_length();
 
     Gfx::IntRect knob_rect = bar_rect();
     knob_rect.set_width(knob_thickness);
@@ -134,14 +139,17 @@ Gfx::IntRect ValueSlider::knob_rect() const
 
 int ValueSlider::value_at(Gfx::IntPoint position) const
 {
-    if (position.x() < bar_rect().left())
+    int knob_thickness = knob_length();
+    float leftmost_knob_center = (float)bar_rect().left() + (float)knob_thickness / 2;
+    if (position.x() < leftmost_knob_center)
         return min();
-    if (position.x() > bar_rect().right())
+    float rightmost_knob_center = (float)bar_rect().right() - (float)knob_thickness / 2;
+    if (position.x() > rightmost_knob_center)
         return max();
-    float relative_offset = (float)(position.x() - bar_rect().left()) / (float)bar_rect().width();
+    float relative_offset = (float)(position.x() - leftmost_knob_center) / (rightmost_knob_center - leftmost_knob_center);
 
     int range = max() - min();
-    return min() + (int)(relative_offset * (float)range);
+    return min() + (int)roundf(relative_offset * (float)range);
 }
 
 void ValueSlider::set_value(int value, AllowCallback allow_callback, DoClamp do_clamp)
@@ -200,6 +208,22 @@ void ValueSlider::mouseup_event(MouseEvent& event)
         return;
 
     m_dragging = false;
+}
+
+Optional<UISize> ValueSlider::calculated_min_size() const
+{
+    auto content_min_size = m_textbox->effective_min_size();
+
+    if (orientation() == Gfx::Orientation::Vertical)
+        return { { content_min_size.width(), content_min_size.height().as_int() + knob_length() } };
+    return { { content_min_size.width().as_int() + knob_length(), content_min_size.height() } };
+}
+
+Optional<UISize> ValueSlider::calculated_preferred_size() const
+{
+    if (orientation() == Gfx::Orientation::Vertical)
+        return { { SpecialDimension::Shrink, SpecialDimension::OpportunisticGrow } };
+    return { { SpecialDimension::OpportunisticGrow, SpecialDimension::Shrink } };
 }
 
 }

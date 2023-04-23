@@ -14,7 +14,10 @@
 
 namespace Gfx {
 
-static constexpr int menubar_height = 20;
+int ClassicWindowTheme::menubar_height() const
+{
+    return max(20, FontDatabase::default_font().pixel_size_rounded_up() + 6);
+}
 
 Gfx::IntRect ClassicWindowTheme::titlebar_icon_rect(WindowType window_type, WindowMode window_mode, IntRect const& window_rect, Palette const& palette) const
 {
@@ -120,7 +123,7 @@ IntRect ClassicWindowTheme::menubar_rect(WindowType window_type, WindowMode wind
 {
     if (window_type != WindowType::Normal)
         return {};
-    return { palette.window_border_thickness(), palette.window_border_thickness() - 1 + titlebar_height(window_type, window_mode, palette) + 2, window_rect.width(), menubar_height * menu_row_count };
+    return { palette.window_border_thickness(), palette.window_border_thickness() - 1 + titlebar_height(window_type, window_mode, palette) + 2, window_rect.width(), menubar_height() * menu_row_count };
 }
 
 IntRect ClassicWindowTheme::titlebar_rect(WindowType window_type, WindowMode window_mode, IntRect const& window_rect, Palette const& palette) const
@@ -128,7 +131,7 @@ IntRect ClassicWindowTheme::titlebar_rect(WindowType window_type, WindowMode win
     auto& title_font = FontDatabase::window_title_font();
     auto window_titlebar_height = titlebar_height(window_type, window_mode, palette);
     // FIXME: The top of the titlebar doesn't get redrawn properly if this padding is different
-    int total_vertical_padding = title_font.glyph_height() - 1;
+    int total_vertical_padding = title_font.pixel_size_rounded_up() - 1;
 
     if (window_type == WindowType::Notification)
         return { window_rect.width() + 3, total_vertical_padding / 2 - 1, window_titlebar_height, window_rect.height() };
@@ -180,9 +183,9 @@ IntRect ClassicWindowTheme::frame_rect_for_window(WindowType window_type, Window
     case WindowType::Normal:
         return {
             window_rect.x() - border_thickness,
-            window_rect.y() - window_titlebar_height - border_thickness - 1 - menu_row_count * menubar_height,
+            window_rect.y() - window_titlebar_height - border_thickness - 1 - menu_row_count * menubar_height(),
             window_rect.width() + (border_thickness * 2),
-            window_rect.height() + (border_thickness * 2) + 1 + window_titlebar_height + menu_row_count * menubar_height
+            window_rect.height() + (border_thickness * 2) + 1 + window_titlebar_height + menu_row_count * menubar_height(),
         };
     case WindowType::Notification:
         return {
@@ -231,9 +234,9 @@ int ClassicWindowTheme::titlebar_height(WindowType window_type, WindowMode windo
     case WindowType::Normal:
     case WindowType::Notification: {
         if (window_mode == WindowMode::RenderAbove)
-            return max(palette.window_title_height() - 4, title_font.glyph_height() + 4);
+            return max(palette.window_title_height() - 4, title_font.pixel_size() + 2);
         else
-            return max(palette.window_title_height(), title_font.glyph_height() + 8);
+            return max(palette.window_title_height(), title_font.pixel_size() + 6);
     }
     default:
         return 0;

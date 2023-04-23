@@ -6,17 +6,17 @@
 
 #include <AK/Assertions.h>
 #include <AK/ByteBuffer.h>
-#include <AK/DeprecatedString.h>
+#include <AK/String.h>
 #include <AK/StringBuilder.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/Clipboard.h>
 #include <LibMain/Main.h>
 #include <unistd.h>
 
 struct Options {
-    DeprecatedString data;
+    String data;
     StringView type;
     bool clear;
 };
@@ -24,7 +24,7 @@ struct Options {
 static ErrorOr<Options> parse_options(Main::Arguments arguments)
 {
     auto type = "text/plain"sv;
-    Vector<DeprecatedString> text;
+    Vector<StringView> text;
     bool clear = false;
 
     Core::ArgsParser args_parser;
@@ -42,16 +42,16 @@ static ErrorOr<Options> parse_options(Main::Arguments arguments)
         // We're not copying anything.
     } else if (text.is_empty()) {
         // Copy our stdin.
-        auto c_stdin = TRY(Core::Stream::File::standard_input());
+        auto c_stdin = TRY(Core::File::standard_input());
         auto buffer = TRY(c_stdin->read_until_eof());
         dbgln("Read size {}", buffer.size());
         dbgln("Read data: `{}`", StringView(buffer.bytes()));
-        options.data = buffer.bytes();
+        options.data = TRY(String::from_utf8(StringView(buffer.bytes())));
     } else {
         // Copy the rest of our command-line args.
         StringBuilder builder;
         builder.join(' ', text);
-        options.data = builder.to_deprecated_string();
+        options.data = TRY(builder.to_string());
     }
 
     return options;

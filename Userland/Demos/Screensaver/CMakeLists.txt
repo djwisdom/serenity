@@ -4,8 +4,8 @@ serenity_component(
 )
 
 set(SOURCES
-    Screensaver.cpp
+    main.cpp
 )
 
 serenity_app(Screensaver ICON app-screensaver)
-target_link_libraries(Screensaver PRIVATE LibGUI LibCore LibGfx LibMain)
+target_link_libraries(Screensaver PRIVATE LibDesktop LibGUI LibCore LibGfx LibMain)

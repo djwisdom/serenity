@@ -5,7 +5,6 @@
  */
 
 #include <AK/Debug.h>
-#include <AK/DeprecatedString.h>
 #include <LibJS/Runtime/ConsoleObject.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
@@ -17,18 +16,25 @@
 namespace Web::HTML {
 
 // https://html.spec.whatwg.org/multipage/workers.html#dedicated-workers-and-the-worker-interface
-Worker::Worker(FlyString const& script_url, WorkerOptions const options, DOM::Document& document)
+Worker::Worker(String const& script_url, WorkerOptions const options, DOM::Document& document)
     : DOM::EventTarget(document.realm())
     , m_script_url(script_url)
     , m_options(options)
     , m_document(&document)
     , m_custom_data()
-    , m_worker_vm(JS::VM::create(adopt_own(m_custom_data)))
+    , m_worker_vm(JS::VM::create(adopt_own(m_custom_data)).release_value_but_fixme_should_propagate_errors())
     , m_interpreter(JS::Interpreter::create<JS::GlobalObject>(m_worker_vm))
     , m_interpreter_scope(*m_interpreter)
-    , m_implicit_port(MessagePort::create(document.realm()))
+    , m_implicit_port(MessagePort::create(document.realm()).release_value_but_fixme_should_propagate_errors())
 {
-    set_prototype(&Bindings::cached_web_prototype(document.realm(), "Worker"));
+}
+
+JS::ThrowCompletionOr<void> Worker::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::WorkerPrototype>(realm, "Worker"));
+
+    return {};
 }
 
 void Worker::visit_edges(Cell::Visitor& visitor)
@@ -40,7 +46,7 @@ void Worker::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://html.spec.whatwg.org/multipage/workers.html#dom-worker
-WebIDL::ExceptionOr<JS::NonnullGCPtr<Worker>> Worker::create(FlyString const& script_url, WorkerOptions const options, DOM::Document& document)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Worker>> Worker::create(String const& script_url, WorkerOptions const options, DOM::Document& document)
 {
     dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Creating worker with script_url = {}", script_url);
 
@@ -59,7 +65,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Worker>> Worker::create(FlyString const& sc
     auto& outside_settings = document.relevant_settings_object();
 
     // 3. Parse the scriptURL argument relative to outside settings.
-    auto url = document.parse_url(script_url);
+    auto url = document.parse_url(script_url.to_deprecated_string());
 
     // 4. If this fails, throw a "SyntaxError" DOMException.
     if (!url.is_valid()) {
@@ -70,10 +76,10 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Worker>> Worker::create(FlyString const& sc
     // 5. Let worker URL be the resulting URL record.
 
     // 6. Let worker be a new Worker object.
-    auto worker = document.heap().allocate<Worker>(document.realm(), script_url, options, document);
+    auto worker = MUST_OR_THROW_OOM(document.heap().allocate<Worker>(document.realm(), script_url, options, document));
 
     // 7. Let outside port be a new MessagePort in outside settings's Realm.
-    auto outside_port = MessagePort::create(outside_settings.realm());
+    auto outside_port = TRY(MessagePort::create(outside_settings.realm()));
 
     // 8. Associate the outside port with worker
     worker->m_outside_port = outside_port;
@@ -158,8 +164,8 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
             event_loop.task_queue().add(HTML::Task::create(HTML::Task::Source::PostedMessage, nullptr, [this, message] {
                 MessageEventInit event_init {};
                 event_init.data = message;
-                event_init.origin = "<origin>";
-                dispatch_event(*MessageEvent::create(*m_worker_realm, HTML::EventNames::message, event_init));
+                event_init.origin = "<origin>"_string.release_value_but_fixme_should_propagate_errors();
+                dispatch_event(MessageEvent::create(*m_worker_realm, HTML::EventNames::message, event_init).release_value_but_fixme_should_propagate_errors());
             }));
 
             return JS::js_undefined();
@@ -256,7 +262,7 @@ void Worker::run_a_worker(AK::URL& url, EnvironmentSettingsObject& outside_setti
             // FIXME: Global scope association
 
             // 16. Let inside port be a new MessagePort object in inside settings's Realm.
-            auto inside_port = MessagePort::create(m_inner_settings->realm());
+            auto inside_port = MessagePort::create(m_inner_settings->realm()).release_value_but_fixme_should_propagate_errors();
 
             // 17. Associate inside port with worker global scope.
             // FIXME: Global scope association
@@ -319,7 +325,7 @@ WebIDL::ExceptionOr<void> Worker::terminate()
 // https://html.spec.whatwg.org/multipage/workers.html#dom-worker-postmessage
 void Worker::post_message(JS::Value message, JS::Value)
 {
-    dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Post Message: {}", message.to_string_without_side_effects());
+    dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Post Message: {}", MUST(message.to_string_without_side_effects()));
 
     // 1. Let targetPort be the port with which this is entangled, if any; otherwise let it be null.
     auto& target_port = m_outside_port;

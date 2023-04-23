@@ -9,7 +9,6 @@
 #include <AK/Debug.h>
 #include <AK/DeprecatedString.h>
 #include <LibCore/EventLoop.h>
-#include <LibCore/File.h>
 
 namespace Chess::UCI {
 
@@ -54,15 +53,30 @@ void Endpoint::event(Core::Event& event)
         return handle_bestmove(static_cast<BestMoveCommand const&>(event));
     case Command::Type::Info:
         return handle_info(static_cast<InfoCommand const&>(event));
+    case Command::Type::Quit:
+        return handle_quit();
     default:
+        Object::event(event);
         break;
     }
+}
+
+void Endpoint::custom_event(Core::CustomEvent& custom_event)
+{
+    if (custom_event.custom_type() == EndpointEventType::UnexpectedEof)
+        handle_unexpected_eof();
 }
 
 void Endpoint::set_in_notifier()
 {
     m_in_notifier = Core::Notifier::construct(m_in->fd(), Core::Notifier::Read);
     m_in_notifier->on_ready_to_read = [this] {
+        if (!m_in->can_read_line()) {
+            Core::EventLoop::current().post_event(*this, make<Core::CustomEvent>(EndpointEventType::UnexpectedEof));
+            m_in_notifier->set_enabled(false);
+            return;
+        }
+
         while (m_in->can_read_line())
             Core::EventLoop::current().post_event(*this, read_command());
     };
@@ -98,6 +112,8 @@ NonnullOwnPtr<Command> Endpoint::read_command()
         return make<BestMoveCommand>(BestMoveCommand::from_string(line));
     } else if (line.starts_with("info"sv)) {
         return make<InfoCommand>(InfoCommand::from_string(line));
+    } else if (line.starts_with("quit"sv)) {
+        return make<QuitCommand>(QuitCommand::from_string(line));
     }
 
     dbgln("command line: {}", line);

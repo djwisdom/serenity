@@ -63,10 +63,8 @@ void ImageBox::prepare_for_replaced_layout()
         auto& image_element = verify_cast<HTML::HTMLImageElement>(dom_node());
         auto& font = Platform::FontPlugin::the().default_font();
         auto alt = image_element.alt();
-        if (alt.is_empty())
-            alt = image_element.src();
 
-        float alt_text_width = 0;
+        CSSPixels alt_text_width = 0;
         if (!m_cached_alt_text_width.has_value())
             m_cached_alt_text_width = font.width(alt);
         alt_text_width = m_cached_alt_text_width.value();
@@ -92,12 +90,12 @@ bool ImageBox::renders_as_alt_text() const
     return false;
 }
 
-void ImageBox::browsing_context_did_set_viewport_rect(Gfx::IntRect const& viewport_rect)
+void ImageBox::browsing_context_did_set_viewport_rect(CSSPixelRect const& viewport_rect)
 {
-    m_image_loader.set_visible_in_viewport(paint_box() && viewport_rect.to_type<CSSPixels>().intersects(paint_box()->absolute_rect()));
+    m_image_loader.set_visible_in_viewport(paintable_box() && viewport_rect.intersects(paintable_box()->absolute_rect()));
 }
 
-RefPtr<Painting::Paintable> ImageBox::create_paintable() const
+JS::GCPtr<Painting::Paintable> ImageBox::create_paintable() const
 {
     return Painting::ImagePaintable::create(*this);
 }

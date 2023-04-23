@@ -16,7 +16,6 @@
 #include "GMLPreviewWidget.h"
 #include "Git/DiffViewer.h"
 #include "Git/GitWidget.h"
-#include "LibGUI/Button.h"
 #include "Locator.h"
 #include "Project.h"
 #include "ProjectBuilder.h"
@@ -25,6 +24,7 @@
 #include "ToDoEntriesWidget.h"
 #include <LibCoredump/Inspector.h>
 #include <LibGUI/ActionGroup.h>
+#include <LibGUI/Button.h>
 #include <LibGUI/Scrollbar.h>
 #include <LibGUI/Splitter.h>
 #include <LibGUI/Widget.h>
@@ -76,6 +76,7 @@ public:
     };
 
     void open_coredump(DeprecatedString const& coredump_path);
+    void debug_process(pid_t pid);
     void for_each_open_file(Function<void(ProjectFile const&)>);
     bool semantic_syntax_highlighting_is_enabled() const;
 
@@ -104,7 +105,6 @@ private:
     ErrorOr<NonnullRefPtr<GUI::Action>> create_new_file_action(DeprecatedString const& label, DeprecatedString const& icon, DeprecatedString const& extension);
     ErrorOr<NonnullRefPtr<GUI::Action>> create_new_directory_action();
     ErrorOr<NonnullRefPtr<GUI::Action>> create_open_selected_action();
-    NonnullRefPtr<GUI::Action> create_open_selected_in_new_tab_action();
     NonnullRefPtr<GUI::Action> create_delete_action();
     ErrorOr<NonnullRefPtr<GUI::Action>> create_new_project_action();
     NonnullRefPtr<GUI::Action> create_switch_to_next_editor_tab_widget_action();
@@ -177,9 +177,9 @@ private:
     ProjectLocation current_project_location() const;
     void update_history_actions();
 
-    NonnullRefPtrVector<EditorWrapper> m_all_editor_wrappers;
+    Vector<NonnullRefPtr<EditorWrapper>> m_all_editor_wrappers;
     RefPtr<EditorWrapper> m_current_editor_wrapper;
-    NonnullRefPtrVector<GUI::TabWidget> m_all_editor_tab_widgets;
+    Vector<NonnullRefPtr<GUI::TabWidget>> m_all_editor_tab_widgets;
     RefPtr<GUI::TabWidget> m_current_editor_tab_widget;
 
     HashMap<DeprecatedString, NonnullRefPtr<ProjectFile>> m_open_files;
@@ -217,7 +217,7 @@ private:
     RefPtr<EditorWrapper> m_current_editor_in_execution;
     RefPtr<GUI::Menu> m_recent_projects_submenu { nullptr };
 
-    NonnullRefPtrVector<GUI::Action> m_new_file_actions;
+    Vector<NonnullRefPtr<GUI::Action>> m_new_file_actions;
     RefPtr<GUI::Action> m_new_plain_file_action;
 
     RefPtr<GUI::Action> m_new_directory_action;
@@ -249,11 +249,12 @@ private:
     RefPtr<GUI::Action> m_toggle_semantic_highlighting_action;
     RefPtr<GUI::Action> m_open_project_configuration_action;
 
-    RefPtr<Gfx::Font> read_editor_font_from_config();
-    void change_editor_font(RefPtr<Gfx::Font>);
-    RefPtr<Gfx::Font> m_editor_font;
+    RefPtr<Gfx::Font const> read_editor_font_from_config();
+    void change_editor_font(RefPtr<Gfx::Font const>);
+    RefPtr<Gfx::Font const> m_editor_font;
     RefPtr<GUI::Action> m_editor_font_action;
 
+    GUI::TextEditor::WrappingMode m_wrapping_mode { GUI::TextEditor::NoWrap };
     GUI::ActionGroup m_wrapping_mode_actions;
     RefPtr<GUI::Action> m_no_wrapping_action;
     RefPtr<GUI::Action> m_wrap_anywhere_action;

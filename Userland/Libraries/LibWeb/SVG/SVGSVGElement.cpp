@@ -5,9 +5,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibGfx/Painter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
@@ -20,7 +20,14 @@ namespace Web::SVG {
 SVGSVGElement::SVGSVGElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : SVGGraphicsElement(document, qualified_name)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "SVGSVGElement"));
+}
+
+JS::ThrowCompletionOr<void> SVGSVGElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::SVGSVGElementPrototype>(realm, "SVGSVGElement"));
+
+    return {};
 }
 
 JS::GCPtr<Layout::Node> SVGSVGElement::create_layout_node(NonnullRefPtr<CSS::StyleProperties> style)
@@ -30,8 +37,16 @@ JS::GCPtr<Layout::Node> SVGSVGElement::create_layout_node(NonnullRefPtr<CSS::Sty
 
 void SVGSVGElement::apply_presentational_hints(CSS::StyleProperties& style) const
 {
+    // NOTE: Hack to ensure SVG unitless widths/heights are parsed even with <!DOCTYPE html>
+    auto previous_quirks_mode = document().mode();
+    const_cast<DOM::Document&>(document()).set_quirks_mode(DOM::QuirksMode::Yes);
+    ScopeGuard reset_quirks_mode = [&] {
+        const_cast<DOM::Document&>(document()).set_quirks_mode(previous_quirks_mode);
+    };
+
     auto width_attribute = attribute(SVG::AttributeNames::width);
-    if (auto width_value = HTML::parse_dimension_value(width_attribute)) {
+    auto parsing_context = CSS::Parser::ParsingContext { document() };
+    if (auto width_value = parse_css_value(parsing_context, attribute(Web::HTML::AttributeNames::width), CSS::PropertyID::Width)) {
         style.set_property(CSS::PropertyID::Width, width_value.release_nonnull());
     } else if (width_attribute == "") {
         // If the `width` attribute is an empty string, it defaults to 100%.
@@ -42,7 +57,7 @@ void SVGSVGElement::apply_presentational_hints(CSS::StyleProperties& style) cons
 
     // Height defaults to 100%
     auto height_attribute = attribute(SVG::AttributeNames::height);
-    if (auto height_value = HTML::parse_dimension_value(height_attribute)) {
+    if (auto height_value = parse_css_value(parsing_context, attribute(Web::HTML::AttributeNames::height), CSS::PropertyID::Height)) {
         style.set_property(CSS::PropertyID::Height, height_value.release_nonnull());
     } else if (height_attribute == "") {
         // If the `height` attribute is an empty string, it defaults to 100%.
@@ -52,12 +67,14 @@ void SVGSVGElement::apply_presentational_hints(CSS::StyleProperties& style) cons
     }
 }
 
-void SVGSVGElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
+void SVGSVGElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     SVGGraphicsElement::parse_attribute(name, value);
 
-    if (name.equals_ignoring_case(SVG::AttributeNames::viewBox))
+    if (name.equals_ignoring_ascii_case(SVG::AttributeNames::viewBox))
         m_view_box = try_parse_view_box(value);
+    if (name.equals_ignoring_ascii_case(SVG::AttributeNames::preserveAspectRatio))
+        m_preserve_aspect_ratio = AttributeParser::parse_preserve_aspect_ratio(value);
 }
 
 }

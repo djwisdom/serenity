@@ -62,7 +62,6 @@ static Vector<StringView> wrap_line(DeprecatedString const& string, size_t width
         spans.append(string.substring_view(span_start, bit_length));
         span_start += bit_length;
     }
-    spans.append(string.substring_view(span_start));
 
     return spans;
 }
@@ -565,28 +564,28 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             } else if (sequence == "j" || sequence == "\e[B" || sequence == "\n") {
                 if (!emulate_more) {
                     if (!modifier_buffer.is_empty())
-                        pager.down_n(modifier_buffer.build().to_uint().value_or(1));
+                        pager.down_n(modifier_buffer.to_deprecated_string().to_uint().value_or(1));
                     else
                         pager.down();
                 }
             } else if (sequence == "k" || sequence == "\e[A") {
                 if (!emulate_more) {
                     if (!modifier_buffer.is_empty())
-                        pager.up_n(modifier_buffer.build().to_uint().value_or(1));
+                        pager.up_n(modifier_buffer.to_deprecated_string().to_uint().value_or(1));
                     else
                         pager.up();
                 }
             } else if (sequence == "g") {
                 if (!emulate_more) {
                     if (!modifier_buffer.is_empty())
-                        pager.go_to_line(modifier_buffer.build().to_uint().value());
+                        pager.go_to_line(modifier_buffer.to_deprecated_string().to_uint().value());
                     else
                         pager.top();
                 }
             } else if (sequence == "G") {
                 if (!emulate_more) {
                     if (!modifier_buffer.is_empty())
-                        pager.go_to_line(modifier_buffer.build().to_uint().value());
+                        pager.go_to_line(modifier_buffer.to_deprecated_string().to_uint().value());
                     else
                         pager.bottom();
                 }

@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/DeprecatedString.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibMain/Main.h>
 #include <unistd.h>
 
@@ -17,7 +16,7 @@
     T(GIFLoader)             \
     T(HttpRequest)           \
     T(ICOLoader)             \
-    T(JPGLoader)             \
+    T(JPEGLoader)            \
     T(Js)                    \
     T(Markdown)              \
     T(PBMLoader)             \
@@ -25,6 +24,7 @@
     T(PNGLoader)             \
     T(PPMLoader)             \
     T(QOILoader)             \
+    T(TGALoader)             \
     T(RegexECMA262)          \
     T(RegexPosixExtended)    \
     T(Shell)                 \
@@ -60,8 +60,8 @@ ENUMERATE_TARGETS(__ENUMERATE_TARGET)
 #include <Meta/Lagom/Fuzzers/FuzzICOLoader.cpp>
 #undef LLVMFuzzerTestOneInput
 
-#define LLVMFuzzerTestOneInput TestJPGLoader
-#include <Meta/Lagom/Fuzzers/FuzzJPGLoader.cpp>
+#define LLVMFuzzerTestOneInput TestJPEGLoader
+#include <Meta/Lagom/Fuzzers/FuzzJPEGLoader.cpp>
 #undef LLVMFuzzerTestOneInput
 
 #define LLVMFuzzerTestOneInput TestJs
@@ -90,6 +90,10 @@ ENUMERATE_TARGETS(__ENUMERATE_TARGET)
 
 #define LLVMFuzzerTestOneInput TestQOILoader
 #include <Meta/Lagom/Fuzzers/FuzzQOILoader.cpp>
+#undef LLVMFuzzerTestOneInput
+
+#define LLVMFuzzerTestOneInput TestTGALoader
+#include <Meta/Lagom/Fuzzers/FuzzTGALoader.cpp>
 #undef LLVMFuzzerTestOneInput
 
 #define LLVMFuzzerTestOneInput TestRegexECMA262
@@ -145,13 +149,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     if (arguments.strings.size() <= 2 && arguments.strings[1] != "list"sv) {
-        args_parser.print_usage_terminal(stderr, arguments.argv[0]);
+        args_parser.print_usage_terminal(stderr, arguments.strings[0]);
         return 0;
     }
 
     auto fn = parse_target_name(type);
 
-    auto file = TRY(Core::Stream::File::open(filename, Core::Stream::OpenMode::Read));
+    auto file = TRY(Core::File::open(filename, Core::File::OpenMode::Read));
     auto input = TRY(file->read_until_eof());
 
     return fn(input.data(), input.size());

@@ -5,8 +5,8 @@
  */
 
 #include <AK/Platform.h>
-#if ARCH(I386) || ARCH(X86_64)
-#    include <Kernel/Arch/x86/common/BochsDebugOutput.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/BochsDebugOutput.h>
 #endif
 #include <Kernel/Devices/ConsoleDevice.h>
 #include <Kernel/Devices/DeviceManagement.h>
@@ -16,7 +16,7 @@
 
 namespace Kernel {
 
-Spinlock g_console_lock { LockRank::None };
+Spinlock<LockRank::None> g_console_lock {};
 
 UNMAP_AFTER_INIT NonnullLockRefPtr<ConsoleDevice> ConsoleDevice::must_create()
 {

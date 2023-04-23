@@ -32,20 +32,21 @@ void Device::after_inserting_add_to_device_management()
     DeviceManagement::the().after_inserting_device({}, *this);
 }
 
-void Device::after_inserting()
+ErrorOr<void> Device::after_inserting()
 {
-    after_inserting_add_to_device_management();
     VERIFY(!m_sysfs_component);
     auto sys_fs_component = SysFSDeviceComponent::must_create(*this);
     m_sysfs_component = sys_fs_component;
     after_inserting_add_to_device_identifier_directory();
+    after_inserting_add_to_device_management();
+    return {};
 }
 
 void Device::will_be_destroyed()
 {
     VERIFY(m_sysfs_component);
-    before_will_be_destroyed_remove_from_device_identifier_directory();
     before_will_be_destroyed_remove_from_device_management();
+    before_will_be_destroyed_remove_from_device_identifier_directory();
 }
 
 Device::~Device()
@@ -58,9 +59,9 @@ ErrorOr<NonnullOwnPtr<KString>> Device::pseudo_path(OpenFileDescription const&) 
     return KString::formatted("device:{},{}", major(), minor());
 }
 
-ErrorOr<NonnullLockRefPtr<OpenFileDescription>> Device::open(int options)
+ErrorOr<NonnullRefPtr<OpenFileDescription>> Device::open(int options)
 {
-    TRY(Process::current().jail().with([&](auto& my_jail) -> ErrorOr<void> {
+    TRY(Process::current().jail().with([&](auto const& my_jail) -> ErrorOr<void> {
         if (my_jail && !is_openable_by_jailed_processes())
             return Error::from_errno(EPERM);
         return {};

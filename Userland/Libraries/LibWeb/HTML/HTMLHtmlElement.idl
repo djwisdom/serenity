@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLHtmlElement : HTMLElement {
 
-    [Reflect] attribute DOMString version;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString version;
 
 };

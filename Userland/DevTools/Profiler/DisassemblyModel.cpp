@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2023, Jelle Raaijmakers <jelle@gmta.nl>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -7,6 +8,7 @@
 
 #include "DisassemblyModel.h"
 #include "Gradient.h"
+#include "PercentageFormatting.h"
 #include "Profile.h"
 #include <LibCore/MappedFile.h>
 #include <LibDebug/DebugInfo.h>
@@ -116,8 +118,9 @@ DisassemblyModel::DisassemblyModel(Profile& profile, ProfileNode& node)
         StringView instruction_bytes = view.substring_view(offset_into_symbol, insn.value().length());
         u32 samples_at_this_instruction = m_node.events_per_address().get(address_in_profiled_program).value_or(0);
         float percent = ((float)samples_at_this_instruction / (float)m_node.event_count()) * 100.0f;
+        auto source_position = debug_info->get_source_position_with_inlines(address_in_profiled_program - base_address).release_value_but_fixme_should_propagate_errors();
 
-        m_instructions.append({ insn.value(), disassembly, instruction_bytes, address_in_profiled_program, samples_at_this_instruction, percent, debug_info->get_source_position_with_inlines(address_in_profiled_program - base_address) });
+        m_instructions.append({ insn.value(), disassembly, instruction_bytes, address_in_profiled_program, samples_at_this_instruction, percent, source_position });
 
         offset_into_symbol += insn.value().length();
     }
@@ -184,10 +187,15 @@ GUI::Variant DisassemblyModel::data(GUI::ModelIndex const& index, GUI::ModelRole
         return colors.value().foreground;
     }
 
+    if (role == GUI::ModelRole::TextAlignment) {
+        if (index.column() == Column::SampleCount)
+            return Gfx::TextAlignment::CenterRight;
+    }
+
     if (role == GUI::ModelRole::Display) {
         if (index.column() == Column::SampleCount) {
             if (m_profile.show_percentages())
-                return ((float)insn.event_count / (float)m_node.event_count()) * 100.0f;
+                return format_percentage(insn.event_count, m_node.event_count());
             return insn.event_count;
         }
 
@@ -221,7 +229,7 @@ GUI::Variant DisassemblyModel::data(GUI::ModelIndex const& index, GUI::ModelRole
                 auto const& entry = insn.source_position_with_inlines.source_position.value();
                 builder.appendff("{}:{}", entry.file_path, entry.line_number);
             }
-            return builder.build();
+            return builder.to_deprecated_string();
         }
 
         return {};

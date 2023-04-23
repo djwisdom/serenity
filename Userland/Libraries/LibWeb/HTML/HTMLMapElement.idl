@@ -4,6 +4,8 @@
 [Exposed=Window]
 interface HTMLMapElement : HTMLElement {
 
-    [Reflect] attribute DOMString name;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString name;
 
 };

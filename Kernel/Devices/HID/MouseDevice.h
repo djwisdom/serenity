@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Liav A. <liavalb@hotmail.co.il>
+ * Copyright (c) 2021-2023, Liav A. <liavalb@hotmail.co.il>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,14 +11,17 @@
 #include <Kernel/API/KeyCode.h>
 #include <Kernel/API/MousePacket.h>
 #include <Kernel/Devices/CharacterDevice.h>
-#include <Kernel/Devices/HID/HIDDevice.h>
+#include <Kernel/Devices/HID/Device.h>
 #include <Kernel/Interrupts/IRQHandler.h>
 #include <Kernel/Random.h>
 
 namespace Kernel {
 
 class MouseDevice : public HIDDevice {
+    friend class DeviceManagement;
+
 public:
+    static ErrorOr<NonnullRefPtr<MouseDevice>> try_to_initialize();
     virtual ~MouseDevice() override;
 
     // ^CharacterDevice
@@ -27,15 +30,14 @@ public:
     virtual ErrorOr<size_t> write(OpenFileDescription&, u64, UserOrKernelBuffer const&, size_t) override { return EINVAL; }
     virtual bool can_write(OpenFileDescription const&, u64) const override { return true; }
 
-    // ^HIDDevice
-    virtual Type instrument_type() const override { return Type::Mouse; }
+    void handle_mouse_packet_input_event(MousePacket);
 
 protected:
     MouseDevice();
     // ^CharacterDevice
     virtual StringView class_name() const override { return "MouseDevice"sv; }
 
-    mutable Spinlock m_queue_lock { LockRank::None };
+    mutable Spinlock<LockRank::None> m_queue_lock {};
     CircularQueue<MousePacket, 100> m_queue;
 };
 

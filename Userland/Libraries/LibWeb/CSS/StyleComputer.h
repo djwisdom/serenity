@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,7 +8,6 @@
 #pragma once
 
 #include <AK/HashMap.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <LibWeb/CSS/CSSFontFaceRule.h>
@@ -22,16 +21,17 @@
 namespace Web::CSS {
 
 struct MatchingRule {
-    CSSStyleRule const* rule { nullptr };
+    JS::GCPtr<CSSStyleRule const> rule;
     size_t style_sheet_index { 0 };
     size_t rule_index { 0 };
     size_t selector_index { 0 };
     u32 specificity { 0 };
+    bool contains_pseudo_element { false };
 };
 
 class PropertyDependencyNode : public RefCounted<PropertyDependencyNode> {
 public:
-    static NonnullRefPtr<PropertyDependencyNode> create(DeprecatedString name)
+    static NonnullRefPtr<PropertyDependencyNode> create(String name)
     {
         return adopt_ref(*new PropertyDependencyNode(move(name)));
     }
@@ -40,10 +40,10 @@ public:
     bool has_cycles();
 
 private:
-    explicit PropertyDependencyNode(DeprecatedString name);
+    explicit PropertyDependencyNode(String name);
 
-    DeprecatedString m_name;
-    NonnullRefPtrVector<PropertyDependencyNode> m_children;
+    String m_name;
+    Vector<NonnullRefPtr<PropertyDependencyNode>> m_children;
     bool m_marked { false };
 };
 
@@ -56,7 +56,9 @@ public:
     DOM::Document const& document() const { return m_document; }
 
     NonnullRefPtr<StyleProperties> create_document_style() const;
+
     ErrorOr<NonnullRefPtr<StyleProperties>> compute_style(DOM::Element&, Optional<CSS::Selector::PseudoElement> = {}) const;
+    ErrorOr<RefPtr<StyleProperties>> compute_pseudo_element_style_if_needed(DOM::Element&, Optional<CSS::Selector::PseudoElement>) const;
 
     // https://www.w3.org/TR/css-cascade/#origin
     enum class CascadeOrigin {
@@ -78,7 +80,13 @@ public:
     void load_fonts_from_sheet(CSSStyleSheet const&);
 
 private:
-    ErrorOr<void> compute_cascaded_values(StyleProperties&, DOM::Element&, Optional<CSS::Selector::PseudoElement>) const;
+    enum class ComputeStyleMode {
+        Normal,
+        CreatePseudoElementStyleIfNeeded,
+    };
+
+    ErrorOr<RefPtr<StyleProperties>> compute_style_impl(DOM::Element&, Optional<CSS::Selector::PseudoElement>, ComputeStyleMode) const;
+    ErrorOr<void> compute_cascaded_values(StyleProperties&, DOM::Element&, Optional<CSS::Selector::PseudoElement>, bool& did_match_any_pseudo_element_rules, ComputeStyleMode) const;
     void compute_font(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
     void compute_defaulted_values(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
     void absolutize_values(StyleProperties&, DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
@@ -93,32 +101,39 @@ private:
     template<typename Callback>
     void for_each_stylesheet(CascadeOrigin, Callback) const;
 
-    Gfx::IntRect viewport_rect() const;
-    float root_element_font_size() const;
+    CSSPixelRect viewport_rect() const;
+    CSSPixels root_element_font_size() const;
+    CSSPixels root_element_line_height() const;
+    CSSPixels parent_or_root_element_line_height(DOM::Element const*, Optional<CSS::Selector::PseudoElement>) const;
 
     struct MatchingRuleSet {
         Vector<MatchingRule> user_agent_rules;
         Vector<MatchingRule> author_rules;
     };
 
-    void cascade_declarations(StyleProperties&, DOM::Element&, Vector<MatchingRule> const&, CascadeOrigin, Important important) const;
+    void cascade_declarations(StyleProperties&, DOM::Element&, Optional<CSS::Selector::PseudoElement>, Vector<MatchingRule> const&, CascadeOrigin, Important) const;
 
     void build_rule_cache();
     void build_rule_cache_if_needed() const;
 
-    DOM::Document& m_document;
+    JS::NonnullGCPtr<DOM::Document> m_document;
 
     struct RuleCache {
         HashMap<FlyString, Vector<MatchingRule>> rules_by_id;
         HashMap<FlyString, Vector<MatchingRule>> rules_by_class;
         HashMap<FlyString, Vector<MatchingRule>> rules_by_tag_name;
-        HashMap<Selector::PseudoElement, Vector<MatchingRule>> rules_by_pseudo_element;
         Vector<MatchingRule> other_rules;
     };
-    OwnPtr<RuleCache> m_rule_cache;
+
+    NonnullOwnPtr<RuleCache> make_rule_cache_for_cascade_origin(CascadeOrigin);
+
+    RuleCache const& rule_cache_for_cascade_origin(CascadeOrigin) const;
+
+    OwnPtr<RuleCache> m_author_rule_cache;
+    OwnPtr<RuleCache> m_user_agent_rule_cache;
 
     class FontLoader;
-    HashMap<DeprecatedString, NonnullOwnPtr<FontLoader>> m_loaded_fonts;
+    HashMap<String, NonnullOwnPtr<FontLoader>> m_loaded_fonts;
 };
 
 }

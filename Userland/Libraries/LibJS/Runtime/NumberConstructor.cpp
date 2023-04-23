@@ -1,11 +1,12 @@
 /*
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/Math.h>
 #include <LibJS/Runtime/AbstractOperations.h>
+#include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/Error.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/NumberConstructor.h>
@@ -24,14 +25,14 @@ constexpr double const MIN_SAFE_INTEGER_VALUE { -(__builtin_exp2(53) - 1) };
 namespace JS {
 
 NumberConstructor::NumberConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.Number.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.Number.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void NumberConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> NumberConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     // 21.1.2.15 Number.prototype, https://tc39.es/ecma262/#sec-number.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().number_prototype(), 0);
@@ -53,6 +54,8 @@ void NumberConstructor::initialize(Realm& realm)
     define_direct_property(vm.names.NaN, js_nan(), 0);
 
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
+
+    return {};
 }
 
 // Most of 21.1.1.1 Number ( value ) factored into a separate function for sharing between call() and construct().
@@ -105,30 +108,48 @@ ThrowCompletionOr<NonnullGCPtr<Object>> NumberConstructor::construct(FunctionObj
 // 21.1.2.2 Number.isFinite ( number ), https://tc39.es/ecma262/#sec-number.isfinite
 JS_DEFINE_NATIVE_FUNCTION(NumberConstructor::is_finite)
 {
-    return Value(vm.argument(0).is_finite_number());
+    auto number = vm.argument(0);
+
+    // 1. If number is not a Number, return false.
+    // 2. If number is not finite, return false.
+    // 3. Otherwise, return true.
+    return Value(number.is_finite_number());
 }
 
 // 21.1.2.3 Number.isInteger ( number ), https://tc39.es/ecma262/#sec-number.isinteger
 JS_DEFINE_NATIVE_FUNCTION(NumberConstructor::is_integer)
 {
-    return Value(vm.argument(0).is_integral_number());
+    auto number = vm.argument(0);
+
+    // 1. Return IsIntegralNumber(number).
+    return Value(number.is_integral_number());
 }
 
 // 21.1.2.4 Number.isNaN ( number ), https://tc39.es/ecma262/#sec-number.isnan
 JS_DEFINE_NATIVE_FUNCTION(NumberConstructor::is_nan)
 {
-    return Value(vm.argument(0).is_nan());
+    auto number = vm.argument(0);
+
+    // 1. If number is not a Number, return false.
+    // 2. If number is NaN, return true.
+    // 3. Otherwise, return false.
+    return Value(number.is_nan());
 }
 
 // 21.1.2.5 Number.isSafeInteger ( number ), https://tc39.es/ecma262/#sec-number.issafeinteger
 JS_DEFINE_NATIVE_FUNCTION(NumberConstructor::is_safe_integer)
 {
-    if (!vm.argument(0).is_number())
-        return Value(false);
-    if (!vm.argument(0).is_integral_number())
-        return Value(false);
-    auto value = vm.argument(0).as_double();
-    return Value(value >= MIN_SAFE_INTEGER_VALUE && value <= MAX_SAFE_INTEGER_VALUE);
+    auto number = vm.argument(0);
+
+    // 1. If IsIntegralNumber(number) is true, then
+    if (number.is_integral_number()) {
+        // a. If abs(ℝ(number)) ≤ 2^53 - 1, return true.
+        if (fabs(number.as_double()) <= MAX_SAFE_INTEGER_VALUE)
+            return Value(true);
+    }
+
+    // 2. Return false.
+    return Value(false);
 }
 
 }

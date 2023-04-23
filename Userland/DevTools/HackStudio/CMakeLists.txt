@@ -34,7 +34,6 @@ set(SOURCES
     Git/GitWidget.cpp
     GMLPreviewWidget.cpp
     HackStudioWidget.cpp
-    Language.cpp
     LanguageClient.cpp
     Locator.cpp
     Project.cpp
@@ -55,5 +54,5 @@ set(GENERATED_SOURCES
 )
 
 serenity_app(HackStudio ICON app-hack-studio)
-target_link_libraries(HackStudio PRIVATE LibWebView LibWeb LibMarkdown LibGUI LibCpp LibGfx LibCore LibVT LibDebug LibX86 LibDiff LibShell LibSymbolication LibSyntax LibRegex LibSQL LibConfig LibCore LibCoredump LibDesktop LibIPC LibJS LibMain LibThreading)
+target_link_libraries(HackStudio PRIVATE LibWebView LibWeb LibMarkdown LibGUI LibCpp LibCMake LibGfx LibCore LibVT LibDebug LibX86 LibDiff LibShell LibSymbolication LibSyntax LibRegex LibSQL LibConfig LibCore LibCoredump LibDesktop LibFileSystem LibIPC LibJS LibMain LibThreading)
 add_dependencies(HackStudio CppLanguageServer)

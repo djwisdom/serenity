@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include <AK/NonnullOwnPtrVector.h>
 #include <LibGUI/ActionGroup.h>
 #include <LibGUI/Widget.h>
 
@@ -27,7 +26,7 @@ public:
     void for_each_tool(Callback callback)
     {
         for (auto& tool : m_tools)
-            callback(tool);
+            callback(*tool);
     }
 
     Tool* active_tool() const { return m_active_tool; }
@@ -40,7 +39,7 @@ private:
     explicit ToolboxWidget();
     RefPtr<GUI::Toolbar> m_toolbar;
     GUI::ActionGroup m_action_group;
-    NonnullOwnPtrVector<Tool> m_tools;
+    Vector<NonnullOwnPtr<Tool>> m_tools;
     Tool* m_active_tool { nullptr };
 };
 

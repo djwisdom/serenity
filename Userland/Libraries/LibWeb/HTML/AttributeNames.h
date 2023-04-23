@@ -6,7 +6,8 @@
 
 #pragma once
 
-#include <AK/FlyString.h>
+#include <AK/DeprecatedFlyString.h>
+#include <AK/Error.h>
 
 namespace Web {
 namespace HTML {
@@ -39,6 +40,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(checked)                    \
     __ENUMERATE_HTML_ATTRIBUTE(cite)                       \
     __ENUMERATE_HTML_ATTRIBUTE(class_)                     \
+    __ENUMERATE_HTML_ATTRIBUTE(classid)                    \
     __ENUMERATE_HTML_ATTRIBUTE(clear)                      \
     __ENUMERATE_HTML_ATTRIBUTE(code)                       \
     __ENUMERATE_HTML_ATTRIBUTE(codetype)                   \
@@ -50,6 +52,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(contenteditable)            \
     __ENUMERATE_HTML_ATTRIBUTE(controls)                   \
     __ENUMERATE_HTML_ATTRIBUTE(coords)                     \
+    __ENUMERATE_HTML_ATTRIBUTE(crossorigin)                \
     __ENUMERATE_HTML_ATTRIBUTE(data)                       \
     __ENUMERATE_HTML_ATTRIBUTE(datetime)                   \
     __ENUMERATE_HTML_ATTRIBUTE(declare)                    \
@@ -80,6 +83,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(imagesrcset)                \
     __ENUMERATE_HTML_ATTRIBUTE(inert)                      \
     __ENUMERATE_HTML_ATTRIBUTE(integrity)                  \
+    __ENUMERATE_HTML_ATTRIBUTE(is)                         \
     __ENUMERATE_HTML_ATTRIBUTE(ismap)                      \
     __ENUMERATE_HTML_ATTRIBUTE(itemscope)                  \
     __ENUMERATE_HTML_ATTRIBUTE(label)                      \
@@ -192,6 +196,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(poster)                     \
     __ENUMERATE_HTML_ATTRIBUTE(preload)                    \
     __ENUMERATE_HTML_ATTRIBUTE(readonly)                   \
+    __ENUMERATE_HTML_ATTRIBUTE(referrerpolicy)             \
     __ENUMERATE_HTML_ATTRIBUTE(rel)                        \
     __ENUMERATE_HTML_ATTRIBUTE(required)                   \
     __ENUMERATE_HTML_ATTRIBUTE(rev)                        \
@@ -228,13 +233,15 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(width)                      \
     __ENUMERATE_HTML_ATTRIBUTE(wrap)
 
-#define __ENUMERATE_HTML_ATTRIBUTE(name) extern FlyString name;
+#define __ENUMERATE_HTML_ATTRIBUTE(name) extern DeprecatedFlyString name;
 ENUMERATE_HTML_ATTRIBUTES
 #undef __ENUMERATE_HTML_ATTRIBUTE
 
+ErrorOr<void> initialize_strings();
+
 }
 
-bool is_boolean_attribute(FlyString const& attribute);
+bool is_boolean_attribute(DeprecatedFlyString const& attribute);
 
 }
 }

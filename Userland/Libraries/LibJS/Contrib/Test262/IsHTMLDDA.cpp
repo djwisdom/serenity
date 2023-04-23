@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,7 +11,7 @@ namespace JS::Test262 {
 
 IsHTMLDDA::IsHTMLDDA(Realm& realm)
     // NativeFunction without prototype is currently not possible (only due to the lack of a ctor that supports it)
-    : NativeFunction("IsHTMLDDA", *realm.intrinsics().function_prototype())
+    : NativeFunction("IsHTMLDDA", realm.intrinsics().function_prototype())
 {
 }
 
@@ -20,7 +20,7 @@ ThrowCompletionOr<Value> IsHTMLDDA::call()
     auto& vm = this->vm();
     if (vm.argument_count() == 0)
         return js_null();
-    if (vm.argument(0).is_string() && vm.argument(0).as_string().deprecated_string().is_empty())
+    if (vm.argument(0).is_string() && TRY(vm.argument(0).as_string().deprecated_string()).is_empty())
         return js_null();
     // Not sure if this really matters, INTERPRETING.md simply says:
     // * IsHTMLDDA - (present only in implementations that can provide it) an object that:

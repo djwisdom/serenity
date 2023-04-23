@@ -10,7 +10,7 @@
 #include <AK/JsonValue.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DateTime.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <unistd.h>
@@ -42,7 +42,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     dbgln("Updating utmp from UID={} GID={} EGID={} PID={}", getuid(), getgid(), getegid(), pid);
 
-    auto file = TRY(Core::Stream::File::open("/var/run/utmp"sv, Core::Stream::OpenMode::ReadWrite));
+    auto file = TRY(Core::File::open("/var/run/utmp"sv, Core::File::OpenMode::ReadWrite));
 
     auto file_contents = TRY(file->read_until_eof());
     auto previous_json = TRY(JsonValue::from_string(file_contents));
@@ -70,9 +70,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         json.remove(tty_name);
     }
 
-    TRY(file->seek(0, Core::Stream::SeekMode::SetPosition));
+    TRY(file->seek(0, SeekMode::SetPosition));
     TRY(file->truncate(0));
-    TRY(file->write(json.to_deprecated_string().bytes()));
+    TRY(file->write_until_depleted(json.to_deprecated_string().bytes()));
 
     return 0;
 }

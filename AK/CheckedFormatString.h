@@ -9,13 +9,12 @@
 #include <AK/AllOf.h>
 #include <AK/AnyOf.h>
 #include <AK/Array.h>
-#include <AK/StdLibExtras.h>
 #include <AK/StringView.h>
 
 #ifdef ENABLE_COMPILETIME_FORMAT_CHECK
 // FIXME: Seems like clang doesn't like calling 'consteval' functions inside 'consteval' functions quite the same way as GCC does,
 //        it seems to entirely forget that it accepted that parameters to a 'consteval' function to begin with.
-#    if defined(AK_COMPILER_CLANG) || defined(__CLION_IDE__) || defined(__CLION_IDE_)
+#    if defined(AK_COMPILER_CLANG)
 #        undef ENABLE_COMPILETIME_FORMAT_CHECK
 #    endif
 #endif
@@ -40,9 +39,6 @@ struct Array {
 
     T __data[Size];
 };
-
-template<typename... Args>
-void compiletime_fail(Args...);
 
 template<size_t N>
 consteval auto extract_used_argument_index(char const (&fmt)[N], size_t specifier_start_index, size_t specifier_end_index, size_t& next_implicit_argument_index)

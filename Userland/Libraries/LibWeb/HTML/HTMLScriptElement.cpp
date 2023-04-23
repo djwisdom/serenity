@@ -18,6 +18,7 @@
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/Infra/CharacterTypes.h>
+#include <LibWeb/Infra/Strings.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/MimeSniff/MimeType.h>
 
@@ -26,10 +27,17 @@ namespace Web::HTML {
 HTMLScriptElement::HTMLScriptElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLScriptElement"));
 }
 
 HTMLScriptElement::~HTMLScriptElement() = default;
+
+JS::ThrowCompletionOr<void> HTMLScriptElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLScriptElementPrototype>(realm, "HTMLScriptElement"));
+
+    return {};
+}
 
 void HTMLScriptElement::visit_edges(Cell::Visitor& visitor)
 {
@@ -64,7 +72,7 @@ void HTMLScriptElement::execute_script()
     // 3. If el's result is null, then fire an event named error at el, and return.
     if (m_result.has<ResultState::Null>()) {
         dbgln("HTMLScriptElement: Refusing to run script because the element's result is null.");
-        dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
+        dispatch_event(DOM::Event::create(realm(), HTML::EventNames::error).release_value_but_fixme_should_propagate_errors());
         return;
     }
 
@@ -115,7 +123,7 @@ void HTMLScriptElement::execute_script()
 
     // 8. If el's from an external file is true, then fire an event named load at el.
     if (m_from_an_external_file)
-        dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::load));
+        dispatch_event(DOM::Event::create(realm(), HTML::EventNames::load).release_value_but_fixme_should_propagate_errors());
 }
 
 // https://html.spec.whatwg.org/multipage/scripting.html#prepare-a-script
@@ -182,12 +190,12 @@ void HTMLScriptElement::prepare_script()
         m_script_type = ScriptType::Classic;
     }
     // 10. Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "module",
-    else if (script_block_type.equals_ignoring_case("module"sv)) {
+    else if (Infra::is_ascii_case_insensitive_match(script_block_type, "module"sv)) {
         // then set el's type to "module".
         m_script_type = ScriptType::Module;
     }
     // 11. Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "importmap",
-    else if (script_block_type.equals_ignoring_case("importmap"sv)) {
+    else if (Infra::is_ascii_case_insensitive_match(script_block_type, "importmap"sv)) {
         // then set el's type to "importmap".
         m_script_type = ScriptType::ImportMap;
     }
@@ -244,13 +252,14 @@ void HTMLScriptElement::prepare_script()
         event = event.trim(Infra::ASCII_WHITESPACE);
 
         // 4. If for is not an ASCII case-insensitive match for the string "window", then return.
-        if (!for_.equals_ignoring_case("window"sv)) {
+        if (!Infra::is_ascii_case_insensitive_match(for_, "window"sv)) {
             dbgln("HTMLScriptElement: Refusing to run classic script because the provided 'for' attribute is not equal to 'window'");
             return;
         }
 
         // 5. If event is not an ASCII case-insensitive match for either the string "onload" or the string "onload()", then return.
-        if (!event.equals_ignoring_case("onload"sv) && !event.equals_ignoring_case("onload()"sv)) {
+        if (!Infra::is_ascii_case_insensitive_match(event, "onload"sv)
+            && !Infra::is_ascii_case_insensitive_match(event, "onload()"sv)) {
             dbgln("HTMLScriptElement: Refusing to run classic script because the provided 'event' attribute is not equal to 'onload' or 'onload()'");
             return;
         }
@@ -285,7 +294,7 @@ void HTMLScriptElement::prepare_script()
         if (m_script_type == ScriptType::ImportMap) {
             // then queue an element task on the DOM manipulation task source given el to fire an event named error at el, and return.
             queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
-                dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
+                dispatch_event(DOM::Event::create(realm(), HTML::EventNames::error).release_value_but_fixme_should_propagate_errors());
             });
             return;
         }
@@ -297,7 +306,7 @@ void HTMLScriptElement::prepare_script()
         if (src.is_empty()) {
             dbgln("HTMLScriptElement: Refusing to run script because the src attribute is empty.");
             queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
-                dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
+                dispatch_event(DOM::Event::create(realm(), HTML::EventNames::error).release_value_but_fixme_should_propagate_errors());
             });
             return;
         }
@@ -312,7 +321,7 @@ void HTMLScriptElement::prepare_script()
         if (!url.is_valid()) {
             dbgln("HTMLScriptElement: Refusing to run script because the src URL '{}' is invalid.", url);
             queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
-                dispatch_event(*DOM::Event::create(realm(), HTML::EventNames::error));
+                dispatch_event(DOM::Event::create(realm(), HTML::EventNames::error).release_value_but_fixme_should_propagate_errors());
             });
             return;
         }
@@ -341,7 +350,7 @@ void HTMLScriptElement::prepare_script()
         else if (m_script_type == ScriptType::Module) {
             // Fetch an external module script graph given url, settings object, options, and onComplete.
             // FIXME: Pass options.
-            fetch_external_module_script_graph(url, settings_object, [this](auto const* result) {
+            fetch_external_module_script_graph(url, settings_object, [this](auto* result) {
                 // 1. Mark as ready el given result.
                 if (!result)
                     mark_as_ready(ResultState::Null {});
@@ -373,7 +382,7 @@ void HTMLScriptElement::prepare_script()
 
             // 2. Fetch an inline module script graph, given source text, base URL, settings object, options, and with the following steps given result:
             // FIXME: Pass options
-            fetch_inline_module_script_graph(m_document->url().to_deprecated_string(), source_text, base_url, document().relevant_settings_object(), [this](auto const* result) {
+            fetch_inline_module_script_graph(m_document->url().to_deprecated_string(), source_text, base_url, document().relevant_settings_object(), [this](auto* result) {
                 // 1. Mark as ready el given result.
                 if (!result)
                     mark_as_ready(ResultState::Null {});
@@ -505,8 +514,8 @@ void HTMLScriptElement::resource_did_load()
     // If the resource has an explicit encoding (i.e from a HTTP Content-Type header)
     // we have to re-encode it to UTF-8.
     if (resource()->has_encoding()) {
-        if (auto* codec = TextCodec::decoder_for(resource()->encoding().value())) {
-            data = codec->to_utf8(data).to_byte_buffer();
+        if (auto codec = TextCodec::decoder_for(resource()->encoding().value()); codec.has_value()) {
+            data = codec->to_utf8(data).release_value_but_fixme_should_propagate_errors().to_deprecated_string().to_byte_buffer();
         }
     }
 
@@ -550,6 +559,16 @@ void HTMLScriptElement::mark_as_ready(Result result)
 
     // 4. Set el's delaying the load event to false.
     m_document_load_event_delayer.clear();
+}
+
+void HTMLScriptElement::unmark_as_already_started(Badge<DOM::Range>)
+{
+    m_already_started = false;
+}
+
+void HTMLScriptElement::unmark_as_parser_inserted(Badge<DOM::Range>)
+{
+    m_parser_document = nullptr;
 }
 
 }

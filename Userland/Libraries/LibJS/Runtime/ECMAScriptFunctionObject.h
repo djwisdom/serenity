@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,7 +15,7 @@
 
 namespace JS {
 
-void async_block_start(VM&, NonnullRefPtr<Statement> const& parse_node, PromiseCapability const&, ExecutionContext&);
+void async_block_start(VM&, NonnullRefPtr<Statement const> const& parse_node, PromiseCapability const&, ExecutionContext&);
 
 // 10.2 ECMAScript Function Objects, https://tc39.es/ecma262/#sec-ecmascript-function-objects
 class ECMAScriptFunctionObject final : public FunctionObject {
@@ -32,10 +33,10 @@ public:
         Global,
     };
 
-    static NonnullGCPtr<ECMAScriptFunctionObject> create(Realm&, FlyString name, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind, bool is_strict, bool might_need_arguments_object = true, bool contains_direct_call_to_eval = true, bool is_arrow_function = false, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name = {});
-    static NonnullGCPtr<ECMAScriptFunctionObject> create(Realm&, FlyString name, Object& prototype, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind, bool is_strict, bool might_need_arguments_object = true, bool contains_direct_call_to_eval = true, bool is_arrow_function = false, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name = {});
+    static NonnullGCPtr<ECMAScriptFunctionObject> create(Realm&, DeprecatedFlyString name, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind, bool is_strict, bool might_need_arguments_object = true, bool contains_direct_call_to_eval = true, bool is_arrow_function = false, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name = {});
+    static NonnullGCPtr<ECMAScriptFunctionObject> create(Realm&, DeprecatedFlyString name, Object& prototype, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind, bool is_strict, bool might_need_arguments_object = true, bool contains_direct_call_to_eval = true, bool is_arrow_function = false, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name = {});
 
-    virtual void initialize(Realm&) override;
+    virtual ThrowCompletionOr<void> initialize(Realm&) override;
     virtual ~ECMAScriptFunctionObject() override = default;
 
     virtual ThrowCompletionOr<Value> internal_call(Value this_argument, MarkedVector<Value> arguments_list) override;
@@ -46,8 +47,8 @@ public:
     Statement const& ecmascript_code() const { return m_ecmascript_code; }
     Vector<FunctionParameter> const& formal_parameters() const { return m_formal_parameters; };
 
-    virtual FlyString const& name() const override { return m_name; };
-    void set_name(FlyString const& name);
+    virtual DeprecatedFlyString const& name() const override { return m_name; };
+    void set_name(DeprecatedFlyString const& name);
 
     void set_is_class_constructor() { m_is_class_constructor = true; };
 
@@ -93,7 +94,7 @@ protected:
     virtual Completion ordinary_call_evaluate_body();
 
 private:
-    ECMAScriptFunctionObject(FlyString name, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, Object& prototype, FunctionKind, bool is_strict, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name);
+    ECMAScriptFunctionObject(DeprecatedFlyString name, DeprecatedString source_text, Statement const& ecmascript_code, Vector<FunctionParameter> parameters, i32 m_function_length, Environment* parent_environment, PrivateEnvironment* private_environment, Object& prototype, FunctionKind, bool is_strict, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name);
 
     virtual bool is_ecmascript_function_object() const override { return true; }
     virtual void visit_edges(Visitor&) override;
@@ -105,19 +106,19 @@ private:
 
     ThrowCompletionOr<void> function_declaration_instantiation(Interpreter*);
 
-    FlyString m_name;
+    DeprecatedFlyString m_name;
     OwnPtr<Bytecode::Executable> m_bytecode_executable;
     Vector<OwnPtr<Bytecode::Executable>> m_default_parameter_bytecode_executables;
     i32 m_function_length { 0 };
 
     // Internal Slots of ECMAScript Function Objects, https://tc39.es/ecma262/#table-internal-slots-of-ecmascript-function-objects
-    Environment* m_environment { nullptr };                                  // [[Environment]]
-    PrivateEnvironment* m_private_environment { nullptr };                   // [[PrivateEnvironment]]
+    GCPtr<Environment> m_environment;                                        // [[Environment]]
+    GCPtr<PrivateEnvironment> m_private_environment;                         // [[PrivateEnvironment]]
     Vector<FunctionParameter> const m_formal_parameters;                     // [[FormalParameters]]
-    NonnullRefPtr<Statement> m_ecmascript_code;                              // [[ECMAScriptCode]]
-    Realm* m_realm { nullptr };                                              // [[Realm]]
+    NonnullRefPtr<Statement const> m_ecmascript_code;                        // [[ECMAScriptCode]]
+    GCPtr<Realm> m_realm;                                                    // [[Realm]]
     ScriptOrModule m_script_or_module;                                       // [[ScriptOrModule]]
-    Object* m_home_object { nullptr };                                       // [[HomeObject]]
+    GCPtr<Object> m_home_object;                                             // [[HomeObject]]
     DeprecatedString m_source_text;                                          // [[SourceText]]
     Vector<ClassFieldDefinition> m_fields;                                   // [[Fields]]
     Vector<PrivateElement> m_private_methods;                                // [[PrivateMethods]]

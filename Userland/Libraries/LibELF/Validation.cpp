@@ -10,8 +10,11 @@
 #include <Kernel/API/serenity_limits.h>
 #include <LibC/elf.h>
 #include <LibELF/Validation.h>
-#include <limits.h>
-#include <pthread.h>
+
+#ifndef KERNEL
+#    include <limits.h>
+#    include <pthread.h>
+#endif
 
 namespace ELF {
 
@@ -23,13 +26,8 @@ bool validate_elf_header(ElfW(Ehdr) const& elf_header, size_t file_size, bool ve
         return false;
     }
 
-#if ARCH(I386)
-    auto expected_class = ELFCLASS32;
-    auto expected_bitness = 32;
-#else
     auto expected_class = ELFCLASS64;
     auto expected_bitness = 64;
-#endif
     if (expected_class != elf_header.e_ident[EI_CLASS]) {
         if (verbose)
             dbgln("File is not a {}-bit ELF file.", expected_bitness);
@@ -61,17 +59,12 @@ bool validate_elf_header(ElfW(Ehdr) const& elf_header, size_t file_size, bool ve
         return false;
     }
 
-#if ARCH(I386)
-    auto expected_machine = EM_386;
-    auto expected_machine_name = "i386";
-#else
-    auto expected_machine = EM_X86_64;
-    auto expected_machine_name = "x86-64";
-#endif
+    auto expected_machines = Array { EM_X86_64, EM_AARCH64 };
+    auto expected_machine_names = Array { "x86-64"sv, "aarch64"sv };
 
-    if (expected_machine != elf_header.e_machine) {
+    if (!expected_machines.span().contains_slow(elf_header.e_machine)) {
         if (verbose)
-            dbgln("File has unknown machine ({}), expected {} ({})!", elf_header.e_machine, expected_machine_name, expected_machine);
+            dbgln("File has unknown machine ({}), expected {} ({})!", elf_header.e_machine, expected_machine_names.span(), expected_machines.span());
         return false;
     }
 

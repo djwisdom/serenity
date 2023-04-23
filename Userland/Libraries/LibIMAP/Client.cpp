@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "AK/OwnPtr.h"
-#include <LibCore/Stream.h>
+#include <AK/OwnPtr.h>
 #include <LibIMAP/Client.h>
 
 namespace IMAP {
 
-Client::Client(StringView host, u16 port, NonnullOwnPtr<Core::Stream::Socket> socket)
+Client::Client(StringView host, u16 port, NonnullOwnPtr<Core::Socket> socket)
     : m_host(host)
     , m_port(port)
     , m_socket(move(socket))
@@ -49,7 +48,7 @@ ErrorOr<NonnullOwnPtr<Client>> Client::connect_tls(StringView host, u16 port)
 
 ErrorOr<NonnullOwnPtr<Client>> Client::connect_plaintext(StringView host, u16 port)
 {
-    auto socket = TRY(Core::Stream::TCPSocket::connect(host, port));
+    auto socket = TRY(Core::TCPSocket::connect(host, port));
     dbgln("Connected to {}:{}", host, port);
     return adopt_nonnull_own_or_enomem(new (nothrow) Client(host, port, move(socket)));
 }
@@ -61,11 +60,11 @@ ErrorOr<void> Client::on_ready_to_receive()
 
     auto pending_bytes = TRY(m_socket->pending_bytes());
     auto receive_buffer = TRY(m_buffer.get_bytes_for_writing(pending_bytes));
-    TRY(m_socket->read(receive_buffer));
+    TRY(m_socket->read_until_filled(receive_buffer));
 
     // Once we get server hello we can start sending.
     if (m_connect_pending) {
-        m_connect_pending->resolve({});
+        TRY(m_connect_pending->resolve({}));
         m_connect_pending.clear();
         m_buffer.clear();
         return {};
@@ -146,8 +145,8 @@ static ReadonlyBytes command_byte_buffer(CommandType command)
 
 ErrorOr<void> Client::send_raw(StringView data)
 {
-    TRY(m_socket->write(data.bytes()));
-    TRY(m_socket->write("\r\n"sv.bytes()));
+    TRY(m_socket->write_until_depleted(data.bytes()));
+    TRY(m_socket->write_until_depleted("\r\n"sv.bytes()));
 
     return {};
 }
@@ -228,13 +227,13 @@ ErrorOr<void> Client::handle_parsed_response(ParseStatus&& parse_status)
         bool should_send_next = false;
         if (!parse_status.successful) {
             m_expecting_response = false;
-            m_pending_promises.first()->resolve({});
+            TRY(m_pending_promises.first()->resolve({}));
             m_pending_promises.remove(0);
         }
         if (parse_status.response.has_value()) {
             m_expecting_response = false;
             should_send_next = parse_status.response->has<SolidResponse>();
-            m_pending_promises.first()->resolve(move(parse_status.response));
+            TRY(m_pending_promises.first()->resolve(move(parse_status.response)));
             m_pending_promises.remove(0);
         }
 
@@ -306,7 +305,7 @@ RefPtr<Promise<Optional<SolidResponse>>> Client::store(StoreMethod method, Seque
     flags_builder.join(' ', flags);
     flags_builder.append(')');
 
-    auto command = Command { uid ? CommandType::UIDStore : CommandType::Store, m_current_command, { sequence_set.serialize(), data_item_name.build(), flags_builder.build() } };
+    auto command = Command { uid ? CommandType::UIDStore : CommandType::Store, m_current_command, { sequence_set.serialize(), data_item_name.to_deprecated_string(), flags_builder.to_deprecated_string() } };
     return cast_promise<SolidResponse>(send_command(move(command)));
 }
 RefPtr<Promise<Optional<SolidResponse>>> Client::search(Optional<DeprecatedString> charset, Vector<SearchKey>&& keys, bool uid)
@@ -363,7 +362,7 @@ RefPtr<Promise<Optional<SolidResponse>>> Client::status(StringView mailbox, Vect
     types_list.append('(');
     types_list.join(' ', args);
     types_list.append(')');
-    auto command = Command { CommandType::Status, m_current_command, { mailbox, types_list.build() } };
+    auto command = Command { CommandType::Status, m_current_command, { mailbox, types_list.to_deprecated_string() } };
     return cast_promise<SolidResponse>(send_command(move(command)));
 }
 
@@ -375,7 +374,7 @@ RefPtr<Promise<Optional<SolidResponse>>> Client::append(StringView mailbox, Mess
         flags_sb.append('(');
         flags_sb.join(' ', flags.value());
         flags_sb.append(')');
-        args.append(flags_sb.build());
+        args.append(flags_sb.to_deprecated_string());
     }
     if (date_time.has_value())
         args.append(date_time.value().to_deprecated_string("\"%d-%b-%Y %H:%M:%S +0000\""sv));
@@ -387,13 +386,14 @@ RefPtr<Promise<Optional<SolidResponse>>> Client::append(StringView mailbox, Mess
     auto response_promise = Promise<Optional<Response>>::construct();
     m_pending_promises.append(response_promise);
 
-    continue_req->on_resolved = [this, message2 { move(message) }](auto& data) {
+    continue_req->on_resolved = [this, message2 { move(message) }](auto& data) -> ErrorOr<void> {
         if (!data.has_value()) {
-            MUST(handle_parsed_response({ .successful = false, .response = {} }));
+            TRY(handle_parsed_response({ .successful = false, .response = {} }));
         } else {
-            MUST(send_raw(message2.data));
+            TRY(send_raw(message2.data));
             m_expecting_response = true;
         }
+        return {};
     };
 
     return cast_promise<SolidResponse>(response_promise);

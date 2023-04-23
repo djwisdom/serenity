@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -28,6 +28,7 @@ static void search_and_print_results(DeprecatedString const& query)
         builder.append(display_name);
         outln(builder.string_view());
         result_count++;
+        return IterationDecision::Continue;
     });
 
     if (result_count == 0)
@@ -68,8 +69,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_icon(app_icon.bitmap_for_size(16));
     window->resize(600, 400);
 
-    auto character_map_widget = TRY(window->try_set_main_widget<CharacterMapWidget>());
-    character_map_widget->initialize_menubar(*window);
+    auto character_map_widget = TRY(window->set_main_widget<CharacterMapWidget>());
+    TRY(character_map_widget->initialize_menubar(*window));
 
     auto font_query = Config::read_string("CharacterMap"sv, "History"sv, "Font"sv, Gfx::FontDatabase::the().default_font_query());
     character_map_widget->set_font(Gfx::FontDatabase::the().get_by_name(font_query));

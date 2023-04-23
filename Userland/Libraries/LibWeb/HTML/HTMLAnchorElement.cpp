@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/ARIA/Roles.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/ReferrerPolicy/ReferrerPolicy.h>
 
 namespace Web::HTML {
 
 HTMLAnchorElement::HTMLAnchorElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLAnchorElement"));
-
     activation_behavior = [this](auto const& event) {
         run_activation_behavior(event);
     };
@@ -21,7 +21,15 @@ HTMLAnchorElement::HTMLAnchorElement(DOM::Document& document, DOM::QualifiedName
 
 HTMLAnchorElement::~HTMLAnchorElement() = default;
 
-void HTMLAnchorElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
+JS::ThrowCompletionOr<void> HTMLAnchorElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLAnchorElementPrototype>(realm, "HTMLAnchorElement"));
+
+    return {};
+}
+
+void HTMLAnchorElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     HTMLElement::parse_attribute(name, value);
     if (name == HTML::AttributeNames::href) {
@@ -82,6 +90,47 @@ i32 HTMLAnchorElement::default_tab_index_value() const
 {
     // See the base function for the spec comments.
     return 0;
+}
+
+Optional<ARIA::Role> HTMLAnchorElement::default_role() const
+{
+    // https://www.w3.org/TR/html-aria/#el-a-no-href
+    if (!href().is_null())
+        return ARIA::Role::link;
+    // https://www.w3.org/TR/html-aria/#el-a
+    return ARIA::Role::generic;
+}
+
+// https://html.spec.whatwg.org/multipage/text-level-semantics.html#dom-a-text
+DeprecatedString HTMLAnchorElement::text() const
+{
+    // The text attribute's getter must return this element's descendant text content.
+    return descendant_text_content();
+}
+
+// https://html.spec.whatwg.org/multipage/text-level-semantics.html#dom-a-text
+void HTMLAnchorElement::set_text(DeprecatedString const& text)
+{
+    // The text attribute's setter must string replace all with the given value within this element.
+    string_replace_all(text);
+}
+
+// https://html.spec.whatwg.org/multipage/text-level-semantics.html#dom-a-referrerpolicy
+DeprecatedString HTMLAnchorElement::referrer_policy() const
+{
+    // The IDL attribute referrerPolicy must reflect the referrerpolicy content attribute, limited to only known values.
+    auto policy_string = attribute(HTML::AttributeNames::referrerpolicy);
+    auto maybe_policy = ReferrerPolicy::from_string(policy_string);
+    if (maybe_policy.has_value())
+        return ReferrerPolicy::to_string(maybe_policy.value());
+    return "";
+}
+
+// https://html.spec.whatwg.org/multipage/text-level-semantics.html#dom-a-referrerpolicy
+WebIDL::ExceptionOr<void> HTMLAnchorElement::set_referrer_policy(DeprecatedString const& referrer_policy)
+{
+    // The IDL attribute referrerPolicy must reflect the referrerpolicy content attribute, limited to only known values.
+    return set_attribute(HTML::AttributeNames::referrerpolicy, referrer_policy);
 }
 
 }

@@ -7,8 +7,6 @@ endif()
 
 if ("${SERENITY_ARCH}" STREQUAL "aarch64")
     set(KERNEL_ARCH aarch64)
-elseif ("${SERENITY_ARCH}" STREQUAL "i686")
-    set(KERNEL_ARCH i386)
 elseif("${SERENITY_ARCH}" STREQUAL "x86_64")
     set(KERNEL_ARCH x86_64)
 endif()
@@ -19,12 +17,16 @@ set(KERNEL_HEAP_SOURCES
 
 set(KERNEL_SOURCES
     AddressSanitizer.cpp
+    Arch/init.cpp
+    Arch/PageFault.cpp
+    Arch/DeferredCallPool.cpp
     Bus/PCI/Controller/HostController.cpp
     Bus/PCI/Controller/MemoryBackedHostBridge.cpp
     Bus/PCI/Controller/VolumeManagementDevice.cpp
     Bus/PCI/Access.cpp
     Bus/PCI/API.cpp
     Bus/PCI/Device.cpp
+    Bus/PCI/DeviceIdentifier.cpp
     Bus/USB/UHCI/UHCIController.cpp
     Bus/USB/UHCI/UHCIRootHub.cpp
     Bus/USB/USBConfiguration.cpp
@@ -41,10 +43,15 @@ set(KERNEL_SOURCES
     Bus/VirtIO/RNG.cpp
     CommandLine.cpp
     Coredump.cpp
+    CrashHandler.cpp
     Credentials.cpp
     Devices/AsyncDeviceRequest.cpp
     Devices/Audio/AC97.cpp
     Devices/Audio/Channel.cpp
+    Devices/Audio/IntelHDA/Codec.cpp
+    Devices/Audio/IntelHDA/Controller.cpp
+    Devices/Audio/IntelHDA/Format.cpp
+    Devices/Audio/IntelHDA/Stream.cpp
     Devices/Audio/Management.cpp
     Devices/BlockDevice.cpp
     Devices/CharacterDevice.cpp
@@ -62,8 +69,8 @@ set(KERNEL_SOURCES
     Devices/SelfTTYDevice.cpp
     Devices/SerialDevice.cpp
     Devices/ZeroDevice.cpp
-    Devices/HID/HIDManagement.cpp
     Devices/HID/KeyboardDevice.cpp
+    Devices/HID/Management.cpp
     Devices/HID/MouseDevice.cpp
     Graphics/Bochs/GraphicsAdapter.cpp
     Graphics/Bochs/QEMUDisplayConnector.cpp
@@ -74,6 +81,13 @@ set(KERNEL_SOURCES
     Graphics/DisplayConnector.cpp
     Graphics/Generic/DisplayConnector.cpp
     Graphics/GraphicsManagement.cpp
+    Graphics/Intel/Auxiliary/GMBusConnector.cpp
+    Graphics/Intel/Plane/DisplayPlane.cpp
+    Graphics/Intel/Plane/G33DisplayPlane.cpp
+    Graphics/Intel/Transcoder/AnalogDisplayTranscoder.cpp
+    Graphics/Intel/Transcoder/DisplayTranscoder.cpp
+    Graphics/Intel/Transcoder/PLL.cpp
+    Graphics/Intel/DisplayConnectorGroup.cpp
     Graphics/Intel/NativeDisplayConnector.cpp
     Graphics/Intel/NativeGraphicsAdapter.cpp
     Graphics/VMWare/Console.cpp
@@ -85,7 +99,6 @@ set(KERNEL_SOURCES
     Graphics/VirtIOGPU/GraphicsAdapter.cpp
     IOWindow.cpp
     Jail.cpp
-    JailManagement.cpp
     SanCov.cpp
     Storage/ATA/AHCI/Controller.cpp
     Storage/ATA/AHCI/Port.cpp
@@ -101,6 +114,9 @@ set(KERNEL_SOURCES
     Storage/NVMe/NVMeInterruptQueue.cpp
     Storage/NVMe/NVMePollQueue.cpp
     Storage/NVMe/NVMeQueue.cpp
+    Storage/SD/PCISDHostController.cpp
+    Storage/SD/SDHostController.cpp
+    Storage/SD/SDMemoryCard.cpp
     Storage/DiskPartition.cpp
     Storage/StorageController.cpp
     Storage/StorageDevice.cpp
@@ -131,16 +147,11 @@ set(KERNEL_SOURCES
     FileSystem/Plan9FS/FileSystem.cpp
     FileSystem/Plan9FS/Inode.cpp
     FileSystem/Plan9FS/Message.cpp
-    FileSystem/ProcFS/ComponentRegistry.cpp
-    FileSystem/ProcFS/DirectoryInode.cpp
     FileSystem/ProcFS/FileSystem.cpp
-    FileSystem/ProcFS/GlobalInode.cpp
     FileSystem/ProcFS/Inode.cpp
-    FileSystem/ProcFS/LinkInode.cpp
-    FileSystem/ProcFS/ProcessAssociatedInode.cpp
-    FileSystem/ProcFS/ProcessDirectoryInode.cpp
-    FileSystem/ProcFS/ProcessPropertyInode.cpp
-    FileSystem/ProcFS/ProcessSubDirectoryInode.cpp
+    FileSystem/ProcFS/ProcessExposed.cpp
+    FileSystem/RAMFS/FileSystem.cpp
+    FileSystem/RAMFS/Inode.cpp
     FileSystem/SysFS/Component.cpp
     FileSystem/SysFS/DirectoryInode.cpp
     FileSystem/SysFS/FileSystem.cpp
@@ -151,6 +162,7 @@ set(KERNEL_SOURCES
     FileSystem/SysFS/Subsystems/Bus/PCI/BusDirectory.cpp
     FileSystem/SysFS/Subsystems/Bus/PCI/DeviceAttribute.cpp
     FileSystem/SysFS/Subsystems/Bus/PCI/DeviceDirectory.cpp
+    FileSystem/SysFS/Subsystems/Bus/PCI/DeviceExpansionROM.cpp
     FileSystem/SysFS/Subsystems/Bus/USB/BusDirectory.cpp
     FileSystem/SysFS/Subsystems/Bus/USB/DeviceInformation.cpp
     FileSystem/SysFS/Subsystems/Bus/Directory.cpp
@@ -170,7 +182,6 @@ set(KERNEL_SOURCES
     FileSystem/SysFS/Subsystems/Firmware/BIOS/Component.cpp
     FileSystem/SysFS/Subsystems/Firmware/BIOS/Directory.cpp
     FileSystem/SysFS/Subsystems/Firmware/Directory.cpp
-    FileSystem/SysFS/Subsystems/Kernel/CommandLine.cpp
     FileSystem/SysFS/Subsystems/Kernel/Interrupts.cpp
     FileSystem/SysFS/Subsystems/Kernel/Processes.cpp
     FileSystem/SysFS/Subsystems/Kernel/CPUInfo.cpp
@@ -178,8 +189,6 @@ set(KERNEL_SOURCES
     FileSystem/SysFS/Subsystems/Kernel/Keymap.cpp
     FileSystem/SysFS/Subsystems/Kernel/Profile.cpp
     FileSystem/SysFS/Subsystems/Kernel/Directory.cpp
-    FileSystem/SysFS/Subsystems/Kernel/LoadBase.cpp
-    FileSystem/SysFS/Subsystems/Kernel/SystemMode.cpp
     FileSystem/SysFS/Subsystems/Kernel/DiskUsage.cpp
     FileSystem/SysFS/Subsystems/Kernel/Log.cpp
     FileSystem/SysFS/Subsystems/Kernel/SystemStatistics.cpp
@@ -194,6 +203,8 @@ set(KERNEL_SOURCES
     FileSystem/SysFS/Subsystems/Kernel/Network/Route.cpp
     FileSystem/SysFS/Subsystems/Kernel/Network/TCP.cpp
     FileSystem/SysFS/Subsystems/Kernel/Network/UDP.cpp
+    FileSystem/SysFS/Subsystems/Kernel/Constants/ConstantInformation.cpp
+    FileSystem/SysFS/Subsystems/Kernel/Constants/Directory.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/BooleanVariable.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/CapsLockRemap.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/CoredumpDirectory.cpp
@@ -201,8 +212,6 @@ set(KERNEL_SOURCES
     FileSystem/SysFS/Subsystems/Kernel/Variables/DumpKmallocStack.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/StringVariable.cpp
     FileSystem/SysFS/Subsystems/Kernel/Variables/UBSANDeadly.cpp
-    FileSystem/TmpFS/FileSystem.cpp
-    FileSystem/TmpFS/Inode.cpp
     FileSystem/VirtualFileSystem.cpp
     Firmware/BIOS.cpp
     Firmware/ACPI/Initialize.cpp
@@ -221,7 +230,6 @@ set(KERNEL_SOURCES
     Memory/AnonymousVMObject.cpp
     Memory/InodeVMObject.cpp
     Memory/MemoryManager.cpp
-    Memory/PageDirectory.cpp
     Memory/PhysicalPage.cpp
     Memory/PhysicalRegion.cpp
     Memory/PhysicalZone.cpp
@@ -238,11 +246,8 @@ set(KERNEL_SOURCES
     MiniStdLib.cpp
     Locking/LockRank.cpp
     Locking/Mutex.cpp
-    Locking/Spinlock.cpp
     Net/Intel/E1000ENetworkAdapter.cpp
     Net/Intel/E1000NetworkAdapter.cpp
-    Net/NE2000/NetworkAdapter.cpp
-    Net/Realtek/RTL8139NetworkAdapter.cpp
     Net/Realtek/RTL8168NetworkAdapter.cpp
     Net/IPv4Socket.cpp
     Net/LocalSocket.cpp
@@ -256,13 +261,13 @@ set(KERNEL_SOURCES
     Net/UDPSocket.cpp
     PerformanceEventBuffer.cpp
     Process.cpp
-    ProcessExposed.cpp
-    ProcessSpecificExposed.cpp
     ProcessGroup.cpp
-    ProcessProcFSTraits.cpp
+    ProcessList.cpp
     Random.cpp
     Scheduler.cpp
+    ScopedCritical.cpp
     StdLib.cpp
+    Syscall.cpp
     Syscalls/anon_create.cpp
     Syscalls/alarm.cpp
     Syscalls/beep.cpp
@@ -274,10 +279,12 @@ set(KERNEL_SOURCES
     Syscalls/disown.cpp
     Syscalls/dup2.cpp
     Syscalls/emuctl.cpp
+    Syscalls/execve.cpp
     Syscalls/exit.cpp
     Syscalls/faccessat.cpp
     Syscalls/fallocate.cpp
     Syscalls/fcntl.cpp
+    Syscalls/fork.cpp
     Syscalls/fsync.cpp
     Syscalls/ftruncate.cpp
     Syscalls/futex.cpp
@@ -294,6 +301,7 @@ set(KERNEL_SOURCES
     Syscalls/lseek.cpp
     Syscalls/mkdir.cpp
     Syscalls/mknod.cpp
+    Syscalls/mmap.cpp
     Syscalls/mount.cpp
     Syscalls/open.cpp
     Syscalls/perf_event.cpp
@@ -303,6 +311,7 @@ set(KERNEL_SOURCES
     Syscalls/prctl.cpp
     Syscalls/process.cpp
     Syscalls/profiling.cpp
+    Syscalls/ptrace.cpp
     Syscalls/purge.cpp
     Syscalls/read.cpp
     Syscalls/readlink.cpp
@@ -314,6 +323,7 @@ set(KERNEL_SOURCES
     Syscalls/sendfd.cpp
     Syscalls/setpgid.cpp
     Syscalls/setuid.cpp
+    Syscalls/sigaction.cpp
     Syscalls/socket.cpp
     Syscalls/stat.cpp
     Syscalls/statvfs.cpp
@@ -349,97 +359,78 @@ set(KERNEL_SOURCES
     WorkQueue.cpp
 )
 
-if ("${SERENITY_ARCH}" STREQUAL "i686" OR "${SERENITY_ARCH}" STREQUAL "x86_64")
+if ("${SERENITY_ARCH}" STREQUAL "x86_64")
     set(KERNEL_SOURCES
         ${KERNEL_SOURCES}
-        Arch/x86/init.cpp
-
         Arch/Processor.cpp
 
-        Arch/x86/common/Interrupts/APIC.cpp
-        Arch/x86/common/Interrupts/IOAPIC.cpp
-        Arch/x86/common/Interrupts/PIC.cpp
+        Arch/x86_64/CMOS.cpp
+        Arch/x86_64/DebugOutput.cpp
+        Arch/x86_64/Delay.cpp
 
-        Arch/x86/common/CMOS.cpp
-        Arch/x86/common/DebugOutput.cpp
-        Arch/x86/common/Delay.cpp
-        Arch/x86/common/I8042Reboot.cpp
-        Arch/x86/common/PCSpeaker.cpp
-        Arch/x86/common/RTC.cpp
-        Arch/x86/common/ScopedCritical.cpp
-        Arch/x86/common/SmapDisabler.cpp
-        Arch/x86/common/Shutdown.cpp
+        Arch/x86_64/Hypervisor/BochsDisplayConnector.cpp
+        Arch/x86_64/Hypervisor/VMWareBackdoor.cpp
 
-        Arch/x86/CurrentTime.cpp
+        Arch/x86_64/CurrentTime.cpp
 
-        Arch/x86/Hypervisor/BochsDisplayConnector.cpp
-        Arch/x86/Hypervisor/VMWareBackdoor.cpp
+        Arch/x86_64/I8042Reboot.cpp
+        Arch/x86_64/Interrupts/APIC.cpp
+        Arch/x86_64/Interrupts/IOAPIC.cpp
+        Arch/x86_64/Interrupts/PIC.cpp
+        Arch/x86_64/Time/APICTimer.cpp
+        Arch/x86_64/Time/HPET.cpp
+        Arch/x86_64/Time/HPETComparator.cpp
+        Arch/x86_64/Time/PIT.cpp
+        Arch/x86_64/Time/RTC.cpp
+        Arch/x86_64/PCSpeaker.cpp
 
-        Arch/x86/ISABus/HID/PS2KeyboardDevice.cpp
-        Arch/x86/ISABus/HID/PS2MouseDevice.cpp
-        Arch/x86/ISABus/HID/VMWareMouseDevice.cpp
-        Arch/x86/ISABus/I8042Controller.cpp
-        Arch/x86/ISABus/IDEController.cpp
-        Arch/x86/ISABus/SerialDevice.cpp
-        Arch/x86/PCI/Controller/HostBridge.cpp
-        Arch/x86/PCI/IDELegacyModeController.cpp
-        Arch/x86/PCI/Initializer.cpp
+        Arch/x86_64/ISABus/HID/PS2KeyboardDevice.cpp
+        Arch/x86_64/ISABus/HID/PS2MouseDevice.cpp
+        Arch/x86_64/ISABus/HID/VMWareMouseDevice.cpp
+        Arch/x86_64/ISABus/I8042Controller.cpp
+        Arch/x86_64/ISABus/IDEController.cpp
+        Arch/x86_64/ISABus/SerialDevice.cpp
+        Arch/x86_64/PCI/Controller/HostBridge.cpp
+        Arch/x86_64/PCI/IDELegacyModeController.cpp
+        Arch/x86_64/PCI/Initializer.cpp
 
-        Arch/x86/Time/APICTimer.cpp
-        Arch/x86/Time/HPET.cpp
-        Arch/x86/Time/HPETComparator.cpp
-        Arch/x86/Time/PIT.cpp
-        Arch/x86/Time/RTC.cpp
+        Arch/x86_64/VGA/IOArbiter.cpp
 
-        Arch/x86/VGA/IOArbiter.cpp
+        Arch/x86_64/RTC.cpp
+        Arch/x86_64/Shutdown.cpp
+        Arch/x86_64/SmapDisabler.cpp
 
         # TODO: Share these with the aarch64 build
         Interrupts/SpuriousInterruptHandler.cpp
         kprintf.cpp
         Panic.cpp
-        Syscall.cpp
-        Syscalls/execve.cpp
-        Syscalls/fork.cpp
-        Syscalls/mmap.cpp
-        Syscalls/ptrace.cpp
-        Syscalls/sigaction.cpp
     )
 
     set(KERNEL_SOURCES
         ${KERNEL_SOURCES}
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/ASM_wrapper.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/Boot/ap_setup.S
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/InterruptEntry.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/Processor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/Boot/ap_setup.S
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/InterruptEntry.cpp
     )
 
     set(KERNEL_SOURCES
         ${KERNEL_SOURCES}
         
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/ASM_wrapper.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/CPU.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/CPUID.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/CrashHandler.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/InterruptManagement.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/Interrupts.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/PageDirectory.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/Processor.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/ProcessorInfo.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/SafeMem.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/TrapFrame.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/ASM_wrapper.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/CPU.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/CPUID.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/InterruptManagement.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/Interrupts.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/PageDirectory.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/Processor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/ProcessorInfo.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/SafeMem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/TrapFrame.cpp
     )
 
     if("${SERENITY_ARCH}" STREQUAL "x86_64")
         set(KERNEL_SOURCES
             ${KERNEL_SOURCES}
-            ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/SyscallEntry.cpp
-        )
-    endif()
-
-    if ("${SERENITY_ARCH}" STREQUAL "i686")
-        set(KERNEL_SOURCES
-            ${KERNEL_SOURCES}
-            ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/Atomics.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/SyscallEntry.cpp
         )
     endif()
 elseif("${SERENITY_ARCH}" STREQUAL "aarch64")
@@ -450,32 +441,36 @@ elseif("${SERENITY_ARCH}" STREQUAL "aarch64")
         Arch/aarch64/RPi/InterruptController.cpp
         Arch/aarch64/RPi/Mailbox.cpp
         Arch/aarch64/RPi/MMIO.cpp
+        Arch/aarch64/RPi/SDHostController.cpp
         Arch/aarch64/RPi/Timer.cpp
         Arch/aarch64/RPi/UART.cpp
     )
+    set(SOURCES_RUNNING_WITHOUT_MMU
+        Arch/aarch64/Exceptions.cpp
+        Arch/aarch64/MMU.cpp
+        Arch/aarch64/pre_init.cpp
+        )
     set(KERNEL_SOURCES
         ${KERNEL_SOURCES}
         ${RPI_SOURCES}
+        ${SOURCES_RUNNING_WITHOUT_MMU}
         Arch/Processor.cpp
 
         Arch/aarch64/boot.S
         Arch/aarch64/BootPPMParser.cpp
-        Arch/aarch64/CrashHandler.cpp
+        Arch/aarch64/CPUID.cpp
         Arch/aarch64/CurrentTime.cpp
         Arch/aarch64/Dummy.cpp
-        Arch/aarch64/Exceptions.cpp
-        Arch/aarch64/init.cpp
         Arch/aarch64/InterruptManagement.cpp
         Arch/aarch64/Interrupts.cpp
         Arch/aarch64/kprintf.cpp
         Arch/aarch64/MainIdRegister.cpp
-        Arch/aarch64/MMU.cpp
         Arch/aarch64/PageDirectory.cpp
         Arch/aarch64/Panic.cpp
         Arch/aarch64/Processor.cpp
         Arch/aarch64/SafeMem.cpp
-        Arch/aarch64/ScopedCritical.cpp
         Arch/aarch64/SmapDisabler.cpp
+        Arch/aarch64/TrapFrame.cpp
         Arch/aarch64/vector_table.S
     )
 
@@ -484,15 +479,23 @@ elseif("${SERENITY_ARCH}" STREQUAL "aarch64")
 
     # FIXME: Remove this once compiling MemoryManager.cpp doesn't give the nonnull error anymore.
     add_compile_options(-Wno-nonnull)
+
+    # NOTE: These files cannot use a stack protector and sanitizers, as these will cause accesses to global variables to be inserted
+    #       by the compiler. The CPU cannot access global variables without the MMU as the kernel is linked for a virtual address in high memory.
+    set_source_files_properties(${SOURCES_RUNNING_WITHOUT_MMU} PROPERTIES COMPILE_FLAGS "-fno-stack-protector -fno-sanitize=all")
 endif()
 
 set(AK_SOURCES
+    ../AK/DOSPackedTime.cpp
     ../AK/GenericLexer.cpp
     ../AK/Hex.cpp
+    ../AK/MemoryStream.cpp
+    ../AK/Stream.cpp
     ../AK/StringBuilder.cpp
     ../AK/StringUtils.cpp
     ../AK/StringView.cpp
     ../AK/Time.cpp
+    ../AK/Error.cpp
     ../AK/Format.cpp
     ../AK/UUID.cpp
 )
@@ -556,7 +559,7 @@ add_compile_options(-fsigned-char)
 add_compile_options(-Wno-unknown-warning-option -Wvla -Wnull-dereference)
 add_compile_options(-fno-rtti -ffreestanding -fbuiltin)
 
-if ("${SERENITY_ARCH}" STREQUAL "i686" OR "${SERENITY_ARCH}" STREQUAL "x86_64")
+if ("${SERENITY_ARCH}" STREQUAL "x86_64")
     add_compile_options(-mno-80387 -mno-mmx -mno-sse -mno-sse2)
 elseif("${SERENITY_ARCH}" STREQUAL "aarch64")
     add_compile_options(-mgeneral-regs-only)
@@ -617,8 +620,6 @@ endmacro()
 if ("${SERENITY_ARCH}" STREQUAL "x86_64")
     add_compile_options(-mcmodel=large -mno-red-zone)
     set_new_alignment(8)
-elseif ("${SERENITY_ARCH}" STREQUAL "i686")
-    set_new_alignment(4)
 endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-pie")
@@ -632,9 +633,10 @@ if (ENABLE_KERNEL_COVERAGE_COLLECTION)
     set(KCOV_EXCLUDED_SOURCES
         # Make sure we don't instrument any code called from __sanitizer_cov_trace_pc
         # otherwise we'll end up with recursive calls to that function.
+        ../AK/Error.cpp
         ../AK/Format.cpp
         ../AK/StringBuilder.cpp
-        ../Kernel/Arch/x86/${KERNEL_ARCH}/Processor.cpp
+        ../Kernel/Arch/x86_64/Processor.cpp
         ../Kernel/Devices/KCOVDevice.cpp
         ../Kernel/Devices/KCOVInstance.cpp
         ../Kernel/FileSystem/File.cpp
@@ -646,7 +648,7 @@ if (ENABLE_KERNEL_COVERAGE_COLLECTION)
         # function prologue for all functions. This assumption is not true for
         # interrupt handlers because their calling convention is not compatible
         # with the System V ABI.
-        ../Kernel/Arch/x86/common/Interrupts.cpp
+        ../Kernel/Arch/x86_64/Interrupts.cpp
         ../Kernel/Syscall.cpp
     )
     set_source_files_properties(${KCOV_EXCLUDED_SOURCES} PROPERTIES COMPILE_FLAGS "-fno-sanitize-coverage=trace-pc")
@@ -688,8 +690,8 @@ add_dependencies(Kernel generate_EscapeSequenceStateMachine.h generate_version_h
 if (NOT "${SERENITY_ARCH}" STREQUAL "aarch64")
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/linker.ld
-        COMMAND "${CMAKE_CXX_COMPILER}" ${TARGET_STRING} -E -P -x c -I${CMAKE_CURRENT_SOURCE_DIR}/.. "${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/linker.ld" -o "${CMAKE_CURRENT_BINARY_DIR}/linker.ld"
-        MAIN_DEPENDENCY "Arch/x86/linker.ld"
+        COMMAND "${CMAKE_CXX_COMPILER}" ${TARGET_STRING} -E -P -x c -I${CMAKE_CURRENT_SOURCE_DIR}/.. "${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86_64/linker.ld" -o "${CMAKE_CURRENT_BINARY_DIR}/linker.ld"
+        MAIN_DEPENDENCY "Arch/x86_64/linker.ld"
         COMMENT "Preprocessing linker.ld"
         VERBATIM
     )

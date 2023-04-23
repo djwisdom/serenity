@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -9,6 +9,7 @@
 #pragma once
 
 #include <AK/HashMap.h>
+#include <AK/Queue.h>
 #include <LibIPC/ConnectionFromClient.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Handle.h>
@@ -34,7 +35,7 @@ public:
 
     void initialize_js_console(Badge<PageHost>);
 
-    void request_file(NonnullRefPtr<Web::FileRequest>&);
+    void request_file(Web::FileRequest);
 
     Optional<int> fd() { return socket().fd(); }
 
@@ -42,11 +43,13 @@ public:
     PageHost const& page_host() const { return *m_page_host; }
 
 private:
-    explicit ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSocket>);
+    explicit ConnectionFromClient(NonnullOwnPtr<Core::LocalSocket>);
 
     Web::Page& page();
     Web::Page const& page() const;
 
+    virtual Messages::WebContentServer::GetWindowHandleResponse get_window_handle() override;
+    virtual void set_window_handle(String const& handle) override;
     virtual void connect_to_webdriver(DeprecatedString const& webdriver_ipc_path) override;
     virtual void update_system_theme(Core::AnonymousBuffer const&) override;
     virtual void update_system_fonts(DeprecatedString const&, DeprecatedString const&, DeprecatedString const&) override;
@@ -68,13 +71,17 @@ private:
     virtual void get_source() override;
     virtual void inspect_dom_tree() override;
     virtual Messages::WebContentServer::InspectDomNodeResponse inspect_dom_node(i32 node_id, Optional<Web::CSS::Selector::PseudoElement> const& pseudo_element) override;
+    virtual void inspect_accessibility_tree() override;
     virtual Messages::WebContentServer::GetHoveredNodeIdResponse get_hovered_node_id() override;
     virtual Messages::WebContentServer::DumpLayoutTreeResponse dump_layout_tree() override;
-    virtual void set_content_filters(Vector<DeprecatedString> const&) override;
+    virtual void set_content_filters(Vector<String> const&) override;
+    virtual void set_autoplay_allowed_on_all_websites() override;
+    virtual void set_autoplay_allowlist(Vector<String> const& allowlist) override;
     virtual void set_proxy_mappings(Vector<DeprecatedString> const&, HashMap<DeprecatedString, size_t> const&) override;
     virtual void set_preferred_color_scheme(Web::CSS::PreferredColorScheme const&) override;
     virtual void set_has_focus(bool) override;
     virtual void set_is_scripting_enabled(bool) override;
+    virtual void set_device_pixels_per_css_pixel(float) override;
     virtual void set_window_position(Gfx::IntPoint) override;
     virtual void set_window_size(Gfx::IntSize) override;
     virtual void handle_file_return(i32 error, Optional<IPC::File> const& file, i32 request_id) override;
@@ -86,7 +93,7 @@ private:
 
     virtual void alert_closed() override;
     virtual void confirm_closed(bool accepted) override;
-    virtual void prompt_closed(DeprecatedString const& response) override;
+    virtual void prompt_closed(Optional<String> const& response) override;
 
     virtual Messages::WebContentServer::TakeDocumentScreenshotResponse take_document_screenshot() override;
 
@@ -115,8 +122,44 @@ private:
     OwnPtr<WebContentConsoleClient> m_console_client;
     JS::Handle<JS::GlobalObject> m_console_global_object;
 
-    HashMap<int, NonnullRefPtr<Web::FileRequest>> m_requested_files {};
+    HashMap<int, Web::FileRequest> m_requested_files {};
     int last_id { 0 };
+
+    struct QueuedMouseEvent {
+        enum class Type {
+            MouseMove,
+            MouseDown,
+            MouseUp,
+            MouseWheel,
+            DoubleClick,
+        };
+        Type type {};
+        Gfx::IntPoint position {};
+        unsigned button {};
+        unsigned buttons {};
+        unsigned modifiers {};
+        int wheel_delta_x {};
+        int wheel_delta_y {};
+        size_t coalesced_event_count { 0 };
+    };
+
+    struct QueuedKeyboardEvent {
+        enum class Type {
+            KeyDown,
+            KeyUp,
+        };
+        Type type {};
+        i32 key {};
+        unsigned int modifiers {};
+        u32 code_point {};
+    };
+
+    void enqueue_input_event(Variant<QueuedMouseEvent, QueuedKeyboardEvent>);
+    void process_next_input_event();
+
+    Queue<Variant<QueuedMouseEvent, QueuedKeyboardEvent>> m_input_event_queue;
+
+    RefPtr<Web::Platform::Timer> m_input_event_queue_timer;
 };
 
 }

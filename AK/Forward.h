@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/DefaultDelete.h>
+#include <AK/SinglyLinkedListSizePolicy.h>
 #include <AK/Types.h>
 
 namespace AK {
@@ -16,37 +17,40 @@ template<size_t inline_capacity>
 class ByteBuffer;
 }
 
+class BigEndianInputBitStream;
+class BigEndianOutputBitStream;
 class Bitmap;
 using ByteBuffer = Detail::ByteBuffer<32>;
+class CircularBuffer;
+class ConstrainedStream;
+class CountingStream;
+class DeprecatedFlyString;
+class DeprecatedString;
+class DeprecatedStringCodePointIterator;
 class Error;
+class FlyString;
 class GenericLexer;
 class IPv4Address;
 class JsonArray;
 class JsonObject;
 class JsonValue;
+class LexicalPath;
+class LittleEndianInputBitStream;
+class LittleEndianOutputBitStream;
+class SeekableStream;
 class StackInfo;
-class DeprecatedString;
+class Stream;
+class String;
 class StringBuilder;
 class StringImpl;
 class StringView;
 class Time;
 class URL;
-class FlyString;
-class String;
 class Utf16View;
+class Utf32CodePointIterator;
 class Utf32View;
 class Utf8CodePointIterator;
 class Utf8View;
-class InputStream;
-class InputMemoryStream;
-class DuplexMemoryStream;
-class OutputStream;
-class InputBitStream;
-class OutputBitStream;
-class OutputMemoryStream;
-
-template<size_t Capacity>
-class CircularDuplexStream;
 
 template<typename T>
 class Span;
@@ -57,13 +61,16 @@ struct Array;
 template<typename Container, typename ValueType>
 class SimpleIterator;
 
-using ReadonlyBytes = Span<u8 const>;
+template<typename T>
+using ReadonlySpan = Span<T const>;
+
+using ReadonlyBytes = ReadonlySpan<u8>;
 using Bytes = Span<u8>;
 
 template<typename T, AK::MemoryOrder DefaultMemoryOrder>
 class Atomic;
 
-template<typename T>
+template<typename T, typename TSizeCalculationPolicy = DefaultSizeCalculationPolicy>
 class SinglyLinkedList;
 
 template<typename T>
@@ -108,21 +115,12 @@ class NonnullRefPtr;
 template<typename T>
 class NonnullOwnPtr;
 
-template<typename T, size_t inline_capacity = 0>
-class NonnullOwnPtrVector;
-
-template<typename T, size_t inline_capacity = 0>
-class NonnullRefPtrVector;
-
 template<typename T>
 class Optional;
 
 #ifdef KERNEL
 template<typename T>
 class NonnullLockRefPtr;
-
-template<typename T, size_t inline_capacity = 0>
-class NonnullLockRefPtrVector;
 
 template<typename T>
 struct LockRefPtrTraits;
@@ -152,14 +150,19 @@ class [[nodiscard]] ErrorOr;
 using AK::Array;
 using AK::Atomic;
 using AK::Badge;
+using AK::BigEndianInputBitStream;
+using AK::BigEndianOutputBitStream;
 using AK::Bitmap;
 using AK::ByteBuffer;
 using AK::Bytes;
-using AK::CircularDuplexStream;
+using AK::CircularBuffer;
 using AK::CircularQueue;
+using AK::ConstrainedStream;
+using AK::CountingStream;
+using AK::DeprecatedFlyString;
 using AK::DeprecatedString;
+using AK::DeprecatedStringCodePointIterator;
 using AK::DoublyLinkedList;
-using AK::DuplexMemoryStream;
 using AK::Error;
 using AK::ErrorOr;
 using AK::FixedArray;
@@ -169,27 +172,24 @@ using AK::Function;
 using AK::GenericLexer;
 using AK::HashMap;
 using AK::HashTable;
-using AK::InputBitStream;
-using AK::InputMemoryStream;
-using AK::InputStream;
 using AK::IPv4Address;
 using AK::JsonArray;
 using AK::JsonObject;
 using AK::JsonValue;
+using AK::LexicalPath;
+using AK::LittleEndianInputBitStream;
+using AK::LittleEndianOutputBitStream;
 using AK::NonnullOwnPtr;
-using AK::NonnullOwnPtrVector;
 using AK::NonnullRefPtr;
-using AK::NonnullRefPtrVector;
 using AK::Optional;
-using AK::OutputBitStream;
-using AK::OutputMemoryStream;
-using AK::OutputStream;
 using AK::OwnPtr;
 using AK::ReadonlyBytes;
 using AK::RefPtr;
+using AK::SeekableStream;
 using AK::SinglyLinkedList;
 using AK::Span;
 using AK::StackInfo;
+using AK::Stream;
 using AK::String;
 using AK::StringBuilder;
 using AK::StringImpl;
@@ -198,6 +198,7 @@ using AK::Time;
 using AK::Traits;
 using AK::URL;
 using AK::Utf16View;
+using AK::Utf32CodePointIterator;
 using AK::Utf32View;
 using AK::Utf8CodePointIterator;
 using AK::Utf8View;
@@ -207,7 +208,6 @@ using AK::Vector;
 using AK::LockRefPtr;
 using AK::LockRefPtrTraits;
 using AK::NonnullLockRefPtr;
-using AK::NonnullLockRefPtrVector;
 #    endif
 
 #endif

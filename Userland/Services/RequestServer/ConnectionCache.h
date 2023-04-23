@@ -9,7 +9,6 @@
 
 #include <AK/Debug.h>
 #include <AK/HashMap.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/URL.h>
 #include <AK/Vector.h>
 #include <LibCore/ElapsedTimer.h>
@@ -44,7 +43,7 @@ struct Proxy {
             if constexpr (requires { SocketType::connect(declval<DeprecatedString>(), *proxy_client_storage, forward<Args>(args)...); }) {
                 proxy_client_storage = TRY(Core::SOCKSProxyClient::connect(data.host_ipv4, data.port, Core::SOCKSProxyClient::Version::V5, url.host(), url.port_or_default()));
                 return TRY(SocketType::connect(url.host(), *proxy_client_storage, forward<Args>(args)...));
-            } else if constexpr (IsSame<SocketType, Core::Stream::TCPSocket>) {
+            } else if constexpr (IsSame<SocketType, Core::TCPSocket>) {
                 return TRY(Core::SOCKSProxyClient::connect(data.host_ipv4, data.port, Core::SOCKSProxyClient::Version::V5, url.host(), url.port_or_default()));
             } else {
                 return Error::from_string_literal("SOCKS5 not supported for this socket type");
@@ -57,7 +56,7 @@ struct Proxy {
 template<typename Socket, typename SocketStorageType = Socket>
 struct Connection {
     struct JobData {
-        Function<void(Core::Stream::Socket&)> start {};
+        Function<void(Core::Socket&)> start {};
         Function<void(Core::NetworkJob::Error)> fail {};
         Function<Vector<TLS::Certificate>()> provide_client_certificates {};
 
@@ -91,7 +90,7 @@ struct Connection {
     using SocketType = Socket;
     using StorageType = SocketStorageType;
 
-    NonnullOwnPtr<Core::Stream::BufferedSocket<SocketStorageType>> socket;
+    NonnullOwnPtr<Core::BufferedSocket<SocketStorageType>> socket;
     QueueType request_queue;
     NonnullRefPtr<Core::Timer> removal_timer;
     bool has_started { false };
@@ -121,10 +120,10 @@ struct AK::Traits<RequestServer::ConnectionCache::ConnectionKey> : public AK::Ge
 
 namespace RequestServer::ConnectionCache {
 
-extern HashMap<ConnectionKey, NonnullOwnPtr<NonnullOwnPtrVector<Connection<Core::Stream::TCPSocket, Core::Stream::Socket>>>> g_tcp_connection_cache;
-extern HashMap<ConnectionKey, NonnullOwnPtr<NonnullOwnPtrVector<Connection<TLS::TLSv12>>>> g_tls_connection_cache;
+extern HashMap<ConnectionKey, NonnullOwnPtr<Vector<NonnullOwnPtr<Connection<Core::TCPSocket, Core::Socket>>>>> g_tcp_connection_cache;
+extern HashMap<ConnectionKey, NonnullOwnPtr<Vector<NonnullOwnPtr<Connection<TLS::TLSv12>>>>> g_tls_connection_cache;
 
-void request_did_finish(URL const&, Core::Stream::Socket const*);
+void request_did_finish(URL const&, Core::Socket const*);
 void dump_jobs();
 
 constexpr static size_t MaxConcurrentConnectionsPerURL = 4;
@@ -139,7 +138,7 @@ ErrorOr<void> recreate_socket_if_needed(T& connection, URL const& url)
     if (!connection.socket->is_open() || connection.socket->is_eof()) {
         // Create another socket for the connection.
         auto set_socket = [&](auto socket) -> ErrorOr<void> {
-            connection.socket = TRY(Core::Stream::BufferedSocket<SocketStorageType>::create(move(socket)));
+            connection.socket = TRY(Core::BufferedSocket<SocketStorageType>::create(move(socket)));
             return {};
         };
 
@@ -147,9 +146,9 @@ ErrorOr<void> recreate_socket_if_needed(T& connection, URL const& url)
             TLS::Options options;
             options.set_alert_handler([&connection](TLS::AlertDescription alert) {
                 Core::NetworkJob::Error reason;
-                if (alert == TLS::AlertDescription::HandshakeFailure)
+                if (alert == TLS::AlertDescription::HANDSHAKE_FAILURE)
                     reason = Core::NetworkJob::Error::ProtocolFailed;
-                else if (alert == TLS::AlertDescription::DecryptError)
+                else if (alert == TLS::AlertDescription::DECRYPT_ERROR)
                     reason = Core::NetworkJob::Error::ConnectionFailed;
                 else
                     reason = Core::NetworkJob::Error::TransmissionFailed;
@@ -178,12 +177,12 @@ decltype(auto) get_or_create_connection(auto& cache, URL const& url, auto& job, 
 
     Proxy proxy { proxy_data };
 
-    using ReturnType = decltype(&sockets_for_url[0]);
+    using ReturnType = decltype(sockets_for_url[0].ptr());
     auto it = sockets_for_url.find_if([](auto& connection) { return connection->request_queue.is_empty(); });
     auto did_add_new_connection = false;
     auto failed_to_find_a_socket = it.is_end();
     if (failed_to_find_a_socket && sockets_for_url.size() < ConnectionCache::MaxConcurrentConnectionsPerURL) {
-        using ConnectionType = RemoveCVReference<decltype(cache.begin()->value->at(0))>;
+        using ConnectionType = RemoveCVReference<decltype(*cache.begin()->value->at(0))>;
         auto connection_result = proxy.tunnel<typename ConnectionType::SocketType, typename ConnectionType::StorageType>(url);
         if (connection_result.is_error()) {
             dbgln("ConnectionCache: Connection to {} failed: {}", url, connection_result.error());
@@ -192,7 +191,7 @@ decltype(auto) get_or_create_connection(auto& cache, URL const& url, auto& job, 
             });
             return ReturnType { nullptr };
         }
-        auto socket_result = Core::Stream::BufferedSocket<typename ConnectionType::StorageType>::create(connection_result.release_value());
+        auto socket_result = Core::BufferedSocket<typename ConnectionType::StorageType>::create(connection_result.release_value());
         if (socket_result.is_error()) {
             dbgln("ConnectionCache: Failed to make a buffered socket for {}: {}", url, socket_result.error());
             Core::deferred_invoke([&job] {
@@ -203,8 +202,8 @@ decltype(auto) get_or_create_connection(auto& cache, URL const& url, auto& job, 
         sockets_for_url.append(make<ConnectionType>(
             socket_result.release_value(),
             typename ConnectionType::QueueType {},
-            Core::Timer::create_single_shot(ConnectionKeepAliveTimeMilliseconds, nullptr)));
-        sockets_for_url.last().proxy = move(proxy);
+            Core::Timer::create_single_shot(ConnectionKeepAliveTimeMilliseconds, nullptr).release_value_but_fixme_should_propagate_errors()));
+        sockets_for_url.last()->proxy = move(proxy);
         did_add_new_connection = true;
     }
     size_t index;
@@ -216,7 +215,7 @@ decltype(auto) get_or_create_connection(auto& cache, URL const& url, auto& job, 
             index = 0;
             auto min_queue_size = (size_t)-1;
             for (auto it = sockets_for_url.begin(); it != sockets_for_url.end(); ++it) {
-                if (auto queue_size = it->request_queue.size(); min_queue_size > queue_size) {
+                if (auto queue_size = (*it)->request_queue.size(); min_queue_size > queue_size) {
                     index = it.index();
                     min_queue_size = queue_size;
                 }
@@ -232,7 +231,7 @@ decltype(auto) get_or_create_connection(auto& cache, URL const& url, auto& job, 
         return ReturnType { nullptr };
     }
 
-    auto& connection = sockets_for_url[index];
+    auto& connection = *sockets_for_url[index];
     if (!connection.has_started) {
         if (auto result = recreate_socket_if_needed(connection, url); result.is_error()) {
             dbgln("ConnectionCache: request failed to start, failed to make a socket: {}", result.error());

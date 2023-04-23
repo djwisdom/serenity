@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
  * Copyright (c) 2022, Filiph Sandström <filiph.sandstrom@filfatstudios.com>
  *
@@ -59,7 +59,7 @@ private:
 class Palette {
 
 public:
-    explicit Palette(PaletteImpl const&);
+    explicit Palette(NonnullRefPtr<PaletteImpl>);
     ~Palette() = default;
 
     Color accent() const { return color(ColorRole::Accent); }
@@ -117,10 +117,15 @@ public:
     Color ruler_inactive_text() const { return color(ColorRole::RulerInactiveText); }
     Color text_cursor() const { return color(ColorRole::TextCursor); }
     Color focus_outline() const { return color(ColorRole::FocusOutline); }
+<<<<<<< HEAD
     Color active_slider_gradient1() const { return color(ColorRole::ActiveSliderGradient1); }
     Color active_slider_gradient2() const { return color(ColorRole::ActiveSliderGradient2); }
     Color inactive_slider_gradient1() const { return color(ColorRole::InactiveSliderGradient1); }
     Color inactive_slider_gradient2() const { return color(ColorRole::InactiveSliderGradient2); }
+=======
+    Color tray() const { return color(ColorRole::Tray); }
+    Color tray_text() const { return color(ColorRole::TrayText); }
+>>>>>>> master
 
     Color link() const { return color(ColorRole::Link); }
     Color active_link() const { return color(ColorRole::ActiveLink); }
@@ -144,8 +149,30 @@ public:
     Color syntax_member() const { return color(ColorRole::SyntaxMember); }
     Color syntax_parameter() const { return color(ColorRole::SyntaxParameter); }
 
+    Color background() const { return color(ColorRole::ColorSchemeBackground); }
+    Color foreground() const { return color(ColorRole::ColorSchemeForeground); }
+
+    Color black() const { return color(ColorRole::Black); }
+    Color red() const { return color(ColorRole::Red); }
+    Color green() const { return color(ColorRole::Green); }
+    Color yellow() const { return color(ColorRole::Yellow); }
+    Color blue() const { return color(ColorRole::Blue); }
+    Color magenta() const { return color(ColorRole::Magenta); }
+    Color cyan() const { return color(ColorRole::Cyan); }
+    Color white() const { return color(ColorRole::White); }
+
+    Color bright_black() const { return color(ColorRole::BrightBlack); }
+    Color bright_red() const { return color(ColorRole::BrightRed); }
+    Color bright_green() const { return color(ColorRole::BrightGreen); }
+    Color bright_yellow() const { return color(ColorRole::BrightYellow); }
+    Color bright_blue() const { return color(ColorRole::BrightBlue); }
+    Color bright_magenta() const { return color(ColorRole::BrightMagenta); }
+    Color bright_cyan() const { return color(ColorRole::BrightCyan); }
+    Color bright_white() const { return color(ColorRole::BrightWhite); }
+
     Gfx::TextAlignment title_alignment() const { return alignment(AlignmentRole::TitleAlignment); }
 
+    bool bold_text_as_bright() const { return flag(FlagRole::BoldTextAsBright); }
     bool is_dark() const { return flag(FlagRole::IsDark); }
     bool title_buttons_icon_only() const { return flag(FlagRole::TitleButtonsIconOnly); }
 
@@ -161,6 +188,7 @@ public:
     DeprecatedString menu_shadow_path() const { return path(PathRole::MenuShadow); }
     DeprecatedString taskbar_shadow_path() const { return path(PathRole::TaskbarShadow); }
     DeprecatedString tooltip_shadow_path() const { return path(PathRole::TooltipShadow); }
+    DeprecatedString color_scheme_path() const { return path(PathRole::ColorScheme); }
 
     Color color(ColorRole role) const { return m_impl->color(role); }
     Gfx::TextAlignment alignment(AlignmentRole role) const { return m_impl->alignment(role); }

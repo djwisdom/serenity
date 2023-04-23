@@ -8,6 +8,7 @@
 #include "PromotionDialog.h"
 #include <AK/DeprecatedString.h>
 #include <AK/Random.h>
+#include <AK/String.h>
 #include <LibCore/DateTime.h>
 #include <LibCore/File.h>
 #include <LibGUI/MessageBox.h>
@@ -18,9 +19,12 @@
 #include <LibGfx/Path.h>
 #include <unistd.h>
 
-ChessWidget::ChessWidget()
+ErrorOr<NonnullRefPtr<ChessWidget>> ChessWidget::try_create()
 {
-    set_piece_set("stelar7"sv);
+    auto widget = TRY(AK::adopt_nonnull_ref_or_enomem(new (nothrow) ChessWidget));
+    widget->set_piece_set("stelar7"sv);
+
+    return widget;
 }
 
 void ChessWidget::paint_event(GUI::PaintEvent& event)
@@ -34,12 +38,13 @@ void ChessWidget::paint_event(GUI::PaintEvent& event)
     GUI::Painter painter(*this);
     painter.add_clip_rect(event.rect());
 
-    painter.fill_rect({ 0, 0, width(), height() }, Color::Black);
+    painter.fill_rect(frame_inner_rect(), Color::Black);
 
     painter.translate(frame_thickness() + widget_offset_x, frame_thickness() + widget_offset_y);
 
-    size_t tile_width = min_size / 8;
-    size_t tile_height = min_size / 8;
+    auto square_width = min_size / 8;
+    auto square_height = min_size / 8;
+    auto square_margin = square_width / 10;
     int coord_rank_file = (side() == Chess::Color::White) ? 0 : 7;
 
     Chess::Board& active_board = (m_playback ? board_playback() : board());
@@ -49,9 +54,9 @@ void ChessWidget::paint_event(GUI::PaintEvent& event)
     Chess::Square::for_each([&](Chess::Square sq) {
         Gfx::IntRect tile_rect;
         if (side() == Chess::Color::White) {
-            tile_rect = { sq.file * tile_width, (7 - sq.rank) * tile_height, tile_width, tile_height };
+            tile_rect = { sq.file * square_width, (7 - sq.rank) * square_height, square_width, square_height };
         } else {
-            tile_rect = { (7 - sq.file) * tile_width, sq.rank * tile_height, tile_width, tile_height };
+            tile_rect = { (7 - sq.file) * square_width, sq.rank * square_height, square_width, square_height };
         }
 
         painter.fill_rect(tile_rect, (sq.is_light()) ? board_theme().light_square_color : board_theme().dark_square_color);
@@ -83,7 +88,7 @@ void ChessWidget::paint_event(GUI::PaintEvent& event)
         if (!(m_dragging_piece && sq == m_moving_square)) {
             auto bmp = m_pieces.get(active_board.get_piece(sq));
             if (bmp.has_value()) {
-                painter.draw_scaled_bitmap(tile_rect, *bmp.value(), bmp.value()->rect());
+                painter.draw_scaled_bitmap(tile_rect.shrunken(square_margin, square_margin, square_margin, square_margin), *bmp.value(), bmp.value()->rect(), 1.0f, Gfx::Painter::ScalingMode::BilinearBlend);
             }
         }
 
@@ -128,28 +133,28 @@ void ChessWidget::paint_event(GUI::PaintEvent& event)
             Gfx::FloatPoint arrow_end;
 
             if (side() == Chess::Color::White) {
-                arrow_start = { m.from.file * tile_width + tile_width / 2.0f, (7 - m.from.rank) * tile_height + tile_height / 2.0f };
-                arrow_end = { m.to.file * tile_width + tile_width / 2.0f, (7 - m.to.rank) * tile_height + tile_height / 2.0f };
+                arrow_start = { m.from.file * square_width + square_width / 2.0f, (7 - m.from.rank) * square_height + square_height / 2.0f };
+                arrow_end = { m.to.file * square_width + square_width / 2.0f, (7 - m.to.rank) * square_height + square_height / 2.0f };
             } else {
-                arrow_start = { (7 - m.from.file) * tile_width + tile_width / 2.0f, m.from.rank * tile_height + tile_height / 2.0f };
-                arrow_end = { (7 - m.to.file) * tile_width + tile_width / 2.0f, m.to.rank * tile_height + tile_height / 2.0f };
+                arrow_start = { (7 - m.from.file) * square_width + square_width / 2.0f, m.from.rank * square_height + square_height / 2.0f };
+                arrow_end = { (7 - m.to.file) * square_width + square_width / 2.0f, m.to.rank * square_height + square_height / 2.0f };
             }
 
             Gfx::Color color = m.secondary_color ? m_marking_secondary_color : (m.alternate_color ? m_marking_primary_color : m_marking_alternate_color);
-            draw_arrow(arrow_start, arrow_end, tile_width / 8.0f, tile_width / 10.0f, tile_height / 2.5f, color);
+            draw_arrow(arrow_start, arrow_end, square_width / 8.0f, square_width / 10.0f, square_height / 2.5f, color);
         }
     }
 
     if (m_dragging_piece) {
         if (m_show_available_moves) {
             Gfx::IntPoint move_point;
-            Gfx::IntPoint point_offset = { tile_width / 3, tile_height / 3 };
-            Gfx::IntSize rect_size = { tile_width / 3, tile_height / 3 };
+            Gfx::IntPoint point_offset = { square_width / 3, square_height / 3 };
+            Gfx::IntSize rect_size = { square_width / 3, square_height / 3 };
             for (auto const& square : m_available_moves) {
                 if (side() == Chess::Color::White) {
-                    move_point = { square.file * tile_width, (7 - square.rank) * tile_height };
+                    move_point = { square.file * square_width, (7 - square.rank) * square_height };
                 } else {
-                    move_point = { (7 - square.file) * tile_width, square.rank * tile_height };
+                    move_point = { (7 - square.file) * square_width, square.rank * square_height };
                 }
 
                 Gfx::AntiAliasingPainter aa_painter { painter };
@@ -159,16 +164,16 @@ void ChessWidget::paint_event(GUI::PaintEvent& event)
 
         Gfx::IntRect origin_square;
         if (side() == Chess::Color::White) {
-            origin_square = { m_moving_square.file * tile_width, (7 - m_moving_square.rank) * tile_height, tile_width, tile_height };
+            origin_square = { m_moving_square.file * square_width, (7 - m_moving_square.rank) * square_height, square_width, square_height };
         } else {
-            origin_square = { (7 - m_moving_square.file) * tile_width, m_moving_square.rank * tile_height, tile_width, tile_height };
+            origin_square = { (7 - m_moving_square.file) * square_width, m_moving_square.rank * square_height, square_width, square_height };
         }
         painter.fill_rect(origin_square, m_move_highlight_color);
 
         auto bmp = m_pieces.get(active_board.get_piece(m_moving_square));
         if (bmp.has_value()) {
-            auto center = m_drag_point - Gfx::IntPoint(tile_width / 2, tile_height / 2);
-            painter.draw_scaled_bitmap({ center, { tile_width, tile_height } }, *bmp.value(), bmp.value()->rect());
+            auto center = m_drag_point - Gfx::IntPoint(square_width / 2, square_height / 2);
+            painter.draw_scaled_bitmap({ center, { square_width, square_height } }, *bmp.value(), bmp.value()->rect(), 1.0f, Gfx::Painter::ScalingMode::BilinearBlend);
         }
     }
 }
@@ -371,7 +376,7 @@ void ChessWidget::keydown_event(GUI::KeyEvent& event)
     update();
 }
 
-static DeprecatedString set_path = DeprecatedString("/res/icons/chess/sets/");
+static constexpr StringView set_path = "/res/icons/chess/sets/"sv;
 
 static RefPtr<Gfx::Bitmap> get_piece(StringView set, StringView image)
 {
@@ -380,7 +385,7 @@ static RefPtr<Gfx::Bitmap> get_piece(StringView set, StringView image)
     builder.append(set);
     builder.append('/');
     builder.append(image);
-    return Gfx::Bitmap::try_load_from_file(builder.build()).release_value_but_fixme_should_propagate_errors();
+    return Gfx::Bitmap::load_from_file(builder.to_deprecated_string()).release_value_but_fixme_should_propagate_errors();
 }
 
 void ChessWidget::set_piece_set(StringView set)
@@ -406,17 +411,17 @@ Chess::Square ChessWidget::mouse_to_square(GUI::MouseEvent& event) const
     int const widget_offset_x = (window()->width() - min_size) / 2;
     int const widget_offset_y = (window()->height() - min_size) / 2;
 
-    int tile_width = min_size / 8;
-    int tile_height = min_size / 8;
+    int square_width = min_size / 8;
+    int square_height = min_size / 8;
 
     if (side() == Chess::Color::White) {
-        return { 7 - ((event.y() - widget_offset_y) / tile_height), (event.x() - widget_offset_x) / tile_width };
+        return { 7 - ((event.y() - widget_offset_y) / square_height), (event.x() - widget_offset_x) / square_width };
     } else {
-        return { (event.y() - widget_offset_y) / tile_height, 7 - ((event.x() - widget_offset_x) / tile_width) };
+        return { (event.y() - widget_offset_y) / square_height, 7 - ((event.x() - widget_offset_x) / square_width) };
     }
 }
 
-RefPtr<Gfx::Bitmap> ChessWidget::get_piece_graphic(Chess::Piece const& piece) const
+RefPtr<Gfx::Bitmap const> ChessWidget::get_piece_graphic(Chess::Piece const& piece) const
 {
     return m_pieces.get(piece).value();
 }
@@ -439,11 +444,11 @@ void ChessWidget::set_board_theme(StringView name)
     // FIXME: Add some kind of themes.json
     // The following Colors have been taken from lichess.org, but i'm pretty sure they took them from chess.com.
     if (name == "Beige") {
-        m_board_theme = { "Beige", Color::from_rgb(0xb58863), Color::from_rgb(0xf0d9b5) };
+        m_board_theme = { "Beige"sv, Color::from_rgb(0xb58863), Color::from_rgb(0xf0d9b5) };
     } else if (name == "Green") {
-        m_board_theme = { "Green", Color::from_rgb(0x86a666), Color::from_rgb(0xffffdd) };
+        m_board_theme = { "Green"sv, Color::from_rgb(0x86a666), Color::from_rgb(0xffffdd) };
     } else if (name == "Blue") {
-        m_board_theme = { "Blue", Color::from_rgb(0x8ca2ad), Color::from_rgb(0xdee3e6) };
+        m_board_theme = { "Blue"sv, Color::from_rgb(0x8ca2ad), Color::from_rgb(0xdee3e6) };
     } else {
         set_board_theme("Beige"sv);
     }
@@ -468,12 +473,14 @@ void ChessWidget::input_engine_move()
         set_drag_enabled(false);
 
     set_override_cursor(Gfx::StandardCursor::Wait);
-    m_engine->get_best_move(board(), 4000, [this, drag_was_enabled](Chess::Move move) {
+    m_engine->get_best_move(board(), 4000, [this, drag_was_enabled](ErrorOr<Chess::Move> move) {
         set_override_cursor(Gfx::StandardCursor::None);
         if (!want_engine_move())
             return;
         set_drag_enabled(drag_was_enabled);
-        VERIFY(board().apply_move(move));
+        if (!move.is_error())
+            VERIFY(board().apply_move(move.release_value()));
+
         m_playback_move_number = m_board.moves().size();
         m_playback = false;
         m_board_markings.clear();
@@ -527,11 +534,11 @@ DeprecatedString ChessWidget::get_fen() const
     return m_playback ? m_board_playback.to_fen() : m_board.to_fen();
 }
 
-void ChessWidget::import_pgn(Core::File& file)
+ErrorOr<void> ChessWidget::import_pgn(Core::File& file)
 {
     m_board = Chess::Board();
 
-    ByteBuffer bytes = file.read_all();
+    ByteBuffer bytes = TRY(file.read_until_eof());
     StringView content = bytes;
     auto lines = content.lines();
     StringView line;
@@ -620,29 +627,31 @@ void ChessWidget::import_pgn(Core::File& file)
     m_playback_move_number = m_board_playback.moves().size();
     m_playback = true;
     update();
+
+    return {};
 }
 
-void ChessWidget::export_pgn(Core::File& file) const
+ErrorOr<void> ChessWidget::export_pgn(Core::File& file) const
 {
     // Tag Pair Section
-    file.write("[Event \"Casual Game\"]\n"sv);
-    file.write("[Site \"SerenityOS Chess\"]\n"sv);
-    file.write(DeprecatedString::formatted("[Date \"{}\"]\n", Core::DateTime::now().to_deprecated_string("%Y.%m.%d"sv)));
-    file.write("[Round \"1\"]\n"sv);
+    TRY(file.write_until_depleted("[Event \"Casual Game\"]\n"sv.bytes()));
+    TRY(file.write_until_depleted("[Site \"SerenityOS Chess\"]\n"sv.bytes()));
+    TRY(file.write_until_depleted(DeprecatedString::formatted("[Date \"{}\"]\n", Core::DateTime::now().to_deprecated_string("%Y.%m.%d"sv)).bytes()));
+    TRY(file.write_until_depleted("[Round \"1\"]\n"sv.bytes()));
 
     DeprecatedString username(getlogin());
-    const DeprecatedString player1 = (!username.is_empty() ? username.view() : "?"sv);
-    const DeprecatedString player2 = (!m_engine.is_null() ? "SerenityOS ChessEngine"sv : "?"sv);
-    file.write(DeprecatedString::formatted("[White \"{}\"]\n", m_side == Chess::Color::White ? player1 : player2));
-    file.write(DeprecatedString::formatted("[Black \"{}\"]\n", m_side == Chess::Color::Black ? player1 : player2));
+    auto const player1 = (!username.is_empty() ? username.view() : "?"sv.bytes());
+    auto const player2 = (!m_engine.is_null() ? "SerenityOS ChessEngine"sv.bytes() : "?"sv.bytes());
+    TRY(file.write_until_depleted(DeprecatedString::formatted("[White \"{}\"]\n", m_side == Chess::Color::White ? player1 : player2).bytes()));
+    TRY(file.write_until_depleted(DeprecatedString::formatted("[Black \"{}\"]\n", m_side == Chess::Color::Black ? player1 : player2).bytes()));
 
-    file.write(DeprecatedString::formatted("[Result \"{}\"]\n", Chess::Board::result_to_points_deprecated_string(m_board.game_result(), m_board.turn())));
-    file.write("[WhiteElo \"?\"]\n"sv);
-    file.write("[BlackElo \"?\"]\n"sv);
-    file.write("[Variant \"Standard\"]\n"sv);
-    file.write("[TimeControl \"-\"]\n"sv);
-    file.write("[Annotator \"SerenityOS Chess\"]\n"sv);
-    file.write("\n"sv);
+    TRY(file.write_until_depleted(DeprecatedString::formatted("[Result \"{}\"]\n", Chess::Board::result_to_points_string(m_board.game_result(), m_board.turn())).bytes()));
+    TRY(file.write_until_depleted("[WhiteElo \"?\"]\n"sv.bytes()));
+    TRY(file.write_until_depleted("[BlackElo \"?\"]\n"sv.bytes()));
+    TRY(file.write_until_depleted("[Variant \"Standard\"]\n"sv.bytes()));
+    TRY(file.write_until_depleted("[TimeControl \"-\"]\n"sv.bytes()));
+    TRY(file.write_until_depleted("[Annotator \"SerenityOS Chess\"]\n"sv.bytes()));
+    TRY(file.write_until_depleted("\n"sv.bytes()));
 
     // Movetext Section
     for (size_t i = 0, move_no = 1; i < m_board.moves().size(); i += 2, move_no++) {
@@ -650,17 +659,19 @@ void ChessWidget::export_pgn(Core::File& file) const
 
         if (i + 1 < m_board.moves().size()) {
             const DeprecatedString black = m_board.moves().at(i + 1).to_algebraic();
-            file.write(DeprecatedString::formatted("{}. {} {} ", move_no, white, black));
+            TRY(file.write_until_depleted(DeprecatedString::formatted("{}. {} {} ", move_no, white, black).bytes()));
         } else {
-            file.write(DeprecatedString::formatted("{}. {} ", move_no, white));
+            TRY(file.write_until_depleted(DeprecatedString::formatted("{}. {} ", move_no, white).bytes()));
         }
     }
 
-    file.write("{ "sv);
-    file.write(Chess::Board::result_to_deprecated_string(m_board.game_result(), m_board.turn()));
-    file.write(" } "sv);
-    file.write(Chess::Board::result_to_points_deprecated_string(m_board.game_result(), m_board.turn()));
-    file.write("\n"sv);
+    TRY(file.write_until_depleted("{ "sv.bytes()));
+    TRY(file.write_until_depleted(Chess::Board::result_to_string(m_board.game_result(), m_board.turn()).bytes()));
+    TRY(file.write_until_depleted(" } "sv.bytes()));
+    TRY(file.write_until_depleted(Chess::Board::result_to_points_string(m_board.game_result(), m_board.turn()).bytes()));
+    TRY(file.write_until_depleted("\n"sv.bytes()));
+
+    return {};
 }
 
 void ChessWidget::flip_board()
@@ -689,8 +700,33 @@ int ChessWidget::resign()
 
     set_drag_enabled(false);
     update();
-    const DeprecatedString msg = Chess::Board::result_to_deprecated_string(m_board.game_result(), m_board.turn());
+    auto const msg = Chess::Board::result_to_string(m_board.game_result(), m_board.turn());
     GUI::MessageBox::show(window(), msg, "Game Over"sv, GUI::MessageBox::Type::Information);
 
     return 0;
+}
+
+void ChessWidget::config_string_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, DeprecatedString const& value)
+{
+    if (domain != "Games"sv && group != "Chess"sv)
+        return;
+
+    if (key == "PieceSet"sv) {
+        set_piece_set(value);
+        update();
+    } else if (key == "BoardTheme"sv) {
+        set_board_theme(value);
+        update();
+    }
+}
+
+void ChessWidget::config_bool_did_change(DeprecatedString const& domain, DeprecatedString const& group, DeprecatedString const& key, bool value)
+{
+    if (domain != "Games"sv && group != "Chess"sv)
+        return;
+
+    if (key == "ShowCoordinates"sv) {
+        set_coordinates(value);
+        update();
+    }
 }

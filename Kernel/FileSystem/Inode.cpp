@@ -15,23 +15,22 @@
 #include <Kernel/FileSystem/OpenFileDescription.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/KBufferBuilder.h>
-#include <Kernel/Library/NonnullLockRefPtrVector.h>
 #include <Kernel/Memory/SharedInodeVMObject.h>
 #include <Kernel/Net/LocalSocket.h>
 #include <Kernel/Process.h>
 
 namespace Kernel {
 
-static Singleton<SpinlockProtected<Inode::AllInstancesList>> s_all_instances;
+static Singleton<SpinlockProtected<Inode::AllInstancesList, LockRank::None>> s_all_instances;
 
-SpinlockProtected<Inode::AllInstancesList>& Inode::all_instances()
+SpinlockProtected<Inode::AllInstancesList, LockRank::None>& Inode::all_instances()
 {
     return s_all_instances;
 }
 
 void Inode::sync_all()
 {
-    NonnullLockRefPtrVector<Inode, 32> inodes;
+    Vector<NonnullRefPtr<Inode>, 32> inodes;
     Inode::all_instances().with([&](auto& all_inodes) {
         for (auto& inode : all_inodes) {
             if (inode.is_metadata_dirty())
@@ -40,8 +39,8 @@ void Inode::sync_all()
     });
 
     for (auto& inode : inodes) {
-        VERIFY(inode.is_metadata_dirty());
-        (void)inode.flush_metadata();
+        VERIFY(inode->is_metadata_dirty());
+        (void)inode->flush_metadata();
     }
 }
 
@@ -52,37 +51,19 @@ void Inode::sync()
     fs().flush_writes();
 }
 
-ErrorOr<NonnullOwnPtr<KBuffer>> Inode::read_entire(OpenFileDescription* description) const
-{
-    auto builder = TRY(KBufferBuilder::try_create());
-
-    u8 buffer[4096];
-    off_t offset = 0;
-    for (;;) {
-        auto buf = UserOrKernelBuffer::for_kernel_buffer(buffer);
-        auto nread = TRY(read_bytes(offset, sizeof(buffer), buf, description));
-        VERIFY(nread <= sizeof(buffer));
-        if (nread == 0)
-            break;
-        TRY(builder.append((char const*)buffer, nread));
-        offset += nread;
-        if (nread < sizeof(buffer))
-            break;
-    }
-
-    auto entire_file = builder.build();
-    if (!entire_file)
-        return ENOMEM;
-    return entire_file.release_nonnull();
-}
-
 ErrorOr<NonnullRefPtr<Custody>> Inode::resolve_as_link(Credentials const& credentials, Custody& base, RefPtr<Custody>* out_parent, int options, int symlink_recursion_level) const
 {
     // The default implementation simply treats the stored
     // contents as a path and resolves that. That is, it
     // behaves exactly how you would expect a symlink to work.
-    auto contents = TRY(read_entire());
-    return VirtualFileSystem::the().resolve_path(credentials, StringView { contents->bytes() }, base, out_parent, options, symlink_recursion_level);
+
+    // Make sure that our assumptions about the path length hold up.
+    // Note that this doesn't mean that the reported size can be trusted, some inodes just report zero.
+    VERIFY(size() <= MAXPATHLEN);
+
+    Array<u8, MAXPATHLEN> contents;
+    auto read_bytes = TRY(read_until_filled_or_end(0, contents.size(), UserOrKernelBuffer::for_kernel_buffer(contents.data()), nullptr));
+    return VirtualFileSystem::the().resolve_path(credentials, StringView { contents.span().trim(read_bytes) }, base, out_parent, options, symlink_recursion_level);
 }
 
 Inode::Inode(FileSystem& fs, InodeIndex index)
@@ -119,6 +100,21 @@ ErrorOr<size_t> Inode::read_bytes(off_t offset, size_t length, UserOrKernelBuffe
     return read_bytes_locked(offset, length, buffer, open_description);
 }
 
+ErrorOr<size_t> Inode::read_until_filled_or_end(off_t offset, size_t length, UserOrKernelBuffer buffer, OpenFileDescription* open_description) const
+{
+    auto remaining_length = length;
+
+    while (remaining_length > 0) {
+        auto filled_bytes = TRY(read_bytes(offset, remaining_length, buffer, open_description));
+        if (filled_bytes == 0)
+            break;
+        offset += filled_bytes;
+        remaining_length -= filled_bytes;
+    }
+
+    return length - remaining_length;
+}
+
 ErrorOr<void> Inode::update_timestamps([[maybe_unused]] Optional<Time> atime, [[maybe_unused]] Optional<Time> ctime, [[maybe_unused]] Optional<Time> mtime)
 {
     return ENOTIMPL;
@@ -143,7 +139,7 @@ ErrorOr<void> Inode::set_shared_vmobject(Memory::SharedInodeVMObject& vmobject)
 
 LockRefPtr<LocalSocket> Inode::bound_socket() const
 {
-    return m_bound_socket;
+    return m_bound_socket.strong_ref();
 }
 
 bool Inode::bind_socket(LocalSocket& socket)
@@ -181,7 +177,7 @@ void Inode::unregister_watcher(Badge<InodeWatcher>, InodeWatcher& watcher)
     });
 }
 
-ErrorOr<NonnullLockRefPtr<FIFO>> Inode::fifo()
+ErrorOr<NonnullRefPtr<FIFO>> Inode::fifo()
 {
     MutexLocker locker(m_inode_lock);
     VERIFY(metadata().is_fifo());
@@ -190,7 +186,7 @@ ErrorOr<NonnullLockRefPtr<FIFO>> Inode::fifo()
     if (!m_fifo)
         m_fifo = TRY(FIFO::try_create(metadata().uid));
 
-    return NonnullLockRefPtr { *m_fifo };
+    return NonnullRefPtr { *m_fifo };
 }
 
 void Inode::set_metadata_dirty(bool metadata_dirty)

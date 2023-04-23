@@ -11,16 +11,15 @@
 #include <AK/URL.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DateTime.h>
-#include <LibCore/File.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/Process.h>
-#include <LibCore/Stream.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/Clipboard.h>
 #include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGUI/Painter.h>
 #include <LibGUI/Widget.h>
 #include <LibGUI/Window.h>
-#include <LibGfx/PNGWriter.h>
+#include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibGfx/Palette.h>
 #include <LibMain/Main.h>
 #include <unistd.h>
@@ -117,7 +116,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     Optional<Gfx::IntRect> crop_region;
     if (select_region) {
         auto window = GUI::Window::construct();
-        auto& container = window->set_main_widget<SelectableLayover>(window);
+        auto container = TRY(window->set_main_widget<SelectableLayover>(window));
 
         window->set_title("shot");
         window->set_has_alpha_channel(true);
@@ -125,7 +124,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         window->show();
         app->exec();
 
-        crop_region = container.region();
+        crop_region = container->region();
         if (crop_region.value().is_empty()) {
             dbgln("cancelled...");
             return 0;
@@ -161,21 +160,21 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     if (edit_image)
         output_path = Core::DateTime::now().to_deprecated_string("/tmp/screenshot-%Y-%m-%d-%H-%M-%S.png"sv);
 
-    auto file_or_error = Core::Stream::File::open(output_path, Core::Stream::OpenMode::ReadWrite);
+    auto file_or_error = Core::File::open(output_path, Core::File::OpenMode::ReadWrite);
     if (file_or_error.is_error()) {
         warnln("Could not open '{}' for writing: {}", output_path, file_or_error.error());
         return 1;
     }
 
     auto& file = *file_or_error.value();
-    TRY(file.write(encoded_bitmap.bytes()));
+    TRY(file.write_until_depleted(encoded_bitmap.bytes()));
 
     if (edit_image)
         TRY(Core::Process::spawn("/bin/PixelPaint"sv, Array { output_path }));
 
     bool printed_hyperlink = false;
     if (isatty(STDOUT_FILENO)) {
-        auto full_path = Core::File::real_path_for(output_path);
+        auto full_path = Core::DeprecatedFile::real_path_for(output_path);
         if (!full_path.is_null()) {
             char hostname[HOST_NAME_MAX];
             VERIFY(gethostname(hostname, sizeof(hostname)) == 0);

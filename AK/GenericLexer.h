@@ -22,6 +22,7 @@ public:
     constexpr size_t tell_remaining() const { return m_input.length() - m_index; }
 
     StringView remaining() const { return m_input.substring_view(m_index); }
+    StringView input() const { return m_input; }
 
     constexpr bool is_eof() const { return m_index >= m_input.length(); }
 
@@ -141,7 +142,6 @@ public:
         while (!is_eof() && peek() != stop) {
             ++m_index;
         }
-        ignore();
     }
 
     constexpr void ignore_until(char const* stop)
@@ -149,7 +149,6 @@ public:
         while (!is_eof() && !next_is(stop)) {
             ++m_index;
         }
-        ignore(__builtin_strlen(stop));
     }
 
     /*
@@ -204,8 +203,7 @@ public:
             ++m_index;
     }
 
-    // Ignore characters until `pred` return true
-    // We don't skip the stop character as it may not be a unique value
+    // Ignore characters until `pred` returns true
     template<typename TPredicate>
     constexpr void ignore_until(TPredicate pred)
     {

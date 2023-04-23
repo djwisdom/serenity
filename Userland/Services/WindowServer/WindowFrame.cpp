@@ -60,7 +60,7 @@ static DeprecatedString s_last_menu_shadow_path;
 static DeprecatedString s_last_taskbar_shadow_path;
 static DeprecatedString s_last_tooltip_shadow_path;
 
-static Gfx::IntRect frame_rect_for_window(Window& window, Gfx::IntRect const& rect)
+Gfx::IntRect WindowFrame::frame_rect_for_window(Window& window, Gfx::IntRect const& rect)
 {
     if (window.is_frameless())
         return rect;
@@ -294,7 +294,7 @@ Gfx::WindowTheme::WindowState WindowFrame::window_state_for_theme() const
 void WindowFrame::paint_notification_frame(Gfx::Painter& painter)
 {
     auto palette = WindowManager::the().palette();
-    Gfx::WindowTheme::current().paint_notification_frame(painter, to_theme_window_mode(m_window.mode()), m_window.rect(), palette, m_buttons.last().relative_rect());
+    Gfx::WindowTheme::current().paint_notification_frame(painter, to_theme_window_mode(m_window.mode()), m_window.rect(), palette, m_buttons.last()->relative_rect());
 }
 
 void WindowFrame::paint_menubar(Gfx::Painter& painter)
@@ -401,7 +401,7 @@ void WindowFrame::render(Screen& screen, Gfx::Painter& painter)
         return;
 
     for (auto& button : m_buttons)
-        button.paint(screen, painter);
+        button->paint(screen, painter);
 }
 
 void WindowFrame::theme_changed()
@@ -463,7 +463,7 @@ void WindowFrame::PerScaleRenderedCache::render(WindowFrame& frame, Screen& scre
             if (tmp_it != s_tmp_bitmap_cache.end())
                 tmp_it->value = nullptr;
 
-            auto bitmap_or_error = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, frame_rect_including_shadow.size(), scale);
+            auto bitmap_or_error = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, frame_rect_including_shadow.size(), scale);
             if (bitmap_or_error.is_error()) {
                 s_tmp_bitmap_cache.remove(scale);
                 dbgln("Could not create bitmap of size {}: {}", frame_rect_including_shadow.size(), bitmap_or_error.error());
@@ -487,14 +487,14 @@ void WindowFrame::PerScaleRenderedCache::render(WindowFrame& frame, Screen& scre
 
     if (!m_top_bottom || m_top_bottom->width() != frame_rect_including_shadow.width() || m_top_bottom->height() != top_bottom_height || m_top_bottom->scale() != scale) {
         if (top_bottom_height > 0)
-            m_top_bottom = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, { frame_rect_including_shadow.width(), top_bottom_height }, scale).release_value_but_fixme_should_propagate_errors();
+            m_top_bottom = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { frame_rect_including_shadow.width(), top_bottom_height }, scale).release_value_but_fixme_should_propagate_errors();
         else
             m_top_bottom = nullptr;
         m_shadow_dirty = true;
     }
     if (!m_left_right || m_left_right->height() != frame_rect_including_shadow.height() || m_left_right->width() != left_right_width || m_left_right->scale() != scale) {
         if (left_right_width > 0)
-            m_left_right = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, { left_right_width, frame_rect_including_shadow.height() }, scale).release_value_but_fixme_should_propagate_errors();
+            m_left_right = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { left_right_width, frame_rect_including_shadow.height() }, scale).release_value_but_fixme_should_propagate_errors();
         else
             m_left_right = nullptr;
         m_shadow_dirty = true;
@@ -585,7 +585,7 @@ Gfx::IntRect WindowFrame::constrained_render_rect_to_screen(Gfx::IntRect const& 
 Gfx::IntRect WindowFrame::leftmost_titlebar_button_rect() const
 {
     if (!m_buttons.is_empty())
-        return m_buttons.last().relative_rect();
+        return m_buttons.last()->relative_rect();
 
     auto rect = titlebar_rect();
     rect.translate_by(rect.width(), 0);
@@ -677,7 +677,7 @@ void WindowFrame::layout_buttons()
 {
     auto button_rects = Gfx::WindowTheme::current().layout_buttons(to_theme_window_type(m_window.type()), to_theme_window_mode(m_window.mode()), m_window.rect(), WindowManager::the().palette(), m_buttons.size());
     for (size_t i = 0; i < m_buttons.size(); i++)
-        m_buttons[i].set_relative_rect(button_rects[i]);
+        m_buttons[i]->set_relative_rect(button_rects[i]);
 }
 
 Optional<HitTestResult> WindowFrame::hit_test(Gfx::IntPoint position)
@@ -796,8 +796,8 @@ void WindowFrame::handle_titlebar_mouse_event(MouseEvent const& event)
     }
 
     for (auto& button : m_buttons) {
-        if (button.relative_rect().contains(event.position()))
-            return button.on_mouse_event(event.translated(-button.relative_rect().location()));
+        if (button->relative_rect().contains(event.position()))
+            return button->on_mouse_event(event.translated(-button->relative_rect().location()));
     }
 
     if (event.type() == Event::MouseDown) {
@@ -868,6 +868,12 @@ void WindowFrame::handle_border_mouse_event(MouseEvent const& event)
     int hot_area_column = (window_relative_x < corner_size) ? 0 : (window_relative_x > outer_rect.width() - corner_size) ? 2
                                                                                                                          : 1;
     ResizeDirection resize_direction = direction_for_hot_area[hot_area_row][hot_area_column];
+
+    // Double click latches a window's edge to the screen's edge
+    if (event.type() == Event::MouseDoubleClick) {
+        latch_window_to_screen_edge(resize_direction);
+        return;
+    }
 
     if (event.type() == Event::MouseMove && event.buttons() == 0) {
         wm.set_resize_candidate(m_window, resize_direction);
@@ -949,12 +955,12 @@ void WindowFrame::handle_menu_mouse_event(Menu& menu, MouseEvent const& event)
 void WindowFrame::start_flash_animation()
 {
     if (!m_flash_timer) {
-        m_flash_timer = Core::Timer::construct(100, [this] {
+        m_flash_timer = Core::Timer::create_repeating(100, [this] {
             VERIFY(m_flash_counter);
             invalidate_titlebar();
             if (!--m_flash_counter)
                 m_flash_timer->stop();
-        });
+        }).release_value_but_fixme_should_propagate_errors();
     }
     m_flash_counter = 8;
     m_flash_timer->start();
@@ -965,6 +971,36 @@ int WindowFrame::menu_row_count() const
     if (!m_window.should_show_menubar())
         return 0;
     return m_window.menubar().has_menus() ? 1 : 0;
+}
+
+void WindowFrame::latch_window_to_screen_edge(ResizeDirection resize_direction)
+{
+    auto window_rect = m_window.rect();
+    auto frame_rect = rect();
+    auto& screen = Screen::closest_to_rect(window_rect);
+    auto screen_rect = WindowManager::the().desktop_rect(screen);
+
+    if (resize_direction == ResizeDirection::UpLeft
+        || resize_direction == ResizeDirection::Up
+        || resize_direction == ResizeDirection::UpRight)
+        window_rect.inflate(frame_rect.top() - screen_rect.top(), 0, 0, 0);
+
+    if (resize_direction == ResizeDirection::UpRight
+        || resize_direction == ResizeDirection::Right
+        || resize_direction == ResizeDirection::DownRight)
+        window_rect.inflate(0, screen_rect.right() - frame_rect.right(), 0, 0);
+
+    if (resize_direction == ResizeDirection::DownLeft
+        || resize_direction == ResizeDirection::Down
+        || resize_direction == ResizeDirection::DownRight)
+        window_rect.inflate(0, 0, screen_rect.bottom() - frame_rect.bottom(), 0);
+
+    if (resize_direction == ResizeDirection::UpLeft
+        || resize_direction == ResizeDirection::Left
+        || resize_direction == ResizeDirection::DownLeft)
+        window_rect.inflate(0, 0, 0, frame_rect.left() - screen_rect.left());
+
+    m_window.set_rect(window_rect);
 }
 
 }

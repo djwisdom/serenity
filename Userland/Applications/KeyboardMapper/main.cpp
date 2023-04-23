@@ -34,7 +34,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto window = GUI::Window::construct();
     window->set_title("Keyboard Mapper");
     window->set_icon(app_icon.bitmap_for_size(16));
-    auto keyboard_mapper_widget = TRY(window->try_set_main_widget<KeyboardMapperWidget>());
+    auto keyboard_mapper_widget = TRY(window->set_main_widget<KeyboardMapperWidget>());
     window->resize(775, 315);
     window->set_resizable(false);
 
@@ -54,16 +54,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             if (!path.has_value())
                 return;
 
-            ErrorOr<void> error_or = keyboard_mapper_widget->load_map_from_file(path.value());
-            if (error_or.is_error())
-                keyboard_mapper_widget->show_error_to_user(error_or.error());
+            if (auto error_or = keyboard_mapper_widget->load_map_from_file(path.value()); error_or.is_error())
+                keyboard_mapper_widget->show_error_to_user(error_or.release_error());
         });
 
     auto save_action = GUI::CommonActions::make_save_action(
         [&](auto&) {
-            ErrorOr<void> error_or = keyboard_mapper_widget->save();
-            if (error_or.is_error())
-                keyboard_mapper_widget->show_error_to_user(error_or.error());
+            if (auto error_or = keyboard_mapper_widget->save(); error_or.is_error())
+                keyboard_mapper_widget->show_error_to_user(error_or.release_error());
         });
 
     auto save_as_action = GUI::CommonActions::make_save_as_action([&](auto&) {
@@ -72,9 +70,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         if (!save_path.has_value())
             return;
 
-        ErrorOr<void> error_or = keyboard_mapper_widget->save_to_file(save_path.value());
-        if (error_or.is_error())
-            keyboard_mapper_widget->show_error_to_user(error_or.error());
+        if (auto error_or = keyboard_mapper_widget->save_to_file(save_path.value()); error_or.is_error())
+            keyboard_mapper_widget->show_error_to_user(error_or.release_error());
     });
 
     auto quit_action = GUI::CommonActions::make_quit_action(
@@ -89,17 +86,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto_modifier_action->set_checkable(true);
     auto_modifier_action->set_checked(false);
 
-    auto& file_menu = window->add_menu("&File");
+    auto& file_menu = window->add_menu("&File"_short_string);
     file_menu.add_action(open_action);
     file_menu.add_action(save_action);
     file_menu.add_action(save_as_action);
     file_menu.add_separator();
     file_menu.add_action(quit_action);
 
-    auto& settings_menu = window->add_menu("&Settings");
+    auto& settings_menu = window->add_menu(TRY("&Settings"_string));
     settings_menu.add_action(auto_modifier_action);
 
-    auto& help_menu = window->add_menu("&Help");
+    auto& help_menu = window->add_menu("&Help"_short_string);
     help_menu.add_action(GUI::CommonActions::make_command_palette_action(window));
     help_menu.add_action(GUI::CommonActions::make_about_action("Keyboard Mapper", app_icon, window));
 

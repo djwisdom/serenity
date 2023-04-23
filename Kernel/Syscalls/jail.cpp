@@ -1,15 +1,14 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022, Liav A. <liavalb@hotmail.co.il>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/Userspace.h>
+#include <Kernel/API/Ioctl.h>
 #include <Kernel/Jail.h>
-#include <Kernel/JailManagement.h>
 #include <Kernel/Process.h>
 #include <Kernel/StdLib.h>
-#include <LibC/sys/ioctl_numbers.h>
 
 namespace Kernel {
 
@@ -31,7 +30,7 @@ ErrorOr<FlatPtr> Process::sys$jail_create(Userspace<Syscall::SC_jail_create_para
         // any info leak about the "outside world" jail metadata.
         if (my_jail)
             return Error::from_errno(EPERM);
-        auto jail = TRY(JailManagement::the().create_jail(move(jail_name)));
+        auto jail = TRY(Jail::create(move(jail_name)));
         return jail->index().value();
     }));
     // Note: We do the copy_to_user outside of the m_attached_jail Spinlock locked scope because
@@ -45,6 +44,17 @@ ErrorOr<FlatPtr> Process::sys$jail_attach(Userspace<Syscall::SC_jail_attach_para
     VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::jail));
 
+    // NOTE: Because the user might run a binary that is using this syscall and
+    // that binary was marked as SUID, then the user might be unaware of the
+    // fact that while no new setuid binaries might be executed, he is already
+    // running within such binary so for the sake of completeness and preventing
+    // naive sense of being secure, we should block that.
+    TRY(with_protected_data([&](auto& protected_data) -> ErrorOr<void> {
+        if (protected_data.executable_is_setid)
+            return EPERM;
+        return {};
+    }));
+
     auto params = TRY(copy_typed_from_user(user_params));
     return m_attached_jail.with([&](auto& my_jail) -> ErrorOr<FlatPtr> {
         // Note: If we are already in a jail, don't let the process escape it even if
@@ -53,12 +63,20 @@ ErrorOr<FlatPtr> Process::sys$jail_attach(Userspace<Syscall::SC_jail_attach_para
         // in the system, just return EPERM before doing anything else.
         if (my_jail)
             return EPERM;
-        auto jail = JailManagement::the().find_jail_by_index(static_cast<JailIndex>(params.index));
+        auto jail = Jail::find_by_index(static_cast<JailIndex>(params.index));
         if (!jail)
             return EINVAL;
         my_jail = *jail;
         my_jail->attach_count().with([&](auto& attach_count) {
             attach_count++;
+        });
+        m_jail_process_list.with([&](auto& list_ptr) {
+            list_ptr = my_jail->process_list();
+            if (list_ptr) {
+                list_ptr->attached_processes().with([&](auto& list) {
+                    list.append(*this);
+                });
+            }
         });
         return 0;
     });

@@ -27,7 +27,7 @@ public:
 
     bool renders_as_alt_text() const;
 
-    virtual RefPtr<Painting::Paintable> create_paintable() const override;
+    virtual JS::GCPtr<Painting::Paintable> create_paintable() const override;
 
     auto const& image_loader() const { return m_image_loader; }
 
@@ -35,7 +35,7 @@ public:
 
 private:
     // ^BrowsingContext::ViewportClient
-    virtual void browsing_context_did_set_viewport_rect(Gfx::IntRect const&) final;
+    virtual void browsing_context_did_set_viewport_rect(CSSPixelRect const&) final;
 
     // ^JS::Cell
     virtual void finalize() override;
@@ -45,7 +45,7 @@ private:
 
     ImageLoader const& m_image_loader;
 
-    Optional<float> m_cached_alt_text_width;
+    Optional<CSSPixels> m_cached_alt_text_width;
 };
 
 }

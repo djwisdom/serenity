@@ -130,7 +130,7 @@ private:
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#outstanding-rejected-promises-weak-set
     // The outstanding rejected promises weak set must not create strong references to any of its members, and implementations are free to limit its size, e.g. by removing old entries from it when new ones are added.
-    Vector<JS::Promise*> m_outstanding_rejected_promises_weak_set;
+    Vector<JS::GCPtr<JS::Promise>> m_outstanding_rejected_promises_weak_set;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#about-to-be-notified-rejected-promises-list
     Vector<JS::Handle<JS::Promise>> m_about_to_be_notified_rejected_promises_list;
@@ -148,6 +148,7 @@ JS::Object& relevant_global_object(JS::Object const&);
 JS::Realm& entry_realm();
 EnvironmentSettingsObject& entry_settings_object();
 JS::Object& entry_global_object();
+JS::VM& relevant_agent(JS::Object const&);
 [[nodiscard]] bool is_secure_context(Environment const&);
 [[nodiscard]] bool is_non_secure_context(Environment const&);
 

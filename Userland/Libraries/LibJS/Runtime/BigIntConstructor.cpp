@@ -1,10 +1,9 @@
 /*
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/DeprecatedString.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/BigIntConstructor.h>
@@ -18,14 +17,14 @@ namespace JS {
 static const Crypto::SignedBigInteger BIGINT_ONE { 1 };
 
 BigIntConstructor::BigIntConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.BigInt.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.BigInt.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void BigIntConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> BigIntConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     // 21.2.2.3 BigInt.prototype, https://tc39.es/ecma262/#sec-bigint.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().bigint_prototype(), 0);
@@ -35,6 +34,8 @@ void BigIntConstructor::initialize(Realm& realm)
     define_native_function(realm, vm.names.asUintN, as_uint_n, 2, attr);
 
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
+
+    return {};
 }
 
 // 21.2.1.1 BigInt ( value ), https://tc39.es/ecma262/#sec-bigint-constructor-number-value
@@ -68,7 +69,7 @@ JS_DEFINE_NATIVE_FUNCTION(BigIntConstructor::as_int_n)
     auto bits = TRY(vm.argument(0).to_index(vm));
 
     // 2. Set bigint to ? ToBigInt(bigint).
-    auto* bigint = TRY(vm.argument(1).to_bigint(vm));
+    auto bigint = TRY(vm.argument(1).to_bigint(vm));
 
     // 3. Let mod be ℝ(bigint) modulo 2^bits.
     // FIXME: For large values of `bits`, this can likely be improved with a SignedBigInteger API to
@@ -94,7 +95,7 @@ JS_DEFINE_NATIVE_FUNCTION(BigIntConstructor::as_uint_n)
     auto bits = TRY(vm.argument(0).to_index(vm));
 
     // 2. Set bigint to ? ToBigInt(bigint).
-    auto* bigint = TRY(vm.argument(1).to_bigint(vm));
+    auto bigint = TRY(vm.argument(1).to_bigint(vm));
 
     // 3. Return the BigInt value that represents ℝ(bigint) modulo 2bits.
     // FIXME: For large values of `bits`, this can likely be improved with a SignedBigInteger API to

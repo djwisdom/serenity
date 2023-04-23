@@ -6,24 +6,29 @@
 
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/HTMLCollection.h>
+#include <LibWeb/DOM/Range.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
 #include <LibWeb/HTML/BrowsingContext.h>
-#include <LibWeb/HTML/BrowsingContextContainer.h>
 #include <LibWeb/HTML/BrowsingContextGroup.h>
 #include <LibWeb/HTML/CrossOrigin/CrossOriginOpenerPolicy.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/NavigableContainer.h>
+#include <LibWeb/HTML/RemoteBrowsingContext.h>
 #include <LibWeb/HTML/SandboxingFlagSet.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
+#include <LibWeb/Infra/Strings.h>
 #include <LibWeb/Layout/BreakNode.h>
-#include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/URL/URL.h>
 
@@ -34,7 +39,7 @@ static bool url_matches_about_blank(AK::URL const& url)
 {
     // A URL matches about:blank if its scheme is "about", its path contains a single string "blank", its username and password are the empty string, and its host is null.
     return url.scheme() == "about"sv
-        && url.path() == "blank"sv
+        && url.serialize_path() == "blank"sv
         && url.username().is_empty()
         && url.password().is_empty()
         && url.host().is_null();
@@ -75,14 +80,14 @@ JS::NonnullGCPtr<BrowsingContext> BrowsingContext::create_a_new_top_level_browsi
     auto group = BrowsingContextGroup::create_a_new_browsing_context_group(page);
 
     // 2. Return group's browsing context set[0].
-    return *(*group->browsing_context_set().begin());
+    return *group->browsing_context_set().begin();
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#creating-a-new-browsing-context
 JS::NonnullGCPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context(Page& page, JS::GCPtr<DOM::Document> creator, JS::GCPtr<DOM::Element> embedder, BrowsingContextGroup&)
 {
     // 1. Let browsingContext be a new browsing context.
-    BrowsingContextContainer* container = (embedder && is<BrowsingContextContainer>(*embedder)) ? static_cast<BrowsingContextContainer*>(embedder.ptr()) : nullptr;
+    NavigableContainer* container = (embedder && is<NavigableContainer>(*embedder)) ? static_cast<NavigableContainer*>(embedder.ptr()) : nullptr;
     auto browsing_context = Bindings::main_thread_vm().heap().allocate_without_realm<BrowsingContext>(page, container);
 
     // 2. Let unsafeContextCreationTime be the unsafe shared current time.
@@ -114,10 +119,10 @@ JS::NonnullGCPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context
     auto realm_execution_context = Bindings::create_a_new_javascript_realm(
         Bindings::main_thread_vm(),
         [&](JS::Realm& realm) -> JS::Object* {
-            browsing_context->m_window_proxy = realm.heap().allocate<WindowProxy>(realm, realm);
+            browsing_context->m_window_proxy = realm.heap().allocate<WindowProxy>(realm, realm).release_allocated_value_but_fixme_should_propagate_errors();
 
             // - For the global object, create a new Window object.
-            window = HTML::Window::create(realm);
+            window = HTML::Window::create(realm).release_value_but_fixme_should_propagate_errors();
             return window.ptr();
         },
         [&](JS::Realm&) -> JS::Object* {
@@ -137,7 +142,8 @@ JS::NonnullGCPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context
         move(realm_execution_context),
         {},
         top_level_creation_url,
-        top_level_origin);
+        top_level_origin)
+        .release_value_but_fixme_should_propagate_errors();
 
     // 12. Let loadTimingInfo be a new document load timing info with its navigation start time set to the result of calling
     //     coarsen time with unsafeContextCreationTime and the new environment settings object's cross-origin isolated capability.
@@ -167,7 +173,7 @@ JS::NonnullGCPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context
     //     load timing info is loadTimingInfo,
     //     FIXME: navigation id is null,
     //     and which is ready for post-load tasks.
-    auto document = DOM::Document::create(window->realm());
+    auto document = DOM::Document::create(window->realm()).release_value_but_fixme_should_propagate_errors();
 
     // Non-standard
     document->set_window({}, *window);
@@ -187,9 +193,9 @@ JS::NonnullGCPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context
     document->set_is_initial_about_blank(true);
 
     // 18. Ensure that document has a single child html node, which itself has two empty child nodes: a head element, and a body element.
-    auto html_node = document->create_element(HTML::TagNames::html).release_value();
-    MUST(html_node->append_child(document->create_element(HTML::TagNames::head).release_value()));
-    MUST(html_node->append_child(document->create_element(HTML::TagNames::body).release_value()));
+    auto html_node = DOM::create_element(document, HTML::TagNames::html, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
+    MUST(html_node->append_child(DOM::create_element(document, HTML::TagNames::head, Namespace::HTML).release_value_but_fixme_should_propagate_errors()));
+    MUST(html_node->append_child(DOM::create_element(document, HTML::TagNames::body, Namespace::HTML).release_value_but_fixme_should_propagate_errors()));
     MUST(document->append_child(html_node));
 
     // 19. Set the active document of browsingContext to document.
@@ -203,15 +209,15 @@ JS::NonnullGCPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context
     // FIXME: 21. If creator is non-null, then set document's policy container to a clone of creator's policy container.
 
     // 22. Append a new session history entry to browsingContext's session history whose URL is about:blank and document is document.
-    browsing_context->m_session_history.append(HTML::SessionHistoryEntry {
-        .url = AK::URL("about:blank"),
-        .document = document.ptr(),
-        .serialized_state = {},
-        .policy_container = {},
-        .scroll_restoration_mode = {},
-        .browsing_context_name = {},
-        .original_source_browsing_context = {},
-    });
+    auto new_entry = browsing_context->heap().allocate_without_realm<SessionHistoryEntry>();
+    new_entry->url = AK::URL("about:blank");
+    new_entry->document = document.ptr();
+    new_entry->serialized_state = {};
+    new_entry->policy_container = {};
+    new_entry->scroll_restoration_mode = {};
+    new_entry->browsing_context_name = {};
+    new_entry->original_source_browsing_context = {};
+    browsing_context->m_session_history.append(*new_entry);
 
     // 23. Completely finish loading document.
     document->completely_finish_loading();
@@ -220,7 +226,7 @@ JS::NonnullGCPtr<BrowsingContext> BrowsingContext::create_a_new_browsing_context
     return *browsing_context;
 }
 
-BrowsingContext::BrowsingContext(Page& page, HTML::BrowsingContextContainer* container)
+BrowsingContext::BrowsingContext(Page& page, HTML::NavigableContainer* container)
     : m_page(page)
     , m_loader(*this)
     , m_event_handler({}, *this)
@@ -243,7 +249,7 @@ void BrowsingContext::visit_edges(Cell::Visitor& visitor)
     Base::visit_edges(visitor);
 
     for (auto& entry : m_session_history)
-        visitor.visit(entry.document);
+        visitor.visit(entry);
     visitor.visit(m_container);
     visitor.visit(m_window_proxy);
     visitor.visit(m_opener_browsing_context);
@@ -316,7 +322,7 @@ void BrowsingContext::set_active_document(JS::NonnullGCPtr<DOM::Document> docume
         previously_active_document->did_stop_being_active_document_in_browsing_context({});
 }
 
-void BrowsingContext::set_viewport_rect(Gfx::IntRect const& rect)
+void BrowsingContext::set_viewport_rect(CSSPixelRect const& rect)
 {
     bool did_change = false;
 
@@ -345,7 +351,7 @@ void BrowsingContext::set_viewport_rect(Gfx::IntRect const& rect)
     HTML::main_thread_event_loop().schedule();
 }
 
-void BrowsingContext::set_size(Gfx::IntSize size)
+void BrowsingContext::set_size(CSSPixelSize size)
 {
     if (m_size == size)
         return;
@@ -368,14 +374,14 @@ void BrowsingContext::set_needs_display()
     set_needs_display(viewport_rect());
 }
 
-void BrowsingContext::set_needs_display(Gfx::IntRect const& rect)
+void BrowsingContext::set_needs_display(CSSPixelRect const& rect)
 {
     if (!viewport_rect().intersects(rect))
         return;
 
     if (is_top_level()) {
         if (m_page)
-            m_page->client().page_did_invalidate(to_top_level_rect(rect.to_type<CSSPixels>()));
+            m_page->client().page_did_invalidate(to_top_level_rect(rect));
         return;
     }
 
@@ -383,13 +389,17 @@ void BrowsingContext::set_needs_display(Gfx::IntRect const& rect)
         container()->layout_node()->set_needs_display();
 }
 
-void BrowsingContext::scroll_to(Gfx::IntPoint position)
+void BrowsingContext::scroll_to(CSSPixelPoint position)
 {
-    if (active_document())
-        active_document()->force_layout();
+    // NOTE: Scrolling to a position requires up-to-date layout *unless* we're scrolling to (0, 0)
+    //       as (0, 0) is always guaranteed to be a valid scroll position.
+    if (!position.is_zero()) {
+        if (active_document())
+            active_document()->update_layout();
+    }
 
     if (m_page)
-        m_page->client().page_did_request_scroll_to(position.to_type<CSSPixels>());
+        m_page->client().page_did_request_scroll_to(position);
 }
 
 void BrowsingContext::scroll_to_anchor(DeprecatedString const& fragment)
@@ -412,22 +422,22 @@ void BrowsingContext::scroll_to_anchor(DeprecatedString const& fragment)
     if (!element)
         return;
 
-    document->force_layout();
+    document->update_layout();
 
     if (!element->layout_node())
         return;
 
     auto& layout_node = *element->layout_node();
 
-    Gfx::FloatRect float_rect { layout_node.box_type_agnostic_position(), { (float)viewport_rect().width(), (float)viewport_rect().height() } };
+    CSSPixelRect target_rect { layout_node.box_type_agnostic_position(), { viewport_rect().width(), viewport_rect().height() } };
     if (is<Layout::Box>(layout_node)) {
         auto& layout_box = verify_cast<Layout::Box>(layout_node);
         auto padding_box = layout_box.box_model().padding_box();
-        float_rect.translate_by(-padding_box.left, -padding_box.top);
+        target_rect.translate_by(-padding_box.left, -padding_box.top);
     }
 
     if (m_page)
-        m_page->client().page_did_request_scroll_into_view(float_rect.to_type<CSSPixels>());
+        m_page->client().page_did_request_scroll_into_view(target_rect);
 }
 
 CSSPixelRect BrowsingContext::to_top_level_rect(CSSPixelRect const& a_rect)
@@ -447,7 +457,7 @@ CSSPixelPoint BrowsingContext::to_top_level_position(CSSPixelPoint a_position)
             return {};
         if (!ancestor->container()->layout_node())
             return {};
-        position.translate_by(ancestor->container()->layout_node()->box_type_agnostic_position().to_type<CSSPixels>());
+        position.translate_by(ancestor->container()->layout_node()->box_type_agnostic_position());
     }
     return position;
 }
@@ -468,96 +478,55 @@ void BrowsingContext::set_cursor_position(DOM::Position position)
     reset_cursor_blink_cycle();
 }
 
-DeprecatedString BrowsingContext::selected_text() const
+static DeprecatedString visible_text_in_range(DOM::Range const& range)
 {
+    // NOTE: This is an adaption of Range stringification, but we skip over DOM nodes that don't have a corresponding layout node.
     StringBuilder builder;
-    if (!active_document())
-        return {};
-    auto* layout_root = active_document()->layout_node();
-    if (!layout_root)
-        return {};
-    if (!layout_root->selection().is_valid())
-        return {};
 
-    auto selection = layout_root->selection().normalized();
-
-    if (selection.start().layout_node.ptr() == selection.end().layout_node) {
-        if (!is<Layout::TextNode>(*selection.start().layout_node))
-            return "";
-        return verify_cast<Layout::TextNode>(*selection.start().layout_node).text_for_rendering().substring(selection.start().index_in_node, selection.end().index_in_node - selection.start().index_in_node);
+    if (range.start_container() == range.end_container() && is<DOM::Text>(*range.start_container())) {
+        if (!range.start_container()->layout_node())
+            return ""sv;
+        return static_cast<DOM::Text const&>(*range.start_container()).data().substring(range.start_offset(), range.end_offset() - range.start_offset());
     }
 
-    // Start node
-    auto layout_node = selection.start().layout_node;
-    if (is<Layout::TextNode>(*layout_node)) {
-        auto& text = verify_cast<Layout::TextNode>(*layout_node).text_for_rendering();
-        builder.append(text.substring(selection.start().index_in_node, text.length() - selection.start().index_in_node));
+    if (is<DOM::Text>(*range.start_container()) && range.start_container()->layout_node())
+        builder.append(static_cast<DOM::Text const&>(*range.start_container()).data().substring_view(range.start_offset()));
+
+    for (DOM::Node const* node = range.start_container(); node != range.end_container()->next_sibling(); node = node->next_in_pre_order()) {
+        if (is<DOM::Text>(*node) && range.contains_node(*node) && node->layout_node())
+            builder.append(static_cast<DOM::Text const&>(*node).data());
     }
 
-    // Middle nodes
-    layout_node = layout_node->next_in_pre_order();
-    while (layout_node && layout_node.ptr() != selection.end().layout_node) {
-        if (is<Layout::TextNode>(*layout_node))
-            builder.append(verify_cast<Layout::TextNode>(*layout_node).text_for_rendering());
-        else if (is<Layout::BreakNode>(*layout_node) || is<Layout::BlockContainer>(*layout_node))
-            builder.append('\n');
-
-        layout_node = layout_node->next_in_pre_order();
-    }
-
-    // End node
-    VERIFY(layout_node.ptr() == selection.end().layout_node);
-    if (is<Layout::TextNode>(*layout_node)) {
-        auto& text = verify_cast<Layout::TextNode>(*layout_node).text_for_rendering();
-        builder.append(text.substring(0, selection.end().index_in_node));
-    }
+    if (is<DOM::Text>(*range.end_container()) && range.end_container()->layout_node())
+        builder.append(static_cast<DOM::Text const&>(*range.end_container()).data().substring_view(0, range.end_offset()));
 
     return builder.to_deprecated_string();
 }
 
+DeprecatedString BrowsingContext::selected_text() const
+{
+    auto* document = active_document();
+    if (!document)
+        return ""sv;
+    auto selection = const_cast<DOM::Document&>(*document).get_selection();
+    auto range = selection->range();
+    if (!range)
+        return ""sv;
+    return visible_text_in_range(*range);
+}
+
 void BrowsingContext::select_all()
 {
-    if (!active_document())
+    auto* document = active_document();
+    if (!document)
         return;
-    auto* layout_root = active_document()->layout_node();
-    if (!layout_root)
+    auto* body = document->body();
+    if (!body)
         return;
-
-    Layout::Node const* first_layout_node = layout_root;
-
-    for (;;) {
-        auto* next = first_layout_node->next_in_pre_order();
-        if (!next)
-            break;
-        first_layout_node = next;
-        if (is<Layout::TextNode>(*first_layout_node))
-            break;
-    }
-
-    Layout::Node const* last_layout_node = first_layout_node;
-
-    for (Layout::Node const* layout_node = first_layout_node; layout_node; layout_node = layout_node->next_in_pre_order()) {
-        if (is<Layout::TextNode>(*layout_node))
-            last_layout_node = layout_node;
-    }
-
-    VERIFY(first_layout_node);
-    VERIFY(last_layout_node);
-
-    int last_layout_node_index_in_node = 0;
-    if (is<Layout::TextNode>(*last_layout_node)) {
-        auto const& text_for_rendering = verify_cast<Layout::TextNode>(*last_layout_node).text_for_rendering();
-        if (!text_for_rendering.is_empty())
-            last_layout_node_index_in_node = text_for_rendering.length() - 1;
-    }
-
-    auto start = Layout::LayoutPosition {
-        JS::make_handle(const_cast<Layout::Node*>(first_layout_node)), 0
-    };
-    auto end = Layout::LayoutPosition {
-        JS::make_handle(const_cast<Layout::Node*>(last_layout_node)), last_layout_node_index_in_node
-    };
-    layout_root->set_selection({ move(start), move(end) });
+    auto selection = document->get_selection();
+    if (!selection)
+        return;
+    (void)selection->select_all_children(*document->body());
 }
 
 void BrowsingContext::register_viewport_client(ViewportClient& client)
@@ -635,9 +604,9 @@ JS::GCPtr<DOM::Node> BrowsingContext::currently_focused_area()
     // 3. While candidate's focused area is a browsing context container with a non-null nested browsing context:
     //    set candidate to the active document of that browsing context container's nested browsing context.
     while (candidate->focused_element()
-        && is<HTML::BrowsingContextContainer>(candidate->focused_element())
-        && static_cast<HTML::BrowsingContextContainer&>(*candidate->focused_element()).nested_browsing_context()) {
-        candidate = static_cast<HTML::BrowsingContextContainer&>(*candidate->focused_element()).nested_browsing_context()->active_document();
+        && is<HTML::NavigableContainer>(candidate->focused_element())
+        && static_cast<HTML::NavigableContainer&>(*candidate->focused_element()).nested_browsing_context()) {
+        candidate = static_cast<HTML::NavigableContainer&>(*candidate->focused_element()).nested_browsing_context()->active_document();
     }
 
     // 4. If candidate's focused area is non-null, set candidate to candidate's focused area.
@@ -652,13 +621,13 @@ JS::GCPtr<DOM::Node> BrowsingContext::currently_focused_area()
 }
 
 // https://html.spec.whatwg.org/#the-rules-for-choosing-a-browsing-context-given-a-browsing-context-name
-BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_context(StringView name, bool no_opener)
+BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_context(StringView name, TokenizedFeature::NoOpener no_opener, ActivateTab activate_tab)
 {
     // The rules for choosing a browsing context, given a browsing context name name, a browsing context current, and
     // a boolean noopener are as follows:
 
     // 1. Let chosen be null.
-    JS::GCPtr<BrowsingContext> chosen = nullptr;
+    JS::GCPtr<AbstractBrowsingContext> chosen = nullptr;
 
     // 2. Let windowType be "existing or none".
     auto window_type = WindowType::ExistingOrNone;
@@ -667,13 +636,13 @@ BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_contex
     auto sandboxing_flag_set = active_document()->active_sandboxing_flag_set();
 
     // 4. If name is the empty string or an ASCII case-insensitive match for "_self", then set chosen to current.
-    if (name.is_empty() || name.equals_ignoring_case("_self"sv)) {
+    if (name.is_empty() || Infra::is_ascii_case_insensitive_match(name, "_self"sv)) {
         chosen = this;
     }
 
     // 5. Otherwise, if name is an ASCII case-insensitive match for "_parent", set chosen to current's parent browsing
     //    context, if any, and current otherwise.
-    else if (name.equals_ignoring_case("_parent"sv)) {
+    else if (Infra::is_ascii_case_insensitive_match(name, "_parent"sv)) {
         if (auto parent = this->parent())
             chosen = parent;
         else
@@ -682,7 +651,7 @@ BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_contex
 
     // 6. Otherwise, if name is an ASCII case-insensitive match for "_top", set chosen to current's top-level browsing
     //    context, if any, and current otherwise.
-    else if (name.equals_ignoring_case("_top"sv)) {
+    else if (Infra::is_ascii_case_insensitive_match(name, "_top"sv)) {
         chosen = &top_level_browsing_context();
     }
 
@@ -692,7 +661,7 @@ BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_contex
     //           set chosen to that browsing context. If there are multiple matching browsing contexts, the user agent
     //           should set chosen to one in some arbitrary consistent manner, such as the most recently opened, most
     //           recently focused, or more closely related.
-    else if (!name.equals_ignoring_case("_blank"sv)) {
+    else if (!Infra::is_ascii_case_insensitive_match(name, "_blank"sv)) {
         dbgln("FIXME: Find matching browser context for name {}", name);
         chosen = this;
     } else {
@@ -728,15 +697,16 @@ BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_contex
                 // 2. If currentDocument's origin is not same origin with currentDocument's relevant settings object's
                 //    top-level origin, then set noopener to true, name to "_blank", and windowType to "new with no opener".
                 if (!current_document->origin().is_same_origin(current_document->relevant_settings_object().top_level_origin)) {
-                    no_opener = true;
+                    no_opener = TokenizedFeature::NoOpener::Yes;
                     name = "_blank"sv;
                     window_type = WindowType::NewWithNoOpener;
                 }
             }
 
             // 3. If noopener is true, then set chosen to the result of creating a new top-level browsing context.
-            if (no_opener) {
-                chosen = HTML::BrowsingContext::create_a_new_top_level_browsing_context(*m_page);
+            if (no_opener == TokenizedFeature::NoOpener::Yes) {
+                auto handle = m_page->client().page_did_request_new_tab(activate_tab);
+                chosen = RemoteBrowsingContext::create_a_new_remote_browsing_context(handle);
             }
 
             // 4. Otherwise:
@@ -755,8 +725,8 @@ BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_contex
             // FIXME: Our BrowsingContexts do not have SandboxingFlagSets yet, only documents do
 
             // 6. If name is not an ASCII case-insensitive match for "_blank", then set chosen's name to name.
-            if (!name.equals_ignoring_case("_blank"sv))
-                chosen->set_name(name);
+            if (!Infra::is_ascii_case_insensitive_match(name, "_blank"sv))
+                chosen->set_name(String::from_deprecated_string(name).release_value_but_fixme_should_propagate_errors());
         }
 
         // --> If the user agent has been configured such that in this instance t will reuse current
@@ -772,7 +742,7 @@ BrowsingContext::ChosenBrowsingContext BrowsingContext::choose_a_browsing_contex
     }
 
     // 9. Return chosen and windowType.
-    return { chosen, window_type };
+    return { chosen.ptr(), window_type };
 }
 
 // https://html.spec.whatwg.org/multipage/browsers.html#document-tree-child-browsing-context
@@ -804,8 +774,8 @@ bool BrowsingContext::still_on_its_initial_about_blank_document() const
     // if browsingContext's session history's size is 1
     // and browsingContext's session history[0]'s document's is initial about:blank is true.
     return m_session_history.size() == 1
-        && m_session_history[0].document
-        && m_session_history[0].document->is_initial_about_blank();
+        && m_session_history[0]->document
+        && m_session_history[0]->document->is_initial_about_blank();
 }
 
 DOM::Document const* BrowsingContext::active_document() const
@@ -888,7 +858,7 @@ void BrowsingContext::remove()
     set_group(nullptr);
 
     // 4. Remove browsingContext from group's browsing context set.
-    group->browsing_context_set().remove(this);
+    group->browsing_context_set().remove(*this);
 
     // 5. If group's browsing context set is empty, then remove group from the user agent's browsing context group set.
     // NOTE: This is done by ~BrowsingContextGroup() when the refcount reaches 0.
@@ -1039,15 +1009,15 @@ WebIDL::ExceptionOr<void> BrowsingContext::navigate_to_a_fragment(AK::URL const&
     //    document is the current entry's document,
     //    policy container is the current entry's policy-container
     //    and scroll restoration mode is the current entry's scroll restoration mode.
-    m_session_history.append(SessionHistoryEntry {
-        .url = url,
-        .document = current_entry().document,
-        .serialized_state = {},
-        .policy_container = current_entry().policy_container,
-        .scroll_restoration_mode = current_entry().scroll_restoration_mode,
-        .browsing_context_name = {},
-        .original_source_browsing_context = {},
-    });
+    auto new_entry = heap().allocate_without_realm<SessionHistoryEntry>();
+    new_entry->url = url;
+    new_entry->document = current_entry().document;
+    new_entry->serialized_state = {};
+    new_entry->policy_container = current_entry().policy_container;
+    new_entry->scroll_restoration_mode = current_entry().scroll_restoration_mode;
+    new_entry->browsing_context_name = {};
+    new_entry->original_source_browsing_context = {};
+    m_session_history.append(*new_entry);
 
     // 4. Traverse the history to the new entry, with historyHandling set to historyHandling.
     //    This will scroll to the fragment given in what is now the document's URL.
@@ -1063,7 +1033,7 @@ WebIDL::ExceptionOr<void> BrowsingContext::navigate_to_a_fragment(AK::URL const&
 // https://html.spec.whatwg.org/multipage/browsing-the-web.html#traverse-the-history
 WebIDL::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_index, HistoryHandlingBehavior history_handling, bool explicit_history_navigation)
 {
-    auto* entry = &m_session_history[entry_index];
+    auto entry = m_session_history[entry_index];
 
     // 1. If entry's document is null, then:
     if (!entry->document) {
@@ -1182,7 +1152,7 @@ WebIDL::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_ind
         // FIXME: This is gnarly.
         m_session_history.remove(entry_index - 1);
         entry_index--;
-        entry = &m_session_history[entry_index];
+        entry = m_session_history[entry_index];
     }
 
     // 10. If entry's persisted user state is null, and its URL's fragment is non-null, then scroll to the fragment.
@@ -1217,7 +1187,7 @@ WebIDL::ExceptionOr<void> BrowsingContext::traverse_the_history(size_t entry_ind
             // and the newURL attribute initialized to newURL.
 
             // FIXME: Implement a proper HashChangeEvent class.
-            auto event = DOM::Event::create(verify_cast<HTML::Window>(relevant_global_object(*new_document)).realm(), HTML::EventNames::hashchange);
+            auto event = DOM::Event::create(verify_cast<HTML::Window>(relevant_global_object(*new_document)).realm(), HTML::EventNames::hashchange).release_value_but_fixme_should_propagate_errors();
             new_document->dispatch_event(event);
         });
     }
@@ -1290,11 +1260,11 @@ Vector<JS::Handle<DOM::Document>> BrowsingContext::document_family() const
 {
     HashTable<DOM::Document*> documents;
     for (auto& entry : m_session_history) {
-        if (!entry.document)
+        if (!entry->document)
             continue;
-        if (documents.set(const_cast<DOM::Document*>(entry.document.ptr())) == AK::HashSetResult::ReplacedExistingEntry)
+        if (documents.set(const_cast<DOM::Document*>(entry->document.ptr())) == AK::HashSetResult::ReplacedExistingEntry)
             continue;
-        for (auto& context : entry.document->list_of_descendant_browsing_contexts()) {
+        for (auto& context : entry->document->list_of_descendant_browsing_contexts()) {
             for (auto& document : context->document_family()) {
                 documents.set(document.ptr());
             }
@@ -1330,7 +1300,13 @@ void BrowsingContext::set_system_visibility_state(VisibilityState visibility_sta
     // has changed to newState, it must queue a task on the user interaction task source to update
     // the visibility state of all the Document objects in the top-level browsing context's document family with newState.
     auto document_family = top_level_browsing_context().document_family();
-    queue_global_task(Task::Source::UserInteraction, Bindings::main_thread_vm().current_realm()->global_object(), [visibility_state, document_family = move(document_family)] {
+
+    // From the new navigable version, where it tells us what global object to use here:
+    // 1. Let document be navigable's active document.
+    // 2. Queue a global task on the user interaction task source given document's relevant global object to update the visibility state of document with newState.
+    // FIXME: Update this function to fully match the navigable version.
+    VERIFY(active_document());
+    queue_global_task(Task::Source::UserInteraction, relevant_global_object(*active_document()), [visibility_state, document_family = move(document_family)] {
         for (auto& document : document_family) {
             document->update_the_visibility_state(visibility_state);
         }
@@ -1344,8 +1320,8 @@ void BrowsingContext::discard()
 
     // 1. Discard all Document objects for all the entries in browsingContext's session history.
     for (auto& entry : m_session_history) {
-        if (entry.document)
-            entry.document->discard();
+        if (entry->document)
+            entry->document->discard();
     }
 
     // AD-HOC:

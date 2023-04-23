@@ -13,7 +13,7 @@ namespace Kernel {
 
 ErrorOr<FlatPtr> Process::sys$sigprocmask(int how, Userspace<sigset_t const*> set, Userspace<sigset_t*> old_set)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::sigaction));
     auto* current_thread = Thread::current();
     u32 previous_signal_mask;
@@ -43,7 +43,7 @@ ErrorOr<FlatPtr> Process::sys$sigprocmask(int how, Userspace<sigset_t const*> se
 
 ErrorOr<FlatPtr> Process::sys$sigpending(Userspace<sigset_t*> set)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
     auto pending_signals = Thread::current()->pending_signals();
     TRY(copy_to_user(set, &pending_signals));
@@ -75,9 +75,9 @@ ErrorOr<FlatPtr> Process::sys$sigaction(int signum, Userspace<sigaction const*> 
     return 0;
 }
 
-ErrorOr<FlatPtr> Process::sys$sigreturn([[maybe_unused]] RegisterState& registers)
+ErrorOr<FlatPtr> Process::sys$sigreturn(RegisterState& registers)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
     SmapDisabler disabler;
 
@@ -87,14 +87,12 @@ ErrorOr<FlatPtr> Process::sys$sigreturn([[maybe_unused]] RegisterState& register
     // Stack state (created by the signal trampoline):
     // saved_ax, ucontext, signal_info, fpu_state?.
 
-#if ARCH(I386) || ARCH(X86_64)
     // The FPU state is at the top here, pop it off and restore it.
     // FIXME: The stack alignment is off by 8 bytes here, figure this out and remove this excessively aligned object.
     alignas(alignof(FPUState) * 2) FPUState data {};
     TRY(copy_from_user(&data, bit_cast<FPUState const*>(stack_ptr)));
     Thread::current()->fpu_state() = data;
     stack_ptr += sizeof(FPUState);
-#endif
 
     stack_ptr += sizeof(siginfo); // We don't need this here.
 
@@ -107,8 +105,6 @@ ErrorOr<FlatPtr> Process::sys$sigreturn([[maybe_unused]] RegisterState& register
     Thread::current()->m_currently_handled_signal = 0;
 #if ARCH(X86_64)
     auto sp = registers.rsp;
-#elif ARCH(I386)
-    auto sp = registers.esp;
 #endif
 
     copy_ptrace_registers_into_kernel_registers(registers, static_cast<PtraceRegisters const&>(ucontext.uc_mcontext));
@@ -116,9 +112,6 @@ ErrorOr<FlatPtr> Process::sys$sigreturn([[maybe_unused]] RegisterState& register
 #if ARCH(X86_64)
     registers.set_userspace_sp(registers.rsp);
     registers.rsp = sp;
-#elif ARCH(I386)
-    registers.set_userspace_sp(registers.esp);
-    registers.esp = sp;
 #endif
 
     return saved_ax;
@@ -300,7 +293,7 @@ ErrorOr<FlatPtr> Process::sys$sigaltstack(Userspace<stack_t const*> user_ss, Use
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigtimedwait.html
 ErrorOr<FlatPtr> Process::sys$sigtimedwait(Userspace<sigset_t const*> set, Userspace<siginfo_t*> info, Userspace<timespec const*> timeout)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::sigaction));
 
     sigset_t set_value;
@@ -331,7 +324,7 @@ ErrorOr<FlatPtr> Process::sys$sigtimedwait(Userspace<sigset_t const*> set, Users
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigsuspend.html
 ErrorOr<FlatPtr> Process::sys$sigsuspend(Userspace<sigset_t const*> mask)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
 
     auto sigmask = TRY(copy_typed_from_user(mask));
 

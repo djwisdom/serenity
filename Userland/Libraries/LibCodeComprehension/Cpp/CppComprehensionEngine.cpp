@@ -10,11 +10,11 @@
 #include <AK/OwnPtr.h>
 #include <AK/ScopeGuard.h>
 #include <LibCore/DirIterator.h>
-#include <LibCore/File.h>
 #include <LibCpp/AST.h>
 #include <LibCpp/Lexer.h>
 #include <LibCpp/Parser.h>
 #include <LibCpp/Preprocessor.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibRegex/Regex.h>
 #include <Userland/DevTools/HackStudio/LanguageServers/ConnectionFromClient.h>
 
@@ -199,9 +199,9 @@ Vector<StringView> CppComprehensionEngine::scope_of_reference_to_symbol(ASTNode 
     Vector<StringView> scope_parts;
     for (auto& scope_part : name->scope()) {
         // If the target node is part of a scope reference, we want to end the scope chain before it.
-        if (&scope_part == &node)
+        if (scope_part == &node)
             break;
-        scope_parts.append(scope_part.name());
+        scope_parts.append(scope_part->name());
     }
     return scope_parts;
 }
@@ -263,8 +263,8 @@ DeprecatedString CppComprehensionEngine::type_of_variable(Identifier const& iden
     ASTNode const* current = &identifier;
     while (current) {
         for (auto& decl : current->declarations()) {
-            if (decl.is_variable_or_parameter_declaration()) {
-                auto& var_or_param = verify_cast<VariableOrParameterDeclaration>(decl);
+            if (decl->is_variable_or_parameter_declaration()) {
+                auto& var_or_param = verify_cast<VariableOrParameterDeclaration>(*decl);
                 if (var_or_param.full_name() == identifier.name() && var_or_param.type()->is_named_type()) {
                     VERIFY(verify_cast<NamedType>(*var_or_param.type()).name());
                     if (verify_cast<NamedType>(*var_or_param.type()).name())
@@ -326,12 +326,12 @@ Vector<CppComprehensionEngine::Symbol> CppComprehensionEngine::properties_of_typ
         Vector<StringView> scope(type_symbol.scope);
         scope.append(type_symbol.name);
         // FIXME: We don't have to create the Symbol here, it should already exist in the 'm_symbol' table of some DocumentData we already parsed.
-        properties.append(Symbol::create(member.full_name(), scope, member, Symbol::IsLocal::No));
+        properties.append(Symbol::create(member->full_name(), scope, member, Symbol::IsLocal::No));
     }
     return properties;
 }
 
-CppComprehensionEngine::Symbol CppComprehensionEngine::Symbol::create(StringView name, Vector<StringView> const& scope, NonnullRefPtr<Cpp::Declaration> declaration, IsLocal is_local)
+CppComprehensionEngine::Symbol CppComprehensionEngine::Symbol::create(StringView name, Vector<StringView> const& scope, NonnullRefPtr<Cpp::Declaration const> declaration, IsLocal is_local)
 {
     return { { name, scope }, move(declaration), is_local == IsLocal::Yes };
 }
@@ -346,16 +346,16 @@ Vector<CppComprehensionEngine::Symbol> CppComprehensionEngine::get_child_symbols
     Vector<Symbol> symbols;
 
     for (auto& decl : node.declarations()) {
-        symbols.append(Symbol::create(decl.full_name(), scope, decl, is_local));
+        symbols.append(Symbol::create(decl->full_name(), scope, decl, is_local));
 
-        bool should_recurse = decl.is_namespace() || decl.is_struct_or_class() || decl.is_function();
-        bool are_child_symbols_local = decl.is_function();
+        bool should_recurse = decl->is_namespace() || decl->is_struct_or_class() || decl->is_function();
+        bool are_child_symbols_local = decl->is_function();
 
         if (!should_recurse)
             continue;
 
         auto new_scope = scope;
-        new_scope.append(decl.full_name());
+        new_scope.append(decl->full_name());
         symbols.extend(get_child_symbols(decl, new_scope, are_child_symbols_local ? Symbol::IsLocal::Yes : is_local));
     }
 
@@ -416,7 +416,7 @@ Optional<CodeComprehension::ProjectLocation> CppComprehensionEngine::find_declar
     return find_preprocessor_definition(document, identifier_position);
 }
 
-RefPtr<Cpp::Declaration> CppComprehensionEngine::find_declaration_of(DocumentData const& document, const GUI::TextPosition& identifier_position)
+RefPtr<Cpp::Declaration const> CppComprehensionEngine::find_declaration_of(DocumentData const& document, const GUI::TextPosition& identifier_position)
 {
     auto node = document.parser().node_at(Cpp::Position { identifier_position.line(), identifier_position.column() });
     if (!node) {
@@ -509,7 +509,7 @@ static Optional<TargetDeclaration> get_target_declaration(ASTNode const& node, D
 
     return TargetDeclaration { TargetDeclaration::Type::Variable, name };
 }
-RefPtr<Cpp::Declaration> CppComprehensionEngine::find_declaration_of(DocumentData const& document_data, ASTNode const& node) const
+RefPtr<Cpp::Declaration const> CppComprehensionEngine::find_declaration_of(DocumentData const& document_data, ASTNode const& node) const
 {
     dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "find_declaration_of: {} ({})", document_data.parser().text_of_node(node), node.class_name());
 
@@ -669,15 +669,15 @@ Vector<StringView> CppComprehensionEngine::scope_of_node(ASTNode const& node) co
     if (!parent->is_declaration())
         return parent_scope;
 
-    auto& parent_decl = static_cast<Cpp::Declaration&>(*parent);
+    auto& parent_decl = static_cast<Cpp::Declaration const&>(*parent);
 
     StringView containing_scope;
     if (parent_decl.is_namespace())
-        containing_scope = static_cast<NamespaceDeclaration&>(parent_decl).full_name();
+        containing_scope = static_cast<NamespaceDeclaration const&>(parent_decl).full_name();
     if (parent_decl.is_struct_or_class())
-        containing_scope = static_cast<StructOrClassDeclaration&>(parent_decl).full_name();
+        containing_scope = static_cast<StructOrClassDeclaration const&>(parent_decl).full_name();
     if (parent_decl.is_function())
-        containing_scope = static_cast<FunctionDeclaration&>(parent_decl).full_name();
+        containing_scope = static_cast<FunctionDeclaration const&>(parent_decl).full_name();
 
     parent_scope.append(containing_scope);
     return parent_scope;
@@ -736,7 +736,7 @@ Optional<Vector<CodeComprehension::AutocompleteResultEntry>> CppComprehensionEng
         if (!path.starts_with(partial_basename))
             continue;
 
-        if (Core::File::is_directory(LexicalPath::join(full_dir, path).string())) {
+        if (FileSystem::is_directory(LexicalPath::join(full_dir, path).string())) {
             // FIXME: Don't dismiss the autocomplete when filling these suggestions.
             auto completion = DeprecatedString::formatted("{}{}{}/", prefix, include_dir, path);
             options.empend(completion, include_dir.length() + partial_basename.length() + 1, CodeComprehension::Language::Cpp, path, CodeComprehension::AutocompleteResultEntry::HideAutocompleteAfterApplying::No);
@@ -751,9 +751,9 @@ Optional<Vector<CodeComprehension::AutocompleteResultEntry>> CppComprehensionEng
     return options;
 }
 
-RefPtr<Cpp::Declaration> CppComprehensionEngine::find_declaration_of(CppComprehensionEngine::DocumentData const& document, CppComprehensionEngine::SymbolName const& target_symbol_name) const
+RefPtr<Cpp::Declaration const> CppComprehensionEngine::find_declaration_of(CppComprehensionEngine::DocumentData const& document, CppComprehensionEngine::SymbolName const& target_symbol_name) const
 {
-    RefPtr<Cpp::Declaration> target_declaration;
+    RefPtr<Cpp::Declaration const> target_declaration;
     for_each_available_symbol(document, [&](Symbol const& symbol) {
         if (symbol.name == target_symbol_name) {
             target_declaration = symbol.declaration;
@@ -834,7 +834,7 @@ Optional<CodeComprehensionEngine::FunctionParamsHint> CppComprehensionEngine::ge
 
     dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "node type: {}", node->class_name());
 
-    FunctionCall* call_node { nullptr };
+    FunctionCall const* call_node { nullptr };
 
     if (node->is_function_call()) {
         call_node = verify_cast<FunctionCall>(node.ptr());
@@ -864,7 +864,7 @@ Optional<CodeComprehensionEngine::FunctionParamsHint> CppComprehensionEngine::ge
 
     Optional<size_t> invoked_arg_index;
     for (size_t arg_index = 0; arg_index < call_node->arguments().size(); ++arg_index) {
-        if (&call_node->arguments()[arg_index] == node.ptr()) {
+        if (call_node->arguments()[arg_index] == node.ptr()) {
             invoked_arg_index = arg_index;
             break;
         }
@@ -880,7 +880,7 @@ Optional<CodeComprehensionEngine::FunctionParamsHint> CppComprehensionEngine::ge
 
 Optional<CppComprehensionEngine::FunctionParamsHint> CppComprehensionEngine::get_function_params_hint(
     DocumentData const& document,
-    FunctionCall& call_node,
+    FunctionCall const& call_node,
     size_t argument_index)
 {
     Identifier const* callee = nullptr;
@@ -920,7 +920,7 @@ Optional<CppComprehensionEngine::FunctionParamsHint> CppComprehensionEngine::get
     hint.current_index = argument_index;
     for (auto& arg : func_decl.parameters()) {
         Vector<StringView> tokens_text;
-        for (auto token : document_of_declaration->parser().tokens_in_range(arg.start(), arg.end())) {
+        for (auto token : document_of_declaration->parser().tokens_in_range(arg->start(), arg->end())) {
             tokens_text.append(token.text());
         }
         hint.params.append(DeprecatedString::join(' ', tokens_text));

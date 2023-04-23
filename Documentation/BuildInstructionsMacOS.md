@@ -22,6 +22,9 @@ Toolchain/BuildFuseExt2.sh
 
 # (option 2) genext2fs
 brew install genext2fs
+
+# for kernel debugging, on Apple Silicon
+brew install x86_64-elf-gdb
 ```
 
 If you have Xcode version 13 or older, also install a newer host compiler from homebrew. Xcode 14 is known to work.
@@ -34,6 +37,10 @@ brew install gcc@12
 
 # Notes
 
+You can use both Intel and Apple Silicon Macs to run the x86-64 version of SerenityOS. You do not
+need to install Rosetta for this. An emulator is used when running on an Apple Silicon, so Serenity
+will be slower compared to running natively with hardware-assisted virtualization on an Intel machine.
+
 If you're building on M1 Mac and have Homebrew installed in both Rosetta and native environments,
 you have to make sure that required packages are installed only in one of the environments. Otherwise,
 these installations can conflict during the build process, which is manifested in hard to diagnose issues.
@@ -45,5 +52,8 @@ Installing macfuse for the first time requires enabling its system extension in 
 It's important to make sure that Xcode is not only installed but also accordingly updated, otherwise CMake will run into incompatibilities with GCC.
 
 Homebrew is known to ship bleeding edge CMake versions, but building CMake from source with homebrew
-gcc or llvm may not work. If homebrew does not offer cmake 3.25.x+ on your platform, it may be neccessary
+gcc or llvm may not work. If homebrew does not offer cmake 3.25.x+ on your platform, it may be necessary
 to manually run Toolchain/BuildCMake.sh with Apple clang from Xcode as the first compiler in your $PATH.
+
+If you want to debug the x86-64 kernel on an Apple Silicon machine, you can install the `x86_64-elf-gdb`
+package to get a native build of GDB that can cross-debug x86-64 code.

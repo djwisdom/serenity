@@ -5,12 +5,17 @@
 [Exposed=Window]
 interface HTMLFormElement : HTMLElement {
 
-    [Reflect] attribute DOMString name;
-    [Reflect] attribute DOMString rel;
-    [Reflect=accept-charset] attribute DOMString acceptCharset;
-    [Reflect=novalidate] attribute boolean noValidate;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString name;
+    [CEReactions, Reflect] attribute DOMString rel;
+    [CEReactions, Reflect=accept-charset] attribute DOMString acceptCharset;
+    [CEReactions, Reflect=novalidate] attribute boolean noValidate;
 
     undefined submit();
+    [CEReactions] undefined reset();
+    boolean checkValidity();
+    boolean reportValidity();
 
     // FIXME: Should be a HTMLFormControlsCollection
     [SameObject] readonly attribute HTMLCollection elements;

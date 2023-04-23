@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/CharacterTypes.h>
 #include <AK/DeprecatedString.h>
 #include <AK/GenericLexer.h>
 #include <AK/Optional.h>
@@ -34,29 +35,29 @@ static ErrorOr<DeprecatedString> build_set(StringView specification)
 
     while (!lexer.is_eof()) {
         if (lexer.consume_specific("[:alnum:]"sv))
-            TRY(generate_character_class(isalnum, out));
+            TRY(generate_character_class(is_ascii_alphanumeric, out));
         else if (lexer.consume_specific("[:blank:]"sv))
-            TRY(generate_character_class(isblank, out));
+            TRY(generate_character_class(is_ascii_blank, out));
         else if (lexer.consume_specific("[:digit:]"sv))
-            TRY(generate_character_class(isdigit, out));
+            TRY(generate_character_class(is_ascii_digit, out));
         else if (lexer.consume_specific("[:lower:]"sv))
-            TRY(generate_character_class(islower, out));
+            TRY(generate_character_class(is_ascii_lower_alpha, out));
         else if (lexer.consume_specific("[:punct:]"sv))
-            TRY(generate_character_class(ispunct, out));
+            TRY(generate_character_class(is_ascii_punctuation, out));
         else if (lexer.consume_specific("[:upper:]"sv))
-            TRY(generate_character_class(isupper, out));
+            TRY(generate_character_class(is_ascii_upper_alpha, out));
         else if (lexer.consume_specific("[:alpha:]"sv))
-            TRY(generate_character_class(isalpha, out));
+            TRY(generate_character_class(is_ascii_alpha, out));
         else if (lexer.consume_specific("[:cntrl:]"sv))
-            TRY(generate_character_class(iscntrl, out));
+            TRY(generate_character_class(is_ascii_control, out));
         else if (lexer.consume_specific("[:graph:]"sv))
-            TRY(generate_character_class(isgraph, out));
+            TRY(generate_character_class(is_ascii_graphical, out));
         else if (lexer.consume_specific("[:print:]"sv))
-            TRY(generate_character_class(isprint, out));
+            TRY(generate_character_class(is_ascii_printable, out));
         else if (lexer.consume_specific("[:space:]"sv))
-            TRY(generate_character_class(isspace, out));
+            TRY(generate_character_class(is_ascii_space, out));
         else if (lexer.consume_specific("[:xdigit:]"sv))
-            TRY(generate_character_class(isxdigit, out));
+            TRY(generate_character_class(is_ascii_hex_digit, out));
         else if (lexer.consume_specific("\\\\"sv))
             TRY(out.try_append('\\'));
         else if (lexer.consume_specific("\\a"sv))
@@ -111,19 +112,19 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     if (!transform_flag && !delete_flag && !squeeze_flag) {
         warnln("tr: Missing operand");
-        args_parser.print_usage(stderr, arguments.argv[0]);
+        args_parser.print_usage(stderr, arguments.strings[0]);
         return 1;
     }
 
     if (delete_flag && squeeze_flag && to_chars.is_empty()) {
         warnln("tr: Combined delete and squeeze operations need two sets of characters");
-        args_parser.print_usage(stderr, arguments.argv[0]);
+        args_parser.print_usage(stderr, arguments.strings[0]);
         return 1;
     }
 
     if (delete_flag && !squeeze_flag && !to_chars.is_empty()) {
         warnln("tr: Only one set of characters may be given when deleting without squeezing");
-        args_parser.print_usage(stderr, arguments.argv[0]);
+        args_parser.print_usage(stderr, arguments.strings[0]);
         return 1;
     }
 

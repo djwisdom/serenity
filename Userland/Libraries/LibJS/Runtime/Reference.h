@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <AK/DeprecatedString.h>
 #include <LibJS/Runtime/Environment.h>
 #include <LibJS/Runtime/EnvironmentCoordinate.h>
 #include <LibJS/Runtime/PropertyKey.h>
@@ -14,7 +13,7 @@
 
 namespace JS {
 
-Reference make_private_reference(VM&, Value base_value, FlyString const& private_identifier);
+Reference make_private_reference(VM&, Value base_value, DeprecatedFlyString const& private_identifier);
 
 class Reference {
 public:
@@ -47,7 +46,7 @@ public:
         }
     }
 
-    Reference(Environment& base, FlyString referenced_name, bool strict = false, Optional<EnvironmentCoordinate> environment_coordinate = {})
+    Reference(Environment& base, DeprecatedFlyString referenced_name, bool strict = false, Optional<EnvironmentCoordinate> environment_coordinate = {})
         : m_base_type(BaseType::Environment)
         , m_base_environment(&base)
         , m_name(move(referenced_name))
@@ -121,13 +120,11 @@ public:
         return m_base_type == BaseType::Environment;
     }
 
-    ThrowCompletionOr<void> initialize_referenced_binding(VM&, Value value) const;
+    ThrowCompletionOr<void> initialize_referenced_binding(VM&, Value value, Environment::InitializeBindingHint hint = Environment::InitializeBindingHint::Normal) const;
 
     ThrowCompletionOr<void> put_value(VM&, Value);
     ThrowCompletionOr<Value> get_value(VM&) const;
     ThrowCompletionOr<bool> delete_(VM&);
-
-    DeprecatedString to_deprecated_string() const;
 
     bool is_valid_reference() const { return m_name.is_valid() || m_is_private; }
 

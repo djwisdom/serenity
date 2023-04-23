@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Martin Falisse <mfalisse@outlook.com>
+ * Copyright (c) 2022-2023, Martin Falisse <mfalisse@outlook.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -7,22 +7,66 @@
 #pragma once
 
 #include <LibWeb/CSS/Length.h>
-#include <LibWeb/Layout/BlockFormattingContext.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/FormattingContext.h>
 
 namespace Web::Layout {
 
-class GridFormattingContext final : public BlockFormattingContext {
+class OccupationGrid {
 public:
-    explicit GridFormattingContext(LayoutState&, BlockContainer const&, FormattingContext* parent);
+    OccupationGrid(int column_count, int row_count);
+    OccupationGrid();
+
+    void maybe_add_column(int needed_number_of_columns);
+    void maybe_add_row(int needed_number_of_rows);
+    void set_occupied(int column_start, int column_end, int row_start, int row_end);
+    void set_occupied(int column_index, int row_index);
+
+    int column_count() { return static_cast<int>(m_occupation_grid[0].size()); }
+    int row_count() { return static_cast<int>(m_occupation_grid.size()); }
+    bool is_occupied(int column_index, int row_index);
+
+private:
+    Vector<Vector<bool>> m_occupation_grid;
+};
+
+class GridItem {
+public:
+    GridItem(Box const& box, int row, int row_span, int column, int column_span)
+        : m_box(box)
+        , m_row(row)
+        , m_row_span(row_span)
+        , m_column(column)
+        , m_column_span(column_span)
+    {
+    }
+
+    Box const& box() const { return m_box; }
+
+    int raw_row_span() { return m_row_span; }
+    int raw_column_span() { return m_column_span; }
+
+    int gap_adjusted_row(Box const& parent_box) const;
+    int gap_adjusted_column(Box const& parent_box) const;
+
+private:
+    JS::NonnullGCPtr<Box const> m_box;
+    int m_row { 0 };
+    int m_row_span { 1 };
+    int m_column { 0 };
+    int m_column_span { 1 };
+};
+
+class GridFormattingContext final : public FormattingContext {
+public:
+    explicit GridFormattingContext(LayoutState&, Box const& grid_container, FormattingContext* parent);
     ~GridFormattingContext();
 
     virtual void run(Box const&, LayoutMode, AvailableSpace const& available_space) override;
-    virtual float automatic_content_height() const override;
+    virtual CSSPixels automatic_content_width() const override;
+    virtual CSSPixels automatic_content_height() const override;
 
 private:
-    float m_automatic_content_height { 0 };
+    CSSPixels m_automatic_content_height { 0 };
     bool is_auto_positioned_row(CSS::GridTrackPlacement const&, CSS::GridTrackPlacement const&) const;
     bool is_auto_positioned_column(CSS::GridTrackPlacement const&, CSS::GridTrackPlacement const&) const;
     bool is_auto_positioned_track(CSS::GridTrackPlacement const&, CSS::GridTrackPlacement const&) const;
@@ -30,11 +74,26 @@ private:
     struct TemporaryTrack {
         CSS::GridSize min_track_sizing_function;
         CSS::GridSize max_track_sizing_function;
-        float base_size { 0 };
-        float growth_limit { 0 };
-        float space_to_distribute { 0 };
-        float planned_increase { 0 };
+        CSSPixels base_size { 0 };
+        CSSPixels growth_limit { 0 };
+        CSSPixels space_to_distribute { 0 };
+        CSSPixels planned_increase { 0 };
         bool is_gap { false };
+
+        CSSPixels border_left { 0 };
+        CSSPixels border_right { 0 };
+        CSSPixels border_top { 0 };
+        CSSPixels border_bottom { 0 };
+
+        CSSPixels full_horizontal_size() const
+        {
+            return base_size + border_left + border_right;
+        }
+
+        CSSPixels full_vertical_size() const
+        {
+            return base_size + border_top + border_bottom;
+        }
 
         TemporaryTrack(CSS::GridSize min_track_sizing_function, CSS::GridSize max_track_sizing_function)
             : min_track_sizing_function(min_track_sizing_function)
@@ -48,10 +107,10 @@ private:
         {
         }
 
-        TemporaryTrack(float size_in_px, bool is_gap)
-            : min_track_sizing_function(CSS::GridSize(CSS::Length(size_in_px, CSS::Length::Type::Px)))
-            , max_track_sizing_function(CSS::GridSize(CSS::Length(size_in_px, CSS::Length::Type::Px)))
-            , base_size(size_in_px)
+        TemporaryTrack(CSSPixels size, bool is_gap)
+            : min_track_sizing_function(CSS::GridSize(CSS::Length::make_px(size)))
+            , max_track_sizing_function(CSS::GridSize(CSS::Length::make_px(size)))
+            , base_size(size)
             , is_gap(is_gap)
         {
         }
@@ -63,30 +122,46 @@ private:
         }
     };
 
+    struct GridArea {
+        String name;
+        int row_start { 0 };
+        int row_end { 1 };
+        int column_start { 0 };
+        int column_end { 1 };
+    };
+    Vector<GridArea> m_valid_grid_areas;
+
     Vector<TemporaryTrack> m_grid_rows;
     Vector<TemporaryTrack> m_grid_columns;
 
-    float get_free_space_x(AvailableSpace const& available_space);
-    float get_free_space_y(Box const&);
+    OccupationGrid m_occupation_grid;
+    Vector<GridItem> m_grid_items;
+    Vector<JS::NonnullGCPtr<Box const>> m_boxes_to_place;
 
-    int get_line_index_by_line_name(DeprecatedString const& line_name, CSS::GridTrackSizeList);
-};
+    CSSPixels get_free_space_x(AvailableSpace const& available_space);
+    CSSPixels get_free_space_y(Box const&);
 
-class OccupationGrid {
-public:
-    OccupationGrid(int column_count, int row_count);
+    int get_line_index_by_line_name(String const& line_name, CSS::GridTrackSizeList);
+    CSSPixels resolve_definite_track_size(CSS::GridSize const&, AvailableSpace const&, Box const&);
+    size_t count_of_gap_columns();
+    size_t count_of_gap_rows();
+    CSSPixels resolve_size(CSS::Size const&, AvailableSize const&, Box const&);
+    int count_of_repeated_auto_fill_or_fit_tracks(Vector<CSS::ExplicitGridTrack> const& track_list, AvailableSpace const&, Box const&);
+    int get_count_of_tracks(Vector<CSS::ExplicitGridTrack> const&, AvailableSpace const&, Box const&);
 
-    void maybe_add_column(int needed_number_of_columns);
-    void maybe_add_row(int needed_number_of_rows);
-    void set_occupied(int column_start, int column_end, int row_start, int row_end);
-    void set_occupied(int column_index, int row_index);
+    void build_valid_grid_areas(Box const&);
+    int find_valid_grid_area(String const& needle);
 
-    int column_count() { return static_cast<int>(m_occupation_grid[0].size()); }
-    int row_count() { return static_cast<int>(m_occupation_grid.size()); }
-    bool is_occupied(int column_index, int row_index);
+    void place_item_with_row_and_column_position(Box const& box, Box const& child_box);
+    void place_item_with_row_position(Box const& box, Box const& child_box);
+    void place_item_with_column_position(Box const& box, Box const& child_box, int& auto_placement_cursor_x, int& auto_placement_cursor_y);
+    void place_item_with_no_declared_position(Box const& child_box, int& auto_placement_cursor_x, int& auto_placement_cursor_y);
 
-private:
-    Vector<Vector<bool>> m_occupation_grid;
+    void initialize_grid_tracks(Box const&, AvailableSpace const&, int column_count, int row_count);
+    void calculate_sizes_of_columns(Box const&, AvailableSpace const&);
+    void calculate_sizes_of_rows(Box const&);
+
+    CSSPixels content_based_minimum_height(GridItem const&, Box const& parent_box);
 };
 
 }

@@ -18,7 +18,7 @@
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    char const* file_path = nullptr;
+    StringView file_path;
     Core::ArgsParser args_parser;
     args_parser.add_positional_argument(file_path, "PDF file to open", "path", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
@@ -27,6 +27,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto app_icon = GUI::Icon::default_icon("app-pdf-viewer"sv);
 
     Config::pledge_domain("PDFViewer");
+    app->set_config_domain(TRY("PDFViewer"_string));
 
     auto window = TRY(GUI::Window::try_create());
     window->set_title("PDF Viewer");
@@ -34,23 +35,22 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(Core::System::pledge("stdio recvfd sendfd rpath unix"));
 
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/tmp/session/%sid/portal/filesystemaccess", "rw"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    auto pdf_viewer_widget = TRY(window->try_set_main_widget<PDFViewerWidget>());
+    auto pdf_viewer_widget = TRY(window->set_main_widget<PDFViewerWidget>());
 
-    pdf_viewer_widget->initialize_menubar(*window);
+    TRY(pdf_viewer_widget->initialize_menubar(*window));
 
     window->show();
     window->set_icon(app_icon.bitmap_for_size(16));
 
-    if (file_path) {
-        auto response = FileSystemAccessClient::Client::the().try_request_file_read_only_approved(window, file_path);
+    if (!file_path.is_empty()) {
+        auto response = FileSystemAccessClient::Client::the().request_file_read_only_approved(window, file_path);
         if (response.is_error())
             return 1;
-        pdf_viewer_widget->open_file(*response.value());
+        pdf_viewer_widget->open_file(response.value().filename(), response.value().release_stream());
     }
 
     return app->exec();

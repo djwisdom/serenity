@@ -4,10 +4,12 @@
 [Exposed=Window]
 interface HTMLButtonElement : HTMLElement {
 
-    [Reflect=formnovalidate] attribute boolean formNoValidate;
-    [Reflect=formtarget] attribute DOMString formTarget;
-    [Reflect] attribute DOMString name;
-    [Reflect] attribute DOMString value;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect=formnovalidate] attribute boolean formNoValidate;
+    [CEReactions, Reflect=formtarget] attribute DOMString formTarget;
+    [CEReactions, Reflect] attribute DOMString name;
+    [CEReactions, Reflect] attribute DOMString value;
     [CEReactions] attribute DOMString type;
 
 };

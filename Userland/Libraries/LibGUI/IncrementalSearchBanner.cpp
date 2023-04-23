@@ -19,7 +19,7 @@ namespace GUI {
 IncrementalSearchBanner::IncrementalSearchBanner(TextEditor& editor)
     : m_editor(editor)
 {
-    load_from_gml(incremental_search_banner_gml);
+    load_from_gml(incremental_search_banner_gml).release_value_but_fixme_should_propagate_errors();
     m_index_label = find_descendant_of_type_named<Label>("incremental_search_banner_index_label");
 
     m_wrap_search_button = find_descendant_of_type_named<Button>("incremental_search_banner_wrap_search_button");
@@ -37,7 +37,7 @@ IncrementalSearchBanner::IncrementalSearchBanner(TextEditor& editor)
     };
 
     m_close_button = find_descendant_of_type_named<Button>("incremental_search_banner_close_button");
-    m_close_button->set_text("\xE2\x9D\x8C");
+    m_close_button->set_text("\xE2\x9D\x8C"_short_string);
     m_close_button->on_click = [this](auto) {
         hide();
     };

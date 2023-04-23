@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -19,19 +19,21 @@
 namespace JS {
 
 FunctionConstructor::FunctionConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.Function.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.Function.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void FunctionConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> FunctionConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     // 20.2.2.2 Function.prototype, https://tc39.es/ecma262/#sec-function.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().function_prototype(), 0);
 
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
+
+    return {};
 }
 
 // 20.2.1.1.1 CreateDynamicFunction ( constructor, newTarget, kind, args ), https://tc39.es/ecma262/#sec-createdynamicfunction
@@ -48,7 +50,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
         new_target = &constructor;
 
     StringView prefix;
-    Object* (Intrinsics::*fallback_prototype)() = nullptr;
+    NonnullGCPtr<Object> (Intrinsics::*fallback_prototype)() = nullptr;
 
     switch (kind) {
     // 4. If kind is normal, then
@@ -145,7 +147,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
 
             // ii. Let nextArgString be ? ToString(nextArg).
             // iii. Set P to the string-concatenation of P, "," (a comma), and nextArgString.
-            parameters.append(TRY(next_arg.to_string(vm)));
+            parameters.append(TRY(next_arg.to_deprecated_string(vm)));
 
             // iv. Set k to k + 1.
         }
@@ -156,7 +158,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     }
 
     // 13. Let bodyString be the string-concatenation of 0x000A (LINE FEED), ? ToString(bodyArg), and 0x000A (LINE FEED).
-    auto body_string = DeprecatedString::formatted("\n{}\n", body_arg.has_value() ? TRY(body_arg->to_string(vm)) : "");
+    auto body_string = DeprecatedString::formatted("\n{}\n", body_arg.has_value() ? TRY(body_arg->to_deprecated_string(vm)) : "");
 
     // 14. Let sourceString be the string-concatenation of prefix, " anonymous(", P, 0x000A (LINE FEED), ") {", bodyString, and "}".
     // 15. Let sourceText be StringToCodePoints(sourceString).
@@ -176,7 +178,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     // 17. If parameters is a List of errors, throw a SyntaxError exception.
     if (parameters_parser.has_errors()) {
         auto error = parameters_parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
+        return vm.throw_completion<SyntaxError>(TRY_OR_THROW_OOM(vm, error.to_string()));
     }
 
     // 18. Let body be ParseText(StringToCodePoints(bodyString), bodySym).
@@ -193,7 +195,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     // 19. If body is a List of errors, throw a SyntaxError exception.
     if (body_parser.has_errors()) {
         auto error = body_parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
+        return vm.throw_completion<SyntaxError>(TRY_OR_THROW_OOM(vm, error.to_string()));
     }
 
     // 20. NOTE: The parameters and body are parsed separately to ensure that each is valid alone. For example, new Function("/*", "*/ ) {") is not legal.
@@ -207,7 +209,7 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> FunctionConstructor::create_dynamic
     // 23. If expr is a List of errors, throw a SyntaxError exception.
     if (source_parser.has_errors()) {
         auto error = source_parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
+        return vm.throw_completion<SyntaxError>(TRY_OR_THROW_OOM(vm, error.to_string()));
     }
 
     // 24. Let proto be ? GetPrototypeFromConstructor(newTarget, fallbackProto).

@@ -20,6 +20,7 @@
 #include "ToolboxWidget.h"
 #include "Tools/Tool.h"
 #include "VectorscopeWidget.h"
+#include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/ComboBox.h>
 #include <LibGUI/Forward.h>
@@ -40,7 +41,7 @@ public:
 
     ErrorOr<void> initialize_menubar(GUI::Window&);
 
-    void open_image(Core::File&);
+    void open_image(FileSystemAccessClient::File);
     ErrorOr<void> create_default_image();
 
     bool request_close();
@@ -55,11 +56,13 @@ private:
     void image_editor_did_update_undo_stack();
 
     void set_actions_enabled(bool enabled);
+    void set_mask_actions_for_layer(Layer* active_layer);
 
     virtual void drag_enter_event(GUI::DragEvent&) override;
     virtual void drop_event(GUI::DropEvent&) override;
 
     void update_window_modified();
+    void update_status_bar(DeprecatedString appended_text = DeprecatedString::empty());
 
     ProjectLoader m_loader;
 
@@ -107,6 +110,12 @@ private:
 
     RefPtr<GUI::Action> m_layer_via_copy;
     RefPtr<GUI::Action> m_layer_via_cut;
+
+    RefPtr<GUI::Action> m_add_mask_action;
+    RefPtr<GUI::Action> m_delete_mask_action;
+    RefPtr<GUI::Action> m_apply_mask_action;
+
+    Gfx::IntPoint m_last_image_editor_mouse_position;
 };
 
 }

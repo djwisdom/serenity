@@ -37,6 +37,7 @@ public:
         SCSI,
         ATA,
         NVMe,
+        SD,
     };
 
     // Note: The most reliable way to address this device from userspace interfaces,
@@ -45,7 +46,7 @@ public:
     // For example, on a legacy ATA instance, one might connect an harddrive to the second IDE controller,
     // to the Primary channel as a slave device, which translates to LUN 1:0:1.
     // On NVMe, for example, connecting a second PCIe NVMe storage device as a sole NVMe namespace translates
-    // to LUN 1:0:0.
+    // to LUN 1:1:0.
     struct LUNAddress {
         u32 controller_id;
         u32 target_id;
@@ -62,7 +63,7 @@ public:
     virtual bool can_write(OpenFileDescription const&, u64) const override;
     virtual void prepare_for_unplug() { m_partitions.clear(); }
 
-    NonnullLockRefPtrVector<DiskPartition> const& partitions() const { return m_partitions; }
+    Vector<NonnullLockRefPtr<DiskPartition>> const& partitions() const { return m_partitions; }
 
     void add_partition(NonnullLockRefPtr<DiskPartition> disk_partition) { MUST(m_partitions.try_append(disk_partition)); }
 
@@ -88,11 +89,11 @@ protected:
     virtual StringView class_name() const override;
 
 private:
-    virtual void after_inserting() override;
+    virtual ErrorOr<void> after_inserting() override;
     virtual void will_be_destroyed() override;
 
     mutable IntrusiveListNode<StorageDevice, LockRefPtr<StorageDevice>> m_list_node;
-    NonnullLockRefPtrVector<DiskPartition> m_partitions;
+    Vector<NonnullLockRefPtr<DiskPartition>> m_partitions;
 
     LUNAddress const m_logical_unit_number_address;
 

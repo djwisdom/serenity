@@ -35,10 +35,15 @@
 #    include <shadow.h>
 #endif
 
+#ifdef AK_OS_SOLARIS
+#    include <sys/filio.h>
+#    include <ucred.h>
+#endif
+
 namespace Core::System {
 
 #ifdef AK_OS_SERENITY
-ErrorOr<void> beep();
+ErrorOr<void> beep(Optional<size_t> tone);
 ErrorOr<void> pledge(StringView promises, StringView execpromises = {});
 ErrorOr<void> unveil(StringView path, StringView permissions);
 ErrorOr<void> unveil_after_exec(StringView path, StringView permissions);
@@ -93,7 +98,9 @@ ErrorOr<int> accept4(int sockfd, struct sockaddr*, socklen_t*, int flags);
 #endif
 
 ErrorOr<void> sigaction(int signal, struct sigaction const* action, struct sigaction* old_action);
-#if defined(AK_OS_MACOS) || defined(AK_OS_OPENBSD) || defined(AK_OS_FREEBSD)
+#if defined(AK_OS_SOLARIS)
+ErrorOr<SIG_TYP> signal(int signal, SIG_TYP handler);
+#elif defined(AK_OS_BSD_GENERIC)
 ErrorOr<sig_t> signal(int signal, sig_t handler);
 #else
 ErrorOr<sighandler_t> signal(int signal, sighandler_t handler);
@@ -159,11 +166,13 @@ ErrorOr<void> chdir(StringView path);
 ErrorOr<void> rmdir(StringView path);
 ErrorOr<pid_t> fork();
 ErrorOr<int> mkstemp(Span<char> pattern);
+ErrorOr<String> mkdtemp(Span<char> pattern);
 ErrorOr<void> fchmod(int fd, mode_t mode);
 ErrorOr<void> fchown(int fd, uid_t, gid_t);
 ErrorOr<void> rename(StringView old_path, StringView new_path);
 ErrorOr<void> unlink(StringView path);
 ErrorOr<void> utime(StringView path, Optional<struct utimbuf>);
+ErrorOr<void> utimensat(int fd, StringView path, struct timespec const times[2], int flag);
 ErrorOr<struct utsname> uname();
 ErrorOr<Array<int, 2>> pipe2(int flags);
 #ifndef AK_OS_ANDROID
@@ -178,7 +187,7 @@ enum class SearchInPath {
 ErrorOr<void> exec_command(Vector<StringView>& command, bool preserve_env);
 #endif
 
-ErrorOr<void> exec(StringView filename, Span<StringView> arguments, SearchInPath, Optional<Span<StringView>> environment = {});
+ErrorOr<void> exec(StringView filename, ReadonlySpan<StringView> arguments, SearchInPath, Optional<ReadonlySpan<StringView>> environment = {});
 
 #ifdef AK_OS_SERENITY
 ErrorOr<void> join_jail(u64 jail_index);
@@ -203,10 +212,11 @@ ErrorOr<void> getsockname(int sockfd, struct sockaddr*, socklen_t*);
 ErrorOr<void> getpeername(int sockfd, struct sockaddr*, socklen_t*);
 ErrorOr<void> socketpair(int domain, int type, int protocol, int sv[2]);
 ErrorOr<Vector<gid_t>> getgroups();
-ErrorOr<void> setgroups(Span<gid_t const>);
+ErrorOr<void> setgroups(ReadonlySpan<gid_t>);
 ErrorOr<void> mknod(StringView pathname, mode_t mode, dev_t dev);
 ErrorOr<void> mkfifo(StringView pathname, mode_t mode);
 ErrorOr<void> setenv(StringView, StringView, bool);
+ErrorOr<void> putenv(StringView);
 ErrorOr<int> posix_openpt(int flags);
 ErrorOr<void> grantpt(int fildes);
 ErrorOr<void> unlockpt(int fildes);
@@ -221,7 +231,7 @@ public:
     AddressInfoVector(AddressInfoVector&&) = default;
     ~AddressInfoVector() = default;
 
-    Span<struct addrinfo const> addresses() const { return m_addresses; }
+    ReadonlySpan<struct addrinfo> addresses() const { return m_addresses; }
 
 private:
     friend ErrorOr<AddressInfoVector> getaddrinfo(char const* nodename, char const* servname, struct addrinfo const& hints);

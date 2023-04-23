@@ -12,21 +12,26 @@ stdenv.mkDerivation {
     gmp
     libmpc
     e2fsprogs
+    fuse2fs
     patch
     ccache
     rsync
     unzip
     texinfo
-    # Example Build-time Additional Dependencies
     pkg-config
+    # To create port launcher icons
+    imagemagick
   ];
   buildInputs = [
-    # Example Run-time Additional Dependencies
     openssl
     libxcrypt
     xlibsWrapper
     qemu
     e2fsprogs
+    fuse2fs
+    # To build the GRUB disk image
+    grub2
+    parted
   ];
 
   hardeningDisable = [ "format" "fortify" ];

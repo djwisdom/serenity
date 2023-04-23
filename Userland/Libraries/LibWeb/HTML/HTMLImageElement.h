@@ -9,6 +9,7 @@
 #include <AK/ByteBuffer.h>
 #include <AK/OwnPtr.h>
 #include <LibGfx/Forward.h>
+#include <LibWeb/DOM/DocumentLoadEventDelayer.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/Loader/ImageLoader.h>
@@ -24,7 +25,7 @@ class HTMLImageElement final
 public:
     virtual ~HTMLImageElement() override;
 
-    virtual void parse_attribute(FlyString const& name, DeprecatedString const& value) override;
+    virtual void parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value) override;
 
     DeprecatedString alt() const { return attribute(HTML::AttributeNames::alt); }
     DeprecatedString src() const { return attribute(HTML::AttributeNames::src); }
@@ -43,16 +44,19 @@ public:
     // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-complete
     bool complete() const;
 
+    virtual Optional<ARIA::Role> default_role() const override;
+
 private:
     HTMLImageElement(DOM::Document&, DOM::QualifiedName);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void apply_presentational_hints(CSS::StyleProperties&) const override;
-
-    void animate();
 
     virtual JS::GCPtr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::StyleProperties>) override;
 
     ImageLoader m_image_loader;
+
+    Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
 };
 
 }

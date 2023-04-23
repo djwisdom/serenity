@@ -6,8 +6,8 @@
 
 #include <AK/Singleton.h>
 #include <Kernel/Arch/Delay.h>
-#if ARCH(I386) || ARCH(X86_64)
-#    include <Kernel/Arch/x86/Hypervisor/BochsDisplayConnector.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/Hypervisor/BochsDisplayConnector.h>
 #endif
 #include <Kernel/Bus/PCI/API.h>
 #include <Kernel/Bus/PCI/IDs.h>
@@ -44,7 +44,7 @@ UNMAP_AFTER_INIT GraphicsManagement::GraphicsManagement()
 
 void GraphicsManagement::disable_vga_emulation_access_permanently()
 {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     if (!m_vga_arbiter)
         return;
     m_vga_arbiter->disable_vga_emulation_access_permanently({});
@@ -53,7 +53,7 @@ void GraphicsManagement::disable_vga_emulation_access_permanently()
 
 void GraphicsManagement::enable_vga_text_mode_console_cursor()
 {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     if (!m_vga_arbiter)
         return;
     m_vga_arbiter->enable_vga_text_mode_console_cursor({});
@@ -62,7 +62,7 @@ void GraphicsManagement::enable_vga_text_mode_console_cursor()
 
 void GraphicsManagement::disable_vga_text_mode_console_cursor()
 {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     if (!m_vga_arbiter)
         return;
     m_vga_arbiter->disable_vga_text_mode_console_cursor({});
@@ -71,7 +71,7 @@ void GraphicsManagement::disable_vga_text_mode_console_cursor()
 
 void GraphicsManagement::set_vga_text_mode_cursor([[maybe_unused]] size_t console_width, [[maybe_unused]] size_t x, [[maybe_unused]] size_t y)
 {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     if (!m_vga_arbiter)
         return;
     m_vga_arbiter->set_vga_text_mode_cursor({}, console_width, x, y);
@@ -120,40 +120,35 @@ static inline bool is_display_controller_pci_device(PCI::DeviceIdentifier const&
     return device_identifier.class_code().value() == 0x3;
 }
 
-UNMAP_AFTER_INIT bool GraphicsManagement::determine_and_initialize_graphics_device(PCI::DeviceIdentifier const& device_identifier)
+struct PCIGraphicsDriverInitializer {
+    ErrorOr<bool> (*probe)(PCI::DeviceIdentifier const&) = nullptr;
+    ErrorOr<NonnullLockRefPtr<GenericGraphicsAdapter>> (*create)(PCI::DeviceIdentifier const&) = nullptr;
+};
+
+static constexpr PCIGraphicsDriverInitializer s_initializers[] = {
+    { IntelNativeGraphicsAdapter::probe, IntelNativeGraphicsAdapter::create },
+    { BochsGraphicsAdapter::probe, BochsGraphicsAdapter::create },
+    { VirtIOGraphicsAdapter::probe, VirtIOGraphicsAdapter::create },
+    { VMWareGraphicsAdapter::probe, VMWareGraphicsAdapter::create },
+};
+
+UNMAP_AFTER_INIT ErrorOr<void> GraphicsManagement::determine_and_initialize_graphics_device(PCI::DeviceIdentifier const& device_identifier)
 {
     VERIFY(is_vga_compatible_pci_device(device_identifier) || is_display_controller_pci_device(device_identifier));
-    LockRefPtr<GenericGraphicsAdapter> adapter;
-
-    if (!adapter) {
-        switch (device_identifier.hardware_id().vendor_id) {
-        case PCI::VendorID::QEMUOld:
-            if (device_identifier.hardware_id().device_id == 0x1111)
-                adapter = BochsGraphicsAdapter::initialize(device_identifier);
-            break;
-        case PCI::VendorID::VirtualBox:
-            if (device_identifier.hardware_id().device_id == 0xbeef)
-                adapter = BochsGraphicsAdapter::initialize(device_identifier);
-            break;
-        case PCI::VendorID::Intel:
-            adapter = IntelNativeGraphicsAdapter::initialize(device_identifier);
-            break;
-        case PCI::VendorID::VirtIO:
-            dmesgln("Graphics: Using VirtIO console");
-            adapter = VirtIOGraphicsAdapter::initialize(device_identifier);
-            break;
-        case PCI::VendorID::VMWare:
-            adapter = VMWareGraphicsAdapter::try_initialize(device_identifier);
-            break;
-        default:
-            break;
+    for (auto& initializer : s_initializers) {
+        auto initializer_probe_found_driver_match_or_error = initializer.probe(device_identifier);
+        if (initializer_probe_found_driver_match_or_error.is_error()) {
+            dmesgln("Graphics: Failed to probe device {}, due to {}", device_identifier.address(), initializer_probe_found_driver_match_or_error.error());
+            continue;
+        }
+        auto initializer_probe_found_driver_match = initializer_probe_found_driver_match_or_error.release_value();
+        if (initializer_probe_found_driver_match) {
+            auto adapter = TRY(initializer.create(device_identifier));
+            TRY(m_graphics_devices.try_append(*adapter));
+            return {};
         }
     }
-
-    if (!adapter)
-        return false;
-    m_graphics_devices.append(*adapter);
-    return true;
+    return {};
 }
 
 UNMAP_AFTER_INIT void GraphicsManagement::initialize_preset_resolution_generic_display_connector()
@@ -195,7 +190,7 @@ UNMAP_AFTER_INIT bool GraphicsManagement::initialize()
             }
         }
     });
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     m_vga_arbiter = VGAIOArbiter::must_create({});
 #endif
 
@@ -210,7 +205,7 @@ UNMAP_AFTER_INIT bool GraphicsManagement::initialize()
     // Otherwise we risk using the Bochs VBE driver on a wrong physical address
     // for the framebuffer.
     if (PCI::Access::is_hardware_disabled() && !(graphics_subsystem_mode == CommandLine::GraphicsSubsystemMode::Limited && !multiboot_framebuffer_addr.is_null() && multiboot_framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB)) {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
         auto vga_isa_bochs_display_connector = BochsDisplayConnector::try_create_for_vga_isa_connector();
         if (vga_isa_bochs_display_connector) {
             dmesgln("Graphics: Using a Bochs ISA VGA compatible adapter");
@@ -228,6 +223,7 @@ UNMAP_AFTER_INIT bool GraphicsManagement::initialize()
         return true;
     }
 
+#if ARCH(X86_64)
     if (PCI::Access::is_disabled()) {
         dmesgln("Graphics: Using an assumed-to-exist ISA VGA compatible generic adapter");
         return true;
@@ -239,8 +235,10 @@ UNMAP_AFTER_INIT bool GraphicsManagement::initialize()
         // framebuffer console will take the control instead.
         if (!is_vga_compatible_pci_device(device_identifier) && !is_display_controller_pci_device(device_identifier))
             return;
-        determine_and_initialize_graphics_device(device_identifier);
+        if (auto result = determine_and_initialize_graphics_device(device_identifier); result.is_error())
+            dbgln("Failed to initialize device {}, due to {}", device_identifier.address(), result.error());
     }));
+#endif
 
     // Note: If we failed to find any graphics device to be used natively, but the
     // bootloader prepared a framebuffer for us to use, then just create a DisplayConnector

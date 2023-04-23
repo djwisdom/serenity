@@ -8,7 +8,6 @@
 
 #include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibXML/FundamentalTypes.h>
@@ -30,7 +29,7 @@ struct Node {
     struct Element {
         Name name;
         HashMap<Name, DeprecatedString> attributes;
-        NonnullOwnPtrVector<Node> children;
+        Vector<NonnullOwnPtr<Node>> children;
     };
 
     bool operator==(Node const&) const;

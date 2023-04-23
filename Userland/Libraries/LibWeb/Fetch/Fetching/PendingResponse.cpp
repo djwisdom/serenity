@@ -52,13 +52,13 @@ void PendingResponse::resolve(JS::NonnullGCPtr<Infrastructure::Response> respons
         run_callback();
 }
 
-void PendingResponse::run_callback() const
+void PendingResponse::run_callback()
 {
     VERIFY(m_callback);
     VERIFY(m_response);
-    Platform::EventLoopPlugin::the().deferred_invoke([strong_this = JS::make_handle(const_cast<PendingResponse&>(*this))] {
-        strong_this->m_callback(*strong_this->m_response);
-        strong_this->m_request->remove_pending_response({}, *strong_this.ptr());
+    Platform::EventLoopPlugin::the().deferred_invoke([this] {
+        m_callback(*m_response);
+        m_request->remove_pending_response({}, *this);
     });
 }
 

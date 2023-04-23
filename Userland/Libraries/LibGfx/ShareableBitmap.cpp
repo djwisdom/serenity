@@ -23,21 +23,23 @@ ShareableBitmap::ShareableBitmap(NonnullRefPtr<Bitmap> bitmap, Tag)
 namespace IPC {
 
 template<>
-bool encode(Encoder& encoder, Gfx::ShareableBitmap const& shareable_bitmap)
+ErrorOr<void> encode(Encoder& encoder, Gfx::ShareableBitmap const& shareable_bitmap)
 {
-    encoder << shareable_bitmap.is_valid();
+    TRY(encoder.encode(shareable_bitmap.is_valid()));
     if (!shareable_bitmap.is_valid())
-        return true;
+        return {};
+
     auto& bitmap = *shareable_bitmap.bitmap();
-    encoder << IPC::File(bitmap.anonymous_buffer().fd());
-    encoder << bitmap.size();
-    encoder << static_cast<u32>(bitmap.scale());
-    encoder << static_cast<u32>(bitmap.format());
+    TRY(encoder.encode(IPC::File(bitmap.anonymous_buffer().fd())));
+    TRY(encoder.encode(bitmap.size()));
+    TRY(encoder.encode(static_cast<u32>(bitmap.scale())));
+    TRY(encoder.encode(static_cast<u32>(bitmap.format())));
     if (bitmap.is_indexed()) {
         auto palette = bitmap.palette_to_vector();
-        encoder << palette;
+        TRY(encoder.encode(palette));
     }
-    return true;
+
+    return {};
 }
 
 template<>
@@ -60,7 +62,7 @@ ErrorOr<Gfx::ShareableBitmap> decode(Decoder& decoder)
         palette = TRY(decoder.decode<decltype(palette)>());
 
     auto buffer = TRY(Core::AnonymousBuffer::create_from_anon_fd(anon_file.take_fd(), Gfx::Bitmap::size_in_bytes(Gfx::Bitmap::minimum_pitch(size.width() * scale, bitmap_format), size.height() * scale)));
-    auto bitmap = TRY(Gfx::Bitmap::try_create_with_anonymous_buffer(bitmap_format, move(buffer), size, scale, palette));
+    auto bitmap = TRY(Gfx::Bitmap::create_with_anonymous_buffer(bitmap_format, move(buffer), size, scale, palette));
 
     return Gfx::ShareableBitmap { move(bitmap), Gfx::ShareableBitmap::ConstructWithKnownGoodBitmap };
 }

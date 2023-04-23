@@ -36,7 +36,7 @@ struct Traits<GridPosition> : public GenericTraits<GridPosition> {
 
 namespace Web::Layout {
 
-TableFormattingContext::TableFormattingContext(LayoutState& state, BlockContainer const& root, FormattingContext* parent)
+TableFormattingContext::TableFormattingContext(LayoutState& state, TableBox const& root, FormattingContext* parent)
     : FormattingContext(Type::Table, state, root, parent)
 {
 }
@@ -103,68 +103,138 @@ void TableFormattingContext::calculate_row_column_grid(Box const& box)
 
 void TableFormattingContext::compute_table_measures()
 {
+    size_t max_cell_column_span = 1;
+
     for (auto& cell : m_cells) {
-        auto width_of_containing_block = m_state.get(*cell.box.containing_block()).content_width();
+        auto width_of_containing_block = m_state.get(*table_wrapper().containing_block()).content_width();
         auto width_of_containing_block_as_length = CSS::Length::make_px(width_of_containing_block);
-        auto& computed_values = cell.box.computed_values();
-        float padding_left = computed_values.padding().left().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
-        float padding_right = computed_values.padding().right().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
-        float border_left = computed_values.border_left().width;
-        float border_right = computed_values.border_right().width;
-        float width = computed_values.width().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
+        auto& computed_values = cell.box->computed_values();
+        CSSPixels padding_left = computed_values.padding().left().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
+        CSSPixels padding_right = computed_values.padding().right().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
+
+        auto is_left_most_cell = cell.column_index == 0;
+        auto is_right_most_cell = cell.column_index == m_columns.size() - 1;
+        auto should_hide_borders = cell.box->computed_values().border_collapse() == CSS::BorderCollapse::Collapse;
+        CSSPixels border_left = should_hide_borders && !is_left_most_cell ? 0 : computed_values.border_left().width;
+        CSSPixels border_right = should_hide_borders && !is_right_most_cell ? 0 : computed_values.border_right().width;
+
+        CSSPixels width = computed_values.width().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
         auto cell_intrinsic_offsets = padding_left + padding_right + border_left + border_right;
         auto min_content_width = calculate_min_content_width(cell.box);
         auto max_content_width = calculate_max_content_width(cell.box);
 
-        float min_width = min_content_width;
+        CSSPixels min_width = min_content_width;
         if (!computed_values.min_width().is_auto())
             min_width = max(min_width, computed_values.min_width().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box));
 
-        float max_width = computed_values.width().is_auto() ? max_content_width : width;
+        CSSPixels max_width = computed_values.width().is_auto() ? max_content_width.value() : width;
         if (!computed_values.max_width().is_none())
             max_width = min(max_width, computed_values.max_width().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box));
 
-        auto cell_outer_min_content_width = min_width + cell_intrinsic_offsets;
-        auto cell_outer_max_content_width = max(max(width, min_width), max_width) + cell_intrinsic_offsets;
-        m_columns[cell.column_index].min_width = max(m_columns[cell.column_index].min_width, cell_outer_min_content_width);
-        m_columns[cell.column_index].max_width = max(m_columns[cell.column_index].max_width, cell_outer_max_content_width);
+        auto computed_width = computed_values.width();
+        if (computed_width.is_percentage()) {
+            m_columns[cell.column_index].type = ColumnType::Percent;
+            m_columns[cell.column_index].percentage_width = max(m_columns[cell.column_index].percentage_width, computed_width.percentage().value());
+        } else if (computed_width.is_length()) {
+            m_columns[cell.column_index].type = ColumnType::Pixel;
+        }
+
+        cell.min_width = min_width + cell_intrinsic_offsets;
+        cell.max_width = max(max(width, min_width), max_width) + cell_intrinsic_offsets;
+
+        max_cell_column_span = max(max_cell_column_span, cell.column_span);
     }
 
-    for (auto& column : m_columns) {
-        column.used_width = column.min_width;
+    for (auto& cell : m_cells) {
+        if (cell.column_span == 1) {
+            m_columns[cell.column_index].min_width = max(m_columns[cell.column_index].min_width, cell.min_width);
+            m_columns[cell.column_index].max_width = max(m_columns[cell.column_index].max_width, cell.max_width);
+        }
+    }
+
+    for (size_t current_column_span = 2; current_column_span < max_cell_column_span; current_column_span++) {
+        // https://www.w3.org/TR/css-tables-3/#min-content-width-of-a-column-based-on-cells-of-span-up-to-n-n--1
+        Vector<Vector<CSSPixels>> cell_min_contributions_by_column_index;
+        cell_min_contributions_by_column_index.resize(m_columns.size());
+        // https://www.w3.org/TR/css-tables-3/#max-content-width-of-a-column-based-on-cells-of-span-up-to-n-n--1
+        Vector<Vector<CSSPixels>> cell_max_contributions_by_column_index;
+        cell_max_contributions_by_column_index.resize(m_columns.size());
+        for (auto& cell : m_cells) {
+            if (cell.column_span == current_column_span) {
+                // Define the baseline max-content width as the sum of the max-content widths based on cells of span up to N-1 of all columns that the cell spans.
+                CSSPixels baseline_max_content_width = 0;
+                auto cell_start_column_index = cell.column_index;
+                auto cell_end_column_index = cell.column_index + cell.column_span;
+                for (auto column_index = cell_start_column_index; column_index < cell_end_column_index; column_index++) {
+                    baseline_max_content_width += m_columns[column_index].max_width;
+                }
+
+                // The contribution of the cell is the sum of:
+                // the min-content width of the column based on cells of span up to N-1
+                auto cell_min_contribution = m_columns[cell.column_index].min_width;
+                // and the product of:
+                // - the ratio of the max-content width based on cells of span up to N-1 of the column to the baseline max-content width
+                // - the outer min-content width of the cell minus the baseline max-content width and baseline border spacing, or 0 if this is negative
+                cell_min_contribution += (m_columns[cell.column_index].max_width / baseline_max_content_width) * max(CSSPixels(0), cell.min_width - baseline_max_content_width);
+
+                // The contribution of the cell is the sum of:
+                // the max-content width of the column based on cells of span up to N-1
+                auto cell_max_contribution = m_columns[cell.column_index].max_width;
+                // and the product of:
+                // - the ratio of the max-content width based on cells of span up to N-1 of the column to the baseline max-content width
+                // - the outer max-content width of the cell minus the baseline max-content width and the baseline border spacing, or 0 if this is negative
+                cell_max_contribution += (m_columns[cell.column_index].max_width / baseline_max_content_width) * max(CSSPixels(0), cell.max_width - baseline_max_content_width);
+
+                cell_min_contributions_by_column_index[cell.column_index].append(cell_min_contribution);
+                cell_max_contributions_by_column_index[cell.column_index].append(cell_max_contribution);
+            }
+        }
+
+        for (size_t column_index = 0; column_index < m_columns.size(); column_index++) {
+            // min-content width of a column based on cells of span up to N (N > 1) is
+            // the largest of the min-content width of the column based on cells of span up to N-1 and the contributions of the cells in the column whose colSpan is N
+            for (auto min_contribution : cell_min_contributions_by_column_index[column_index])
+                m_columns[column_index].min_width = max(m_columns[column_index].min_width, min_contribution);
+
+            // max-content width of a column based on cells of span up to N (N > 1) is
+            // the largest of the max-content width based on cells of span up to N-1 and the contributions of the cells in the column whose colSpan is N
+            for (auto max_contribution : cell_max_contributions_by_column_index[column_index])
+                m_columns[column_index].max_width = max(m_columns[column_index].max_width, max_contribution);
+        }
     }
 }
 
-void TableFormattingContext::compute_table_width(float& extra_width)
+void TableFormattingContext::compute_table_width()
 {
-    auto const& table_box = context_box();
-    auto& table_box_state = m_state.get_mutable(table_box);
+    auto& table_box_state = m_state.get_mutable(table_box());
 
-    auto& computed_values = table_box.computed_values();
+    auto& computed_values = table_box().computed_values();
 
-    float width_of_table_containing_block = m_state.get(*table_box.containing_block()).content_width();
+    // Percentages on 'width' and 'height' on the table are relative to the table wrapper box's containing block,
+    // not the table wrapper box itself.
+    CSSPixels width_of_table_containing_block = m_state.get(*table_wrapper().containing_block()).content_width();
 
     // The row/column-grid width minimum (GRIDMIN) width is the sum of the min-content width
     // of all the columns plus cell spacing or borders.
-    float grid_min = 0.0f;
+    CSSPixels grid_min = 0.0f;
     for (auto& column : m_columns) {
         grid_min += column.min_width;
     }
 
     // The row/column-grid width maximum (GRIDMAX) width is the sum of the max-content width
     // of all the columns plus cell spacing or borders.
-    float grid_max = 0.0f;
+    CSSPixels grid_max = 0.0f;
     for (auto& column : m_columns) {
         grid_max += column.max_width;
     }
 
     // The used min-width of a table is the greater of the resolved min-width, CAPMIN, and GRIDMIN.
-    float used_min_width = grid_min;
+    auto used_min_width = grid_min;
     if (!computed_values.min_width().is_auto()) {
-        used_min_width = max(used_min_width, computed_values.min_width().resolved(table_box, CSS::Length::make_px(width_of_table_containing_block)).to_px(table_box));
+        used_min_width = max(used_min_width, computed_values.min_width().resolved(table_box(), CSS::Length::make_px(width_of_table_containing_block)).to_px(table_box()));
     }
 
-    float used_width;
+    CSSPixels used_width;
     if (computed_values.width().is_auto()) {
         // If the table-root has 'width: auto', the used width is the greater of
         // min(GRIDMAX, the table’s containing block width), the used min-width of the table.
@@ -174,34 +244,133 @@ void TableFormattingContext::compute_table_width(float& extra_width)
         // If the table-root’s width property has a computed value (resolving to
         // resolved-table-width) other than auto, the used width is the greater
         // of resolved-table-width, and the used min-width of the table.
-        float resolved_table_width = computed_values.width().resolved(table_box, CSS::Length::make_px(width_of_table_containing_block)).to_px(table_box);
+        CSSPixels resolved_table_width = computed_values.width().resolved(table_box(), CSS::Length::make_px(width_of_table_containing_block)).to_px(table_box());
         used_width = max(resolved_table_width, used_min_width);
+        if (!computed_values.max_width().is_none())
+            used_width = min(used_width, computed_values.max_width().resolved(table_box(), CSS::Length::make_px(width_of_table_containing_block)).to_px(table_box()));
         table_box_state.set_content_width(used_width);
-    }
-
-    if (used_width > grid_min) {
-        extra_width = used_width - grid_min;
     }
 }
 
-void TableFormattingContext::distribute_width_to_columns(float extra_width)
+void TableFormattingContext::distribute_width_to_columns()
 {
-    float grid_max = 0.0f;
-    for (auto& column : m_columns)
-        grid_max += column.max_width - column.min_width;
+    // Implements https://www.w3.org/TR/css-tables-3/#width-distribution-algorithm
 
-    for (auto& column : m_columns)
-        column.used_width += ((column.max_width - column.min_width) / grid_max) * extra_width;
+    CSSPixels available_width = m_state.get(table_box()).content_width();
+
+    auto columns_total_used_width = [&]() {
+        CSSPixels total_used_width = 0;
+        for (auto& column : m_columns) {
+            total_used_width += column.used_width;
+        }
+        return total_used_width;
+    };
+
+    auto column_preferred_width = [&](Column& column) {
+        switch (column.type) {
+        case ColumnType::Percent: {
+            return max(column.min_width, column.percentage_width / 100 * available_width);
+        }
+        case ColumnType::Pixel:
+        case ColumnType::Auto: {
+            return column.max_width;
+        }
+        default: {
+            VERIFY_NOT_REACHED();
+        }
+        }
+    };
+
+    auto expand_columns_to_fill_available_width = [&](ColumnType column_type) {
+        CSSPixels remaining_available_width = available_width;
+        CSSPixels total_preferred_width_increment = 0;
+        for (auto& column : m_columns) {
+            remaining_available_width -= column.used_width;
+            if (column.type == column_type) {
+                total_preferred_width_increment += column_preferred_width(column) - column.min_width;
+            }
+        }
+
+        if (total_preferred_width_increment == 0)
+            return;
+
+        for (auto& column : m_columns) {
+            if (column.type == column_type) {
+                CSSPixels preferred_width_increment = column_preferred_width(column) - column.min_width;
+                column.used_width += preferred_width_increment * remaining_available_width / total_preferred_width_increment;
+            }
+        }
+    };
+
+    auto shrink_columns_to_fit_available_width = [&](ColumnType column_type) {
+        for (auto& column : m_columns) {
+            if (column.type == column_type)
+                column.used_width = column.min_width;
+        }
+
+        expand_columns_to_fill_available_width(column_type);
+    };
+
+    for (auto& column : m_columns) {
+        column.used_width = column.min_width;
+    }
+
+    for (auto& column : m_columns) {
+        if (column.type == ColumnType::Percent) {
+            column.used_width = max(column.min_width, column.percentage_width / 100 * available_width);
+        }
+    }
+
+    if (columns_total_used_width() > available_width) {
+        shrink_columns_to_fit_available_width(ColumnType::Percent);
+        return;
+    }
+
+    for (auto& column : m_columns) {
+        if (column.type == ColumnType::Pixel) {
+            column.used_width = column.max_width;
+        }
+    }
+
+    if (columns_total_used_width() > available_width) {
+        shrink_columns_to_fit_available_width(ColumnType::Pixel);
+        return;
+    }
+
+    if (columns_total_used_width() < available_width) {
+        expand_columns_to_fill_available_width(ColumnType::Auto);
+    }
+
+    if (columns_total_used_width() < available_width) {
+        expand_columns_to_fill_available_width(ColumnType::Pixel);
+    }
+
+    if (columns_total_used_width() < available_width) {
+        expand_columns_to_fill_available_width(ColumnType::Percent);
+    }
+
+    if (columns_total_used_width() < available_width) {
+        // NOTE: if all columns got their max width and there is still width to distribute left
+        // it should be assigned to columns proportionally to their max width
+        CSSPixels grid_max = 0.0f;
+        for (auto& column : m_columns) {
+            grid_max += column.max_width;
+        }
+
+        auto width_to_distribute = available_width - columns_total_used_width();
+        for (auto& column : m_columns) {
+            column.used_width += width_to_distribute * column.max_width / grid_max;
+        }
+    }
 }
 
 void TableFormattingContext::determine_intrisic_size_of_table_container(AvailableSpace const& available_space)
 {
-    auto const& table_box = context_box();
-    auto& table_box_state = m_state.get_mutable(table_box);
+    auto& table_box_state = m_state.get_mutable(table_box());
 
     if (available_space.width.is_min_content()) {
         // The min-content width of a table is the width required to fit all of its columns min-content widths and its undistributable spaces.
-        float grid_min = 0.0f;
+        CSSPixels grid_min = 0.0f;
         for (auto& column : m_columns)
             grid_min += column.min_width;
         table_box_state.set_content_width(grid_min);
@@ -209,36 +378,104 @@ void TableFormattingContext::determine_intrisic_size_of_table_container(Availabl
 
     if (available_space.width.is_max_content()) {
         // The max-content width of a table is the width required to fit all of its columns max-content widths and its undistributable spaces.
-        float grid_max = 0.0f;
+        CSSPixels grid_max = 0.0f;
         for (auto& column : m_columns)
             grid_max += column.max_width;
         table_box_state.set_content_width(grid_max);
     }
 }
 
-void TableFormattingContext::run(Box const& box, LayoutMode, AvailableSpace const& available_space)
+void TableFormattingContext::calculate_row_heights(LayoutMode layout_mode)
 {
-    float total_content_height = 0;
+    for (auto& cell : m_cells) {
+        auto& cell_state = m_state.get_mutable(cell.box);
 
-    // Determine the number of rows/columns the table requires.
-    calculate_row_column_grid(box);
+        CSSPixels span_width = 0;
+        for (size_t i = 0; i < cell.column_span; ++i)
+            span_width += m_columns[cell.column_index + i].used_width;
 
-    // Compute the minimum width of each column.
-    compute_table_measures();
+        auto width_of_containing_block = m_state.get(*cell.box->containing_block()).content_width();
+        auto width_of_containing_block_as_length = CSS::Length::make_px(width_of_containing_block);
 
-    if (available_space.width.is_intrinsic_sizing_constraint()) {
-        determine_intrisic_size_of_table_container(available_space);
-        return;
+        cell_state.padding_top = cell.box->computed_values().padding().top().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
+        cell_state.padding_bottom = cell.box->computed_values().padding().bottom().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
+        cell_state.padding_left = cell.box->computed_values().padding().left().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
+        cell_state.padding_right = cell.box->computed_values().padding().right().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
+
+        auto is_top_most_cell = cell.row_index == 0;
+        auto is_left_most_cell = cell.column_index == 0;
+        auto is_right_most_cell = cell.column_index == m_columns.size() - 1;
+        auto is_bottom_most_cell = cell.row_index == m_rows.size() - 1;
+        auto should_hide_borders = cell.box->computed_values().border_collapse() == CSS::BorderCollapse::Collapse;
+
+        cell_state.border_top = (should_hide_borders && is_top_most_cell) ? 0 : cell.box->computed_values().border_top().width;
+        cell_state.border_bottom = (should_hide_borders && is_bottom_most_cell) ? 0 : cell.box->computed_values().border_bottom().width;
+        cell_state.border_left = (should_hide_borders && is_left_most_cell) ? 0 : cell.box->computed_values().border_left().width;
+        cell_state.border_right = (should_hide_borders && is_right_most_cell) ? 0 : cell.box->computed_values().border_right().width;
+
+        cell_state.set_content_width((span_width - cell_state.border_box_left() - cell_state.border_box_right()));
+        if (auto independent_formatting_context = layout_inside(cell.box, layout_mode, cell_state.available_inner_space_or_constraints_from(*m_available_space))) {
+            cell_state.set_content_height(independent_formatting_context->automatic_content_height());
+            independent_formatting_context->parent_context_did_dimension_child_root_box();
+        }
+
+        cell.baseline = box_baseline(m_state, cell.box);
+
+        auto& row = m_rows[cell.row_index];
+        row.used_height = max(row.used_height, cell_state.border_box_height());
+        row.baseline = max(row.baseline, cell.baseline);
+    }
+}
+
+void TableFormattingContext::position_row_boxes(CSSPixels& total_content_height)
+{
+    auto const& table_state = m_state.get(table_box());
+
+    CSSPixels row_top_offset = table_state.border_top + table_state.padding_top;
+    CSSPixels row_left_offset = table_state.border_left + table_state.padding_left;
+    for (size_t y = 0; y < m_rows.size(); y++) {
+        auto& row = m_rows[y];
+        auto& row_state = m_state.get_mutable(row.box);
+        CSSPixels row_width = 0.0f;
+        for (auto& column : m_columns) {
+            row_width += column.used_width;
+        }
+
+        row_state.set_content_height(row.used_height);
+        row_state.set_content_width(row_width);
+        row_state.set_content_x(row_left_offset);
+        row_state.set_content_y(row_top_offset);
+        row_top_offset += row_state.content_height();
     }
 
-    // Compute the width of the table.
-    float extra_width = 0;
-    compute_table_width(extra_width);
+    CSSPixels row_group_top_offset = table_state.border_top + table_state.padding_top;
+    CSSPixels row_group_left_offset = table_state.border_left + table_state.padding_left;
+    table_box().for_each_child_of_type<TableRowGroupBox>([&](auto& row_group_box) {
+        CSSPixels row_group_height = 0.0f;
+        CSSPixels row_group_width = 0.0f;
 
-    // Distribute the width of the table among columns.
-    distribute_width_to_columns(extra_width);
+        auto& row_group_box_state = m_state.get_mutable(row_group_box);
+        row_group_box_state.set_content_x(row_group_left_offset);
+        row_group_box_state.set_content_y(row_group_top_offset);
 
-    float left_column_offset = 0;
+        row_group_box.template for_each_child_of_type<TableRowBox>([&](auto& row) {
+            auto const& row_state = m_state.get(row);
+            row_group_height += row_state.border_box_height();
+            row_group_width = max(row_group_width, row_state.border_box_width());
+        });
+
+        row_group_box_state.set_content_height(row_group_height);
+        row_group_box_state.set_content_width(row_group_width);
+
+        row_group_top_offset += row_group_height;
+    });
+
+    total_content_height = max(row_top_offset, row_group_top_offset) - table_state.border_top - table_state.padding_top;
+}
+
+void TableFormattingContext::position_cell_boxes()
+{
+    CSSPixels left_column_offset = 0;
     for (auto& column : m_columns) {
         column.left_offset = left_column_offset;
         left_column_offset += column.used_width;
@@ -246,77 +483,10 @@ void TableFormattingContext::run(Box const& box, LayoutMode, AvailableSpace cons
 
     for (auto& cell : m_cells) {
         auto& cell_state = m_state.get_mutable(cell.box);
-
-        float span_width = 0;
-        for (size_t i = 0; i < cell.column_span; ++i)
-            span_width += m_columns[cell.column_index + i].used_width;
-
-        auto width_of_containing_block = m_state.get(*cell.box.containing_block()).content_width();
-        auto width_of_containing_block_as_length = CSS::Length::make_px(width_of_containing_block);
-
-        cell_state.padding_top = cell.box.computed_values().padding().top().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
-        cell_state.padding_bottom = cell.box.computed_values().padding().bottom().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
-        cell_state.padding_left = cell.box.computed_values().padding().left().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
-        cell_state.padding_right = cell.box.computed_values().padding().right().resolved(cell.box, width_of_containing_block_as_length).to_px(cell.box);
-        cell_state.border_top = cell.box.computed_values().border_top().width;
-        cell_state.border_bottom = cell.box.computed_values().border_bottom().width;
-        cell_state.border_left = cell.box.computed_values().border_left().width;
-        cell_state.border_right = cell.box.computed_values().border_right().width;
-
-        cell_state.set_content_width(span_width - cell_state.border_box_left() - cell_state.border_box_right());
-        auto independent_formatting_context = layout_inside(cell.box, LayoutMode::Normal, cell_state.available_inner_space_or_constraints_from(available_space));
-        VERIFY(independent_formatting_context);
-        cell_state.set_content_height(independent_formatting_context->automatic_content_height());
-        independent_formatting_context->parent_context_did_dimension_child_root_box();
-
-        cell.baseline = box_baseline(m_state, cell.box);
-
-        auto& row = m_rows[cell.row_index];
-        row.used_width = max(row.used_width, cell_state.border_box_height());
-        row.baseline = max(row.baseline, cell.baseline);
-    }
-
-    for (size_t y = 0; y < m_rows.size(); y++) {
-        auto& row = m_rows[y];
-        auto& row_state = m_state.get_mutable(row.box);
-        float row_width = 0.0f;
-        for (auto& column : m_columns) {
-            row_width += column.used_width;
-        }
-
-        row_state.set_content_height(row.used_width);
-        row_state.set_content_width(row_width);
-    }
-
-    float row_group_top_offset = 0.0f;
-    box.for_each_child_of_type<TableRowGroupBox>([&](auto& row_group_box) {
-        float row_group_height = 0.0f;
-        float row_group_width = 0.0f;
-
-        auto& row_group_box_state = m_state.get_mutable(row_group_box);
-        row_group_box_state.set_content_y(row_group_top_offset);
-
-        float row_top_offset = 0.0f;
-        row_group_box.template for_each_child_of_type<TableRowBox>([&](auto& row) {
-            auto& row_state = m_state.get_mutable(row);
-            row_state.set_content_y(row_top_offset);
-            row_group_height += row_state.border_box_height();
-            row_group_width = max(row_group_width, row_state.border_box_width());
-            row_top_offset += row_state.border_box_height();
-        });
-
-        row_group_top_offset += row_top_offset;
-
-        row_group_box_state.set_content_height(row_group_height);
-        row_group_box_state.set_content_width(row_group_width);
-    });
-
-    for (auto& cell : m_cells) {
-        auto& cell_state = m_state.get_mutable(cell.box);
         auto& row_state = m_state.get(m_rows[cell.row_index].box);
-        float const cell_border_box_height = cell_state.content_height() + cell_state.border_box_top() + cell_state.border_box_bottom();
-        float const row_content_height = row_state.content_height();
-        auto const& vertical_align = cell.box.computed_values().vertical_align();
+        CSSPixels const cell_border_box_height = cell_state.content_height() + cell_state.border_box_top() + cell_state.border_box_bottom();
+        CSSPixels const row_content_height = row_state.content_height();
+        auto const& vertical_align = cell.box->computed_values().vertical_align();
         if (vertical_align.has<CSS::VerticalAlign>()) {
             switch (vertical_align.get<CSS::VerticalAlign>()) {
             case CSS::VerticalAlign::Middle: {
@@ -339,14 +509,47 @@ void TableFormattingContext::run(Box const& box, LayoutMode, AvailableSpace cons
 
         cell_state.offset = row_state.offset.translated(cell_state.border_box_left() + m_columns[cell.column_index].left_offset, cell_state.border_box_top());
     }
+}
 
-    m_state.get_mutable(context_box()).set_content_height(total_content_height);
+void TableFormattingContext::run(Box const& box, LayoutMode layout_mode, AvailableSpace const& available_space)
+{
+    m_available_space = available_space;
+
+    CSSPixels total_content_height = 0;
+
+    // Determine the number of rows/columns the table requires.
+    calculate_row_column_grid(box);
+
+    // Compute the minimum width of each column.
+    compute_table_measures();
+
+    if (available_space.width.is_intrinsic_sizing_constraint() && !available_space.height.is_intrinsic_sizing_constraint()) {
+        determine_intrisic_size_of_table_container(available_space);
+        return;
+    }
+
+    // Compute the width of the table.
+    compute_table_width();
+
+    // Distribute the width of the table among columns.
+    distribute_width_to_columns();
+
+    calculate_row_heights(layout_mode);
+    position_row_boxes(total_content_height);
+    position_cell_boxes();
+
+    m_state.get_mutable(table_box()).set_content_height(total_content_height);
 
     // FIXME: This is a total hack, we should respect the 'height' property.
     m_automatic_content_height = total_content_height;
 }
 
-float TableFormattingContext::automatic_content_height() const
+CSSPixels TableFormattingContext::automatic_content_width() const
+{
+    return greatest_child_width(context_box());
+}
+
+CSSPixels TableFormattingContext::automatic_content_height() const
 {
     return m_automatic_content_height;
 }

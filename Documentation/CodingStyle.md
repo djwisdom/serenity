@@ -11,7 +11,11 @@ We'll definitely be tweaking and amending this over time, so let's consider it a
 
 ### Names
 
-A combination of CamelCase and snake\_case. Use CamelCase (Capitalize the first letter, including all letters in an acronym) in a class, struct, or namespace name. Use snake\_case (all lowercase, with underscores separating words) for variable and function names.
+A combination of CamelCase, snake\_case, and SCREAMING\_CASE:
+
+- Use CamelCase (Capitalize the first letter, including all letters in an acronym) in a class, struct, or namespace name
+- Use snake\_case (all lowercase, with underscores separating words) for variable and function names
+- Use SCREAMING\_CASE for constants (both global and static member variables)
 
 ###### Right:
 
@@ -666,7 +670,7 @@ T* ret = reinterpret_cast<T*>(buffer);
 ```
 
 ```cpp
-// Core::Stream::SeekableStream::tell()
+// SeekableStream::tell()
 
 // Seek with 0 and SEEK_CUR does not modify anything despite the const_cast,
 // so it's safe to do this.
@@ -682,4 +686,73 @@ size_t mask_length = (size_t)((u8)-1) + 1;
 ```cpp
 // This should be reinterpret_cast.
 return (u8 const*)string.characters_without_null_termination();
+```
+
+### Omission of curly braces from statement blocks
+
+Curly braces may only be omitted from `if`/`else`/`for`/`while`/etc. statement blocks if the body is a single line.
+
+Additionally, if any body of a connected if/else statement requires curly braces according to this rule, all of them do.
+
+###### Right:
+```cpp
+if (condition)
+    foo();
+```
+
+```cpp
+if (condition) {
+    foo();
+    bar();
+}
+```
+
+```cpp
+if (condition) {
+    foo();
+} else if (condition) {
+    bar();
+    baz();
+} else {
+    qux();
+}
+```
+
+```cpp
+for (size_t i = i; condition; ++i) {
+    if (other_condition)
+        foo();
+}
+```
+
+##### OK:
+
+```cpp
+if (condition) {
+    foo();
+}
+```
+
+###### Wrong:
+
+```cpp
+if (condition)
+    // There is a comment here.
+    foo();
+```
+
+```cpp
+if (condition)
+    foo();
+else {
+    bar();
+    baz();
+} else
+    qux();
+```
+
+```cpp
+for (size_t i = i; condition; ++i)
+    if (other_condition)
+        foo();
 ```

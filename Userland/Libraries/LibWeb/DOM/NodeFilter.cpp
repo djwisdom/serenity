@@ -6,16 +6,17 @@
 
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/DOM/NodeFilter.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::DOM {
 
-JS::NonnullGCPtr<NodeFilter> NodeFilter::create(JS::Realm& realm, WebIDL::CallbackType& callback)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<NodeFilter>> NodeFilter::create(JS::Realm& realm, WebIDL::CallbackType& callback)
 {
-    return realm.heap().allocate<NodeFilter>(realm, realm, callback);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<NodeFilter>(realm, realm, callback));
 }
 
 NodeFilter::NodeFilter(JS::Realm& realm, WebIDL::CallbackType& callback)
-    : PlatformObject(*realm.intrinsics().object_prototype())
+    : PlatformObject(realm.intrinsics().object_prototype())
     , m_callback(callback)
 {
 }
@@ -23,7 +24,7 @@ NodeFilter::NodeFilter(JS::Realm& realm, WebIDL::CallbackType& callback)
 void NodeFilter::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(&m_callback);
+    visitor.visit(m_callback);
 }
 
 }

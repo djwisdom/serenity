@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,7 +13,7 @@
 
 namespace JS {
 
-static Syntax::TextStyle style_for_token_type(Gfx::Palette const& palette, TokenType type)
+static Gfx::TextAttributes style_for_token_type(Gfx::Palette const& palette, TokenType type)
 {
     switch (Token::category(type)) {
     case TokenCategory::Invalid:
@@ -26,9 +27,9 @@ static Syntax::TextStyle style_for_token_type(Gfx::Palette const& palette, Token
     case TokenCategory::Operator:
         return { palette.syntax_operator() };
     case TokenCategory::Keyword:
-        return { palette.syntax_keyword(), true };
+        return { palette.syntax_keyword(), {}, true };
     case TokenCategory::ControlKeyword:
-        return { palette.syntax_control_keyword(), true };
+        return { palette.syntax_control_keyword(), {}, true };
     case TokenCategory::Identifier:
         return { palette.syntax_identifier() };
     default:
@@ -54,6 +55,7 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
     Lexer lexer(text);
 
     Vector<GUI::TextDocumentSpan> spans;
+    Vector<GUI::TextDocumentFoldingRegion> folding_regions;
     GUI::TextPosition position { 0, 0 };
     GUI::TextPosition start { 0, 0 };
 
@@ -77,9 +79,7 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
         span.range.set_start(start);
         span.range.set_end({ position.line(), position.column() });
         auto type = is_trivia ? TokenType::Invalid : token.type();
-        auto style = style_for_token_type(palette, type);
-        span.attributes.color = style.color;
-        span.attributes.bold = style.bold;
+        span.attributes = style_for_token_type(palette, type);
         span.is_skippable = is_trivia;
         span.data = static_cast<u64>(type);
         spans.append(span);
@@ -92,16 +92,39 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
             span.range.end().line(), span.range.end().column());
     };
 
+    struct TokenData {
+        Token token;
+        GUI::TextRange range;
+    };
+    Vector<TokenData> folding_region_start_tokens;
+
     bool was_eof = false;
     for (auto token = lexer.next(); !was_eof; token = lexer.next()) {
         append_token(token.trivia(), token, true);
+
+        auto token_start_position = position;
         append_token(token.value(), token, false);
 
         if (token.type() == TokenType::Eof)
             was_eof = true;
+
+        // Create folding regions for {} blocks
+        if (token.type() == TokenType::CurlyOpen) {
+            folding_region_start_tokens.append({ .token = token,
+                .range = { token_start_position, position } });
+        } else if (token.type() == TokenType::CurlyClose) {
+            if (!folding_region_start_tokens.is_empty()) {
+                auto curly_open = folding_region_start_tokens.take_last();
+                GUI::TextDocumentFoldingRegion region;
+                region.range.set_start(curly_open.range.end());
+                region.range.set_end(token_start_position);
+                folding_regions.append(region);
+            }
+        }
     }
 
     m_client->do_set_spans(move(spans));
+    m_client->do_set_folding_regions(move(folding_regions));
 
     m_has_brace_buddies = false;
     highlight_matching_token_pair();

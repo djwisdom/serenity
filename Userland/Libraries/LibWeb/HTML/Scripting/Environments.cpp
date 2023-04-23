@@ -251,7 +251,7 @@ void EnvironmentSettingsObject::notify_about_rejected_promises(Badge<EventLoop>)
             // FIXME: This currently assumes that global is a WindowObject.
             auto& window = verify_cast<HTML::Window>(global);
 
-            auto promise_rejection_event = PromiseRejectionEvent::create(window.realm(), HTML::EventNames::unhandledrejection, event_init);
+            auto promise_rejection_event = PromiseRejectionEvent::create(window.realm(), HTML::EventNames::unhandledrejection, event_init).release_value_but_fixme_should_propagate_errors();
 
             bool not_handled = window.dispatch_event(*promise_rejection_event);
 
@@ -259,7 +259,7 @@ void EnvironmentSettingsObject::notify_about_rejected_promises(Badge<EventLoop>)
 
             // 4. If p's [[PromiseIsHandled]] internal slot is false, add p to settings object's outstanding rejected promises weak set.
             if (!promise->is_handled())
-                m_outstanding_rejected_promises_weak_set.append(promise);
+                m_outstanding_rejected_promises_weak_set.append(*promise);
 
             // This algorithm results in promise rejections being marked as handled or not handled. These concepts parallel handled and not handled script errors.
             // If a rejection is still not handled after this, then the rejection may be reported to a developer console.
@@ -433,6 +433,13 @@ JS::Object& entry_global_object()
 {
     // Similarly, the entry global object is the global object of the entry realm.
     return entry_realm().global_object();
+}
+
+JS::VM& relevant_agent(JS::Object const& object)
+{
+    // The relevant agent for a platform object platformObject is platformObject's relevant Realm's agent.
+    // Spec Note: This pointer is not yet defined in the JavaScript specification; see tc39/ecma262#1357.
+    return relevant_realm(object).vm();
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#secure-context

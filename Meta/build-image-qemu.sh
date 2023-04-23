@@ -32,11 +32,6 @@ fi
 # Prepend the toolchain qemu directory so we pick up QEMU from there
 PATH="$SCRIPT_DIR/../Toolchain/Local/qemu/bin:$PATH"
 
-# Also prepend the i686 toolchain directory because that's where most
-# people will have their QEMU binaries if they built them before the
-# directory was changed to Toolchain/Local/qemu.
-PATH="$SCRIPT_DIR/../Toolchain/Local/i686/bin:$PATH"
-
 # We depend on GNU coreutils du for the --apparent-size extension.
 # GNU coreutils is a build dependency.
 if command -v gdu > /dev/null 2>&1 && gdu --version | grep -q "GNU coreutils"; then
@@ -74,6 +69,26 @@ else
         die "SERENITY_DISK_SIZE_BYTES is set to $SERENITY_DISK_SIZE_BYTES but required disk size is $DISK_SIZE_BYTES bytes"
     fi
     DISK_SIZE_BYTES="$SERENITY_DISK_SIZE_BYTES"
+fi
+
+if [ -n "$SERENITY_INODE_COUNT" ]; then
+    if [ "$INODE_COUNT" -gt "$SERENITY_INODE_COUNT" ]; then
+        die "SERENITY_INODE_COUNT is set to $SERENITY_INODE_COUNT but required inode count is roughly $INODE_COUNT"
+    fi
+    INODE_COUNT="$SERENITY_INODE_COUNT"
+fi
+
+nearest_power_of_2() {
+    local n=$1
+    local p=1
+    while [ $p -lt "$n" ]; do
+        p=$((p*2))
+    done
+    echo $p
+}
+if [ "$SERENITY_ARCH" = "aarch64" ] || { [ -n "$SERENITY_USE_SDCARD" ] && [ "$SERENITY_USE_SDCARD" -eq 1 ]; }; then
+    # SD cards must have a size that is a power of 2. The Aarch64 port loads from an SD card. 
+    DISK_SIZE_BYTES=$(nearest_power_of_2 "$DISK_SIZE_BYTES")
 fi
 
 USE_EXISTING=0
@@ -117,7 +132,7 @@ if [ $USE_EXISTING -ne 1 ]; then
     if [ "$(uname -s)" = "OpenBSD" ]; then
         VND=$(vnconfig _disk_image)
         (echo "e 0"; echo 83; echo n; echo 0; echo "*"; echo "quit") | fdisk -e "$VND"
-        newfs_ext2fs -D $INODE_SIZE -n $INODE_COUNT "/dev/r${VND}i" || die "could not create filesystem"
+        newfs_ext2fs -D "${INODE_SIZE}" -n "${INODE_COUNT}" "/dev/r${VND}i" || die "could not create filesystem"
     else
         "${MKE2FS_PATH}" -q -I "${INODE_SIZE}" -N "${INODE_COUNT}" _disk_image || die "could not create filesystem"
     fi
@@ -183,7 +198,7 @@ if [ $use_genext2fs = 1 ]; then
     # genext2fs is very slow in generating big images, so I use a smaller image here. size can be updated
     # if it's not enough.
     # not using "-I $INODE_SIZE" since it hangs. Serenity handles whatever default this uses instead.
-    genext2fs -B 4096 -b $((DISK_SIZE_BYTES / 4096)) -N $INODE_COUNT -d mnt _disk_image || die "try increasing image size (genext2fs -b)"
+    genext2fs -B 4096 -b $((DISK_SIZE_BYTES / 4096)) -N "${INODE_COUNT}" -d mnt _disk_image || die "try increasing image size (genext2fs -b)"
     # if using docker with shared mount, file is created as root, so make it writable for users
     chmod 0666 _disk_image
 fi

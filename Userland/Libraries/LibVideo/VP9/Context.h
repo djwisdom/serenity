@@ -8,11 +8,14 @@
 #pragma once
 
 #include <AK/Array.h>
+#include <AK/BitStream.h>
 #include <AK/Error.h>
 #include <AK/FixedArray.h>
+#include <AK/MemoryStream.h>
 #include <LibGfx/Size.h>
 #include <LibVideo/Color/CodingIndependentCodePoints.h>
 
+#include "BooleanDecoder.h"
 #include "ContextStorage.h"
 #include "Enums.h"
 #include "LookupTables.h"
@@ -29,10 +32,19 @@ enum class FrameShowMode {
 
 struct FrameContext {
 public:
-    FrameContext(Vector2D<FrameBlockContext>& contexts)
-        : m_block_contexts(contexts)
+    FrameContext(ReadonlyBytes data,
+        Vector2D<FrameBlockContext>& contexts)
+        : stream(data)
+        , bit_stream(MaybeOwned<Stream>(stream))
+        , m_block_contexts(contexts)
     {
     }
+
+    FrameContext(FrameContext const&) = delete;
+    FrameContext(FrameContext&&) = default;
+
+    FixedMemoryStream stream;
+    BigEndianInputBitStream bit_stream;
 
     u8 profile { 0 };
 
@@ -143,9 +155,9 @@ private:
 static ErrorOr<NonZeroTokens> create_non_zero_tokens(u32 size_in_sub_blocks, bool subsampling)
 {
     return NonZeroTokens {
-        TRY(FixedArray<bool>::try_create(size_in_sub_blocks)),
-        TRY(FixedArray<bool>::try_create(size_in_sub_blocks >>= subsampling)),
-        TRY(FixedArray<bool>::try_create(size_in_sub_blocks)),
+        TRY(FixedArray<bool>::create(size_in_sub_blocks)),
+        TRY(FixedArray<bool>::create(size_in_sub_blocks >>= subsampling)),
+        TRY(FixedArray<bool>::create(size_in_sub_blocks)),
     };
 }
 
@@ -175,14 +187,18 @@ static NonZeroTokensView create_non_zero_tokens_view(NonZeroTokens& non_zero_tok
 
 struct TileContext {
 public:
-    static ErrorOr<TileContext> try_create(FrameContext& frame_context, u32 rows_start, u32 rows_end, u32 columns_start, u32 columns_end, PartitionContextView above_partition_context, NonZeroTokensView above_non_zero_tokens, SegmentationPredictionContextView above_segmentation_ids)
+    static ErrorOr<TileContext> try_create(FrameContext& frame_context, u32 tile_size, u32 rows_start, u32 rows_end, u32 columns_start, u32 columns_end, PartitionContextView above_partition_context, NonZeroTokensView above_non_zero_tokens, SegmentationPredictionContextView above_segmentation_ids)
     {
         auto width = columns_end - columns_start;
         auto height = rows_end - rows_start;
         auto context_view = frame_context.m_block_contexts.view(rows_start, columns_start, height, width);
 
+        auto bit_stream = TRY(try_make<BigEndianInputBitStream>(TRY(try_make<FixedMemoryStream>(frame_context.stream))));
+        auto decoder = TRY(BooleanDecoder::initialize(move(bit_stream), tile_size));
+
         return TileContext {
             frame_context,
+            move(decoder),
             rows_start,
             rows_end,
             columns_start,
@@ -191,15 +207,16 @@ public:
             above_partition_context,
             above_non_zero_tokens,
             above_segmentation_ids,
-            TRY(PartitionContext::try_create(superblocks_to_blocks(blocks_ceiled_to_superblocks(height)))),
+            TRY(PartitionContext::create(superblocks_to_blocks(blocks_ceiled_to_superblocks(height)))),
             TRY(create_non_zero_tokens(blocks_to_sub_blocks(height), frame_context.color_config.subsampling_y)),
-            TRY(SegmentationPredictionContext::try_create(height)),
+            TRY(SegmentationPredictionContext::create(height)),
         };
     }
 
     Vector2D<FrameBlockContext> const& frame_block_contexts() const { return frame_context.block_contexts(); }
 
     FrameContext const& frame_context;
+    BooleanDecoder decoder;
     u32 rows_start { 0 };
     u32 rows_end { 0 };
     u32 columns_start { 0 };
@@ -231,6 +248,7 @@ struct BlockContext {
         return BlockContext {
             .frame_context = tile_context.frame_context,
             .tile_context = tile_context,
+            .decoder = tile_context.decoder,
             .row = row,
             .column = column,
             .size = size,
@@ -246,6 +264,7 @@ struct BlockContext {
 
     FrameContext const& frame_context;
     TileContext const& tile_context;
+    BooleanDecoder& decoder;
     u32 row { 0 };
     u32 column { 0 };
     BlockSubsize size;

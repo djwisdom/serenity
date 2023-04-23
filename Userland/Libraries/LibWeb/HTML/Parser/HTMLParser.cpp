@@ -10,6 +10,8 @@
 #include <AK/Utf32View.h>
 #include <LibTextCodec/Decoder.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
+#include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/DOM/Comment.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentType.h>
@@ -17,6 +19,7 @@
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/ProcessingInstruction.h>
 #include <LibWeb/DOM/Text.h>
+#include <LibWeb/HTML/CustomElements/CustomElementDefinition.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/HTMLFormElement.h>
@@ -37,10 +40,10 @@ namespace Web::HTML {
 
 static inline void log_parse_error(SourceLocation const& location = SourceLocation::current())
 {
-    dbgln("Parse error! {}", location);
+    dbgln_if(HTML_PARSER_DEBUG, "Parse error! {}", location);
 }
 
-static Vector<FlyString> s_quirks_public_ids = {
+static Vector<DeprecatedFlyString> s_quirks_public_ids = {
     "+//Silmaril//dtd html Pro v0r11 19970101//",
     "-//AS//DTD HTML 3.0 asWedit + extensions//",
     "-//AdvaSoft Ltd//DTD HTML 3.0 asWedit + extensions//",
@@ -219,6 +222,28 @@ void HTMLParser::the_end()
 {
     // Once the user agent stops parsing the document, the user agent must run the following steps:
 
+    // The entirety of "the end" should be a no-op for HTML fragment parsers, because:
+    // - the temporary document is not accessible, making the DOMContentLoaded event and "ready for post load tasks" do
+    //   nothing, making the parser not re-entrant from document.{open,write,close} and document.readyState inaccessible
+    // - there is no Window associated with it and no associated browsing context with the temporary document (meaning
+    //   the Window load event is skipped and making the load timing info inaccessible)
+    // - scripts are not able to be prepared, meaning the script queues are empty.
+    // However, the unconditional "spin the event loop" invocations cause two issues:
+    // - Microtask timing is changed, as "spin the event loop" performs an unconditional microtask checkpoint, causing
+    //   things to happen out of order. For example, YouTube sets the innerHTML of a <template> element in the constructor
+    //   of the ytd-app custom element _before_ setting up class attributes. Since custom elements use microtasks to run
+    //   callbacks, this causes custom element callbacks that rely on attributes setup by the constructor to run before
+    //   the attributes are set up, causing unhandled exceptions.
+    // - Load event delaying can spin forever, e.g. if the fragment contains an <img> element which stops delaying the
+    //   load event from an element task. Since tasks are not considered runnable if they're from a document with no
+    //   browsing context (i.e. the temporary document made for innerHTML), the <img> element will forever delay the load
+    //   event and cause an infinite loop.
+    // We can avoid these issues and also avoid doing unnecessary work by simply skipping "the end" for HTML fragment
+    // parsers.
+    // See the message of the commit that added this for more details.
+    if (m_parsing_fragment)
+        return;
+
     // FIXME: 1. If the active speculative HTML parser is not null, then stop the speculative HTML parser and return.
 
     // 2. Set the insertion point to undefined.
@@ -253,9 +278,9 @@ void HTMLParser::the_end()
         document->load_timing_info().dom_content_loaded_event_start_time = HighResolutionTime::unsafe_shared_current_time();
 
         // 2. Fire an event named DOMContentLoaded at the Document object, with its bubbles attribute initialized to true.
-        auto content_loaded_event = DOM::Event::create(document->realm(), HTML::EventNames::DOMContentLoaded);
+        auto content_loaded_event = DOM::Event::create(document->realm(), HTML::EventNames::DOMContentLoaded).release_value_but_fixme_should_propagate_errors();
         content_loaded_event->set_bubbles(true);
-        document->dispatch_event(*content_loaded_event);
+        document->dispatch_event(content_loaded_event);
 
         // 3. Set the Document's load timing info's DOM content loaded event end time to the current high resolution time given the Document's relevant global object.
         document->load_timing_info().dom_content_loaded_event_end_time = HighResolutionTime::unsafe_shared_current_time();
@@ -294,7 +319,7 @@ void HTMLParser::the_end()
         // 5. Fire an event named load at window, with legacy target override flag set.
         // FIXME: The legacy target override flag is currently set by a virtual override of dispatch_event()
         //        We should reorganize this so that the flag appears explicitly here instead.
-        window->dispatch_event(*DOM::Event::create(document->realm(), HTML::EventNames::load));
+        window->dispatch_event(DOM::Event::create(document->realm(), HTML::EventNames::load).release_value_but_fixme_should_propagate_errors());
 
         // FIXME: 6. Invoke WebDriver BiDi load complete with the Document's browsing context, and a new WebDriver BiDi navigation status whose id is the Document object's navigation id, status is "complete", and url is the Document object's URL.
 
@@ -413,16 +438,16 @@ DOM::QuirksMode HTMLParser::which_quirks_mode(HTMLToken const& doctype_token) co
     auto const& public_identifier = doctype_token.doctype_data().public_identifier;
     auto const& system_identifier = doctype_token.doctype_data().system_identifier;
 
-    if (public_identifier.equals_ignoring_case("-//W3O//DTD W3 HTML Strict 3.0//EN//"sv))
+    if (public_identifier.equals_ignoring_ascii_case("-//W3O//DTD W3 HTML Strict 3.0//EN//"sv))
         return DOM::QuirksMode::Yes;
 
-    if (public_identifier.equals_ignoring_case("-/W3C/DTD HTML 4.0 Transitional/EN"sv))
+    if (public_identifier.equals_ignoring_ascii_case("-/W3C/DTD HTML 4.0 Transitional/EN"sv))
         return DOM::QuirksMode::Yes;
 
-    if (public_identifier.equals_ignoring_case("HTML"sv))
+    if (public_identifier.equals_ignoring_ascii_case("HTML"sv))
         return DOM::QuirksMode::Yes;
 
-    if (system_identifier.equals_ignoring_case("http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd"sv))
+    if (system_identifier.equals_ignoring_ascii_case("http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd"sv))
         return DOM::QuirksMode::Yes;
 
     for (auto& public_id : s_quirks_public_ids) {
@@ -462,13 +487,13 @@ void HTMLParser::handle_initial(HTMLToken& token)
     }
 
     if (token.is_comment()) {
-        auto comment = realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment());
+        auto comment = realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment()).release_allocated_value_but_fixme_should_propagate_errors();
         MUST(document().append_child(*comment));
         return;
     }
 
     if (token.is_doctype()) {
-        auto doctype = realm().heap().allocate<DOM::DocumentType>(realm(), document());
+        auto doctype = realm().heap().allocate<DOM::DocumentType>(realm(), document()).release_allocated_value_but_fixme_should_propagate_errors();
         doctype->set_name(token.doctype_data().name);
         doctype->set_public_id(token.doctype_data().public_identifier);
         doctype->set_system_id(token.doctype_data().system_identifier);
@@ -497,7 +522,7 @@ void HTMLParser::handle_before_html(HTMLToken& token)
     // -> A comment token
     if (token.is_comment()) {
         // Insert a comment as the last child of the Document object.
-        auto comment = realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment());
+        auto comment = realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment()).release_allocated_value_but_fixme_should_propagate_errors();
         MUST(document().append_child(*comment));
         return;
     }
@@ -536,8 +561,8 @@ void HTMLParser::handle_before_html(HTMLToken& token)
     // -> Anything else
 AnythingElse:
     // Create an html element whose node document is the Document object. Append it to the Document object. Put this element in the stack of open elements.
-    auto element = create_element(document(), HTML::TagNames::html, Namespace::HTML);
-    MUST(document().append_child(*element));
+    auto element = create_element(document(), HTML::TagNames::html, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
+    MUST(document().append_child(element));
     m_stack_of_open_elements.push(element);
 
     // Switch the insertion mode to "before head", then reprocess the token.
@@ -616,7 +641,7 @@ HTMLParser::AdjustedInsertionLocation HTMLParser::find_appropriate_place_for_ins
     return adjusted_insertion_location;
 }
 
-JS::NonnullGCPtr<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, FlyString const& namespace_, DOM::Node const& intended_parent)
+JS::NonnullGCPtr<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, DeprecatedFlyString const& namespace_, DOM::Node& intended_parent)
 {
     // FIXME: 1. If the active speculative HTML parser is not null, then return the result of creating a speculative mock element given given namespace, the tag name of the given token, and the attributes of the given token.
     // FIXME: 2. Otherwise, optionally create a speculative mock element given given namespace, the tag name of the given token, and the attributes of the given token.
@@ -627,18 +652,36 @@ JS::NonnullGCPtr<DOM::Element> HTMLParser::create_element_for(HTMLToken const& t
     // 4. Let local name be the tag name of the token.
     auto local_name = token.tag_name();
 
-    // FIXME: 5. Let is be the value of the "is" attribute in the given token, if such an attribute exists, or null otherwise.
-    // FIXME: 6. Let definition be the result of looking up a custom element definition given document, given namespace, local name, and is.
-    // FIXME: 7. If definition is non-null and the parser was not created as part of the HTML fragment parsing algorithm, then let will execute script be true. Otherwise, let it be false.
-    // FIXME: 8. If will execute script is true, then:
-    // FIXME:    1. Increment document's throw-on-dynamic-markup-insertion counter.
-    // FIXME:    2. If the JavaScript execution context stack is empty, then perform a microtask checkpoint.
-    // FIXME:    3. Push a new element queue onto document's relevant agent's custom element reactions stack.
+    // 5. Let is be the value of the "is" attribute in the given token, if such an attribute exists, or null otherwise.
+    auto is_value_deprecated_string = token.attribute(AttributeNames::is);
+    Optional<String> is_value;
+    if (!is_value_deprecated_string.is_null())
+        is_value = String::from_utf8(is_value_deprecated_string).release_value_but_fixme_should_propagate_errors();
+
+    // 6. Let definition be the result of looking up a custom element definition given document, given namespace, local name, and is.
+    auto definition = document->lookup_custom_element_definition(namespace_, local_name, is_value);
+
+    // 7. If definition is non-null and the parser was not created as part of the HTML fragment parsing algorithm, then let will execute script be true. Otherwise, let it be false.
+    bool will_execute_script = definition && !m_parsing_fragment;
+
+    // 8. If will execute script is true, then:
+    if (will_execute_script) {
+        // 1. Increment document's throw-on-dynamic-markup-insertion counter.
+        document->increment_throw_on_dynamic_markup_insertion_counter({});
+
+        // 2. If the JavaScript execution context stack is empty, then perform a microtask checkpoint.
+        auto& vm = main_thread_event_loop().vm();
+        if (vm.execution_context_stack().is_empty())
+            perform_a_microtask_checkpoint();
+
+        // 3. Push a new element queue onto document's relevant agent's custom element reactions stack.
+        auto& custom_data = verify_cast<Bindings::WebEngineCustomData>(*vm.custom_data());
+        custom_data.custom_element_reactions_stack.element_queue_stack.append({});
+    }
 
     // 9. Let element be the result of creating an element given document, localName, given namespace, null, and is.
-    // FIXME: If will execute script is true, set the synchronous custom elements flag; otherwise, leave it unset.
-    // FIXME: Pass in `null` and `is`.
-    auto element = create_element(*document, local_name, namespace_);
+    //    If will execute script is true, set the synchronous custom elements flag; otherwise, leave it unset.
+    auto element = create_element(*document, local_name, namespace_, {}, is_value, will_execute_script).release_value_but_fixme_should_propagate_errors();
 
     // 10. Append each attribute in the given token to element.
     // FIXME: This isn't the exact `append` the spec is talking about.
@@ -647,10 +690,19 @@ JS::NonnullGCPtr<DOM::Element> HTMLParser::create_element_for(HTMLToken const& t
         return IterationDecision::Continue;
     });
 
-    // FIXME: 11. If will execute script is true, then:
-    // FIXME:     1. Let queue be the result of popping from document's relevant agent's custom element reactions stack. (This will be the same element queue as was pushed above.)
-    // FIXME:     2. Invoke custom element reactions in queue.
-    // FIXME:     3. Decrement document's throw-on-dynamic-markup-insertion counter.
+    // 11. If will execute script is true, then:
+    if (will_execute_script) {
+        // 1. Let queue be the result of popping from document's relevant agent's custom element reactions stack. (This will be the same element queue as was pushed above.)
+        auto& vm = main_thread_event_loop().vm();
+        auto& custom_data = verify_cast<Bindings::WebEngineCustomData>(*vm.custom_data());
+        auto queue = custom_data.custom_element_reactions_stack.element_queue_stack.take_last();
+
+        // 2. Invoke custom element reactions in queue.
+        Bindings::invoke_custom_element_reactions(queue);
+
+        // 3. Decrement document's throw-on-dynamic-markup-insertion counter.
+        document->decrement_throw_on_dynamic_markup_insertion_counter({});
+    }
 
     // FIXME: 12. If element has an xmlns attribute in the XMLNS namespace whose value is not exactly the same as the element's namespace, that is a parse error.
     //            Similarly, if element has an xmlns:xlink attribute in the XMLNS namespace whose value is not the XLink Namespace, that is a parse error.
@@ -681,7 +733,7 @@ JS::NonnullGCPtr<DOM::Element> HTMLParser::create_element_for(HTMLToken const& t
 }
 
 // https://html.spec.whatwg.org/multipage/parsing.html#insert-a-foreign-element
-JS::NonnullGCPtr<DOM::Element> HTMLParser::insert_foreign_element(HTMLToken const& token, FlyString const& namespace_)
+JS::NonnullGCPtr<DOM::Element> HTMLParser::insert_foreign_element(HTMLToken const& token, DeprecatedFlyString const& namespace_)
 {
     auto adjusted_insertion_location = find_appropriate_place_for_inserting_node();
 
@@ -692,14 +744,22 @@ JS::NonnullGCPtr<DOM::Element> HTMLParser::insert_foreign_element(HTMLToken cons
 
     // NOTE: If it's not possible to insert the element at the adjusted insertion location, the element is simply dropped.
     if (!pre_insertion_validity.is_exception()) {
+        // 1. If the parser was not created as part of the HTML fragment parsing algorithm, then push a new element queue onto element's relevant agent's custom element reactions stack.
         if (!m_parsing_fragment) {
-            // FIXME: push a new element queue onto element's relevant agent's custom element reactions stack.
+            auto& vm = main_thread_event_loop().vm();
+            auto& custom_data = verify_cast<Bindings::WebEngineCustomData>(*vm.custom_data());
+            custom_data.custom_element_reactions_stack.element_queue_stack.append({});
         }
 
+        // 2. Insert element at the adjusted insertion location.
         adjusted_insertion_location.parent->insert_before(*element, adjusted_insertion_location.insert_before_sibling);
 
+        // 3. If the parser was not created as part of the HTML fragment parsing algorithm, then pop the element queue from element's relevant agent's custom element reactions stack, and invoke custom element reactions in that queue.
         if (!m_parsing_fragment) {
-            // FIXME: pop the element queue from element's relevant agent's custom element reactions stack, and invoke custom element reactions in that queue.
+            auto& vm = main_thread_event_loop().vm();
+            auto& custom_data = verify_cast<Bindings::WebEngineCustomData>(*vm.custom_data());
+            auto queue = custom_data.custom_element_reactions_stack.element_queue_stack.take_last();
+            Bindings::invoke_custom_element_reactions(queue);
         }
     }
 
@@ -759,7 +819,7 @@ AnythingElse:
 void HTMLParser::insert_comment(HTMLToken& token)
 {
     auto adjusted_insertion_location = find_appropriate_place_for_inserting_node();
-    adjusted_insertion_location.parent->insert_before(realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment()), adjusted_insertion_location.insert_before_sibling);
+    adjusted_insertion_location.parent->insert_before(realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment()).release_allocated_value_but_fixme_should_propagate_errors(), adjusted_insertion_location.insert_before_sibling);
 }
 
 void HTMLParser::handle_in_head(HTMLToken& token)
@@ -945,7 +1005,7 @@ DOM::Text* HTMLParser::find_character_insertion_node()
         return nullptr;
     if (adjusted_insertion_location.parent->last_child() && adjusted_insertion_location.parent->last_child()->is_text())
         return verify_cast<DOM::Text>(adjusted_insertion_location.parent->last_child());
-    auto new_text_node = realm().heap().allocate<DOM::Text>(realm(), document(), "");
+    auto new_text_node = realm().heap().allocate<DOM::Text>(realm(), document(), "").release_allocated_value_but_fixme_should_propagate_errors();
     MUST(adjusted_insertion_location.parent->append_child(*new_text_node));
     return new_text_node;
 }
@@ -955,7 +1015,6 @@ void HTMLParser::flush_character_insertions()
     if (m_character_insertion_builder.is_empty())
         return;
     m_character_insertion_node->set_data(m_character_insertion_builder.to_deprecated_string());
-    m_character_insertion_node->parent()->children_changed();
     m_character_insertion_builder.clear();
 }
 
@@ -1041,7 +1100,7 @@ AnythingElse:
     process_using_the_rules_for(m_insertion_mode, token);
 }
 
-void HTMLParser::generate_implied_end_tags(FlyString const& exception)
+void HTMLParser::generate_implied_end_tags(DeprecatedFlyString const& exception)
 {
     while (current_node().local_name() != exception && current_node().local_name().is_one_of(HTML::TagNames::dd, HTML::TagNames::dt, HTML::TagNames::li, HTML::TagNames::optgroup, HTML::TagNames::option, HTML::TagNames::p, HTML::TagNames::rb, HTML::TagNames::rp, HTML::TagNames::rt, HTML::TagNames::rtc))
         (void)m_stack_of_open_elements.pop();
@@ -1071,7 +1130,7 @@ void HTMLParser::handle_after_body(HTMLToken& token)
 
     if (token.is_comment()) {
         auto& insertion_location = m_stack_of_open_elements.first();
-        MUST(insertion_location.append_child(realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment())));
+        MUST(insertion_location.append_child(realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment()).release_allocated_value_but_fixme_should_propagate_errors()));
         return;
     }
 
@@ -1107,7 +1166,7 @@ void HTMLParser::handle_after_body(HTMLToken& token)
 void HTMLParser::handle_after_after_body(HTMLToken& token)
 {
     if (token.is_comment()) {
-        auto comment = realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment());
+        auto comment = realm().heap().allocate<DOM::Comment>(realm(), document(), token.comment()).release_allocated_value_but_fixme_should_propagate_errors();
         MUST(document().append_child(*comment));
         return;
     }
@@ -1365,7 +1424,7 @@ HTMLParser::AdoptionAgencyAlgorithmOutcome HTMLParser::run_the_adoption_agency_a
     }
 }
 
-bool HTMLParser::is_special_tag(FlyString const& tag_name, FlyString const& namespace_)
+bool HTMLParser::is_special_tag(DeprecatedFlyString const& tag_name, DeprecatedFlyString const& namespace_)
 {
     if (namespace_ == Namespace::HTML) {
         return tag_name.is_one_of(
@@ -1922,7 +1981,7 @@ void HTMLParser::handle_in_body(HTMLToken& token)
         (void)m_stack_of_open_elements.pop();
         token.acknowledge_self_closing_flag_if_set();
         auto type_attribute = token.attribute(HTML::AttributeNames::type);
-        if (type_attribute.is_null() || !type_attribute.equals_ignoring_case("hidden"sv)) {
+        if (type_attribute.is_null() || !type_attribute.equals_ignoring_ascii_case("hidden"sv)) {
             m_frameset_ok = false;
         }
         return;
@@ -2267,6 +2326,12 @@ void HTMLParser::handle_text(HTMLToken& token)
 
         // Non-standard: Make sure the <script> element has up-to-date text content before preparing the script.
         flush_character_insertions();
+
+        // If the active speculative HTML parser is null and the JavaScript execution context stack is empty, then perform a microtask checkpoint.
+        // FIXME: If the active speculative HTML parser is null
+        auto& vm = main_thread_event_loop().vm();
+        if (vm.execution_context_stack().is_empty())
+            perform_a_microtask_checkpoint();
 
         // Let script be the current node (which will be a script element).
         JS::NonnullGCPtr<HTMLScriptElement> script = verify_cast<HTMLScriptElement>(current_node());
@@ -2698,7 +2763,7 @@ void HTMLParser::handle_in_table(HTMLToken& token)
     }
     if (token.is_start_tag() && token.tag_name() == HTML::TagNames::input) {
         auto type_attribute = token.attribute(HTML::AttributeNames::type);
-        if (type_attribute.is_null() || !type_attribute.equals_ignoring_case("hidden"sv)) {
+        if (type_attribute.is_null() || !type_attribute.equals_ignoring_ascii_case("hidden"sv)) {
             goto AnythingElse;
         }
 
@@ -3181,7 +3246,7 @@ void HTMLParser::handle_after_frameset(HTMLToken& token)
 void HTMLParser::handle_after_after_frameset(HTMLToken& token)
 {
     if (token.is_comment()) {
-        auto comment = document().heap().allocate<DOM::Comment>(document().realm(), document(), token.comment());
+        auto comment = document().heap().allocate<DOM::Comment>(document().realm(), document(), token.comment()).release_allocated_value_but_fixme_should_propagate_errors();
         MUST(document().append_child(comment));
         return;
     }
@@ -3448,7 +3513,7 @@ DOM::Document& HTMLParser::document()
 Vector<JS::Handle<DOM::Node>> HTMLParser::parse_html_fragment(DOM::Element& context_element, StringView markup)
 {
     // 1. Create a new Document node, and mark it as being an HTML document.
-    auto temp_document = DOM::Document::create(context_element.realm());
+    auto temp_document = DOM::Document::create(context_element.realm()).release_value_but_fixme_should_propagate_errors();
     temp_document->set_document_type(DOM::Document::Type::HTML);
 
     // 2. If the node document of the context element is in quirks mode, then let the Document be in quirks mode.
@@ -3499,7 +3564,7 @@ Vector<JS::Handle<DOM::Node>> HTMLParser::parse_html_fragment(DOM::Element& cont
     }
 
     // 5. Let root be a new html element with no attributes.
-    auto root = create_element(context_element.document(), HTML::TagNames::html, Namespace::HTML);
+    auto root = create_element(context_element.document(), HTML::TagNames::html, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
 
     // 6. Append the element root to the Document node created above.
     MUST(temp_document->append_child(root));
@@ -3562,7 +3627,7 @@ DeprecatedString HTMLParser::serialize_html_fragment(DOM::Node const& node)
 {
     // The algorithm takes as input a DOM Element, Document, or DocumentFragment referred to as the node.
     VERIFY(node.is_element() || node.is_document() || node.is_document_fragment());
-    JS::NonnullGCPtr<DOM::Node> actual_node = node;
+    JS::NonnullGCPtr<DOM::Node const> actual_node = node;
 
     if (is<DOM::Element>(node)) {
         auto& element = verify_cast<DOM::Element>(node);
@@ -3586,23 +3651,23 @@ DeprecatedString HTMLParser::serialize_html_fragment(DOM::Node const& node)
     auto escape_string = [](StringView string, AttributeMode attribute_mode) -> DeprecatedString {
         // https://html.spec.whatwg.org/multipage/parsing.html#escapingString
         StringBuilder builder;
-        for (auto& ch : string) {
+        for (auto code_point : Utf8View { string }) {
             // 1. Replace any occurrence of the "&" character by the string "&amp;".
-            if (ch == '&')
+            if (code_point == '&')
                 builder.append("&amp;"sv);
             // 2. Replace any occurrences of the U+00A0 NO-BREAK SPACE character by the string "&nbsp;".
-            else if (ch == '\xA0')
+            else if (code_point == 0xA0)
                 builder.append("&nbsp;"sv);
             // 3. If the algorithm was invoked in the attribute mode, replace any occurrences of the """ character by the string "&quot;".
-            else if (ch == '"' && attribute_mode == AttributeMode::Yes)
+            else if (code_point == '"' && attribute_mode == AttributeMode::Yes)
                 builder.append("&quot;"sv);
             // 4. If the algorithm was not invoked in the attribute mode, replace any occurrences of the "<" character by the string "&lt;", and any occurrences of the ">" character by the string "&gt;".
-            else if (ch == '<' && attribute_mode == AttributeMode::No)
+            else if (code_point == '<' && attribute_mode == AttributeMode::No)
                 builder.append("&lt;"sv);
-            else if (ch == '>' && attribute_mode == AttributeMode::No)
+            else if (code_point == '>' && attribute_mode == AttributeMode::No)
                 builder.append("&gt;"sv);
             else
-                builder.append(ch);
+                builder.append_code_point(code_point);
         }
         return builder.to_deprecated_string();
     };
@@ -3633,9 +3698,14 @@ DeprecatedString HTMLParser::serialize_html_fragment(DOM::Node const& node)
             builder.append('<');
             builder.append(tag_name);
 
-            // FIXME: 3. If current node's is value is not null, and the element does not have an is attribute in its attribute list,
-            //           then append the string " is="", followed by current node's is value escaped as described below in attribute mode,
-            //           followed by a U+0022 QUOTATION MARK character (").
+            // 3. If current node's is value is not null, and the element does not have an is attribute in its attribute list,
+            //    then append the string " is="", followed by current node's is value escaped as described below in attribute mode,
+            //    followed by a U+0022 QUOTATION MARK character (").
+            if (element.is_value().has_value() && !element.has_attribute(AttributeNames::is)) {
+                builder.append(" is=\""sv);
+                builder.append(escape_string(element.is_value().value(), AttributeMode::Yes));
+                builder.append('"');
+            }
 
             // 4. For each attribute that the element has, append a U+0020 SPACE character, the attribute's serialized name as described below, a U+003D EQUALS SIGN character (=),
             //    a U+0022 QUOTATION MARK character ("), the attribute's value, escaped as described below in attribute mode, and a second U+0022 QUOTATION MARK character (").

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibCore/Stream.h>
+#include <AK/MemoryStream.h>
 #include <LibTest/JavaScriptTestRunner.h>
 #include <LibWasm/AbstractMachine/BytecodeInterpreter.h>
 #include <LibWasm/Types.h>
@@ -15,20 +15,26 @@ TEST_ROOT("Userland/Libraries/LibWasm/Tests");
 TESTJS_GLOBAL_FUNCTION(read_binary_wasm_file, readBinaryWasmFile)
 {
     auto& realm = *vm.current_realm();
-    auto filename = TRY(vm.argument(0).to_string(vm));
-    auto file = Core::Stream::File::open(filename, Core::Stream::OpenMode::Read);
+
+    auto error_code_to_string = [](int code) {
+        auto const* error_string = strerror(code);
+        return StringView { error_string, strlen(error_string) };
+    };
+
+    auto filename = TRY(vm.argument(0).to_deprecated_string(vm));
+    auto file = Core::File::open(filename, Core::File::OpenMode::Read);
     if (file.is_error())
-        return vm.throw_completion<JS::TypeError>(strerror(file.error().code()));
+        return vm.throw_completion<JS::TypeError>(error_code_to_string(file.error().code()));
 
     auto file_size = file.value()->size();
     if (file_size.is_error())
-        return vm.throw_completion<JS::TypeError>(strerror(file_size.error().code()));
+        return vm.throw_completion<JS::TypeError>(error_code_to_string(file_size.error().code()));
 
     auto array = TRY(JS::Uint8Array::create(realm, file_size.value()));
 
-    auto read = file.value()->read(array->data());
+    auto read = file.value()->read_until_filled(array->data());
     if (read.is_error())
-        return vm.throw_completion<JS::TypeError>(strerror(read.error().code()));
+        return vm.throw_completion<JS::TypeError>(error_code_to_string(read.error().code()));
 
     return JS::Value(array);
 }
@@ -50,21 +56,21 @@ public:
     static JS::ThrowCompletionOr<WebAssemblyModule*> create(JS::Realm& realm, Wasm::Module module, HashMap<Wasm::Linker::Name, Wasm::ExternValue> const& imports)
     {
         auto& vm = realm.vm();
-        auto instance = realm.heap().allocate<WebAssemblyModule>(realm, *realm.intrinsics().object_prototype());
+        auto instance = MUST_OR_THROW_OOM(realm.heap().allocate<WebAssemblyModule>(realm, realm.intrinsics().object_prototype()));
         instance->m_module = move(module);
         Wasm::Linker linker(*instance->m_module);
         linker.link(imports);
         linker.link(spec_test_namespace());
         auto link_result = linker.finish();
         if (link_result.is_error())
-            return vm.throw_completion<JS::TypeError>("Link failed");
+            return vm.throw_completion<JS::TypeError>("Link failed"sv);
         auto result = machine().instantiate(*instance->m_module, link_result.release_value());
         if (result.is_error())
             return vm.throw_completion<JS::TypeError>(result.release_error().error);
         instance->m_module_instance = result.release_value();
         return instance.ptr();
     }
-    void initialize(JS::Realm&) override;
+    JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 
     ~WebAssemblyModule() override = default;
 
@@ -101,22 +107,14 @@ HashMap<Wasm::Linker::Name, Wasm::ExternValue> WebAssemblyModule::s_spec_test_na
 TESTJS_GLOBAL_FUNCTION(parse_webassembly_module, parseWebAssemblyModule)
 {
     auto& realm = *vm.current_realm();
-    auto* object = TRY(vm.argument(0).to_object(vm));
-    if (!is<JS::Uint8Array>(object))
-        return vm.throw_completion<JS::TypeError>("Expected a Uint8Array argument to parse_webassembly_module");
+    auto object = TRY(vm.argument(0).to_object(vm));
+    if (!is<JS::Uint8Array>(*object))
+        return vm.throw_completion<JS::TypeError>("Expected a Uint8Array argument to parse_webassembly_module"sv);
     auto& array = static_cast<JS::Uint8Array&>(*object);
-    InputMemoryStream stream { array.data() };
-    ScopeGuard handle_stream_error {
-        [&] {
-            stream.handle_any_error();
-        }
-    };
+    FixedMemoryStream stream { array.data() };
     auto result = Wasm::Module::parse(stream);
     if (result.is_error())
         return vm.throw_completion<JS::SyntaxError>(Wasm::parse_error_to_deprecated_string(result.error()));
-
-    if (stream.handle_any_error())
-        return vm.throw_completion<JS::SyntaxError>("Binary stream contained errors");
 
     HashMap<Wasm::Linker::Name, Wasm::ExternValue> imports;
     auto import_value = vm.argument(1);
@@ -139,33 +137,35 @@ TESTJS_GLOBAL_FUNCTION(parse_webassembly_module, parseWebAssemblyModule)
 
 TESTJS_GLOBAL_FUNCTION(compare_typed_arrays, compareTypedArrays)
 {
-    auto* lhs = TRY(vm.argument(0).to_object(vm));
-    if (!is<JS::TypedArrayBase>(lhs))
-        return vm.throw_completion<JS::TypeError>("Expected a TypedArray");
+    auto lhs = TRY(vm.argument(0).to_object(vm));
+    if (!is<JS::TypedArrayBase>(*lhs))
+        return vm.throw_completion<JS::TypeError>("Expected a TypedArray"sv);
     auto& lhs_array = static_cast<JS::TypedArrayBase&>(*lhs);
-    auto* rhs = TRY(vm.argument(1).to_object(vm));
-    if (!is<JS::TypedArrayBase>(rhs))
-        return vm.throw_completion<JS::TypeError>("Expected a TypedArray");
+    auto rhs = TRY(vm.argument(1).to_object(vm));
+    if (!is<JS::TypedArrayBase>(*rhs))
+        return vm.throw_completion<JS::TypeError>("Expected a TypedArray"sv);
     auto& rhs_array = static_cast<JS::TypedArrayBase&>(*rhs);
     return JS::Value(lhs_array.viewed_array_buffer()->buffer() == rhs_array.viewed_array_buffer()->buffer());
 }
 
-void WebAssemblyModule::initialize(JS::Realm& realm)
+JS::ThrowCompletionOr<void> WebAssemblyModule::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     define_native_function(realm, "getExport", get_export, 1, JS::default_attributes);
     define_native_function(realm, "invoke", wasm_invoke, 1, JS::default_attributes);
+
+    return {};
 }
 
 JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::get_export)
 {
-    auto name = TRY(vm.argument(0).to_string(vm));
+    auto name = TRY(vm.argument(0).to_deprecated_string(vm));
     auto this_value = vm.this_value();
-    auto* object = TRY(this_value.to_object(vm));
-    if (!is<WebAssemblyModule>(object))
-        return vm.throw_completion<JS::TypeError>("Not a WebAssemblyModule");
-    auto instance = static_cast<WebAssemblyModule*>(object);
-    for (auto& entry : instance->module_instance().exports()) {
+    auto object = TRY(this_value.to_object(vm));
+    if (!is<WebAssemblyModule>(*object))
+        return vm.throw_completion<JS::TypeError>("Not a WebAssemblyModule"sv);
+    auto& instance = static_cast<WebAssemblyModule&>(*object);
+    for (auto& entry : instance.module_instance().exports()) {
         if (entry.name() == name) {
             auto& value = entry.value();
             if (auto ptr = value.get_pointer<Wasm::FunctionAddress>())
@@ -181,10 +181,10 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::get_export)
                             [&](const auto& ref) -> JS::Value { return JS::Value(static_cast<double>(ref.address.value())); });
                     });
             }
-            return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("'{}' does not refer to a function or a global", name));
+            return vm.throw_completion<JS::TypeError>(TRY_OR_THROW_OOM(vm, String::formatted("'{}' does not refer to a function or a global", name)));
         }
     }
-    return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("'{}' could not be found", name));
+    return vm.throw_completion<JS::TypeError>(TRY_OR_THROW_OOM(vm, String::formatted("'{}' could not be found", name)));
 }
 
 JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
@@ -193,16 +193,16 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
     Wasm::FunctionAddress function_address { address };
     auto function_instance = WebAssemblyModule::machine().store().get(function_address);
     if (!function_instance)
-        return vm.throw_completion<JS::TypeError>("Invalid function address");
+        return vm.throw_completion<JS::TypeError>("Invalid function address"sv);
 
     Wasm::FunctionType const* type { nullptr };
     function_instance->visit([&](auto& value) { type = &value.type(); });
     if (!type)
-        return vm.throw_completion<JS::TypeError>("Invalid function found at given address");
+        return vm.throw_completion<JS::TypeError>("Invalid function found at given address"sv);
 
     Vector<Wasm::Value> arguments;
     if (type->parameters().size() + 1 > vm.argument_count())
-        return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("Expected {} arguments for call, but found {}", type->parameters().size() + 1, vm.argument_count()));
+        return vm.throw_completion<JS::TypeError>(TRY_OR_THROW_OOM(vm, String::formatted("Expected {} arguments for call, but found {}", type->parameters().size() + 1, vm.argument_count())));
     size_t index = 1;
     for (auto& param : type->parameters()) {
         auto argument = vm.argument(index++);
@@ -244,20 +244,30 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
 
     auto result = WebAssemblyModule::machine().invoke(function_address, arguments);
     if (result.is_trap())
-        return vm.throw_completion<JS::TypeError>(DeprecatedString::formatted("Execution trapped: {}", result.trap().reason));
+        return vm.throw_completion<JS::TypeError>(TRY_OR_THROW_OOM(vm, String::formatted("Execution trapped: {}", result.trap().reason)));
+
+    if (result.is_completion())
+        return result.completion();
 
     if (result.values().is_empty())
         return JS::js_null();
 
-    JS::Value return_value;
-    result.values().first().value().visit(
-        [&](auto const& value) { return_value = JS::Value(static_cast<double>(value)); },
-        [&](i32 value) { return_value = JS::Value(static_cast<double>(value)); },
-        [&](i64 value) { return_value = JS::Value(JS::BigInt::create(vm, Crypto::SignedBigInteger { value })); },
-        [&](Wasm::Reference const& reference) {
-            reference.ref().visit(
-                [&](const Wasm::Reference::Null&) { return_value = JS::js_null(); },
-                [&](const auto& ref) { return_value = JS::Value(static_cast<double>(ref.address.value())); });
-        });
-    return return_value;
+    auto to_js_value = [&](Wasm::Value const& value) {
+        return value.value().visit(
+            [](auto const& value) { return JS::Value(static_cast<double>(value)); },
+            [](i32 value) { return JS::Value(static_cast<double>(value)); },
+            [&](i64 value) { return JS::Value(JS::BigInt::create(vm, Crypto::SignedBigInteger { value })); },
+            [](Wasm::Reference const& reference) {
+                return reference.ref().visit(
+                    [](const Wasm::Reference::Null&) { return JS::js_null(); },
+                    [](const auto& ref) { return JS::Value(static_cast<double>(ref.address.value())); });
+            });
+    };
+
+    if (result.values().size() == 1)
+        return to_js_value(result.values().first());
+
+    return JS::Array::create_from<Wasm::Value>(*vm.current_realm(), result.values(), [&](Wasm::Value value) {
+        return to_js_value(value);
+    });
 }

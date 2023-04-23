@@ -6,8 +6,9 @@
 
 #include <Applications/PartitionEditor/PartitionEditorWindowGML.h>
 #include <Applications/PartitionEditor/PartitionModel.h>
-#include <LibCore/DirIterator.h>
+#include <LibCore/Directory.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/ComboBox.h>
 #include <LibGUI/ItemListModel.h>
@@ -19,25 +20,30 @@
 static Vector<DeprecatedString> get_device_paths()
 {
     auto device_paths = Vector<DeprecatedString>();
-    Core::DirIterator iterator("/dev", Core::DirIterator::SkipParentAndBaseDir);
-    while (iterator.has_next()) {
-        auto path = iterator.next_full_path();
-        if (Core::File::is_block_device(path))
-            device_paths.append(path);
-    }
+    // FIXME: Propagate errors.
+    (void)Core::Directory::for_each_entry("/dev"sv, Core::DirIterator::Flags::SkipParentAndBaseDir, [&](auto const& entry, auto const& directory) -> ErrorOr<IterationDecision> {
+        auto full_path = LexicalPath::join(directory.path().string(), entry.name).string();
+        if (FileSystem::is_block_device(full_path))
+            device_paths.append(full_path);
+        return IterationDecision::Continue;
+    });
     return device_paths;
 }
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
+    TRY(Core::System::unveil("/dev", "r"));
+    TRY(Core::System::unveil("/res", "r"));
+    TRY(Core::System::unveil("/proc", "r"));
+    TRY(Core::System::unveil("/tmp/session/%sid/portal/clipboard", "rw"));
+    TRY(Core::System::unveil("/tmp/portal/window", "rw"));
+    TRY(Core::System::unveil(nullptr, nullptr));
+
     TRY(Core::System::pledge("stdio recvfd sendfd rpath unix"));
 
     auto app = TRY(GUI::Application::try_create(arguments));
 
     TRY(Core::System::pledge("stdio recvfd sendfd rpath"));
-    TRY(Core::System::unveil("/dev", "r"));
-    TRY(Core::System::unveil("/res", "r"));
-    TRY(Core::System::unveil(nullptr, nullptr));
 
     auto app_icon = TRY(GUI::Icon::try_create_default_icon("app-partition-editor"sv));
 
@@ -52,8 +58,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return Error::from_string_view(error_message);
     }
 
-    auto widget = TRY(window->try_set_main_widget<GUI::Widget>());
-    widget->load_from_gml(partition_editor_window_gml);
+    auto widget = TRY(window->set_main_widget<GUI::Widget>());
+    TRY(widget->load_from_gml(partition_editor_window_gml));
 
     auto device_paths = get_device_paths();
 
@@ -74,12 +80,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     partition_table_view.set_model(partition_model);
     partition_table_view.set_focus(true);
 
-    auto& file_menu = window->add_menu("&File");
+    auto& file_menu = window->add_menu("&File"_short_string);
     file_menu.add_action(GUI::CommonActions::make_quit_action([&](auto&) {
         app->quit();
     }));
 
-    auto help_menu = TRY(window->try_add_menu("&Help"));
+    auto help_menu = TRY(window->try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Partition Editor", app_icon, window)));
 

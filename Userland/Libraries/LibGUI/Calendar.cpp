@@ -7,6 +7,7 @@
  */
 
 #include <AK/DateConstants.h>
+#include <AK/String.h>
 #include <LibConfig/Client.h>
 #include <LibCore/DateTime.h>
 #include <LibGUI/Calendar.h>
@@ -332,20 +333,19 @@ void Calendar::update_tiles(unsigned view_year, unsigned view_month)
     update();
 }
 
-DeprecatedString Calendar::formatted_date(Format format)
+ErrorOr<String> Calendar::formatted_date(Format format)
 {
     switch (format) {
     case ShortMonthYear:
-        return DeprecatedString::formatted("{} {}", short_month_names[view_month() - 1], view_year());
+        return String::formatted("{} {}", short_month_names[view_month() - 1], view_year());
     case LongMonthYear:
-        return DeprecatedString::formatted("{} {}", long_month_names[view_month() - 1], view_year());
+        return String::formatted("{} {}", long_month_names[view_month() - 1], view_year());
     case MonthOnly:
-        return DeprecatedString::formatted("{}", long_month_names[view_month() - 1]);
+        return String::formatted("{}", long_month_names[view_month() - 1]);
     case YearOnly:
-        return DeprecatedString::number(view_year());
-    default:
-        VERIFY_NOT_REACHED();
+        return String::number(view_year());
     }
+    VERIFY_NOT_REACHED();
 }
 
 void Calendar::paint_event(GUI::PaintEvent& event)
@@ -376,7 +376,7 @@ void Calendar::paint_event(GUI::PaintEvent& event)
             22);
         y_offset += year_only_rect.height();
         painter.fill_rect(year_only_rect, palette().hover_highlight());
-        painter.draw_text(year_only_rect, formatted_date(YearOnly), medium_font->bold_variant(), Gfx::TextAlignment::Center, palette().base_text());
+        painter.draw_text(year_only_rect, formatted_date(YearOnly).release_value_but_fixme_should_propagate_errors(), medium_font->bold_variant(), Gfx::TextAlignment::Center, palette().base_text());
         painter.draw_line({ 0, y_offset }, { frame_inner_rect().width(), y_offset }, (!m_show_month_tiles ? palette().threed_shadow1() : palette().threed_shadow2()), 1);
         y_offset += 1;
         if (!m_show_month_tiles) {
@@ -391,9 +391,9 @@ void Calendar::paint_event(GUI::PaintEvent& event)
             22);
         painter.fill_rect(month_year_rect, palette().hover_highlight());
         month_year_rect.set_width(frame_inner_rect().width() / 2);
-        painter.draw_text(month_year_rect, formatted_date(MonthOnly), medium_font->bold_variant(), Gfx::TextAlignment::Center, palette().base_text());
+        painter.draw_text(month_year_rect, formatted_date(MonthOnly).release_value_but_fixme_should_propagate_errors(), medium_font->bold_variant(), Gfx::TextAlignment::Center, palette().base_text());
         month_year_rect.set_x(month_year_rect.width() + (frame_inner_rect().width() % 2 ? 1 : 0));
-        painter.draw_text(month_year_rect, formatted_date(YearOnly), medium_font->bold_variant(), Gfx::TextAlignment::Center, palette().base_text());
+        painter.draw_text(month_year_rect, formatted_date(YearOnly).release_value_but_fixme_should_propagate_errors(), medium_font->bold_variant(), Gfx::TextAlignment::Center, palette().base_text());
         y_offset += 22;
         painter.draw_line({ 0, y_offset }, { frame_inner_rect().width(), y_offset }, palette().threed_shadow1(), 1);
         y_offset += 1;
@@ -484,7 +484,7 @@ void Calendar::paint_event(GUI::PaintEvent& event)
                     x_offset,
                     y_offset + 4,
                     m_tiles[0][i].width - 4,
-                    font().glyph_height() + 4);
+                    font().pixel_size_rounded_up() + 4);
 
                 if (width > 150 && height > 150) {
                     set_font(extra_large_font);

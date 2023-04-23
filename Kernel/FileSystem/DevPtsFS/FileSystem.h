@@ -20,7 +20,7 @@ class DevPtsFS final : public FileSystem {
 
 public:
     virtual ~DevPtsFS() override;
-    static ErrorOr<NonnullLockRefPtr<FileSystem>> try_create();
+    static ErrorOr<NonnullRefPtr<FileSystem>> try_create();
 
     virtual ErrorOr<void> initialize() override;
     virtual StringView class_name() const override { return "DevPtsFS"sv; }
@@ -29,9 +29,9 @@ public:
 
 private:
     DevPtsFS();
-    ErrorOr<NonnullLockRefPtr<Inode>> get_inode(InodeIdentifier) const;
+    ErrorOr<NonnullRefPtr<Inode>> get_inode(InodeIdentifier) const;
 
-    LockRefPtr<DevPtsFSInode> m_root_inode;
+    RefPtr<DevPtsFSInode> m_root_inode;
 };
 
 }

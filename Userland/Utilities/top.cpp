@@ -46,7 +46,6 @@ struct ThreadData {
     uid_t uid;
     gid_t gid;
     pid_t ppid;
-    unsigned nfds;
     DeprecatedString name;
     DeprecatedString tty;
     size_t amount_virtual;
@@ -105,7 +104,6 @@ static ErrorOr<Snapshot> get_snapshot()
             thread_data.uid = process.uid;
             thread_data.gid = process.gid;
             thread_data.ppid = process.ppid;
-            thread_data.nfds = process.nfds;
             thread_data.name = process.name;
             thread_data.tty = process.tty;
             thread_data.amount_virtual = process.amount_virtual;
@@ -141,8 +139,7 @@ static void parse_args(Main::Arguments arguments, TopOption& top_option)
         "sort-by",
         's',
         nullptr,
-        [&top_option](char const* s) {
-            StringView sort_by_option { s, strlen(s) };
+        [&top_option](StringView sort_by_option) {
             if (sort_by_option == "pid"sv)
                 top_option.sort_by = TopOption::SortBy::Pid;
             else if (sort_by_option == "tid"sv)
@@ -203,11 +200,14 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/etc/passwd", "r"));
     unveil(nullptr, nullptr);
 
-    signal(SIGWINCH, [](int) {
+    TRY(Core::System::signal(SIGWINCH, [](int) {
         g_window_size_changed = true;
-    });
-
+    }));
+    TRY(Core::System::signal(SIGINT, [](int) {
+        exit(0);
+    }));
     TRY(Core::System::pledge("stdio rpath tty"));
+
     TopOption top_option;
     parse_args(arguments, top_option);
 

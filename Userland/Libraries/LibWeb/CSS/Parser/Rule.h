@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, the SerenityOS developers.
- * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -40,8 +40,6 @@ public:
     Vector<ComponentValue> const& prelude() const { return m_prelude; }
     RefPtr<Block const> block() const { return m_block; }
     StringView at_rule_name() const { return m_at_rule_name; }
-
-    DeprecatedString to_deprecated_string() const;
 
 private:
     Rule(Type, FlyString name, Vector<ComponentValue> prelude, RefPtr<Block>);

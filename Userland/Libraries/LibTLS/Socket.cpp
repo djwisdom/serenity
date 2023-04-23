@@ -18,7 +18,7 @@ constexpr static size_t MaximumApplicationDataChunkSize = 16 * KiB;
 
 namespace TLS {
 
-ErrorOr<Bytes> TLSv12::read(Bytes bytes)
+ErrorOr<Bytes> TLSv12::read_some(Bytes bytes)
 {
     m_eof = false;
     auto size_to_read = min(bytes.size(), m_context.application_buffer.size());
@@ -53,7 +53,7 @@ DeprecatedString TLSv12::read_line(size_t max_size)
     return line;
 }
 
-ErrorOr<size_t> TLSv12::write(ReadonlyBytes bytes)
+ErrorOr<size_t> TLSv12::write_some(ReadonlyBytes bytes)
 {
     if (m_context.connection_status != ConnectionStatus::Established) {
         dbgln_if(TLS_DEBUG, "write request while not connected");
@@ -61,7 +61,7 @@ ErrorOr<size_t> TLSv12::write(ReadonlyBytes bytes)
     }
 
     for (size_t offset = 0; offset < bytes.size(); offset += MaximumApplicationDataChunkSize) {
-        PacketBuilder builder { MessageType::ApplicationData, m_context.options.version, bytes.size() - offset };
+        PacketBuilder builder { ContentType::APPLICATION_DATA, m_context.options.version, bytes.size() - offset };
         builder.append(bytes.slice(offset, min(bytes.size() - offset, MaximumApplicationDataChunkSize)));
         auto packet = builder.build();
 
@@ -75,7 +75,7 @@ ErrorOr<size_t> TLSv12::write(ReadonlyBytes bytes)
 ErrorOr<NonnullOwnPtr<TLSv12>> TLSv12::connect(DeprecatedString const& host, u16 port, Options options)
 {
     Core::EventLoop loop;
-    OwnPtr<Core::Stream::Socket> tcp_socket = TRY(Core::Stream::TCPSocket::connect(host, port));
+    OwnPtr<Core::Socket> tcp_socket = TRY(Core::TCPSocket::connect(host, port));
     TRY(tcp_socket->set_blocking(false));
     auto tls_socket = make<TLSv12>(move(tcp_socket), move(options));
     tls_socket->set_sni(host);
@@ -91,10 +91,10 @@ ErrorOr<NonnullOwnPtr<TLSv12>> TLSv12::connect(DeprecatedString const& host, u16
 
     tls_socket->try_disambiguate_error();
     // FIXME: Should return richer information here.
-    return AK::Error::from_string_view(alert_name(static_cast<AlertDescription>(256 - result)));
+    return AK::Error::from_string_view(enum_to_string(static_cast<AlertDescription>(256 - result)));
 }
 
-ErrorOr<NonnullOwnPtr<TLSv12>> TLSv12::connect(DeprecatedString const& host, Core::Stream::Socket& underlying_stream, Options options)
+ErrorOr<NonnullOwnPtr<TLSv12>> TLSv12::connect(DeprecatedString const& host, Core::Socket& underlying_stream, Options options)
 {
     TRY(underlying_stream.set_blocking(false));
     auto tls_socket = make<TLSv12>(&underlying_stream, move(options));
@@ -112,7 +112,7 @@ ErrorOr<NonnullOwnPtr<TLSv12>> TLSv12::connect(DeprecatedString const& host, Cor
 
     tls_socket->try_disambiguate_error();
     // FIXME: Should return richer information here.
-    return AK::Error::from_string_view(alert_name(static_cast<AlertDescription>(256 - result)));
+    return AK::Error::from_string_view(enum_to_string(static_cast<AlertDescription>(256 - result)));
 }
 
 void TLSv12::setup_connection()
@@ -135,7 +135,7 @@ void TLSv12::setup_connection()
                 if (timeout_diff < m_max_wait_time_for_handshake_in_seconds + 1) {
                     // The server did not respond fast enough,
                     // time the connection out.
-                    alert(AlertLevel::Critical, AlertDescription::UserCanceled);
+                    alert(AlertLevel::FATAL, AlertDescription::USER_CANCELED);
                     m_context.tls_buffer.clear();
                     m_context.error_code = Error::TimedOut;
                     m_context.critical_error = (u8)Error::TimedOut;
@@ -144,7 +144,7 @@ void TLSv12::setup_connection()
                     // Extend the timer, we are too slow.
                     m_handshake_timeout_timer->restart(m_max_wait_time_for_handshake_in_seconds * 1000);
                 }
-            });
+            }).release_value_but_fixme_should_propagate_errors();
         auto packet = build_hello();
         write_packet(packet);
         write_into_socket();
@@ -190,7 +190,7 @@ ErrorOr<void> TLSv12::read_from_socket()
     Bytes read_bytes {};
     auto& stream = underlying_stream();
     do {
-        auto result = stream.read(bytes);
+        auto result = stream.read_some(bytes);
         if (result.is_error()) {
             if (result.error().is_errno() && result.error().code() != EINTR) {
                 if (result.error().code() != EAGAIN)
@@ -291,7 +291,7 @@ ErrorOr<bool> TLSv12::flush()
     Optional<AK::Error> error;
     size_t written;
     do {
-        auto result = stream.write(out_bytes);
+        auto result = stream.write_some(out_bytes);
         if (result.is_error() && result.error().code() != EINTR && result.error().code() != EAGAIN) {
             error = result.release_error();
             dbgln("TLS Socket write error: {}", *error);
@@ -317,7 +317,7 @@ ErrorOr<bool> TLSv12::flush()
 
 void TLSv12::close()
 {
-    alert(AlertLevel::Critical, AlertDescription::CloseNotify);
+    alert(AlertLevel::FATAL, AlertDescription::CLOSE_NOTIFY);
     // bye bye.
     m_context.connection_status = ConnectionStatus::Disconnected;
 }

@@ -1,15 +1,17 @@
 /*
  * Copyright (c) 2020-2022, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2023, MacDue <macdue@dueutil.tech>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Debug.h>
 #include <AK/OwnPtr.h>
 #include <LibGfx/Painter.h>
 #include <LibGfx/Quad.h>
 #include <LibGfx/Rect.h>
+#include <LibUnicode/Segmentation.h>
+#include <LibWeb/Bindings/CanvasRenderingContext2DPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/CanvasRenderingContext2D.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
@@ -24,9 +26,9 @@
 
 namespace Web::HTML {
 
-JS::NonnullGCPtr<CanvasRenderingContext2D> CanvasRenderingContext2D::create(JS::Realm& realm, HTMLCanvasElement& element)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<CanvasRenderingContext2D>> CanvasRenderingContext2D::create(JS::Realm& realm, HTMLCanvasElement& element)
 {
-    return realm.heap().allocate<CanvasRenderingContext2D>(realm, realm, element);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<CanvasRenderingContext2D>(realm, realm, element));
 }
 
 CanvasRenderingContext2D::CanvasRenderingContext2D(JS::Realm& realm, HTMLCanvasElement& element)
@@ -34,10 +36,17 @@ CanvasRenderingContext2D::CanvasRenderingContext2D(JS::Realm& realm, HTMLCanvasE
     , CanvasPath(static_cast<Bindings::PlatformObject&>(*this))
     , m_element(element)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "CanvasRenderingContext2D"));
 }
 
 CanvasRenderingContext2D::~CanvasRenderingContext2D() = default;
+
+JS::ThrowCompletionOr<void> CanvasRenderingContext2D::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::CanvasRenderingContext2DPrototype>(realm, "CanvasRenderingContext2D"));
+
+    return {};
+}
 
 void CanvasRenderingContext2D::visit_edges(Cell::Visitor& visitor)
 {
@@ -62,52 +71,51 @@ JS::NonnullGCPtr<HTMLCanvasElement> CanvasRenderingContext2D::canvas_for_binding
 
 void CanvasRenderingContext2D::fill_rect(float x, float y, float width, float height)
 {
-    auto painter = this->antialiased_painter();
-    if (!painter.has_value())
-        return;
-
-    auto& drawing_state = this->drawing_state();
-
-    auto rect = drawing_state.transform.map(Gfx::FloatRect(x, y, width, height));
-    painter->fill_rect(rect, drawing_state.fill_style);
-    did_draw(rect);
+    draw_clipped([&](auto& painter) {
+        auto& drawing_state = this->drawing_state();
+        auto rect = drawing_state.transform.map(Gfx::FloatRect(x, y, width, height));
+        auto color_fill = drawing_state.fill_style.as_color();
+        if (color_fill.has_value()) {
+            painter.fill_rect(rect, *color_fill);
+        } else {
+            // FIXME: This should use AntiAliasingPainter::fill_rect() too but that does not support FillPath yet.
+            painter.underlying_painter().fill_rect(rect.to_rounded<int>(), *drawing_state.fill_style.to_gfx_paint_style());
+        }
+        return rect;
+    });
 }
 
 void CanvasRenderingContext2D::clear_rect(float x, float y, float width, float height)
 {
-    auto painter = this->painter();
-    if (!painter)
-        return;
-
-    auto rect = drawing_state().transform.map(Gfx::FloatRect(x, y, width, height));
-    painter->clear_rect(enclosing_int_rect(rect), Color());
-    did_draw(rect);
+    draw_clipped([&](auto& painter) {
+        auto rect = drawing_state().transform.map(Gfx::FloatRect(x, y, width, height));
+        painter.underlying_painter().clear_rect(enclosing_int_rect(rect), Color());
+        return rect;
+    });
 }
 
 void CanvasRenderingContext2D::stroke_rect(float x, float y, float width, float height)
 {
-    auto painter = this->antialiased_painter();
-    if (!painter.has_value())
-        return;
+    draw_clipped([&](auto& painter) {
+        auto& drawing_state = this->drawing_state();
 
-    auto& drawing_state = this->drawing_state();
+        auto rect = drawing_state.transform.map(Gfx::FloatRect(x, y, width, height));
+        // We could remove the rounding here, but the lines look better when they have whole number pixel endpoints.
+        auto top_left = drawing_state.transform.map(Gfx::FloatPoint(x, y)).to_rounded<float>();
+        auto top_right = drawing_state.transform.map(Gfx::FloatPoint(x + width - 1, y)).to_rounded<float>();
+        auto bottom_left = drawing_state.transform.map(Gfx::FloatPoint(x, y + height - 1)).to_rounded<float>();
+        auto bottom_right = drawing_state.transform.map(Gfx::FloatPoint(x + width - 1, y + height - 1)).to_rounded<float>();
 
-    auto rect = drawing_state.transform.map(Gfx::FloatRect(x, y, width, height));
-    // We could remove the rounding here, but the lines look better when they have whole number pixel endponts.
-    auto top_left = drawing_state.transform.map(Gfx::FloatPoint(x, y)).to_rounded<float>();
-    auto top_right = drawing_state.transform.map(Gfx::FloatPoint(x + width - 1, y)).to_rounded<float>();
-    auto bottom_left = drawing_state.transform.map(Gfx::FloatPoint(x, y + height - 1)).to_rounded<float>();
-    auto bottom_right = drawing_state.transform.map(Gfx::FloatPoint(x + width - 1, y + height - 1)).to_rounded<float>();
+        Gfx::Path path;
+        path.move_to(top_left);
+        path.line_to(top_right);
+        path.line_to(bottom_right);
+        path.line_to(bottom_left);
+        path.line_to(top_left);
+        painter.stroke_path(path, drawing_state.stroke_style.to_color_but_fixme_should_accept_any_paint_style(), drawing_state.line_width);
 
-    Gfx::Path path;
-    path.move_to(top_left);
-    path.line_to(top_right);
-    path.line_to(bottom_right);
-    path.line_to(bottom_left);
-    path.line_to(top_left);
-    painter->stroke_path(path, drawing_state.stroke_style, drawing_state.line_width);
-
-    did_draw(rect);
+        return rect;
+    });
 }
 
 // 4.12.5.1.14 Drawing images, https://html.spec.whatwg.org/multipage/canvas.html#drawing-images
@@ -155,15 +163,21 @@ WebIDL::ExceptionOr<void> CanvasRenderingContext2D::draw_image_internal(CanvasIm
         return {};
 
     // 6. Paint the region of the image argument specified by the source rectangle on the region of the rendering context's output bitmap specified by the destination rectangle, after applying the current transformation matrix to the destination rectangle.
-    auto painter = this->painter();
-    if (!painter)
-        return {};
+    draw_clipped([&](auto& painter) {
+        auto scaling_mode = Gfx::Painter::ScalingMode::NearestNeighbor;
+        if (drawing_state().image_smoothing_enabled) {
+            // FIXME: Honor drawing_state().image_smoothing_quality
+            scaling_mode = Gfx::Painter::ScalingMode::BilinearBlend;
+        }
 
-    painter->draw_scaled_bitmap_with_transform(destination_rect.to_rounded<int>(), *bitmap, source_rect, drawing_state().transform, 1.0f, Gfx::Painter::ScalingMode::BilinearBlend);
+        painter.underlying_painter().draw_scaled_bitmap_with_transform(destination_rect.to_rounded<int>(), *bitmap, source_rect, drawing_state().transform, 1.0f, scaling_mode);
 
-    // 7. If image is not origin-clean, then set the CanvasRenderingContext2D's origin-clean flag to false.
-    if (image_is_not_origin_clean(image))
-        m_origin_clean = false;
+        // 7. If image is not origin-clean, then set the CanvasRenderingContext2D's origin-clean flag to false.
+        if (image_is_not_origin_clean(image))
+            m_origin_clean = false;
+
+        return destination_rect;
+    });
 
     return {};
 }
@@ -199,17 +213,14 @@ void CanvasRenderingContext2D::fill_text(DeprecatedString const& text, float x, 
     if (max_width.has_value() && max_width.value() <= 0)
         return;
 
-    auto painter = this->painter();
-    if (!painter)
-        return;
-
-    auto& drawing_state = this->drawing_state();
-
-    // FIXME: painter only supports integer rects for text right now, so this effectively chops off any fractional position
-    auto text_rect = Gfx::IntRect(x, y, max_width.has_value() ? max_width.value() : painter->font().width(text), painter->font().pixel_size());
-    auto transformed_rect = drawing_state.transform.map(text_rect);
-    painter->draw_text(transformed_rect, text, Gfx::TextAlignment::TopLeft, drawing_state.fill_style);
-    did_draw(transformed_rect.to_type<float>());
+    draw_clipped([&](auto& painter) {
+        auto& drawing_state = this->drawing_state();
+        auto& base_painter = painter.underlying_painter();
+        auto text_rect = Gfx::FloatRect(x, y, max_width.has_value() ? static_cast<float>(max_width.value()) : base_painter.font().width(text), base_painter.font().pixel_size());
+        auto transformed_rect = drawing_state.transform.map(text_rect);
+        base_painter.draw_text(transformed_rect, text, Gfx::TextAlignment::TopLeft, drawing_state.fill_style.to_color_but_fixme_should_accept_any_paint_style());
+        return transformed_rect;
+    });
 }
 
 void CanvasRenderingContext2D::stroke_text(DeprecatedString const& text, float x, float y, Optional<double> max_width)
@@ -225,14 +236,12 @@ void CanvasRenderingContext2D::begin_path()
 
 void CanvasRenderingContext2D::stroke_internal(Gfx::Path const& path)
 {
-    auto painter = this->antialiased_painter();
-    if (!painter.has_value())
-        return;
+    draw_clipped([&](auto& painter) {
+        auto& drawing_state = this->drawing_state();
 
-    auto& drawing_state = this->drawing_state();
-
-    painter->stroke_path(path, drawing_state.stroke_style, drawing_state.line_width);
-    did_draw(path.bounding_box());
+        painter.stroke_path(path, drawing_state.stroke_style.to_color_but_fixme_should_accept_any_paint_style(), drawing_state.line_width);
+        return path.bounding_box();
+    });
 }
 
 void CanvasRenderingContext2D::stroke()
@@ -247,29 +256,29 @@ void CanvasRenderingContext2D::stroke(Path2D const& path)
     stroke_internal(transformed_path);
 }
 
-void CanvasRenderingContext2D::fill_internal(Gfx::Path& path, DeprecatedString const& fill_rule)
+static Gfx::Painter::WindingRule parse_fill_rule(StringView fill_rule)
 {
-    auto painter = this->antialiased_painter();
-    if (!painter.has_value())
-        return;
+    if (fill_rule == "evenodd"sv)
+        return Gfx::Painter::WindingRule::EvenOdd;
+    if (fill_rule == "nonzero"sv)
+        return Gfx::Painter::WindingRule::Nonzero;
+    dbgln("Unrecognized fillRule for CRC2D.fill() - this problem goes away once we pass an enum instead of a string");
+    return Gfx::Painter::WindingRule::Nonzero;
+}
 
-    path.close_all_subpaths();
-
-    auto winding = Gfx::Painter::WindingRule::Nonzero;
-    if (fill_rule == "evenodd")
-        winding = Gfx::Painter::WindingRule::EvenOdd;
-    else if (fill_rule == "nonzero")
-        winding = Gfx::Painter::WindingRule::Nonzero;
-    else
-        dbgln("Unrecognized fillRule for CRC2D.fill() - this problem goes away once we pass an enum instead of a string");
-
-    painter->fill_path(path, drawing_state().fill_style, winding);
-    did_draw(path.bounding_box());
+void CanvasRenderingContext2D::fill_internal(Gfx::Path& path, StringView fill_rule)
+{
+    draw_clipped([&](auto& painter) {
+        path.close_all_subpaths();
+        painter.fill_path(path, *drawing_state().fill_style.to_gfx_paint_style(), parse_fill_rule(fill_rule));
+        return path.bounding_box();
+    });
 }
 
 void CanvasRenderingContext2D::fill(DeprecatedString const& fill_rule)
 {
-    return fill_internal(path(), fill_rule);
+    auto transformed_path = path().copy_transformed(drawing_state().transform);
+    return fill_internal(transformed_path, fill_rule);
 }
 
 void CanvasRenderingContext2D::fill(Path2D& path, DeprecatedString const& fill_rule)
@@ -325,13 +334,10 @@ WebIDL::ExceptionOr<JS::GCPtr<ImageData>> CanvasRenderingContext2D::get_image_da
 
 void CanvasRenderingContext2D::put_image_data(ImageData const& image_data, float x, float y)
 {
-    auto painter = this->painter();
-    if (!painter)
-        return;
-
-    painter->blit(Gfx::IntPoint(x, y), image_data.bitmap(), image_data.bitmap().rect());
-
-    did_draw(Gfx::FloatRect(x, y, image_data.width(), image_data.height()));
+    draw_clipped([&](auto& painter) {
+        painter.underlying_painter().blit(Gfx::IntPoint(x, y), image_data.bitmap(), image_data.bitmap().rect());
+        return Gfx::FloatRect(x, y, image_data.width(), image_data.height());
+    });
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#reset-the-rendering-context-to-its-default-state
@@ -365,7 +371,7 @@ JS::NonnullGCPtr<TextMetrics> CanvasRenderingContext2D::measure_text(DeprecatedS
     // TextMetrics object with members behaving as described in the following
     // list:
     auto prepared_text = prepare_text(text);
-    auto metrics = TextMetrics::create(realm());
+    auto metrics = TextMetrics::create(realm()).release_value_but_fixme_should_propagate_errors();
     // FIXME: Use the font that was used to create the glyphs in prepared_text.
     auto& font = Platform::FontPlugin::the().default_font();
 
@@ -410,7 +416,7 @@ CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(De
     for (auto c : text) {
         builder.append(Infra::is_ascii_whitespace(c) ? ' ' : c);
     }
-    DeprecatedString replaced_text = builder.build();
+    auto replaced_text = builder.to_deprecated_string();
 
     // 3. Let font be the current font of target, as given by that object's font attribute.
     // FIXME: Once we have CanvasTextDrawingStyles, implement font selection.
@@ -439,9 +445,10 @@ CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(De
     auto& font = Platform::FontPlugin::the().default_font();
     size_t width = 0;
     size_t height = font.pixel_size();
-    for (auto c : Utf8View { replaced_text }) {
-        width += font.glyph_or_emoji_width(c);
-    }
+
+    Utf8View replaced_text_view { replaced_text };
+    for (auto it = replaced_text_view.begin(); it != replaced_text_view.end(); ++it)
+        width += font.glyph_or_emoji_width(it);
 
     // 6. If maxWidth was provided and the hypothetical width of the inline box in the hypothetical line box is greater than maxWidth CSS pixels, then change font to have a more condensed font (if one is available or if a reasonably readable one can be synthesized by applying a horizontal scale factor to the font) or a smaller font, and return to the previous step.
     // FIXME: Record the font size used for this piece of text, and actually retry with a smaller size if needed.
@@ -466,19 +473,43 @@ CanvasRenderingContext2D::PreparedText CanvasRenderingContext2D::prepare_text(De
     PreparedText prepared_text { {}, physical_alignment, { 0, 0, static_cast<int>(width), static_cast<int>(height) } };
     prepared_text.glyphs.ensure_capacity(replaced_text.length());
 
-    size_t offset = 0;
-    for (auto c : Utf8View { replaced_text }) {
-        prepared_text.glyphs.append({ c, { static_cast<int>(offset), 0 } });
-        offset += font.glyph_or_emoji_width(c);
-    }
+    size_t previous_grapheme_boundary = 0;
+    Unicode::for_each_grapheme_segmentation_boundary(replaced_text_view, [&](auto boundary) {
+        if (boundary == 0)
+            return IterationDecision::Continue;
+
+        auto glyph_view = replaced_text_view.substring_view(previous_grapheme_boundary, boundary - previous_grapheme_boundary);
+        auto glyph = String::from_utf8(glyph_view.as_string()).release_value_but_fixme_should_propagate_errors();
+
+        prepared_text.glyphs.append({ move(glyph), { static_cast<int>(boundary), 0 } });
+        return IterationDecision::Continue;
+    });
 
     // 9. Return result, physical alignment, and the inline box.
     return prepared_text;
 }
 
-void CanvasRenderingContext2D::clip()
+void CanvasRenderingContext2D::clip_internal(Gfx::Path& path, StringView fill_rule)
 {
-    // FIXME: Implement.
+    // FIXME: This should calculate the new clip path by intersecting the given path with the current one.
+    // See: https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-clip-dev
+    path.close_all_subpaths();
+    if (drawing_state().clip.has_value()) {
+        dbgln("FIXME: CRC2D: Calculate the new clip path by intersecting the given path with the current one.");
+    }
+    drawing_state().clip = CanvasClip { path, parse_fill_rule(fill_rule) };
+}
+
+void CanvasRenderingContext2D::clip(DeprecatedString const& fill_rule)
+{
+    auto transformed_path = path().copy_transformed(drawing_state().transform);
+    return clip_internal(transformed_path, fill_rule);
+}
+
+void CanvasRenderingContext2D::clip(Path2D& path, DeprecatedString const& fill_rule)
+{
+    auto transformed_path = path.path().copy_transformed(drawing_state().transform);
+    return clip_internal(transformed_path, fill_rule);
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#check-the-usability-of-the-image-argument
@@ -538,6 +569,26 @@ bool image_is_not_origin_clean(CanvasImageSource const& image)
             // FIXME: image's bitmap's origin-clean flag is false.
             return false;
         });
+}
+
+bool CanvasRenderingContext2D::image_smoothing_enabled() const
+{
+    return drawing_state().image_smoothing_enabled;
+}
+
+void CanvasRenderingContext2D::set_image_smoothing_enabled(bool enabled)
+{
+    drawing_state().image_smoothing_enabled = enabled;
+}
+
+Bindings::ImageSmoothingQuality CanvasRenderingContext2D::image_smoothing_quality() const
+{
+    return drawing_state().image_smoothing_quality;
+}
+
+void CanvasRenderingContext2D::set_image_smoothing_quality(Bindings::ImageSmoothingQuality quality)
+{
+    drawing_state().image_smoothing_quality = quality;
 }
 
 }

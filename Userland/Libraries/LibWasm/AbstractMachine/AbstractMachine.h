@@ -13,6 +13,9 @@
 #include <AK/Result.h>
 #include <LibWasm/Types.h>
 
+// NOTE: Special case for Wasm::Result.
+#include <LibJS/Runtime/Completion.h>
+
 namespace Wasm {
 
 class Configuration;
@@ -171,6 +174,35 @@ struct Trap {
     DeprecatedString reason;
 };
 
+// A variant of Result that does not include external reasons for error (JS::Completion, for now).
+class PureResult {
+public:
+    explicit PureResult(Vector<Value> values)
+        : m_result(move(values))
+    {
+    }
+
+    PureResult(Trap trap)
+        : m_result(move(trap))
+    {
+    }
+
+    auto is_trap() const { return m_result.has<Trap>(); }
+    auto& values() const { return m_result.get<Vector<Value>>(); }
+    auto& values() { return m_result.get<Vector<Value>>(); }
+    auto& trap() const { return m_result.get<Trap>(); }
+    auto& trap() { return m_result.get<Trap>(); }
+
+private:
+    friend class Result;
+    explicit PureResult(Variant<Vector<Value>, Trap>&& result)
+        : m_result(move(result))
+    {
+    }
+
+    Variant<Vector<Value>, Trap> m_result;
+};
+
 class Result {
 public:
     explicit Result(Vector<Value> values)
@@ -183,14 +215,34 @@ public:
     {
     }
 
+    Result(JS::Completion completion)
+        : m_result(move(completion))
+    {
+        VERIFY(m_result.get<JS::Completion>().is_abrupt());
+    }
+
+    Result(PureResult&& result)
+        : m_result(result.m_result.downcast<decltype(m_result)>())
+    {
+    }
+
     auto is_trap() const { return m_result.has<Trap>(); }
+    auto is_completion() const { return m_result.has<JS::Completion>(); }
     auto& values() const { return m_result.get<Vector<Value>>(); }
     auto& values() { return m_result.get<Vector<Value>>(); }
     auto& trap() const { return m_result.get<Trap>(); }
     auto& trap() { return m_result.get<Trap>(); }
+    auto& completion() { return m_result.get<JS::Completion>(); }
+    auto& completion() const { return m_result.get<JS::Completion>(); }
+
+    PureResult assert_wasm_result() &&
+    {
+        VERIFY(!is_completion());
+        return PureResult(move(m_result).downcast<Vector<Value>, Trap>());
+    }
 
 private:
-    Variant<Vector<Value>, Trap> m_result;
+    Variant<Vector<Value>, Trap, JS::Completion> m_result;
 };
 
 using ExternValue = Variant<FunctionAddress, TableAddress, MemoryAddress, GlobalAddress>;
@@ -346,7 +398,12 @@ public:
     auto& data() const { return m_data; }
     auto& data() { return m_data; }
 
-    bool grow(size_t size_to_grow)
+    enum class InhibitGrowCallback {
+        No,
+        Yes,
+    };
+
+    bool grow(size_t size_to_grow, InhibitGrowCallback inhibit_callback = InhibitGrowCallback::No)
     {
         if (size_to_grow == 0)
             return true;
@@ -364,8 +421,16 @@ public:
         m_size = new_size;
         // The spec requires that we zero out everything on grow
         __builtin_memset(m_data.offset_pointer(previous_size), 0, size_to_grow);
+
+        // NOTE: This exists because wasm-js-api wants to execute code after a successful grow,
+        //       See [this issue](https://github.com/WebAssembly/spec/issues/1635) for more details.
+        if (inhibit_callback == InhibitGrowCallback::No && successful_grow_hook)
+            successful_grow_hook();
+
         return true;
     }
+
+    Function<void()> successful_grow_hook;
 
 private:
     explicit MemoryInstance(MemoryType const& type)

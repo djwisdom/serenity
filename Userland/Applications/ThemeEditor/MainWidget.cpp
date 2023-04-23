@@ -15,6 +15,7 @@
 #include <Applications/ThemeEditor/MetricPropertyGML.h>
 #include <Applications/ThemeEditor/PathPropertyGML.h>
 #include <Applications/ThemeEditor/ThemeEditorGML.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/ActionGroup.h>
 #include <LibGUI/BoxLayout.h>
@@ -35,7 +36,7 @@
 namespace ThemeEditor {
 
 static const PropertyTab window_tab {
-    "Windows",
+    "Windows"sv,
     {
         { "General",
             { { Gfx::FlagRole::IsDark },
@@ -91,7 +92,7 @@ static const PropertyTab window_tab {
 };
 
 static const PropertyTab widgets_tab {
-    "Widgets",
+    "Widgets"sv,
     {
         { "General",
             { { Gfx::ColorRole::Accent },
@@ -166,7 +167,7 @@ static const PropertyTab widgets_tab {
 };
 
 static const PropertyTab syntax_highlighting_tab {
-    "Syntax Highlighting",
+    "Syntax Highlighting"sv,
     {
         { "General",
             { { Gfx::ColorRole::SyntaxComment },
@@ -189,58 +190,94 @@ static const PropertyTab syntax_highlighting_tab {
     }
 };
 
-MainWidget::MainWidget()
-    : m_current_palette(GUI::Application::the()->palette())
+static const PropertyTab color_scheme_tab {
+    "Color Scheme"sv,
+    {
+        { "General",
+            { { Gfx::FlagRole::BoldTextAsBright },
+                { Gfx::ColorRole::Black },
+                { Gfx::ColorRole::Red },
+                { Gfx::ColorRole::Green },
+                { Gfx::ColorRole::Yellow },
+                { Gfx::ColorRole::Blue },
+                { Gfx::ColorRole::Magenta },
+                { Gfx::ColorRole::ColorSchemeBackground },
+                { Gfx::ColorRole::ColorSchemeForeground },
+                { Gfx::ColorRole::Cyan },
+                { Gfx::ColorRole::White },
+                { Gfx::ColorRole::BrightBlack },
+                { Gfx::ColorRole::BrightRed },
+                { Gfx::ColorRole::BrightGreen },
+                { Gfx::ColorRole::BrightYellow },
+                { Gfx::ColorRole::BrightBlue },
+                { Gfx::ColorRole::BrightMagenta },
+                { Gfx::ColorRole::BrightCyan },
+                { Gfx::ColorRole::BrightWhite } } },
+    }
+};
+
+ErrorOr<NonnullRefPtr<MainWidget>> MainWidget::try_create()
 {
-    load_from_gml(theme_editor_gml);
+    auto alignment_model = TRY(AlignmentModel::try_create());
 
-    m_alignment_model = MUST(AlignmentModel::try_create());
+    auto main_widget = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) MainWidget(move(alignment_model))));
 
-    m_preview_widget = find_descendant_of_type_named<ThemeEditor::PreviewWidget>("preview_widget");
-    m_property_tabs = find_descendant_of_type_named<GUI::TabWidget>("property_tabs");
-    add_property_tab(window_tab);
-    add_property_tab(widgets_tab);
-    add_property_tab(syntax_highlighting_tab);
+    TRY(main_widget->load_from_gml(theme_editor_gml));
+    main_widget->m_preview_widget = main_widget->find_descendant_of_type_named<ThemeEditor::PreviewWidget>("preview_widget");
+    main_widget->m_property_tabs = main_widget->find_descendant_of_type_named<GUI::TabWidget>("property_tabs");
 
-    build_override_controls();
+    TRY(main_widget->add_property_tab(window_tab));
+    TRY(main_widget->add_property_tab(widgets_tab));
+    TRY(main_widget->add_property_tab(syntax_highlighting_tab));
+    TRY(main_widget->add_property_tab(color_scheme_tab));
+
+    main_widget->build_override_controls();
+
+    return main_widget;
+}
+
+MainWidget::MainWidget(NonnullRefPtr<AlignmentModel> alignment_model)
+    : m_current_palette(GUI::Application::the()->palette())
+    , m_alignment_model(move(alignment_model))
+{
 }
 
 ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
 {
-    auto file_menu = TRY(window.try_add_menu("&File"));
+    auto file_menu = TRY(window.try_add_menu("&File"_short_string));
     TRY(file_menu->try_add_action(GUI::CommonActions::make_open_action([&](auto&) {
         if (request_close() == GUI::Window::CloseRequestDecision::StayOpen)
             return;
-        auto response = FileSystemAccessClient::Client::the().try_open_file(&window, "Select theme file", "/res/themes"sv);
+        auto response = FileSystemAccessClient::Client::the().open_file(&window, "Select theme file", "/res/themes"sv);
         if (response.is_error())
             return;
-        auto load_from_file_result = load_from_file(*response.value());
+        auto load_from_file_result = load_from_file(response.value().filename(), response.value().release_stream());
         if (load_from_file_result.is_error()) {
-            GUI::MessageBox::show_error(&window, DeprecatedString::formatted("Can't open file named {}: {}", response.value()->filename(), load_from_file_result.error()));
+            GUI::MessageBox::show_error(&window, DeprecatedString::formatted("Can't open file named {}: {}", response.value().filename(), load_from_file_result.error()));
             return;
         }
     })));
 
     m_save_action = GUI::CommonActions::make_save_action([&](auto&) {
         if (m_path.has_value()) {
-            auto result = FileSystemAccessClient::Client::the().try_request_file(&window, *m_path, Core::OpenMode::ReadWrite | Core::OpenMode::Truncate);
+            auto result = FileSystemAccessClient::Client::the().request_file(&window, *m_path, Core::File::OpenMode::ReadWrite | Core::File::OpenMode::Truncate);
             if (result.is_error())
                 return;
-            save_to_file(result.value());
+            save_to_file(result.value().filename(), result.value().release_stream());
         } else {
-            auto result = FileSystemAccessClient::Client::the().try_save_file_deprecated(&window, "Theme", "ini", Core::OpenMode::ReadWrite | Core::OpenMode::Truncate);
+            auto result = FileSystemAccessClient::Client::the().save_file(&window, "Theme", "ini", Core::File::OpenMode::ReadWrite | Core::File::OpenMode::Truncate);
             if (result.is_error())
                 return;
-            save_to_file(result.value());
+            save_to_file(result.value().filename(), result.value().release_stream());
         }
     });
     TRY(file_menu->try_add_action(*m_save_action));
 
     TRY(file_menu->try_add_action(GUI::CommonActions::make_save_as_action([&](auto&) {
-        auto result = FileSystemAccessClient::Client::the().try_save_file_deprecated(&window, "Theme", "ini", Core::OpenMode::ReadWrite | Core::OpenMode::Truncate);
+        auto result = FileSystemAccessClient::Client::the().save_file(&window, "Theme", "ini", Core::File::OpenMode::ReadWrite | Core::File::OpenMode::Truncate);
         if (result.is_error())
             return;
-        save_to_file(result.value());
+        save_to_file(result.value().filename(), result.value().release_stream());
     })));
 
     TRY(file_menu->try_add_separator());
@@ -251,7 +288,7 @@ ErrorOr<void> MainWidget::initialize_menubar(GUI::Window& window)
 
     TRY(window.try_add_menu(TRY(GUI::CommonMenus::make_accessibility_menu(*m_preview_widget))));
 
-    auto help_menu = TRY(window.try_add_menu("&Help"));
+    auto help_menu = TRY(window.try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(&window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_about_action("Theme Editor", GUI::Icon::default_icon("app-theme-editor"sv), &window)));
 
@@ -288,9 +325,9 @@ void MainWidget::set_path(DeprecatedString path)
     update_title();
 }
 
-void MainWidget::save_to_file(Core::File& file)
+void MainWidget::save_to_file(String const& filename, NonnullOwnPtr<Core::File> file)
 {
-    auto theme = Core::ConfigFile::open(file.filename(), file.leak_fd()).release_value_but_fixme_should_propagate_errors();
+    auto theme = Core::ConfigFile::open(filename.to_deprecated_string(), move(file)).release_value_but_fixme_should_propagate_errors();
 
 #define __ENUMERATE_ALIGNMENT_ROLE(role) theme->write_entry("Alignments", to_string(Gfx::AlignmentRole::role), to_string(m_current_palette.alignment(Gfx::AlignmentRole::role)));
     ENUMERATE_ALIGNMENT_ROLES(__ENUMERATE_ALIGNMENT_ROLE)
@@ -317,7 +354,7 @@ void MainWidget::save_to_file(Core::File& file)
         GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Failed to save theme file: {}", sync_result.error()));
     } else {
         m_last_modified_time = Time::now_monotonic();
-        set_path(file.filename());
+        set_path(filename.to_deprecated_string());
         window()->set_modified(false);
     }
 }
@@ -386,6 +423,8 @@ void MainWidget::build_override_controls()
         auto encoded = encode();
         if (encoded.is_error())
             return;
+        // Empty the color scheme path to signal that it exists only in memory.
+        m_current_palette.path(Gfx::PathRole::ColorScheme) = "";
         GUI::ConnectionToWindowServer::the().async_set_system_theme_override(encoded.value());
     };
 
@@ -400,31 +439,27 @@ void MainWidget::build_override_controls()
     };
 }
 
-void MainWidget::add_property_tab(PropertyTab const& property_tab)
+ErrorOr<void> MainWidget::add_property_tab(PropertyTab const& property_tab)
 {
-    auto& scrollable_container = m_property_tabs->add_tab<GUI::ScrollableContainerWidget>(property_tab.title);
-    scrollable_container.set_should_hide_unnecessary_scrollbars(true);
+    auto scrollable_container = TRY(m_property_tabs->try_add_tab<GUI::ScrollableContainerWidget>(TRY(String::from_utf8(property_tab.title))));
+    scrollable_container->set_should_hide_unnecessary_scrollbars(true);
 
-    auto properties_list = GUI::Widget::construct();
-    scrollable_container.set_widget(properties_list);
-    properties_list->set_layout<GUI::VerticalBoxLayout>();
-    properties_list->layout()->set_spacing(12);
-    properties_list->layout()->set_margins({ 8 });
+    auto properties_list = TRY(GUI::Widget::try_create());
+    scrollable_container->set_widget(properties_list);
+    TRY(properties_list->try_set_layout<GUI::VerticalBoxLayout>(GUI::Margins { 8 }, 12));
 
     for (auto const& group : property_tab.property_groups) {
-        NonnullRefPtr<GUI::GroupBox> group_box = properties_list->add<GUI::GroupBox>(group.title);
-        group_box->set_layout<GUI::VerticalBoxLayout>();
-        group_box->layout()->set_spacing(12);
+        NonnullRefPtr<GUI::GroupBox> group_box = TRY(properties_list->try_add<GUI::GroupBox>(group.title));
         // 1px less on the left makes the text line up with the group title.
-        group_box->layout()->set_margins({ 8, 8, 8, 7 });
+        TRY(group_box->try_set_layout<GUI::VerticalBoxLayout>(GUI::Margins { 8, 8, 8, 7 }, 12));
         group_box->set_preferred_height(GUI::SpecialDimension::Fit);
 
         for (auto const& property : group.properties) {
-            NonnullRefPtr<GUI::Widget> row_widget = group_box->add<GUI::Widget>();
+            NonnullRefPtr<GUI::Widget> row_widget = TRY(group_box->try_add<GUI::Widget>());
             row_widget->set_fixed_height(22);
-            property.role.visit(
-                [&](Gfx::AlignmentRole role) {
-                    row_widget->load_from_gml(alignment_property_gml);
+            TRY(property.role.visit(
+                [&](Gfx::AlignmentRole role) -> ErrorOr<void> {
+                    TRY(row_widget->load_from_gml(alignment_property_gml));
 
                     auto& name_label = *row_widget->find_descendant_of_type_named<GUI::Label>("name");
                     name_label.set_text(to_string(role));
@@ -438,9 +473,10 @@ void MainWidget::add_property_tab(PropertyTab const& property_tab)
 
                     VERIFY(m_alignment_inputs[to_underlying(role)].is_null());
                     m_alignment_inputs[to_underlying(role)] = alignment_picker;
+                    return {};
                 },
-                [&](Gfx::ColorRole role) {
-                    row_widget->load_from_gml(color_property_gml);
+                [&](Gfx::ColorRole role) -> ErrorOr<void> {
+                    TRY(row_widget->load_from_gml(color_property_gml));
 
                     auto& name_label = *row_widget->find_descendant_of_type_named<GUI::Label>("name");
                     name_label.set_text(to_string(role));
@@ -453,12 +489,13 @@ void MainWidget::add_property_tab(PropertyTab const& property_tab)
 
                     VERIFY(m_color_inputs[to_underlying(role)].is_null());
                     m_color_inputs[to_underlying(role)] = color_input;
+                    return {};
                 },
-                [&](Gfx::FlagRole role) {
-                    row_widget->load_from_gml(flag_property_gml);
+                [&](Gfx::FlagRole role) -> ErrorOr<void> {
+                    TRY(row_widget->load_from_gml(flag_property_gml));
 
                     auto& checkbox = *row_widget->find_descendant_of_type_named<GUI::CheckBox>("checkbox");
-                    checkbox.set_text(to_string(role));
+                    checkbox.set_text(String::from_deprecated_string(DeprecatedString(to_string(role))).release_value_but_fixme_should_propagate_errors());
                     checkbox.on_checked = [&, role](bool checked) {
                         set_flag(role, checked);
                     };
@@ -466,9 +503,10 @@ void MainWidget::add_property_tab(PropertyTab const& property_tab)
 
                     VERIFY(m_flag_inputs[to_underlying(role)].is_null());
                     m_flag_inputs[to_underlying(role)] = checkbox;
+                    return {};
                 },
-                [&](Gfx::MetricRole role) {
-                    row_widget->load_from_gml(metric_property_gml);
+                [&](Gfx::MetricRole role) -> ErrorOr<void> {
+                    TRY(row_widget->load_from_gml(metric_property_gml));
 
                     auto& name_label = *row_widget->find_descendant_of_type_named<GUI::Label>("name");
                     name_label.set_text(to_string(role));
@@ -481,9 +519,10 @@ void MainWidget::add_property_tab(PropertyTab const& property_tab)
 
                     VERIFY(m_metric_inputs[to_underlying(role)].is_null());
                     m_metric_inputs[to_underlying(role)] = spin_box;
+                    return {};
                 },
-                [&](Gfx::PathRole role) {
-                    row_widget->load_from_gml(path_property_gml);
+                [&](Gfx::PathRole role) -> ErrorOr<void> {
+                    TRY(row_widget->load_from_gml(path_property_gml));
 
                     auto& name_label = *row_widget->find_descendant_of_type_named<GUI::Label>("name");
                     name_label.set_text(to_string(role));
@@ -502,9 +541,12 @@ void MainWidget::add_property_tab(PropertyTab const& property_tab)
 
                     VERIFY(m_path_inputs[to_underlying(role)].is_null());
                     m_path_inputs[to_underlying(role)] = path_input;
-                });
+                    return {};
+                }));
         }
     }
+
+    return {};
 }
 
 void MainWidget::set_alignment(Gfx::AlignmentRole role, Gfx::TextAlignment value)
@@ -555,8 +597,8 @@ void MainWidget::show_path_picker_dialog(StringView property_display_name, GUI::
     bool open_folder = path_picker_target == PathPickerTarget::Folder;
     auto window_title = DeprecatedString::formatted(open_folder ? "Select {} folder"sv : "Select {} file"sv, property_display_name);
     auto target_path = path_input.text();
-    if (Core::File::exists(target_path)) {
-        if (!Core::File::is_directory(target_path))
+    if (FileSystem::exists(target_path)) {
+        if (!FileSystem::is_directory(target_path))
             target_path = LexicalPath::dirname(target_path);
     } else {
         target_path = "/res/icons";
@@ -567,15 +609,15 @@ void MainWidget::show_path_picker_dialog(StringView property_display_name, GUI::
     path_input.set_text(*result);
 }
 
-ErrorOr<void> MainWidget::load_from_file(Core::File& file)
+ErrorOr<void> MainWidget::load_from_file(String const& filename, NonnullOwnPtr<Core::File> file)
 {
-    auto config_file = TRY(Core::ConfigFile::open(file.filename(), file.leak_fd()));
+    auto config_file = TRY(Core::ConfigFile::open(filename.to_deprecated_string(), move(file)));
     auto theme = TRY(Gfx::load_system_theme(config_file));
     VERIFY(theme.is_valid());
 
     auto new_palette = Gfx::Palette(Gfx::PaletteImpl::create_with_anonymous_buffer(theme));
     set_palette(move(new_palette));
-    set_path(file.filename());
+    set_path(filename.to_deprecated_string());
 
 #define __ENUMERATE_ALIGNMENT_ROLE(role)                                                    \
     if (auto alignment_input = m_alignment_inputs[to_underlying(Gfx::AlignmentRole::role)]) \
@@ -610,6 +652,39 @@ ErrorOr<void> MainWidget::load_from_file(Core::File& file)
     m_last_modified_time = Time::now_monotonic();
     window()->set_modified(false);
     return {};
+}
+
+void MainWidget::drag_enter_event(GUI::DragEvent& event)
+{
+    auto const& mime_types = event.mime_types();
+    if (mime_types.contains_slow("text/uri-list"))
+        event.accept();
+}
+
+void MainWidget::drop_event(GUI::DropEvent& event)
+{
+    event.accept();
+    window()->move_to_front();
+
+    if (event.mime_data().has_urls()) {
+        auto urls = event.mime_data().urls();
+        if (urls.is_empty())
+            return;
+        if (urls.size() > 1) {
+            GUI::MessageBox::show(window(), "ThemeEditor can only open one file at a time!"sv, "One at a time please!"sv, GUI::MessageBox::Type::Error);
+            return;
+        }
+        if (request_close() == GUI::Window::CloseRequestDecision::StayOpen)
+            return;
+
+        auto response = FileSystemAccessClient::Client::the().request_file(window(), urls.first().serialize_path(), Core::File::OpenMode::Read);
+        if (response.is_error())
+            return;
+
+        auto load_from_file_result = load_from_file(response.value().filename(), response.value().release_stream());
+        if (load_from_file_result.is_error())
+            GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Can't open file named {}: {}", response.value().filename(), load_from_file_result.error()));
+    }
 }
 
 }

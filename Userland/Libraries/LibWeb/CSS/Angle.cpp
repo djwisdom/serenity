@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include "Angle.h"
 #include <AK/Math.h>
-#include <LibWeb/CSS/StyleValue.h>
+#include <LibWeb/CSS/Percentage.h>
 
 namespace Web::CSS {
 
@@ -22,13 +22,6 @@ Angle::Angle(float value, Type type)
 {
 }
 
-Angle Angle::make_calculated(NonnullRefPtr<CalculatedStyleValue> calculated_style_value)
-{
-    Angle angle { 0, Type::Calculated };
-    angle.m_calculated_style = move(calculated_style_value);
-    return angle;
-}
-
 Angle Angle::make_degrees(float value)
 {
     return { value, Type::Deg };
@@ -36,23 +29,17 @@ Angle Angle::make_degrees(float value)
 
 Angle Angle::percentage_of(Percentage const& percentage) const
 {
-    VERIFY(!is_calculated());
-
     return Angle { percentage.as_fraction() * m_value, m_type };
 }
 
-DeprecatedString Angle::to_deprecated_string() const
+ErrorOr<String> Angle::to_string() const
 {
-    if (is_calculated())
-        return m_calculated_style->to_deprecated_string();
-    return DeprecatedString::formatted("{}{}", m_value, unit_name());
+    return String::formatted("{}{}", m_value, unit_name());
 }
 
 float Angle::to_degrees() const
 {
     switch (m_type) {
-    case Type::Calculated:
-        return m_calculated_style->resolve_angle()->to_degrees();
     case Type::Deg:
         return m_value;
     case Type::Grad:
@@ -68,8 +55,6 @@ float Angle::to_degrees() const
 StringView Angle::unit_name() const
 {
     switch (m_type) {
-    case Type::Calculated:
-        return "calculated"sv;
     case Type::Deg:
         return "deg"sv;
     case Type::Grad:
@@ -84,22 +69,19 @@ StringView Angle::unit_name() const
 
 Optional<Angle::Type> Angle::unit_from_name(StringView name)
 {
-    if (name.equals_ignoring_case("deg"sv)) {
+    if (name.equals_ignoring_ascii_case("deg"sv)) {
         return Type::Deg;
-    } else if (name.equals_ignoring_case("grad"sv)) {
+    }
+    if (name.equals_ignoring_ascii_case("grad"sv)) {
         return Type::Grad;
-    } else if (name.equals_ignoring_case("rad"sv)) {
+    }
+    if (name.equals_ignoring_ascii_case("rad"sv)) {
         return Type::Rad;
-    } else if (name.equals_ignoring_case("turn"sv)) {
+    }
+    if (name.equals_ignoring_ascii_case("turn"sv)) {
         return Type::Turn;
     }
     return {};
-}
-
-NonnullRefPtr<CalculatedStyleValue> Angle::calculated_style_value() const
-{
-    VERIFY(!m_calculated_style.is_null());
-    return *m_calculated_style;
 }
 
 }

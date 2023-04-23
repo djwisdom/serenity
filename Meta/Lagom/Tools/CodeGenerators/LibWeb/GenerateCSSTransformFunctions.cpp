@@ -11,8 +11,8 @@
 #include <LibCore/ArgsParser.h>
 #include <LibMain/Main.h>
 
-ErrorOr<void> generate_header_file(JsonObject& transforms_data, Core::Stream::File& file);
-ErrorOr<void> generate_implementation_file(JsonObject& transforms_data, Core::Stream::File& file);
+ErrorOr<void> generate_header_file(JsonObject& transforms_data, Core::File& file);
+ErrorOr<void> generate_implementation_file(JsonObject& transforms_data, Core::File& file);
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
@@ -30,8 +30,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     VERIFY(json.is_object());
     auto transforms_data = json.as_object();
 
-    auto generated_header_file = TRY(Core::Stream::File::open(generated_header_path, Core::Stream::OpenMode::Write));
-    auto generated_implementation_file = TRY(Core::Stream::File::open(generated_implementation_path, Core::Stream::OpenMode::Write));
+    auto generated_header_file = TRY(Core::File::open(generated_header_path, Core::File::OpenMode::Write));
+    auto generated_implementation_file = TRY(Core::File::open(generated_implementation_path, Core::File::OpenMode::Write));
 
     TRY(generate_header_file(transforms_data, *generated_header_file));
     TRY(generate_implementation_file(transforms_data, *generated_implementation_file));
@@ -48,7 +48,7 @@ static DeprecatedString title_casify_transform_function(StringView input)
     return builder.to_deprecated_string();
 }
 
-ErrorOr<void> generate_header_file(JsonObject& transforms_data, Core::Stream::File& file)
+ErrorOr<void> generate_header_file(JsonObject& transforms_data, Core::File& file)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -96,11 +96,11 @@ TransformFunctionMetadata transform_function_metadata(TransformFunction);
 
     generator.appendln("\n}");
 
-    TRY(file.write(generator.as_string_view().bytes()));
+    TRY(file.write_until_depleted(generator.as_string_view().bytes()));
     return {};
 }
 
-ErrorOr<void> generate_implementation_file(JsonObject& transforms_data, Core::Stream::File& file)
+ErrorOr<void> generate_implementation_file(JsonObject& transforms_data, Core::File& file)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -121,7 +121,7 @@ Optional<TransformFunction> transform_function_from_string(StringView name)
         member_generator.set("name", name);
         member_generator.set("name:titlecase", title_casify_transform_function(name));
         member_generator.append(R"~~~(
-    if (name.equals_ignoring_case("@name@"sv))
+    if (name.equals_ignoring_ascii_case("@name@"sv))
         return TransformFunction::@name:titlecase@;
 )~~~");
     });
@@ -166,10 +166,10 @@ TransformFunctionMetadata transform_function_metadata(TransformFunction transfor
         return TransformFunctionMetadata {
             .parameters = {)~~~");
 
-        const JsonArray& parameters = value.as_object().get("parameters"sv).as_array();
+        JsonArray const& parameters = value.as_object().get_array("parameters"sv).value();
         bool first = true;
         parameters.for_each([&](JsonValue const& value) {
-            GenericLexer lexer { value.as_object().get("type"sv).as_string() };
+            GenericLexer lexer { value.as_object().get_deprecated_string("type"sv).value() };
             VERIFY(lexer.consume_specific('<'));
             auto parameter_type_name = lexer.consume_until('>');
             VERIFY(lexer.consume_specific('>'));
@@ -189,7 +189,7 @@ TransformFunctionMetadata transform_function_metadata(TransformFunction transfor
             member_generator.append(first ? " "sv : ", "sv);
             first = false;
 
-            member_generator.append(DeprecatedString::formatted("{{ TransformFunctionParameterType::{}, {}}}", parameter_type, value.as_object().get("required"sv).to_deprecated_string()));
+            member_generator.append(DeprecatedString::formatted("{{ TransformFunctionParameterType::{}, {}}}", parameter_type, value.as_object().get("required"sv)->to_deprecated_string()));
         });
 
         member_generator.append(R"~~~( }
@@ -205,6 +205,6 @@ TransformFunctionMetadata transform_function_metadata(TransformFunction transfor
 
     generator.appendln("\n}");
 
-    TRY(file.write(generator.as_string_view().bytes()));
+    TRY(file.write_until_depleted(generator.as_string_view().bytes()));
     return {};
 }

@@ -1,9 +1,10 @@
 /*
- * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Fetch/Headers.h>
@@ -16,7 +17,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<Headers>> Headers::construct_impl(JS::Realm
     auto& vm = realm.vm();
 
     // The new Headers(init) constructor steps are:
-    auto headers = realm.heap().allocate<Headers>(realm, realm, Infrastructure::HeaderList::create(vm));
+    auto headers = MUST_OR_THROW_OOM(realm.heap().allocate<Headers>(realm, realm, Infrastructure::HeaderList::create(vm)));
 
     // 1. Set this’s guard to "none".
     headers->m_guard = Guard::None;
@@ -32,10 +33,17 @@ Headers::Headers(JS::Realm& realm, JS::NonnullGCPtr<Infrastructure::HeaderList> 
     : PlatformObject(realm)
     , m_header_list(header_list)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "Headers"));
 }
 
 Headers::~Headers() = default;
+
+JS::ThrowCompletionOr<void> Headers::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HeadersPrototype>(realm, "Headers"));
+
+    return {};
+}
 
 void Headers::visit_edges(JS::Cell::Visitor& visitor)
 {
@@ -44,27 +52,29 @@ void Headers::visit_edges(JS::Cell::Visitor& visitor)
 }
 
 // https://fetch.spec.whatwg.org/#dom-headers-append
-WebIDL::ExceptionOr<void> Headers::append(DeprecatedString const& name_string, DeprecatedString const& value_string)
+WebIDL::ExceptionOr<void> Headers::append(String const& name_string, String const& value_string)
 {
+    auto& vm = this->vm();
+
     // The append(name, value) method steps are to append (name, value) to this.
     auto header = Infrastructure::Header {
-        .name = TRY_OR_RETURN_OOM(realm(), ByteBuffer::copy(name_string.bytes())),
-        .value = TRY_OR_RETURN_OOM(realm(), ByteBuffer::copy(value_string.bytes())),
+        .name = TRY_OR_THROW_OOM(vm, ByteBuffer::copy(name_string.bytes())),
+        .value = TRY_OR_THROW_OOM(vm, ByteBuffer::copy(value_string.bytes())),
     };
     TRY(append(move(header)));
     return {};
 }
 
 // https://fetch.spec.whatwg.org/#dom-headers-delete
-WebIDL::ExceptionOr<void> Headers::delete_(DeprecatedString const& name_string)
+WebIDL::ExceptionOr<void> Headers::delete_(String const& name_string)
 {
     // The delete(name) method steps are:
-    auto& realm = this->realm();
+    auto& vm = this->vm();
     auto name = name_string.bytes();
 
     // 1. If validating (name, ``) for headers returns false, then return.
     // NOTE: Passing a dummy header value ought not to have any negative repercussions.
-    auto header = TRY_OR_RETURN_OOM(realm, Infrastructure::Header::from_string_pair(name, ""sv));
+    auto header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair(name, ""sv));
     if (!TRY(validate(header)))
         return {};
 
@@ -87,9 +97,10 @@ WebIDL::ExceptionOr<void> Headers::delete_(DeprecatedString const& name_string)
 }
 
 // https://fetch.spec.whatwg.org/#dom-headers-get
-WebIDL::ExceptionOr<DeprecatedString> Headers::get(DeprecatedString const& name_string)
+WebIDL::ExceptionOr<Optional<String>> Headers::get(String const& name_string)
 {
     // The get(name) method steps are:
+    auto& vm = this->vm();
     auto name = name_string.bytes();
 
     // 1. If name is not a header name, then throw a TypeError.
@@ -97,13 +108,32 @@ WebIDL::ExceptionOr<DeprecatedString> Headers::get(DeprecatedString const& name_
         return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid header name"sv };
 
     // 2. Return the result of getting name from this’s header list.
-    auto byte_buffer = TRY_OR_RETURN_OOM(realm(), m_header_list->get(name));
-    // FIXME: Teach BindingsGenerator about Optional<DeprecatedString>
-    return byte_buffer.has_value() ? DeprecatedString { byte_buffer->span() } : DeprecatedString {};
+    auto byte_buffer = TRY_OR_THROW_OOM(vm, m_header_list->get(name));
+    return byte_buffer.has_value() ? TRY_OR_THROW_OOM(vm, String::from_utf8(*byte_buffer)) : Optional<String> {};
+}
+
+// https://fetch.spec.whatwg.org/#dom-headers-getsetcookie
+WebIDL::ExceptionOr<Vector<String>> Headers::get_set_cookie()
+{
+    // The getSetCookie() method steps are:
+    auto& vm = this->vm();
+    auto values = Vector<String> {};
+
+    // 1. If this’s header list does not contain `Set-Cookie`, then return « ».
+    if (!m_header_list->contains("Set-Cookie"sv.bytes()))
+        return values;
+
+    // 2. Return the values of all headers in this’s header list whose name is a byte-case-insensitive match for
+    //    `Set-Cookie`, in order.
+    for (auto const& header : *m_header_list) {
+        if (StringView { header.name }.equals_ignoring_ascii_case("Set-Cookie"sv))
+            TRY_OR_THROW_OOM(vm, values.try_append(TRY_OR_THROW_OOM(vm, String::from_utf8(header.value))));
+    }
+    return values;
 }
 
 // https://fetch.spec.whatwg.org/#dom-headers-has
-WebIDL::ExceptionOr<bool> Headers::has(DeprecatedString const& name_string)
+WebIDL::ExceptionOr<bool> Headers::has(String const& name_string)
 {
     // The has(name) method steps are:
     auto name = name_string.bytes();
@@ -117,18 +147,20 @@ WebIDL::ExceptionOr<bool> Headers::has(DeprecatedString const& name_string)
 }
 
 // https://fetch.spec.whatwg.org/#dom-headers-set
-WebIDL::ExceptionOr<void> Headers::set(DeprecatedString const& name_string, DeprecatedString const& value_string)
+WebIDL::ExceptionOr<void> Headers::set(String const& name_string, String const& value_string)
 {
-    // The set(name, value) method steps are:
     auto& realm = this->realm();
+    auto& vm = realm.vm();
+
+    // The set(name, value) method steps are:
     auto name = name_string.bytes();
     auto value = value_string.bytes();
 
     // 1. Normalize value.
-    auto normalized_value = TRY_OR_RETURN_OOM(realm, Infrastructure::normalize_header_value(value));
+    auto normalized_value = TRY_OR_THROW_OOM(vm, Infrastructure::normalize_header_value(value));
 
     auto header = Infrastructure::Header {
-        .name = TRY_OR_RETURN_OOM(realm, ByteBuffer::copy(name)),
+        .name = TRY_OR_THROW_OOM(vm, ByteBuffer::copy(name)),
         .value = move(normalized_value),
     };
 
@@ -141,7 +173,7 @@ WebIDL::ExceptionOr<void> Headers::set(DeprecatedString const& name_string, Depr
         return {};
 
     // 4. Set (name, value) in this’s header list.
-    TRY_OR_RETURN_OOM(realm, m_header_list->set(move(header)));
+    TRY_OR_THROW_OOM(vm, m_header_list->set(move(header)));
 
     // 5. If this’s guard is "request-no-cors", then remove privileged no-CORS request-headers from this.
     if (m_guard == Guard::RequestNoCORS)
@@ -153,12 +185,11 @@ WebIDL::ExceptionOr<void> Headers::set(DeprecatedString const& name_string, Depr
 // https://webidl.spec.whatwg.org/#es-iterable, Step 4
 JS::ThrowCompletionOr<void> Headers::for_each(ForEachCallback callback)
 {
+    auto& vm = this->vm();
+
     // The value pairs to iterate over are the return value of running sort and combine with this’s header list.
     auto value_pairs_to_iterate_over = [&]() -> JS::ThrowCompletionOr<Vector<Fetch::Infrastructure::Header>> {
-        auto headers_or_error = m_header_list->sort_and_combine();
-        if (headers_or_error.is_error())
-            return vm().throw_completion<JS::InternalError>(JS::ErrorType::NotEnoughMemoryToAllocate);
-        return headers_or_error.release_value();
+        return TRY_OR_THROW_OOM(vm, m_header_list->sort_and_combine());
     };
 
     // 1-5. Are done in the generated wrapper code.
@@ -175,7 +206,7 @@ JS::ThrowCompletionOr<void> Headers::for_each(ForEachCallback callback)
         auto const& pair = pairs[i];
 
         // 2. Invoke idlCallback with « pair’s value, pair’s key, idlObject » and with thisArg as the callback this value.
-        TRY(callback(StringView { pair.name }, StringView { pair.value }));
+        TRY(callback(TRY_OR_THROW_OOM(vm, String::from_utf8(pair.name)), TRY_OR_THROW_OOM(vm, String::from_utf8(pair.value))));
 
         // 3. Set pairs to idlObject’s current list of value pairs to iterate over. (It might have changed.)
         pairs = TRY(value_pairs_to_iterate_over());
@@ -190,8 +221,9 @@ JS::ThrowCompletionOr<void> Headers::for_each(ForEachCallback callback)
 // https://fetch.spec.whatwg.org/#headers-validate
 WebIDL::ExceptionOr<bool> Headers::validate(Infrastructure::Header const& header) const
 {
-    // To validate a header (name, value) for a Headers object headers:
     auto& realm = this->realm();
+
+    // To validate a header (name, value) for a Headers object headers:
     auto const& [name, value] = header;
 
     // 1. If name is not a header name or value is not a header value, then throw a TypeError.
@@ -205,7 +237,7 @@ WebIDL::ExceptionOr<bool> Headers::validate(Infrastructure::Header const& header
         return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Headers object is immutable"sv };
 
     // 3. If headers’s guard is "request" and (name, value) is a forbidden request-header, then return false.
-    if (m_guard == Guard::Request && TRY_OR_RETURN_OOM(realm, Infrastructure::is_forbidden_request_header(header)))
+    if (m_guard == Guard::Request && TRY_OR_THROW_OOM(realm.vm(), Infrastructure::is_forbidden_request_header(header)))
         return false;
 
     // 4. If headers’s guard is "response" and name is a forbidden response-header name, then return false.
@@ -219,12 +251,14 @@ WebIDL::ExceptionOr<bool> Headers::validate(Infrastructure::Header const& header
 // https://fetch.spec.whatwg.org/#concept-headers-append
 WebIDL::ExceptionOr<void> Headers::append(Infrastructure::Header header)
 {
-    // To append a header (name, value) to a Headers object headers, run these steps:
     auto& realm = this->realm();
+    auto& vm = realm.vm();
+
+    // To append a header (name, value) to a Headers object headers, run these steps:
     auto& [name, value] = header;
 
     // 1. Normalize value.
-    value = TRY_OR_RETURN_OOM(realm, Infrastructure::normalize_header_value(value));
+    value = TRY_OR_THROW_OOM(vm, Infrastructure::normalize_header_value(value));
 
     // 2. If validating (name, value) for headers returns false, then return.
     if (!TRY(validate(header)))
@@ -233,21 +267,21 @@ WebIDL::ExceptionOr<void> Headers::append(Infrastructure::Header header)
     // 3. If headers’s guard is "request-no-cors":
     if (m_guard == Guard::RequestNoCORS) {
         // 1. Let temporaryValue be the result of getting name from headers’s header list.
-        auto temporary_value = TRY_OR_RETURN_OOM(realm, m_header_list->get(name));
+        auto temporary_value = TRY_OR_THROW_OOM(vm, m_header_list->get(name));
 
         // 2. If temporaryValue is null, then set temporaryValue to value.
         if (!temporary_value.has_value()) {
-            temporary_value = TRY_OR_RETURN_OOM(realm, ByteBuffer::copy(value));
+            temporary_value = TRY_OR_THROW_OOM(vm, ByteBuffer::copy(value));
         }
         // 3. Otherwise, set temporaryValue to temporaryValue, followed by 0x2C 0x20, followed by value.
         else {
-            TRY_OR_RETURN_OOM(realm, temporary_value->try_append(0x2c));
-            TRY_OR_RETURN_OOM(realm, temporary_value->try_append(0x20));
-            TRY_OR_RETURN_OOM(realm, temporary_value->try_append(value));
+            TRY_OR_THROW_OOM(vm, temporary_value->try_append(0x2c));
+            TRY_OR_THROW_OOM(vm, temporary_value->try_append(0x20));
+            TRY_OR_THROW_OOM(vm, temporary_value->try_append(value));
         }
 
         auto temporary_header = Infrastructure::Header {
-            .name = TRY_OR_RETURN_OOM(realm, ByteBuffer::copy(name)),
+            .name = TRY_OR_THROW_OOM(vm, ByteBuffer::copy(name)),
             .value = temporary_value.release_value(),
         };
 
@@ -257,7 +291,7 @@ WebIDL::ExceptionOr<void> Headers::append(Infrastructure::Header header)
     }
 
     // 4. Append (name, value) to headers’s header list.
-    TRY_OR_RETURN_OOM(realm, m_header_list->append(move(header)));
+    TRY_OR_THROW_OOM(vm, m_header_list->append(move(header)));
 
     // 5. If headers’s guard is "request-no-cors", then remove privileged no-CORS request-headers from headers.
     if (m_guard == Guard::RequestNoCORS)
@@ -269,25 +303,27 @@ WebIDL::ExceptionOr<void> Headers::append(Infrastructure::Header header)
 // https://fetch.spec.whatwg.org/#concept-headers-fill
 WebIDL::ExceptionOr<void> Headers::fill(HeadersInit const& object)
 {
+    auto& vm = realm().vm();
+
     // To fill a Headers object headers with a given object object, run these steps:
     return object.visit(
         // 1. If object is a sequence, then for each header of object:
-        [this](Vector<Vector<DeprecatedString>> const& object) -> WebIDL::ExceptionOr<void> {
+        [&](Vector<Vector<String>> const& object) -> WebIDL::ExceptionOr<void> {
             for (auto const& entry : object) {
                 // 1. If header's size is not 2, then throw a TypeError.
                 if (entry.size() != 2)
                     return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Array must contain header key/value pair"sv };
 
                 // 2. Append (header[0], header[1]) to headers.
-                auto header = TRY_OR_RETURN_OOM(realm(), Infrastructure::Header::from_string_pair(entry[0], entry[1].bytes()));
+                auto header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair(entry[0], entry[1]));
                 TRY(append(move(header)));
             }
             return {};
         },
         // 2. Otherwise, object is a record, then for each key → value of object, append (key, value) to headers.
-        [this](OrderedHashMap<DeprecatedString, DeprecatedString> const& object) -> WebIDL::ExceptionOr<void> {
+        [&](OrderedHashMap<String, String> const& object) -> WebIDL::ExceptionOr<void> {
             for (auto const& entry : object) {
-                auto header = TRY_OR_RETURN_OOM(realm(), Infrastructure::Header::from_string_pair(entry.key, entry.value));
+                auto header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair(entry.key, entry.value));
                 TRY(append(move(header)));
             }
             return {};

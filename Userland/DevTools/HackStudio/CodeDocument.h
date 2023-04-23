@@ -7,11 +7,13 @@
 
 #pragma once
 
-#include "Language.h"
 #include <AK/LexicalPath.h>
 #include <LibGUI/TextDocument.h>
+#include <LibSyntax/Language.h>
 
 namespace HackStudio {
+
+class Editor;
 
 class CodeDocument final : public GUI::TextDocument {
 public:
@@ -25,20 +27,29 @@ public:
     void set_execution_position(size_t line) { m_execution_position = line; }
     void clear_execution_position() { m_execution_position.clear(); }
     DeprecatedString const& file_path() const { return m_file_path; }
-    DeprecatedString const& language_name() const { return m_language_name; };
-    Language language() const { return m_language; }
+    Optional<Syntax::Language> const& language() const { return m_language; }
 
     virtual bool is_code_document() const override final { return true; }
+
+    enum class DiffType {
+        None,
+        AddedLine,
+        ModifiedLine,
+        DeletedLinesBefore,
+    };
+    DiffType line_difference(size_t line) const;
+    void set_line_differences(Badge<Editor>, Vector<DiffType>);
 
 private:
     explicit CodeDocument(DeprecatedString const& file_path, Client* client = nullptr);
     explicit CodeDocument(Client* client = nullptr);
 
     DeprecatedString m_file_path;
-    DeprecatedString m_language_name;
-    Language m_language { Language::Unknown };
+    Optional<Syntax::Language> m_language;
     Vector<size_t> m_breakpoint_lines;
     Optional<size_t> m_execution_position;
+
+    Vector<DiffType> m_line_differences;
 };
 
 }

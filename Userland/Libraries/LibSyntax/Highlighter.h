@@ -11,29 +11,9 @@
 #include <LibGUI/TextDocument.h>
 #include <LibGfx/Palette.h>
 #include <LibSyntax/HighlighterClient.h>
+#include <LibSyntax/Language.h>
 
 namespace Syntax {
-
-enum class Language {
-    Cpp,
-    CSS,
-    GitCommit,
-    GML,
-    HTML,
-    INI,
-    JavaScript,
-    PlainText,
-    SQL,
-    Shell,
-};
-
-struct TextStyle {
-    const Gfx::Color color;
-    bool const bold { false };
-};
-
-StringView language_to_string(Language);
-StringView common_language_extension(Language);
 
 class Highlighter {
     AK_MAKE_NONCOPYABLE(Highlighter);
@@ -118,6 +98,23 @@ public:
         return spans;
     }
 
+    Vector<GUI::TextDocumentFoldingRegion> corrected_folding_regions() const
+    {
+        Vector<GUI::TextDocumentFoldingRegion> folding_regions { m_folding_regions };
+        for (auto& entry : folding_regions) {
+            entry.range.start() = {
+                entry.range.start().line() + m_start.line(),
+                entry.range.start().line() == 0 ? entry.range.start().column() + m_start.column() : entry.range.start().column(),
+            };
+            entry.range.end() = {
+                entry.range.end().line() + m_start.line(),
+                entry.range.end().line() == 0 ? entry.range.end().column() + m_start.column() : entry.range.end().column(),
+            };
+        }
+
+        return folding_regions;
+    }
+
     Vector<Syntax::Highlighter::MatchingTokenPair> corrected_token_pairs(Vector<Syntax::Highlighter::MatchingTokenPair> pairs) const
     {
         for (auto& pair : pairs) {
@@ -128,17 +125,21 @@ public:
     }
 
 private:
-    virtual Vector<GUI::TextDocumentSpan>& spans() override { return m_spans; }
     virtual Vector<GUI::TextDocumentSpan> const& spans() const override { return m_spans; }
     virtual void set_span_at_index(size_t index, GUI::TextDocumentSpan span) override { m_spans.at(index) = move(span); }
+
+    virtual Vector<GUI::TextDocumentFoldingRegion>& folding_regions() override { return m_folding_regions; }
+    virtual Vector<GUI::TextDocumentFoldingRegion> const& folding_regions() const override { return m_folding_regions; }
 
     virtual DeprecatedString highlighter_did_request_text() const override { return m_text; }
     virtual void highlighter_did_request_update() override { }
     virtual GUI::TextDocument& highlighter_did_request_document() override { return m_document; }
     virtual GUI::TextPosition highlighter_did_request_cursor() const override { return {}; }
     virtual void highlighter_did_set_spans(Vector<GUI::TextDocumentSpan> spans) override { m_spans = move(spans); }
+    virtual void highlighter_did_set_folding_regions(Vector<GUI::TextDocumentFoldingRegion> folding_regions) override { m_folding_regions = folding_regions; }
 
     Vector<GUI::TextDocumentSpan> m_spans;
+    Vector<GUI::TextDocumentFoldingRegion> m_folding_regions;
     GUI::TextDocument& m_document;
     StringView m_text;
     GUI::TextPosition m_start;

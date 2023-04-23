@@ -1,4 +1,14 @@
 {
+  "accent-color": {
+    "inherited": true,
+    "initial": "auto",
+    "valid-types": [
+      "color"
+    ],
+    "valid-identifiers": [
+      "auto"
+    ]
+  },
   "align-content": {
     "inherited": false,
     "initial": "stretch",
@@ -118,6 +128,44 @@
     ],
     "quirks": [
       "unitless-length"
+    ],
+    "longhands": [
+      "background-position-x",
+      "background-position-y"
+    ]
+  },
+  "background-position-x": {
+    "inherited": false,
+    "affects-layout": false,
+    "initial": "0%",
+    "valid-types": [
+      "length",
+      "percentage"
+    ],
+    "valid-identifiers": [
+      "center",
+      "left",
+      "right"
+    ],
+    "quirks": [
+      "unitless-length"
+    ]
+  },
+  "background-position-y": {
+    "inherited": false,
+    "affects-layout": false,
+    "initial": "0%",
+    "valid-types": [
+      "length",
+      "percentage"
+    ],
+    "valid-identifiers": [
+      "center",
+      "bottom",
+      "top"
+    ],
+    "quirks": [
+      "unitless-length"
     ]
   },
   "background-repeat": {
@@ -225,7 +273,6 @@
     ]
   },
   "border-bottom-style": {
-    "affects-layout": false,
     "initial": "none",
     "inherited": false,
     "valid-types": [
@@ -267,9 +314,8 @@
   "border-collapse": {
     "inherited": true,
     "initial": "separate",
-    "valid-identifiers": [
-      "collapse",
-      "separate"
+    "valid-types": [
+      "border-collapse"
     ]
   },
   "border-left-color": {
@@ -284,7 +330,6 @@
     ]
   },
   "border-left-style": {
-    "affects-layout": false,
     "initial": "none",
     "inherited": false,
     "valid-types": [
@@ -329,7 +374,6 @@
     ]
   },
   "border-right-style": {
-    "affects-layout": false,
     "initial": "none",
     "inherited": false,
     "valid-types": [
@@ -359,7 +403,6 @@
     ]
   },
   "border-style": {
-    "affects-layout": false,
     "initial": "none",
     "longhands": [
       "border-top-style",
@@ -401,7 +444,6 @@
     ]
   },
   "border-top-style": {
-    "affects-layout": false,
     "initial": "none",
     "inherited": false,
     "valid-types": [
@@ -698,6 +740,24 @@
       "unitless-length"
     ]
   },
+  "font-stretch": {
+    "inherited": true,
+    "initial": "normal",
+    "valid-types": [
+      "percentage [0,∞]"
+    ],
+    "valid-identifiers": [
+      "normal",
+      "ultra-condensed",
+      "extra-condensed",
+      "condensed",
+      "semi-condensed",
+      "semi-expanded",
+      "expanded",
+      "extra-expanded",
+      "ultra-expanded"
+    ]
+  },
   "font-style": {
     "inherited": true,
     "initial": "normal",
@@ -744,6 +804,22 @@
     "longhands": [
       "row-gap",
       "column-gap"
+    ]
+  },
+  "grid-area": {
+    "inherited": false,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "string"
+    ],
+    "longhands": [
+      "grid-column-end",
+      "grid-column-start",
+      "grid-row-end",
+      "grid-row-start"
     ]
   },
   "grid-column": {
@@ -852,6 +928,16 @@
     ]
   },
   "grid-row-start": {
+    "inherited": false,
+    "initial": "auto",
+    "valid-identifiers": [
+      "auto"
+    ],
+    "valid-types": [
+      "string"
+    ]
+  },
+  "grid-template-areas": {
     "inherited": false,
     "initial": "auto",
     "valid-identifiers": [

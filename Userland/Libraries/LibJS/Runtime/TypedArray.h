@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -32,7 +32,7 @@ public:
         Number,
     };
 
-    using IntrinsicConstructor = TypedArrayConstructor* (Intrinsics::*)();
+    using IntrinsicConstructor = NonnullGCPtr<TypedArrayConstructor> (Intrinsics::*)();
 
     u32 array_length() const { return m_array_length; }
     u32 byte_length() const { return m_byte_length; }
@@ -47,7 +47,7 @@ public:
     void set_viewed_array_buffer(ArrayBuffer* array_buffer) { m_viewed_array_buffer = array_buffer; }
 
     virtual size_t element_size() const = 0;
-    virtual FlyString const& element_name() const = 0;
+    virtual DeprecatedFlyString const& element_name() const = 0;
 
     // 25.1.2.6 IsUnclampedIntegerElementType ( type ), https://tc39.es/ecma262/#sec-isunclampedintegerelementtype
     virtual bool is_unclamped_integer_element_type() const = 0;
@@ -71,7 +71,7 @@ protected:
     u32 m_byte_length { 0 };
     u32 m_byte_offset { 0 };
     ContentType m_content_type { ContentType::Number };
-    ArrayBuffer* m_viewed_array_buffer { nullptr };
+    GCPtr<ArrayBuffer> m_viewed_array_buffer;
     IntrinsicConstructor m_intrinsic_constructor { nullptr };
 
 private:
@@ -191,7 +191,7 @@ public:
         // NOTE: This includes an implementation-defined optimization, see note above!
         if (property_key.is_string() || property_key.is_number()) {
             // a. Let numericIndex be CanonicalNumericIndexString(P).
-            auto numeric_index = canonical_numeric_index_string(property_key, CanonicalIndexMode::DetectNumericRoundtrip);
+            auto numeric_index = MUST_OR_THROW_OOM(canonical_numeric_index_string(vm(), property_key, CanonicalIndexMode::DetectNumericRoundtrip));
             // b. If numericIndex is not undefined, then
             if (!numeric_index.is_undefined()) {
                 // i. Let value be IntegerIndexedElementGet(O, numericIndex).
@@ -228,7 +228,7 @@ public:
         // NOTE: This includes an implementation-defined optimization, see note above!
         if (property_key.is_string() || property_key.is_number()) {
             // a. Let numericIndex be CanonicalNumericIndexString(P).
-            auto numeric_index = canonical_numeric_index_string(property_key, CanonicalIndexMode::DetectNumericRoundtrip);
+            auto numeric_index = MUST_OR_THROW_OOM(canonical_numeric_index_string(vm(), property_key, CanonicalIndexMode::DetectNumericRoundtrip));
             // b. If numericIndex is not undefined, return IsValidIntegerIndex(O, numericIndex).
             if (!numeric_index.is_undefined())
                 return is_valid_integer_index(*this, numeric_index);
@@ -251,7 +251,7 @@ public:
         // NOTE: This includes an implementation-defined optimization, see note above!
         if (property_key.is_string() || property_key.is_number()) {
             // a. Let numericIndex be CanonicalNumericIndexString(P).
-            auto numeric_index = canonical_numeric_index_string(property_key, CanonicalIndexMode::DetectNumericRoundtrip);
+            auto numeric_index = MUST_OR_THROW_OOM(canonical_numeric_index_string(vm(), property_key, CanonicalIndexMode::DetectNumericRoundtrip));
             // b. If numericIndex is not undefined, then
             if (!numeric_index.is_undefined()) {
                 // i. If IsValidIntegerIndex(O, numericIndex) is false, return false.
@@ -301,7 +301,7 @@ public:
         // NOTE: This includes an implementation-defined optimization, see note above!
         if (property_key.is_string() || property_key.is_number()) {
             // a. Let numericIndex be CanonicalNumericIndexString(P).
-            auto numeric_index = canonical_numeric_index_string(property_key, CanonicalIndexMode::DetectNumericRoundtrip);
+            auto numeric_index = MUST_OR_THROW_OOM(canonical_numeric_index_string(vm(), property_key, CanonicalIndexMode::DetectNumericRoundtrip));
             // b. If numericIndex is not undefined, then
             if (!numeric_index.is_undefined()) {
                 // i. Return IntegerIndexedElementGet(O, numericIndex).
@@ -328,7 +328,7 @@ public:
         // NOTE: This includes an implementation-defined optimization, see note above!
         if (property_key.is_string() || property_key.is_number()) {
             // a. Let numericIndex be CanonicalNumericIndexString(P).
-            auto numeric_index = canonical_numeric_index_string(property_key, CanonicalIndexMode::DetectNumericRoundtrip);
+            auto numeric_index = MUST_OR_THROW_OOM(canonical_numeric_index_string(vm(), property_key, CanonicalIndexMode::DetectNumericRoundtrip));
             // b. If numericIndex is not undefined, then
             if (!numeric_index.is_undefined()) {
                 // i. If SameValue(O, Receiver) is true, then
@@ -363,7 +363,7 @@ public:
         // NOTE: This includes an implementation-defined optimization, see note above!
         if (property_key.is_string() || property_key.is_number()) {
             // a. Let numericIndex be CanonicalNumericIndexString(P).
-            auto numeric_index = canonical_numeric_index_string(property_key, CanonicalIndexMode::DetectNumericRoundtrip);
+            auto numeric_index = MUST_OR_THROW_OOM(canonical_numeric_index_string(vm(), property_key, CanonicalIndexMode::DetectNumericRoundtrip));
             // b. If numericIndex is not undefined, then
             if (!numeric_index.is_undefined()) {
                 // i. If IsValidIntegerIndex(O, numericIndex) is false, return true; else return false.
@@ -414,7 +414,7 @@ public:
         return { move(keys) };
     }
 
-    Span<UnderlyingBufferDataType const> data() const
+    ReadonlySpan<UnderlyingBufferDataType> data() const
     {
         return { reinterpret_cast<UnderlyingBufferDataType const*>(m_viewed_array_buffer->buffer().data() + m_byte_offset), m_array_length };
     }
@@ -470,7 +470,7 @@ ThrowCompletionOr<double> compare_typed_array_elements(VM&, Value x, Value y, Fu
         static ThrowCompletionOr<NonnullGCPtr<ClassName>> create(Realm&, u32 length, FunctionObject& new_target); \
         static ThrowCompletionOr<NonnullGCPtr<ClassName>> create(Realm&, u32 length);                             \
         static NonnullGCPtr<ClassName> create(Realm&, u32 length, ArrayBuffer& buffer);                           \
-        virtual FlyString const& element_name() const override;                                                   \
+        virtual DeprecatedFlyString const& element_name() const override;                                         \
                                                                                                                   \
     protected:                                                                                                    \
         ClassName(Object& prototype, u32 length, ArrayBuffer& array_buffer);                                      \
@@ -479,7 +479,7 @@ ThrowCompletionOr<double> compare_typed_array_elements(VM&, Value x, Value y, Fu
         JS_OBJECT(PrototypeName, Object);                                                                         \
                                                                                                                   \
     public:                                                                                                       \
-        virtual void initialize(Realm&) override;                                                                 \
+        virtual ThrowCompletionOr<void> initialize(Realm&) override;                                              \
         virtual ~PrototypeName() override;                                                                        \
                                                                                                                   \
     private:                                                                                                      \
@@ -489,7 +489,7 @@ ThrowCompletionOr<double> compare_typed_array_elements(VM&, Value x, Value y, Fu
         JS_OBJECT(ConstructorName, TypedArrayConstructor);                                                        \
                                                                                                                   \
     public:                                                                                                       \
-        virtual void initialize(Realm&) override;                                                                 \
+        virtual ThrowCompletionOr<void> initialize(Realm&) override;                                              \
         virtual ~ConstructorName() override;                                                                      \
                                                                                                                   \
         virtual ThrowCompletionOr<Value> call() override;                                                         \

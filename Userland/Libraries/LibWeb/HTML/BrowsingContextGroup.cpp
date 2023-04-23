@@ -11,21 +11,21 @@
 namespace Web::HTML {
 
 // https://html.spec.whatwg.org/multipage/browsers.html#browsing-context-group-set
-static HashTable<BrowsingContextGroup*>& user_agent_browsing_context_group_set()
+static HashTable<JS::NonnullGCPtr<BrowsingContextGroup>>& user_agent_browsing_context_group_set()
 {
-    static HashTable<BrowsingContextGroup*> set;
+    static HashTable<JS::NonnullGCPtr<BrowsingContextGroup>> set;
     return set;
 }
 
 BrowsingContextGroup::BrowsingContextGroup(Web::Page& page)
     : m_page(page)
 {
-    user_agent_browsing_context_group_set().set(this);
+    user_agent_browsing_context_group_set().set(*this);
 }
 
 BrowsingContextGroup::~BrowsingContextGroup()
 {
-    user_agent_browsing_context_group_set().remove(this);
+    user_agent_browsing_context_group_set().remove(*this);
 }
 
 void BrowsingContextGroup::visit_edges(Cell::Visitor& visitor)
@@ -58,7 +58,7 @@ void BrowsingContextGroup::append(BrowsingContext& browsing_context)
     VERIFY(browsing_context.is_top_level());
 
     // 1. Append browsingContext to group's browsing context set.
-    m_browsing_context_set.set(&browsing_context);
+    m_browsing_context_set.set(browsing_context);
 
     // 2. Set browsingContext's group to group.
     browsing_context.set_group(this);

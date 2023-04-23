@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -30,7 +30,7 @@ static ThrowCompletionOr<Value> get_promise_resolve(VM& vm, Value constructor)
 
     // 2. If IsCallable(promiseResolve) is false, throw a TypeError exception.
     if (!promise_resolve.is_function())
-        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, promise_resolve.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, TRY_OR_THROW_OOM(vm, promise_resolve.to_string_without_side_effects()));
 
     // 3. Return promiseResolve.
     return promise_resolve;
@@ -64,7 +64,7 @@ static ThrowCompletionOr<Value> perform_promise_common(VM& vm, Iterator& iterato
             iterator_record.done = true;
             return next_or_error.release_error();
         }
-        auto* next = next_or_error.release_value();
+        auto next = next_or_error.release_value();
 
         // d. If next is false, then
         if (!next) {
@@ -139,7 +139,7 @@ static ThrowCompletionOr<Value> perform_promise_all(VM& vm, Iterator& iterator_r
             // p. Set onFulfilled.[[Capability]] to resultCapability.
             // q. Set onFulfilled.[[RemainingElements]] to remainingElementsCount.
             auto on_fulfilled = PromiseAllResolveElementFunction::create(realm, index, values, result_capability, remaining_elements_count);
-            on_fulfilled->define_direct_property(vm.names.name, PrimitiveString::create(vm, DeprecatedString::empty()), Attribute::Configurable);
+            on_fulfilled->define_direct_property(vm.names.name, PrimitiveString::create(vm, String {}), Attribute::Configurable);
 
             // s. Perform ? Invoke(nextPromise, "then", « onFulfilled, resultCapability.[[Reject]] »).
             return next_promise.invoke(vm, vm.names.then, on_fulfilled, result_capability.reject());
@@ -171,7 +171,7 @@ static ThrowCompletionOr<Value> perform_promise_all_settled(VM& vm, Iterator& it
             // q. Set onFulfilled.[[Capability]] to resultCapability.
             // r. Set onFulfilled.[[RemainingElements]] to remainingElementsCount.
             auto on_fulfilled = PromiseAllSettledResolveElementFunction::create(realm, index, values, result_capability, remaining_elements_count);
-            on_fulfilled->define_direct_property(vm.names.name, PrimitiveString::create(vm, DeprecatedString::empty()), Attribute::Configurable);
+            on_fulfilled->define_direct_property(vm.names.name, PrimitiveString::create(vm, String {}), Attribute::Configurable);
 
             // s. Let stepsRejected be the algorithm steps defined in Promise.allSettled Reject Element Functions.
             // t. Let lengthRejected be the number of non-optional parameters of the function definition in Promise.allSettled Reject Element Functions.
@@ -182,7 +182,7 @@ static ThrowCompletionOr<Value> perform_promise_all_settled(VM& vm, Iterator& it
             // y. Set onRejected.[[Capability]] to resultCapability.
             // z. Set onRejected.[[RemainingElements]] to remainingElementsCount.
             auto on_rejected = PromiseAllSettledRejectElementFunction::create(realm, index, values, result_capability, remaining_elements_count);
-            on_rejected->define_direct_property(vm.names.name, PrimitiveString::create(vm, DeprecatedString::empty()), Attribute::Configurable);
+            on_rejected->define_direct_property(vm.names.name, PrimitiveString::create(vm, String {}), Attribute::Configurable);
 
             // ab. Perform ? Invoke(nextPromise, "then", « onFulfilled, onRejected »).
             return next_promise.invoke(vm, vm.names.then, on_fulfilled, on_rejected);
@@ -190,7 +190,7 @@ static ThrowCompletionOr<Value> perform_promise_all_settled(VM& vm, Iterator& it
 }
 
 // 27.2.4.3.1 PerformPromiseAny ( iteratorRecord, constructor, resultCapability, promiseResolve ), https://tc39.es/ecma262/#sec-performpromiseany
-static ThrowCompletionOr<Value> perform_promise_any(VM& vm, Iterator& iterator_record, Value constructor, PromiseCapability const& result_capability, Value promise_resolve)
+static ThrowCompletionOr<Value> perform_promise_any(VM& vm, Iterator& iterator_record, Value constructor, PromiseCapability& result_capability, Value promise_resolve)
 {
     auto& realm = *vm.current_realm();
 
@@ -217,7 +217,7 @@ static ThrowCompletionOr<Value> perform_promise_any(VM& vm, Iterator& iterator_r
             // p. Set onRejected.[[Capability]] to resultCapability.
             // q. Set onRejected.[[RemainingElements]] to remainingElementsCount.
             auto on_rejected = PromiseAnyRejectElementFunction::create(realm, index, errors, result_capability, remaining_elements_count);
-            on_rejected->define_direct_property(vm.names.name, PrimitiveString::create(vm, DeprecatedString::empty()), Attribute::Configurable);
+            on_rejected->define_direct_property(vm.names.name, PrimitiveString::create(vm, String {}), Attribute::Configurable);
 
             // s. Perform ? Invoke(nextPromise, "then", « resultCapability.[[Resolve]], onRejected »).
             return next_promise.invoke(vm, vm.names.then, result_capability.resolve(), on_rejected);
@@ -240,14 +240,14 @@ static ThrowCompletionOr<Value> perform_promise_race(VM& vm, Iterator& iterator_
 }
 
 PromiseConstructor::PromiseConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.Promise.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.Promise.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void PromiseConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> PromiseConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     // 27.2.4.4 Promise.prototype, https://tc39.es/ecma262/#sec-promise.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().promise_prototype(), 0);
@@ -260,9 +260,11 @@ void PromiseConstructor::initialize(Realm& realm)
     define_native_function(realm, vm.names.reject, reject, 1, attr);
     define_native_function(realm, vm.names.resolve, resolve, 1, attr);
 
-    define_native_accessor(realm, *vm.well_known_symbol_species(), symbol_species_getter, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.well_known_symbol_species(), symbol_species_getter, {}, Attribute::Configurable);
 
     define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
+
+    return {};
 }
 
 // 27.2.3.1 Promise ( executor ), https://tc39.es/ecma262/#sec-promise-executor
@@ -296,12 +298,12 @@ ThrowCompletionOr<NonnullGCPtr<Object>> PromiseConstructor::construct(FunctionOb
     auto [resolve_function, reject_function] = promise->create_resolving_functions();
 
     // 9. Let completion be Completion(Call(executor, undefined, « resolvingFunctions.[[Resolve]], resolvingFunctions.[[Reject]] »)).
-    auto completion = JS::call(vm, executor.as_function(), js_undefined(), &resolve_function, &reject_function);
+    auto completion = JS::call(vm, executor.as_function(), js_undefined(), resolve_function, reject_function);
 
     // 10. If completion is an abrupt completion, then
     if (completion.is_error()) {
         // a. Perform ? Call(resolvingFunctions.[[Reject]], undefined, « completion.[[Value]] »).
-        TRY(JS::call(vm, reject_function, js_undefined(), *completion.release_error().value()));
+        TRY(JS::call(vm, *reject_function, js_undefined(), *completion.release_error().value()));
     }
 
     // 11. Return promise.
@@ -312,7 +314,7 @@ ThrowCompletionOr<NonnullGCPtr<Object>> PromiseConstructor::construct(FunctionOb
 JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::all)
 {
     // 1. Let C be the this value.
-    auto* constructor = TRY(vm.this_value().to_object(vm));
+    auto constructor = TRY(vm.this_value().to_object(vm));
 
     // 2. Let promiseCapability be ? NewPromiseCapability(C).
     auto promise_capability = TRY(new_promise_capability(vm, constructor));
@@ -346,7 +348,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::all)
 JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::all_settled)
 {
     // 1. Let C be the this value.
-    auto* constructor = TRY(vm.this_value().to_object(vm));
+    auto constructor = TRY(vm.this_value().to_object(vm));
 
     // 2. Let promiseCapability be ? NewPromiseCapability(C).
     auto promise_capability = TRY(new_promise_capability(vm, constructor));
@@ -380,7 +382,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::all_settled)
 JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::any)
 {
     // 1. Let C be the this value.
-    auto* constructor = TRY(vm.this_value().to_object(vm));
+    auto constructor = TRY(vm.this_value().to_object(vm));
 
     // 2. Let promiseCapability be ? NewPromiseCapability(C).
     auto promise_capability = TRY(new_promise_capability(vm, constructor));
@@ -414,7 +416,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::any)
 JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::race)
 {
     // 1. Let C be the this value.
-    auto* constructor = TRY(vm.this_value().to_object(vm));
+    auto constructor = TRY(vm.this_value().to_object(vm));
 
     // 2. Let promiseCapability be ? NewPromiseCapability(C).
     auto promise_capability = TRY(new_promise_capability(vm, constructor));
@@ -450,7 +452,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::reject)
     auto reason = vm.argument(0);
 
     // 1. Let C be the this value.
-    auto* constructor = TRY(vm.this_value().to_object(vm));
+    auto constructor = TRY(vm.this_value().to_object(vm));
 
     // 2. Let promiseCapability be ? NewPromiseCapability(C).
     auto promise_capability = TRY(new_promise_capability(vm, constructor));
@@ -472,7 +474,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::resolve)
 
     // 2. If Type(C) is not Object, throw a TypeError exception.
     if (!constructor.is_object())
-        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, constructor.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, TRY_OR_THROW_OOM(vm, constructor.to_string_without_side_effects()));
 
     // 3. Return ? PromiseResolve(C, x).
     return TRY(promise_resolve(vm, constructor.as_object(), value));

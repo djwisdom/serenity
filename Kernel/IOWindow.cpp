@@ -10,7 +10,7 @@
 
 namespace Kernel {
 
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
 ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_for_io_space(IOAddress address, u64 space_length)
 {
     VERIFY(!Checked<u64>::addition_would_overflow(address.get(), space_length));
@@ -27,7 +27,7 @@ IOWindow::IOWindow(NonnullOwnPtr<IOAddressData> io_range)
 
 ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_from_io_window_with_offset(u64 offset, u64 space_length)
 {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     if (m_space_type == SpaceType::IO) {
         VERIFY(m_io_range);
         if (Checked<u64>::addition_would_overflow(m_io_range->address(), space_length))
@@ -39,19 +39,10 @@ ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_from_io_window_with_offset(u64
     VERIFY(space_type() == SpaceType::Memory);
     VERIFY(m_memory_mapped_range);
 
-// Note: x86-IA32 is the only 32 bit CPU architecture currently being supported and
-// probably will be the only such in the foreseeable future.
-#if ARCH(I386)
-    if (Checked<u32>::addition_would_overflow(m_memory_mapped_range->paddr.get(), offset))
-        return Error::from_errno(EOVERFLOW);
-    if (Checked<u32>::addition_would_overflow(m_memory_mapped_range->paddr.get() + offset, space_length))
-        return Error::from_errno(EOVERFLOW);
-#else
     if (Checked<u64>::addition_would_overflow(m_memory_mapped_range->paddr.get(), offset))
         return Error::from_errno(EOVERFLOW);
     if (Checked<u64>::addition_would_overflow(m_memory_mapped_range->paddr.get() + offset, space_length))
         return Error::from_errno(EOVERFLOW);
-#endif
 
     auto memory_mapped_range = TRY(Memory::adopt_new_nonnull_own_typed_mapping<u8 volatile>(m_memory_mapped_range->paddr.offset(offset), space_length, Memory::Region::Access::ReadWrite));
     return TRY(adopt_nonnull_own_or_enomem(new (nothrow) IOWindow(move(memory_mapped_range))));
@@ -60,7 +51,7 @@ ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_from_io_window_with_offset(u64
 ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_from_io_window_with_offset(u64 offset)
 {
 
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     if (m_space_type == SpaceType::IO) {
         VERIFY(m_io_range);
         VERIFY(m_io_range->space_length() >= offset);
@@ -73,9 +64,9 @@ ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_from_io_window_with_offset(u64
     return create_from_io_window_with_offset(offset, m_memory_mapped_range->length - offset);
 }
 
-ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_for_pci_device_bar(PCI::Address const& pci_address, PCI::HeaderType0BaseRegister pci_bar, u64 space_length)
+ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_for_pci_device_bar(PCI::DeviceIdentifier const& pci_device_identifier, PCI::HeaderType0BaseRegister pci_bar, u64 space_length)
 {
-    u64 pci_bar_value = PCI::get_BAR(pci_address, pci_bar);
+    u64 pci_bar_value = PCI::get_BAR(pci_device_identifier, pci_bar);
     auto pci_bar_space_type = PCI::get_BAR_space_type(pci_bar_value);
     if (pci_bar_space_type == PCI::BARSpaceType::Memory64BitSpace) {
         // FIXME: In theory, BAR5 cannot be assigned to 64 bit as it is the last one...
@@ -84,16 +75,16 @@ ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_for_pci_device_bar(PCI::Addres
         if (pci_bar == PCI::HeaderType0BaseRegister::BAR5) {
             return Error::from_errno(EINVAL);
         }
-        u64 next_pci_bar_value = PCI::get_BAR(pci_address, static_cast<PCI::HeaderType0BaseRegister>(to_underlying(pci_bar) + 1));
+        u64 next_pci_bar_value = PCI::get_BAR(pci_device_identifier, static_cast<PCI::HeaderType0BaseRegister>(to_underlying(pci_bar) + 1));
         pci_bar_value |= next_pci_bar_value << 32;
     }
 
-    auto pci_bar_space_size = PCI::get_BAR_space_size(pci_address, pci_bar);
+    auto pci_bar_space_size = PCI::get_BAR_space_size(pci_device_identifier, pci_bar);
     if (pci_bar_space_size < space_length)
         return Error::from_errno(EIO);
 
     if (pci_bar_space_type == PCI::BARSpaceType::IOSpace) {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
         if (Checked<u64>::addition_would_overflow(pci_bar_value, space_length))
             return Error::from_errno(EOVERFLOW);
         auto io_address_range = TRY(adopt_nonnull_own_or_enomem(new (nothrow) IOAddressData((pci_bar_value & 0xfffffffc), space_length)));
@@ -114,21 +105,10 @@ ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_for_pci_device_bar(PCI::Addres
     return TRY(adopt_nonnull_own_or_enomem(new (nothrow) IOWindow(move(memory_mapped_range))));
 }
 
-ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_for_pci_device_bar(PCI::Address const& pci_address, PCI::HeaderType0BaseRegister pci_bar)
-{
-    u64 pci_bar_space_size = PCI::get_BAR_space_size(pci_address, pci_bar);
-    return create_for_pci_device_bar(pci_address, pci_bar, pci_bar_space_size);
-}
-
 ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_for_pci_device_bar(PCI::DeviceIdentifier const& pci_device_identifier, PCI::HeaderType0BaseRegister pci_bar)
 {
-    u64 pci_bar_space_size = PCI::get_BAR_space_size(pci_device_identifier.address(), pci_bar);
-    return create_for_pci_device_bar(pci_device_identifier.address(), pci_bar, pci_bar_space_size);
-}
-
-ErrorOr<NonnullOwnPtr<IOWindow>> IOWindow::create_for_pci_device_bar(PCI::DeviceIdentifier const& pci_device_identifier, PCI::HeaderType0BaseRegister pci_bar, u64 space_length)
-{
-    return create_for_pci_device_bar(pci_device_identifier.address(), pci_bar, space_length);
+    u64 pci_bar_space_size = PCI::get_BAR_space_size(pci_device_identifier, pci_bar);
+    return create_for_pci_device_bar(pci_device_identifier, pci_bar, pci_bar_space_size);
 }
 
 IOWindow::IOWindow(NonnullOwnPtr<Memory::TypedMapping<u8 volatile>> memory_mapped_range)
@@ -148,7 +128,7 @@ bool IOWindow::is_access_in_range(u64 offset, size_t byte_size_access) const
 {
     if (Checked<u64>::addition_would_overflow(offset, byte_size_access))
         return false;
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     if (m_space_type == SpaceType::IO) {
         VERIFY(m_io_range);
         VERIFY(!Checked<u64>::addition_would_overflow(m_io_range->address(), m_io_range->space_length()));
@@ -273,7 +253,7 @@ u8 volatile* IOWindow::as_memory_address_pointer()
     return m_memory_mapped_range->ptr();
 }
 
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
 IOAddress IOWindow::as_io_address() const
 {
     VERIFY(space_type() == SpaceType::IO);

@@ -1,7 +1,8 @@
 /*
- * Copyright (c) 2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2022-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, Matthew Costa <ucosty@gmail.com>
  * Copyright (c) 2022, Filiph Sandström <filiph.sandstrom@filfatstudios.com>
+ * Copyright (c) 2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -13,20 +14,27 @@
 #include "WebContentView.h"
 #include <AK/TypeCasts.h>
 #include <Browser/CookieJar.h>
+#include <LibWeb/CSS/PreferredColorScheme.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <QAction>
 #include <QActionGroup>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QInputDialog>
 #include <QPlainTextEdit>
+#include <QTabBar>
 
 extern DeprecatedString s_serenity_resource_root;
 extern Browser::Settings* s_settings;
 
-BrowserWindow::BrowserWindow(Browser::CookieJar& cookie_jar, StringView webdriver_content_ipc_path)
+BrowserWindow::BrowserWindow(Browser::CookieJar& cookie_jar, StringView webdriver_content_ipc_path, WebView::EnableCallgrindProfiling enable_callgrind_profiling)
     : m_cookie_jar(cookie_jar)
     , m_webdriver_content_ipc_path(webdriver_content_ipc_path)
+    , m_enable_callgrind_profiling(enable_callgrind_profiling)
+
 {
     m_tabs_container = new QTabWidget(this);
+    m_tabs_container->installEventFilter(this);
     m_tabs_container->setElideMode(Qt::TextElideMode::ElideRight);
     m_tabs_container->setMovable(true);
     m_tabs_container->setTabsClosable(true);
@@ -36,20 +44,32 @@ BrowserWindow::BrowserWindow(Browser::CookieJar& cookie_jar, StringView webdrive
     auto* menu = menuBar()->addMenu("&File");
 
     auto* new_tab_action = new QAction("New &Tab", this);
-    new_tab_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_T));
+    new_tab_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::AddTab));
     menu->addAction(new_tab_action);
 
     auto* settings_action = new QAction("&Settings", this);
-    settings_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
+    settings_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::Preferences));
     menu->addAction(settings_action);
 
     auto* close_current_tab_action = new QAction("Close Current Tab", this);
-    close_current_tab_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
+    close_current_tab_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::Close));
     menu->addAction(close_current_tab_action);
 
     auto* quit_action = new QAction("&Quit", this);
-    quit_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q));
+    quit_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::Quit));
     menu->addAction(quit_action);
+
+    auto* edit_menu = menuBar()->addMenu("&Edit");
+
+    auto* copy_action = new QAction("&Copy", this);
+    copy_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::Copy));
+    edit_menu->addAction(copy_action);
+    QObject::connect(copy_action, &QAction::triggered, this, &BrowserWindow::copy_selected_text);
+
+    auto* select_all_action = new QAction("Select &All", this);
+    select_all_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::SelectAll));
+    edit_menu->addAction(select_all_action);
+    QObject::connect(select_all_action, &QAction::triggered, this, &BrowserWindow::select_all);
 
     auto* view_menu = menuBar()->addMenu("&View");
 
@@ -62,6 +82,27 @@ BrowserWindow::BrowserWindow(Browser::CookieJar& cookie_jar, StringView webdrive
     open_previous_tab_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_PageUp));
     view_menu->addAction(open_previous_tab_action);
     QObject::connect(open_previous_tab_action, &QAction::triggered, this, &BrowserWindow::open_previous_tab);
+
+    view_menu->addSeparator();
+
+    m_zoom_menu = view_menu->addMenu("&Zoom");
+
+    auto* zoom_in_action = new QAction("Zoom &In", this);
+    auto zoom_in_shortcuts = QKeySequence::keyBindings(QKeySequence::StandardKey::ZoomIn);
+    zoom_in_shortcuts.append(QKeySequence(Qt::CTRL | Qt::Key_Equal));
+    zoom_in_action->setShortcuts(zoom_in_shortcuts);
+    m_zoom_menu->addAction(zoom_in_action);
+    QObject::connect(zoom_in_action, &QAction::triggered, this, &BrowserWindow::zoom_in);
+
+    auto* zoom_out_action = new QAction("Zoom &Out", this);
+    zoom_out_action->setShortcuts(QKeySequence::keyBindings(QKeySequence::StandardKey::ZoomOut));
+    m_zoom_menu->addAction(zoom_out_action);
+    QObject::connect(zoom_out_action, &QAction::triggered, this, &BrowserWindow::zoom_out);
+
+    auto* reset_zoom_action = new QAction("&Reset Zoom", this);
+    reset_zoom_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
+    m_zoom_menu->addAction(reset_zoom_action);
+    QObject::connect(reset_zoom_action, &QAction::triggered, this, &BrowserWindow::reset_zoom);
 
     view_menu->addSeparator();
 
@@ -135,6 +176,12 @@ BrowserWindow::BrowserWindow(Browser::CookieJar& cookie_jar, StringView webdrive
     debug_menu->addAction(dump_layout_tree_action);
     QObject::connect(dump_layout_tree_action, &QAction::triggered, this, [this] {
         debug_request("dump-layout-tree");
+    });
+
+    auto* dump_paint_tree_action = new QAction("Dump Paint Tree", this);
+    debug_menu->addAction(dump_paint_tree_action);
+    QObject::connect(dump_paint_tree_action, &QAction::triggered, this, [this] {
+        debug_request("dump-paint-tree");
     });
 
     auto* dump_stacking_context_tree_action = new QAction("Dump Stacking Context Tree", this);
@@ -267,7 +314,9 @@ BrowserWindow::BrowserWindow(Browser::CookieJar& cookie_jar, StringView webdrive
         debug_request("same-origin-policy", state ? "on" : "off");
     });
 
-    QObject::connect(new_tab_action, &QAction::triggered, this, &BrowserWindow::new_tab);
+    QObject::connect(new_tab_action, &QAction::triggered, this, [this] {
+        new_tab(s_settings->new_tab_page(), Web::HTML::ActivateTab::Yes);
+    });
     QObject::connect(settings_action, &QAction::triggered, this, [this] {
         new SettingsDialog(this);
     });
@@ -275,14 +324,21 @@ BrowserWindow::BrowserWindow(Browser::CookieJar& cookie_jar, StringView webdrive
     QObject::connect(m_tabs_container, &QTabWidget::currentChanged, [this](int index) {
         setWindowTitle(QString("%1 - Ladybird").arg(m_tabs_container->tabText(index)));
         setWindowIcon(m_tabs_container->tabIcon(index));
-        m_current_tab = verify_cast<Tab>(m_tabs_container->widget(index));
+        set_current_tab(verify_cast<Tab>(m_tabs_container->widget(index)));
     });
     QObject::connect(m_tabs_container, &QTabWidget::tabCloseRequested, this, &BrowserWindow::close_tab);
     QObject::connect(close_current_tab_action, &QAction::triggered, this, &BrowserWindow::close_current_tab);
 
-    new_tab();
+    new_tab(s_settings->new_tab_page(), Web::HTML::ActivateTab::Yes);
 
     setCentralWidget(m_tabs_container);
+}
+
+void BrowserWindow::set_current_tab(Tab* tab)
+{
+    m_current_tab = tab;
+    if (tab)
+        update_displayed_zoom_level();
 }
 
 void BrowserWindow::debug_request(DeprecatedString const& request, DeprecatedString const& argument)
@@ -292,21 +348,54 @@ void BrowserWindow::debug_request(DeprecatedString const& request, DeprecatedStr
     m_current_tab->debug_request(request, argument);
 }
 
-void BrowserWindow::new_tab()
+Tab& BrowserWindow::new_tab(QString const& url, Web::HTML::ActivateTab activate_tab)
 {
-    auto tab = make<Tab>(this, m_webdriver_content_ipc_path);
+    auto tab = make<Tab>(this, m_webdriver_content_ipc_path, m_enable_callgrind_profiling);
     auto tab_ptr = tab.ptr();
     m_tabs.append(std::move(tab));
 
     if (m_current_tab == nullptr) {
-        m_current_tab = tab_ptr;
+        set_current_tab(tab_ptr);
     }
 
     m_tabs_container->addTab(tab_ptr, "New Tab");
-    m_tabs_container->setCurrentWidget(tab_ptr);
+    if (activate_tab == Web::HTML::ActivateTab::Yes)
+        m_tabs_container->setCurrentWidget(tab_ptr);
 
     QObject::connect(tab_ptr, &Tab::title_changed, this, &BrowserWindow::tab_title_changed);
     QObject::connect(tab_ptr, &Tab::favicon_changed, this, &BrowserWindow::tab_favicon_changed);
+
+    QObject::connect(&tab_ptr->view(), &WebContentView::urls_dropped, this, [this](auto& urls) {
+        VERIFY(urls.size());
+        m_current_tab->navigate(urls[0].toString());
+
+        for (qsizetype i = 1; i < urls.size(); ++i)
+            new_tab(urls[i].toString(), Web::HTML::ActivateTab::No);
+    });
+
+    tab_ptr->view().on_new_tab = [this](auto activate_tab) {
+        auto& tab = new_tab("about:blank", activate_tab);
+        return tab.view().handle();
+    };
+
+    tab_ptr->view().on_tab_open_request = [this](auto url, auto activate_tab) {
+        auto& tab = new_tab(qstring_from_ak_deprecated_string(url.to_deprecated_string()), activate_tab);
+        return tab.view().handle();
+    };
+
+    tab_ptr->view().on_link_click = [this](auto url, auto target, unsigned modifiers) {
+        // TODO: maybe activate tabs according to some configuration, this is just normal current browser behavior
+        if (modifiers == Mod_Ctrl) {
+            m_current_tab->view().on_tab_open_request(url, Web::HTML::ActivateTab::No);
+        } else if (target == "_blank") {
+            m_current_tab->view().on_tab_open_request(url, Web::HTML::ActivateTab::Yes);
+        }
+    };
+
+    tab_ptr->view().on_link_middle_click = [this](auto url, auto target, unsigned modifiers) {
+        m_current_tab->view().on_link_click(url, target, Mod_Ctrl);
+        (void)modifiers;
+    };
 
     tab_ptr->view().on_get_all_cookies = [this](auto const& url) {
         return m_cookie_jar.get_all_cookies(url);
@@ -329,6 +418,20 @@ void BrowserWindow::new_tab()
     };
 
     tab_ptr->focus_location_editor();
+
+    // We *don't* load the initial page if we are connected to a WebDriver, as the Set URL command may come in very
+    // quickly, and become replaced by this load.
+    if (m_webdriver_content_ipc_path.is_empty()) {
+        // We make it HistoryNavigation so that the initial page doesn't get added to the history.
+        tab_ptr->navigate(url, Tab::LoadType::HistoryNavigation);
+    }
+
+    return *tab_ptr;
+}
+
+void BrowserWindow::activate_tab(int index)
+{
+    m_tabs_container->setCurrentIndex(index);
 }
 
 void BrowserWindow::close_tab(int index)
@@ -399,20 +502,99 @@ void BrowserWindow::open_previous_tab()
 void BrowserWindow::enable_auto_color_scheme()
 {
     for (auto& tab : m_tabs) {
-        tab.view().set_color_scheme(ColorScheme::Auto);
+        tab->view().set_preferred_color_scheme(Web::CSS::PreferredColorScheme::Auto);
     }
 }
 
 void BrowserWindow::enable_light_color_scheme()
 {
     for (auto& tab : m_tabs) {
-        tab.view().set_color_scheme(ColorScheme::Light);
+        tab->view().set_preferred_color_scheme(Web::CSS::PreferredColorScheme::Light);
     }
 }
 
 void BrowserWindow::enable_dark_color_scheme()
 {
     for (auto& tab : m_tabs) {
-        tab.view().set_color_scheme(ColorScheme::Dark);
+        tab->view().set_preferred_color_scheme(Web::CSS::PreferredColorScheme::Dark);
     }
+}
+
+void BrowserWindow::zoom_in()
+{
+    if (!m_current_tab)
+        return;
+    m_current_tab->view().zoom_in();
+    update_displayed_zoom_level();
+}
+
+void BrowserWindow::zoom_out()
+{
+    if (!m_current_tab)
+        return;
+    m_current_tab->view().zoom_out();
+    update_displayed_zoom_level();
+}
+
+void BrowserWindow::reset_zoom()
+{
+    if (!m_current_tab)
+        return;
+    m_current_tab->view().reset_zoom();
+    update_displayed_zoom_level();
+}
+
+void BrowserWindow::select_all()
+{
+    if (auto* tab = m_current_tab)
+        tab->view().select_all();
+}
+
+void BrowserWindow::update_displayed_zoom_level()
+{
+    VERIFY(m_zoom_menu && m_current_tab);
+    auto zoom_level_text = MUST(String::formatted("&Zoom ({}%)", round_to<int>(m_current_tab->view().zoom_level() * 100)));
+    m_zoom_menu->setTitle(qstring_from_ak_string(zoom_level_text));
+    m_current_tab->update_reset_zoom_button();
+}
+
+void BrowserWindow::copy_selected_text()
+{
+    if (auto* tab = m_current_tab) {
+        auto text = tab->view().selected_text();
+        auto* clipboard = QGuiApplication::clipboard();
+        clipboard->setText(qstring_from_ak_deprecated_string(text));
+    }
+}
+
+void BrowserWindow::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    for (auto& tab : m_tabs) {
+        tab->view().set_window_size({ frameSize().width(), frameSize().height() });
+    }
+}
+
+void BrowserWindow::moveEvent(QMoveEvent* event)
+{
+    QWidget::moveEvent(event);
+    for (auto& tab : m_tabs) {
+        tab->view().set_window_position({ event->pos().x(), event->pos().y() });
+    }
+}
+
+bool BrowserWindow::eventFilter(QObject* obj, QEvent* event)
+{
+    if (event->type() == QEvent::MouseButtonRelease) {
+        auto const* const mouse_event = static_cast<QMouseEvent*>(event);
+        if (mouse_event->button() == Qt::MouseButton::MiddleButton) {
+            if (obj == m_tabs_container) {
+                auto const tab_index = m_tabs_container->tabBar()->tabAt(mouse_event->pos());
+                close_tab(tab_index);
+                return true;
+            }
+        }
+    }
+
+    return QMainWindow::eventFilter(obj, event);
 }

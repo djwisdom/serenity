@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Forward.h>
 #include <AK/StringBuilder.h>
 #include <LibMarkdown/List.h>
 #include <LibMarkdown/Paragraph.h>
@@ -26,7 +27,7 @@ DeprecatedString List::render_to_html(bool) const
 
     for (auto& item : m_items) {
         builder.append("<li>"sv);
-        if (!m_is_tight || (item->blocks().size() != 0 && !dynamic_cast<Paragraph const*>(&(item->blocks()[0]))))
+        if (!m_is_tight || (item->blocks().size() != 0 && !dynamic_cast<Paragraph const*>(item->blocks()[0].ptr())))
             builder.append('\n');
         builder.append(item->render_to_html(m_is_tight));
         builder.append("</li>\n"sv);
@@ -34,24 +35,39 @@ DeprecatedString List::render_to_html(bool) const
 
     builder.appendff("</{}>\n", tag);
 
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
-DeprecatedString List::render_for_terminal(size_t) const
+Vector<DeprecatedString> List::render_lines_for_terminal(size_t view_width) const
 {
-    StringBuilder builder;
+    Vector<DeprecatedString> lines;
 
     int i = 0;
     for (auto& item : m_items) {
+        auto item_lines = item->render_lines_for_terminal(view_width);
+        auto first_line = item_lines.take_first();
+
+        StringBuilder builder;
         builder.append("  "sv);
         if (m_is_ordered)
             builder.appendff("{}.", ++i);
         else
             builder.append('*');
-        builder.append(item->render_for_terminal());
+        auto item_indentation = builder.length();
+
+        builder.append(first_line);
+
+        lines.append(builder.to_deprecated_string());
+
+        for (auto& line : item_lines) {
+            builder.clear();
+            builder.append(DeprecatedString::repeated(' ', item_indentation));
+            builder.append(line);
+            lines.append(builder.to_deprecated_string());
+        }
     }
 
-    return builder.build();
+    return lines;
 }
 
 RecursionDecision List::walk(Visitor& visitor) const

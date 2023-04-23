@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021-2022, David Tuin <davidot@serenityos.org>
  *
@@ -8,10 +8,9 @@
 
 #pragma once
 
+#include <AK/DeprecatedFlyString.h>
 #include <AK/DeprecatedString.h>
-#include <AK/FlyString.h>
 #include <AK/HashMap.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/OwnPtr.h>
 #include <AK/RefPtr.h>
 #include <AK/Variant.h>
@@ -97,7 +96,7 @@ private:
     // NOTE: These members are carefully ordered so that `m_start_offset` is packed with the padding after RefCounted::m_ref_count.
     //       This creates a 4-byte padding hole after `m_end_offset` which is used to pack subclasses better.
     u32 m_start_offset { 0 };
-    RefPtr<SourceCode> m_source_code;
+    RefPtr<SourceCode const> m_source_code;
     u32 m_end_offset { 0 };
 };
 
@@ -111,7 +110,7 @@ public:
             value.~T();
     }
 
-    Span<T const> tail_span() const { return { tail_data(), tail_size() }; }
+    ReadonlySpan<T> tail_span() const { return { tail_data(), tail_size() }; }
 
     T const* tail_data() const { return reinterpret_cast<T const*>(reinterpret_cast<uintptr_t>(this) + sizeof(Derived)); }
     size_t tail_size() const { return m_tail_size; }
@@ -126,7 +125,7 @@ protected:
         return adopt_ref(*::new (memory) ActualDerived(move(source_range), forward<Args>(args)...));
     }
 
-    ASTNodeWithTailArray(SourceRange source_range, Span<T const> values)
+    ASTNodeWithTailArray(SourceRange source_range, ReadonlySpan<T> values)
         : Base(move(source_range))
         , m_tail_size(values.size())
     {
@@ -152,7 +151,7 @@ public:
 // 14.13 Labelled Statements, https://tc39.es/ecma262/#sec-labelled-statements
 class LabelledStatement : public Statement {
 public:
-    LabelledStatement(SourceRange source_range, FlyString label, NonnullRefPtr<Statement> labelled_item)
+    LabelledStatement(SourceRange source_range, DeprecatedFlyString label, NonnullRefPtr<Statement const> labelled_item)
         : Statement(source_range)
         , m_label(move(label))
         , m_labelled_item(move(labelled_item))
@@ -162,37 +161,36 @@ public:
     virtual Completion execute(Interpreter&) const override;
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
-    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<FlyString> const&) const;
+    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<DeprecatedFlyString> const&) const;
 
-    FlyString const& label() const { return m_label; }
-    FlyString& label() { return m_label; }
-    NonnullRefPtr<Statement> const& labelled_item() const { return m_labelled_item; }
-    NonnullRefPtr<Statement>& labelled_item() { return m_labelled_item; }
+    DeprecatedFlyString const& label() const { return m_label; }
+    DeprecatedFlyString& label() { return m_label; }
+    NonnullRefPtr<Statement const> const& labelled_item() const { return m_labelled_item; }
 
 private:
     virtual bool is_labelled_statement() const final { return true; }
 
-    FlyString m_label;
-    NonnullRefPtr<Statement> m_labelled_item;
+    DeprecatedFlyString m_label;
+    NonnullRefPtr<Statement const> m_labelled_item;
 };
 
 class LabelableStatement : public Statement {
 public:
     using Statement::Statement;
 
-    Vector<FlyString> const& labels() const { return m_labels; }
-    virtual void add_label(FlyString string) { m_labels.append(move(string)); }
+    Vector<DeprecatedFlyString> const& labels() const { return m_labels; }
+    virtual void add_label(DeprecatedFlyString string) { m_labels.append(move(string)); }
 
 protected:
-    Vector<FlyString> m_labels;
+    Vector<DeprecatedFlyString> m_labels;
 };
 
 class IterationStatement : public Statement {
 public:
     using Statement::Statement;
 
-    virtual Completion loop_evaluation(Interpreter&, Vector<FlyString> const&) const = 0;
-    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<FlyString> const&) const;
+    virtual Completion loop_evaluation(Interpreter&, Vector<DeprecatedFlyString> const&) const = 0;
+    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<DeprecatedFlyString> const&) const;
 
 private:
     virtual bool is_iteration_statement() const final { return true; }
@@ -219,7 +217,7 @@ public:
 
 class ExpressionStatement final : public Statement {
 public:
-    ExpressionStatement(SourceRange source_range, NonnullRefPtr<Expression> expression)
+    ExpressionStatement(SourceRange source_range, NonnullRefPtr<Expression const> expression)
         : Statement(source_range)
         , m_expression(move(expression))
     {
@@ -234,7 +232,7 @@ public:
 private:
     virtual bool is_expression_statement() const override { return true; }
 
-    NonnullRefPtr<Expression> m_expression;
+    NonnullRefPtr<Expression const> m_expression;
 };
 
 template<typename Func, typename... Args>
@@ -273,9 +271,9 @@ public:
     {
         auto child = create_ast_node<T>(range, forward<Args>(args)...);
         m_children.append(move(child));
-        return static_cast<T&>(m_children.last());
+        return static_cast<T&>(*m_children.last());
     }
-    void append(NonnullRefPtr<Statement> child)
+    void append(NonnullRefPtr<Statement const> child)
     {
         m_children.append(move(child));
     }
@@ -288,15 +286,15 @@ public:
         m_functions_hoistable_with_annexB_extension.shrink_to_fit();
     }
 
-    NonnullRefPtrVector<Statement> const& children() const { return m_children; }
+    Vector<NonnullRefPtr<Statement const>> const& children() const { return m_children; }
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
     Completion evaluate_statements(Interpreter&) const;
 
-    void add_var_scoped_declaration(NonnullRefPtr<Declaration> variables);
-    void add_lexical_declaration(NonnullRefPtr<Declaration> variables);
-    void add_hoisted_function(NonnullRefPtr<FunctionDeclaration> declaration);
+    void add_var_scoped_declaration(NonnullRefPtr<Declaration const> variables);
+    void add_lexical_declaration(NonnullRefPtr<Declaration const> variables);
+    void add_hoisted_function(NonnullRefPtr<FunctionDeclaration const> declaration);
 
     [[nodiscard]] bool has_lexical_declarations() const { return !m_lexical_declarations.is_empty(); }
     [[nodiscard]] bool has_var_declarations() const { return !m_var_declarations.is_empty(); }
@@ -305,9 +303,9 @@ public:
     [[nodiscard]] size_t lexical_declaration_count() const { return m_lexical_declarations.size(); }
 
     ThrowCompletionOr<void> for_each_lexically_scoped_declaration(ThrowCompletionOrVoidCallback<Declaration const&>&& callback) const;
-    ThrowCompletionOr<void> for_each_lexically_declared_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const;
+    ThrowCompletionOr<void> for_each_lexically_declared_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&& callback) const;
 
-    ThrowCompletionOr<void> for_each_var_declared_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const;
+    ThrowCompletionOr<void> for_each_var_declared_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&& callback) const;
 
     ThrowCompletionOr<void> for_each_var_function_declaration_in_reverse_order(ThrowCompletionOrVoidCallback<FunctionDeclaration const&>&& callback) const;
     ThrowCompletionOr<void> for_each_var_scoped_variable_declaration(ThrowCompletionOrVoidCallback<VariableDeclaration const&>&& callback) const;
@@ -325,20 +323,20 @@ protected:
 private:
     virtual bool is_scope_node() const final { return true; }
 
-    NonnullRefPtrVector<Statement> m_children;
-    NonnullRefPtrVector<Declaration> m_lexical_declarations;
-    NonnullRefPtrVector<Declaration> m_var_declarations;
+    Vector<NonnullRefPtr<Statement const>> m_children;
+    Vector<NonnullRefPtr<Declaration const>> m_lexical_declarations;
+    Vector<NonnullRefPtr<Declaration const>> m_var_declarations;
 
-    NonnullRefPtrVector<FunctionDeclaration> m_functions_hoistable_with_annexB_extension;
+    Vector<NonnullRefPtr<FunctionDeclaration const>> m_functions_hoistable_with_annexB_extension;
 };
 
 // ImportEntry Record, https://tc39.es/ecma262/#table-importentry-record-fields
 struct ImportEntry {
-    FlyString import_name;       // [[ImportName]] if a String
-    FlyString local_name;        // [[LocalName]]
-    bool is_namespace { false }; // [[ImportName]] if `namespace-object`
+    DeprecatedFlyString import_name; // [[ImportName]] if a String
+    DeprecatedFlyString local_name;  // [[LocalName]]
+    bool is_namespace { false };     // [[ImportName]] if `namespace-object`
 
-    ImportEntry(FlyString import_name_, FlyString local_name_, bool is_namespace_ = false)
+    ImportEntry(DeprecatedFlyString import_name_, DeprecatedFlyString local_name_, bool is_namespace_ = false)
         : import_name(move(import_name_))
         , local_name(move(local_name_))
         , is_namespace(is_namespace_)
@@ -372,10 +370,9 @@ public:
 
     virtual void dump(int indent) const override;
 
-    bool has_bound_name(FlyString const& name) const;
+    bool has_bound_name(DeprecatedFlyString const& name) const;
     Vector<ImportEntry> const& entries() const { return m_entries; }
     ModuleRequest const& module_request() const { return m_module_request; }
-    ModuleRequest& module_request() { return m_module_request; }
 
 private:
     ModuleRequest m_module_request;
@@ -395,10 +392,10 @@ struct ExportEntry {
         EmptyNamedExport,
     } kind;
 
-    FlyString export_name;          // [[ExportName]]
-    FlyString local_or_import_name; // Either [[ImportName]] or [[LocalName]]
+    DeprecatedFlyString export_name;          // [[ExportName]]
+    DeprecatedFlyString local_or_import_name; // Either [[ImportName]] or [[LocalName]]
 
-    ExportEntry(Kind export_kind, FlyString export_name_, FlyString local_or_import_name_)
+    ExportEntry(Kind export_kind, DeprecatedFlyString export_name_, DeprecatedFlyString local_or_import_name_)
         : kind(export_kind)
         , export_name(move(export_name_))
         , local_or_import_name(move(local_or_import_name_))
@@ -410,7 +407,7 @@ struct ExportEntry {
         return m_module_request != nullptr;
     }
 
-    static ExportEntry indirect_export_entry(ModuleRequest const& module_request, FlyString export_name, FlyString import_name)
+    static ExportEntry indirect_export_entry(ModuleRequest const& module_request, DeprecatedFlyString export_name, DeprecatedFlyString import_name)
     {
         ExportEntry entry { Kind::NamedExport, move(export_name), move(import_name) };
         entry.m_module_request = &module_request;
@@ -428,7 +425,7 @@ private:
     friend class ExportStatement;
 
 public:
-    static ExportEntry named_export(FlyString export_name, FlyString local_name)
+    static ExportEntry named_export(DeprecatedFlyString export_name, DeprecatedFlyString local_name)
     {
         return ExportEntry { Kind::NamedExport, move(export_name), move(local_name) };
     }
@@ -438,7 +435,7 @@ public:
         return ExportEntry { Kind::ModuleRequestAllButDefault, {}, {} };
     }
 
-    static ExportEntry all_module_request(FlyString export_name)
+    static ExportEntry all_module_request(DeprecatedFlyString export_name)
     {
         return ExportEntry { Kind::ModuleRequestAll, move(export_name), {} };
     }
@@ -451,9 +448,9 @@ public:
 
 class ExportStatement final : public Statement {
 public:
-    static FlyString local_name_for_default;
+    static DeprecatedFlyString local_name_for_default;
 
-    ExportStatement(SourceRange source_range, RefPtr<ASTNode> statement, Vector<ExportEntry> entries, bool is_default_export, ModuleRequest module_request)
+    ExportStatement(SourceRange source_range, RefPtr<ASTNode const> statement, Vector<ExportEntry> entries, bool is_default_export, ModuleRequest module_request)
         : Statement(source_range)
         , m_statement(move(statement))
         , m_entries(move(entries))
@@ -470,7 +467,7 @@ public:
 
     virtual void dump(int indent) const override;
 
-    bool has_export(FlyString const& export_name) const;
+    bool has_export(DeprecatedFlyString const& export_name) const;
 
     bool has_statement() const { return m_statement; }
     Vector<ExportEntry> const& entries() const { return m_entries; }
@@ -483,14 +480,14 @@ public:
         return *m_statement;
     }
 
-    ModuleRequest& module_request()
+    ModuleRequest const& module_request() const
     {
         VERIFY(!m_module_request.module_specifier.is_null());
         return m_module_request;
     }
 
 private:
-    RefPtr<ASTNode> m_statement;
+    RefPtr<ASTNode const> m_statement;
     Vector<ExportEntry> m_entries;
     bool m_is_default_export { false };
     ModuleRequest m_module_request;
@@ -516,23 +513,23 @@ public:
 
     Type type() const { return m_type; }
 
-    void append_import(NonnullRefPtr<ImportStatement> import_statement)
+    void append_import(NonnullRefPtr<ImportStatement const> import_statement)
     {
         m_imports.append(import_statement);
         append(import_statement);
     }
 
-    void append_export(NonnullRefPtr<ExportStatement> export_statement)
+    void append_export(NonnullRefPtr<ExportStatement const> export_statement)
     {
         m_exports.append(export_statement);
         append(export_statement);
     }
 
-    NonnullRefPtrVector<ImportStatement> const& imports() const { return m_imports; }
-    NonnullRefPtrVector<ExportStatement> const& exports() const { return m_exports; }
+    Vector<NonnullRefPtr<ImportStatement const>> const& imports() const { return m_imports; }
+    Vector<NonnullRefPtr<ExportStatement const>> const& exports() const { return m_exports; }
 
-    NonnullRefPtrVector<ImportStatement>& imports() { return m_imports; }
-    NonnullRefPtrVector<ExportStatement>& exports() { return m_exports; }
+    Vector<NonnullRefPtr<ImportStatement const>>& imports() { return m_imports; }
+    Vector<NonnullRefPtr<ExportStatement const>>& exports() { return m_exports; }
 
     bool has_top_level_await() const { return m_has_top_level_await; }
     void set_has_top_level_await() { m_has_top_level_await = true; }
@@ -545,8 +542,8 @@ private:
     bool m_is_strict_mode { false };
     Type m_type { Type::Script };
 
-    NonnullRefPtrVector<ImportStatement> m_imports;
-    NonnullRefPtrVector<ExportStatement> m_exports;
+    Vector<NonnullRefPtr<ImportStatement const>> m_imports;
+    Vector<NonnullRefPtr<ExportStatement const>> m_exports;
     bool m_has_top_level_await { false };
 };
 
@@ -592,7 +589,7 @@ public:
     {
     }
 
-    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const = 0;
+    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&& callback) const = 0;
 
     // 8.1.3 Static Semantics: IsConstantDeclaration, https://tc39.es/ecma262/#sec-static-semantics-isconstantdeclaration
     virtual bool is_constant_declaration() const { return false; }
@@ -608,7 +605,7 @@ public:
     }
     Completion execute(Interpreter&) const override { return {}; }
 
-    ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&&) const override
+    ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&&) const override
     {
         VERIFY_NOT_REACHED();
     }
@@ -618,9 +615,9 @@ struct BindingPattern : RefCounted<BindingPattern> {
     // This covers both BindingProperty and BindingElement, hence the more generic name
     struct BindingEntry {
         // If this entry represents a BindingElement, then name will be Empty
-        Variant<NonnullRefPtr<Identifier>, NonnullRefPtr<Expression>, Empty> name {};
-        Variant<NonnullRefPtr<Identifier>, NonnullRefPtr<BindingPattern>, NonnullRefPtr<MemberExpression>, Empty> alias {};
-        RefPtr<Expression> initializer {};
+        Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<Expression const>, Empty> name {};
+        Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>, NonnullRefPtr<MemberExpression const>, Empty> alias {};
+        RefPtr<Expression const> initializer {};
         bool is_rest { false };
 
         bool is_elision() const { return name.has<Empty>() && alias.has<Empty>(); }
@@ -633,7 +630,7 @@ struct BindingPattern : RefCounted<BindingPattern> {
 
     void dump(int indent) const;
 
-    ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const;
+    ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&& callback) const;
 
     bool contains_expression() const;
 
@@ -642,14 +639,14 @@ struct BindingPattern : RefCounted<BindingPattern> {
 };
 
 struct FunctionParameter {
-    Variant<FlyString, NonnullRefPtr<BindingPattern>> binding;
-    RefPtr<Expression> default_value;
+    Variant<DeprecatedFlyString, NonnullRefPtr<BindingPattern const>> binding;
+    RefPtr<Expression const> default_value;
     bool is_rest { false };
 };
 
 class FunctionNode {
 public:
-    FlyString const& name() const { return m_name; }
+    DeprecatedFlyString const& name() const { return m_name; }
     DeprecatedString const& source_text() const { return m_source_text; }
     Statement const& body() const { return *m_body; }
     Vector<FunctionParameter> const& parameters() const { return m_parameters; };
@@ -661,7 +658,7 @@ public:
     FunctionKind kind() const { return m_kind; }
 
 protected:
-    FunctionNode(FlyString name, DeprecatedString source_text, NonnullRefPtr<Statement> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function)
+    FunctionNode(DeprecatedFlyString name, DeprecatedString source_text, NonnullRefPtr<Statement const> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function)
         : m_name(move(name))
         , m_source_text(move(source_text))
         , m_body(move(body))
@@ -680,9 +677,9 @@ protected:
     void dump(int indent, DeprecatedString const& class_name) const;
 
 private:
-    FlyString m_name;
+    DeprecatedFlyString m_name;
     DeprecatedString m_source_text;
-    NonnullRefPtr<Statement> m_body;
+    NonnullRefPtr<Statement const> m_body;
     Vector<FunctionParameter> const m_parameters;
     const i32 m_function_length;
     FunctionKind m_kind;
@@ -698,7 +695,7 @@ class FunctionDeclaration final
 public:
     static bool must_have_name() { return true; }
 
-    FunctionDeclaration(SourceRange source_range, FlyString const& name, DeprecatedString source_text, NonnullRefPtr<Statement> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, bool might_need_arguments_object, bool contains_direct_call_to_eval)
+    FunctionDeclaration(SourceRange source_range, DeprecatedFlyString const& name, DeprecatedString source_text, NonnullRefPtr<Statement const> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, bool might_need_arguments_object, bool contains_direct_call_to_eval)
         : Declaration(source_range)
         , FunctionNode(name, move(source_text), move(body), move(parameters), function_length, kind, is_strict_mode, might_need_arguments_object, contains_direct_call_to_eval, false)
     {
@@ -708,7 +705,7 @@ public:
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
-    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const override;
+    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&& callback) const override;
 
     virtual bool is_function_declaration() const override { return true; }
 
@@ -724,7 +721,7 @@ class FunctionExpression final
 public:
     static bool must_have_name() { return false; }
 
-    FunctionExpression(SourceRange source_range, FlyString const& name, DeprecatedString source_text, NonnullRefPtr<Statement> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function = false)
+    FunctionExpression(SourceRange source_range, DeprecatedFlyString const& name, DeprecatedString source_text, NonnullRefPtr<Statement const> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, bool might_need_arguments_object, bool contains_direct_call_to_eval, bool is_arrow_function = false)
         : Expression(source_range)
         , FunctionNode(name, move(source_text), move(body), move(parameters), function_length, kind, is_strict_mode, might_need_arguments_object, contains_direct_call_to_eval, is_arrow_function)
     {
@@ -737,7 +734,7 @@ public:
 
     bool has_name() const { return !name().is_empty(); }
 
-    Value instantiate_ordinary_function_expression(Interpreter&, FlyString given_name) const;
+    Value instantiate_ordinary_function_expression(Interpreter&, DeprecatedFlyString given_name) const;
 
 private:
     virtual bool is_function_expression() const override { return true; }
@@ -755,7 +752,7 @@ public:
 
 class YieldExpression final : public Expression {
 public:
-    explicit YieldExpression(SourceRange source_range, RefPtr<Expression> argument, bool is_yield_from)
+    explicit YieldExpression(SourceRange source_range, RefPtr<Expression const> argument, bool is_yield_from)
         : Expression(source_range)
         , m_argument(move(argument))
         , m_is_yield_from(is_yield_from)
@@ -770,13 +767,13 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    RefPtr<Expression> m_argument;
+    RefPtr<Expression const> m_argument;
     bool m_is_yield_from { false };
 };
 
 class AwaitExpression final : public Expression {
 public:
-    explicit AwaitExpression(SourceRange source_range, NonnullRefPtr<Expression> argument)
+    explicit AwaitExpression(SourceRange source_range, NonnullRefPtr<Expression const> argument)
         : Expression(source_range)
         , m_argument(move(argument))
     {
@@ -787,12 +784,12 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    NonnullRefPtr<Expression> m_argument;
+    NonnullRefPtr<Expression const> m_argument;
 };
 
 class ReturnStatement final : public Statement {
 public:
-    explicit ReturnStatement(SourceRange source_range, RefPtr<Expression> argument)
+    explicit ReturnStatement(SourceRange source_range, RefPtr<Expression const> argument)
         : Statement(source_range)
         , m_argument(move(argument))
     {
@@ -805,12 +802,12 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    RefPtr<Expression> m_argument;
+    RefPtr<Expression const> m_argument;
 };
 
 class IfStatement final : public Statement {
 public:
-    IfStatement(SourceRange source_range, NonnullRefPtr<Expression> predicate, NonnullRefPtr<Statement> consequent, RefPtr<Statement> alternate)
+    IfStatement(SourceRange source_range, NonnullRefPtr<Expression const> predicate, NonnullRefPtr<Statement const> consequent, RefPtr<Statement const> alternate)
         : Statement(source_range)
         , m_predicate(move(predicate))
         , m_consequent(move(consequent))
@@ -827,14 +824,14 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    NonnullRefPtr<Expression> m_predicate;
-    NonnullRefPtr<Statement> m_consequent;
-    RefPtr<Statement> m_alternate;
+    NonnullRefPtr<Expression const> m_predicate;
+    NonnullRefPtr<Statement const> m_consequent;
+    RefPtr<Statement const> m_alternate;
 };
 
 class WhileStatement final : public IterationStatement {
 public:
-    WhileStatement(SourceRange source_range, NonnullRefPtr<Expression> test, NonnullRefPtr<Statement> body)
+    WhileStatement(SourceRange source_range, NonnullRefPtr<Expression const> test, NonnullRefPtr<Statement const> body)
         : IterationStatement(source_range)
         , m_test(move(test))
         , m_body(move(body))
@@ -845,19 +842,19 @@ public:
     Statement const& body() const { return *m_body; }
 
     virtual Completion execute(Interpreter&) const override;
-    virtual Completion loop_evaluation(Interpreter&, Vector<FlyString> const&) const override;
+    virtual Completion loop_evaluation(Interpreter&, Vector<DeprecatedFlyString> const&) const override;
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
-    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<FlyString> const&) const override;
+    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<DeprecatedFlyString> const&) const override;
 
 private:
-    NonnullRefPtr<Expression> m_test;
-    NonnullRefPtr<Statement> m_body;
+    NonnullRefPtr<Expression const> m_test;
+    NonnullRefPtr<Statement const> m_body;
 };
 
 class DoWhileStatement final : public IterationStatement {
 public:
-    DoWhileStatement(SourceRange source_range, NonnullRefPtr<Expression> test, NonnullRefPtr<Statement> body)
+    DoWhileStatement(SourceRange source_range, NonnullRefPtr<Expression const> test, NonnullRefPtr<Statement const> body)
         : IterationStatement(source_range)
         , m_test(move(test))
         , m_body(move(body))
@@ -868,19 +865,19 @@ public:
     Statement const& body() const { return *m_body; }
 
     virtual Completion execute(Interpreter&) const override;
-    virtual Completion loop_evaluation(Interpreter&, Vector<FlyString> const&) const override;
+    virtual Completion loop_evaluation(Interpreter&, Vector<DeprecatedFlyString> const&) const override;
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
-    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<FlyString> const&) const override;
+    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<DeprecatedFlyString> const&) const override;
 
 private:
-    NonnullRefPtr<Expression> m_test;
-    NonnullRefPtr<Statement> m_body;
+    NonnullRefPtr<Expression const> m_test;
+    NonnullRefPtr<Statement const> m_body;
 };
 
 class WithStatement final : public Statement {
 public:
-    WithStatement(SourceRange source_range, NonnullRefPtr<Expression> object, NonnullRefPtr<Statement> body)
+    WithStatement(SourceRange source_range, NonnullRefPtr<Expression const> object, NonnullRefPtr<Statement const> body)
         : Statement(source_range)
         , m_object(move(object))
         , m_body(move(body))
@@ -895,13 +892,13 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    NonnullRefPtr<Expression> m_object;
-    NonnullRefPtr<Statement> m_body;
+    NonnullRefPtr<Expression const> m_object;
+    NonnullRefPtr<Statement const> m_body;
 };
 
 class ForStatement final : public IterationStatement {
 public:
-    ForStatement(SourceRange source_range, RefPtr<ASTNode> init, RefPtr<Expression> test, RefPtr<Expression> update, NonnullRefPtr<Statement> body)
+    ForStatement(SourceRange source_range, RefPtr<ASTNode const> init, RefPtr<Expression const> test, RefPtr<Expression const> update, NonnullRefPtr<Statement const> body)
         : IterationStatement(source_range)
         , m_init(move(init))
         , m_test(move(test))
@@ -916,21 +913,23 @@ public:
     Statement const& body() const { return *m_body; }
 
     virtual Completion execute(Interpreter&) const override;
-    virtual Completion loop_evaluation(Interpreter&, Vector<FlyString> const&) const override;
+    virtual Completion loop_evaluation(Interpreter&, Vector<DeprecatedFlyString> const&) const override;
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
-    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<FlyString> const&) const override;
+    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<DeprecatedFlyString> const&) const override;
 
 private:
-    RefPtr<ASTNode> m_init;
-    RefPtr<Expression> m_test;
-    RefPtr<Expression> m_update;
-    NonnullRefPtr<Statement> m_body;
+    Completion for_body_evaluation(Interpreter&, Vector<DeprecatedFlyString> const&, size_t per_iteration_bindings_size) const;
+
+    RefPtr<ASTNode const> m_init;
+    RefPtr<Expression const> m_test;
+    RefPtr<Expression const> m_update;
+    NonnullRefPtr<Statement const> m_body;
 };
 
 class ForInStatement final : public IterationStatement {
 public:
-    ForInStatement(SourceRange source_range, Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> lhs, NonnullRefPtr<Expression> rhs, NonnullRefPtr<Statement> body)
+    ForInStatement(SourceRange source_range, Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> lhs, NonnullRefPtr<Expression const> rhs, NonnullRefPtr<Statement const> body)
         : IterationStatement(source_range)
         , m_lhs(move(lhs))
         , m_rhs(move(rhs))
@@ -944,19 +943,19 @@ public:
 
     virtual Completion execute(Interpreter&) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
-    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<FlyString> const&) const override;
-    virtual Completion loop_evaluation(Interpreter&, Vector<FlyString> const&) const override;
+    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<DeprecatedFlyString> const&) const override;
+    virtual Completion loop_evaluation(Interpreter&, Vector<DeprecatedFlyString> const&) const override;
     virtual void dump(int indent) const override;
 
 private:
-    Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> m_lhs;
-    NonnullRefPtr<Expression> m_rhs;
-    NonnullRefPtr<Statement> m_body;
+    Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> m_lhs;
+    NonnullRefPtr<Expression const> m_rhs;
+    NonnullRefPtr<Statement const> m_body;
 };
 
 class ForOfStatement final : public IterationStatement {
 public:
-    ForOfStatement(SourceRange source_range, Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> lhs, NonnullRefPtr<Expression> rhs, NonnullRefPtr<Statement> body)
+    ForOfStatement(SourceRange source_range, Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> lhs, NonnullRefPtr<Expression const> rhs, NonnullRefPtr<Statement const> body)
         : IterationStatement(source_range)
         , m_lhs(move(lhs))
         , m_rhs(move(rhs))
@@ -970,19 +969,19 @@ public:
 
     virtual Completion execute(Interpreter&) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
-    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<FlyString> const&) const override;
-    virtual Completion loop_evaluation(Interpreter&, Vector<FlyString> const&) const override;
+    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<DeprecatedFlyString> const&) const override;
+    virtual Completion loop_evaluation(Interpreter&, Vector<DeprecatedFlyString> const&) const override;
     virtual void dump(int indent) const override;
 
 private:
-    Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> m_lhs;
-    NonnullRefPtr<Expression> m_rhs;
-    NonnullRefPtr<Statement> m_body;
+    Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> m_lhs;
+    NonnullRefPtr<Expression const> m_rhs;
+    NonnullRefPtr<Statement const> m_body;
 };
 
 class ForAwaitOfStatement final : public IterationStatement {
 public:
-    ForAwaitOfStatement(SourceRange source_range, Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> lhs, NonnullRefPtr<Expression> rhs, NonnullRefPtr<Statement> body)
+    ForAwaitOfStatement(SourceRange source_range, Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> lhs, NonnullRefPtr<Expression const> rhs, NonnullRefPtr<Statement const> body)
         : IterationStatement(source_range)
         , m_lhs(move(lhs))
         , m_rhs(move(rhs))
@@ -991,13 +990,13 @@ public:
     }
 
     virtual Completion execute(Interpreter&) const override;
-    virtual Completion loop_evaluation(Interpreter&, Vector<FlyString> const&) const override;
+    virtual Completion loop_evaluation(Interpreter&, Vector<DeprecatedFlyString> const&) const override;
     virtual void dump(int indent) const override;
 
 private:
-    Variant<NonnullRefPtr<ASTNode>, NonnullRefPtr<BindingPattern>> m_lhs;
-    NonnullRefPtr<Expression> m_rhs;
-    NonnullRefPtr<Statement> m_body;
+    Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> m_lhs;
+    NonnullRefPtr<Expression const> m_rhs;
+    NonnullRefPtr<Statement const> m_body;
 };
 
 enum class BinaryOp {
@@ -1027,7 +1026,7 @@ enum class BinaryOp {
 
 class BinaryExpression final : public Expression {
 public:
-    BinaryExpression(SourceRange source_range, BinaryOp op, NonnullRefPtr<Expression> lhs, NonnullRefPtr<Expression> rhs)
+    BinaryExpression(SourceRange source_range, BinaryOp op, NonnullRefPtr<Expression const> lhs, NonnullRefPtr<Expression const> rhs)
         : Expression(source_range)
         , m_op(op)
         , m_lhs(move(lhs))
@@ -1041,8 +1040,8 @@ public:
 
 private:
     BinaryOp m_op;
-    NonnullRefPtr<Expression> m_lhs;
-    NonnullRefPtr<Expression> m_rhs;
+    NonnullRefPtr<Expression const> m_lhs;
+    NonnullRefPtr<Expression const> m_rhs;
 };
 
 enum class LogicalOp {
@@ -1053,7 +1052,7 @@ enum class LogicalOp {
 
 class LogicalExpression final : public Expression {
 public:
-    LogicalExpression(SourceRange source_range, LogicalOp op, NonnullRefPtr<Expression> lhs, NonnullRefPtr<Expression> rhs)
+    LogicalExpression(SourceRange source_range, LogicalOp op, NonnullRefPtr<Expression const> lhs, NonnullRefPtr<Expression const> rhs)
         : Expression(source_range)
         , m_op(op)
         , m_lhs(move(lhs))
@@ -1067,8 +1066,8 @@ public:
 
 private:
     LogicalOp m_op;
-    NonnullRefPtr<Expression> m_lhs;
-    NonnullRefPtr<Expression> m_rhs;
+    NonnullRefPtr<Expression const> m_lhs;
+    NonnullRefPtr<Expression const> m_rhs;
 };
 
 enum class UnaryOp {
@@ -1083,7 +1082,7 @@ enum class UnaryOp {
 
 class UnaryExpression final : public Expression {
 public:
-    UnaryExpression(SourceRange source_range, UnaryOp op, NonnullRefPtr<Expression> lhs)
+    UnaryExpression(SourceRange source_range, UnaryOp op, NonnullRefPtr<Expression const> lhs)
         : Expression(source_range)
         , m_op(op)
         , m_lhs(move(lhs))
@@ -1096,12 +1095,12 @@ public:
 
 private:
     UnaryOp m_op;
-    NonnullRefPtr<Expression> m_lhs;
+    NonnullRefPtr<Expression const> m_lhs;
 };
 
 class SequenceExpression final : public Expression {
 public:
-    SequenceExpression(SourceRange source_range, NonnullRefPtrVector<Expression> expressions)
+    SequenceExpression(SourceRange source_range, Vector<NonnullRefPtr<Expression const>> expressions)
         : Expression(source_range)
         , m_expressions(move(expressions))
     {
@@ -1113,7 +1112,7 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    NonnullRefPtrVector<Expression> m_expressions;
+    Vector<NonnullRefPtr<Expression const>> m_expressions;
 };
 
 class Literal : public Expression {
@@ -1236,13 +1235,13 @@ private:
 
 class Identifier final : public Expression {
 public:
-    explicit Identifier(SourceRange source_range, FlyString string)
+    explicit Identifier(SourceRange source_range, DeprecatedFlyString string)
         : Expression(source_range)
         , m_string(move(string))
     {
     }
 
-    FlyString const& string() const { return m_string; }
+    DeprecatedFlyString const& string() const { return m_string; }
 
     virtual Completion execute(Interpreter&) const override;
     virtual void dump(int indent) const override;
@@ -1252,19 +1251,19 @@ public:
 private:
     virtual bool is_identifier() const override { return true; }
 
-    FlyString m_string;
+    DeprecatedFlyString m_string;
     mutable EnvironmentCoordinate m_cached_environment_coordinate;
 };
 
 class PrivateIdentifier final : public Expression {
 public:
-    explicit PrivateIdentifier(SourceRange source_range, FlyString string)
+    explicit PrivateIdentifier(SourceRange source_range, DeprecatedFlyString string)
         : Expression(source_range)
         , m_string(move(string))
     {
     }
 
-    FlyString const& string() const { return m_string; }
+    DeprecatedFlyString const& string() const { return m_string; }
 
     virtual Completion execute(Interpreter&) const override;
     virtual void dump(int indent) const override;
@@ -1272,7 +1271,7 @@ public:
     virtual bool is_private_identifier() const override { return true; }
 
 private:
-    FlyString m_string;
+    DeprecatedFlyString m_string;
 };
 
 class ClassElement : public ASTNode {
@@ -1298,7 +1297,7 @@ public:
     using ClassValue = Variant<ClassFieldDefinition, Completion, PrivateElement>;
     virtual ThrowCompletionOr<ClassValue> class_element_evaluation(Interpreter&, Object& home_object) const = 0;
 
-    virtual Optional<FlyString> private_bound_identifier() const { return {}; };
+    virtual Optional<DeprecatedFlyString> private_bound_identifier() const { return {}; };
 
 private:
     bool m_is_static { false };
@@ -1312,7 +1311,7 @@ public:
         Setter,
     };
 
-    ClassMethod(SourceRange source_range, NonnullRefPtr<Expression> key, NonnullRefPtr<FunctionExpression> function, Kind kind, bool is_static)
+    ClassMethod(SourceRange source_range, NonnullRefPtr<Expression const> key, NonnullRefPtr<FunctionExpression const> function, Kind kind, bool is_static)
         : ClassElement(source_range, is_static)
         , m_key(move(key))
         , m_function(move(function))
@@ -1326,18 +1325,18 @@ public:
 
     virtual void dump(int indent) const override;
     virtual ThrowCompletionOr<ClassValue> class_element_evaluation(Interpreter&, Object& home_object) const override;
-    virtual Optional<FlyString> private_bound_identifier() const override;
+    virtual Optional<DeprecatedFlyString> private_bound_identifier() const override;
 
 private:
     virtual bool is_class_method() const override { return true; }
-    NonnullRefPtr<Expression> m_key;
-    NonnullRefPtr<FunctionExpression> m_function;
+    NonnullRefPtr<Expression const> m_key;
+    NonnullRefPtr<FunctionExpression const> m_function;
     Kind m_kind;
 };
 
 class ClassField final : public ClassElement {
 public:
-    ClassField(SourceRange source_range, NonnullRefPtr<Expression> key, RefPtr<Expression> init, bool contains_direct_call_to_eval, bool is_static)
+    ClassField(SourceRange source_range, NonnullRefPtr<Expression const> key, RefPtr<Expression const> init, bool contains_direct_call_to_eval, bool is_static)
         : ClassElement(source_range, is_static)
         , m_key(move(key))
         , m_initializer(move(init))
@@ -1346,18 +1345,18 @@ public:
     }
 
     Expression const& key() const { return *m_key; }
-    RefPtr<Expression> const& initializer() const { return m_initializer; }
-    RefPtr<Expression>& initializer() { return m_initializer; }
+    RefPtr<Expression const> const& initializer() const { return m_initializer; }
+    RefPtr<Expression const>& initializer() { return m_initializer; }
 
     virtual ElementKind class_element_kind() const override { return ElementKind::Field; }
 
     virtual void dump(int indent) const override;
     virtual ThrowCompletionOr<ClassValue> class_element_evaluation(Interpreter&, Object& home_object) const override;
-    virtual Optional<FlyString> private_bound_identifier() const override;
+    virtual Optional<DeprecatedFlyString> private_bound_identifier() const override;
 
 private:
-    NonnullRefPtr<Expression> m_key;
-    RefPtr<Expression> m_initializer;
+    NonnullRefPtr<Expression const> m_key;
+    RefPtr<Expression const> m_initializer;
     bool m_contains_direct_call_to_eval { false };
 };
 
@@ -1395,7 +1394,7 @@ public:
 
 class ClassExpression final : public Expression {
 public:
-    ClassExpression(SourceRange source_range, DeprecatedString name, DeprecatedString source_text, RefPtr<FunctionExpression> constructor, RefPtr<Expression> super_class, NonnullRefPtrVector<ClassElement> elements)
+    ClassExpression(SourceRange source_range, DeprecatedString name, DeprecatedString source_text, RefPtr<FunctionExpression const> constructor, RefPtr<Expression const> super_class, Vector<NonnullRefPtr<ClassElement const>> elements)
         : Expression(source_range)
         , m_name(move(name))
         , m_source_text(move(source_text))
@@ -1407,7 +1406,7 @@ public:
 
     StringView name() const { return m_name; }
     DeprecatedString const& source_text() const { return m_source_text; }
-    RefPtr<FunctionExpression> constructor() const { return m_constructor; }
+    RefPtr<FunctionExpression const> constructor() const { return m_constructor; }
 
     virtual Completion execute(Interpreter&) const override;
     virtual void dump(int indent) const override;
@@ -1415,21 +1414,21 @@ public:
 
     bool has_name() const { return !m_name.is_empty(); }
 
-    ThrowCompletionOr<ECMAScriptFunctionObject*> class_definition_evaluation(Interpreter&, FlyString const& binding_name = {}, FlyString const& class_name = {}) const;
+    ThrowCompletionOr<ECMAScriptFunctionObject*> class_definition_evaluation(Interpreter&, DeprecatedFlyString const& binding_name = {}, DeprecatedFlyString const& class_name = {}) const;
 
 private:
     virtual bool is_class_expression() const override { return true; }
 
     DeprecatedString m_name;
     DeprecatedString m_source_text;
-    RefPtr<FunctionExpression> m_constructor;
-    RefPtr<Expression> m_super_class;
-    NonnullRefPtrVector<ClassElement> m_elements;
+    RefPtr<FunctionExpression const> m_constructor;
+    RefPtr<Expression const> m_super_class;
+    Vector<NonnullRefPtr<ClassElement const>> m_elements;
 };
 
 class ClassDeclaration final : public Declaration {
 public:
-    ClassDeclaration(SourceRange source_range, NonnullRefPtr<ClassExpression> class_expression)
+    ClassDeclaration(SourceRange source_range, NonnullRefPtr<ClassExpression const> class_expression)
         : Declaration(source_range)
         , m_class_expression(move(class_expression))
     {
@@ -1439,7 +1438,7 @@ public:
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
-    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const override;
+    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&& callback) const override;
 
     virtual bool is_lexical_declaration() const override { return true; }
 
@@ -1450,12 +1449,12 @@ private:
 
     friend ExportStatement;
 
-    NonnullRefPtr<ClassExpression> m_class_expression;
+    NonnullRefPtr<ClassExpression const> m_class_expression;
 };
 
 class SpreadExpression final : public Expression {
 public:
-    explicit SpreadExpression(SourceRange source_range, NonnullRefPtr<Expression> target)
+    explicit SpreadExpression(SourceRange source_range, NonnullRefPtr<Expression const> target)
         : Expression(source_range)
         , m_target(move(target))
     {
@@ -1466,7 +1465,7 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    NonnullRefPtr<Expression> m_target;
+    NonnullRefPtr<Expression const> m_target;
 };
 
 class ThisExpression final : public Expression {
@@ -1481,7 +1480,7 @@ public:
 };
 
 struct CallExpressionArgument {
-    NonnullRefPtr<Expression> value;
+    NonnullRefPtr<Expression const> value;
     bool is_spread;
 };
 
@@ -1491,7 +1490,7 @@ class CallExpression : public ASTNodeWithTailArray<CallExpression, Expression, C
 public:
     using Argument = CallExpressionArgument;
 
-    static NonnullRefPtr<CallExpression> create(SourceRange, NonnullRefPtr<Expression> callee, Span<Argument const> arguments);
+    static NonnullRefPtr<CallExpression> create(SourceRange, NonnullRefPtr<Expression const> callee, ReadonlySpan<Argument> arguments);
 
     virtual Completion execute(Interpreter&) const override;
     virtual void dump(int indent) const override;
@@ -1499,10 +1498,10 @@ public:
 
     Expression const& callee() const { return m_callee; }
 
-    Span<Argument const> arguments() const { return tail_span(); }
+    ReadonlySpan<Argument> arguments() const { return tail_span(); }
 
 protected:
-    CallExpression(SourceRange source_range, NonnullRefPtr<Expression> callee, Span<Argument const> arguments)
+    CallExpression(SourceRange source_range, NonnullRefPtr<Expression const> callee, ReadonlySpan<Argument> arguments)
         : ASTNodeWithTailArray(move(source_range), arguments)
         , m_callee(move(callee))
     {
@@ -1521,21 +1520,21 @@ protected:
     Completion throw_type_error_for_callee(Interpreter&, Value callee_value, StringView call_type) const;
     Optional<DeprecatedString> expression_string() const;
 
-    NonnullRefPtr<Expression> m_callee;
+    NonnullRefPtr<Expression const> m_callee;
 };
 
 class NewExpression final : public CallExpression {
     friend class ASTNodeWithTailArray;
 
 public:
-    static NonnullRefPtr<NewExpression> create(SourceRange, NonnullRefPtr<Expression> callee, Span<Argument const> arguments);
+    static NonnullRefPtr<NewExpression> create(SourceRange, NonnullRefPtr<Expression const> callee, ReadonlySpan<Argument> arguments);
 
     virtual Completion execute(Interpreter&) const override;
 
     virtual bool is_new_expression() const override { return true; }
 
 private:
-    NewExpression(SourceRange source_range, NonnullRefPtr<Expression> callee, Span<Argument const> arguments)
+    NewExpression(SourceRange source_range, NonnullRefPtr<Expression const> callee, ReadonlySpan<Argument> arguments)
         : CallExpression(move(source_range), move(callee), arguments)
     {
     }
@@ -1597,7 +1596,7 @@ enum class AssignmentOp {
 
 class AssignmentExpression final : public Expression {
 public:
-    AssignmentExpression(SourceRange source_range, AssignmentOp op, NonnullRefPtr<Expression> lhs, NonnullRefPtr<Expression> rhs)
+    AssignmentExpression(SourceRange source_range, AssignmentOp op, NonnullRefPtr<Expression const> lhs, NonnullRefPtr<Expression const> rhs)
         : Expression(source_range)
         , m_op(op)
         , m_lhs(move(lhs))
@@ -1605,7 +1604,7 @@ public:
     {
     }
 
-    AssignmentExpression(SourceRange source_range, AssignmentOp op, NonnullRefPtr<BindingPattern> lhs, NonnullRefPtr<Expression> rhs)
+    AssignmentExpression(SourceRange source_range, AssignmentOp op, NonnullRefPtr<BindingPattern const> lhs, NonnullRefPtr<Expression const> rhs)
         : Expression(source_range)
         , m_op(op)
         , m_lhs(move(lhs))
@@ -1619,8 +1618,8 @@ public:
 
 private:
     AssignmentOp m_op;
-    Variant<NonnullRefPtr<Expression>, NonnullRefPtr<BindingPattern>> m_lhs;
-    NonnullRefPtr<Expression> m_rhs;
+    Variant<NonnullRefPtr<Expression const>, NonnullRefPtr<BindingPattern const>> m_lhs;
+    NonnullRefPtr<Expression const> m_rhs;
 };
 
 enum class UpdateOp {
@@ -1630,7 +1629,7 @@ enum class UpdateOp {
 
 class UpdateExpression final : public Expression {
 public:
-    UpdateExpression(SourceRange source_range, UpdateOp op, NonnullRefPtr<Expression> argument, bool prefixed = false)
+    UpdateExpression(SourceRange source_range, UpdateOp op, NonnullRefPtr<Expression const> argument, bool prefixed = false)
         : Expression(source_range)
         , m_op(op)
         , m_argument(move(argument))
@@ -1646,7 +1645,7 @@ private:
     virtual bool is_update_expression() const override { return true; }
 
     UpdateOp m_op;
-    NonnullRefPtr<Expression> m_argument;
+    NonnullRefPtr<Expression const> m_argument;
     bool m_prefixed;
 };
 
@@ -1658,20 +1657,20 @@ enum class DeclarationKind {
 
 class VariableDeclarator final : public ASTNode {
 public:
-    VariableDeclarator(SourceRange source_range, NonnullRefPtr<Identifier> id)
+    VariableDeclarator(SourceRange source_range, NonnullRefPtr<Identifier const> id)
         : ASTNode(source_range)
         , m_target(move(id))
     {
     }
 
-    VariableDeclarator(SourceRange source_range, NonnullRefPtr<Identifier> target, RefPtr<Expression> init)
+    VariableDeclarator(SourceRange source_range, NonnullRefPtr<Identifier const> target, RefPtr<Expression const> init)
         : ASTNode(source_range)
         , m_target(move(target))
         , m_init(move(init))
     {
     }
 
-    VariableDeclarator(SourceRange source_range, Variant<NonnullRefPtr<Identifier>, NonnullRefPtr<BindingPattern>> target, RefPtr<Expression> init)
+    VariableDeclarator(SourceRange source_range, Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>> target, RefPtr<Expression const> init)
         : ASTNode(source_range)
         , m_target(move(target))
         , m_init(move(init))
@@ -1685,13 +1684,13 @@ public:
     virtual void dump(int indent) const override;
 
 private:
-    Variant<NonnullRefPtr<Identifier>, NonnullRefPtr<BindingPattern>> m_target;
-    RefPtr<Expression> m_init;
+    Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>> m_target;
+    RefPtr<Expression const> m_init;
 };
 
 class VariableDeclaration final : public Declaration {
 public:
-    VariableDeclaration(SourceRange source_range, DeclarationKind declaration_kind, NonnullRefPtrVector<VariableDeclarator> declarations)
+    VariableDeclaration(SourceRange source_range, DeclarationKind declaration_kind, Vector<NonnullRefPtr<VariableDeclarator const>> declarations)
         : Declaration(source_range)
         , m_declaration_kind(declaration_kind)
         , m_declarations(move(declarations))
@@ -1704,9 +1703,9 @@ public:
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
-    NonnullRefPtrVector<VariableDeclarator> const& declarations() const { return m_declarations; }
+    Vector<NonnullRefPtr<VariableDeclarator const>> const& declarations() const { return m_declarations; }
 
-    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<FlyString const&>&& callback) const override;
+    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&& callback) const override;
 
     virtual bool is_constant_declaration() const override { return m_declaration_kind == DeclarationKind::Const; };
 
@@ -1716,7 +1715,30 @@ private:
     virtual bool is_variable_declaration() const override { return true; }
 
     DeclarationKind m_declaration_kind;
-    NonnullRefPtrVector<VariableDeclarator> m_declarations;
+    Vector<NonnullRefPtr<VariableDeclarator const>> m_declarations;
+};
+
+class UsingDeclaration final : public Declaration {
+public:
+    UsingDeclaration(SourceRange source_range, Vector<NonnullRefPtr<VariableDeclarator const>> declarations)
+        : Declaration(move(source_range))
+        , m_declarations(move(declarations))
+    {
+    }
+
+    virtual Completion execute(Interpreter&) const override;
+    virtual void dump(int indent) const override;
+
+    virtual ThrowCompletionOr<void> for_each_bound_name(ThrowCompletionOrVoidCallback<DeprecatedFlyString const&>&& callback) const override;
+
+    virtual bool is_constant_declaration() const override { return true; };
+
+    virtual bool is_lexical_declaration() const override { return true; }
+
+    Vector<NonnullRefPtr<VariableDeclarator const>> const& declarations() const { return m_declarations; }
+
+private:
+    Vector<NonnullRefPtr<VariableDeclarator const>> m_declarations;
 };
 
 class ObjectProperty final : public ASTNode {
@@ -1729,7 +1751,7 @@ public:
         ProtoSetter,
     };
 
-    ObjectProperty(SourceRange source_range, NonnullRefPtr<Expression> key, RefPtr<Expression> value, Type property_type, bool is_method)
+    ObjectProperty(SourceRange source_range, NonnullRefPtr<Expression const> key, RefPtr<Expression const> value, Type property_type, bool is_method)
         : ASTNode(source_range)
         , m_property_type(property_type)
         , m_is_method(is_method)
@@ -1754,13 +1776,13 @@ public:
 private:
     Type m_property_type;
     bool m_is_method { false };
-    NonnullRefPtr<Expression> m_key;
-    RefPtr<Expression> m_value;
+    NonnullRefPtr<Expression const> m_key;
+    RefPtr<Expression const> m_value;
 };
 
 class ObjectExpression final : public Expression {
 public:
-    explicit ObjectExpression(SourceRange source_range, NonnullRefPtrVector<ObjectProperty> properties = {})
+    explicit ObjectExpression(SourceRange source_range, Vector<NonnullRefPtr<ObjectProperty>> properties = {})
         : Expression(source_range)
         , m_properties(move(properties))
     {
@@ -1773,18 +1795,18 @@ public:
 private:
     virtual bool is_object_expression() const override { return true; }
 
-    NonnullRefPtrVector<ObjectProperty> m_properties;
+    Vector<NonnullRefPtr<ObjectProperty>> m_properties;
 };
 
 class ArrayExpression final : public Expression {
 public:
-    ArrayExpression(SourceRange source_range, Vector<RefPtr<Expression>> elements)
+    ArrayExpression(SourceRange source_range, Vector<RefPtr<Expression const>> elements)
         : Expression(source_range)
         , m_elements(move(elements))
     {
     }
 
-    Vector<RefPtr<Expression>> const& elements() const { return m_elements; }
+    Vector<RefPtr<Expression const>> const& elements() const { return m_elements; }
 
     virtual Completion execute(Interpreter&) const override;
     virtual void dump(int indent) const override;
@@ -1793,18 +1815,18 @@ public:
 private:
     virtual bool is_array_expression() const override { return true; }
 
-    Vector<RefPtr<Expression>> m_elements;
+    Vector<RefPtr<Expression const>> m_elements;
 };
 
 class TemplateLiteral final : public Expression {
 public:
-    TemplateLiteral(SourceRange source_range, NonnullRefPtrVector<Expression> expressions)
+    TemplateLiteral(SourceRange source_range, Vector<NonnullRefPtr<Expression const>> expressions)
         : Expression(source_range)
         , m_expressions(move(expressions))
     {
     }
 
-    TemplateLiteral(SourceRange source_range, NonnullRefPtrVector<Expression> expressions, NonnullRefPtrVector<Expression> raw_strings)
+    TemplateLiteral(SourceRange source_range, Vector<NonnullRefPtr<Expression const>> expressions, Vector<NonnullRefPtr<Expression const>> raw_strings)
         : Expression(source_range)
         , m_expressions(move(expressions))
         , m_raw_strings(move(raw_strings))
@@ -1815,17 +1837,17 @@ public:
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
-    NonnullRefPtrVector<Expression> const& expressions() const { return m_expressions; }
-    NonnullRefPtrVector<Expression> const& raw_strings() const { return m_raw_strings; }
+    Vector<NonnullRefPtr<Expression const>> const& expressions() const { return m_expressions; }
+    Vector<NonnullRefPtr<Expression const>> const& raw_strings() const { return m_raw_strings; }
 
 private:
-    NonnullRefPtrVector<Expression> const m_expressions;
-    NonnullRefPtrVector<Expression> const m_raw_strings;
+    Vector<NonnullRefPtr<Expression const>> const m_expressions;
+    Vector<NonnullRefPtr<Expression const>> const m_raw_strings;
 };
 
 class TaggedTemplateLiteral final : public Expression {
 public:
-    TaggedTemplateLiteral(SourceRange source_range, NonnullRefPtr<Expression> tag, NonnullRefPtr<TemplateLiteral> template_literal)
+    TaggedTemplateLiteral(SourceRange source_range, NonnullRefPtr<Expression const> tag, NonnullRefPtr<TemplateLiteral const> template_literal)
         : Expression(source_range)
         , m_tag(move(tag))
         , m_template_literal(move(template_literal))
@@ -1839,14 +1861,14 @@ public:
     ThrowCompletionOr<Value> get_template_object(Interpreter&) const;
 
 private:
-    NonnullRefPtr<Expression> const m_tag;
-    NonnullRefPtr<TemplateLiteral> const m_template_literal;
-    mutable HashMap<Realm*, Handle<Array>> m_cached_values;
+    NonnullRefPtr<Expression const> const m_tag;
+    NonnullRefPtr<TemplateLiteral const> const m_template_literal;
+    mutable HashMap<GCPtr<Realm>, Handle<Array>> m_cached_values;
 };
 
 class MemberExpression final : public Expression {
 public:
-    MemberExpression(SourceRange source_range, NonnullRefPtr<Expression> object, NonnullRefPtr<Expression> property, bool computed = false)
+    MemberExpression(SourceRange source_range, NonnullRefPtr<Expression const> object, NonnullRefPtr<Expression const> property, bool computed = false)
         : Expression(source_range)
         , m_computed(computed)
         , m_object(move(object))
@@ -1871,8 +1893,8 @@ private:
     virtual bool is_member_expression() const override { return true; }
 
     bool m_computed { false };
-    NonnullRefPtr<Expression> m_object;
-    NonnullRefPtr<Expression> m_property;
+    NonnullRefPtr<Expression const> m_object;
+    NonnullRefPtr<Expression const> m_property;
 };
 
 class OptionalChain final : public Expression {
@@ -1887,21 +1909,21 @@ public:
         Mode mode;
     };
     struct ComputedReference {
-        NonnullRefPtr<Expression> expression;
+        NonnullRefPtr<Expression const> expression;
         Mode mode;
     };
     struct MemberReference {
-        NonnullRefPtr<Identifier> identifier;
+        NonnullRefPtr<Identifier const> identifier;
         Mode mode;
     };
     struct PrivateMemberReference {
-        NonnullRefPtr<PrivateIdentifier> private_identifier;
+        NonnullRefPtr<PrivateIdentifier const> private_identifier;
         Mode mode;
     };
 
     using Reference = Variant<Call, ComputedReference, MemberReference, PrivateMemberReference>;
 
-    OptionalChain(SourceRange source_range, NonnullRefPtr<Expression> base, Vector<Reference> references)
+    OptionalChain(SourceRange source_range, NonnullRefPtr<Expression const> base, Vector<Reference> references)
         : Expression(source_range)
         , m_base(move(base))
         , m_references(move(references))
@@ -1919,7 +1941,7 @@ private:
     };
     ThrowCompletionOr<ReferenceAndValue> to_reference_and_value(Interpreter&) const;
 
-    NonnullRefPtr<Expression> m_base;
+    NonnullRefPtr<Expression const> m_base;
     Vector<Reference> m_references;
 };
 
@@ -1946,7 +1968,7 @@ private:
 
 class ImportCall final : public Expression {
 public:
-    ImportCall(SourceRange source_range, NonnullRefPtr<Expression> specifier, RefPtr<Expression> options)
+    ImportCall(SourceRange source_range, NonnullRefPtr<Expression const> specifier, RefPtr<Expression const> options)
         : Expression(source_range)
         , m_specifier(move(specifier))
         , m_options(move(options))
@@ -1959,13 +1981,13 @@ public:
 private:
     virtual bool is_import_call() const override { return true; }
 
-    NonnullRefPtr<Expression> m_specifier;
-    RefPtr<Expression> m_options;
+    NonnullRefPtr<Expression const> m_specifier;
+    RefPtr<Expression const> m_options;
 };
 
 class ConditionalExpression final : public Expression {
 public:
-    ConditionalExpression(SourceRange source_range, NonnullRefPtr<Expression> test, NonnullRefPtr<Expression> consequent, NonnullRefPtr<Expression> alternate)
+    ConditionalExpression(SourceRange source_range, NonnullRefPtr<Expression const> test, NonnullRefPtr<Expression const> consequent, NonnullRefPtr<Expression const> alternate)
         : Expression(source_range)
         , m_test(move(test))
         , m_consequent(move(consequent))
@@ -1978,21 +2000,21 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    NonnullRefPtr<Expression> m_test;
-    NonnullRefPtr<Expression> m_consequent;
-    NonnullRefPtr<Expression> m_alternate;
+    NonnullRefPtr<Expression const> m_test;
+    NonnullRefPtr<Expression const> m_consequent;
+    NonnullRefPtr<Expression const> m_alternate;
 };
 
 class CatchClause final : public ASTNode {
 public:
-    CatchClause(SourceRange source_range, FlyString parameter, NonnullRefPtr<BlockStatement> body)
+    CatchClause(SourceRange source_range, DeprecatedFlyString parameter, NonnullRefPtr<BlockStatement const> body)
         : ASTNode(source_range)
         , m_parameter(move(parameter))
         , m_body(move(body))
     {
     }
 
-    CatchClause(SourceRange source_range, NonnullRefPtr<BindingPattern> parameter, NonnullRefPtr<BlockStatement> body)
+    CatchClause(SourceRange source_range, NonnullRefPtr<BindingPattern const> parameter, NonnullRefPtr<BlockStatement const> body)
         : ASTNode(source_range)
         , m_parameter(move(parameter))
         , m_body(move(body))
@@ -2006,13 +2028,13 @@ public:
     virtual Completion execute(Interpreter&) const override;
 
 private:
-    Variant<FlyString, NonnullRefPtr<BindingPattern>> m_parameter;
-    NonnullRefPtr<BlockStatement> m_body;
+    Variant<DeprecatedFlyString, NonnullRefPtr<BindingPattern const>> m_parameter;
+    NonnullRefPtr<BlockStatement const> m_body;
 };
 
 class TryStatement final : public Statement {
 public:
-    TryStatement(SourceRange source_range, NonnullRefPtr<BlockStatement> block, RefPtr<CatchClause> handler, RefPtr<BlockStatement> finalizer)
+    TryStatement(SourceRange source_range, NonnullRefPtr<BlockStatement const> block, RefPtr<CatchClause const> handler, RefPtr<BlockStatement const> finalizer)
         : Statement(source_range)
         , m_block(move(block))
         , m_handler(move(handler))
@@ -2029,14 +2051,14 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    NonnullRefPtr<BlockStatement> m_block;
-    RefPtr<CatchClause> m_handler;
-    RefPtr<BlockStatement> m_finalizer;
+    NonnullRefPtr<BlockStatement const> m_block;
+    RefPtr<CatchClause const> m_handler;
+    RefPtr<BlockStatement const> m_finalizer;
 };
 
 class ThrowStatement final : public Statement {
 public:
-    explicit ThrowStatement(SourceRange source_range, NonnullRefPtr<Expression> argument)
+    explicit ThrowStatement(SourceRange source_range, NonnullRefPtr<Expression const> argument)
         : Statement(source_range)
         , m_argument(move(argument))
     {
@@ -2049,12 +2071,12 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    NonnullRefPtr<Expression> m_argument;
+    NonnullRefPtr<Expression const> m_argument;
 };
 
 class SwitchCase final : public ScopeNode {
 public:
-    SwitchCase(SourceRange source_range, RefPtr<Expression> test)
+    SwitchCase(SourceRange source_range, RefPtr<Expression const> test)
         : ScopeNode(source_range)
         , m_test(move(test))
     {
@@ -2066,12 +2088,12 @@ public:
     virtual Completion execute(Interpreter&) const override;
 
 private:
-    RefPtr<Expression> m_test;
+    RefPtr<Expression const> m_test;
 };
 
 class SwitchStatement final : public ScopeNode {
 public:
-    SwitchStatement(SourceRange source_range, NonnullRefPtr<Expression> discriminant)
+    SwitchStatement(SourceRange source_range, NonnullRefPtr<Expression const> discriminant)
         : ScopeNode(source_range)
         , m_discriminant(move(discriminant))
     {
@@ -2080,19 +2102,19 @@ public:
     virtual void dump(int indent) const override;
     virtual Completion execute(Interpreter&) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
-    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<FlyString> const&) const;
+    virtual Bytecode::CodeGenerationErrorOr<void> generate_labelled_evaluation(Bytecode::Generator&, Vector<DeprecatedFlyString> const&) const;
 
     Completion execute_impl(Interpreter&) const;
-    void add_case(NonnullRefPtr<SwitchCase> switch_case) { m_cases.append(move(switch_case)); }
+    void add_case(NonnullRefPtr<SwitchCase const> switch_case) { m_cases.append(move(switch_case)); }
 
 private:
-    NonnullRefPtr<Expression> m_discriminant;
-    NonnullRefPtrVector<SwitchCase> m_cases;
+    NonnullRefPtr<Expression const> m_discriminant;
+    Vector<NonnullRefPtr<SwitchCase const>> m_cases;
 };
 
 class BreakStatement final : public Statement {
 public:
-    BreakStatement(SourceRange source_range, FlyString target_label)
+    BreakStatement(SourceRange source_range, DeprecatedFlyString target_label)
         : Statement(source_range)
         , m_target_label(move(target_label))
     {
@@ -2100,16 +2122,16 @@ public:
 
     virtual Completion execute(Interpreter&) const override;
 
-    FlyString const& target_label() const { return m_target_label; }
+    DeprecatedFlyString const& target_label() const { return m_target_label; }
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
 private:
-    FlyString m_target_label;
+    DeprecatedFlyString m_target_label;
 };
 
 class ContinueStatement final : public Statement {
 public:
-    ContinueStatement(SourceRange source_range, FlyString target_label)
+    ContinueStatement(SourceRange source_range, DeprecatedFlyString target_label)
         : Statement(source_range)
         , m_target_label(move(target_label))
     {
@@ -2118,10 +2140,10 @@ public:
     virtual Completion execute(Interpreter&) const override;
     virtual Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&) const override;
 
-    FlyString const& target_label() const { return m_target_label; }
+    DeprecatedFlyString const& target_label() const { return m_target_label; }
 
 private:
-    FlyString m_target_label;
+    DeprecatedFlyString m_target_label;
 };
 
 class DebuggerStatement final : public Statement {

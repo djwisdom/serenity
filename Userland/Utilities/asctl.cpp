@@ -11,7 +11,6 @@
 #include <LibAudio/ConnectionToServer.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/EventLoop.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <math.h>
@@ -31,7 +30,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto audio_client = TRY(Audio::ConnectionToServer::try_create());
     audio_client->async_pause_playback();
 
-    DeprecatedString command = DeprecatedString::empty();
+    StringView command;
     Vector<StringView> command_arguments;
     bool human_mode = false;
 
@@ -45,7 +44,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil(nullptr, nullptr));
     TRY(Core::System::pledge("stdio rpath wpath recvfd thread"));
 
-    if (command.equals_ignoring_case("get"sv) || command == "g") {
+    if (command.equals_ignoring_ascii_case("get"sv) || command == "g") {
         // Get variables
         Vector<AudioVariable> values_to_print;
         if (command_arguments.is_empty()) {
@@ -70,7 +69,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         for (auto to_print : values_to_print) {
             switch (to_print) {
             case AudioVariable::Volume: {
-                auto volume = static_cast<int>(round(audio_client->get_main_mix_volume() * 100));
+                auto volume = lround(audio_client->get_main_mix_volume() * 100);
                 if (human_mode)
                     outln("Volume: {}%", volume);
                 else
@@ -97,7 +96,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
         if (!human_mode)
             outln();
-    } else if (command.equals_ignoring_case("set"sv) || command == "s") {
+    } else if (command.equals_ignoring_ascii_case("set"sv) || command == "s") {
         // Set variables
         HashMap<AudioVariable, Variant<int, bool>> values_to_set;
         for (size_t i = 0; i < command_arguments.size(); ++i) {
@@ -120,9 +119,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             } else if (variable.is_one_of("m"sv, "mute"sv)) {
                 auto& mute_text = command_arguments[++i];
                 bool mute;
-                if (mute_text.equals_ignoring_case("true"sv) || mute_text == "1") {
+                if (mute_text.equals_ignoring_ascii_case("true"sv) || mute_text == "1") {
                     mute = true;
-                } else if (mute_text.equals_ignoring_case("false"sv) || mute_text == "0") {
+                } else if (mute_text.equals_ignoring_ascii_case("false"sv) || mute_text == "0") {
                     mute = false;
                 } else {
                     warnln("Error: {} is not one of {{0, 1, true, false}}", mute_text);

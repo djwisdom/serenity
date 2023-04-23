@@ -94,7 +94,7 @@ public:
 
     void set_font_and_resize_to_fit(Gfx::Font const&);
 
-    void set_color_scheme(StringView);
+    void update_color_scheme();
 
     void set_logical_focus(bool);
 
@@ -161,6 +161,8 @@ private:
     VT::Position next_position_after(const VT::Position&, bool should_wrap) const;
     VT::Position previous_position_before(const VT::Position&, bool should_wrap) const;
 
+    void update_cached_font_metrics();
+
     VT::Terminal m_terminal;
 
     VT::Range m_selection;
@@ -174,7 +176,7 @@ private:
     // Snapshot of m_hovered_href when opening a context menu for a hyperlink.
     DeprecatedString m_context_menu_href;
 
-    unsigned m_colors[256];
+    Gfx::Color m_colors[256];
     Gfx::Color m_default_foreground_color;
     Gfx::Color m_default_background_color;
     bool m_show_bold_text_as_bright { true };
@@ -191,6 +193,8 @@ private:
     int m_inset { 2 };
     int m_line_spacing { 4 };
     int m_line_height { 0 };
+    int m_cell_height { 0 };
+    int m_column_width { 0 };
 
     int m_ptm_fd { -1 };
 

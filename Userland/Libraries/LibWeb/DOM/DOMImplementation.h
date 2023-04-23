@@ -17,7 +17,7 @@ class DOMImplementation final : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(DOMImplementation, Bindings::PlatformObject);
 
 public:
-    static JS::NonnullGCPtr<DOMImplementation> create(Document&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOMImplementation>> create(Document&);
     virtual ~DOMImplementation();
 
     WebIDL::ExceptionOr<JS::NonnullGCPtr<Document>> create_document(DeprecatedString const&, DeprecatedString const&, JS::GCPtr<DocumentType>) const;
@@ -30,12 +30,13 @@ public:
 private:
     explicit DOMImplementation(Document&);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     Document& document() { return m_document; }
     Document const& document() const { return m_document; }
 
-    Document& m_document;
+    JS::NonnullGCPtr<Document> m_document;
 };
 
 }

@@ -9,8 +9,8 @@
 #include <AK/Platform.h>
 #include <AK/Types.h>
 
-#if ARCH(X86_64) || ARCH(I386)
-#    include <Kernel/Arch/x86/Interrupts.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/Interrupts.h>
 #endif
 
 namespace Kernel {

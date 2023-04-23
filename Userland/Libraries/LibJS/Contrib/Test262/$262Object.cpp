@@ -24,12 +24,12 @@ $262Object::$262Object(Realm& realm)
 {
 }
 
-void $262Object::initialize(Realm& realm)
+ThrowCompletionOr<void> $262Object::initialize(Realm& realm)
 {
-    Base::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
-    m_agent = vm().heap().allocate<AgentObject>(realm, realm);
-    m_is_htmldda = vm().heap().allocate<IsHTMLDDA>(realm, realm);
+    m_agent = MUST_OR_THROW_OOM(vm().heap().allocate<AgentObject>(realm, realm));
+    m_is_htmldda = MUST_OR_THROW_OOM(vm().heap().allocate<IsHTMLDDA>(realm, realm));
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, "clearKeptObjects", clear_kept_objects, 0, attr);
@@ -41,6 +41,8 @@ void $262Object::initialize(Realm& realm)
     define_direct_property("gc", realm.global_object().get_without_side_effects("gc"), attr);
     define_direct_property("global", &realm.global_object(), attr);
     define_direct_property("IsHTMLDDA", m_is_htmldda, attr);
+
+    return {};
 }
 
 void $262Object::visit_edges(Cell::Visitor& visitor)
@@ -58,12 +60,12 @@ JS_DEFINE_NATIVE_FUNCTION($262Object::clear_kept_objects)
 
 JS_DEFINE_NATIVE_FUNCTION($262Object::create_realm)
 {
-    auto realm = Realm::create(vm);
+    auto realm = MUST_OR_THROW_OOM(Realm::create(vm));
     auto realm_global_object = vm.heap().allocate_without_realm<GlobalObject>(*realm);
     VERIFY(realm_global_object);
     realm->set_global_object(realm_global_object, nullptr);
     set_default_global_bindings(*realm);
-    realm_global_object->initialize(*realm);
+    MUST_OR_THROW_OOM(realm_global_object->initialize(*realm));
     return Value(realm_global_object->$262());
 }
 
@@ -80,7 +82,7 @@ JS_DEFINE_NATIVE_FUNCTION($262Object::detach_array_buffer)
 
 JS_DEFINE_NATIVE_FUNCTION($262Object::eval_script)
 {
-    auto source_text = TRY(vm.argument(0).to_string(vm));
+    auto source_text = TRY(vm.argument(0).to_deprecated_string(vm));
 
     // 1. Let hostDefined be any host-defined values for the provided sourceText (obtained in an implementation dependent manner)
 
@@ -96,7 +98,7 @@ JS_DEFINE_NATIVE_FUNCTION($262Object::eval_script)
         auto& error = script_or_error.error()[0];
 
         // b. Return Completion { [[Type]]: throw, [[Value]]: error, [[Target]]: empty }.
-        return vm.throw_completion<SyntaxError>(error.to_deprecated_string());
+        return vm.throw_completion<SyntaxError>(TRY_OR_THROW_OOM(vm, error.to_string()));
     }
 
     // 5. Let status be ScriptEvaluation(s).

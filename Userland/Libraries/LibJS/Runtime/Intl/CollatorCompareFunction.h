@@ -16,7 +16,7 @@ class CollatorCompareFunction : public NativeFunction {
 public:
     static NonnullGCPtr<CollatorCompareFunction> create(Realm&, Collator&);
 
-    virtual void initialize(Realm&) override;
+    virtual ThrowCompletionOr<void> initialize(Realm&) override;
     virtual ~CollatorCompareFunction() override = default;
 
     virtual ThrowCompletionOr<Value> call() override;
@@ -26,7 +26,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    Collator& m_collator; // [[Collator]]
+    NonnullGCPtr<Collator> m_collator; // [[Collator]]
 };
 
 double compare_strings(Collator&, Utf8View const& x, Utf8View const& y);

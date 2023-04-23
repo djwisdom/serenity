@@ -14,21 +14,23 @@
 namespace JS {
 
 MapConstructor::MapConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.Map.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.Map.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void MapConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> MapConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     // 24.1.2.1 Map.prototype, https://tc39.es/ecma262/#sec-map.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().map_prototype(), 0);
 
-    define_native_accessor(realm, *vm.well_known_symbol_species(), symbol_species_getter, {}, Attribute::Configurable);
+    define_native_accessor(realm, vm.well_known_symbol_species(), symbol_species_getter, {}, Attribute::Configurable);
 
     define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
+
+    return {};
 }
 
 // 24.1.1.1 Map ( [ iterable ] ), https://tc39.es/ecma262/#sec-map-iterable
@@ -54,7 +56,7 @@ ThrowCompletionOr<NonnullGCPtr<Object>> MapConstructor::construct(FunctionObject
 
     (void)TRY(get_iterator_values(vm, vm.argument(0), [&](Value iterator_value) -> Optional<Completion> {
         if (!iterator_value.is_object())
-            return vm.throw_completion<TypeError>(ErrorType::NotAnObject, DeprecatedString::formatted("Iterator value {}", iterator_value.to_string_without_side_effects()));
+            return vm.throw_completion<TypeError>(ErrorType::NotAnObject, DeprecatedString::formatted("Iterator value {}", TRY_OR_THROW_OOM(vm, iterator_value.to_string_without_side_effects())));
 
         auto key = TRY(iterator_value.as_object().get(0));
         auto value = TRY(iterator_value.as_object().get(1));

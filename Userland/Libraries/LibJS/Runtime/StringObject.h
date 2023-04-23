@@ -14,9 +14,9 @@ class StringObject : public Object {
     JS_OBJECT(StringObject, Object);
 
 public:
-    static NonnullGCPtr<StringObject> create(Realm&, PrimitiveString&, Object& prototype);
+    static ThrowCompletionOr<NonnullGCPtr<StringObject>> create(Realm&, PrimitiveString&, Object& prototype);
 
-    virtual void initialize(Realm&) override;
+    virtual ThrowCompletionOr<void> initialize(Realm&) override;
     virtual ~StringObject() override = default;
 
     PrimitiveString const& primitive_string() const { return m_string; }
@@ -33,7 +33,7 @@ private:
     virtual bool is_string_object() const final { return true; }
     virtual void visit_edges(Visitor&) override;
 
-    PrimitiveString& m_string;
+    NonnullGCPtr<PrimitiveString> m_string;
 };
 
 template<>

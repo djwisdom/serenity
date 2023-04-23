@@ -6,7 +6,6 @@
 
 #include "Game.h"
 #include <AK/Array.h>
-#include <AK/DeprecatedString.h>
 #include <AK/NumericLimits.h>
 #include <AK/ScopeGuard.h>
 #include <stdlib.h>
@@ -141,7 +140,7 @@ static bool is_complete(Game::Board const& board, size_t target)
     return false;
 }
 
-static bool has_no_neighbors(Span<u32 const> const& row)
+static bool has_no_neighbors(ReadonlySpan<u32> const& row)
 {
     if (row.size() < 2)
         return true;

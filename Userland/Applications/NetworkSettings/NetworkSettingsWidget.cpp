@@ -11,7 +11,6 @@
 #include <AK/JsonParser.h>
 #include <Applications/NetworkSettings/NetworkSettingsGML.h>
 #include <LibCore/Command.h>
-#include <LibCore/File.h>
 #include <LibGUI/CheckBox.h>
 #include <LibGUI/ComboBox.h>
 #include <LibGUI/ItemListModel.h>
@@ -30,7 +29,7 @@ static int netmask_to_cidr(IPv4Address const& address)
 
 NetworkSettingsWidget::NetworkSettingsWidget()
 {
-    load_from_gml(network_settings_gml);
+    load_from_gml(network_settings_gml).release_value_but_fixme_should_propagate_errors();
 
     m_adapters_combobox = *find_descendant_of_type_named<GUI::ComboBox>("adapters_combobox");
     m_enabled_checkbox = *find_descendant_of_type_named<GUI::CheckBox>("enabled_checkbox");
@@ -63,7 +62,7 @@ NetworkSettingsWidget::NetworkSettingsWidget()
 
     auto config_file = Core::ConfigFile::open_for_system("Network").release_value_but_fixme_should_propagate_errors();
 
-    auto proc_net_adapters_file = Core::Stream::File::open("/sys/kernel/net/adapters"sv, Core::Stream::OpenMode::Read).release_value_but_fixme_should_propagate_errors();
+    auto proc_net_adapters_file = Core::File::open("/sys/kernel/net/adapters"sv, Core::File::OpenMode::Read).release_value_but_fixme_should_propagate_errors();
     auto data = proc_net_adapters_file->read_until_eof().release_value_but_fixme_should_propagate_errors();
     JsonParser parser(data);
     JsonValue proc_net_adapters_json = parser.parse().release_value_but_fixme_should_propagate_errors();
@@ -78,7 +77,7 @@ NetworkSettingsWidget::NetworkSettingsWidget()
     size_t index = 0;
     proc_net_adapters_json.as_array().for_each([&](auto& value) {
         auto& if_object = value.as_object();
-        auto adapter_name = if_object.get("name"sv).to_deprecated_string();
+        auto adapter_name = if_object.get_deprecated_string("name"sv).value();
         if (adapter_name == "loop")
             return;
 

@@ -13,7 +13,6 @@
 #include <Kernel/Bus/PCI/Device.h>
 #include <Kernel/Library/LockRefPtr.h>
 #include <Kernel/Library/NonnullLockRefPtr.h>
-#include <Kernel/Library/NonnullLockRefPtrVector.h>
 #include <Kernel/Locking/Spinlock.h>
 #include <Kernel/Memory/TypedMapping.h>
 #include <Kernel/Storage/NVMe/NVMeDefinitions.h>
@@ -26,19 +25,20 @@ namespace Kernel {
 class NVMeController : public PCI::Device
     , public StorageController {
 public:
-    static ErrorOr<NonnullLockRefPtr<NVMeController>> try_initialize(PCI::DeviceIdentifier const&, bool is_queue_polled);
+    static ErrorOr<NonnullRefPtr<NVMeController>> try_initialize(PCI::DeviceIdentifier const&, bool is_queue_polled);
     ErrorOr<void> initialize(bool is_queue_polled);
     LockRefPtr<StorageDevice> device(u32 index) const override;
     size_t devices_count() const override;
+    virtual StringView device_name() const override { return "NVMeController"sv; }
 
 protected:
-    bool reset() override;
-    bool shutdown() override;
+    ErrorOr<void> reset() override;
+    ErrorOr<void> shutdown() override;
     void complete_current_request(AsyncDeviceRequest::RequestResult result) override;
 
 public:
-    bool reset_controller();
-    bool start_controller();
+    ErrorOr<void> reset_controller();
+    ErrorOr<void> start_controller();
     u32 get_admin_q_dept();
 
     u16 submit_admin_command(NVMeSubmission& sub, bool sync = false)
@@ -68,10 +68,9 @@ private:
     bool wait_for_ready(bool);
 
 private:
-    PCI::DeviceIdentifier m_pci_device_id;
     LockRefPtr<NVMeQueue> m_admin_queue;
-    NonnullLockRefPtrVector<NVMeQueue> m_queues;
-    NonnullLockRefPtrVector<NVMeNameSpace> m_namespaces;
+    Vector<NonnullLockRefPtr<NVMeQueue>> m_queues;
+    Vector<NonnullLockRefPtr<NVMeNameSpace>> m_namespaces;
     Memory::TypedMapping<ControllerRegister volatile> m_controller_regs;
     bool m_admin_queue_ready { false };
     size_t m_device_count { 0 };

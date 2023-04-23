@@ -6,14 +6,12 @@
 
 #pragma once
 
+#include <Kernel/API/kcov.h>
 #include <Kernel/Locking/Spinlock.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 
 namespace Kernel {
 
-// Note: These need to be kept in sync with Userland/Libraries/LibC/sys/kcov.h
-typedef volatile u64 kcov_pc_t;
-#define KCOV_ENTRY_SIZE sizeof(kcov_pc_t)
 #define KCOV_MAX_ENTRIES (10 * 1024 * 1024)
 
 /*
@@ -46,7 +44,7 @@ public:
 
     Memory::VMObject* vmobject() { return m_vmobject; }
 
-    Spinlock& spinlock() { return m_lock; }
+    Spinlock<LockRank::None>& spinlock() { return m_lock; }
 
 private:
     ProcessID m_pid { 0 };
@@ -58,7 +56,7 @@ private:
     // Here to ensure it's not garbage collected at the end of open()
     OwnPtr<Memory::Region> m_kernel_region;
 
-    Spinlock m_lock { LockRank::None };
+    Spinlock<LockRank::None> m_lock {};
 };
 
 }

@@ -9,11 +9,6 @@
 
 namespace Archive {
 
-OutputStream& operator<<(OutputStream& stream, ZipCompressionMethod method)
-{
-    return stream << to_underlying(method);
-}
-
 bool Zip::find_end_of_central_directory_offset(ReadonlyBytes buffer, size_t& offset)
 {
     for (size_t backwards_offset = 0; backwards_offset <= UINT16_MAX; backwards_offset++) // the file may have a trailing comment of an arbitrary 16 bit length
@@ -80,7 +75,7 @@ Optional<Zip> Zip::try_create(ReadonlyBytes buffer)
     };
 }
 
-bool Zip::for_each_member(Function<IterationDecision(ZipMember const&)> callback)
+ErrorOr<bool> Zip::for_each_member(Function<IterationDecision(ZipMember const&)> callback)
 {
     size_t member_offset = m_members_start_offset;
     for (size_t i = 0; i < m_member_count; i++) {
@@ -90,15 +85,14 @@ bool Zip::for_each_member(Function<IterationDecision(ZipMember const&)> callback
         VERIFY(local_file_header.read(m_input_data.slice(central_directory_record.local_file_header_offset)));
 
         ZipMember member;
-        char null_terminated_name[central_directory_record.name_length + 1];
-        memcpy(null_terminated_name, central_directory_record.name, central_directory_record.name_length);
-        null_terminated_name[central_directory_record.name_length] = 0;
-        member.name = DeprecatedString { null_terminated_name };
+        member.name = TRY(String::from_utf8({ central_directory_record.name, central_directory_record.name_length }));
         member.compressed_data = { local_file_header.compressed_data, central_directory_record.compressed_size };
         member.compression_method = central_directory_record.compression_method;
         member.uncompressed_size = central_directory_record.uncompressed_size;
         member.crc32 = central_directory_record.crc32;
-        member.is_directory = central_directory_record.external_attributes & zip_directory_external_attribute || member.name.ends_with('/'); // FIXME: better directory detection
+        member.modification_time = central_directory_record.modification_time;
+        member.modification_date = central_directory_record.modification_date;
+        member.is_directory = central_directory_record.external_attributes & zip_directory_external_attribute || member.name.bytes_as_string_view().ends_with('/'); // FIXME: better directory detection
 
         if (callback(member) == IterationDecision::Break)
             return false;
@@ -108,8 +102,8 @@ bool Zip::for_each_member(Function<IterationDecision(ZipMember const&)> callback
     return true;
 }
 
-ZipOutputStream::ZipOutputStream(OutputStream& stream)
-    : m_stream(stream)
+ZipOutputStream::ZipOutputStream(NonnullOwnPtr<Stream> stream)
+    : m_stream(move(stream))
 {
 }
 
@@ -119,32 +113,32 @@ static u16 minimum_version_needed(ZipCompressionMethod method)
     return method == ZipCompressionMethod::Deflate ? 20 : 10;
 }
 
-void ZipOutputStream::add_member(ZipMember const& member)
+ErrorOr<void> ZipOutputStream::add_member(ZipMember const& member)
 {
     VERIFY(!m_finished);
-    VERIFY(member.name.length() <= UINT16_MAX);
+    VERIFY(member.name.bytes_as_string_view().length() <= UINT16_MAX);
     VERIFY(member.compressed_data.size() <= UINT32_MAX);
-    m_members.append(member);
+    TRY(m_members.try_append(member));
 
     LocalFileHeader local_file_header {
         .minimum_version = minimum_version_needed(member.compression_method),
         .general_purpose_flags = { .flags = 0 },
         .compression_method = static_cast<u16>(member.compression_method),
-        .modification_time = 0, // TODO: support modification time
-        .modification_date = 0,
+        .modification_time = member.modification_time,
+        .modification_date = member.modification_date,
         .crc32 = member.crc32,
         .compressed_size = static_cast<u32>(member.compressed_data.size()),
         .uncompressed_size = member.uncompressed_size,
-        .name_length = static_cast<u16>(member.name.length()),
+        .name_length = static_cast<u16>(member.name.bytes_as_string_view().length()),
         .extra_data_length = 0,
-        .name = reinterpret_cast<u8 const*>(member.name.characters()),
+        .name = reinterpret_cast<u8 const*>(member.name.bytes_as_string_view().characters_without_null_termination()),
         .extra_data = nullptr,
         .compressed_data = member.compressed_data.data(),
     };
-    local_file_header.write(m_stream);
+    return local_file_header.write(*m_stream);
 }
 
-void ZipOutputStream::finish()
+ErrorOr<void> ZipOutputStream::finish()
 {
     VERIFY(!m_finished);
     m_finished = true;
@@ -158,24 +152,24 @@ void ZipOutputStream::finish()
             .minimum_version = zip_version,
             .general_purpose_flags = { .flags = 0 },
             .compression_method = member.compression_method,
-            .modification_time = 0, // TODO: support modification time
-            .modification_date = 0,
+            .modification_time = member.modification_time,
+            .modification_date = member.modification_date,
             .crc32 = member.crc32,
             .compressed_size = static_cast<u32>(member.compressed_data.size()),
             .uncompressed_size = member.uncompressed_size,
-            .name_length = static_cast<u16>(member.name.length()),
+            .name_length = static_cast<u16>(member.name.bytes_as_string_view().length()),
             .extra_data_length = 0,
             .comment_length = 0,
             .start_disk = 0,
             .internal_attributes = 0,
             .external_attributes = member.is_directory ? zip_directory_external_attribute : 0,
             .local_file_header_offset = file_header_offset, // FIXME: we assume the wrapped output stream was never written to before us
-            .name = reinterpret_cast<u8 const*>(member.name.characters()),
+            .name = reinterpret_cast<u8 const*>(member.name.bytes_as_string_view().characters_without_null_termination()),
             .extra_data = nullptr,
             .comment = nullptr,
         };
-        file_header_offset += sizeof(LocalFileHeader::signature) + (sizeof(LocalFileHeader) - (sizeof(u8*) * 3)) + member.name.length() + member.compressed_data.size();
-        central_directory_record.write(m_stream);
+        file_header_offset += sizeof(LocalFileHeader::signature) + (sizeof(LocalFileHeader) - (sizeof(u8*) * 3)) + member.name.bytes_as_string_view().length() + member.compressed_data.size();
+        TRY(central_directory_record.write(*m_stream));
         central_directory_size += central_directory_record.size();
     }
 
@@ -189,7 +183,7 @@ void ZipOutputStream::finish()
         .comment_length = 0,
         .comment = nullptr,
     };
-    end_of_central_directory.write(m_stream);
+    return end_of_central_directory.write(*m_stream);
 }
 
 }

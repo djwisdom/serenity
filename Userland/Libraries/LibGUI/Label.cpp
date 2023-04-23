@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, the SerenityOS developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -10,7 +10,6 @@
 #include <LibGUI/Painter.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Palette.h>
-#include <LibGfx/TextLayout.h>
 #include <LibGfx/TextWrapping.h>
 
 REGISTER_WIDGET(GUI, Label)
@@ -24,7 +23,7 @@ Label::Label(DeprecatedString text)
     REGISTER_TEXT_WRAPPING_PROPERTY("text_wrapping", text_wrapping, set_text_wrapping);
 
     set_preferred_size({ SpecialDimension::OpportunisticGrow });
-    set_min_height(22);
+    set_min_size({ SpecialDimension::Shrink });
 
     set_frame_thickness(0);
     set_frame_shadow(Gfx::FrameShadow::Plain);
@@ -32,7 +31,7 @@ Label::Label(DeprecatedString text)
 
     set_foreground_role(Gfx::ColorRole::WindowText);
 
-    REGISTER_STRING_PROPERTY("text", text, set_text);
+    REGISTER_DEPRECATED_STRING_PROPERTY("text", text, set_text);
     REGISTER_BOOL_PROPERTY("autosize", is_autosize, set_autosize);
     REGISTER_WRITE_ONLY_STRING_PROPERTY("icon", set_icon_from_path);
 }
@@ -57,7 +56,7 @@ void Label::set_icon(Gfx::Bitmap const* icon)
 
 void Label::set_icon_from_path(DeprecatedString const& path)
 {
-    auto maybe_bitmap = Gfx::Bitmap::try_load_from_file(path);
+    auto maybe_bitmap = Gfx::Bitmap::load_from_file(path);
     if (maybe_bitmap.is_error()) {
         dbgln("Unable to load bitmap `{}` for label icon", path);
         return;
@@ -110,18 +109,41 @@ void Label::paint_event(PaintEvent& event)
     }
 }
 
+void Label::did_change_font()
+{
+    if (m_autosize)
+        size_to_fit();
+}
+
 void Label::size_to_fit()
 {
-    set_fixed_width(font().width(m_text) + m_autosize_padding * 2);
+    set_fixed_width(text_calculated_preferred_width());
+    set_fixed_height(text_calculated_preferred_height());
+}
+
+int Label::text_calculated_preferred_width() const
+{
+    return font().width_rounded_up(m_text) + m_autosize_padding * 2;
 }
 
 int Label::text_calculated_preferred_height() const
 {
-    return Gfx::TextLayout(&font(), Utf8View { m_text }, text_rect()).bounding_rect(Gfx::TextWrapping::Wrap, Gfx::Painter::LINE_SPACING).height();
+    return static_cast<int>(ceilf(font().preferred_line_height()) * (m_text.count("\n"sv) + 1));
 }
 
 Optional<UISize> Label::calculated_preferred_size() const
 {
-    return GUI::UISize(SpecialDimension::Grow, text_calculated_preferred_height());
+    return GUI::UISize(text_calculated_preferred_width(), text_calculated_preferred_height());
 }
+
+Optional<UISize> Label::calculated_min_size() const
+{
+    int frame = frame_thickness() * 2;
+    int width = font().width_rounded_up("..."sv) + frame;
+    int height = font().pixel_size_rounded_up() + frame;
+    height = max(height, 22);
+
+    return UISize(width, height);
+}
+
 }

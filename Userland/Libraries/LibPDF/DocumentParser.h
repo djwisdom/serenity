@@ -20,10 +20,12 @@ public:
         Linearized,
     };
 
-    [[nodiscard]] ALWAYS_INLINE RefPtr<DictObject> const& trailer() const { return m_trailer; }
+    [[nodiscard]] ALWAYS_INLINE RefPtr<DictObject> const& trailer() const { return m_xref_table->trailer(); }
 
     // Parses the header and initializes the xref table and trailer
     PDFErrorOr<void> initialize();
+
+    bool can_resolve_references() { return m_xref_table; };
 
     PDFErrorOr<Value> parse_object_with_index(u32 index);
 
@@ -82,7 +84,7 @@ private:
     PDFErrorOr<void> validate_xref_table_and_fix_if_necessary();
     PDFErrorOr<void> initialize_hint_tables();
     PDFErrorOr<PageOffsetHintTable> parse_page_offset_hint_table(ReadonlyBytes hint_stream_bytes);
-    Vector<PageOffsetHintTableEntry> parse_all_page_offset_hint_table_entries(PageOffsetHintTable const&, ReadonlyBytes hint_stream_bytes);
+    PDFErrorOr<Vector<PageOffsetHintTableEntry>> parse_all_page_offset_hint_table_entries(PageOffsetHintTable const&, ReadonlyBytes hint_stream_bytes);
     PDFErrorOr<NonnullRefPtr<XRefTable>> parse_xref_stream();
     PDFErrorOr<NonnullRefPtr<XRefTable>> parse_xref_table();
     PDFErrorOr<NonnullRefPtr<DictObject>> parse_file_trailer();
@@ -92,7 +94,6 @@ private:
     bool navigate_to_after_startxref();
 
     RefPtr<XRefTable> m_xref_table;
-    RefPtr<DictObject> m_trailer;
     Optional<LinearizationDictionary> m_linearization_dictionary;
 };
 

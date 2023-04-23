@@ -22,11 +22,12 @@ class ConnectionToNotificationServer final
 public:
     virtual void die() override
     {
-        m_notification->connection_closed();
+        if (!m_notification->m_destroyed)
+            m_notification->connection_closed();
     }
 
 private:
-    explicit ConnectionToNotificationServer(NonnullOwnPtr<Core::Stream::LocalSocket> socket, Notification* notification)
+    explicit ConnectionToNotificationServer(NonnullOwnPtr<Core::LocalSocket> socket, Notification* notification)
         : IPC::ConnectionToServer<NotificationClientEndpoint, NotificationServerEndpoint>(*this, move(socket))
         , m_notification(notification)
     {

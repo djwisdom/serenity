@@ -19,17 +19,19 @@ class SVGPathElement final : public SVGGeometryElement {
 public:
     virtual ~SVGPathElement() override = default;
 
-    virtual void parse_attribute(FlyString const& name, DeprecatedString const& value) override;
+    virtual void parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value) override;
 
     virtual Gfx::Path& get_path() override;
 
 private:
     SVGPathElement(DOM::Document&, DOM::QualifiedName);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
+
     Vector<PathInstruction> m_instructions;
     Optional<Gfx::Path> m_path;
 };
 
-Gfx::Path path_from_path_instructions(Span<PathInstruction const>);
+Gfx::Path path_from_path_instructions(ReadonlySpan<PathInstruction>);
 
 }

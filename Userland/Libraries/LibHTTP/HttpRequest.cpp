@@ -43,39 +43,39 @@ DeprecatedString HttpRequest::method_name() const
     return to_deprecated_string(m_method);
 }
 
-ByteBuffer HttpRequest::to_raw_request() const
+ErrorOr<ByteBuffer> HttpRequest::to_raw_request() const
 {
     StringBuilder builder;
-    builder.append(method_name());
-    builder.append(' ');
+    TRY(builder.try_append(method_name()));
+    TRY(builder.try_append(' '));
     // NOTE: The percent_encode is so that e.g. spaces are properly encoded.
-    auto path = m_url.path();
+    auto path = m_url.serialize_path();
     VERIFY(!path.is_empty());
-    builder.append(URL::percent_encode(m_url.path(), URL::PercentEncodeSet::EncodeURI));
+    TRY(builder.try_append(URL::percent_encode(path, URL::PercentEncodeSet::EncodeURI)));
     if (!m_url.query().is_empty()) {
-        builder.append('?');
-        builder.append(m_url.query());
+        TRY(builder.try_append('?'));
+        TRY(builder.try_append(m_url.query()));
     }
-    builder.append(" HTTP/1.1\r\nHost: "sv);
-    builder.append(m_url.host());
+    TRY(builder.try_append(" HTTP/1.1\r\nHost: "sv));
+    TRY(builder.try_append(m_url.host()));
     if (m_url.port().has_value())
-        builder.appendff(":{}", *m_url.port());
-    builder.append("\r\n"sv);
+        TRY(builder.try_appendff(":{}", *m_url.port()));
+    TRY(builder.try_append("\r\n"sv));
     for (auto& header : m_headers) {
-        builder.append(header.name);
-        builder.append(": "sv);
-        builder.append(header.value);
-        builder.append("\r\n"sv);
+        TRY(builder.try_append(header.name));
+        TRY(builder.try_append(": "sv));
+        TRY(builder.try_append(header.value));
+        TRY(builder.try_append("\r\n"sv));
     }
     if (!m_body.is_empty() || method() == Method::POST) {
-        builder.appendff("Content-Length: {}\r\n\r\n", m_body.size());
-        builder.append((char const*)m_body.data(), m_body.size());
+        TRY(builder.try_appendff("Content-Length: {}\r\n\r\n", m_body.size()));
+        TRY(builder.try_append((char const*)m_body.data(), m_body.size()));
     }
-    builder.append("\r\n"sv);
+    TRY(builder.try_append("\r\n"sv));
     return builder.to_byte_buffer();
 }
 
-Optional<HttpRequest> HttpRequest::from_raw_request(ReadonlyBytes raw_request)
+ErrorOr<HttpRequest, HttpRequest::ParseError> HttpRequest::from_raw_request(ReadonlyBytes raw_request)
 {
     enum class State {
         InMethod,
@@ -102,6 +102,7 @@ Optional<HttpRequest> HttpRequest::from_raw_request(ReadonlyBytes raw_request)
 
     Vector<u8, 256> buffer;
 
+    Optional<unsigned> content_length;
     DeprecatedString method;
     DeprecatedString resource;
     DeprecatedString protocol;
@@ -118,7 +119,7 @@ Optional<HttpRequest> HttpRequest::from_raw_request(ReadonlyBytes raw_request)
     while (index < raw_request.size()) {
         // FIXME: Figure out what the appropriate limitations should be.
         if (buffer.size() > 65536)
-            return {};
+            return ParseError::RequestTooLarge;
         switch (state) {
         case State::InMethod:
             if (peek() == ' ') {
@@ -168,6 +169,10 @@ Optional<HttpRequest> HttpRequest::from_raw_request(ReadonlyBytes raw_request)
                 }
 
                 commit_and_advance_to(current_header.value, next_state);
+
+                if (current_header.name.equals_ignoring_ascii_case("Content-Length"sv))
+                    content_length = current_header.value.to_uint();
+
                 headers.append(move(current_header));
                 break;
             }
@@ -178,15 +183,22 @@ Optional<HttpRequest> HttpRequest::from_raw_request(ReadonlyBytes raw_request)
             if (index == raw_request.size()) {
                 // End of data, so store the body
                 auto maybe_body = ByteBuffer::copy(buffer);
-                // FIXME: Propagate this error somehow.
-                if (maybe_body.is_error())
-                    return {};
+                if (maybe_body.is_error()) {
+                    VERIFY(maybe_body.error().code() == ENOMEM);
+                    return ParseError::OutOfMemory;
+                }
                 body = maybe_body.release_value();
                 buffer.clear();
             }
             break;
         }
     }
+
+    if (state != State::InBody)
+        return ParseError::RequestIncomplete;
+
+    if (content_length.has_value() && content_length.value() != body.size())
+        return ParseError::RequestIncomplete;
 
     HttpRequest request;
     if (method == "GET")
@@ -208,7 +220,7 @@ Optional<HttpRequest> HttpRequest::from_raw_request(ReadonlyBytes raw_request)
     else if (method == "PUT")
         request.set_method(HTTP::HttpRequest::Method::PUT);
     else
-        return {};
+        return ParseError::UnsupportedMethod;
 
     request.m_headers = move(headers);
     auto url_parts = resource.split_limit('?', 2, SplitBehavior::KeepEmpty);

@@ -14,11 +14,12 @@
 #include <AK/StringBuilder.h>
 #include <AK/URL.h>
 #include <LibCore/DateTime.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
-#include <LibCore/FileStream.h>
 #include <LibCore/MappedFile.h>
 #include <LibCore/MimeData.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibHTTP/HttpRequest.h>
 #include <LibHTTP/HttpResponse.h>
 #include <WebServer/Client.h>
@@ -29,7 +30,7 @@
 
 namespace WebServer {
 
-Client::Client(NonnullOwnPtr<Core::Stream::BufferedTCPSocket> socket, Core::Object* parent)
+Client::Client(NonnullOwnPtr<Core::BufferedTCPSocket> socket, Core::Object* parent)
     : Core::Object(parent)
     , m_socket(move(socket))
 {
@@ -44,61 +45,60 @@ void Client::die()
 void Client::start()
 {
     m_socket->on_ready_to_read = [this] {
-        StringBuilder builder;
+        if (auto result = on_ready_to_read(); result.is_error()) {
+            result.error().visit(
+                [](AK::Error const& error) {
+                    warnln("Internal error: {}", error);
+                },
+                [](HTTP::HttpRequest::ParseError const& error) {
+                    warnln("HTTP request parsing error: {}", HTTP::HttpRequest::parse_error_to_string(error));
+                });
 
-        auto maybe_buffer = ByteBuffer::create_uninitialized(m_socket->buffer_size());
-        if (maybe_buffer.is_error()) {
-            warnln("Could not create buffer for client: {}", maybe_buffer.error());
             die();
-            return;
         }
-
-        auto buffer = maybe_buffer.release_value();
-        for (;;) {
-            auto maybe_can_read = m_socket->can_read_without_blocking();
-            if (maybe_can_read.is_error()) {
-                warnln("Failed to get the blocking status for the socket: {}", maybe_can_read.error());
-                die();
-                return;
-            }
-
-            if (!maybe_can_read.value())
-                break;
-
-            auto maybe_bytes_read = m_socket->read_until_any_of(buffer, Array { "\r"sv, "\n"sv, "\r\n"sv });
-            if (maybe_bytes_read.is_error()) {
-                warnln("Failed to read a line from the request: {}", maybe_bytes_read.error());
-                die();
-                return;
-            }
-
-            if (m_socket->is_eof()) {
-                die();
-                break;
-            }
-
-            builder.append(StringView { maybe_bytes_read.value() });
-            builder.append("\r\n"sv);
-        }
-
-        auto request = builder.to_byte_buffer();
-        dbgln_if(WEBSERVER_DEBUG, "Got raw request: '{}'", DeprecatedString::copy(request));
-
-        auto maybe_did_handle = handle_request(request);
-        if (maybe_did_handle.is_error()) {
-            warnln("Failed to handle the request: {}", maybe_did_handle.error());
-        }
-
-        die();
     };
 }
 
-ErrorOr<bool> Client::handle_request(ReadonlyBytes raw_request)
+ErrorOr<void, Client::WrappedError> Client::on_ready_to_read()
 {
-    auto request_or_error = HTTP::HttpRequest::from_raw_request(raw_request);
-    if (!request_or_error.has_value())
-        return false;
-    auto& request = request_or_error.value();
+    // FIXME: Mostly copied from LibWeb/WebDriver/Client.cpp. As noted there, this should be move the LibHTTP and made spec compliant.
+    auto buffer = TRY(ByteBuffer::create_uninitialized(m_socket->buffer_size()));
+
+    for (;;) {
+        if (!TRY(m_socket->can_read_without_blocking()))
+            break;
+
+        auto data = TRY(m_socket->read_some(buffer));
+        TRY(m_remaining_request.try_append(StringView { data }));
+
+        if (m_socket->is_eof())
+            break;
+    }
+
+    if (m_remaining_request.is_empty())
+        return {};
+
+    auto request = TRY(m_remaining_request.to_byte_buffer());
+    dbgln_if(WEBSERVER_DEBUG, "Got raw request: '{}'", DeprecatedString::copy(request));
+
+    auto maybe_parsed_request = HTTP::HttpRequest::from_raw_request(TRY(m_remaining_request.to_byte_buffer()));
+    if (maybe_parsed_request.is_error()) {
+        if (maybe_parsed_request.error() == HTTP::HttpRequest::ParseError::RequestIncomplete) {
+            // If request is not complete we need to wait for more data to arrive
+            return {};
+        }
+        return maybe_parsed_request.error();
+    }
+
+    m_remaining_request.clear();
+
+    TRY(handle_request(maybe_parsed_request.value()));
+
+    return {};
+}
+
+ErrorOr<bool> Client::handle_request(HTTP::HttpRequest const& request)
+{
     auto resource_decoded = URL::percent_decode(request.resource());
 
     if constexpr (WEBSERVER_DEBUG) {
@@ -117,7 +117,7 @@ ErrorOr<bool> Client::handle_request(ReadonlyBytes raw_request)
     if (Configuration::the().credentials().has_value()) {
         bool has_authenticated = verify_credentials(request.headers());
         if (!has_authenticated) {
-            auto const basic_auth_header = TRY(String::from_utf8("WWW-Authenticate: Basic realm=\"WebServer\", charset=\"UTF-8\""sv));
+            auto const basic_auth_header = TRY("WWW-Authenticate: Basic realm=\"WebServer\", charset=\"UTF-8\""_string);
             Vector<String> headers {};
             TRY(headers.try_append(basic_auth_header));
             TRY(send_error_response(401, request, move(headers)));
@@ -128,34 +128,23 @@ ErrorOr<bool> Client::handle_request(ReadonlyBytes raw_request)
     auto requested_path = TRY(String::from_deprecated_string(LexicalPath::join("/"sv, resource_decoded).string()));
     dbgln_if(WEBSERVER_DEBUG, "Canonical requested path: '{}'", requested_path);
 
-    StringBuilder path_builder;
-    path_builder.append(Configuration::the().document_root_path());
-    path_builder.append(requested_path);
-    auto real_path = TRY(path_builder.to_string());
+    auto real_path = TRY(String::formatted("{}{}", Configuration::the().document_root_path(), requested_path));
 
-    if (Core::File::is_directory(real_path.bytes_as_string_view())) {
+    if (FileSystem::is_directory(real_path.bytes_as_string_view())) {
         if (!resource_decoded.ends_with('/')) {
-            StringBuilder red;
-
-            red.append(requested_path);
-            red.append("/"sv);
-
-            TRY(send_redirect(red.to_deprecated_string(), request));
+            TRY(send_redirect(TRY(String::formatted("{}/", requested_path)), request));
             return true;
         }
 
-        StringBuilder index_html_path_builder;
-        index_html_path_builder.append(real_path);
-        index_html_path_builder.append("/index.html"sv);
-        auto index_html_path = TRY(index_html_path_builder.to_string());
-        if (!Core::File::exists(index_html_path)) {
+        auto index_html_path = TRY(String::formatted("{}/index.html", real_path));
+        if (!FileSystem::exists(index_html_path)) {
             TRY(handle_directory_listing(requested_path, real_path, request));
             return true;
         }
         real_path = index_html_path;
     }
 
-    auto file = Core::File::construct(real_path.bytes_as_string_view());
+    auto file = Core::DeprecatedFile::construct(real_path.bytes_as_string_view());
     if (!file->open(Core::OpenMode::ReadOnly)) {
         TRY(send_error_response(404, request));
         return false;
@@ -166,44 +155,44 @@ ErrorOr<bool> Client::handle_request(ReadonlyBytes raw_request)
         return false;
     }
 
-    Core::InputFileStream stream { file };
+    auto stream = TRY(Core::File::open(real_path.bytes_as_string_view(), Core::File::OpenMode::Read));
 
     auto const info = ContentInfo {
-        .type = TRY(String::from_deprecated_string(Core::guess_mime_type_based_on_filename(real_path.bytes_as_string_view()))),
-        .length = TRY(Core::File::size(real_path.bytes_as_string_view()))
+        .type = TRY(String::from_utf8(Core::guess_mime_type_based_on_filename(real_path.bytes_as_string_view()))),
+        .length = TRY(FileSystem::size(real_path.bytes_as_string_view()))
     };
-    TRY(send_response(stream, request, move(info)));
+    TRY(send_response(*stream, request, move(info)));
     return true;
 }
 
-ErrorOr<void> Client::send_response(InputStream& response, HTTP::HttpRequest const& request, ContentInfo content_info)
+ErrorOr<void> Client::send_response(Stream& response, HTTP::HttpRequest const& request, ContentInfo content_info)
 {
     StringBuilder builder;
-    builder.append("HTTP/1.0 200 OK\r\n"sv);
-    builder.append("Server: WebServer (SerenityOS)\r\n"sv);
-    builder.append("X-Frame-Options: SAMEORIGIN\r\n"sv);
-    builder.append("X-Content-Type-Options: nosniff\r\n"sv);
-    builder.append("Pragma: no-cache\r\n"sv);
+    TRY(builder.try_append("HTTP/1.0 200 OK\r\n"sv));
+    TRY(builder.try_append("Server: WebServer (SerenityOS)\r\n"sv));
+    TRY(builder.try_append("X-Frame-Options: SAMEORIGIN\r\n"sv));
+    TRY(builder.try_append("X-Content-Type-Options: nosniff\r\n"sv));
+    TRY(builder.try_append("Pragma: no-cache\r\n"sv));
     if (content_info.type == "text/plain")
-        builder.appendff("Content-Type: {}; charset=utf-8\r\n", content_info.type);
+        TRY(builder.try_appendff("Content-Type: {}; charset=utf-8\r\n", content_info.type));
     else
-        builder.appendff("Content-Type: {}\r\n", content_info.type);
-    builder.appendff("Content-Length: {}\r\n", content_info.length);
-    builder.append("\r\n"sv);
+        TRY(builder.try_appendff("Content-Type: {}\r\n", content_info.type));
+    TRY(builder.try_appendff("Content-Length: {}\r\n", content_info.length));
+    TRY(builder.try_append("\r\n"sv));
 
-    auto builder_contents = builder.to_byte_buffer();
-    TRY(m_socket->write(builder_contents));
+    auto builder_contents = TRY(builder.to_byte_buffer());
+    TRY(m_socket->write_until_depleted(builder_contents));
     log_response(200, request);
 
     char buffer[PAGE_SIZE];
     do {
-        auto size = response.read({ buffer, sizeof(buffer) });
-        if (response.unreliable_eof() && size == 0)
+        auto size = TRY(response.read_some({ buffer, sizeof(buffer) })).size();
+        if (response.is_eof() && size == 0)
             break;
 
         ReadonlyBytes write_buffer { buffer, size };
         while (!write_buffer.is_empty()) {
-            auto nwritten = TRY(m_socket->write(write_buffer));
+            auto nwritten = TRY(m_socket->write_some(write_buffer));
 
             if (nwritten == 0) {
                 dbgln("EEEEEE got 0 bytes written!");
@@ -214,8 +203,8 @@ ErrorOr<void> Client::send_response(InputStream& response, HTTP::HttpRequest con
     } while (true);
 
     auto keep_alive = false;
-    if (auto it = request.headers().find_if([](auto& header) { return header.name.equals_ignoring_case("Connection"sv); }); !it.is_end()) {
-        if (it->value.trim_whitespace().equals_ignoring_case("keep-alive"sv))
+    if (auto it = request.headers().find_if([](auto& header) { return header.name.equals_ignoring_ascii_case("Connection"sv); }); !it.is_end()) {
+        if (it->value.trim_whitespace().equals_ignoring_ascii_case("keep-alive"sv))
             keep_alive = true;
     }
     if (!keep_alive)
@@ -227,14 +216,14 @@ ErrorOr<void> Client::send_response(InputStream& response, HTTP::HttpRequest con
 ErrorOr<void> Client::send_redirect(StringView redirect_path, HTTP::HttpRequest const& request)
 {
     StringBuilder builder;
-    builder.append("HTTP/1.0 301 Moved Permanently\r\n"sv);
-    builder.append("Location: "sv);
-    builder.append(redirect_path);
-    builder.append("\r\n"sv);
-    builder.append("\r\n"sv);
+    TRY(builder.try_append("HTTP/1.0 301 Moved Permanently\r\n"sv));
+    TRY(builder.try_append("Location: "sv));
+    TRY(builder.try_append(redirect_path));
+    TRY(builder.try_append("\r\n"sv));
+    TRY(builder.try_append("\r\n"sv));
 
-    auto builder_contents = builder.to_byte_buffer();
-    TRY(m_socket->write(builder_contents));
+    auto builder_contents = TRY(builder.to_byte_buffer());
+    TRY(m_socket->write_until_depleted(builder_contents));
 
     log_response(301, request);
     return {};
@@ -266,41 +255,41 @@ ErrorOr<void> Client::handle_directory_listing(String const& requested_path, Str
 {
     StringBuilder builder;
 
-    builder.append("<!DOCTYPE html>\n"sv);
-    builder.append("<html>\n"sv);
-    builder.append("<head><meta charset=\"utf-8\">\n"sv);
-    builder.append("<title>Index of "sv);
-    builder.append(escape_html_entities(requested_path));
-    builder.append("</title><style>\n"sv);
-    builder.append(".folder { width: 16px; height: 16px; background-image: url('data:image/png;base64,"sv);
-    builder.append(folder_image_data());
-    builder.append("'); }\n"sv);
-    builder.append(".file { width: 16px; height: 16px; background-image: url('data:image/png;base64,"sv);
-    builder.append(file_image_data());
-    builder.append("'); }\n"sv);
-    builder.append("</style></head><body>\n"sv);
-    builder.append("<h1>Index of "sv);
-    builder.append(escape_html_entities(requested_path));
-    builder.append("</h1>\n"sv);
-    builder.append("<hr>\n"sv);
-    builder.append("<code><table>\n"sv);
+    TRY(builder.try_append("<!DOCTYPE html>\n"sv));
+    TRY(builder.try_append("<html>\n"sv));
+    TRY(builder.try_append("<head><meta charset=\"utf-8\">\n"sv));
+    TRY(builder.try_append("<title>Index of "sv));
+    TRY(builder.try_append(escape_html_entities(requested_path)));
+    TRY(builder.try_append("</title><style>\n"sv));
+    TRY(builder.try_append(".folder { width: 16px; height: 16px; background-image: url('data:image/png;base64,"sv));
+    TRY(builder.try_append(folder_image_data()));
+    TRY(builder.try_append("'); }\n"sv));
+    TRY(builder.try_append(".file { width: 16px; height: 16px; background-image: url('data:image/png;base64,"sv));
+    TRY(builder.try_append(file_image_data()));
+    TRY(builder.try_append("'); }\n"sv));
+    TRY(builder.try_append("</style></head><body>\n"sv));
+    TRY(builder.try_append("<h1>Index of "sv));
+    TRY(builder.try_append(escape_html_entities(requested_path)));
+    TRY(builder.try_append("</h1>\n"sv));
+    TRY(builder.try_append("<hr>\n"sv));
+    TRY(builder.try_append("<code><table>\n"sv));
 
     Core::DirIterator dt(real_path.bytes_as_string_view());
     Vector<DeprecatedString> names;
     while (dt.has_next())
-        names.append(dt.next_path());
+        TRY(names.try_append(dt.next_path()));
     quick_sort(names);
 
     for (auto& name : names) {
         StringBuilder path_builder;
-        path_builder.append(real_path);
-        path_builder.append('/');
+        TRY(path_builder.try_append(real_path));
+        TRY(path_builder.try_append('/'));
         // NOTE: In the root directory of the webserver, ".." should be equal to ".", since we don't want
         //       the user to see e.g. the size of the parent directory (and it isn't unveiled, so stat fails).
         if (requested_path == "/" && name == "..")
-            path_builder.append("."sv);
+            TRY(path_builder.try_append("."sv));
         else
-            path_builder.append(name);
+            TRY(path_builder.try_append(name));
 
         struct stat st;
         memset(&st, 0, sizeof(st));
@@ -311,34 +300,34 @@ ErrorOr<void> Client::handle_directory_listing(String const& requested_path, Str
 
         bool is_directory = S_ISDIR(st.st_mode);
 
-        builder.append("<tr>"sv);
-        builder.appendff("<td><div class=\"{}\"></div></td>", is_directory ? "folder" : "file");
-        builder.append("<td><a href=\""sv);
-        builder.append(URL::percent_encode(name));
+        TRY(builder.try_append("<tr>"sv));
+        TRY(builder.try_appendff("<td><div class=\"{}\"></div></td>", is_directory ? "folder" : "file"));
+        TRY(builder.try_append("<td><a href=\"./"sv));
+        TRY(builder.try_append(URL::percent_encode(name)));
         // NOTE: For directories, we append a slash so we don't always hit the redirect case,
         //       which adds a slash anyways.
         if (is_directory)
-            builder.append('/');
-        builder.append("\">"sv);
-        builder.append(escape_html_entities(name));
-        builder.append("</a></td><td>&nbsp;</td>"sv);
+            TRY(builder.try_append('/'));
+        TRY(builder.try_append("\">"sv));
+        TRY(builder.try_append(escape_html_entities(name)));
+        TRY(builder.try_append("</a></td><td>&nbsp;</td>"sv));
 
-        builder.appendff("<td>{:10}</td><td>&nbsp;</td>", st.st_size);
-        builder.append("<td>"sv);
-        builder.append(Core::DateTime::from_timestamp(st.st_mtime).to_deprecated_string());
-        builder.append("</td>"sv);
-        builder.append("</tr>\n"sv);
+        TRY(builder.try_appendff("<td>{:10}</td><td>&nbsp;</td>", st.st_size));
+        TRY(builder.try_append("<td>"sv));
+        TRY(builder.try_append(TRY(Core::DateTime::from_timestamp(st.st_mtime).to_string())));
+        TRY(builder.try_append("</td>"sv));
+        TRY(builder.try_append("</tr>\n"sv));
     }
 
-    builder.append("</table></code>\n"sv);
-    builder.append("<hr>\n"sv);
-    builder.append("<i>Generated by WebServer (SerenityOS)</i>\n"sv);
-    builder.append("</body>\n"sv);
-    builder.append("</html>\n"sv);
+    TRY(builder.try_append("</table></code>\n"sv));
+    TRY(builder.try_append("<hr>\n"sv));
+    TRY(builder.try_append("<i>Generated by WebServer (SerenityOS)</i>\n"sv));
+    TRY(builder.try_append("</body>\n"sv));
+    TRY(builder.try_append("</html>\n"sv));
 
     auto response = builder.to_deprecated_string();
-    InputMemoryStream stream { response.bytes() };
-    return send_response(stream, request, { .type = TRY(String::from_utf8("text/html"sv)), .length = response.length() });
+    FixedMemoryStream stream { response.bytes() };
+    return send_response(stream, request, { .type = TRY("text/html"_string), .length = response.length() });
 }
 
 ErrorOr<void> Client::send_error_response(unsigned code, HTTP::HttpRequest const& request, Vector<String> const& headers)
@@ -346,25 +335,25 @@ ErrorOr<void> Client::send_error_response(unsigned code, HTTP::HttpRequest const
     auto reason_phrase = HTTP::HttpResponse::reason_phrase_for_code(code);
 
     StringBuilder content_builder;
-    content_builder.append("<!DOCTYPE html><html><body><h1>"sv);
-    content_builder.appendff("{} ", code);
-    content_builder.append(reason_phrase);
-    content_builder.append("</h1></body></html>"sv);
+    TRY(content_builder.try_append("<!DOCTYPE html><html><body><h1>"sv));
+    TRY(content_builder.try_appendff("{} ", code));
+    TRY(content_builder.try_append(reason_phrase));
+    TRY(content_builder.try_append("</h1></body></html>"sv));
 
     StringBuilder header_builder;
-    header_builder.appendff("HTTP/1.0 {} ", code);
-    header_builder.append(reason_phrase);
-    header_builder.append("\r\n"sv);
+    TRY(header_builder.try_appendff("HTTP/1.0 {} ", code));
+    TRY(header_builder.try_append(reason_phrase));
+    TRY(header_builder.try_append("\r\n"sv));
 
     for (auto& header : headers) {
-        header_builder.append(header);
-        header_builder.append("\r\n"sv);
+        TRY(header_builder.try_append(header));
+        TRY(header_builder.try_append("\r\n"sv));
     }
-    header_builder.append("Content-Type: text/html; charset=UTF-8\r\n"sv);
-    header_builder.appendff("Content-Length: {}\r\n", content_builder.length());
-    header_builder.append("\r\n"sv);
-    TRY(m_socket->write(header_builder.to_byte_buffer()));
-    TRY(m_socket->write(content_builder.to_byte_buffer()));
+    TRY(header_builder.try_append("Content-Type: text/html; charset=UTF-8\r\n"sv));
+    TRY(header_builder.try_appendff("Content-Length: {}\r\n", content_builder.length()));
+    TRY(header_builder.try_append("\r\n"sv));
+    TRY(m_socket->write_until_depleted(TRY(header_builder.to_byte_buffer())));
+    TRY(m_socket->write_until_depleted(TRY(content_builder.to_byte_buffer())));
 
     log_response(code, request);
     return {};
@@ -380,7 +369,7 @@ bool Client::verify_credentials(Vector<HTTP::HttpRequest::Header> const& headers
     VERIFY(Configuration::the().credentials().has_value());
     auto& configured_credentials = Configuration::the().credentials().value();
     for (auto& header : headers) {
-        if (header.name.equals_ignoring_case("Authorization"sv)) {
+        if (header.name.equals_ignoring_ascii_case("Authorization"sv)) {
             auto provided_credentials = HTTP::HttpRequest::parse_http_basic_authentication_header(header.value);
             if (provided_credentials.has_value() && configured_credentials.username == provided_credentials->username && configured_credentials.password == provided_credentials->password)
                 return true;

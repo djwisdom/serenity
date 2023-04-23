@@ -4,20 +4,20 @@
 // https://html.spec.whatwg.org/multipage/image-maps.html#htmlareaelement
 [Exposed=Window]
 interface HTMLAreaElement : HTMLElement {
-    // FIXME: [HTMLConstructor] constructor();
 
-    // FIXME: [CEReactions] attribute DOMString alt;
-    // FIXME: [CEReactions] attribute DOMString coords;
-    // FIXME: [CEReactions] attribute DOMString shape;
-    // FIXME: [CEReactions] attribute DOMString target;
-    // FIXME: [CEReactions] attribute DOMString download;
-    // FIXME: [CEReactions] attribute USVString ping;
-    // FIXME: [CEReactions] attribute DOMString rel;
-    // FIXME: [SameObject, PutForwards=value] readonly attribute DOMTokenList relList;
-    // FIXME: [CEReactions] attribute DOMString referrerPolicy;
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString alt;
+    [CEReactions, Reflect] attribute DOMString coords;
+    [CEReactions, Reflect] attribute DOMString shape;
+    [CEReactions, Reflect] attribute DOMString target;
+    [CEReactions, Reflect] attribute DOMString download;
+    [CEReactions, Reflect] attribute USVString ping;
+    [CEReactions, Reflect] attribute DOMString rel;
 
     // Obsolete
     [Reflect=nohref] attribute boolean noHref;
+
 };
 
 HTMLAreaElement includes HTMLHyperlinkElementUtils;

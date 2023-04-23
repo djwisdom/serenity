@@ -11,9 +11,9 @@
 
 namespace Web::Painting {
 
-NonnullRefPtr<MarkerPaintable> MarkerPaintable::create(Layout::ListItemMarkerBox const& layout_box)
+JS::NonnullGCPtr<MarkerPaintable> MarkerPaintable::create(Layout::ListItemMarkerBox const& layout_box)
 {
-    return adopt_ref(*new MarkerPaintable(layout_box));
+    return layout_box.heap().allocate_without_realm<MarkerPaintable>(layout_box);
 }
 
 MarkerPaintable::MarkerPaintable(Layout::ListItemMarkerBox const& layout_box)
@@ -46,8 +46,8 @@ void MarkerPaintable::paint(PaintContext& context, PaintPhase phase) const
         image_rect.center_within(enclosing);
 
         auto device_image_rect = context.enclosing_device_rect(image_rect);
-        list_style_image->resolve_for_size(layout_box(), device_image_rect.size().to_type<int>().to_type<float>());
-        list_style_image->paint(context, device_image_rect.to_type<int>(), computed_values().image_rendering());
+        list_style_image->resolve_for_size(layout_box(), image_rect.size());
+        list_style_image->paint(context, device_image_rect, computed_values().image_rendering());
         return;
     }
 
@@ -79,7 +79,9 @@ void MarkerPaintable::paint(PaintContext& context, PaintPhase phase) const
     case CSS::ListStyleType::UpperRoman:
         if (layout_box().text().is_null())
             break;
-        context.painter().draw_text(device_enclosing.to_type<int>(), layout_box().text(), Gfx::TextAlignment::Center);
+        // FIXME: This should use proper text layout logic!
+        // This does not line up with the text in the <li> element which looks very sad :(
+        context.painter().draw_text(device_enclosing.to_type<int>(), layout_box().text(), layout_box().scaled_font(context), Gfx::TextAlignment::Center);
         break;
     case CSS::ListStyleType::None:
         return;

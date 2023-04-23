@@ -83,7 +83,7 @@ bool EventDispatcher::inner_invoke(Event& event, Vector<JS::Handle<DOM::DOMEvent
 
         // 6. Let global be listener callback’s associated Realm’s global object.
         auto& callback = listener->callback->callback();
-        auto& realm = callback.callback.shape().realm();
+        auto& realm = callback.callback->shape().realm();
         auto& global = realm.global_object();
 
         // 7. Let currentEvent be undefined.
@@ -180,14 +180,14 @@ void EventDispatcher::invoke(Event::PathEntry& struct_, Event& event, Event::Pha
 
         // 2. If event’s type attribute value is a match for any of the strings in the first column in the following table,
         //    set event’s type attribute value to the string in the second column on the same row as the matching string, and return otherwise.
-        if (event.type() == "animationend")
-            event.set_type("webkitAnimationEnd"sv);
-        else if (event.type() == "animationiteration")
-            event.set_type("webkitAnimationIteration"sv);
-        else if (event.type() == "animationstart")
-            event.set_type("webkitAnimationStart"sv);
-        else if (event.type() == "transitionend")
-            event.set_type("webkitTransitionEnd"sv);
+        if (event.type() == HTML::EventNames::animationend)
+            event.set_type(HTML::EventNames::webkitAnimationEnd);
+        else if (event.type() == HTML::EventNames::animationiteration)
+            event.set_type(HTML::EventNames::webkitAnimationIteration);
+        else if (event.type() == HTML::EventNames::animationstart)
+            event.set_type(HTML::EventNames::webkitAnimationStart);
+        else if (event.type() == HTML::EventNames::transitionend)
+            event.set_type(HTML::EventNames::webkitTransitionEnd);
         else
             return;
 

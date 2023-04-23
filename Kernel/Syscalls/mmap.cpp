@@ -6,22 +6,25 @@
  */
 
 #include <Kernel/API/VirtualMemoryAnnotations.h>
+#include <Kernel/Arch/CPU.h>
+#include <Kernel/Arch/PageDirectory.h>
 #include <Kernel/Arch/SafeMem.h>
 #include <Kernel/Arch/SmapDisabler.h>
-#include <Kernel/Arch/x86/MSR.h>
 #include <Kernel/FileSystem/Custody.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 #include <Kernel/Memory/MemoryManager.h>
-#include <Kernel/Memory/PageDirectory.h>
 #include <Kernel/Memory/PrivateInodeVMObject.h>
 #include <Kernel/Memory/Region.h>
 #include <Kernel/Memory/SharedInodeVMObject.h>
 #include <Kernel/PerformanceEventBuffer.h>
 #include <Kernel/PerformanceManager.h>
 #include <Kernel/Process.h>
-#include <LibC/limits.h>
 #include <LibELF/Validation.h>
+
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/MSR.h>
+#endif
 
 namespace Kernel {
 
@@ -107,7 +110,6 @@ ErrorOr<void> Process::validate_mmap_prot(int prot, bool map_stack, bool map_ano
 
 ErrorOr<void> Process::validate_inode_mmap_prot(int prot, bool readable_description, bool description_writable, bool map_shared) const
 {
-    auto credentials = this->credentials();
     if ((prot & PROT_READ) && !readable_description)
         return EACCES;
 
@@ -123,7 +125,7 @@ ErrorOr<void> Process::validate_inode_mmap_prot(int prot, bool readable_descript
 
 ErrorOr<FlatPtr> Process::sys$mmap(Userspace<Syscall::SC_mmap_params const*> user_params)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
@@ -139,7 +141,7 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<Syscall::SC_mmap_params const*> use
         TRY(require_promise(Pledge::prot_exec));
     }
 
-    if (prot & MAP_FIXED || prot & MAP_FIXED_NOREPLACE) {
+    if (flags & MAP_FIXED || flags & MAP_FIXED_NOREPLACE) {
         TRY(require_promise(Pledge::map_fixed));
     }
 
@@ -193,7 +195,7 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<Syscall::SC_mmap_params const*> use
 
     Memory::Region* region = nullptr;
 
-    LockRefPtr<OpenFileDescription> description;
+    RefPtr<OpenFileDescription> description;
     LockRefPtr<Memory::VMObject> vmobject;
     u64 used_offset = 0;
 
@@ -266,7 +268,7 @@ ErrorOr<FlatPtr> Process::sys$mmap(Userspace<Syscall::SC_mmap_params const*> use
 
 ErrorOr<FlatPtr> Process::sys$mprotect(Userspace<void*> addr, size_t size, int prot)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
 
     if (prot & PROT_EXEC) {
@@ -404,7 +406,7 @@ ErrorOr<FlatPtr> Process::sys$mprotect(Userspace<void*> addr, size_t size, int p
 
 ErrorOr<FlatPtr> Process::sys$madvise(Userspace<void*> address, size_t size, int advice)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
 
     auto range_to_madvise = TRY(Memory::expand_range_to_page_boundaries(address.ptr(), size));
@@ -439,7 +441,7 @@ ErrorOr<FlatPtr> Process::sys$madvise(Userspace<void*> address, size_t size, int
 
 ErrorOr<FlatPtr> Process::sys$set_mmap_name(Userspace<Syscall::SC_set_mmap_name_params const*> user_params)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
@@ -468,7 +470,7 @@ ErrorOr<FlatPtr> Process::sys$set_mmap_name(Userspace<Syscall::SC_set_mmap_name_
 
 ErrorOr<FlatPtr> Process::sys$munmap(Userspace<void*> addr, size_t size)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
     TRY(address_space().with([&](auto& space) {
         return space->unmap_mmap_range(addr.vaddr(), size);
@@ -478,7 +480,7 @@ ErrorOr<FlatPtr> Process::sys$munmap(Userspace<void*> addr, size_t size)
 
 ErrorOr<FlatPtr> Process::sys$mremap(Userspace<Syscall::SC_mremap_params const*> user_params)
 {
-    VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     TRY(require_promise(Pledge::stdio));
     auto params = TRY(copy_typed_from_user(user_params));
 
@@ -563,14 +565,7 @@ ErrorOr<FlatPtr> Process::sys$allocate_tls(Userspace<char const*> initial_data, 
 
         TRY(main_thread->make_thread_specific_region({}));
 
-#if ARCH(I386)
-        auto& tls_descriptor = Processor::current().get_gdt_entry(GDT_SELECTOR_TLS);
-        tls_descriptor.set_base(main_thread->thread_specific_data());
-        tls_descriptor.set_limit(main_thread->thread_specific_region_size());
-#else
-        MSR fs_base_msr(MSR_FS_BASE);
-        fs_base_msr.set(main_thread->thread_specific_data().get());
-#endif
+        Processor::set_thread_specific_data(main_thread->thread_specific_data());
 
         return m_master_tls_region.unsafe_ptr()->vaddr().get();
     });
@@ -579,21 +574,18 @@ ErrorOr<FlatPtr> Process::sys$allocate_tls(Userspace<char const*> initial_data, 
 ErrorOr<FlatPtr> Process::sys$annotate_mapping(Userspace<void*> address, int flags)
 {
     VERIFY_NO_PROCESS_BIG_LOCK(this);
+    if (flags == to_underlying(VirtualMemoryRangeFlags::None))
+        return EINVAL;
+
+    if (!address)
+        return EINVAL;
+
+    if (!Memory::is_user_address(address.vaddr()))
+        return EFAULT;
 
     return address_space().with([&](auto& space) -> ErrorOr<FlatPtr> {
-        if (flags == to_underlying(VirtualMemoryRangeFlags::None))
-            return EINVAL;
-
         if (space->enforces_syscall_regions() && (flags & to_underlying(VirtualMemoryRangeFlags::SyscallCode)))
             return EPERM;
-
-        if (!address) {
-            space->set_enforces_syscall_regions(true);
-            return 0;
-        }
-
-        if (!Memory::is_user_address(address.vaddr()))
-            return EFAULT;
 
         auto* region = space->find_region_containing(Memory::VirtualRange { address.vaddr(), 1 });
         if (!region)
@@ -614,6 +606,7 @@ ErrorOr<FlatPtr> Process::sys$annotate_mapping(Userspace<void*> address, int fla
 
 ErrorOr<FlatPtr> Process::sys$msync(Userspace<void*> address, size_t size, int flags)
 {
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
     if ((flags & (MS_SYNC | MS_ASYNC | MS_INVALIDATE)) != flags)
         return EINVAL;
 

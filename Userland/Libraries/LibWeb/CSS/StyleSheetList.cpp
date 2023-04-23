@@ -15,18 +15,34 @@ namespace Web::CSS {
 void StyleSheetList::add_sheet(CSSStyleSheet& sheet)
 {
     sheet.set_style_sheet_list({}, this);
-    m_sheets.append(sheet);
 
-    sort_sheets();
+    if (m_sheets.is_empty()) {
+        // This is the first sheet, append it to the list.
+        m_sheets.append(sheet);
+    } else {
+        // We have sheets from before. Insert the new sheet in the correct position (DOM tree order).
+        bool did_insert = false;
+        for (ssize_t i = m_sheets.size() - 1; i >= 0; --i) {
+            auto& existing_sheet = *m_sheets[i];
+            auto position = existing_sheet.owner_node()->compare_document_position(sheet.owner_node());
+            if (position & DOM::Node::DocumentPosition::DOCUMENT_POSITION_FOLLOWING) {
+                m_sheets.insert(i + 1, sheet);
+                did_insert = true;
+                break;
+            }
+        }
+        if (!did_insert)
+            m_sheets.prepend(sheet);
+    }
 
     if (sheet.rules().length() == 0) {
         // NOTE: If the added sheet has no rules, we don't have to invalidate anything.
         return;
     }
 
-    m_document.style_computer().invalidate_rule_cache();
-    m_document.style_computer().load_fonts_from_sheet(sheet);
-    m_document.invalidate_style();
+    m_document->style_computer().invalidate_rule_cache();
+    m_document->style_computer().load_fonts_from_sheet(sheet);
+    m_document->invalidate_style();
 }
 
 void StyleSheetList::remove_sheet(CSSStyleSheet& sheet)
@@ -41,20 +57,28 @@ void StyleSheetList::remove_sheet(CSSStyleSheet& sheet)
 
     sort_sheets();
 
-    m_document.style_computer().invalidate_rule_cache();
-    m_document.invalidate_style();
+    m_document->style_computer().invalidate_rule_cache();
+    m_document->invalidate_style();
 }
 
-StyleSheetList* StyleSheetList::create(DOM::Document& document)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<StyleSheetList>> StyleSheetList::create(DOM::Document& document)
 {
     auto& realm = document.realm();
-    return realm.heap().allocate<StyleSheetList>(realm, document);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<StyleSheetList>(realm, document));
 }
 
 StyleSheetList::StyleSheetList(DOM::Document& document)
-    : Bindings::LegacyPlatformObject(Bindings::ensure_web_prototype<Bindings::StyleSheetListPrototype>(document.realm(), "StyleSheetList"))
+    : Bindings::LegacyPlatformObject(document.realm())
     , m_document(document)
 {
+}
+
+JS::ThrowCompletionOr<void> StyleSheetList::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::StyleSheetListPrototype>(realm, "StyleSheetList"));
+
+    return {};
 }
 
 void StyleSheetList::visit_edges(Cell::Visitor& visitor)
@@ -76,7 +100,7 @@ bool StyleSheetList::is_supported_property_index(u32 index) const
     return index < m_sheets.size();
 }
 
-JS::Value StyleSheetList::item_value(size_t index) const
+WebIDL::ExceptionOr<JS::Value> StyleSheetList::item_value(size_t index) const
 {
     if (index >= m_sheets.size())
         return JS::js_undefined();

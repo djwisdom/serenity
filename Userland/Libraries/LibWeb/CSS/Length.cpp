@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
- * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,7 +15,6 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
-#include <LibWeb/PixelUnits.h>
 
 namespace Web::CSS {
 
@@ -29,11 +28,6 @@ Length::Length(float value, Type type)
     , m_value(value)
 {
 }
-Length::Length(CSSPixels value, Type type)
-    : m_type(type)
-    , m_value(value.value())
-{
-}
 Length::~Length() = default;
 
 Length Length::make_auto()
@@ -41,27 +35,13 @@ Length Length::make_auto()
     return Length(0, Type::Auto);
 }
 
-Length Length::make_px(float value)
-{
-    return Length(value, Type::Px);
-}
-
 Length Length::make_px(CSSPixels value)
 {
     return Length(value.value(), Type::Px);
 }
 
-Length Length::make_calculated(NonnullRefPtr<CalculatedStyleValue> calculated_style_value)
-{
-    Length length { 0, Type::Calculated };
-    length.m_calculated_style = move(calculated_style_value);
-    return length;
-}
-
 Length Length::percentage_of(Percentage const& percentage) const
 {
-    VERIFY(!is_calculated());
-
     if (is_auto()) {
         dbgln("Attempting to get percentage of an auto length, this seems wrong? But for now we just return the original length.");
         return *this;
@@ -72,8 +52,6 @@ Length Length::percentage_of(Percentage const& percentage) const
 
 Length Length::resolved(Layout::Node const& layout_node) const
 {
-    if (is_calculated())
-        return m_calculated_style->resolve_length(layout_node).release_value();
     if (is_relative())
         return make_px(to_px(layout_node));
     if (!isfinite(m_value))
@@ -81,7 +59,7 @@ Length Length::resolved(Layout::Node const& layout_node) const
     return *this;
 }
 
-float Length::relative_length_to_px(Gfx::IntRect const& viewport_rect, Gfx::FontPixelMetrics const& font_metrics, float font_size, float root_font_size) const
+CSSPixels Length::relative_length_to_px(CSSPixelRect const& viewport_rect, Gfx::FontPixelMetrics const& font_metrics, CSSPixels font_size, CSSPixels root_font_size, CSSPixels line_height, CSSPixels root_line_height) const
 {
     switch (m_type) {
     case Type::Ex:
@@ -89,7 +67,7 @@ float Length::relative_length_to_px(Gfx::IntRect const& viewport_rect, Gfx::Font
     case Type::Em:
         return m_value * font_size;
     case Type::Ch:
-        // FIXME: Use layout_node.font().glyph_height() when writing-mode is not horizontal-tb (it has to be implemented first)
+        // FIXME: Use layout_node.font().pixel_size() when writing-mode is not horizontal-tb (it has to be implemented first)
         return m_value * (font_metrics.advance_of_ascii_zero + font_metrics.glyph_spacing);
     case Type::Rem:
         return m_value * root_font_size;
@@ -101,16 +79,17 @@ float Length::relative_length_to_px(Gfx::IntRect const& viewport_rect, Gfx::Font
         return min(viewport_rect.width(), viewport_rect.height()) * (m_value / 100);
     case Type::Vmax:
         return max(viewport_rect.width(), viewport_rect.height()) * (m_value / 100);
+    case Type::Lh:
+        return m_value * line_height;
+    case Type::Rlh:
+        return m_value * root_line_height;
     default:
         VERIFY_NOT_REACHED();
     }
 }
 
-float Length::to_px(Layout::Node const& layout_node) const
+CSSPixels Length::to_px(Layout::Node const& layout_node) const
 {
-    if (is_calculated())
-        return m_calculated_style->resolve_length(layout_node)->to_px(layout_node);
-
     if (is_absolute())
         return absolute_length_to_px();
 
@@ -120,16 +99,14 @@ float Length::to_px(Layout::Node const& layout_node) const
     auto* root_element = layout_node.document().document_element();
     if (!root_element || !root_element->layout_node())
         return 0;
-    return to_px(viewport_rect, layout_node.font().pixel_metrics(), layout_node.computed_values().font_size(), root_element->layout_node()->computed_values().font_size());
+    return to_px(viewport_rect, layout_node.font().pixel_metrics(), layout_node.computed_values().font_size(), root_element->layout_node()->computed_values().font_size(), layout_node.line_height(), root_element->layout_node()->line_height());
 }
 
-DeprecatedString Length::to_deprecated_string() const
+ErrorOr<String> Length::to_string() const
 {
-    if (is_calculated())
-        return m_calculated_style->to_deprecated_string();
     if (is_auto())
-        return "auto";
-    return DeprecatedString::formatted("{}{}", m_value, unit_name());
+        return "auto"_string;
+    return String::formatted("{}{}", m_value, unit_name());
 }
 
 char const* Length::unit_name() const
@@ -167,60 +144,69 @@ char const* Length::unit_name() const
         return "vmax";
     case Type::Vmin:
         return "vmin";
-    case Type::Calculated:
-        return "calculated";
+    case Type::Lh:
+        return "lh";
+    case Type::Rlh:
+        return "rlh";
     }
     VERIFY_NOT_REACHED();
 }
 
 Optional<Length::Type> Length::unit_from_name(StringView name)
 {
-    if (name.equals_ignoring_case("px"sv)) {
+    if (name.equals_ignoring_ascii_case("px"sv)) {
         return Length::Type::Px;
-    } else if (name.equals_ignoring_case("pt"sv)) {
+    } else if (name.equals_ignoring_ascii_case("pt"sv)) {
         return Length::Type::Pt;
-    } else if (name.equals_ignoring_case("pc"sv)) {
+    } else if (name.equals_ignoring_ascii_case("pc"sv)) {
         return Length::Type::Pc;
-    } else if (name.equals_ignoring_case("mm"sv)) {
+    } else if (name.equals_ignoring_ascii_case("mm"sv)) {
         return Length::Type::Mm;
-    } else if (name.equals_ignoring_case("rem"sv)) {
+    } else if (name.equals_ignoring_ascii_case("rem"sv)) {
         return Length::Type::Rem;
-    } else if (name.equals_ignoring_case("em"sv)) {
+    } else if (name.equals_ignoring_ascii_case("em"sv)) {
         return Length::Type::Em;
-    } else if (name.equals_ignoring_case("ex"sv)) {
+    } else if (name.equals_ignoring_ascii_case("ex"sv)) {
         return Length::Type::Ex;
-    } else if (name.equals_ignoring_case("ch"sv)) {
+    } else if (name.equals_ignoring_ascii_case("ch"sv)) {
         return Length::Type::Ch;
-    } else if (name.equals_ignoring_case("vw"sv)) {
+    } else if (name.equals_ignoring_ascii_case("vw"sv)) {
         return Length::Type::Vw;
-    } else if (name.equals_ignoring_case("vh"sv)) {
+    } else if (name.equals_ignoring_ascii_case("vh"sv)) {
         return Length::Type::Vh;
-    } else if (name.equals_ignoring_case("vmax"sv)) {
+    } else if (name.equals_ignoring_ascii_case("vmax"sv)) {
         return Length::Type::Vmax;
-    } else if (name.equals_ignoring_case("vmin"sv)) {
+    } else if (name.equals_ignoring_ascii_case("vmin"sv)) {
         return Length::Type::Vmin;
-    } else if (name.equals_ignoring_case("cm"sv)) {
+    } else if (name.equals_ignoring_ascii_case("cm"sv)) {
         return Length::Type::Cm;
-    } else if (name.equals_ignoring_case("in"sv)) {
+    } else if (name.equals_ignoring_ascii_case("in"sv)) {
         return Length::Type::In;
-    } else if (name.equals_ignoring_case("Q"sv)) {
+    } else if (name.equals_ignoring_ascii_case("Q"sv)) {
         return Length::Type::Q;
+    } else if (name.equals_ignoring_ascii_case("lh"sv)) {
+        return Length::Type::Lh;
+    } else if (name.equals_ignoring_ascii_case("rlh"sv)) {
+        return Length::Type::Rlh;
     }
 
     return {};
 }
 
-NonnullRefPtr<CalculatedStyleValue> Length::calculated_style_value() const
+Optional<Length> Length::absolutize(CSSPixelRect const& viewport_rect, Gfx::FontPixelMetrics const& font_metrics, CSSPixels font_size, CSSPixels root_font_size, CSSPixels line_height, CSSPixels root_line_height) const
 {
-    VERIFY(!m_calculated_style.is_null());
-    return *m_calculated_style;
+    if (is_px())
+        return {};
+    if (is_absolute() || is_relative()) {
+        auto px = to_px(viewport_rect, font_metrics, font_size, root_font_size, line_height, root_line_height);
+        return CSS::Length::make_px(px);
+    }
+    return {};
 }
 
-bool Length::operator==(Length const& other) const
+Length Length::absolutized(CSSPixelRect const& viewport_rect, Gfx::FontPixelMetrics const& font_metrics, CSSPixels font_size, CSSPixels root_font_size, CSSPixels line_height, CSSPixels root_line_height) const
 {
-    if (is_calculated())
-        return m_calculated_style == other.m_calculated_style;
-    return m_type == other.m_type && m_value == other.m_value;
+    return absolutize(viewport_rect, font_metrics, font_size, root_font_size, line_height, root_line_height).value_or(*this);
 }
 
 }

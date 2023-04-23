@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <AK/FlyString.h>
+#include <AK/DeprecatedFlyString.h>
 #include <AK/Noncopyable.h>
 #include <AK/Vector.h>
 #include <LibJS/Forward.h>
@@ -55,11 +55,12 @@ public:
     void set_event_handler_attribute(FlyString const& name, WebIDL::CallbackType*);
 
     bool has_event_listener(FlyString const& type) const;
+    bool has_event_listeners() const;
 
 protected:
     explicit EventTarget(JS::Realm&);
 
-    void element_event_handler_attribute_changed(FlyString const& local_name, DeprecatedString const& value);
+    void element_event_handler_attribute_changed(FlyString const& local_name, Optional<String> const& value);
 
     virtual void visit_edges(Cell::Visitor&) override;
 

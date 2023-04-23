@@ -19,8 +19,8 @@ class SubmitEvent final : public DOM::Event {
     WEB_PLATFORM_OBJECT(SubmitEvent, DOM::Event);
 
 public:
-    static SubmitEvent* create(JS::Realm&, FlyString const& event_name, SubmitEventInit const& event_init);
-    static SubmitEvent* construct_impl(JS::Realm&, FlyString const& event_name, SubmitEventInit const& event_init);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<SubmitEvent>> create(JS::Realm&, FlyString const& event_name, SubmitEventInit const& event_init);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<SubmitEvent>> construct_impl(JS::Realm&, FlyString const& event_name, SubmitEventInit const& event_init);
 
     virtual ~SubmitEvent() override;
 
@@ -29,6 +29,7 @@ public:
 private:
     SubmitEvent(JS::Realm&, FlyString const& event_name, SubmitEventInit const& event_init);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     JS::GCPtr<HTMLElement> m_submitter;

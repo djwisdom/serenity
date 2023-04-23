@@ -4,7 +4,8 @@
 
 endpoint WindowServer
 {
-    create_menu(i32 menu_id, [UTF8] DeprecatedString menu_title) =|
+    create_menu(i32 menu_id, [UTF8] String name) =|
+    set_menu_name(i32 menu_id, String name) =|
     destroy_menu(i32 menu_id) =|
 
     add_menu(i32 window_id, i32 menu_id) =|
@@ -98,7 +99,7 @@ endpoint WindowServer
 
     set_window_alpha_hit_threshold(i32 window_id, float threshold) =|
 
-    set_window_backing_store(i32 window_id, i32 bpp, i32 pitch, IPC::File anon_file, i32 serial, bool has_alpha_channel, Gfx::IntSize size, bool flush_immediately) => ()
+    set_window_backing_store(i32 window_id, i32 bpp, i32 pitch, IPC::File anon_file, i32 serial, bool has_alpha_channel, Gfx::IntSize size, Gfx::IntSize visible_size, bool flush_immediately) => ()
 
     set_window_has_alpha_channel(i32 window_id, bool has_alpha_channel) =|
     move_window_to_front(i32 window_id) =|
@@ -130,7 +131,7 @@ endpoint WindowServer
     start_drag([UTF8] DeprecatedString text, HashMap<DeprecatedString,ByteBuffer> mime_data, Gfx::ShareableBitmap drag_bitmap) => (bool started)
     set_accepts_drag(bool accepts) =|
 
-    set_system_theme(DeprecatedString theme_path, [UTF8] DeprecatedString theme_name, bool keep_desktop_background) => (bool success)
+    set_system_theme(DeprecatedString theme_path, [UTF8] DeprecatedString theme_name, bool keep_desktop_background, Optional<DeprecatedString> color_scheme_path) => (bool success)
     get_system_theme() => ([UTF8] DeprecatedString theme_name)
     refresh_system_theme() =|
 
@@ -138,6 +139,8 @@ endpoint WindowServer
     get_system_theme_override() => (Optional<Core::AnonymousBuffer> buffer)
     clear_system_theme_override() =|
     is_system_theme_overridden() => (bool overridden)
+
+    get_preferred_color_scheme() => (Optional<DeprecatedString> path)
 
     apply_cursor_theme(DeprecatedString name) =|
     get_cursor_theme() => (DeprecatedString name)
@@ -149,7 +152,7 @@ endpoint WindowServer
     get_cursor_highlight_color() => (Gfx::Color color)
 
     set_system_fonts(DeprecatedString default_font_query, DeprecatedString fixed_width_font_query, DeprecatedString window_title_font_query) => (bool success)
-    set_system_effects(Vector<bool> effects, u8 geometry) =|
+    set_system_effects(Vector<bool> effects, u8 geometry, u8 tile_window) =|
 
     set_window_base_size_and_size_increment(i32 window_id, Gfx::IntSize base_size, Gfx::IntSize size_increment) =|
     set_window_resize_aspect_ratio(i32 window_id, Optional<Gfx::IntSize> resize_aspect_ratio) =|

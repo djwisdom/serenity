@@ -18,6 +18,29 @@ namespace HTTP {
 
 class HttpRequest {
 public:
+    enum class ParseError {
+        RequestTooLarge,
+        RequestIncomplete,
+        OutOfMemory,
+        UnsupportedMethod
+    };
+
+    static StringView parse_error_to_string(ParseError error)
+    {
+        switch (error) {
+        case ParseError::RequestTooLarge:
+            return "Request too large"sv;
+        case ParseError::RequestIncomplete:
+            return "Request is incomplete"sv;
+        case ParseError::OutOfMemory:
+            return "Out of memory"sv;
+        case ParseError::UnsupportedMethod:
+            return "Unsupported method"sv;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+
     enum Method {
         Invalid,
         HEAD,
@@ -57,11 +80,11 @@ public:
     void set_body(ByteBuffer&& body) { m_body = move(body); }
 
     DeprecatedString method_name() const;
-    ByteBuffer to_raw_request() const;
+    ErrorOr<ByteBuffer> to_raw_request() const;
 
     void set_headers(HashMap<DeprecatedString, DeprecatedString> const&);
 
-    static Optional<HttpRequest> from_raw_request(ReadonlyBytes);
+    static ErrorOr<HttpRequest, HttpRequest::ParseError> from_raw_request(ReadonlyBytes);
     static Optional<Header> get_http_basic_authentication_header(URL const&);
     static Optional<BasicAuthenticationCredentials> parse_http_basic_authentication_header(DeprecatedString const&);
 

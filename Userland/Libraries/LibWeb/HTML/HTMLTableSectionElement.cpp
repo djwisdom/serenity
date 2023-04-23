@@ -17,10 +17,17 @@ namespace Web::HTML {
 HTMLTableSectionElement::HTMLTableSectionElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : HTMLElement(document, move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLTableSectionElement"));
 }
 
 HTMLTableSectionElement::~HTMLTableSectionElement() = default;
+
+JS::ThrowCompletionOr<void> HTMLTableSectionElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLTableSectionElementPrototype>(realm, "HTMLTableSectionElement"));
+
+    return {};
+}
 
 void HTMLTableSectionElement::visit_edges(Cell::Visitor& visitor)
 {
@@ -37,7 +44,7 @@ JS::NonnullGCPtr<DOM::HTMLCollection> HTMLTableSectionElement::rows() const
         m_rows = DOM::HTMLCollection::create(const_cast<HTMLTableSectionElement&>(*this), [this](Element const& element) {
             return element.parent() == this
                 && is<HTMLTableRowElement>(element);
-        });
+        }).release_value_but_fixme_should_propagate_errors();
     }
     return *m_rows;
 }
@@ -53,7 +60,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<HTMLTableRowElement>> HTMLTableSectionEleme
         return WebIDL::IndexSizeError::create(realm(), "Index is negative or greater than the number of rows");
 
     // 2. Let table row be the result of creating an element given this element's node document, tr, and the HTML namespace.
-    auto& table_row = static_cast<HTMLTableRowElement&>(*DOM::create_element(document(), TagNames::tr, Namespace::HTML));
+    auto& table_row = static_cast<HTMLTableRowElement&>(*TRY(DOM::create_element(document(), TagNames::tr, Namespace::HTML)));
 
     // 3. If index is −1 or equal to the number of items in the rows collection, then append table row to this element.
     if (index == -1 || index == rows_collection_size)

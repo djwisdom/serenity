@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2021-2023, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,6 +8,7 @@
 #include <AK/DateConstants.h>
 #include <AK/Function.h>
 #include <AK/StdLibExtras.h>
+#include <AK/Time.h>
 #include <AK/Vector.h>
 #include <LibIPC/Decoder.h>
 #include <LibIPC/Encoder.h>
@@ -26,7 +27,7 @@ static void on_path_attribute(ParsedCookie& parsed_cookie, StringView attribute_
 static void on_secure_attribute(ParsedCookie& parsed_cookie);
 static void on_http_only_attribute(ParsedCookie& parsed_cookie);
 static void on_same_site_attribute(ParsedCookie& parsed_cookie, StringView attribute_value);
-static Optional<Core::DateTime> parse_date_time(StringView date_string);
+static Optional<Time> parse_date_time(StringView date_string);
 
 Optional<ParsedCookie> parse_cookie(DeprecatedString const& cookie_string)
 {
@@ -132,19 +133,19 @@ void parse_attributes(ParsedCookie& parsed_cookie, StringView unparsed_attribute
 
 void process_attribute(ParsedCookie& parsed_cookie, StringView attribute_name, StringView attribute_value)
 {
-    if (attribute_name.equals_ignoring_case("Expires"sv)) {
+    if (attribute_name.equals_ignoring_ascii_case("Expires"sv)) {
         on_expires_attribute(parsed_cookie, attribute_value);
-    } else if (attribute_name.equals_ignoring_case("Max-Age"sv)) {
+    } else if (attribute_name.equals_ignoring_ascii_case("Max-Age"sv)) {
         on_max_age_attribute(parsed_cookie, attribute_value);
-    } else if (attribute_name.equals_ignoring_case("Domain"sv)) {
+    } else if (attribute_name.equals_ignoring_ascii_case("Domain"sv)) {
         on_domain_attribute(parsed_cookie, attribute_value);
-    } else if (attribute_name.equals_ignoring_case("Path"sv)) {
+    } else if (attribute_name.equals_ignoring_ascii_case("Path"sv)) {
         on_path_attribute(parsed_cookie, attribute_value);
-    } else if (attribute_name.equals_ignoring_case("Secure"sv)) {
+    } else if (attribute_name.equals_ignoring_ascii_case("Secure"sv)) {
         on_secure_attribute(parsed_cookie);
-    } else if (attribute_name.equals_ignoring_case("HttpOnly"sv)) {
+    } else if (attribute_name.equals_ignoring_ascii_case("HttpOnly"sv)) {
         on_http_only_attribute(parsed_cookie);
-    } else if (attribute_name.equals_ignoring_case("SameSite"sv)) {
+    } else if (attribute_name.equals_ignoring_ascii_case("SameSite"sv)) {
         on_same_site_attribute(parsed_cookie, attribute_value);
     }
 }
@@ -153,7 +154,7 @@ void on_expires_attribute(ParsedCookie& parsed_cookie, StringView attribute_valu
 {
     // https://tools.ietf.org/html/rfc6265#section-5.2.1
     if (auto expiry_time = parse_date_time(attribute_value); expiry_time.has_value())
-        parsed_cookie.expiry_time_from_expires_attribute = move(*expiry_time);
+        parsed_cookie.expiry_time_from_expires_attribute = expiry_time.release_value();
 }
 
 void on_max_age_attribute(ParsedCookie& parsed_cookie, StringView attribute_value)
@@ -168,11 +169,10 @@ void on_max_age_attribute(ParsedCookie& parsed_cookie, StringView attribute_valu
     if (auto delta_seconds = attribute_value.to_int(); delta_seconds.has_value()) {
         if (*delta_seconds <= 0) {
             // If delta-seconds is less than or equal to zero (0), let expiry-time be the earliest representable date and time.
-            parsed_cookie.expiry_time_from_max_age_attribute = Core::DateTime::from_timestamp(0);
+            parsed_cookie.expiry_time_from_max_age_attribute = Time::min();
         } else {
             // Otherwise, let the expiry-time be the current date and time plus delta-seconds seconds.
-            time_t now = Core::DateTime::now().timestamp();
-            parsed_cookie.expiry_time_from_max_age_attribute = Core::DateTime::from_timestamp(now + *delta_seconds);
+            parsed_cookie.expiry_time_from_max_age_attribute = Time::now_realtime() + Time::from_seconds(*delta_seconds);
         }
     }
 }
@@ -236,7 +236,7 @@ void on_same_site_attribute(ParsedCookie& parsed_cookie, StringView attribute_va
     parsed_cookie.same_site_attribute = same_site_from_string(attribute_value);
 }
 
-Optional<Core::DateTime> parse_date_time(StringView date_string)
+Optional<Time> parse_date_time(StringView date_string)
 {
     // https://tools.ietf.org/html/rfc6265#section-5.1.1
     unsigned hour = 0;
@@ -279,7 +279,7 @@ Optional<Core::DateTime> parse_date_time(StringView date_string)
 
     auto parse_month = [&](StringView token) {
         for (unsigned i = 0; i < 12; ++i) {
-            if (token.equals_ignoring_case(short_month_names[i])) {
+            if (token.equals_ignoring_ascii_case(short_month_names[i])) {
                 month = i + 1;
                 return true;
             }
@@ -341,26 +341,32 @@ Optional<Core::DateTime> parse_date_time(StringView date_string)
     if (second > 59)
         return {};
 
+    // 6. Let the parsed-cookie-date be the date whose day-of-month, month, year, hour, minute, and second (in UTC) are the
+    //    day-of-month-value, the month-value, the year-value, the hour-value, the minute-value, and the second-value, respectively.
+    //    If no such date exists, abort these steps and fail to parse the cookie-date.
     // FIXME: Fail on dates that do not exist.
-    return Core::DateTime::create(year, month, day_of_month, hour, minute, second);
+    auto parsed_cookie_date = Time::from_timestamp(year, month, day_of_month, hour, minute, second, 0);
+
+    // 7. Return the parsed-cookie-date as the result of this algorithm.
+    return parsed_cookie_date;
 }
 
 }
 
 template<>
-bool IPC::encode(Encoder& encoder, Web::Cookie::ParsedCookie const& cookie)
+ErrorOr<void> IPC::encode(Encoder& encoder, Web::Cookie::ParsedCookie const& cookie)
 {
-    encoder << cookie.name;
-    encoder << cookie.value;
-    encoder << cookie.expiry_time_from_expires_attribute;
-    encoder << cookie.expiry_time_from_max_age_attribute;
-    encoder << cookie.domain;
-    encoder << cookie.path;
-    encoder << cookie.secure_attribute_present;
-    encoder << cookie.http_only_attribute_present;
-    encoder << cookie.same_site_attribute;
+    TRY(encoder.encode(cookie.name));
+    TRY(encoder.encode(cookie.value));
+    TRY(encoder.encode(cookie.expiry_time_from_expires_attribute));
+    TRY(encoder.encode(cookie.expiry_time_from_max_age_attribute));
+    TRY(encoder.encode(cookie.domain));
+    TRY(encoder.encode(cookie.path));
+    TRY(encoder.encode(cookie.secure_attribute_present));
+    TRY(encoder.encode(cookie.http_only_attribute_present));
+    TRY(encoder.encode(cookie.same_site_attribute));
 
-    return true;
+    return {};
 }
 
 template<>
@@ -368,8 +374,8 @@ ErrorOr<Web::Cookie::ParsedCookie> IPC::decode(Decoder& decoder)
 {
     auto name = TRY(decoder.decode<DeprecatedString>());
     auto value = TRY(decoder.decode<DeprecatedString>());
-    auto expiry_time_from_expires_attribute = TRY(decoder.decode<Optional<Core::DateTime>>());
-    auto expiry_time_from_max_age_attribute = TRY(decoder.decode<Optional<Core::DateTime>>());
+    auto expiry_time_from_expires_attribute = TRY(decoder.decode<Optional<Time>>());
+    auto expiry_time_from_max_age_attribute = TRY(decoder.decode<Optional<Time>>());
     auto domain = TRY(decoder.decode<Optional<DeprecatedString>>());
     auto path = TRY(decoder.decode<Optional<DeprecatedString>>());
     auto secure_attribute_present = TRY(decoder.decode<bool>());

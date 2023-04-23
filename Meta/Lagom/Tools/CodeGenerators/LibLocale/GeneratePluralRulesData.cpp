@@ -6,7 +6,6 @@
 
 #include "../LibUnicode/GeneratorUtil.h" // FIXME: Move this somewhere common.
 #include <AK/DeprecatedString.h>
-#include <AK/Format.h>
 #include <AK/JsonObject.h>
 #include <AK/JsonParser.h>
 #include <AK/JsonValue.h>
@@ -15,8 +14,8 @@
 #include <AK/StringBuilder.h>
 #include <AK/Variant.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
-#include <LibCore/Stream.h>
+#include <LibCore/Directory.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibLocale/PluralRules.h>
 
 static DeprecatedString format_identifier(StringView owner, DeprecatedString identifier)
@@ -331,9 +330,9 @@ static ErrorOr<void> parse_plural_rules(DeprecatedString core_supplemental_path,
     plurals_path = plurals_path.append(file_name);
 
     auto plurals = TRY(read_json_file(plurals_path.string()));
-    auto const& supplemental_object = plurals.as_object().get("supplemental"sv);
+    auto const& supplemental_object = plurals.as_object().get_object("supplemental"sv).value();
 
-    supplemental_object.as_object().for_each_member([&](auto const& key, auto const& plurals_object) {
+    supplemental_object.for_each_member([&](auto const& key, auto const& plurals_object) {
         if (!key.starts_with(form_prefix))
             return;
 
@@ -366,10 +365,10 @@ static ErrorOr<void> parse_plural_ranges(DeprecatedString core_supplemental_path
     plural_ranges_path = plural_ranges_path.append("pluralRanges.json"sv);
 
     auto plural_ranges = TRY(read_json_file(plural_ranges_path.string()));
-    auto const& supplemental_object = plural_ranges.as_object().get("supplemental"sv);
-    auto const& plurals_object = supplemental_object.as_object().get("plurals"sv);
+    auto const& supplemental_object = plural_ranges.as_object().get_object("supplemental"sv).value();
+    auto const& plurals_object = supplemental_object.get_object("plurals"sv).value();
 
-    plurals_object.as_object().for_each_member([&](auto const& loc, auto const& ranges_object) {
+    plurals_object.for_each_member([&](auto const& loc, auto const& ranges_object) {
         auto locale = cldr.locales.get(loc);
         if (!locale.has_value())
             return;
@@ -395,11 +394,9 @@ static ErrorOr<void> parse_plural_ranges(DeprecatedString core_supplemental_path
 
 static ErrorOr<void> parse_all_locales(DeprecatedString core_path, DeprecatedString locale_names_path, CLDR& cldr)
 {
-    auto identity_iterator = TRY(path_to_dir_iterator(move(locale_names_path)));
-
     LexicalPath core_supplemental_path(move(core_path));
     core_supplemental_path = core_supplemental_path.append("supplemental"sv);
-    VERIFY(Core::File::is_directory(core_supplemental_path.string()));
+    VERIFY(FileSystem::is_directory(core_supplemental_path.string()));
 
     auto remove_variants_from_path = [&](DeprecatedString path) -> ErrorOr<DeprecatedString> {
         auto parsed_locale = TRY(CanonicalLanguageID::parse(cldr.unique_strings, LexicalPath::basename(path)));
@@ -411,15 +408,16 @@ static ErrorOr<void> parse_all_locales(DeprecatedString core_path, DeprecatedStr
         if (auto region = cldr.unique_strings.get(parsed_locale.region); !region.is_empty())
             builder.appendff("-{}", region);
 
-        return builder.build();
+        return builder.to_deprecated_string();
     };
 
-    while (identity_iterator.has_next()) {
-        auto locale_path = TRY(next_path_from_dir_iterator(identity_iterator));
+    TRY(Core::Directory::for_each_entry(TRY(String::formatted("{}/main", locale_names_path)), Core::DirIterator::SkipParentAndBaseDir, [&](auto& entry, auto& directory) -> ErrorOr<IterationDecision> {
+        auto locale_path = LexicalPath::join(directory.path().string(), entry.name).string();
         auto language = TRY(remove_variants_from_path(locale_path));
 
         cldr.locales.ensure(language);
-    }
+        return IterationDecision::Continue;
+    }));
 
     TRY(parse_plural_rules(core_supplemental_path.string(), "plurals.json"sv, cldr));
     TRY(parse_plural_rules(core_supplemental_path.string(), "ordinals.json"sv, cldr));
@@ -427,7 +425,7 @@ static ErrorOr<void> parse_all_locales(DeprecatedString core_path, DeprecatedStr
     return {};
 }
 
-static ErrorOr<void> generate_unicode_locale_header(Core::Stream::BufferedFile& file, CLDR&)
+static ErrorOr<void> generate_unicode_locale_header(Core::BufferedFile& file, CLDR&)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -444,11 +442,11 @@ namespace Locale {
 }
 )~~~");
 
-    TRY(file.write(generator.as_string_view().bytes()));
+    TRY(file.write_until_depleted(generator.as_string_view().bytes()));
     return {};
 }
 
-static ErrorOr<void> generate_unicode_locale_implementation(Core::Stream::BufferedFile& file, CLDR& cldr)
+static ErrorOr<void> generate_unicode_locale_implementation(Core::BufferedFile& file, CLDR& cldr)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -623,7 +621,7 @@ PluralCategory determine_plural_category(StringView locale, PluralForm form, Plu
     return decider(move(operands));
 }
 
-Span<PluralCategory const> available_plural_categories(StringView locale, PluralForm form)
+ReadonlySpan<PluralCategory> available_plural_categories(StringView locale, PluralForm form)
 {
     auto locale_value = locale_from_string(locale);
     if (!locale_value.has_value())
@@ -656,7 +654,7 @@ PluralCategory determine_plural_range(StringView locale, PluralCategory start, P
 }
 )~~~");
 
-    TRY(file.write(generator.as_string_view().bytes()));
+    TRY(file.write_until_depleted(generator.as_string_view().bytes()));
     return {};
 }
 
@@ -674,8 +672,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_option(locale_names_path, "Path to cldr-localenames directory", "locale-names-path", 'l', "locale-names-path");
     args_parser.parse(arguments);
 
-    auto generated_header_file = TRY(open_file(generated_header_path, Core::Stream::OpenMode::Write));
-    auto generated_implementation_file = TRY(open_file(generated_implementation_path, Core::Stream::OpenMode::Write));
+    auto generated_header_file = TRY(open_file(generated_header_path, Core::File::OpenMode::Write));
+    auto generated_implementation_file = TRY(open_file(generated_implementation_path, Core::File::OpenMode::Write));
 
     CLDR cldr;
     TRY(parse_all_locales(core_path, locale_names_path, cldr));

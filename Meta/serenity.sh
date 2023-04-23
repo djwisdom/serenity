@@ -7,7 +7,7 @@ print_help() {
     NAME=$(basename "$ARG0")
     cat <<EOF
 Usage: $NAME COMMAND [TARGET] [TOOLCHAIN] [ARGS...]
-  Supported TARGETs: aarch64, i686, x86_64, lagom. Defaults to SERENITY_ARCH, or x86_64 if not set.
+  Supported TARGETs: aarch64, x86_64, lagom. Defaults to SERENITY_ARCH, or x86_64 if not set.
   Supported TOOLCHAINs: GNU, Clang. Defaults to SERENITY_TOOLCHAIN, or GNU if not set.
   Supported COMMANDs:
     build:      Compiles the target binaries, [ARGS...] are passed through to ninja
@@ -46,22 +46,22 @@ Usage: $NAME COMMAND [TARGET] [TOOLCHAIN] [ARGS...]
 
 
   Examples:
-    $NAME run i686 GNU smp=on
+    $NAME run x86_64 GNU smp=on
         Runs the image in QEMU passing "smp=on" to the kernel command line
-    $NAME run i686 GNU 'init=/bin/UserspaceEmulator init_args=/bin/SystemServer'
+    $NAME run x86_64 GNU 'init=/bin/UserspaceEmulator init_args=/bin/SystemServer'
         Runs the image in QEMU, and run the entire system through UserspaceEmulator (not fully supported yet)
     $NAME run
-        Runs the image for the default TARGET i686 in QEMU
+        Runs the image for the default TARGET x86_64 in QEMU
     $NAME run lagom js -A
         Runs the Lagom-built js(1) REPL
     $NAME test lagom
         Runs the unit tests on the build host
-    $NAME kaddr2line i686 0x12345678
+    $NAME kaddr2line x86_64 0x12345678
         Resolves the address 0x12345678 in the Kernel binary
-    $NAME addr2line i686 WindowServer 0x12345678
+    $NAME addr2line x86_64 WindowServer 0x12345678
         Resolves the address 0x12345678 in the WindowServer binary
-    $NAME gdb i686 smp=on -ex 'hb *init'
-        Runs the image for the TARGET i686 in qemu and attaches a gdb session
+    $NAME gdb x86_64 smp=on -ex 'hb *init'
+        Runs the image for the TARGET x86_64 in qemu and attaches a gdb session
         setting a breakpoint at the init() function in the Kernel.
 EOF
 }
@@ -118,10 +118,6 @@ get_top_dir() {
 is_valid_target() {
     if [ "$TARGET" = "aarch64" ]; then
         CMAKE_ARGS+=("-DSERENITY_ARCH=aarch64")
-        return 0
-    fi
-    if [ "$TARGET" = "i686" ]; then
-        CMAKE_ARGS+=("-DSERENITY_ARCH=i686")
         return 0
     fi
     if [ "$TARGET" = "x86_64" ]; then
@@ -287,7 +283,7 @@ build_image() {
     if [ "$SERENITY_RUN" = "limine" ]; then
         build_target limine-image
     else
-        build_target image
+        build_target qemu-image
     fi
 }
 
@@ -319,7 +315,7 @@ ensure_toolchain() {
     if [ "$TOOLCHAIN_TYPE" = "GNU" ]; then
         local ld_version
         ld_version="$("$TOOLCHAIN_DIR"/bin/"$TARGET"-pc-serenity-ld -v)"
-        local expected_version="GNU ld (GNU Binutils) 2.39"
+        local expected_version="GNU ld (GNU Binutils) 2.40"
         if [ "$ld_version" != "$expected_version" ]; then
             echo "Your toolchain has an old version of binutils installed."
             echo "    installed version: \"$ld_version\""
@@ -405,6 +401,24 @@ run_gdb() {
     fi
 }
 
+build_and_run_lagom_target() {
+    local run_target="${1}"
+    local lagom_target="${CMD_ARGS[0]}"
+    local lagom_args
+
+    # All command arguments must have any existing semicolon escaped, to prevent CMake from
+    # interpreting them as list separators.
+    local cmd_args=()
+    for arg in "${CMD_ARGS[@]:1}"; do
+        cmd_args+=( "${arg//;/\\;}" )
+    done
+
+    # Then existing list separators must be replaced with a semicolon for CMake.
+    lagom_args=$(IFS=';' ; echo -e "${cmd_args[*]}")
+
+    LAGOM_TARGET="${lagom_target}" LAGOM_ARGS="${lagom_args[*]}" build_target "${run_target}"
+}
+
 if [[ "$CMD" =~ ^(build|install|image|copy-src|run|gdb|test|rebuild|recreate|kaddr2line|addr2line|setup-and-run)$ ]]; then
     cmd_with_target
     [[ "$CMD" != "recreate" && "$CMD" != "rebuild" ]] || delete_target
@@ -433,11 +447,10 @@ if [[ "$CMD" =~ ^(build|install|image|copy-src|run|gdb|test|rebuild|recreate|kad
           ;;
         run)
             if [ "$TARGET" = "lagom" ]; then
-                build_target "${CMD_ARGS[0]}"
                 if [ "${CMD_ARGS[0]}" = "ladybird" ]; then
-                    ninja -C "$BUILD_DIR" run-ladybird
+                    build_and_run_lagom_target "run-ladybird"
                 else
-                    "$BUILD_DIR/${CMD_ARGS[0]}" "${CMD_ARGS[@]:1}"
+                    build_and_run_lagom_target "run-lagom-target"
                 fi
             else
                 build_target
@@ -450,12 +463,12 @@ if [[ "$CMD" =~ ^(build|install|image|copy-src|run|gdb|test|rebuild|recreate|kad
             fi
             ;;
         gdb)
-            command -v tmux >/dev/null 2>&1 || die "Please install tmux!"
             if [ "$TARGET" = "lagom" ]; then
                 [ $# -ge 1 ] || usage
                 build_target "$@"
                 run_gdb "${CMD_ARGS[@]}"
             else
+                command -v tmux >/dev/null 2>&1 || die "Please install tmux!"
                 build_target
                 build_target install
                 build_image

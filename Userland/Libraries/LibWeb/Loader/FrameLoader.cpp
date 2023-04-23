@@ -9,19 +9,21 @@
 #include <AK/LexicalPath.h>
 #include <AK/SourceGenerator.h>
 #include <LibGemini/Document.h>
-#include <LibGfx/ImageDecoder.h>
+#include <LibGfx/ImageFormats/ImageDecoder.h>
 #include <LibMarkdown/Document.h>
+#include <LibTextCodec/Decoder.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
-#include <LibWeb/Cookie/ParsedCookie.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/HTMLIFrameElement.h>
 #include <LibWeb/HTML/NavigationParams.h>
+#include <LibWeb/HTML/Parser/HTMLEncodingDetection.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/Loader/FrameLoader.h>
 #include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Platform/ImageCodecPlugin.h>
 #include <LibWeb/XML/XMLDocumentBuilder.h>
@@ -40,7 +42,7 @@ FrameLoader::FrameLoader(HTML::BrowsingContext& browsing_context)
     : m_browsing_context(browsing_context)
 {
     if (!s_default_favicon_bitmap) {
-        s_default_favicon_bitmap = Gfx::Bitmap::try_load_from_file(s_default_favicon_path).release_value_but_fixme_should_propagate_errors();
+        s_default_favicon_bitmap = Gfx::Bitmap::load_from_file(s_default_favicon_path).release_value_but_fixme_should_propagate_errors();
         VERIFY(s_default_favicon_bitmap);
     }
 }
@@ -103,21 +105,21 @@ static bool build_markdown_document(DOM::Document& document, ByteBuffer const& d
 
 static bool build_text_document(DOM::Document& document, ByteBuffer const& data)
 {
-    auto html_element = document.create_element("html").release_value();
+    auto html_element = DOM::create_element(document, HTML::TagNames::html, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(document.append_child(html_element));
 
-    auto head_element = document.create_element("head").release_value();
+    auto head_element = DOM::create_element(document, HTML::TagNames::head, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(html_element->append_child(head_element));
-    auto title_element = document.create_element("title").release_value();
+    auto title_element = DOM::create_element(document, HTML::TagNames::title, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(head_element->append_child(title_element));
 
     auto title_text = document.create_text_node(document.url().basename());
     MUST(title_element->append_child(title_text));
 
-    auto body_element = document.create_element("body").release_value();
+    auto body_element = DOM::create_element(document, HTML::TagNames::body, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(html_element->append_child(body_element));
 
-    auto pre_element = document.create_element("pre").release_value();
+    auto pre_element = DOM::create_element(document, HTML::TagNames::pre, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(body_element->append_child(pre_element));
 
     MUST(pre_element->append_child(document.create_text_node(DeprecatedString::copy(data))));
@@ -134,22 +136,22 @@ static bool build_image_document(DOM::Document& document, ByteBuffer const& data
     if (!bitmap)
         return false;
 
-    auto html_element = document.create_element("html").release_value();
+    auto html_element = DOM::create_element(document, HTML::TagNames::html, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(document.append_child(html_element));
 
-    auto head_element = document.create_element("head").release_value();
+    auto head_element = DOM::create_element(document, HTML::TagNames::head, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(html_element->append_child(head_element));
-    auto title_element = document.create_element("title").release_value();
+    auto title_element = DOM::create_element(document, HTML::TagNames::title, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(head_element->append_child(title_element));
 
-    auto basename = LexicalPath::basename(document.url().path());
-    auto title_text = document.heap().allocate<DOM::Text>(document.realm(), document, DeprecatedString::formatted("{} [{}x{}]", basename, bitmap->width(), bitmap->height()));
+    auto basename = LexicalPath::basename(document.url().serialize_path());
+    auto title_text = document.heap().allocate<DOM::Text>(document.realm(), document, DeprecatedString::formatted("{} [{}x{}]", basename, bitmap->width(), bitmap->height())).release_allocated_value_but_fixme_should_propagate_errors();
     MUST(title_element->append_child(*title_text));
 
-    auto body_element = document.create_element("body").release_value();
+    auto body_element = DOM::create_element(document, HTML::TagNames::body, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(html_element->append_child(body_element));
 
-    auto image_element = document.create_element("img").release_value();
+    auto image_element = DOM::create_element(document, HTML::TagNames::img, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
     MUST(image_element->set_attribute(HTML::AttributeNames::src, document.url().to_deprecated_string()));
     MUST(body_element->append_child(image_element));
 
@@ -172,11 +174,34 @@ static bool build_gemini_document(DOM::Document& document, ByteBuffer const& dat
 
 static bool build_xml_document(DOM::Document& document, ByteBuffer const& data)
 {
-
-    XML::Parser parser(data, { .resolve_external_resource = resolve_xml_resource });
+    auto encoding = HTML::run_encoding_sniffing_algorithm(document, data);
+    auto decoder = TextCodec::decoder_for(encoding);
+    VERIFY(decoder.has_value());
+    auto source = decoder->to_utf8(data).release_value_but_fixme_should_propagate_errors();
+    XML::Parser parser(source, { .resolve_external_resource = resolve_xml_resource });
     XMLDocumentBuilder builder { document };
     auto result = parser.parse_with_listener(builder);
     return !result.is_error() && !builder.has_error();
+}
+
+static bool build_video_document(DOM::Document& document)
+{
+    auto html_element = DOM::create_element(document, HTML::TagNames::html, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
+    MUST(document.append_child(html_element));
+
+    auto head_element = DOM::create_element(document, HTML::TagNames::head, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
+    MUST(html_element->append_child(head_element));
+
+    auto body_element = DOM::create_element(document, HTML::TagNames::body, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
+    MUST(html_element->append_child(body_element));
+
+    auto video_element = DOM::create_element(document, HTML::TagNames::video, Namespace::HTML).release_value_but_fixme_should_propagate_errors();
+    MUST(video_element->set_attribute(HTML::AttributeNames::src, document.url().to_deprecated_string()));
+    MUST(video_element->set_attribute(HTML::AttributeNames::autoplay, DeprecatedString::empty()));
+    MUST(video_element->set_attribute(HTML::AttributeNames::controls, DeprecatedString::empty()));
+    MUST(body_element->append_child(video_element));
+
+    return true;
 }
 
 bool FrameLoader::parse_document(DOM::Document& document, ByteBuffer const& data)
@@ -191,6 +216,8 @@ bool FrameLoader::parse_document(DOM::Document& document, ByteBuffer const& data
         return build_xml_document(document, data);
     if (mime_type.starts_with("image/"sv))
         return build_image_document(document, data);
+    if (mime_type.starts_with("video/"sv))
+        return build_video_document(document);
     if (mime_type == "text/plain" || mime_type == "application/json")
         return build_text_document(document, data);
     if (mime_type == "text/markdown")
@@ -208,16 +235,18 @@ bool FrameLoader::load(LoadRequest& request, Type type)
         return false;
     }
 
-    if (!m_browsing_context.is_frame_nesting_allowed(request.url())) {
+    if (!m_browsing_context->is_frame_nesting_allowed(request.url())) {
         dbgln("No further recursion is allowed for the frame, abort load!");
         return false;
     }
+
+    request.set_main_resource(true);
 
     auto& url = request.url();
 
     if (type == Type::Navigation || type == Type::Reload || type == Type::Redirect) {
         if (auto* page = browsing_context().page()) {
-            if (&page->top_level_browsing_context() == &m_browsing_context)
+            if (&page->top_level_browsing_context() == m_browsing_context)
                 page->client().page_did_start_loading(url, type == Type::Redirect);
         }
     }
@@ -314,10 +343,7 @@ void FrameLoader::load_html(StringView html, const AK::URL& url)
         .reserved_environment = {},
         .browsing_context = browsing_context(),
     };
-    auto document = DOM::Document::create_and_initialize(
-        DOM::Document::Type::HTML,
-        "text/html",
-        move(navigation_params));
+    auto document = DOM::Document::create_and_initialize(DOM::Document::Type::HTML, "text/html", move(navigation_params)).release_value_but_fixme_should_propagate_errors();
     browsing_context().set_active_document(document);
 
     auto parser = HTML::HTMLParser::create(document, html, "utf-8");
@@ -336,8 +362,10 @@ void FrameLoader::set_error_page_url(DeprecatedString error_page_url)
 
 void FrameLoader::load_error_page(const AK::URL& failed_url, DeprecatedString const& error)
 {
+    LoadRequest request = LoadRequest::create_for_url_on_page(s_error_page_url, browsing_context().page());
+
     ResourceLoader::the().load(
-        s_error_page_url,
+        request,
         [this, failed_url, error](auto data, auto&, auto) {
             VERIFY(!data.is_null());
             StringBuilder builder;
@@ -345,7 +373,7 @@ void FrameLoader::load_error_page(const AK::URL& failed_url, DeprecatedString co
             generator.set("failed_url", escape_html_entities(failed_url.to_deprecated_string()));
             generator.set("error", escape_html_entities(error));
             generator.append(data);
-            load_html(generator.as_string_view(), failed_url);
+            load_html(generator.as_string_view(), s_error_page_url);
         },
         [](auto& error, auto) {
             dbgln("Failed to load error page: {}", error);
@@ -363,32 +391,37 @@ void FrameLoader::load_favicon(RefPtr<Gfx::Bitmap> bitmap)
     }
 }
 
-void FrameLoader::store_response_cookies(AK::URL const& url, DeprecatedString const& cookies)
-{
-    auto* page = browsing_context().page();
-    if (!page)
-        return;
-
-    auto set_cookie_json_value = MUST(JsonValue::from_string(cookies));
-    VERIFY(set_cookie_json_value.type() == JsonValue::Type::Array);
-
-    for (auto const& set_cookie_entry : set_cookie_json_value.as_array().values()) {
-        VERIFY(set_cookie_entry.type() == JsonValue::Type::String);
-
-        auto cookie = Cookie::parse_cookie(set_cookie_entry.as_string());
-        if (!cookie.has_value())
-            continue;
-
-        page->client().page_did_set_cookie(url, cookie.value(), Cookie::Source::Http); // FIXME: Determine cookie source correctly
-    }
-}
-
 void FrameLoader::resource_did_load()
 {
-    auto url = resource()->url();
+    // This prevents us setting up the document of a removed browsing context container (BCC, e.g. <iframe>), which will cause a crash
+    // if the document contains a script that inserts another BCC as this will use the stale browsing context it previously set up,
+    // even if it's reinserted.
+    // Example:
+    // index.html:
+    // ```
+    // <body><script>
+    //     var i = document.createElement("iframe");
+    //     i.src = "b.html";
+    //     document.body.append(i);
+    //     i.remove();
+    // </script>
+    // ```
+    // b.html:
+    // ```
+    // <body><script>
+    //     var i = document.createElement("iframe");
+    //     document.body.append(i);
+    // </script>
+    // ```
+    // Required by Prebid.js, which does this by inserting an <iframe> into a <div> in the active document via innerHTML,
+    // then transfers it to the <html> element:
+    // https://github.com/prebid/Prebid.js/blob/7b7389c5abdd05626f71c3df606a93713d1b9f85/src/utils.js#L597
+    // This is done in the spec by removing all tasks and aborting all fetches when a document is destroyed:
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#destroy-a-document
+    if (browsing_context().has_been_discarded())
+        return;
 
-    if (auto set_cookie = resource()->response_headers().get("Set-Cookie"); set_cookie.has_value())
-        store_response_cookies(url, *set_cookie);
+    auto url = resource()->url();
 
     // For 3xx (Redirection) responses, the Location value refers to the preferred target resource for automatically redirecting the request.
     auto status_code = resource()->status_code();
@@ -435,11 +468,7 @@ void FrameLoader::resource_did_load()
         .reserved_environment = {},
         .browsing_context = browsing_context(),
     };
-    auto document = DOM::Document::create_and_initialize(
-        DOM::Document::Type::HTML,
-        "text/html",
-        move(navigation_params));
-
+    auto document = DOM::Document::create_and_initialize(DOM::Document::Type::HTML, "text/html", move(navigation_params)).release_value_but_fixme_should_propagate_errors();
     document->set_url(url);
     document->set_encoding(resource()->encoding());
     document->set_content_type(resource()->mime_type());
@@ -464,6 +493,10 @@ void FrameLoader::resource_did_load()
 
 void FrameLoader::resource_did_fail()
 {
+    // See comment in resource_did_load() about why this is done.
+    if (browsing_context().has_been_discarded())
+        return;
+
     load_error_page(resource()->url(), resource()->error());
 }
 

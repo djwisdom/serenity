@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/ByteBuffer.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
 #include <Kernel/Net/LocalSocket.h>
 #include <Kernel/Process.h>
@@ -19,7 +20,7 @@ namespace Kernel {
             TRY(require_promise(Pledge::unix));   \
     } while (0)
 
-static void setup_socket_fd(Process::OpenFileDescriptions& fds, int fd, NonnullLockRefPtr<OpenFileDescription> description, int type)
+static void setup_socket_fd(Process::OpenFileDescriptions& fds, int fd, NonnullRefPtr<OpenFileDescription> description, int type)
 {
     description->set_readable(true);
     description->set_writable(true);
@@ -93,7 +94,7 @@ ErrorOr<FlatPtr> Process::sys$accept4(Userspace<Syscall::SC_accept4_params const
         TRY(copy_from_user(&address_size, static_ptr_cast<socklen_t const*>(user_address_size)));
 
     ScopedDescriptionAllocation fd_allocation;
-    LockRefPtr<OpenFileDescription> accepting_socket_description;
+    RefPtr<OpenFileDescription> accepting_socket_description;
 
     TRY(m_fds.with_exclusive([&](auto& fds) -> ErrorOr<void> {
         fd_allocation = TRY(fds.allocate());
@@ -199,6 +200,24 @@ ErrorOr<FlatPtr> Process::sys$sendmsg(int sockfd, Userspace<const struct msghdr*
             Thread::current()->send_signal(SIGPIPE, &Process::current());
         return EPIPE;
     }
+
+    if (msg.msg_controllen > 0) {
+        // Handle command messages.
+        auto cmsg_buffer = TRY(ByteBuffer::create_uninitialized(msg.msg_controllen));
+        TRY(copy_from_user(cmsg_buffer.data(), msg.msg_control, msg.msg_controllen));
+        msg.msg_control = cmsg_buffer.data();
+        for (struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg); cmsg != nullptr; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+            if (socket.is_local() && cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+                auto& local_socket = static_cast<LocalSocket&>(socket);
+                int* fds = (int*)CMSG_DATA(cmsg);
+                size_t nfds = (cmsg->cmsg_len - CMSG_ALIGN(sizeof(struct cmsghdr))) / sizeof(int);
+                for (size_t i = 0; i < nfds; ++i) {
+                    TRY(local_socket.sendfd(*description, TRY(open_file_description(fds[i]))));
+                }
+            }
+        }
+    }
+
     auto data_buffer = TRY(UserOrKernelBuffer::for_user_buffer((u8*)iovs[0].iov_base, iovs[0].iov_len));
 
     while (true) {
@@ -267,26 +286,46 @@ ErrorOr<FlatPtr> Process::sys$recvmsg(int sockfd, Userspace<struct msghdr*> user
         msg_flags |= MSG_TRUNC;
     }
 
-    if (socket.wants_timestamp()) {
-        struct {
-            cmsghdr cmsg;
-            timeval timestamp;
-        } cmsg_timestamp;
-        socklen_t control_length = sizeof(cmsg_timestamp);
-        if (msg.msg_controllen < control_length) {
+    socklen_t current_cmsg_len = 0;
+    auto try_add_cmsg = [&](int level, int type, void const* data, socklen_t len) -> ErrorOr<bool> {
+        if (current_cmsg_len + len > msg.msg_controllen) {
             msg_flags |= MSG_CTRUNC;
-        } else {
-            cmsg_timestamp = { { control_length, SOL_SOCKET, SCM_TIMESTAMP }, timestamp.to_timeval() };
-            TRY(copy_to_user(msg.msg_control, &cmsg_timestamp, control_length));
+            return false;
         }
-        TRY(copy_to_user(&user_msg.unsafe_userspace_ptr()->msg_controllen, &control_length));
+
+        cmsghdr cmsg = { (socklen_t)CMSG_LEN(len), level, type };
+        cmsghdr* target = (cmsghdr*)(((char*)msg.msg_control) + current_cmsg_len);
+        TRY(copy_to_user(target, &cmsg));
+        TRY(copy_to_user(CMSG_DATA(target), data, len));
+        current_cmsg_len += CMSG_ALIGN(cmsg.cmsg_len);
+        return true;
+    };
+
+    if (socket.wants_timestamp()) {
+        timeval time = timestamp.to_timeval();
+        TRY(try_add_cmsg(SOL_SOCKET, SCM_TIMESTAMP, &time, sizeof(time)));
     }
+
+    int space_for_fds = (msg.msg_controllen - current_cmsg_len - sizeof(struct cmsghdr)) / sizeof(int);
+    if (space_for_fds > 0 && socket.is_local()) {
+        auto& local_socket = static_cast<LocalSocket&>(socket);
+        auto descriptions = TRY(local_socket.recvfds(description, space_for_fds));
+        Vector<int> fdnums;
+        for (auto& description : descriptions) {
+            auto fd_allocation = TRY(m_fds.with_exclusive([](auto& fds) { return fds.allocate(); }));
+            m_fds.with_exclusive([&](auto& fds) { fds[fd_allocation.fd].set(*description, 0); });
+            fdnums.append(fd_allocation.fd);
+        }
+        TRY(try_add_cmsg(SOL_SOCKET, SCM_RIGHTS, fdnums.data(), fdnums.size() * sizeof(int)));
+    }
+
+    TRY(copy_to_user(&user_msg.unsafe_userspace_ptr()->msg_controllen, &current_cmsg_len));
 
     TRY(copy_to_user(&user_msg.unsafe_userspace_ptr()->msg_flags, &msg_flags));
     return result.value();
 }
 
-template<bool sockname, typename Params>
+template<Process::SockOrPeerName sock_or_peer_name, typename Params>
 ErrorOr<void> Process::get_sock_or_peer_name(Params const& params)
 {
     socklen_t addrlen_value;
@@ -304,7 +343,7 @@ ErrorOr<void> Process::get_sock_or_peer_name(Params const& params)
 
     sockaddr_un address_buffer {};
     addrlen_value = min(sizeof(sockaddr_un), static_cast<size_t>(addrlen_value));
-    if constexpr (sockname)
+    if constexpr (sock_or_peer_name == SockOrPeerName::SockName)
         socket.get_local_address((sockaddr*)&address_buffer, &addrlen_value);
     else
         socket.get_peer_address((sockaddr*)&address_buffer, &addrlen_value);
@@ -316,7 +355,7 @@ ErrorOr<FlatPtr> Process::sys$getsockname(Userspace<Syscall::SC_getsockname_para
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     auto params = TRY(copy_typed_from_user(user_params));
-    TRY(get_sock_or_peer_name<true>(params));
+    TRY(get_sock_or_peer_name<SockOrPeerName::SockName>(params));
     return 0;
 }
 
@@ -324,7 +363,7 @@ ErrorOr<FlatPtr> Process::sys$getpeername(Userspace<Syscall::SC_getpeername_para
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     auto params = TRY(copy_typed_from_user(user_params));
-    TRY(get_sock_or_peer_name<false>(params));
+    TRY(get_sock_or_peer_name<SockOrPeerName::PeerName>(params));
     return 0;
 }
 
@@ -389,7 +428,7 @@ ErrorOr<FlatPtr> Process::sys$socketpair(Userspace<Syscall::SC_socketpair_params
         setup_socket_fd(fds, allocated_fds[0], pair.description0, params.type);
         setup_socket_fd(fds, allocated_fds[1], pair.description1, params.type);
 
-        if (copy_to_user(params.sv, allocated_fds, sizeof(allocated_fds)).is_error()) {
+        if (copy_n_to_user(params.sv, allocated_fds, 2).is_error()) {
             // Avoid leaking both file descriptors on error.
             fds[allocated_fds[0]] = {};
             fds[allocated_fds[1]] = {};

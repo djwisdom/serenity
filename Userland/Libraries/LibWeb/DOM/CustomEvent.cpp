@@ -11,12 +11,12 @@
 
 namespace Web::DOM {
 
-CustomEvent* CustomEvent::create(JS::Realm& realm, FlyString const& event_name, CustomEventInit const& event_init)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<CustomEvent>> CustomEvent::create(JS::Realm& realm, FlyString const& event_name, CustomEventInit const& event_init)
 {
-    return realm.heap().allocate<CustomEvent>(realm, realm, event_name, event_init);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<CustomEvent>(realm, realm, event_name, event_init));
 }
 
-CustomEvent* CustomEvent::construct_impl(JS::Realm& realm, FlyString const& event_name, CustomEventInit const& event_init)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<CustomEvent>> CustomEvent::construct_impl(JS::Realm& realm, FlyString const& event_name, CustomEventInit const& event_init)
 {
     return create(realm, event_name, event_init);
 }
@@ -25,10 +25,17 @@ CustomEvent::CustomEvent(JS::Realm& realm, FlyString const& event_name, CustomEv
     : Event(realm, event_name, event_init)
     , m_detail(event_init.detail)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "CustomEvent"));
 }
 
 CustomEvent::~CustomEvent() = default;
+
+JS::ThrowCompletionOr<void> CustomEvent::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::CustomEventPrototype>(realm, "CustomEvent"));
+
+    return {};
+}
 
 void CustomEvent::visit_edges(JS::Cell::Visitor& visitor)
 {
@@ -37,7 +44,7 @@ void CustomEvent::visit_edges(JS::Cell::Visitor& visitor)
 }
 
 // https://dom.spec.whatwg.org/#dom-customevent-initcustomevent
-void CustomEvent::init_custom_event(DeprecatedString const& type, bool bubbles, bool cancelable, JS::Value detail)
+void CustomEvent::init_custom_event(String const& type, bool bubbles, bool cancelable, JS::Value detail)
 {
     // 1. If this’s dispatch flag is set, then return.
     if (dispatched())

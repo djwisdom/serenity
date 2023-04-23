@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -19,13 +19,13 @@ namespace JS::Temporal {
 
 // 11.4 Properties of the Temporal.TimeZone Prototype Object, https://tc39.es/proposal-temporal/#sec-properties-of-the-temporal-timezone-prototype-object
 TimeZonePrototype::TimeZonePrototype(Realm& realm)
-    : PrototypeObject(*realm.intrinsics().object_prototype())
+    : PrototypeObject(realm.intrinsics().object_prototype())
 {
 }
 
-void TimeZonePrototype::initialize(Realm& realm)
+ThrowCompletionOr<void> TimeZonePrototype::initialize(Realm& realm)
 {
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
     auto& vm = this->vm();
 
@@ -42,7 +42,9 @@ void TimeZonePrototype::initialize(Realm& realm)
     define_native_function(realm, vm.names.toJSON, to_json, 0, attr);
 
     // 11.4.2 Temporal.TimeZone.prototype[ @@toStringTag ], https://tc39.es/proposal-temporal/#sec-temporal.timezone.prototype-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Temporal.TimeZone"), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), MUST_OR_THROW_OOM(PrimitiveString::create(vm, "Temporal.TimeZone"sv)), Attribute::Configurable);
+
+    return {};
 }
 
 // 11.4.3 get Temporal.TimeZone.prototype.id, https://tc39.es/proposal-temporal/#sec-get-temporal.timezone.prototype.id
@@ -50,7 +52,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::id_getter)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Return timeZone.[[Identifier]].
     return PrimitiveString::create(vm, time_zone->identifier());
@@ -61,7 +63,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::get_offset_nanoseconds_for)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Set instant to ? ToTemporalInstant(instant).
     auto* instant = TRY(to_temporal_instant(vm, vm.argument(0)));
@@ -79,7 +81,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::get_offset_string_for)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Set instant to ? ToTemporalInstant(instant).
     auto* instant = TRY(to_temporal_instant(vm, vm.argument(0)));
@@ -94,7 +96,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::get_plain_date_time_for)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Set instant to ? ToTemporalInstant(instant).
     auto* instant = TRY(to_temporal_instant(vm, vm.argument(0)));
@@ -111,7 +113,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::get_instant_for)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Set dateTime to ? ToTemporalDateTime(dateTime).
     auto* date_time = TRY(to_temporal_date_time(vm, vm.argument(0)));
@@ -133,7 +135,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::get_possible_instants_for)
 
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimezone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Set dateTime to ? ToTemporalDateTime(dateTime).
     auto* date_time = TRY(to_temporal_date_time(vm, vm.argument(0)));
@@ -180,7 +182,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::get_next_transition)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Set startingPoint to ? ToTemporalInstant(startingPoint).
     auto* starting_point = TRY(to_temporal_instant(vm, vm.argument(0)));
@@ -205,7 +207,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::get_previous_transition)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Set startingPoint to ? ToTemporalInstant(startingPoint).
     auto* starting_point = TRY(to_temporal_instant(vm, vm.argument(0)));
@@ -230,7 +232,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::to_string)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Return timeZone.[[Identifier]].
     return PrimitiveString::create(vm, time_zone->identifier());
@@ -241,7 +243,7 @@ JS_DEFINE_NATIVE_FUNCTION(TimeZonePrototype::to_json)
 {
     // 1. Let timeZone be the this value.
     // 2. Perform ? RequireInternalSlot(timeZone, [[InitializedTemporalTimeZone]]).
-    auto* time_zone = TRY(typed_this_object(vm));
+    auto time_zone = TRY(typed_this_object(vm));
 
     // 3. Return ? ToString(timeZone).
     return PrimitiveString::create(vm, TRY(Value(time_zone).to_string(vm)));

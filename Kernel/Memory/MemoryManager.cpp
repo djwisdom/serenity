@@ -5,8 +5,6 @@
  */
 
 #include <AK/Assertions.h>
-#include <AK/Memory.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/StringView.h>
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Arch/PageDirectory.h>
@@ -19,7 +17,6 @@
 #include <Kernel/KSyms.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 #include <Kernel/Memory/MemoryManager.h>
-#include <Kernel/Memory/PageDirectory.h>
 #include <Kernel/Memory/PhysicalRegion.h>
 #include <Kernel/Memory/SharedInodeVMObject.h>
 #include <Kernel/Multiboot.h>
@@ -73,9 +70,8 @@ bool MemoryManager::is_initialized()
 static UNMAP_AFTER_INIT VirtualRange kernel_virtual_range()
 {
 #if ARCH(AARCH64)
-    // NOTE: We currently identity map the kernel image for aarch64, so the kernel virtual range
-    //       is the complete memory range.
-    return VirtualRange { VirtualAddress((FlatPtr)0), 0x3F000000 };
+    // NOTE: This is not the same as x86_64, because the aarch64 kernel currently doesn't use the pre-kernel.
+    return VirtualRange { VirtualAddress(kernel_mapping_base), KERNEL_PD_END - kernel_mapping_base };
 #else
     size_t kernel_range_start = kernel_mapping_base + 2 * MiB; // The first 2 MiB are used for mapping the pre-kernel
     return VirtualRange { VirtualAddress(kernel_range_start), KERNEL_PD_END - kernel_range_start };
@@ -88,7 +84,6 @@ MemoryManager::GlobalData::GlobalData()
 }
 
 UNMAP_AFTER_INIT MemoryManager::MemoryManager()
-    : m_global_data(LockRank::None)
 {
     s_the = this;
 
@@ -249,7 +244,29 @@ UNMAP_AFTER_INIT void MemoryManager::parse_memory_map()
     // Register used memory regions that we know of.
     m_global_data.with([&](auto& global_data) {
         global_data.used_memory_ranges.ensure_capacity(4);
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
+        // NOTE: We don't touch the first 1 MiB of RAM on x86-64 even if it's usable as indicated
+        // by a certain memory map. There are 2 reasons for this:
+        //
+        // The first reason is specified for Linux doing the same thing in
+        // https://cateee.net/lkddb/web-lkddb/X86_RESERVE_LOW.html -
+        // "By default we reserve the first 64K of physical RAM, as a number of BIOSes are known
+        //  to corrupt that memory range during events such as suspend/resume or monitor cable insertion,
+        //  so it must not be used by the kernel."
+        //
+        // Linux also allows configuring this knob in compiletime for this reserved range length, that might
+        // also include the EBDA and other potential ranges in the first 1 MiB that could be corrupted by the BIOS:
+        // "You can set this to 4 if you are absolutely sure that you trust the BIOS to get all its memory
+        //  reservations and usages right. If you know your BIOS have problems beyond the default 64K area,
+        //  you can set this to 640 to avoid using the entire low memory range."
+        //
+        // The second reason is that the first 1 MiB memory range should also include the actual BIOS blob
+        // together with possible execution blob code for various option ROMs, which should not be touched
+        // by our kernel.
+        //
+        // **To be completely on the safe side** and never worry about where the EBDA is located, how BIOS might
+        // corrupt the low memory range during power state changing, other bad behavior of some BIOS might change
+        // a value in the very first 64k bytes of RAM, etc - we should just ignore this range completely.
         global_data.used_memory_ranges.append(UsedMemoryRange { UsedMemoryRangeType::LowMemory, PhysicalAddress(0x00000000), PhysicalAddress(1 * MiB) });
 #endif
         global_data.used_memory_ranges.append(UsedMemoryRange { UsedMemoryRangeType::Kernel, PhysicalAddress(virtual_to_low_physical((FlatPtr)start_of_kernel_image)), PhysicalAddress(page_round_up(virtual_to_low_physical((FlatPtr)end_of_kernel_image)).release_value_but_fixme_should_propagate_errors()) });
@@ -291,7 +308,7 @@ UNMAP_AFTER_INIT void MemoryManager::parse_memory_map()
                 global_data.physical_memory_ranges.append(PhysicalMemoryRange { PhysicalMemoryRangeType::Usable, start_address, length });
                 break;
             case (MULTIBOOT_MEMORY_RESERVED):
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
                 // Workaround for https://gitlab.com/qemu-project/qemu/-/commit/8504f129450b909c88e199ca44facd35d38ba4de
                 // That commit added a reserved 12GiB entry for the benefit of virtual firmware.
                 // We can safely ignore this block as it isn't actually reserved on any real hardware.
@@ -370,7 +387,7 @@ UNMAP_AFTER_INIT void MemoryManager::parse_memory_map()
         }
 
         for (auto& region : global_data.physical_regions)
-            global_data.system_memory_info.physical_pages += region.size();
+            global_data.system_memory_info.physical_pages += region->size();
 
         register_reserved_ranges();
         for (auto& range : global_data.reserved_memory_ranges) {
@@ -389,8 +406,8 @@ UNMAP_AFTER_INIT void MemoryManager::parse_memory_map()
         }
 
         for (auto& region : global_data.physical_regions) {
-            dmesgln("MM: User physical region: {} - {} (size {:#x})", region.lower(), region.upper().offset(-1), PAGE_SIZE * region.size());
-            region.initialize_zones();
+            dmesgln("MM: User physical region: {} - {} (size {:#x})", region->lower(), region->upper().offset(-1), PAGE_SIZE * region->size());
+            region->initialize_zones();
         }
     });
 }
@@ -430,8 +447,8 @@ UNMAP_AFTER_INIT void MemoryManager::initialize_physical_pages()
         Optional<size_t> found_region_index;
         for (size_t i = 0; i < global_data.physical_regions.size(); ++i) {
             auto& region = global_data.physical_regions[i];
-            if (region.size() >= physical_page_array_pages_and_page_tables_count) {
-                found_region = &region;
+            if (region->size() >= physical_page_array_pages_and_page_tables_count) {
+                found_region = region;
                 found_region_index = i;
                 break;
             }
@@ -654,22 +671,13 @@ void MemoryManager::release_pte(PageDirectory& page_directory, VirtualAddress va
 
 UNMAP_AFTER_INIT void MemoryManager::initialize(u32 cpu)
 {
+    dmesgln("Initialize MMU");
     ProcessorSpecific<MemoryManagerData>::initialize();
 
     if (cpu == 0) {
         new MemoryManager;
         kmalloc_enable_expand();
     }
-}
-
-Region* MemoryManager::kernel_region_from_vaddr(VirtualAddress address)
-{
-    if (is_user_address(address))
-        return nullptr;
-
-    return MM.m_global_data.with([&](auto& global_data) {
-        return global_data.region_tree.find_region_containing(address);
-    });
 }
 
 Region* MemoryManager::find_user_region_from_vaddr(AddressSpace& space, VirtualAddress vaddr)
@@ -719,33 +727,27 @@ void MemoryManager::validate_syscall_preconditions(Process& process, RegisterSta
     }
 }
 
-Region* MemoryManager::find_region_from_vaddr(VirtualAddress vaddr)
-{
-    if (auto* region = kernel_region_from_vaddr(vaddr))
-        return region;
-    auto page_directory = PageDirectory::find_current();
-    if (!page_directory)
-        return nullptr;
-    VERIFY(page_directory->address_space());
-    return find_user_region_from_vaddr(*page_directory->address_space(), vaddr);
-}
-
 PageFaultResponse MemoryManager::handle_page_fault(PageFault const& fault)
 {
     auto faulted_in_range = [&fault](auto const* start, auto const* end) {
         return fault.vaddr() >= VirtualAddress { start } && fault.vaddr() < VirtualAddress { end };
     };
 
-    if (faulted_in_range(&start_of_ro_after_init, &end_of_ro_after_init))
-        PANIC("Attempt to write into READONLY_AFTER_INIT section");
+    if (faulted_in_range(&start_of_ro_after_init, &end_of_ro_after_init)) {
+        dbgln("Attempt to write into READONLY_AFTER_INIT section");
+        return PageFaultResponse::ShouldCrash;
+    }
 
     if (faulted_in_range(&start_of_unmap_after_init, &end_of_unmap_after_init)) {
         auto const* kernel_symbol = symbolicate_kernel_address(fault.vaddr().get());
-        PANIC("Attempt to access UNMAP_AFTER_INIT section ({:p}: {})", fault.vaddr(), kernel_symbol ? kernel_symbol->name : "(Unknown)");
+        dbgln("Attempt to access UNMAP_AFTER_INIT section ({:p}: {})", fault.vaddr(), kernel_symbol ? kernel_symbol->name : "(Unknown)");
+        return PageFaultResponse::ShouldCrash;
     }
 
-    if (faulted_in_range(&start_of_kernel_ksyms, &end_of_kernel_ksyms))
-        PANIC("Attempt to access KSYMS section");
+    if (faulted_in_range(&start_of_kernel_ksyms, &end_of_kernel_ksyms)) {
+        dbgln("Attempt to access KSYMS section");
+        return PageFaultResponse::ShouldCrash;
+    }
 
     if (Processor::current_in_irq()) {
         dbgln("CPU[{}] BUG! Page fault while handling IRQ! code={}, vaddr={}, irq level: {}",
@@ -754,11 +756,44 @@ PageFaultResponse MemoryManager::handle_page_fault(PageFault const& fault)
         return PageFaultResponse::ShouldCrash;
     }
     dbgln_if(PAGE_FAULT_DEBUG, "MM: CPU[{}] handle_page_fault({:#04x}) at {}", Processor::current_id(), fault.code(), fault.vaddr());
-    auto* region = find_region_from_vaddr(fault.vaddr());
-    if (!region) {
-        return PageFaultResponse::ShouldCrash;
+
+    // The faulting region may be unmapped concurrently to handling this page fault, and since
+    // regions are singly-owned it would usually result in the region being immediately
+    // de-allocated. To ensure the region is not de-allocated while we're still handling the
+    // fault we increase a page fault counter on the region, and the region will refrain from
+    // de-allocating itself until the counter reaches zero. (Since unmapping the region also
+    // includes removing it from the region tree while holding the address space spinlock, and
+    // because we increment the counter while still holding the spinlock it is guaranteed that
+    // we always increment the counter before it gets a chance to be deleted)
+    Region* region = nullptr;
+    if (is_user_address(fault.vaddr())) {
+        auto page_directory = PageDirectory::find_current();
+        if (!page_directory)
+            return PageFaultResponse::ShouldCrash;
+        auto* process = page_directory->process();
+        VERIFY(process);
+        region = process->address_space().with([&](auto& space) -> Region* {
+            auto* region = find_user_region_from_vaddr(*space, fault.vaddr());
+            if (!region)
+                return nullptr;
+            region->start_handling_page_fault({});
+            return region;
+        });
+    } else {
+        region = MM.m_global_data.with([&](auto& global_data) -> Region* {
+            auto* region = global_data.region_tree.find_region_containing(fault.vaddr());
+            if (!region)
+                return nullptr;
+            region->start_handling_page_fault({});
+            return region;
+        });
     }
-    return region->handle_fault(fault);
+    if (!region)
+        return PageFaultResponse::ShouldCrash;
+
+    auto response = region->handle_fault(fault);
+    region->finish_handling_page_fault({});
+    return response;
 }
 
 ErrorOr<NonnullOwnPtr<Region>> MemoryManager::allocate_contiguous_kernel_region(size_t size, StringView name, Region::Access access, Region::Cacheable cacheable)
@@ -788,18 +823,18 @@ ErrorOr<NonnullOwnPtr<Memory::Region>> MemoryManager::allocate_dma_buffer_page(S
     return allocate_dma_buffer_page(name, access, dma_buffer_page);
 }
 
-ErrorOr<NonnullOwnPtr<Memory::Region>> MemoryManager::allocate_dma_buffer_pages(size_t size, StringView name, Memory::Region::Access access, NonnullRefPtrVector<Memory::PhysicalPage>& dma_buffer_pages)
+ErrorOr<NonnullOwnPtr<Memory::Region>> MemoryManager::allocate_dma_buffer_pages(size_t size, StringView name, Memory::Region::Access access, Vector<NonnullRefPtr<Memory::PhysicalPage>>& dma_buffer_pages)
 {
     VERIFY(!(size % PAGE_SIZE));
     dma_buffer_pages = TRY(allocate_contiguous_physical_pages(size));
     // Do not enable Cache for this region as physical memory transfers are performed (Most architectures have this behaviour by default)
-    return allocate_kernel_region(dma_buffer_pages.first().paddr(), size, name, access, Region::Cacheable::No);
+    return allocate_kernel_region(dma_buffer_pages.first()->paddr(), size, name, access, Region::Cacheable::No);
 }
 
 ErrorOr<NonnullOwnPtr<Memory::Region>> MemoryManager::allocate_dma_buffer_pages(size_t size, StringView name, Memory::Region::Access access)
 {
     VERIFY(!(size % PAGE_SIZE));
-    NonnullRefPtrVector<Memory::PhysicalPage> dma_buffer_pages;
+    Vector<NonnullRefPtr<Memory::PhysicalPage>> dma_buffer_pages;
 
     return allocate_dma_buffer_pages(size, name, access, dma_buffer_pages);
 }
@@ -867,12 +902,14 @@ ErrorOr<CommittedPhysicalPageSet> MemoryManager::commit_physical_pages(size_t pa
                 amount_shared = space->amount_shared();
                 amount_virtual = space->amount_virtual();
             });
-            dbgln("{}({}) resident:{}, shared:{}, virtual:{}",
-                process.name(),
-                process.pid(),
-                amount_resident / PAGE_SIZE,
-                amount_shared / PAGE_SIZE,
-                amount_virtual / PAGE_SIZE);
+            process.name().with([&](auto& process_name) {
+                dbgln("{}({}) resident:{}, shared:{}, virtual:{}",
+                    process_name->view(),
+                    process.pid(),
+                    amount_resident / PAGE_SIZE,
+                    amount_shared / PAGE_SIZE,
+                    amount_virtual / PAGE_SIZE);
+            });
             return IterationDecision::Continue;
         });
     }
@@ -896,10 +933,10 @@ void MemoryManager::deallocate_physical_page(PhysicalAddress paddr)
     return m_global_data.with([&](auto& global_data) {
         // Are we returning a user page?
         for (auto& region : global_data.physical_regions) {
-            if (!region.contains(paddr))
+            if (!region->contains(paddr))
                 continue;
 
-            region.return_page(paddr);
+            region->return_page(paddr);
             --global_data.system_memory_info.physical_pages_used;
 
             // Always return pages to the uncommitted pool. Pages that were
@@ -927,7 +964,7 @@ RefPtr<PhysicalPage> MemoryManager::find_free_physical_page(bool committed)
             global_data.system_memory_info.physical_pages_uncommitted--;
         }
         for (auto& region : global_data.physical_regions) {
-            page = region.take_free_page();
+            page = region->take_free_page();
             if (!page.is_null()) {
                 ++global_data.system_memory_info.physical_pages_used;
                 break;
@@ -1011,18 +1048,18 @@ ErrorOr<NonnullRefPtr<PhysicalPage>> MemoryManager::allocate_physical_page(Shoul
     });
 }
 
-ErrorOr<NonnullRefPtrVector<PhysicalPage>> MemoryManager::allocate_contiguous_physical_pages(size_t size)
+ErrorOr<Vector<NonnullRefPtr<PhysicalPage>>> MemoryManager::allocate_contiguous_physical_pages(size_t size)
 {
     VERIFY(!(size % PAGE_SIZE));
     size_t page_count = ceil_div(size, static_cast<size_t>(PAGE_SIZE));
 
-    auto physical_pages = TRY(m_global_data.with([&](auto& global_data) -> ErrorOr<NonnullRefPtrVector<PhysicalPage>> {
+    auto physical_pages = TRY(m_global_data.with([&](auto& global_data) -> ErrorOr<Vector<NonnullRefPtr<PhysicalPage>>> {
         // We need to make sure we don't touch pages that we have committed to
         if (global_data.system_memory_info.physical_pages_uncommitted < page_count)
             return ENOMEM;
 
         for (auto& physical_region : global_data.physical_regions) {
-            auto physical_pages = physical_region.take_contiguous_free_pages(page_count);
+            auto physical_pages = physical_region->take_contiguous_free_pages(page_count);
             if (!physical_pages.is_empty()) {
                 global_data.system_memory_info.physical_pages_uncommitted -= page_count;
                 global_data.system_memory_info.physical_pages_used += page_count;
@@ -1034,7 +1071,7 @@ ErrorOr<NonnullRefPtrVector<PhysicalPage>> MemoryManager::allocate_contiguous_ph
     }));
 
     {
-        auto cleanup_region = TRY(MM.allocate_kernel_region(physical_pages[0].paddr(), PAGE_SIZE * page_count, {}, Region::Access::Read | Region::Access::Write));
+        auto cleanup_region = TRY(MM.allocate_kernel_region(physical_pages[0]->paddr(), PAGE_SIZE * page_count, {}, Region::Access::Read | Region::Access::Write));
         memset(cleanup_region->vaddr().as_ptr(), 0, PAGE_SIZE * page_count);
     }
     return physical_pages;
@@ -1152,11 +1189,7 @@ void MemoryManager::unregister_kernel_region(Region& region)
 void MemoryManager::dump_kernel_regions()
 {
     dbgln("Kernel regions:");
-#if ARCH(I386)
-    char const* addr_padding = "";
-#else
     char const* addr_padding = "        ";
-#endif
     dbgln("BEGIN{}         END{}        SIZE{}       ACCESS NAME",
         addr_padding, addr_padding, addr_padding);
     m_global_data.with([&](auto& global_data) {

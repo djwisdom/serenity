@@ -11,11 +11,11 @@
 #include <AK/Platform.h>
 #include <AK/Time.h>
 #include <AK/Types.h>
+#include <AK/Vector.h>
 #include <Kernel/API/TimePage.h>
 #include <Kernel/Arch/RegisterState.h>
 #include <Kernel/Forward.h>
 #include <Kernel/Library/LockRefPtr.h>
-#include <Kernel/Library/NonnullLockRefPtrVector.h>
 #include <Kernel/UnixTypes.h>
 
 namespace Kernel {
@@ -52,10 +52,10 @@ public:
     void set_epoch_time(Time);
     time_t ticks_per_second() const;
     static Time boot_time();
+    Time clock_resolution() const;
 
     bool is_system_timer(HardwareTimerBase const&) const;
 
-    static void update_time_hpet(RegisterState const&);
     void increment_time_since_boot();
 
     static bool is_hpet_periodic_mode_allowed();
@@ -81,7 +81,7 @@ private:
     TimePage& time_page();
     void update_time_page();
 
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     bool probe_and_set_x86_legacy_hardware_timers();
     bool probe_and_set_x86_non_legacy_hardware_timers();
     void increment_time_since_boot_hpet();
@@ -93,11 +93,9 @@ private:
 #endif
     Vector<HardwareTimerBase*> scan_and_initialize_periodic_timers();
     Vector<HardwareTimerBase*> scan_for_non_periodic_timers();
-    NonnullLockRefPtrVector<HardwareTimerBase> m_hardware_timers;
+    Vector<NonnullLockRefPtr<HardwareTimerBase>> m_hardware_timers;
     void set_system_timer(HardwareTimerBase&);
     static void system_timer_tick(RegisterState const&);
-
-    static u64 scheduling_current_time(bool);
 
     // Variables between m_update1 and m_update2 are synchronized
     // FIXME: Replace m_update1 and m_update2 with a SpinlockLocker

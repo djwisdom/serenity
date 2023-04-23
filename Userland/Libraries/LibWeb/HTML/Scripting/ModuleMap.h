@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/URL.h>
 #include <LibWeb/HTML/Scripting/ModuleScript.h>
 
 namespace Web::HTML {
@@ -47,7 +48,7 @@ public:
 
     struct Entry {
         EntryType type;
-        JavaScriptModuleScript* module_script;
+        JS::GCPtr<JavaScriptModuleScript> module_script;
     };
 
     bool is_fetching(AK::URL const& url, DeprecatedString const& type) const;

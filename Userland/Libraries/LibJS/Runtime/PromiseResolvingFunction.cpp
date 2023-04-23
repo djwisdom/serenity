@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -13,7 +13,7 @@ namespace JS {
 
 NonnullGCPtr<PromiseResolvingFunction> PromiseResolvingFunction::create(Realm& realm, Promise& promise, AlreadyResolved& already_resolved, FunctionType function)
 {
-    return realm.heap().allocate<PromiseResolvingFunction>(realm, promise, already_resolved, move(function), *realm.intrinsics().function_prototype());
+    return realm.heap().allocate<PromiseResolvingFunction>(realm, promise, already_resolved, move(function), realm.intrinsics().function_prototype()).release_allocated_value_but_fixme_should_propagate_errors();
 }
 
 PromiseResolvingFunction::PromiseResolvingFunction(Promise& promise, AlreadyResolved& already_resolved, FunctionType native_function, Object& prototype)
@@ -24,10 +24,12 @@ PromiseResolvingFunction::PromiseResolvingFunction(Promise& promise, AlreadyReso
 {
 }
 
-void PromiseResolvingFunction::initialize(Realm& realm)
+ThrowCompletionOr<void> PromiseResolvingFunction::initialize(Realm& realm)
 {
-    Base::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     define_direct_property(vm().names.length, Value(1), Attribute::Configurable);
+
+    return {};
 }
 
 ThrowCompletionOr<Value> PromiseResolvingFunction::call()
@@ -38,8 +40,8 @@ ThrowCompletionOr<Value> PromiseResolvingFunction::call()
 void PromiseResolvingFunction::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(&m_promise);
-    visitor.visit(&m_already_resolved);
+    visitor.visit(m_promise);
+    visitor.visit(m_already_resolved);
 }
 
 }

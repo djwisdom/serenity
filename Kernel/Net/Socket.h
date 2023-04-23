@@ -7,10 +7,9 @@
 #pragma once
 
 #include <AK/Error.h>
+#include <AK/RefPtr.h>
 #include <AK/Time.h>
 #include <Kernel/FileSystem/File.h>
-#include <Kernel/Library/LockRefPtr.h>
-#include <Kernel/Library/NonnullLockRefPtrVector.h>
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/Net/NetworkAdapter.h>
 #include <Kernel/UnixTypes.h>
@@ -21,7 +20,7 @@ class OpenFileDescription;
 
 class Socket : public File {
 public:
-    static ErrorOr<NonnullLockRefPtr<Socket>> create(int domain, int type, int protocol);
+    static ErrorOr<NonnullRefPtr<Socket>> create(int domain, int type, int protocol);
     virtual ~Socket() override;
 
     int domain() const { return m_domain; }
@@ -68,7 +67,7 @@ public:
     void set_connected(bool);
 
     bool can_accept() const { return !m_pending.is_empty(); }
-    LockRefPtr<Socket> accept();
+    RefPtr<Socket> accept();
 
     ErrorOr<void> shutdown(int how);
 
@@ -91,7 +90,7 @@ public:
     ProcessID acceptor_pid() const { return m_acceptor.pid; }
     UserID acceptor_uid() const { return m_acceptor.uid; }
     GroupID acceptor_gid() const { return m_acceptor.gid; }
-    LockRefPtr<NetworkAdapter> const bound_interface() const { return m_bound_interface; }
+    SpinlockProtected<RefPtr<NetworkAdapter>, LockRank::None> const& bound_interface() const { return m_bound_interface; }
 
     Mutex& mutex() { return m_mutex; }
 
@@ -112,7 +111,7 @@ public:
 protected:
     Socket(int domain, int type, int protocol);
 
-    ErrorOr<void> queue_connection_from(NonnullLockRefPtr<Socket>);
+    ErrorOr<void> queue_connection_from(NonnullRefPtr<Socket>);
 
     size_t backlog() const { return m_backlog; }
     void set_backlog(size_t backlog) { m_backlog = backlog; }
@@ -124,29 +123,29 @@ protected:
 
     Role m_role { Role::None };
 
-    ErrorOr<void> so_error() const
-    {
-        VERIFY(m_mutex.is_exclusively_locked_by_current_thread());
-        return m_so_error;
-    }
+    SpinlockProtected<Optional<ErrnoCode>, LockRank::None>& so_error() { return m_so_error; }
 
     Error set_so_error(ErrnoCode error_code)
     {
-        MutexLocker locker(mutex());
-        auto error = Error::from_errno(error_code);
-        m_so_error = error;
-        return error;
+        m_so_error.with([&error_code](auto& so_error) {
+            so_error = error_code;
+        });
+        return Error::from_errno(error_code);
     }
+
     Error set_so_error(Error error)
     {
-        MutexLocker locker(mutex());
-        m_so_error = error;
+        m_so_error.with([&error](auto& so_error) {
+            so_error = static_cast<ErrnoCode>(error.code());
+        });
         return error;
     }
 
     void clear_so_error()
     {
-        m_so_error = {};
+        m_so_error.with([](auto& so_error) {
+            so_error = {};
+        });
     }
 
     void set_origin(Process const&);
@@ -172,24 +171,26 @@ private:
     bool m_shut_down_for_reading { false };
     bool m_shut_down_for_writing { false };
 
-    LockRefPtr<NetworkAdapter> m_bound_interface { nullptr };
+    SpinlockProtected<RefPtr<NetworkAdapter>, LockRank::None> m_bound_interface;
 
     Time m_receive_timeout {};
     Time m_send_timeout {};
     int m_timestamp { 0 };
 
-    ErrorOr<void> m_so_error;
+    SpinlockProtected<Optional<ErrnoCode>, LockRank::None> m_so_error;
 
-    NonnullLockRefPtrVector<Socket> m_pending;
+    Vector<NonnullRefPtr<Socket>> m_pending;
 };
 
 // This is a special variant of TRY() that also updates the socket's SO_ERROR field on error.
-#define SOCKET_TRY(expression)                           \
-    ({                                                   \
-        auto result = (expression);                      \
-        if (result.is_error())                           \
-            return set_so_error(result.release_error()); \
-        result.release_value();                          \
+#define SOCKET_TRY(expression)                                                            \
+    ({                                                                                    \
+        auto&& result = (expression);                                                     \
+        if (result.is_error())                                                            \
+            return set_so_error(result.release_error());                                  \
+        static_assert(!::AK::Detail::IsLvalueReference<decltype(result.release_value())>, \
+            "Do not return a reference from a fallible expression");                      \
+        result.release_value();                                                           \
     })
 
 }

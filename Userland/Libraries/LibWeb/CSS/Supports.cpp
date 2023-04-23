@@ -1,9 +1,10 @@
 /*
- * Copyright (c) 2021-2022, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/Runtime/Realm.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Supports.h>
 
@@ -52,13 +53,13 @@ bool Supports::InParens::evaluate() const
 
 bool Supports::Declaration::evaluate() const
 {
-    auto style_property = Parser::Parser({}, declaration).parse_as_supports_condition();
+    auto style_property = parse_css_supports_condition(Parser::ParsingContext { *realm }, declaration);
     return style_property.has_value();
 }
 
 bool Supports::Selector::evaluate() const
 {
-    auto style_property = Parser::Parser({}, selector).parse_as_selector();
+    auto style_property = parse_selector(Parser::ParsingContext { *realm }, selector);
     return style_property.has_value();
 }
 
@@ -73,45 +74,45 @@ bool Supports::Feature::evaluate() const
         });
 }
 
-DeprecatedString Supports::Declaration::to_deprecated_string() const
+ErrorOr<String> Supports::Declaration::to_string() const
 {
-    return DeprecatedString::formatted("({})", declaration);
+    return String::formatted("({})", declaration);
 }
 
-DeprecatedString Supports::Selector::to_deprecated_string() const
+ErrorOr<String> Supports::Selector::to_string() const
 {
-    return DeprecatedString::formatted("selector({})", selector);
+    return String::formatted("selector({})", selector);
 }
 
-DeprecatedString Supports::Feature::to_deprecated_string() const
+ErrorOr<String> Supports::Feature::to_string() const
 {
-    return value.visit([](auto& it) { return it.to_deprecated_string(); });
+    return value.visit([](auto& it) { return it.to_string(); });
 }
 
-DeprecatedString Supports::InParens::to_deprecated_string() const
+ErrorOr<String> Supports::InParens::to_string() const
 {
     return value.visit(
-        [](NonnullOwnPtr<Condition> const& condition) -> DeprecatedString { return DeprecatedString::formatted("({})", condition->to_deprecated_string()); },
-        [](Supports::Feature const& it) -> DeprecatedString { return it.to_deprecated_string(); },
-        [](GeneralEnclosed const& it) -> DeprecatedString { return it.to_string(); });
+        [](NonnullOwnPtr<Condition> const& condition) -> ErrorOr<String> { return String::formatted("({})", TRY(condition->to_string())); },
+        [](Supports::Feature const& it) -> ErrorOr<String> { return it.to_string(); },
+        [](GeneralEnclosed const& it) -> ErrorOr<String> { return it.to_string(); });
 }
 
-DeprecatedString Supports::Condition::to_deprecated_string() const
+ErrorOr<String> Supports::Condition::to_string() const
 {
     switch (type) {
     case Type::Not:
-        return DeprecatedString::formatted("not {}", children.first().to_deprecated_string());
+        return String::formatted("not {}", TRY(children.first().to_string()));
     case Type::And:
-        return DeprecatedString::join(" and "sv, children);
+        return String::join(" and "sv, children);
     case Type::Or:
-        return DeprecatedString::join(" or "sv, children);
+        return String::join(" or "sv, children);
     }
     VERIFY_NOT_REACHED();
 }
 
-DeprecatedString Supports::to_deprecated_string() const
+ErrorOr<String> Supports::to_string() const
 {
-    return m_condition->to_deprecated_string();
+    return m_condition->to_string();
 }
 
 }

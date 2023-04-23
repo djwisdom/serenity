@@ -7,6 +7,7 @@
 #include "Formatter.h"
 #include "AST.h"
 #include "Parser.h"
+#include "PosixParser.h"
 #include <AK/Hex.h>
 #include <AK/ScopedValueRollback.h>
 #include <AK/TemporaryChange.h>
@@ -15,7 +16,7 @@ namespace Shell {
 
 DeprecatedString Formatter::format()
 {
-    auto node = m_root_node ? m_root_node : Parser(m_source).parse();
+    auto node = m_root_node ?: (m_parse_as_posix ? Posix::Parser(m_source).parse() : Parser(m_source).parse());
     if (m_cursor >= 0)
         m_output_cursor = m_cursor;
 
@@ -203,7 +204,7 @@ void Formatter::visit(const AST::BraceExpansion* node)
             if (!first)
                 current_builder().append(',');
             first = false;
-            entry.visit(*this);
+            entry->visit(*this);
         }
     }
 
@@ -528,7 +529,7 @@ void Formatter::visit(const AST::ImmediateExpression* node)
 
     for (auto& node : node->arguments()) {
         current_builder().append(' ');
-        node.visit(*this);
+        node->visit(*this);
     }
 
     if (node->has_closing_brace())
@@ -584,12 +585,12 @@ void Formatter::visit(const AST::MatchExpr* node)
             first_entry = false;
             auto first = true;
             entry.options.visit(
-                [&](NonnullRefPtrVector<AST::Node> const& patterns) {
+                [&](Vector<NonnullRefPtr<AST::Node>> const& patterns) {
                     for (auto& option : patterns) {
                         if (!first)
                             current_builder().append(" | "sv);
                         first = false;
-                        option.visit(*this);
+                        option->visit(*this);
                     }
                 },
                 [&](Vector<Regex<ECMA262>> const& patterns) {
@@ -597,7 +598,7 @@ void Formatter::visit(const AST::MatchExpr* node)
                         if (!first)
                             current_builder().append(" | "sv);
                         first = false;
-                        auto node = make_ref_counted<AST::BarewordLiteral>(AST::Position {}, option.pattern_value);
+                        auto node = make_ref_counted<AST::BarewordLiteral>(AST::Position {}, String::from_utf8(option.pattern_value).release_value_but_fixme_should_propagate_errors());
                         node->visit(*this);
                     }
                 });
@@ -720,7 +721,7 @@ void Formatter::visit(const AST::Sequence* node)
         else
             insert_separator();
 
-        entry.visit(*this);
+        entry->visit(*this);
     }
 
     visited(node);
@@ -790,7 +791,7 @@ void Formatter::visit(const AST::StringLiteral* node)
         current_builder().append("'"sv);
 
     if (m_options.in_double_quotes && !m_options.in_heredoc) {
-        for (auto ch : node->text()) {
+        for (auto ch : node->text().bytes_as_string_view()) {
             switch (ch) {
             case '"':
             case '\\':

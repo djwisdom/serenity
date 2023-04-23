@@ -11,7 +11,6 @@
 #include <AK/Platform.h>
 #include <AK/StringBuilder.h>
 #include <AK/Try.h>
-#include <LibC/sys/arch/i386/regs.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/System.h>
 #include <LibDebug/DebugInfo.h>
@@ -23,6 +22,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/arch/regs.h>
 #include <unistd.h>
 
 RefPtr<Line::Editor> editor;
@@ -39,11 +39,7 @@ static void handle_sigint(int)
 
 static void handle_print_registers(PtraceRegisters const& regs)
 {
-#if ARCH(I386)
-    outln("eax={:p} ebx={:p} ecx={:p} edx={:p}", regs.eax, regs.ebx, regs.ecx, regs.edx);
-    outln("esp={:p} ebp={:p} esi={:p} edi={:p}", regs.esp, regs.ebp, regs.esi, regs.edi);
-    outln("eip={:p} eflags={:p}", regs.eip, regs.eflags);
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
     outln("rax={:p} rbx={:p} rcx={:p} rdx={:p}", regs.rax, regs.rbx, regs.rcx, regs.rdx);
     outln("rsp={:p} rbp={:p} rsi={:p} rdi={:p}", regs.rsp, regs.rbp, regs.rsi, regs.rdi);
     outln("r8 ={:p} r9 ={:p} r10={:p} r11={:p}", regs.r8, regs.r9, regs.r10, regs.r11);
@@ -97,28 +93,8 @@ static bool handle_disassemble_command(DeprecatedString const& command, FlatPtr 
 
 static bool handle_backtrace_command(PtraceRegisters const& regs)
 {
-#if ARCH(I386)
-    auto ebp_val = regs.ebp;
-    auto eip_val = regs.eip;
-    outln("Backtrace:");
-    while (g_debug_session->peek(eip_val).has_value() && g_debug_session->peek(ebp_val).has_value()) {
-        auto eip_symbol = g_debug_session->symbolicate(eip_val);
-        auto source_position = g_debug_session->get_source_position(eip_val);
-        DeprecatedString symbol_location = (eip_symbol.has_value() && eip_symbol->symbol != "") ? eip_symbol->symbol : "???";
-        if (source_position.has_value()) {
-            outln("{:p} in {} ({}:{})", eip_val, symbol_location, source_position->file_path, source_position->line_number);
-        } else {
-            outln("{:p} in {}", eip_val, symbol_location);
-        }
-        auto next_eip = g_debug_session->peek(ebp_val + 4);
-        auto next_ebp = g_debug_session->peek(ebp_val);
-        eip_val = (u32)next_eip.value();
-        ebp_val = (u32)next_ebp.value();
-    }
-#else
     (void)regs;
     TODO();
-#endif
     return true;
 }
 
@@ -213,25 +189,46 @@ static void print_help()
         "x <address> - examine dword in memory\n");
 }
 
+static NonnullOwnPtr<Debug::DebugSession> create_debug_session(StringView command, pid_t pid_to_debug)
+{
+    if (!command.is_null()) {
+        auto result = Debug::DebugSession::exec_and_attach(command);
+        if (!result) {
+            warnln("Failed to start debugging session for: \"{}\"", command);
+            exit(1);
+        }
+        return result.release_nonnull();
+    }
+
+    if (pid_to_debug == -1) {
+        warnln("Either a command or a pid must be specified");
+        exit(1);
+    }
+
+    auto result = Debug::DebugSession::attach(pid_to_debug);
+    if (!result) {
+        warnln("Failed to attach to pid: {}", pid_to_debug);
+        exit(1);
+    }
+    return result.release_nonnull();
+}
+
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     editor = Line::Editor::construct();
 
     TRY(Core::System::pledge("stdio proc ptrace exec rpath tty sigaction cpath unix"));
 
-    char const* command = nullptr;
+    StringView command;
+    pid_t pid_to_debug = -1;
     Core::ArgsParser args_parser;
     args_parser.add_positional_argument(command,
         "The program to be debugged, along with its arguments",
-        "program", Core::ArgsParser::Required::Yes);
+        "program", Core::ArgsParser::Required::No);
+    args_parser.add_option(pid_to_debug, "Attach debugger to running process", "pid", 'p', "PID");
     args_parser.parse(arguments);
 
-    auto result = Debug::DebugSession::exec_and_attach(command);
-    if (!result) {
-        warnln("Failed to start debugging session for: \"{}\"", command);
-        exit(1);
-    }
-    g_debug_session = result.release_nonnull();
+    g_debug_session = create_debug_session(command, pid_to_debug);
 
     struct sigaction sa {
     };
@@ -249,9 +246,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
         VERIFY(optional_regs.has_value());
         const PtraceRegisters& regs = optional_regs.value();
-#if ARCH(I386)
-        const FlatPtr ip = regs.eip;
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
         const FlatPtr ip = regs.rip;
 #elif ARCH(AARCH64)
         const FlatPtr ip = 0; // FIXME

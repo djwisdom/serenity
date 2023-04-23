@@ -18,10 +18,10 @@
 
 namespace Web::CSS {
 
-CSSImportRule* CSSImportRule::create(AK::URL url, DOM::Document& document)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<CSSImportRule>> CSSImportRule::create(AK::URL url, DOM::Document& document)
 {
     auto& realm = document.realm();
-    return realm.heap().allocate<CSSImportRule>(realm, move(url), document);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<CSSImportRule>(realm, move(url), document));
 }
 
 CSSImportRule::CSSImportRule(AK::URL url, DOM::Document& document)
@@ -29,8 +29,6 @@ CSSImportRule::CSSImportRule(AK::URL url, DOM::Document& document)
     , m_url(move(url))
     , m_document(document)
 {
-    set_prototype(&Bindings::ensure_web_prototype<Bindings::CSSImportRulePrototype>(document.realm(), "CSSImportRule"));
-
     dbgln_if(CSS_LOADER_DEBUG, "CSSImportRule: Loading import URL: {}", m_url);
     auto request = LoadRequest::create_for_url_on_page(m_url, document.page());
 
@@ -39,6 +37,14 @@ CSSImportRule::CSSImportRule(AK::URL url, DOM::Document& document)
     m_document_load_event_delayer.emplace(document);
 
     set_resource(ResourceLoader::the().load_resource(Resource::Type::Generic, request));
+}
+
+JS::ThrowCompletionOr<void> CSSImportRule::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::CSSImportRulePrototype>(realm, "CSSImportRule"));
+
+    return {};
 }
 
 void CSSImportRule::visit_edges(Cell::Visitor& visitor)

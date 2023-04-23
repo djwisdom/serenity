@@ -10,19 +10,26 @@
 
 namespace Web::HTML {
 
-JS::NonnullGCPtr<History> History::create(JS::Realm& realm, DOM::Document& document)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<History>> History::create(JS::Realm& realm, DOM::Document& document)
 {
-    return realm.heap().allocate<History>(realm, realm, document);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<History>(realm, realm, document));
 }
 
 History::History(JS::Realm& realm, DOM::Document& document)
     : PlatformObject(realm)
     , m_associated_document(document)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "History"));
 }
 
 History::~History() = default;
+
+JS::ThrowCompletionOr<void> History::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HistoryPrototype>(realm, "History"));
+
+    return {};
+}
 
 void History::visit_edges(Cell::Visitor& visitor)
 {
@@ -76,7 +83,7 @@ WebIDL::ExceptionOr<void> History::go(long delta = 0)
     if (next_entry_index < sessions.size()) {
         auto const& next_entry = sessions.at(next_entry_index);
         // FIXME: 4. Traverse the history by a delta with delta and document's browsing context.
-        browsing_context->loader().load(next_entry.url, FrameLoader::Type::Reload);
+        browsing_context->loader().load(next_entry->url, FrameLoader::Type::Reload);
     }
 
     return {};

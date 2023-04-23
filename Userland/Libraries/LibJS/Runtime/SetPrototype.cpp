@@ -15,14 +15,14 @@
 namespace JS {
 
 SetPrototype::SetPrototype(Realm& realm)
-    : PrototypeObject(*realm.intrinsics().object_prototype())
+    : PrototypeObject(realm.intrinsics().object_prototype())
 {
 }
 
-void SetPrototype::initialize(Realm& realm)
+ThrowCompletionOr<void> SetPrototype::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     u8 attr = Attribute::Writable | Attribute::Configurable;
 
     define_native_function(realm, vm.names.add, add, 1, attr);
@@ -44,36 +44,67 @@ void SetPrototype::initialize(Realm& realm)
     define_direct_property(vm.names.keys, get_without_side_effects(vm.names.values), attr);
 
     // 24.2.3.11 Set.prototype [ @@iterator ] ( ), https://tc39.es/ecma262/#sec-set.prototype-@@iterator
-    define_direct_property(*vm.well_known_symbol_iterator(), get_without_side_effects(vm.names.values), attr);
+    define_direct_property(vm.well_known_symbol_iterator(), get_without_side_effects(vm.names.values), attr);
 
     // 24.2.3.12 Set.prototype [ @@toStringTag ], https://tc39.es/ecma262/#sec-set.prototype-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, vm.names.Set.as_string()), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, vm.names.Set.as_string()), Attribute::Configurable);
+
+    return {};
 }
 
 // 24.2.3.1 Set.prototype.add ( value ), https://tc39.es/ecma262/#sec-set.prototype.add
 JS_DEFINE_NATIVE_FUNCTION(SetPrototype::add)
 {
-    auto* set = TRY(typed_this_object(vm));
     auto value = vm.argument(0);
+
+    // 1. Let S be the this value.
+    // 2. Perform ? RequireInternalSlot(S, [[SetData]]).
+    auto set = TRY(typed_this_object(vm));
+
+    // 4. If value is -0𝔽, set value to +0𝔽.
     if (value.is_negative_zero())
         value = Value(0);
+
+    // 3. For each element e of S.[[SetData]], do
+    //     a. If e is not empty and SameValueZero(e, value) is true, then
+    //         i. Return S.
+    // 5. Append value to S.[[SetData]].
     set->set_add(value);
+
+    // 6. Return S.
     return set;
 }
 
 // 24.2.3.2 Set.prototype.clear ( ), https://tc39.es/ecma262/#sec-set.prototype.clear
 JS_DEFINE_NATIVE_FUNCTION(SetPrototype::clear)
 {
-    auto* set = TRY(typed_this_object(vm));
+    // 1. Let S be the this value.
+    // 2. Perform ? RequireInternalSlot(S, [[SetData]]).
+    auto set = TRY(typed_this_object(vm));
+
+    // 3. For each element e of S.[[SetData]], do
+    //     a. Replace the element of S.[[SetData]] whose value is e with an element whose value is empty.
     set->set_clear();
+
+    // 4. Return undefined.
     return js_undefined();
 }
 
 // 24.2.3.4 Set.prototype.delete ( value ), https://tc39.es/ecma262/#sec-set.prototype.delete
 JS_DEFINE_NATIVE_FUNCTION(SetPrototype::delete_)
 {
-    auto* set = TRY(typed_this_object(vm));
-    return Value(set->set_remove(vm.argument(0)));
+    auto value = vm.argument(0);
+
+    // 1. Let S be the this value.
+    // 2. Perform ? RequireInternalSlot(S, [[SetData]]).
+    auto set = TRY(typed_this_object(vm));
+
+    // 3. For each element e of S.[[SetData]], do
+    //     a. If e is not empty and SameValueZero(e, value) is true, then
+    //         i. Replace the element of S.[[SetData]] whose value is e with an element whose value is empty.
+    //         ii. Return true.
+    // 4. Return false.
+    return Value(set->set_remove(value));
 }
 
 // 24.2.3.5 Set.prototype.entries ( ), https://tc39.es/ecma262/#sec-set.prototype.entries
@@ -81,28 +112,62 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::entries)
 {
     auto& realm = *vm.current_realm();
 
-    auto* set = TRY(typed_this_object(vm));
+    // 1. Let S be the this value.
+    auto set = TRY(typed_this_object(vm));
 
-    return SetIterator::create(realm, *set, Object::PropertyKind::KeyAndValue);
+    // 2. Return ? CreateSetIterator(S, key+value).
+    return SetIterator::create(realm, set, Object::PropertyKind::KeyAndValue);
 }
 
 // 24.2.3.6 Set.prototype.forEach ( callbackfn [ , thisArg ] ), https://tc39.es/ecma262/#sec-set.prototype.foreach
 JS_DEFINE_NATIVE_FUNCTION(SetPrototype::for_each)
 {
-    auto* set = TRY(typed_this_object(vm));
-    if (!vm.argument(0).is_function())
-        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, vm.argument(0).to_string_without_side_effects());
-    auto this_value = vm.this_value();
-    for (auto& entry : *set)
-        TRY(call(vm, vm.argument(0).as_function(), vm.argument(1), entry.key, entry.key, this_value));
+    auto callback_fn = vm.argument(0);
+    auto this_arg = vm.argument(1);
+
+    // 1. Let S be the this value.
+    // 2. Perform ? RequireInternalSlot(S, [[SetData]]).
+    auto set = TRY(typed_this_object(vm));
+
+    // 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+    if (!callback_fn.is_function())
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, TRY_OR_THROW_OOM(vm, vm.argument(0).to_string_without_side_effects()));
+
+    // 4. Let entries be S.[[SetData]].
+    // 5. Let numEntries be the number of elements in entries.
+    // 6. Let index be 0.
+    // 7. Repeat, while index < numEntries,
+    for (auto& entry : *set) {
+        // a. Let e be entries[index].
+        // b. Set index to index + 1.
+        // c. If e is not empty, then
+        // NOTE: This is handled in Map::IteratorImpl.
+
+        // i. Perform ? Call(callbackfn, thisArg, « e, e, S »).
+        TRY(call(vm, callback_fn.as_function(), this_arg, entry.key, entry.key, set));
+
+        // ii. NOTE: The number of elements in entries may have increased during execution of callbackfn.
+        // iii. Set numEntries to the number of elements in entries.
+        // NOTE: This is handled in Map::IteratorImpl.
+    }
+
+    // 8. Return undefined.
     return js_undefined();
 }
 
 // 24.2.3.7 Set.prototype.has ( value ), https://tc39.es/ecma262/#sec-set.prototype.has
 JS_DEFINE_NATIVE_FUNCTION(SetPrototype::has)
 {
-    auto* set = TRY(typed_this_object(vm));
-    return Value(set->set_has(vm.argument(0)));
+    auto value = vm.argument(0);
+
+    // 1. Let S be the this value.
+    // 2. Perform ? RequireInternalSlot(S, [[SetData]]).
+    auto set = TRY(typed_this_object(vm));
+
+    // 3. For each element e of S.[[SetData]], do
+    //     a. If e is not empty and SameValueZero(e, value) is true, return true.
+    // 4. Return false.
+    return Value(set->set_has(value));
 }
 
 // 24.2.3.10 Set.prototype.values ( ), https://tc39.es/ecma262/#sec-set.prototype.values
@@ -110,21 +175,33 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::values)
 {
     auto& realm = *vm.current_realm();
 
-    auto* set = TRY(typed_this_object(vm));
+    // 1. Let S be the this value.
+    // NOTE: CreateSetIterator checks the presence of a [[SetData]] slot, so we can do this here.
+    auto set = TRY(typed_this_object(vm));
 
-    return SetIterator::create(realm, *set, Object::PropertyKind::Value);
+    // 2. Return ? CreateSetIterator(S, value).
+    return SetIterator::create(realm, set, Object::PropertyKind::Value);
 }
 
 // 24.2.3.9 get Set.prototype.size, https://tc39.es/ecma262/#sec-get-set.prototype.size
 JS_DEFINE_NATIVE_FUNCTION(SetPrototype::size_getter)
 {
-    auto* set = TRY(typed_this_object(vm));
-    return Value(set->set_size());
+    // 1. Let S be the this value.
+    // 2. Perform ? RequireInternalSlot(S, [[SetData]]).
+    auto set = TRY(typed_this_object(vm));
+
+    // 3. Let count be 0.
+    // 4. For each element e of S.[[SetData]], do
+    //     a. If e is not empty, set count to count + 1.
+    auto count = set->set_size();
+
+    // 5. Return 𝔽(count).
+    return Value(count);
 }
 
 // 8 Set Records, https://tc39.es/proposal-set-methods/#sec-set-records
 struct SetRecord {
-    NonnullGCPtr<Object> set;          // [[Set]]
+    NonnullGCPtr<Object const> set;    // [[Set]]
     double size { 0 };                 // [[Size]
     NonnullGCPtr<FunctionObject> has;  // [[Has]]
     NonnullGCPtr<FunctionObject> keys; // [[Keys]]
@@ -135,7 +212,7 @@ static ThrowCompletionOr<SetRecord> get_set_record(VM& vm, Value value)
 {
     // 1. If obj is not an Object, throw a TypeError exception.
     if (!value.is_object())
-        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, value.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, TRY_OR_THROW_OOM(vm, value.to_string_without_side_effects()));
     auto const& object = value.as_object();
 
     // 2. Let rawSize be ? Get(obj, "size").
@@ -157,14 +234,14 @@ static ThrowCompletionOr<SetRecord> get_set_record(VM& vm, Value value)
 
     // 8. If IsCallable(has) is false, throw a TypeError exception.
     if (!has.is_function())
-        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, has.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, TRY_OR_THROW_OOM(vm, has.to_string_without_side_effects()));
 
     // 9. Let keys be ? Get(obj, "keys").
     auto keys = TRY(object.get(vm.names.keys));
 
     // 10. If IsCallable(keys) is false, throw a TypeError exception.
     if (!keys.is_function())
-        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, keys.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, TRY_OR_THROW_OOM(vm, keys.to_string_without_side_effects()));
 
     // 11. Return a new Set Record { [[Set]]: obj, [[Size]]: intSize, [[Has]]: has, [[Keys]]: keys }.
     return SetRecord { .set = object, .size = integer_size, .has = has.as_function(), .keys = keys.as_function() };
@@ -178,14 +255,14 @@ static ThrowCompletionOr<Iterator> get_keys_iterator(VM& vm, SetRecord const& se
 
     // 2. If keysIter is not an Object, throw a TypeError exception.
     if (!keys_iterator.is_object())
-        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, keys_iterator.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, TRY_OR_THROW_OOM(vm, keys_iterator.to_string_without_side_effects()));
 
     // 3. Let nextMethod be ? Get(keysIter, "next").
     auto next_method = TRY(keys_iterator.as_object().get(vm.names.next));
 
     // 4. If IsCallable(nextMethod) is false, throw a TypeError exception.
     if (!next_method.is_function())
-        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, next_method.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, TRY_OR_THROW_OOM(vm, next_method.to_string_without_side_effects()));
 
     // 5. Return a new Iterator Record { [[Iterator]]: keysIter, [[NextMethod]]: nextMethod, [[Done]]: false }.
     return Iterator { .iterator = &keys_iterator.as_object(), .next_method = next_method, .done = false };
@@ -196,7 +273,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::union_)
 {
     // 1. Let O be the this value.
     // 2. Perform ? RequireInternalSlot(O, [[SetData]]).
-    auto* set = TRY(typed_this_object(vm));
+    auto set = TRY(typed_this_object(vm));
 
     // 3. Let otherRec be ? GetSetRecord(other).
     auto other_record = TRY(get_set_record(vm, vm.argument(0)));
@@ -213,7 +290,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::union_)
     // 7. Repeat, while next is not false,
     while (next) {
         // a. Set next to ? IteratorStep(keysIter).
-        auto* iterator_result = TRY(iterator_step(vm, keys_iterator));
+        auto iterator_result = TRY(iterator_step(vm, keys_iterator));
         next = iterator_result;
 
         // b. If next is not false, then
@@ -245,7 +322,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::intersection)
 
     // 1. Let O be the this value.
     // 2. Perform ? RequireInternalSlot(O, [[SetData]]).
-    auto* set = TRY(typed_this_object(vm));
+    auto set = TRY(typed_this_object(vm));
 
     // 3. Let otherRec be ? GetSetRecord(other).
     auto other_record = TRY(get_set_record(vm, vm.argument(0)));
@@ -281,7 +358,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::intersection)
         // c. Repeat, while next is not false,
         while (next) {
             // i. Set next to ? IteratorStep(keysIter).
-            auto* iterator_result = TRY(iterator_step(vm, keys_iterator));
+            auto iterator_result = TRY(iterator_step(vm, keys_iterator));
             next = iterator_result;
 
             // ii. If next is not false, then
@@ -323,7 +400,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::difference)
 {
     // 1. Let O be the this value.
     // 2. Perform ? RequireInternalSlot(O, [[SetData]]).
-    auto* set = TRY(typed_this_object(vm));
+    auto set = TRY(typed_this_object(vm));
 
     // 3. Let otherRec be ? GetSetRecord(other).
     auto other_record = TRY(get_set_record(vm, vm.argument(0)));
@@ -359,7 +436,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::difference)
         // c. Repeat, while next is not false,
         while (next) {
             // i. Set next to ? IteratorStep(keysIter).
-            auto* iterator_result = TRY(iterator_step(vm, keys_iterator));
+            auto iterator_result = TRY(iterator_step(vm, keys_iterator));
             next = iterator_result;
 
             // ii. If next is not false, then
@@ -392,7 +469,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::symmetric_difference)
 {
     // 1. Let O be the this value.
     // 2. Perform ? RequireInternalSlot(O, [[SetData]]).
-    auto* set = TRY(typed_this_object(vm));
+    auto set = TRY(typed_this_object(vm));
 
     // 3. Let otherRec be ? GetSetRecord(other).
     auto other_record = TRY(get_set_record(vm, vm.argument(0)));
@@ -409,7 +486,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::symmetric_difference)
     // 7. Repeat, while next is not false,
     while (next) {
         // a. Set next to ? IteratorStep(keysIter).
-        auto* iterator_result = TRY(iterator_step(vm, keys_iterator));
+        auto iterator_result = TRY(iterator_step(vm, keys_iterator));
         next = iterator_result;
 
         // b. If next is not false, then
@@ -447,7 +524,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::is_subset_of)
 {
     // 1. Let O be the this value.
     // 2. Perform ? RequireInternalSlot(O, [[SetData]]).
-    auto* set = TRY(typed_this_object(vm));
+    auto set = TRY(typed_this_object(vm));
 
     // 3. Let otherRec be ? GetSetRecord(other).
     auto other_record = TRY(get_set_record(vm, vm.argument(0)));
@@ -478,7 +555,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::is_superset_of)
 {
     // 1. Let O be the this value.
     // 2. Perform ? RequireInternalSlot(O, [[SetData]]).
-    auto* set = TRY(typed_this_object(vm));
+    auto set = TRY(typed_this_object(vm));
 
     // 3. Let otherRec be ? GetSetRecord(other).
     auto other_record = TRY(get_set_record(vm, vm.argument(0)));
@@ -499,7 +576,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::is_superset_of)
     // 8. Repeat, while next is not false,
     while (next) {
         // a. Set next to ? IteratorStep(keysIter).
-        auto* iterator_result = TRY(iterator_step(vm, keys_iterator));
+        auto iterator_result = TRY(iterator_step(vm, keys_iterator));
         next = iterator_result;
 
         // b. If next is not false, then
@@ -522,7 +599,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::is_disjoint_from)
 {
     // 1. Let O be the this value.
     // 2. Perform ? RequireInternalSlot(O, [[SetData]]).
-    auto* set = TRY(typed_this_object(vm));
+    auto set = TRY(typed_this_object(vm));
 
     // 3. Let otherRec be ? GetSetRecord(other).
     auto other_record = TRY(get_set_record(vm, vm.argument(0)));
@@ -553,7 +630,7 @@ JS_DEFINE_NATIVE_FUNCTION(SetPrototype::is_disjoint_from)
         // c. Repeat, while next is not false,
         while (next) {
             // i. Set next to ? IteratorStep(keysIter).
-            auto* iterator_result = TRY(iterator_step(vm, keys_iterator));
+            auto iterator_result = TRY(iterator_step(vm, keys_iterator));
             next = iterator_result;
 
             // ii. If next is not false, then

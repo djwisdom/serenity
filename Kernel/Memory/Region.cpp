@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Memory.h>
 #include <AK/StringView.h>
 #include <Kernel/Arch/PageDirectory.h>
 #include <Kernel/Arch/PageFault.h>
@@ -13,7 +12,6 @@
 #include <Kernel/InterruptDisabler.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 #include <Kernel/Memory/MemoryManager.h>
-#include <Kernel/Memory/PageDirectory.h>
 #include <Kernel/Memory/Region.h>
 #include <Kernel/Memory/SharedInodeVMObject.h>
 #include <Kernel/Panic.h>
@@ -77,6 +75,16 @@ Region::~Region()
 
     if (is_kernel())
         MM.unregister_kernel_region(*this);
+
+    // Extend the lifetime of the region if there are any page faults in progress for this region's pages.
+    // Both the removal of regions from the region trees and the fetching of the regions from the tree
+    // during the start of page fault handling are serialized under the address space spinlock. This means
+    // that once the region is removed no more page faults on this region can start, so this counter will
+    // eventually reach 0. And similarly since we can only reach the region destructor once the region was
+    // removed from the appropriate region tree, it is guaranteed that any page faults that are still being
+    // handled have already increased this counter, and will be allowed to finish before deallocation.
+    while (m_in_progress_page_faults)
+        Processor::wait_check();
 }
 
 ErrorOr<NonnullOwnPtr<Region>> Region::create_unbacked()
@@ -270,7 +278,7 @@ void Region::unmap(ShouldFlushTLB should_flush_tlb)
     unmap_with_locks_held(should_flush_tlb, pd_locker);
 }
 
-void Region::unmap_with_locks_held(ShouldFlushTLB should_flush_tlb, SpinlockLocker<RecursiveSpinlock>&)
+void Region::unmap_with_locks_held(ShouldFlushTLB should_flush_tlb, SpinlockLocker<RecursiveSpinlock<LockRank::None>>&)
 {
     if (!m_page_directory)
         return;

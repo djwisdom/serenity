@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2023, Idan Horowitz <idan.horowitz@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,6 +11,7 @@
 #include <Kernel/PerformanceManager.h>
 #include <Kernel/Process.h>
 #include <Kernel/Scheduler.h>
+#include <Kernel/TTY/TTY.h>
 
 namespace Kernel {
 
@@ -17,19 +19,18 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 {
     VERIFY_PROCESS_BIG_LOCK_ACQUIRED(this);
     TRY(require_promise(Pledge::proc));
-    LockRefPtr<Thread> child_first_thread;
+
+    auto child_name = TRY(name().with([](auto& name) { return name->try_clone(); }));
+    auto credentials = this->credentials();
+    auto child_and_first_thread = TRY(Process::create(move(child_name), credentials->uid(), credentials->gid(), pid(), m_is_kernel_process, current_directory(), executable(), tty(), this));
+    auto& child = child_and_first_thread.process;
+    auto& child_first_thread = child_and_first_thread.first_thread;
 
     ArmedScopeGuard thread_finalizer_guard = [&child_first_thread]() {
         SpinlockLocker lock(g_scheduler_lock);
-        if (child_first_thread) {
-            child_first_thread->detach();
-            child_first_thread->set_state(Thread::State::Dying);
-        }
+        child_first_thread->detach();
+        child_first_thread->set_state(Thread::State::Dying);
     };
-
-    auto child_name = TRY(m_name->try_clone());
-    auto credentials = this->credentials();
-    auto child = TRY(Process::try_create(child_first_thread, move(child_name), credentials->uid(), credentials->gid(), pid(), m_is_kernel_process, current_directory(), executable(), m_tty, this));
 
     // NOTE: All user processes have a leaked ref on them. It's balanced by Thread::WaitBlockerSet::finalize().
     child->ref();
@@ -70,13 +71,31 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
         return {};
     }));
 
+    ArmedScopeGuard remove_from_jail_process_list = [&]() {
+        m_jail_process_list.with([&](auto& list_ptr) {
+            if (list_ptr) {
+                list_ptr->attached_processes().with([&](auto& list) {
+                    list.remove(*child);
+                });
+            }
+        });
+    };
+    m_jail_process_list.with([&](auto& list_ptr) {
+        if (list_ptr) {
+            child->m_jail_process_list.with([&](auto& child_list_ptr) {
+                child_list_ptr = list_ptr;
+            });
+            list_ptr->attached_processes().with([&](auto& list) {
+                list.append(child);
+            });
+        }
+    });
+
     TRY(child->m_fds.with_exclusive([&](auto& child_fds) {
         return m_fds.with_exclusive([&](auto& parent_fds) {
             return child_fds.try_clone(parent_fds);
         });
     }));
-
-    child->m_pg = m_pg;
 
     with_protected_data([&](auto& my_protected_data) {
         child->with_mutable_protected_data([&](auto& child_protected_data) {
@@ -84,11 +103,11 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
             child_protected_data.execpromises = my_protected_data.execpromises.load();
             child_protected_data.has_promises = my_protected_data.has_promises.load();
             child_protected_data.has_execpromises = my_protected_data.has_execpromises.load();
-            child_protected_data.sid = my_protected_data.sid;
             child_protected_data.credentials = my_protected_data.credentials;
             child_protected_data.umask = my_protected_data.umask;
             child_protected_data.signal_trampoline = my_protected_data.signal_trampoline;
             child_protected_data.dumpable = my_protected_data.dumpable;
+            child_protected_data.process_group = my_protected_data.process_group;
         });
     });
 
@@ -101,29 +120,8 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     child_first_thread->m_alternative_signal_stack = Thread::current()->m_alternative_signal_stack;
     child_first_thread->m_alternative_signal_stack_size = Thread::current()->m_alternative_signal_stack_size;
 
-#if ARCH(I386)
     auto& child_regs = child_first_thread->m_regs;
-    child_regs.eax = 0; // fork() returns 0 in the child :^)
-    child_regs.ebx = regs.ebx;
-    child_regs.ecx = regs.ecx;
-    child_regs.edx = regs.edx;
-    child_regs.ebp = regs.ebp;
-    child_regs.esp = regs.userspace_esp;
-    child_regs.esi = regs.esi;
-    child_regs.edi = regs.edi;
-    child_regs.eflags = regs.eflags;
-    child_regs.eip = regs.eip;
-    child_regs.cs = regs.cs;
-    child_regs.ds = regs.ds;
-    child_regs.es = regs.es;
-    child_regs.fs = regs.fs;
-    child_regs.gs = regs.gs;
-    child_regs.ss = regs.userspace_ss;
-
-    dbgln_if(FORK_DEBUG, "fork: child will begin executing at {:#04x}:{:p} with stack {:#04x}:{:p}, kstack {:#04x}:{:p}",
-        child_regs.cs, child_regs.eip, child_regs.ss, child_regs.esp, child_regs.ss0, child_regs.esp0);
-#elif ARCH(X86_64)
-    auto& child_regs = child_first_thread->m_regs;
+#if ARCH(X86_64)
     child_regs.rax = 0; // fork() returns 0 in the child :^)
     child_regs.rbx = regs.rbx;
     child_regs.rcx = regs.rcx;
@@ -146,6 +144,13 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
 
     dbgln_if(FORK_DEBUG, "fork: child will begin executing at {:#04x}:{:p} with stack {:p}, kstack {:p}",
         child_regs.cs, child_regs.rip, child_regs.rsp, child_regs.rsp0);
+#elif ARCH(AARCH64)
+    child_regs.x[0] = 0; // fork() returns 0 in the child :^)
+    for (size_t i = 1; i < array_size(child_regs.x); ++i)
+        child_regs.x[i] = regs.x[i];
+    child_regs.spsr_el1 = regs.spsr_el1;
+    child_regs.elr_el1 = regs.elr_el1;
+    child_regs.sp_el0 = regs.sp_el0;
 #else
 #    error Unknown architecture
 #endif
@@ -168,6 +173,7 @@ ErrorOr<FlatPtr> Process::sys$fork(RegisterState& regs)
     }));
 
     thread_finalizer_guard.disarm();
+    remove_from_jail_process_list.disarm();
 
     Process::register_new(*child);
 

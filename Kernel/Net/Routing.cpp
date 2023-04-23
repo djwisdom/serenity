@@ -16,8 +16,8 @@
 
 namespace Kernel {
 
-static Singleton<SpinlockProtected<HashMap<IPv4Address, MACAddress>>> s_arp_table;
-static Singleton<SpinlockProtected<Route::RouteList>> s_routing_table;
+static Singleton<SpinlockProtected<HashMap<IPv4Address, MACAddress>, LockRank::None>> s_arp_table;
+static Singleton<SpinlockProtected<Route::RouteList, LockRank::None>> s_routing_table;
 
 class ARPTableBlocker final : public Thread::Blocker {
 public:
@@ -106,7 +106,7 @@ void ARPTableBlocker::will_unblock_immediately_without_blocking(UnblockImmediate
     }
 }
 
-SpinlockProtected<HashMap<IPv4Address, MACAddress>>& arp_table()
+SpinlockProtected<HashMap<IPv4Address, MACAddress>, LockRank::None>& arp_table()
 {
     return *s_arp_table;
 }
@@ -130,16 +130,16 @@ void update_arp_table(IPv4Address const& ip_addr, MACAddress const& addr, Update
     }
 }
 
-SpinlockProtected<Route::RouteList>& routing_table()
+SpinlockProtected<Route::RouteList, LockRank::None>& routing_table()
 {
     return *s_routing_table;
 }
 
-ErrorOr<void> update_routing_table(IPv4Address const& destination, IPv4Address const& gateway, IPv4Address const& netmask, u16 flags, LockRefPtr<NetworkAdapter> adapter, UpdateTable update)
+ErrorOr<void> update_routing_table(IPv4Address const& destination, IPv4Address const& gateway, IPv4Address const& netmask, u16 flags, RefPtr<NetworkAdapter> adapter, UpdateTable update)
 {
     dbgln_if(ROUTING_DEBUG, "update_routing_table {} {} {} {} {} {}", destination, gateway, netmask, flags, adapter, update == UpdateTable::Set ? "Set" : "Delete");
 
-    auto route_entry = adopt_lock_ref_if_nonnull(new (nothrow) Route { destination, gateway, netmask, flags, adapter.release_nonnull() });
+    auto route_entry = adopt_ref_if_nonnull(new (nothrow) Route { destination, gateway, netmask, flags, adapter.release_nonnull() });
     if (!route_entry)
         return ENOMEM;
 
@@ -178,7 +178,7 @@ static MACAddress multicast_ethernet_address(IPv4Address const& address)
     return MACAddress { 0x01, 0x00, 0x5e, (u8)(address[1] & 0x7f), address[2], address[3] };
 }
 
-RoutingDecision route_to(IPv4Address const& target, IPv4Address const& source, LockRefPtr<NetworkAdapter> const through, AllowUsingGateway allow_using_gateway)
+RoutingDecision route_to(IPv4Address const& target, IPv4Address const& source, RefPtr<NetworkAdapter> const through, AllowUsingGateway allow_using_gateway)
 {
     auto matches = [&](auto& adapter) {
         if (!through)
@@ -200,8 +200,8 @@ RoutingDecision route_to(IPv4Address const& target, IPv4Address const& source, L
     auto target_addr = target.to_u32();
     auto source_addr = source.to_u32();
 
-    LockRefPtr<NetworkAdapter> local_adapter = nullptr;
-    LockRefPtr<Route> chosen_route = nullptr;
+    RefPtr<NetworkAdapter> local_adapter = nullptr;
+    RefPtr<Route> chosen_route = nullptr;
 
     NetworkingManagement::the().for_each([source_addr, &target_addr, &local_adapter, &matches, &through](NetworkAdapter& adapter) {
         auto adapter_addr = adapter.ipv4_address().to_u32();
@@ -263,7 +263,7 @@ RoutingDecision route_to(IPv4Address const& target, IPv4Address const& source, L
         return { nullptr, {} };
     }
 
-    LockRefPtr<NetworkAdapter> adapter = nullptr;
+    RefPtr<NetworkAdapter> adapter = nullptr;
     IPv4Address next_hop_ip;
 
     if (local_adapter) {

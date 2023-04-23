@@ -14,7 +14,7 @@ inline namespace {
 extern char const* s_xhtml_unified_dtd;
 }
 
-static FlyString s_html_namespace = "http://www.w3.org/1999/xhtml";
+static DeprecatedFlyString s_html_namespace = "http://www.w3.org/1999/xhtml";
 
 namespace Web {
 
@@ -41,14 +41,14 @@ ErrorOr<DeprecatedString> resolve_xml_resource(XML::SystemID const&, Optional<XM
 
 XMLDocumentBuilder::XMLDocumentBuilder(DOM::Document& document, XMLScriptingSupport scripting_support)
     : m_document(document)
-    , m_current_node(&m_document)
+    , m_current_node(m_document)
     , m_scripting_support(scripting_support)
 {
 }
 
 void XMLDocumentBuilder::set_source(DeprecatedString source)
 {
-    m_document.set_source(move(source));
+    m_document->set_source(move(source));
 }
 
 void XMLDocumentBuilder::element_start(const XML::Name& name, HashMap<XML::Name, DeprecatedString> const& attributes)
@@ -64,7 +64,7 @@ void XMLDocumentBuilder::element_start(const XML::Name& name, HashMap<XML::Name,
         }
     }
 
-    auto node = DOM::create_element(m_document, name, {});
+    auto node = DOM::create_element(m_document, name, {}).release_value_but_fixme_should_propagate_errors();
     // When an XML parser with XML scripting support enabled creates a script element,
     // it must have its parser document set and its "force async" flag must be unset.
     // FIXME: If the parser was created as part of the XML fragment parsing algorithm, then the element must be marked as "already started" also.
@@ -100,14 +100,14 @@ void XMLDocumentBuilder::element_end(const XML::Name& name)
         auto& script_element = static_cast<HTML::HTMLScriptElement&>(*m_current_node);
         script_element.prepare_script(Badge<XMLDocumentBuilder> {});
         // If this causes there to be a pending parsing-blocking script, then the user agent must run the following steps:
-        if (m_document.pending_parsing_blocking_script()) {
+        if (m_document->pending_parsing_blocking_script()) {
             // Block this instance of the XML parser, such that the event loop will not run tasks that invoke it.
             // NOTE: Noop.
 
             // Spin the event loop until the parser's Document has no style sheet that is blocking scripts and the pending parsing-blocking script's "ready to be parser-executed" flag is set.
-            if (m_document.has_a_style_sheet_that_is_blocking_scripts() || !script_element.is_ready_to_be_parser_executed()) {
+            if (m_document->has_a_style_sheet_that_is_blocking_scripts() || !script_element.is_ready_to_be_parser_executed()) {
                 HTML::main_thread_event_loop().spin_until([&] {
-                    return !m_document.has_a_style_sheet_that_is_blocking_scripts() && script_element.is_ready_to_be_parser_executed();
+                    return !m_document->has_a_style_sheet_that_is_blocking_scripts() && script_element.is_ready_to_be_parser_executed();
                 });
             }
 
@@ -123,7 +123,7 @@ void XMLDocumentBuilder::element_end(const XML::Name& name)
     m_current_node = m_current_node->parent_node();
 }
 
-void XMLDocumentBuilder::text(DeprecatedString const& data)
+void XMLDocumentBuilder::text(StringView data)
 {
     if (m_has_error)
         return;
@@ -135,16 +135,22 @@ void XMLDocumentBuilder::text(DeprecatedString const& data)
         text_node.set_data(text_builder.to_deprecated_string());
         text_builder.clear();
     } else {
-        auto node = m_document.create_text_node(data);
+        auto string = DeprecatedString::empty();
+        if (!data.is_null())
+            string = data.to_deprecated_string();
+        auto node = m_document->create_text_node(string);
         MUST(m_current_node->append_child(node));
     }
 }
 
-void XMLDocumentBuilder::comment(DeprecatedString const& data)
+void XMLDocumentBuilder::comment(StringView data)
 {
     if (m_has_error)
         return;
-    MUST(m_document.append_child(m_document.create_comment(data)));
+    auto string = DeprecatedString::empty();
+    if (!data.is_null())
+        string = data.to_deprecated_string();
+    MUST(m_document->append_child(m_document->create_comment(string)));
 }
 
 void XMLDocumentBuilder::document_end()
@@ -157,35 +163,35 @@ void XMLDocumentBuilder::document_end()
     m_current_node = nullptr;
 
     // Update the current document readiness to "interactive".
-    m_document.update_readiness(HTML::DocumentReadyState::Interactive);
+    m_document->update_readiness(HTML::DocumentReadyState::Interactive);
 
     // Pop all the nodes off the stack of open elements.
     // NOTE: Noop.
 
     // While the list of scripts that will execute when the document has finished parsing is not empty:
-    while (!m_document.scripts_to_execute_when_parsing_has_finished().is_empty()) {
+    while (!m_document->scripts_to_execute_when_parsing_has_finished().is_empty()) {
         // Spin the event loop until the first script in the list of scripts that will execute when the document has finished parsing has its "ready to be parser-executed" flag set
         // and the parser's Document has no style sheet that is blocking scripts.
         HTML::main_thread_event_loop().spin_until([&] {
-            return m_document.scripts_to_execute_when_parsing_has_finished().first()->is_ready_to_be_parser_executed()
-                && !m_document.has_a_style_sheet_that_is_blocking_scripts();
+            return m_document->scripts_to_execute_when_parsing_has_finished().first()->is_ready_to_be_parser_executed()
+                && !m_document->has_a_style_sheet_that_is_blocking_scripts();
         });
 
         // Execute the first script in the list of scripts that will execute when the document has finished parsing.
-        m_document.scripts_to_execute_when_parsing_has_finished().first()->execute_script();
+        m_document->scripts_to_execute_when_parsing_has_finished().first()->execute_script();
 
         // Remove the first script element from the list of scripts that will execute when the document has finished parsing (i.e. shift out the first entry in the list).
-        (void)m_document.scripts_to_execute_when_parsing_has_finished().take_first();
+        (void)m_document->scripts_to_execute_when_parsing_has_finished().take_first();
     }
     // Queue a global task on the DOM manipulation task source given the Document's relevant global object to run the following substeps:
-    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = &m_document] {
+    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = m_document] {
         // Set the Document's load timing info's DOM content loaded event start time to the current high resolution time given the Document's relevant global object.
         document->load_timing_info().dom_content_loaded_event_start_time = HighResolutionTime::unsafe_shared_current_time();
 
         // Fire an event named DOMContentLoaded at the Document object, with its bubbles attribute initialized to true.
-        auto content_loaded_event = DOM::Event::create(document->realm(), HTML::EventNames::DOMContentLoaded);
+        auto content_loaded_event = DOM::Event::create(document->realm(), HTML::EventNames::DOMContentLoaded).release_value_but_fixme_should_propagate_errors();
         content_loaded_event->set_bubbles(true);
-        document->dispatch_event(*content_loaded_event);
+        document->dispatch_event(content_loaded_event);
 
         // Set the Document's load timing info's DOM content loaded event end time to the current high resolution time given the Document's relevant global object.
         document->load_timing_info().dom_content_loaded_event_end_time = HighResolutionTime::unsafe_shared_current_time();
@@ -197,16 +203,16 @@ void XMLDocumentBuilder::document_end()
 
     // Spin the event loop until the set of scripts that will execute as soon as possible and the list of scripts that will execute in order as soon as possible are empty.
     HTML::main_thread_event_loop().spin_until([&] {
-        return m_document.scripts_to_execute_as_soon_as_possible().is_empty();
+        return m_document->scripts_to_execute_as_soon_as_possible().is_empty();
     });
 
     // Spin the event loop until there is nothing that delays the load event in the Document.
     HTML::main_thread_event_loop().spin_until([&] {
-        return m_document.number_of_things_delaying_the_load_event() == 0;
+        return m_document->number_of_things_delaying_the_load_event() == 0;
     });
 
     // Queue a global task on the DOM manipulation task source given the Document's relevant global object to run the following steps:
-    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = &m_document] {
+    old_queue_global_task_with_document(HTML::Task::Source::DOMManipulation, m_document, [document = m_document] {
         // Update the current document readiness to "complete".
         document->update_readiness(HTML::DocumentReadyState::Complete);
 
@@ -223,7 +229,7 @@ void XMLDocumentBuilder::document_end()
         // Fire an event named load at window, with legacy target override flag set.
         // FIXME: The legacy target override flag is currently set by a virtual override of dispatch_event()
         // We should reorganize this so that the flag appears explicitly here instead.
-        window->dispatch_event(*DOM::Event::create(document->realm(), HTML::EventNames::load));
+        window->dispatch_event(DOM::Event::create(document->realm(), HTML::EventNames::load).release_value_but_fixme_should_propagate_errors());
 
         // FIXME: Invoke WebDriver BiDi load complete with the Document's browsing context, and a new WebDriver BiDi navigation status whose id is the Document object's navigation id, status is "complete", and url is the Document object's URL.
 
@@ -250,7 +256,7 @@ void XMLDocumentBuilder::document_end()
     // FIXME: If the Document's print when loaded flag is set, then run the printing steps.
 
     // The Document is now ready for post-load tasks.
-    m_document.set_ready_for_post_load_tasks(true);
+    m_document->set_ready_for_post_load_tasks(true);
 }
 }
 

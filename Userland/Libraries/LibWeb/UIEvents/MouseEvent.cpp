@@ -19,14 +19,23 @@ MouseEvent::MouseEvent(JS::Realm& realm, FlyString const& event_name, MouseEvent
     , m_offset_y(event_init.offset_y)
     , m_client_x(event_init.client_x)
     , m_client_y(event_init.client_y)
+    , m_page_x(event_init.page_x)
+    , m_page_y(event_init.page_y)
     , m_button(event_init.button)
     , m_buttons(event_init.buttons)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "MouseEvent"));
     set_event_characteristics();
 }
 
 MouseEvent::~MouseEvent() = default;
+
+JS::ThrowCompletionOr<void> MouseEvent::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::MouseEventPrototype>(realm, "MouseEvent"));
+
+    return {};
+}
 
 // https://www.w3.org/TR/uievents/#dom-mouseevent-button
 static i16 determine_button(unsigned mouse_button)
@@ -47,18 +56,20 @@ static i16 determine_button(unsigned mouse_button)
     }
 }
 
-MouseEvent* MouseEvent::create(JS::Realm& realm, FlyString const& event_name, MouseEventInit const& event_init)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<MouseEvent>> MouseEvent::create(JS::Realm& realm, FlyString const& event_name, MouseEventInit const& event_init)
 {
-    return realm.heap().allocate<MouseEvent>(realm, realm, event_name, event_init);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<MouseEvent>(realm, realm, event_name, event_init));
 }
 
-MouseEvent* MouseEvent::create_from_platform_event(JS::Realm& realm, FlyString const& event_name, CSSPixels offset_x, CSSPixels offset_y, CSSPixels client_x, CSSPixels client_y, unsigned buttons, unsigned mouse_button)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<MouseEvent>> MouseEvent::create_from_platform_event(JS::Realm& realm, FlyString const& event_name, CSSPixelPoint offset, CSSPixelPoint client_offset, CSSPixelPoint page_offset, unsigned buttons, unsigned mouse_button)
 {
     MouseEventInit event_init {};
-    event_init.offset_x = static_cast<double>(offset_x.value());
-    event_init.offset_y = static_cast<double>(offset_y.value());
-    event_init.client_x = static_cast<double>(client_x.value());
-    event_init.client_y = static_cast<double>(client_y.value());
+    event_init.offset_x = static_cast<double>(offset.x().value());
+    event_init.offset_y = static_cast<double>(offset.y().value());
+    event_init.client_x = static_cast<double>(client_offset.x().value());
+    event_init.client_y = static_cast<double>(client_offset.y().value());
+    event_init.page_x = static_cast<double>(page_offset.x().value());
+    event_init.page_y = static_cast<double>(page_offset.y().value());
     event_init.button = determine_button(mouse_button);
     event_init.buttons = buttons;
     return MouseEvent::create(realm, event_name, event_init);

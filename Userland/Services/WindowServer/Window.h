@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -120,7 +120,7 @@ public:
 
     WindowTileType tile_type() const { return m_tile_type; }
     bool is_tiled() const { return m_tile_type != WindowTileType::None; }
-    void set_tiled(WindowTileType);
+    void set_tiled(WindowTileType, Optional<Screen const&> = {});
     WindowTileType tile_type_based_on_rect(Gfx::IntRect const&) const;
     void check_untile_due_to_resize(Gfx::IntRect const&);
     bool set_untiled();
@@ -243,6 +243,9 @@ public:
         m_backing_store_serial = serial;
     }
 
+    Gfx::IntSize backing_store_visible_size() const { return m_backing_store_visible_size; }
+    void set_backing_store_visible_size(Gfx::IntSize visible_size) { m_backing_store_visible_size = visible_size; }
+
     void swap_backing_stores()
     {
         swap(m_backing_store, m_last_backing_store);
@@ -252,7 +255,6 @@ public:
     Gfx::Bitmap* last_backing_store() { return m_last_backing_store.ptr(); }
     i32 last_backing_store_serial() const { return m_last_backing_store_serial; }
 
-    void set_global_cursor_tracking_enabled(bool);
     void set_automatic_cursor_tracking_enabled(bool enabled) { m_automatic_cursor_tracking_enabled = enabled; }
     bool is_automatic_cursor_tracking() const { return m_automatic_cursor_tracking_enabled; }
 
@@ -278,13 +280,13 @@ public:
     void set_base_size(Gfx::IntSize size) { m_base_size = size; }
 
     Gfx::Bitmap const& icon() const { return *m_icon; }
-    void set_icon(NonnullRefPtr<Gfx::Bitmap>&& icon) { m_icon = move(icon); }
+    void set_icon(NonnullRefPtr<Gfx::Bitmap const>&& icon) { m_icon = move(icon); }
 
     void set_default_icon();
 
     Cursor const* cursor() const { return (m_cursor_override ? m_cursor_override : m_cursor).ptr(); }
-    void set_cursor(RefPtr<Cursor> cursor) { m_cursor = move(cursor); }
-    void set_cursor_override(RefPtr<Cursor> cursor) { m_cursor_override = move(cursor); }
+    void set_cursor(RefPtr<Cursor const> cursor) { m_cursor = move(cursor); }
+    void set_cursor_override(RefPtr<Cursor const> cursor) { m_cursor_override = move(cursor); }
     void remove_cursor_override() { m_cursor_override = nullptr; }
 
     void request_update(Gfx::IntRect const&, bool ignore_occlusion = false);
@@ -375,6 +377,9 @@ public:
     void remove_all_stealing() { m_stealable_by_client_ids.clear(); }
     bool is_stealable_by_client(i32 client_id) const { return m_stealable_by_client_ids.contains_slow(client_id); }
 
+    void send_resize_event_to_client();
+    void send_move_event_to_client();
+
 private:
     Window(ConnectionFromClient&, WindowType, WindowMode, int window_id, bool minimizable, bool closeable, bool frameless, bool resizable, bool fullscreen, Window* parent_window = nullptr);
     Window(Core::Object&, WindowType);
@@ -385,7 +390,7 @@ private:
     void add_child_window(Window&);
     void ensure_window_menu();
     void update_window_menu_items();
-    void modal_unparented();
+    void tile_type_changed(Optional<Screen const&> = {});
     ErrorOr<Optional<DeprecatedString>> compute_title_username(ConnectionFromClient* client);
 
     ConnectionFromClient* m_client { nullptr };
@@ -435,6 +440,7 @@ private:
     bool m_occluded { false };
     RefPtr<Gfx::Bitmap> m_backing_store;
     RefPtr<Gfx::Bitmap> m_last_backing_store;
+    Gfx::IntSize m_backing_store_visible_size {};
     i32 m_backing_store_serial { -1 };
     i32 m_last_backing_store_serial { -1 };
     int m_window_id { -1 };
@@ -444,9 +450,9 @@ private:
     Gfx::IntSize m_size_increment;
     Gfx::IntSize m_base_size;
     Gfx::IntSize m_minimum_size { 0, 0 };
-    NonnullRefPtr<Gfx::Bitmap> m_icon;
-    RefPtr<Cursor> m_cursor;
-    RefPtr<Cursor> m_cursor_override;
+    NonnullRefPtr<Gfx::Bitmap const> m_icon;
+    RefPtr<Cursor const> m_cursor;
+    RefPtr<Cursor const> m_cursor_override;
     WindowFrame m_frame;
     Gfx::DisjointIntRectSet m_pending_paint_rects;
     Gfx::IntRect m_rect_in_applet_area;

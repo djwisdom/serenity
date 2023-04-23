@@ -56,8 +56,6 @@ private:
     virtual void mousemove_event(MouseEvent&) override;
     virtual void layout_relevant_change_occurred() override;
 
-    virtual Optional<UISize> calculated_min_size() const override;
-
     Gfx::IntRect content_rect(int row) const;
     void update_content_size();
 

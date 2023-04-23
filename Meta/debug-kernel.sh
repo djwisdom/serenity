@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 SCRIPT_DIR="$(dirname "${0}")"
 
@@ -9,12 +9,23 @@ fi
 # Set this environment variable to override the default debugger.
 #
 if [ -z "$SERENITY_KERNEL_DEBUGGER" ]; then
-    if [ "$SERENITY_ARCH" = "aarch64" ]; then
-        # Prepend the toolchain aarch64 bin directory so we pick up GDB from there
-        PATH="$SCRIPT_DIR/../Toolchain/Local/aarch64/bin:$PATH"
-        SERENITY_KERNEL_DEBUGGER="aarch64-pc-serenity-gdb"
-    else
+    # Prepend the toolchain's GDB bin directory so we pick up GDB from there
+    PATH="$SCRIPT_DIR/../Toolchain/Local/$SERENITY_ARCH-gdb/bin:$PATH"
+    # GDB used to be installed directly inside the toolchain bin directory
+    PATH="$SCRIPT_DIR/../Toolchain/Local/$SERENITY_ARCH/bin:$PATH"
+
+    if command -v "$SERENITY_ARCH-pc-serenity-gdb" >/dev/null; then
+        SERENITY_KERNEL_DEBUGGER="$SERENITY_ARCH-pc-serenity-gdb"
+    elif command -v "$SERENITY_ARCH-elf-gdb" >/dev/null; then
+        SERENITY_KERNEL_DEBUGGER="$SERENITY_ARCH-elf-gdb"
+    elif command -v gdb >/dev/null && gdb -ex 'set architecture' -ex 'quit' 2>&1 | grep "${SERENITY_ARCH//_/-}"; then
         SERENITY_KERNEL_DEBUGGER="gdb"
+    else
+        echo "Error: No suitable GDB installation found." >&2
+        echo "Please install $SERENITY_ARCH-elf-gdb or build it with Toolchain/BuildGDB.sh $SERENITY_ARCH" >&2
+        # Prevent tmux from dying instantly by waiting for user input
+        read -rp "Press Enter to exit"
+        exit 1
     fi
 fi
 
@@ -31,14 +42,10 @@ if [ "$SERENITY_ARCH" = "x86_64" ]; then
     gdb_arch=i386:x86-64
     prekernel_image=Prekernel64
     kernel_base=0x2000200000
-elif [ "$SERENITY_ARCH" = "i686" ]; then
-    gdb_arch=i386:intel
-    prekernel_image=Prekernel32
-    kernel_base=0xc0200000
 elif [ "$SERENITY_ARCH" = "aarch64" ]; then
     gdb_arch=aarch64:armv8-r
     prekernel_image=Prekernel
-    kernel_base=0xc0000000 # FIXME
+    kernel_base=0x0
 fi
 
 # FIXME: This doesn't work when running QEMU inside the WSL2 VM
@@ -57,6 +64,7 @@ exec $SERENITY_KERNEL_DEBUGGER \
     -ex "set confirm on" \
     -ex "set arch $gdb_arch" \
     -ex "set print frame-arguments none" \
+    -ex "set print asm-demangle on" \
     -ex "target remote ${gdb_host}:1234" \
     -ex "source $SCRIPT_DIR/serenity_gdb.py" \
     -ex "layout asm" \

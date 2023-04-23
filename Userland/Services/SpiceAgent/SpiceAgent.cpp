@@ -7,14 +7,13 @@
 #include "SpiceAgent.h"
 #include "ConnectionToClipboardServer.h"
 #include <AK/DeprecatedString.h>
-#include <LibC/memory.h>
-#include <LibC/unistd.h>
-#include <LibGfx/BMPLoader.h>
-#include <LibGfx/BMPWriter.h>
 #include <LibGfx/Bitmap.h>
-#include <LibGfx/JPGLoader.h>
-#include <LibGfx/PNGLoader.h>
-#include <LibGfx/PNGWriter.h>
+#include <LibGfx/ImageFormats/BMPLoader.h>
+#include <LibGfx/ImageFormats/JPEGLoader.h>
+#include <LibGfx/ImageFormats/PNGLoader.h>
+#include <LibGfx/ImageFormats/PNGWriter.h>
+#include <memory.h>
+#include <unistd.h>
 
 SpiceAgent::SpiceAgent(int fd, ConnectionToClipboardServer& connection)
     : m_fd(fd)
@@ -46,7 +45,7 @@ Optional<SpiceAgent::ClipboardType> SpiceAgent::mime_type_to_clipboard_type(Depr
     if (mime == "text/plain")
         return ClipboardType::Text;
     else if (mime == "image/jpeg")
-        return ClipboardType::JPG;
+        return ClipboardType::JPEG;
     else if (mime == "image/bmp")
         return ClipboardType::BMP;
     else if (mime == "image/png" || mime == "image/x-serenityos")
@@ -100,7 +99,7 @@ void SpiceAgent::on_message_received()
                 switch (type) {
                 case ClipboardType::PNG:
                 case ClipboardType::BMP:
-                case ClipboardType::JPG:
+                case ClipboardType::JPEG:
                     found_type = type;
                     break;
                 default:
@@ -142,11 +141,23 @@ void SpiceAgent::on_message_received()
         } else {
             ErrorOr<Gfx::ImageFrameDescriptor> frame_or_error = Gfx::ImageFrameDescriptor {};
             if (type == ClipboardType::PNG) {
-                frame_or_error = Gfx::PNGImageDecoderPlugin(data_buffer.data(), data_buffer.size()).frame(0);
+                if (Gfx::PNGImageDecoderPlugin::sniff({ data_buffer.data(), data_buffer.size() })) {
+                    auto png_decoder = Gfx::PNGImageDecoderPlugin::create({ data_buffer.data(), data_buffer.size() }).release_value_but_fixme_should_propagate_errors();
+                    if (png_decoder->initialize())
+                        frame_or_error = png_decoder->frame(0);
+                }
             } else if (type == ClipboardType::BMP) {
-                frame_or_error = Gfx::BMPImageDecoderPlugin(data_buffer.data(), data_buffer.size()).frame(0);
-            } else if (type == ClipboardType::JPG) {
-                frame_or_error = Gfx::JPGImageDecoderPlugin(data_buffer.data(), data_buffer.size()).frame(0);
+                if (Gfx::BMPImageDecoderPlugin::sniff({ data_buffer.data(), data_buffer.size() })) {
+                    auto bmp_decoder = Gfx::BMPImageDecoderPlugin::create({ data_buffer.data(), data_buffer.size() }).release_value_but_fixme_should_propagate_errors();
+                    if (bmp_decoder->initialize())
+                        frame_or_error = bmp_decoder->frame(0);
+                }
+            } else if (type == ClipboardType::JPEG) {
+                if (Gfx::JPEGImageDecoderPlugin::sniff({ data_buffer.data(), data_buffer.size() })) {
+                    auto jpeg_decoder = Gfx::JPEGImageDecoderPlugin::create({ data_buffer.data(), data_buffer.size() }).release_value_but_fixme_should_propagate_errors();
+                    if (jpeg_decoder->initialize())
+                        frame_or_error = jpeg_decoder->frame(0);
+                }
             } else {
                 dbgln("Unknown clipboard type: {}", (u32)type);
                 return;

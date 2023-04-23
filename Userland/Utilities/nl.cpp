@@ -22,7 +22,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     NumberStyle number_style = NumberNonEmptyLines;
     int increment = 1;
-    char const* separator = "  ";
+    StringView separator = "  "sv;
     int start_number = 1;
     int number_width = 6;
     Vector<DeprecatedString> files;
@@ -35,12 +35,12 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         "body-numbering",
         'b',
         "style",
-        [&number_style](char const* s) {
-            if (!strcmp(s, "t"))
+        [&number_style](StringView s) {
+            if (s == "t"sv)
                 number_style = NumberNonEmptyLines;
-            else if (!strcmp(s, "a"))
+            else if (s == "a"sv)
                 number_style = NumberAllLines;
-            else if (!strcmp(s, "n"))
+            else if (s == "n"sv)
                 number_style = NumberNoLines;
             else
                 return false;

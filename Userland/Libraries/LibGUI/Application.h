@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,6 +9,7 @@
 #include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
 #include <AK/OwnPtr.h>
+#include <AK/String.h>
 #include <AK/WeakPtr.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/Object.h>
@@ -41,7 +42,7 @@ public:
     void show_tooltip(DeprecatedString, Widget const* tooltip_source_widget);
     void show_tooltip_immediately(DeprecatedString, Widget const* tooltip_source_widget);
     void hide_tooltip();
-    Widget* tooltip_source_widget() { return m_tooltip_source_widget; };
+    Widget const* tooltip_source_widget() { return m_tooltip_source_widget; };
 
     bool quit_when_last_window_deleted() const { return m_quit_when_last_window_deleted; }
     void set_quit_when_last_window_deleted(bool b) { m_quit_when_last_window_deleted = b; }
@@ -53,7 +54,7 @@ public:
     Vector<DeprecatedString> const& args() const { return m_args; }
 
     Gfx::Palette palette() const;
-    void set_palette(Gfx::Palette const&);
+    void set_palette(Gfx::Palette&);
 
     void set_system_palette(Core::AnonymousBuffer&);
 
@@ -87,6 +88,14 @@ public:
 
     auto const& global_shortcut_actions(Badge<GUI::CommandPalette>) const { return m_global_shortcut_actions; }
 
+    static constexpr size_t max_recently_open_files() { return 4; }
+
+    void set_config_domain(String);
+    void update_recent_file_actions();
+    void set_most_recently_open_file(String path);
+
+    void register_recent_file_actions(Badge<GUI::Menu>, Vector<NonnullRefPtr<GUI::Action>>);
+
 private:
     Application(int argc, char** argv, Core::EventLoop::MakeInspectable = Core::EventLoop::MakeInspectable::No);
     Application(Main::Arguments const& arguments, Core::EventLoop::MakeInspectable inspectable = Core::EventLoop::MakeInspectable::No)
@@ -110,7 +119,7 @@ private:
     RefPtr<Core::Timer> m_tooltip_show_timer;
     RefPtr<Core::Timer> m_tooltip_hide_timer;
     RefPtr<TooltipWindow> m_tooltip_window;
-    RefPtr<Widget> m_tooltip_source_widget;
+    RefPtr<Widget const> m_tooltip_source_widget;
     WeakPtr<Window> m_active_window;
     bool m_quit_when_last_window_deleted { true };
     bool m_focus_debugging_enabled { false };
@@ -120,6 +129,9 @@ private:
     Vector<DeprecatedString> m_args;
     WeakPtr<Widget> m_drag_hovered_widget;
     WeakPtr<Widget> m_pending_drop_widget;
+
+    String m_config_domain;
+    Vector<NonnullRefPtr<GUI::Action>> m_recent_file_actions;
 };
 
 }

@@ -17,7 +17,7 @@ class DOMRectReadOnly : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(DOMRectReadOnly, Bindings::PlatformObject);
 
 public:
-    static JS::NonnullGCPtr<DOMRectReadOnly> construct_impl(JS::Realm&, double x = 0, double y = 0, double width = 0, double height = 0);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOMRectReadOnly>> construct_impl(JS::Realm&, double x = 0, double y = 0, double width = 0, double height = 0);
 
     virtual ~DOMRectReadOnly() override;
 
@@ -33,6 +33,8 @@ public:
 
 protected:
     DOMRectReadOnly(JS::Realm&, double x, double y, double width, double height);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 
     Gfx::FloatRect m_rect;
 };

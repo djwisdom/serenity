@@ -6,7 +6,7 @@
 
 #include <LibCompress/Gzip.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/FileStream.h>
+#include <LibCore/File.h>
 #include <LibCore/MappedFile.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
@@ -41,46 +41,17 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             output_filename = DeprecatedString::formatted("{}.gz", input_filename);
         }
 
-        // We map the whole file instead of streaming to reduce size overhead (gzip header) and increase the deflate block size (better compression)
-        // TODO: automatically fallback to buffered streaming for very large files
-        RefPtr<Core::MappedFile> file;
-        ReadonlyBytes input_bytes;
-        if (TRY(Core::System::stat(input_filename)).st_size > 0) {
-            file = TRY(Core::MappedFile::map(input_filename));
-            input_bytes = file->bytes();
-        }
+        auto output_stream = write_to_stdout ? TRY(Core::File::standard_output()) : TRY(Core::File::open(output_filename, Core::File::OpenMode::Write));
 
-        AK::Optional<ByteBuffer> output_bytes;
         if (decompress)
-            output_bytes = TRY(Compress::GzipDecompressor::decompress_all(input_bytes));
+            TRY(Compress::GzipDecompressor::decompress_file(input_filename, move(output_stream)));
         else
-            output_bytes = Compress::GzipCompressor::compress_all(input_bytes);
-
-        if (!output_bytes.has_value()) {
-            warnln("Failed gzip {} input file", decompress ? "decompressing"sv : "compressing"sv);
-            return 1;
-        }
-
-        auto success = false;
-        if (write_to_stdout) {
-            auto stdout = Core::OutputFileStream { Core::File::standard_output() };
-            success = stdout.write_or_error(output_bytes.value());
-        } else {
-            auto output_stream_result = Core::OutputFileStream::open(output_filename);
-            if (output_stream_result.is_error()) {
-                warnln("Failed opening output file for writing: {}", output_stream_result.error());
-                return 1;
-            }
-            success = output_stream_result.value().write_or_error(output_bytes.value());
-        }
-        if (!success) {
-            warnln("Failed writing to output");
-            return 1;
-        }
+            TRY(Compress::GzipCompressor::compress_file(input_filename, move(output_stream)));
 
         if (!keep_input_files) {
             TRY(Core::System::unlink(input_filename));
         }
     }
+
     return 0;
 }

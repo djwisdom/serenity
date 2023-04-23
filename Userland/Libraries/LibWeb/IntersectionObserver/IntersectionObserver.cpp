@@ -11,22 +11,29 @@
 namespace Web::IntersectionObserver {
 
 // https://w3c.github.io/IntersectionObserver/#dom-intersectionobserver-intersectionobserver
-JS::NonnullGCPtr<IntersectionObserver> IntersectionObserver::construct_impl(JS::Realm& realm, WebIDL::CallbackType* callback, IntersectionObserverInit const& options)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<IntersectionObserver>> IntersectionObserver::construct_impl(JS::Realm& realm, WebIDL::CallbackType* callback, IntersectionObserverInit const& options)
 {
     // FIXME: Implement
     (void)callback;
     (void)options;
 
-    return realm.heap().allocate<IntersectionObserver>(realm, realm);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<IntersectionObserver>(realm, realm));
 }
 
 IntersectionObserver::IntersectionObserver(JS::Realm& realm)
     : PlatformObject(realm)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "IntersectionObserver"));
 }
 
 IntersectionObserver::~IntersectionObserver() = default;
+
+JS::ThrowCompletionOr<void> IntersectionObserver::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::IntersectionObserverPrototype>(realm, "IntersectionObserver"));
+
+    return {};
+}
 
 // https://w3c.github.io/IntersectionObserver/#dom-intersectionobserver-observe
 void IntersectionObserver::observe(DOM::Element& target)

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2023, Tim Flynn <trflynn89@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,14 +10,14 @@
 #include <AK/Concepts.h>
 #include <AK/DeprecatedString.h>
 #include <AK/Forward.h>
-#include <AK/MemoryStream.h>
 #include <AK/NumericLimits.h>
 #include <AK/StdLibExtras.h>
+#include <AK/String.h>
 #include <AK/Try.h>
 #include <AK/TypeList.h>
 #include <AK/Variant.h>
 #include <LibCore/SharedCircularQueue.h>
-#include <LibCore/Stream.h>
+#include <LibCore/Socket.h>
 #include <LibIPC/Concepts.h>
 #include <LibIPC/File.h>
 #include <LibIPC/Forward.h>
@@ -33,7 +34,7 @@ inline ErrorOr<T> decode(Decoder&)
 
 class Decoder {
 public:
-    Decoder(InputMemoryStream& stream, Core::Stream::LocalSocket& socket)
+    Decoder(Stream& stream, Core::LocalSocket& socket)
         : m_stream(stream)
         , m_socket(socket)
     {
@@ -45,16 +46,24 @@ public:
     template<typename T>
     ErrorOr<void> decode_into(T& value)
     {
-        m_stream >> value;
-        TRY(m_stream.try_handle_any_error());
+        value = TRY(m_stream.read_value<T>());
         return {};
     }
 
-    Core::Stream::LocalSocket& socket() { return m_socket; }
+    ErrorOr<void> decode_into(Bytes bytes)
+    {
+        TRY(m_stream.read_until_filled(bytes));
+        return {};
+    }
+
+    ErrorOr<size_t> decode_size();
+
+    Stream& stream() { return m_stream; }
+    Core::LocalSocket& socket() { return m_socket; }
 
 private:
-    InputMemoryStream& m_stream;
-    Core::Stream::LocalSocket& m_socket;
+    Stream& m_stream;
+    Core::LocalSocket& m_socket;
 };
 
 template<Arithmetic T>
@@ -73,6 +82,9 @@ ErrorOr<T> decode(Decoder& decoder)
 }
 
 template<>
+ErrorOr<String> decode(Decoder&);
+
+template<>
 ErrorOr<DeprecatedString> decode(Decoder&);
 
 template<>
@@ -80,6 +92,9 @@ ErrorOr<ByteBuffer> decode(Decoder&);
 
 template<>
 ErrorOr<JsonValue> decode(Decoder&);
+
+template<>
+ErrorOr<Time> decode(Decoder&);
 
 template<>
 ErrorOr<URL> decode(Decoder&);
@@ -96,11 +111,9 @@ ErrorOr<Empty> decode(Decoder&);
 template<Concepts::Vector T>
 ErrorOr<T> decode(Decoder& decoder)
 {
-    auto size = TRY(decoder.decode<u64>());
-    if (size > NumericLimits<i32>::max())
-        return Error::from_string_literal("IPC: Invalid Vector size");
-
     T vector;
+
+    auto size = TRY(decoder.decode_size());
     TRY(vector.try_ensure_capacity(size));
 
     for (size_t i = 0; i < size; ++i) {
@@ -114,11 +127,10 @@ ErrorOr<T> decode(Decoder& decoder)
 template<Concepts::HashMap T>
 ErrorOr<T> decode(Decoder& decoder)
 {
-    auto size = TRY(decoder.decode<u32>());
-    if (size > NumericLimits<i32>::max())
-        return Error::from_string_literal("IPC: Invalid HashMap size");
-
     T hashmap;
+
+    auto size = TRY(decoder.decode_size());
+    TRY(hashmap.try_ensure_capacity(size));
 
     for (size_t i = 0; i < size; ++i) {
         auto key = TRY(decoder.decode<typename T::KeyType>());
@@ -133,7 +145,7 @@ template<Concepts::SharedSingleProducerCircularQueue T>
 ErrorOr<T> decode(Decoder& decoder)
 {
     auto anon_file = TRY(decoder.decode<IPC::File>());
-    return T::try_create(anon_file.take_fd());
+    return T::create(anon_file.take_fd());
 }
 
 template<Concepts::Optional T>

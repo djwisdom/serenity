@@ -39,11 +39,7 @@
 #    include <AK/Types.h>
 #endif
 
-#ifdef __i386__
-#    define ElfW(type) Elf32_##type
-#else
-#    define ElfW(type) Elf64_##type
-#endif
+#define ElfW(type) Elf64_##type
 
 typedef uint8_t Elf_Byte;
 
@@ -689,7 +685,7 @@ struct elfcore_procinfo {
 };
 
 /*
- * XXX - these _KERNEL items aren't part of the ABI!
+ * FIXME - these _KERNEL items aren't part of the ABI!
  */
 #if defined(_KERNEL) || defined(_DYN_LOADER)
 
@@ -825,3 +821,9 @@ struct elf_args {
 #define R_X86_64_RELATIVE 8
 #define R_X86_64_TPOFF64 18
 #define R_X86_64_IRELATIVE 37
+
+#define R_AARCH64_ABS64 257
+#define R_AARCH64_GLOB_DAT 1025
+#define R_AARCH64_JUMP_SLOT 1026
+#define R_AARCH64_RELATIVE 1027
+#define R_AARCH64_TLS_TPREL64 1030

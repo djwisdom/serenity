@@ -18,7 +18,7 @@ class AbortSignal final : public EventTarget {
     WEB_PLATFORM_OBJECT(AbortSignal, EventTarget);
 
 public:
-    static JS::NonnullGCPtr<AbortSignal> construct_impl(JS::Realm&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<AbortSignal>> construct_impl(JS::Realm&);
 
     virtual ~AbortSignal() override = default;
 
@@ -43,6 +43,7 @@ public:
 private:
     explicit AbortSignal(JS::Realm&);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
     // https://dom.spec.whatwg.org/#abortsignal-abort-reason

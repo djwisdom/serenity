@@ -5,6 +5,7 @@
  */
 
 #include <LibGfx/Bitmap.h>
+#include <LibWeb/ARIA/Roles.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
@@ -22,13 +23,12 @@ HTMLImageElement::HTMLImageElement(DOM::Document& document, DOM::QualifiedName q
     : HTMLElement(document, move(qualified_name))
     , m_image_loader(*this)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm(), "HTMLImageElement"));
-
     m_image_loader.on_load = [this] {
         set_needs_style_update(true);
         this->document().set_needs_layout();
         queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
-            dispatch_event(*DOM::Event::create(this->realm(), EventNames::load));
+            dispatch_event(DOM::Event::create(this->realm(), EventNames::load).release_value_but_fixme_should_propagate_errors());
+            m_load_event_delayer.clear();
         });
     };
 
@@ -37,7 +37,8 @@ HTMLImageElement::HTMLImageElement(DOM::Document& document, DOM::QualifiedName q
         set_needs_style_update(true);
         this->document().set_needs_layout();
         queue_an_element_task(HTML::Task::Source::DOMManipulation, [this] {
-            dispatch_event(*DOM::Event::create(this->realm(), EventNames::error));
+            dispatch_event(DOM::Event::create(this->realm(), EventNames::error).release_value_but_fixme_should_propagate_errors());
+            m_load_event_delayer.clear();
         });
     };
 
@@ -48,6 +49,14 @@ HTMLImageElement::HTMLImageElement(DOM::Document& document, DOM::QualifiedName q
 }
 
 HTMLImageElement::~HTMLImageElement() = default;
+
+JS::ThrowCompletionOr<void> HTMLImageElement::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::HTMLImageElementPrototype>(realm, "HTMLImageElement"));
+
+    return {};
+}
 
 void HTMLImageElement::apply_presentational_hints(CSS::StyleProperties& style) const
 {
@@ -72,12 +81,14 @@ void HTMLImageElement::apply_presentational_hints(CSS::StyleProperties& style) c
     });
 }
 
-void HTMLImageElement::parse_attribute(FlyString const& name, DeprecatedString const& value)
+void HTMLImageElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     HTMLElement::parse_attribute(name, value);
 
-    if (name == HTML::AttributeNames::src && !value.is_empty())
+    if (name == HTML::AttributeNames::src && !value.is_empty()) {
         m_image_loader.load(document().parse_url(value));
+        m_load_event_delayer.emplace(document());
+    }
 
     if (name == HTML::AttributeNames::alt) {
         if (layout_node())
@@ -101,8 +112,8 @@ unsigned HTMLImageElement::width() const
     const_cast<DOM::Document&>(document()).update_layout();
 
     // Return the rendered width of the image, in CSS pixels, if the image is being rendered.
-    if (auto* paint_box = this->paint_box())
-        return paint_box->content_width().value();
+    if (auto* paintable_box = this->paintable_box())
+        return paintable_box->content_width().value();
 
     // NOTE: This step seems to not be in the spec, but all browsers do it.
     auto width_attr = get_attribute(HTML::AttributeNames::width);
@@ -129,8 +140,8 @@ unsigned HTMLImageElement::height() const
     const_cast<DOM::Document&>(document()).update_layout();
 
     // Return the rendered height of the image, in CSS pixels, if the image is being rendered.
-    if (auto* paint_box = this->paint_box())
-        return paint_box->content_height().value();
+    if (auto* paintable_box = this->paintable_box())
+        return paintable_box->content_height().value();
 
     // NOTE: This step seems to not be in the spec, but all browsers do it.
     auto height_attr = get_attribute(HTML::AttributeNames::height);
@@ -195,6 +206,16 @@ bool HTMLImageElement::complete() const
         return true;
 
     return false;
+}
+
+Optional<ARIA::Role> HTMLImageElement::default_role() const
+{
+    // https://www.w3.org/TR/html-aria/#el-img
+    // https://www.w3.org/TR/html-aria/#el-img-no-alt
+    if (alt().is_null() || !alt().is_empty())
+        return ARIA::Role::img;
+    // https://www.w3.org/TR/html-aria/#el-img-empty-alt
+    return ARIA::Role::presentation;
 }
 
 }

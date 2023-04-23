@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,6 +8,8 @@
 #include <AK/Debug.h>
 #include <AK/StringBuilder.h>
 #include <LibWeb/Bindings/ElementPrototype.h>
+#include <LibWeb/Bindings/ExceptionOrUtils.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/ResolvedCSSStyleDeclaration.h>
@@ -22,6 +24,10 @@
 #include <LibWeb/Geometry/DOMRect.h>
 #include <LibWeb/Geometry/DOMRectList.h>
 #include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/CustomElements/CustomElementDefinition.h>
+#include <LibWeb/HTML/CustomElements/CustomElementName.h>
+#include <LibWeb/HTML/CustomElements/CustomElementReactionNames.h>
+#include <LibWeb/HTML/CustomElements/CustomElementRegistry.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLButtonElement.h>
@@ -34,9 +40,10 @@
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/Infra/CharacterTypes.h>
+#include <LibWeb/Infra/Strings.h>
 #include <LibWeb/Layout/BlockContainer.h>
-#include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/InlineNode.h>
 #include <LibWeb/Layout/ListItemBox.h>
 #include <LibWeb/Layout/TableBox.h>
@@ -44,9 +51,11 @@
 #include <LibWeb/Layout/TableRowBox.h>
 #include <LibWeb/Layout/TableRowGroupBox.h>
 #include <LibWeb/Layout/TreeBuilder.h>
+#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PaintableBox.h>
+#include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/DOMException.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
@@ -56,16 +65,21 @@ Element::Element(Document& document, DOM::QualifiedName qualified_name)
     : ParentNode(document, NodeType::ELEMENT_NODE)
     , m_qualified_name(move(qualified_name))
 {
-    set_prototype(&Bindings::cached_web_prototype(document.realm(), "Element"));
     make_html_uppercased_qualified_name();
 }
 
 Element::~Element() = default;
 
-void Element::initialize(JS::Realm& realm)
+JS::ThrowCompletionOr<void> Element::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
-    m_attributes = NamedNodeMap::create(*this);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::ElementPrototype>(realm, "Element"));
+
+    m_attributes = TRY(Bindings::throw_dom_exception_if_needed(realm.vm(), [&]() {
+        return NamedNodeMap::create(*this);
+    }));
+
+    return {};
 }
 
 void Element::visit_edges(Cell::Visitor& visitor)
@@ -75,12 +89,13 @@ void Element::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_inline_style.ptr());
     visitor.visit(m_class_list.ptr());
     visitor.visit(m_shadow_root.ptr());
+    visitor.visit(m_custom_element_definition.ptr());
     for (auto& pseudo_element_layout_node : m_pseudo_element_nodes)
         visitor.visit(pseudo_element_layout_node);
 }
 
 // https://dom.spec.whatwg.org/#dom-element-getattribute
-DeprecatedString Element::get_attribute(FlyString const& name) const
+DeprecatedString Element::get_attribute(DeprecatedFlyString const& name) const
 {
     // 1. Let attr be the result of getting an attribute given qualifiedName and this.
     auto const* attribute = m_attributes->get_attribute(name);
@@ -94,14 +109,14 @@ DeprecatedString Element::get_attribute(FlyString const& name) const
 }
 
 // https://dom.spec.whatwg.org/#dom-element-getattributenode
-JS::GCPtr<Attr> Element::get_attribute_node(FlyString const& name) const
+JS::GCPtr<Attr> Element::get_attribute_node(DeprecatedFlyString const& name) const
 {
     // The getAttributeNode(qualifiedName) method steps are to return the result of getting an attribute given qualifiedName and this.
     return m_attributes->get_attribute(name);
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattribute
-WebIDL::ExceptionOr<void> Element::set_attribute(FlyString const& name, DeprecatedString const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     // 1. If qualifiedName does not match the Name production in XML, then throw an "InvalidCharacterError" DOMException.
     // FIXME: Proper name validation
@@ -117,7 +132,7 @@ WebIDL::ExceptionOr<void> Element::set_attribute(FlyString const& name, Deprecat
 
     // 4. If attribute is null, create an attribute whose local name is qualifiedName, value is value, and node document is this’s node document, then append this attribute to this, and then return.
     if (!attribute) {
-        auto new_attribute = Attr::create(document(), insert_as_lowercase ? name.to_lowercase() : name, value);
+        auto new_attribute = TRY(Attr::create(document(), insert_as_lowercase ? name.to_lowercase() : name, value));
         m_attributes->append_attribute(new_attribute);
 
         attribute = new_attribute.ptr();
@@ -136,7 +151,7 @@ WebIDL::ExceptionOr<void> Element::set_attribute(FlyString const& name, Deprecat
 }
 
 // https://dom.spec.whatwg.org/#validate-and-extract
-WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm& realm, FlyString namespace_, FlyString qualified_name)
+WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm& realm, DeprecatedFlyString namespace_, DeprecatedFlyString qualified_name)
 {
     // 1. If namespace is the empty string, then set it to null.
     if (namespace_.is_empty())
@@ -146,7 +161,7 @@ WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm& realm, FlyStr
     TRY(Document::validate_qualified_name(realm, qualified_name));
 
     // 3. Let prefix be null.
-    FlyString prefix = {};
+    DeprecatedFlyString prefix = {};
 
     // 4. Let localName be qualifiedName.
     auto local_name = qualified_name;
@@ -179,7 +194,7 @@ WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm& realm, FlyStr
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattributens
-WebIDL::ExceptionOr<void> Element::set_attribute_ns(FlyString const& namespace_, FlyString const& qualified_name, DeprecatedString const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute_ns(DeprecatedFlyString const& namespace_, DeprecatedFlyString const& qualified_name, DeprecatedString const& value)
 {
     // 1. Let namespace, prefix, and localName be the result of passing namespace and qualifiedName to validate and extract.
     auto extracted_qualified_name = TRY(validate_and_extract(realm(), namespace_, qualified_name));
@@ -190,8 +205,22 @@ WebIDL::ExceptionOr<void> Element::set_attribute_ns(FlyString const& namespace_,
     return set_attribute(extracted_qualified_name.local_name(), value);
 }
 
+// https://dom.spec.whatwg.org/#dom-element-setattributenode
+WebIDL::ExceptionOr<JS::GCPtr<Attr>> Element::set_attribute_node(Attr& attr)
+{
+    // The setAttributeNode(attr) and setAttributeNodeNS(attr) methods steps are to return the result of setting an attribute given attr and this.
+    return m_attributes->set_attribute(attr);
+}
+
+// https://dom.spec.whatwg.org/#dom-element-setattributenodens
+WebIDL::ExceptionOr<JS::GCPtr<Attr>> Element::set_attribute_node_ns(Attr& attr)
+{
+    // The setAttributeNode(attr) and setAttributeNodeNS(attr) methods steps are to return the result of setting an attribute given attr and this.
+    return m_attributes->set_attribute(attr);
+}
+
 // https://dom.spec.whatwg.org/#dom-element-removeattribute
-void Element::remove_attribute(FlyString const& name)
+void Element::remove_attribute(DeprecatedFlyString const& name)
 {
     m_attributes->remove_attribute(name);
 
@@ -201,13 +230,13 @@ void Element::remove_attribute(FlyString const& name)
 }
 
 // https://dom.spec.whatwg.org/#dom-element-hasattribute
-bool Element::has_attribute(FlyString const& name) const
+bool Element::has_attribute(DeprecatedFlyString const& name) const
 {
     return m_attributes->get_attribute(name) != nullptr;
 }
 
 // https://dom.spec.whatwg.org/#dom-element-toggleattribute
-WebIDL::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optional<bool> force)
+WebIDL::ExceptionOr<bool> Element::toggle_attribute(DeprecatedFlyString const& name, Optional<bool> force)
 {
     // 1. If qualifiedName does not match the Name production in XML, then throw an "InvalidCharacterError" DOMException.
     // FIXME: Proper name validation
@@ -225,7 +254,7 @@ WebIDL::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optio
     if (!attribute) {
         // 1. If force is not given or is true, create an attribute whose local name is qualifiedName, value is the empty string, and node document is this’s node document, then append this attribute to this, and then return true.
         if (!force.has_value() || force.value()) {
-            auto new_attribute = Attr::create(document(), insert_as_lowercase ? name.to_lowercase() : name, "");
+            auto new_attribute = TRY(Attr::create(document(), insert_as_lowercase ? name.to_lowercase() : name, ""));
             m_attributes->append_attribute(new_attribute);
 
             parse_attribute(new_attribute->local_name(), "");
@@ -272,7 +301,7 @@ bool Element::has_class(FlyString const& class_name, CaseSensitivity case_sensit
         });
     } else {
         return any_of(m_classes, [&](auto& it) {
-            return it.equals_ignoring_case(class_name);
+            return it.equals_ignoring_ascii_case(class_name);
         });
     }
 }
@@ -314,12 +343,15 @@ JS::GCPtr<Layout::Node> Element::create_layout_node_for_display_type(DOM::Docume
         if (display.is_flow_inside())
             return document.heap().allocate_without_realm<Layout::InlineNode>(document, element, move(style));
         if (display.is_flex_inside())
-            return document.heap().allocate_without_realm<Layout::BlockContainer>(document, element, move(style));
-        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Support display: {}", display.to_deprecated_string());
+            return document.heap().allocate_without_realm<Layout::Box>(document, element, move(style));
+        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Support display: {}", MUST(display.to_string()));
         return document.heap().allocate_without_realm<Layout::InlineNode>(document, element, move(style));
     }
 
-    if (display.is_flow_inside() || display.is_flow_root_inside() || display.is_flex_inside() || display.is_grid_inside())
+    if (display.is_flex_inside() || display.is_grid_inside())
+        return document.heap().allocate_without_realm<Layout::Box>(document, element, move(style));
+
+    if (display.is_flow_inside() || display.is_flow_root_inside())
         return document.heap().allocate_without_realm<Layout::BlockContainer>(document, element, move(style));
 
     TODO();
@@ -330,14 +362,14 @@ CSS::CSSStyleDeclaration const* Element::inline_style() const
     return m_inline_style.ptr();
 }
 
-void Element::parse_attribute(FlyString const& name, DeprecatedString const& value)
+void Element::parse_attribute(DeprecatedFlyString const& name, DeprecatedString const& value)
 {
     if (name == HTML::AttributeNames::class_) {
         auto new_classes = value.split_view(Infra::is_ascii_whitespace);
         m_classes.clear();
         m_classes.ensure_capacity(new_classes.size());
         for (auto& new_class : new_classes) {
-            m_classes.unchecked_append(new_class);
+            m_classes.unchecked_append(FlyString::from_utf8(new_class).release_value_but_fixme_should_propagate_errors());
         }
         if (m_class_list)
             m_class_list->associated_attribute_changed(value);
@@ -350,7 +382,7 @@ void Element::parse_attribute(FlyString const& name, DeprecatedString const& val
     }
 }
 
-void Element::did_remove_attribute(FlyString const& name)
+void Element::did_remove_attribute(DeprecatedFlyString const& name)
 {
     if (name == HTML::AttributeNames::style) {
         if (m_inline_style) {
@@ -432,7 +464,7 @@ Element::NeedsRelayout Element::recompute_style()
 
 NonnullRefPtr<CSS::StyleProperties> Element::resolved_css_values()
 {
-    auto element_computed_style = CSS::ResolvedCSSStyleDeclaration::create(*this);
+    auto element_computed_style = CSS::ResolvedCSSStyleDeclaration::create(*this).release_value_but_fixme_should_propagate_errors();
     auto properties = CSS::StyleProperties::create();
 
     for (auto i = to_underlying(CSS::first_property_id); i <= to_underlying(CSS::last_property_id); ++i) {
@@ -449,20 +481,87 @@ NonnullRefPtr<CSS::StyleProperties> Element::resolved_css_values()
 DOMTokenList* Element::class_list()
 {
     if (!m_class_list)
-        m_class_list = DOMTokenList::create(*this, HTML::AttributeNames::class_);
+        m_class_list = DOMTokenList::create(*this, HTML::AttributeNames::class_).release_value_but_fixme_should_propagate_errors();
     return m_class_list;
+}
+
+// https://dom.spec.whatwg.org/#dom-element-attachshadow
+WebIDL::ExceptionOr<JS::NonnullGCPtr<ShadowRoot>> Element::attach_shadow(ShadowRootInit init)
+{
+    // 1. If this’s namespace is not the HTML namespace, then throw a "NotSupportedError" DOMException.
+    if (namespace_() != Namespace::HTML)
+        return WebIDL::NotSupportedError::create(realm(), "Element's namespace is not the HTML namespace"sv);
+
+    // 2. If this’s local name is not one of the following:
+    //    - a valid custom element name
+    //    - "article", "aside", "blockquote", "body", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "main", "nav", "p", "section", or "span"
+    if (!HTML::is_valid_custom_element_name(local_name())
+        && !local_name().is_one_of("article", "aside", "blockquote", "body", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "main", "nav", "p", "section", "span")) {
+        // then throw a "NotSupportedError" DOMException.
+        return WebIDL::NotSupportedError::create(realm(), DeprecatedString::formatted("Element '{}' cannot be a shadow host", local_name()));
+    }
+
+    // 3. If this’s local name is a valid custom element name, or this’s is value is not null, then:
+    if (HTML::is_valid_custom_element_name(local_name()) || m_is_value.has_value()) {
+        // 1. Let definition be the result of looking up a custom element definition given this’s node document, its namespace, its local name, and its is value.
+        auto definition = document().lookup_custom_element_definition(namespace_(), local_name(), m_is_value);
+
+        // 2. If definition is not null and definition’s disable shadow is true, then throw a "NotSupportedError" DOMException.
+        if (definition && definition->disable_shadow())
+            return WebIDL::NotSupportedError::create(realm(), "Cannot attach a shadow root to a custom element that has disabled shadow roots"sv);
+    }
+
+    // 4. If this is a shadow host, then throw an "NotSupportedError" DOMException.
+    if (is_shadow_host())
+        return WebIDL::NotSupportedError::create(realm(), "Element already is a shadow host");
+
+    // 5. Let shadow be a new shadow root whose node document is this’s node document, host is this, and mode is init["mode"].
+    auto shadow = MUST_OR_THROW_OOM(heap().allocate<ShadowRoot>(realm(), document(), *this, init.mode));
+
+    // 6. Set shadow’s delegates focus to init["delegatesFocus"].
+    shadow->set_delegates_focus(init.delegates_focus);
+
+    // 7. If this’s custom element state is "precustomized" or "custom", then set shadow’s available to element internals to true.
+    if (m_custom_element_state == CustomElementState::Precustomized || m_custom_element_state == CustomElementState::Custom)
+        shadow->set_available_to_element_internals(true);
+
+    // FIXME: 8. Set shadow’s slot assignment to init["slotAssignment"].
+
+    // 9. Set this’s shadow root to shadow.
+    set_shadow_root(shadow);
+
+    // 10. Return shadow.
+    return shadow;
+}
+
+// https://dom.spec.whatwg.org/#dom-element-shadowroot
+JS::GCPtr<ShadowRoot> Element::shadow_root() const
+{
+    // 1. Let shadow be this’s shadow root.
+    auto shadow = m_shadow_root;
+
+    // 2. If shadow is null or its mode is "closed", then return null.
+    if (shadow == nullptr || shadow->mode() == Bindings::ShadowRootMode::Closed)
+        return nullptr;
+
+    // 3. Return shadow.
+    return shadow;
 }
 
 // https://dom.spec.whatwg.org/#dom-element-matches
 WebIDL::ExceptionOr<bool> Element::matches(StringView selectors) const
 {
+    // 1. Let s be the result of parse a selector from selectors.
     auto maybe_selectors = parse_selector(CSS::Parser::ParsingContext(static_cast<ParentNode&>(const_cast<Element&>(*this))), selectors);
+
+    // 2. If s is failure, then throw a "SyntaxError" DOMException.
     if (!maybe_selectors.has_value())
         return WebIDL::SyntaxError::create(realm(), "Failed to parse selector");
 
+    // 3. If the result of match a selector against an element, using s, this, and scoping root this, returns success, then return true; otherwise, return false.
     auto sel = maybe_selectors.value();
     for (auto& s : sel) {
-        if (SelectorEngine::matches(s, *this))
+        if (SelectorEngine::matches(s, *this, {}, static_cast<ParentNode const*>(this)))
             return true;
     }
     return false;
@@ -471,19 +570,25 @@ WebIDL::ExceptionOr<bool> Element::matches(StringView selectors) const
 // https://dom.spec.whatwg.org/#dom-element-closest
 WebIDL::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) const
 {
+    // 1. Let s be the result of parse a selector from selectors.
     auto maybe_selectors = parse_selector(CSS::Parser::ParsingContext(static_cast<ParentNode&>(const_cast<Element&>(*this))), selectors);
+
+    // 2. If s is failure, then throw a "SyntaxError" DOMException.
     if (!maybe_selectors.has_value())
         return WebIDL::SyntaxError::create(realm(), "Failed to parse selector");
 
-    auto matches_selectors = [](CSS::SelectorList const& selector_list, Element const* element) {
+    auto matches_selectors = [this](CSS::SelectorList const& selector_list, Element const* element) {
+        // 4. For each element in elements, if match a selector against an element, using s, element, and scoping root this, returns success, return element.
         for (auto& selector : selector_list) {
-            if (!SelectorEngine::matches(selector, *element))
+            if (!SelectorEngine::matches(selector, *element, {}, this))
                 return false;
         }
         return true;
     };
 
     auto const selector_list = maybe_selectors.release_value();
+
+    // 3. Let elements be this’s inclusive ancestors that are elements, in reverse tree order.
     for (auto* element = this; element; element = element->parent_element()) {
         if (!matches_selectors(selector_list, element))
             continue;
@@ -491,6 +596,7 @@ WebIDL::ExceptionOr<DOM::Element const*> Element::closest(StringView selectors) 
         return element;
     }
 
+    // 5. Return null.
     return nullptr;
 }
 
@@ -516,11 +622,11 @@ bool Element::is_active() const
     return document().active_element() == this;
 }
 
-JS::NonnullGCPtr<HTMLCollection> Element::get_elements_by_class_name(FlyString const& class_names)
+JS::NonnullGCPtr<HTMLCollection> Element::get_elements_by_class_name(DeprecatedFlyString const& class_names)
 {
     Vector<FlyString> list_of_class_names;
     for (auto& name : class_names.view().split_view_if(Infra::is_ascii_whitespace)) {
-        list_of_class_names.append(name);
+        list_of_class_names.append(FlyString::from_utf8(name).release_value_but_fixme_should_propagate_errors());
     }
     return HTMLCollection::create(*this, [list_of_class_names = move(list_of_class_names), quirks_mode = document().in_quirks_mode()](Element const& element) {
         for (auto& name : list_of_class_names) {
@@ -528,7 +634,14 @@ JS::NonnullGCPtr<HTMLCollection> Element::get_elements_by_class_name(FlyString c
                 return false;
         }
         return true;
-    });
+    }).release_value_but_fixme_should_propagate_errors();
+}
+
+// https://dom.spec.whatwg.org/#element-shadow-host
+bool Element::is_shadow_host() const
+{
+    // An element is a shadow host if its shadow root is non-null.
+    return m_shadow_root != nullptr;
 }
 
 void Element::set_shadow_root(JS::GCPtr<ShadowRoot> shadow_root)
@@ -546,7 +659,7 @@ void Element::set_shadow_root(JS::GCPtr<ShadowRoot> shadow_root)
 CSS::CSSStyleDeclaration* Element::style_for_bindings()
 {
     if (!m_inline_style)
-        m_inline_style = CSS::ElementInlineCSSStyleDeclaration::create(*this, {}, {});
+        m_inline_style = CSS::ElementInlineCSSStyleDeclaration::create(*this, {}, {}).release_value_but_fixme_should_propagate_errors();
     return m_inline_style;
 }
 
@@ -586,14 +699,14 @@ JS::NonnullGCPtr<Geometry::DOMRect> Element::get_bounding_client_rect() const
     const_cast<Document&>(document()).update_layout();
 
     // FIXME: Support inline layout nodes as well.
-    auto* paint_box = this->paint_box();
-    if (!paint_box)
-        return Geometry::DOMRect::construct_impl(realm(), 0, 0, 0, 0);
+    auto* paintable_box = this->paintable_box();
+    if (!paintable_box)
+        return Geometry::DOMRect::construct_impl(realm(), 0, 0, 0, 0).release_value_but_fixme_should_propagate_errors();
 
     VERIFY(document().browsing_context());
     auto viewport_offset = document().browsing_context()->viewport_scroll_offset();
 
-    return Geometry::DOMRect::create(realm(), paint_box->absolute_rect().translated(-viewport_offset.x(), -viewport_offset.y()).to_type<float>());
+    return Geometry::DOMRect::create(realm(), paintable_box->absolute_rect().translated(-viewport_offset.x(), -viewport_offset.y()).to_type<float>()).release_value_but_fixme_should_propagate_errors();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getclientrects
@@ -606,7 +719,7 @@ JS::NonnullGCPtr<Geometry::DOMRectList> Element::get_client_rects() const
 
     // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList object and stop this algorithm.
     if (!layout_node() || !layout_node()->is_box())
-        return Geometry::DOMRectList::create(realm(), move(rects));
+        return Geometry::DOMRectList::create(realm(), move(rects)).release_value_but_fixme_should_propagate_errors();
 
     // FIXME: 2. If the element has an associated SVG layout box return a DOMRectList object containing a single DOMRect object that describes
     // the bounding box of the element as defined by the SVG specification, applying the transforms that apply to the element and its ancestors.
@@ -620,7 +733,7 @@ JS::NonnullGCPtr<Geometry::DOMRectList> Element::get_client_rects() const
 
     auto bounding_rect = get_bounding_client_rect();
     rects.append(*bounding_rect);
-    return Geometry::DOMRectList::create(realm(), move(rects));
+    return Geometry::DOMRectList::create(realm(), move(rects)).release_value_but_fixme_should_propagate_errors();
 }
 
 int Element::client_top() const
@@ -664,19 +777,19 @@ int Element::client_width() const
     //    return the viewport width excluding the size of a rendered scroll bar (if any).
     if ((is<HTML::HTMLHtmlElement>(*this) && !document().in_quirks_mode())
         || (is<HTML::HTMLBodyElement>(*this) && document().in_quirks_mode())) {
-        return document().browsing_context()->viewport_rect().width();
+        return document().browsing_context()->viewport_rect().width().value();
     }
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document()).update_layout();
 
     // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
-    if (!paint_box())
+    if (!paintable_box())
         return 0;
 
     // 3. Return the width of the padding edge excluding the width of any rendered scrollbar between the padding edge and the border edge,
     // ignoring any transforms that apply to the element and its ancestors.
-    return paint_box()->absolute_padding_box_rect().width().value();
+    return paintable_box()->absolute_padding_box_rect().width().value();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-clientheight
@@ -689,19 +802,19 @@ int Element::client_height() const
     //    return the viewport height excluding the size of a rendered scroll bar (if any).
     if ((is<HTML::HTMLHtmlElement>(*this) && !document().in_quirks_mode())
         || (is<HTML::HTMLBodyElement>(*this) && document().in_quirks_mode())) {
-        return document().browsing_context()->viewport_rect().height();
+        return document().browsing_context()->viewport_rect().height().value();
     }
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document()).update_layout();
 
     // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
-    if (!paint_box())
+    if (!paintable_box())
         return 0;
 
     // 3. Return the height of the padding edge excluding the height of any rendered scrollbar between the padding edge and the border edge,
     //    ignoring any transforms that apply to the element and its ancestors.
-    return paint_box()->absolute_padding_box_rect().height().value();
+    return paintable_box()->absolute_padding_box_rect().height().value();
 }
 
 void Element::children_changed()
@@ -822,14 +935,14 @@ double Element::scroll_top() const
         return window->scroll_y();
 
     // 8. If the element does not have any associated box, return zero and terminate these steps.
-    if (!layout_node() || !is<Layout::BlockContainer>(layout_node()))
+    if (!layout_node() || !is<Layout::Box>(layout_node()))
         return 0.0;
 
-    auto const* block_container = static_cast<Layout::BlockContainer const*>(layout_node());
+    auto const* box = static_cast<Layout::Box const*>(layout_node());
 
     // 9. Return the y-coordinate of the scrolling area at the alignment point with the top of the padding edge of the element.
     // FIXME: Is this correct?
-    return block_container->scroll_offset().y();
+    return box->scroll_offset().y().value();
 }
 
 double Element::scroll_left() const
@@ -864,14 +977,14 @@ double Element::scroll_left() const
         return window->scroll_x();
 
     // 8. If the element does not have any associated box, return zero and terminate these steps.
-    if (!layout_node() || !is<Layout::BlockContainer>(layout_node()))
+    if (!layout_node() || !is<Layout::Box>(layout_node()))
         return 0.0;
 
-    auto const* block_container = static_cast<Layout::BlockContainer const*>(layout_node());
+    auto const* box = static_cast<Layout::Box const*>(layout_node());
 
     // 9. Return the x-coordinate of the scrolling area at the alignment point with the left of the padding edge of the element.
     // FIXME: Is this correct?
-    return block_container->scroll_offset().x();
+    return box->scroll_offset().x().value();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrollleft
@@ -908,7 +1021,7 @@ void Element::set_scroll_left(double x)
     if (document.document_element() == this) {
         // FIXME: Implement this in terms of invoking scroll() on window.
         if (auto* page = document.page())
-            page->client().page_did_request_scroll_to({ static_cast<float>(x), window->scroll_y() });
+            page->client().page_did_request_scroll_to({ static_cast<float>(x), static_cast<float>(window->scroll_y()) });
 
         return;
     }
@@ -917,26 +1030,26 @@ void Element::set_scroll_left(double x)
     if (document.body() == this && document.in_quirks_mode() && !is_potentially_scrollable()) {
         // FIXME: Implement this in terms of invoking scroll() on window.
         if (auto* page = document.page())
-            page->client().page_did_request_scroll_to({ static_cast<float>(x), window->scroll_y() });
+            page->client().page_did_request_scroll_to({ static_cast<float>(x), static_cast<float>(window->scroll_y()) });
 
         return;
     }
 
     // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element has no overflow, terminate these steps.
-    if (!layout_node() || !is<Layout::BlockContainer>(layout_node()))
+    if (!layout_node() || !is<Layout::Box>(layout_node()))
         return;
 
-    auto* block_container = static_cast<Layout::BlockContainer*>(layout_node());
-    if (!block_container->is_scrollable())
+    auto* box = static_cast<Layout::Box*>(layout_node());
+    if (!box->is_scrollable())
         return;
 
     // FIXME: or the element has no overflow.
 
     // 11. Scroll the element to x,scrollTop, with the scroll behavior being "auto".
     // FIXME: Implement this in terms of calling "scroll the element".
-    auto scroll_offset = block_container->scroll_offset();
+    auto scroll_offset = box->scroll_offset();
     scroll_offset.set_x(static_cast<float>(x));
-    block_container->set_scroll_offset(scroll_offset);
+    box->set_scroll_offset(scroll_offset);
 }
 
 void Element::set_scroll_top(double y)
@@ -972,7 +1085,7 @@ void Element::set_scroll_top(double y)
     if (document.document_element() == this) {
         // FIXME: Implement this in terms of invoking scroll() on window.
         if (auto* page = document.page())
-            page->client().page_did_request_scroll_to({ window->scroll_x(), static_cast<float>(y) });
+            page->client().page_did_request_scroll_to({ static_cast<float>(window->scroll_x()), static_cast<float>(y) });
 
         return;
     }
@@ -981,26 +1094,26 @@ void Element::set_scroll_top(double y)
     if (document.body() == this && document.in_quirks_mode() && !is_potentially_scrollable()) {
         // FIXME: Implement this in terms of invoking scroll() on window.
         if (auto* page = document.page())
-            page->client().page_did_request_scroll_to({ window->scroll_x(), static_cast<float>(y) });
+            page->client().page_did_request_scroll_to({ static_cast<float>(window->scroll_x()), static_cast<float>(y) });
 
         return;
     }
 
     // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element has no overflow, terminate these steps.
-    if (!layout_node() || !is<Layout::BlockContainer>(layout_node()))
+    if (!layout_node() || !is<Layout::Box>(layout_node()))
         return;
 
-    auto* block_container = static_cast<Layout::BlockContainer*>(layout_node());
-    if (!block_container->is_scrollable())
+    auto* box = static_cast<Layout::Box*>(layout_node());
+    if (!box->is_scrollable())
         return;
 
     // FIXME: or the element has no overflow.
 
     // 11. Scroll the element to scrollLeft,y, with the scroll behavior being "auto".
     // FIXME: Implement this in terms of calling "scroll the element".
-    auto scroll_offset = block_container->scroll_offset();
+    auto scroll_offset = box->scroll_offset();
     scroll_offset.set_y(static_cast<float>(y));
-    block_container->set_scroll_offset(scroll_offset);
+    box->set_scroll_offset(scroll_offset);
 }
 
 int Element::scroll_width() const
@@ -1053,7 +1166,8 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_html(DeprecatedString positio
     // 1. Use the first matching item from this list:
     // - If position is an ASCII case-insensitive match for the string "beforebegin"
     // - If position is an ASCII case-insensitive match for the string "afterend"
-    if (position.equals_ignoring_case("beforebegin"sv) || position.equals_ignoring_case("afterend"sv)) {
+    if (Infra::is_ascii_case_insensitive_match(position, "beforebegin"sv)
+        || Infra::is_ascii_case_insensitive_match(position, "afterend"sv)) {
         // Let context be the context object's parent.
         context = this->parent();
 
@@ -1063,7 +1177,8 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_html(DeprecatedString positio
     }
     // - If position is an ASCII case-insensitive match for the string "afterbegin"
     // - If position is an ASCII case-insensitive match for the string "beforeend"
-    else if (position.equals_ignoring_case("afterbegin"sv) || position.equals_ignoring_case("beforeend"sv)) {
+    else if (Infra::is_ascii_case_insensitive_match(position, "afterbegin"sv)
+        || Infra::is_ascii_case_insensitive_match(position, "beforeend"sv)) {
         // Let context be the context object.
         context = this;
     }
@@ -1094,25 +1209,25 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_html(DeprecatedString positio
     // 4. Use the first matching item from this list:
 
     // - If position is an ASCII case-insensitive match for the string "beforebegin"
-    if (position.equals_ignoring_case("beforebegin"sv)) {
+    if (Infra::is_ascii_case_insensitive_match(position, "beforebegin"sv)) {
         // Insert fragment into the context object's parent before the context object.
         parent()->insert_before(fragment, this);
     }
 
     // - If position is an ASCII case-insensitive match for the string "afterbegin"
-    else if (position.equals_ignoring_case("afterbegin"sv)) {
+    else if (Infra::is_ascii_case_insensitive_match(position, "afterbegin"sv)) {
         // Insert fragment into the context object before its first child.
         insert_before(fragment, first_child());
     }
 
     // - If position is an ASCII case-insensitive match for the string "beforeend"
-    else if (position.equals_ignoring_case("beforeend"sv)) {
+    else if (Infra::is_ascii_case_insensitive_match(position, "beforeend"sv)) {
         // Append fragment to the context object.
         TRY(append_child(fragment));
     }
 
     // - If position is an ASCII case-insensitive match for the string "afterend"
-    else if (position.equals_ignoring_case("afterend"sv)) {
+    else if (Infra::is_ascii_case_insensitive_match(position, "afterend"sv)) {
         // Insert fragment into the context object's parent before the context object's next sibling.
         parent()->insert_before(fragment, next_sibling());
     }
@@ -1123,7 +1238,7 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_html(DeprecatedString positio
 WebIDL::ExceptionOr<JS::GCPtr<Node>> Element::insert_adjacent(DeprecatedString const& where, JS::NonnullGCPtr<Node> node)
 {
     // To insert adjacent, given an element element, string where, and a node node, run the steps associated with the first ASCII case-insensitive match for where:
-    if (where.equals_ignoring_case("beforebegin"sv)) {
+    if (Infra::is_ascii_case_insensitive_match(where, "beforebegin"sv)) {
         // -> "beforebegin"
         // If element’s parent is null, return null.
         if (!parent())
@@ -1133,19 +1248,19 @@ WebIDL::ExceptionOr<JS::GCPtr<Node>> Element::insert_adjacent(DeprecatedString c
         return JS::GCPtr<Node> { TRY(parent()->pre_insert(move(node), this)) };
     }
 
-    if (where.equals_ignoring_case("afterbegin"sv)) {
+    if (Infra::is_ascii_case_insensitive_match(where, "afterbegin"sv)) {
         // -> "afterbegin"
         // Return the result of pre-inserting node into element before element’s first child.
         return JS::GCPtr<Node> { TRY(pre_insert(move(node), first_child())) };
     }
 
-    if (where.equals_ignoring_case("beforeend"sv)) {
+    if (Infra::is_ascii_case_insensitive_match(where, "beforeend"sv)) {
         // -> "beforeend"
         // Return the result of pre-inserting node into element before null.
         return JS::GCPtr<Node> { TRY(pre_insert(move(node), nullptr)) };
     }
 
-    if (where.equals_ignoring_case("afterend"sv)) {
+    if (Infra::is_ascii_case_insensitive_match(where, "afterend"sv)) {
         // -> "afterend"
         // If element’s parent is null, return null.
         if (!parent())
@@ -1174,7 +1289,7 @@ WebIDL::ExceptionOr<JS::GCPtr<Element>> Element::insert_adjacent_element(Depreca
 WebIDL::ExceptionOr<void> Element::insert_adjacent_text(DeprecatedString const& where, DeprecatedString const& data)
 {
     // 1. Let text be a new Text node whose data is data and node document is this’s node document.
-    auto text = heap().allocate<DOM::Text>(realm(), document(), data);
+    auto text = MUST_OR_THROW_OOM(heap().allocate<DOM::Text>(realm(), document(), data));
 
     // 2. Run insert adjacent, given this, where, and text.
     // Spec Note: This method returns nothing because it existed before we had a chance to design it.
@@ -1193,7 +1308,7 @@ static ErrorOr<void> scroll_an_element_into_view(DOM::Element& element, Bindings
     (void)inline_;
 
     if (!element.document().browsing_context())
-        Error::from_string_view("Element has no browsing context."sv);
+        return Error::from_string_view("Element has no browsing context."sv);
 
     auto* page = element.document().browsing_context()->page();
     if (!page)
@@ -1212,7 +1327,7 @@ static ErrorOr<void> scroll_an_element_into_view(DOM::Element& element, Bindings
     if (!layout_node)
         return Error::from_string_view("Element has no parent layout node that is a box."sv);
 
-    page->client().page_did_request_scroll_into_view(verify_cast<Layout::Box>(*layout_node).paint_box()->absolute_padding_box_rect());
+    page->client().page_did_request_scroll_into_view(verify_cast<Layout::Box>(*layout_node).paintable_box()->absolute_padding_box_rect());
 
     return {};
 }
@@ -1258,13 +1373,294 @@ ErrorOr<void> Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOpt
     // FIXME: 8. Optionally perform some other action that brings the element to the user’s attention.
 }
 
-void Element::invalidate_style_after_attribute_change(FlyString const& attribute_name)
+void Element::invalidate_style_after_attribute_change(DeprecatedFlyString const& attribute_name)
 {
     // FIXME: Only invalidate if the attribute can actually affect style.
     (void)attribute_name;
 
     // FIXME: This will need to become smarter when we implement the :has() selector.
     invalidate_style();
+}
+
+// https://www.w3.org/TR/wai-aria-1.2/#tree_exclusion
+bool Element::exclude_from_accessibility_tree() const
+{
+    // The following elements are not exposed via the accessibility API and user agents MUST NOT include them in the accessibility tree:
+
+    // Elements, including their descendent elements, that have host language semantics specifying that the element is not displayed, such as CSS display:none, visibility:hidden, or the HTML hidden attribute.
+    if (!layout_node())
+        return true;
+
+    // Elements with none or presentation as the first role in the role attribute. However, their exclusion is conditional. In addition, the element's descendants and text content are generally included. These exceptions and conditions are documented in the presentation (role) section.
+    // FIXME: Handle exceptions to excluding presentation role
+    auto role = role_or_default();
+    if (role == ARIA::Role::none || role == ARIA::Role::presentation)
+        return true;
+
+    // TODO: If not already excluded from the accessibility tree per the above rules, user agents SHOULD NOT include the following elements in the accessibility tree:
+    //    Elements, including their descendants, that have aria-hidden set to true. In other words, aria-hidden="true" on a parent overrides aria-hidden="false" on descendants.
+    //    Any descendants of elements that have the characteristic "Children Presentational: True" unless the descendant is not allowed to be presentational because it meets one of the conditions for exception described in Presentational Roles Conflict Resolution. However, the text content of any excluded descendants is included.
+    //    Elements with the following roles have the characteristic "Children Presentational: True":
+    //      button
+    //      checkbox
+    //      img
+    //      menuitemcheckbox
+    //      menuitemradio
+    //      meter
+    //      option
+    //      progressbar
+    //      radio
+    //      scrollbar
+    //      separator
+    //      slider
+    //      switch
+    //      tab
+    return false;
+}
+
+// https://www.w3.org/TR/wai-aria-1.2/#tree_inclusion
+bool Element::include_in_accessibility_tree() const
+{
+    // If not excluded from or marked as hidden in the accessibility tree per the rules above in Excluding Elements in the Accessibility Tree, user agents MUST provide an accessible object in the accessibility tree for DOM elements that meet any of the following criteria:
+    if (exclude_from_accessibility_tree())
+        return false;
+    // Elements that are not hidden and may fire an accessibility API event, including:
+    // Elements that are currently focused, even if the element or one of its ancestor elements has its aria-hidden attribute set to true.
+    if (is_focused())
+        return true;
+    // TODO: Elements that are a valid target of an aria-activedescendant attribute.
+
+    // Elements that have an explicit role or a global WAI-ARIA attribute and do not have aria-hidden set to true. (See Excluding Elements in the Accessibility Tree for additional guidance on aria-hidden.)
+    // NOTE: The spec says only explicit roles count, but playing around in other browsers, this does not seem to be true in practice (for example button elements are always exposed with their implicit role if none is set)
+    //       This issue https://github.com/w3c/aria/issues/1851 seeks clarification on this point
+    if ((role_or_default().has_value() || has_global_aria_attribute()) && aria_hidden() != "true")
+        return true;
+
+    // TODO: Elements that are not hidden and have an ID that is referenced by another element via a WAI-ARIA property.
+
+    return false;
+}
+
+// https://html.spec.whatwg.org/multipage/custom-elements.html#enqueue-an-element-on-the-appropriate-element-queue
+void Element::enqueue_an_element_on_the_appropriate_element_queue()
+{
+    // 1. Let reactionsStack be element's relevant agent's custom element reactions stack.
+    auto& relevant_agent = HTML::relevant_agent(*this);
+    auto* custom_data = verify_cast<Bindings::WebEngineCustomData>(relevant_agent.custom_data());
+    auto& reactions_stack = custom_data->custom_element_reactions_stack;
+
+    // 2. If reactionsStack is empty, then:
+    if (reactions_stack.element_queue_stack.is_empty()) {
+        // 1. Add element to reactionsStack's backup element queue.
+        reactions_stack.backup_element_queue.append(*this);
+
+        // 2. If reactionsStack's processing the backup element queue flag is set, then return.
+        if (reactions_stack.processing_the_backup_element_queue)
+            return;
+
+        // 3. Set reactionsStack's processing the backup element queue flag.
+        reactions_stack.processing_the_backup_element_queue = true;
+
+        // 4. Queue a microtask to perform the following steps:
+        // NOTE: `this` is protected by JS::SafeFunction
+        HTML::queue_a_microtask(&document(), [this]() {
+            auto& relevant_agent = HTML::relevant_agent(*this);
+            auto* custom_data = verify_cast<Bindings::WebEngineCustomData>(relevant_agent.custom_data());
+            auto& reactions_stack = custom_data->custom_element_reactions_stack;
+
+            // 1. Invoke custom element reactions in reactionsStack's backup element queue.
+            Bindings::invoke_custom_element_reactions(reactions_stack.backup_element_queue);
+
+            // 2. Unset reactionsStack's processing the backup element queue flag.
+            reactions_stack.processing_the_backup_element_queue = false;
+        });
+
+        return;
+    }
+
+    // 3. Otherwise, add element to element's relevant agent's current element queue.
+    custom_data->current_element_queue().append(*this);
+}
+
+// https://html.spec.whatwg.org/multipage/custom-elements.html#enqueue-a-custom-element-upgrade-reaction
+void Element::enqueue_a_custom_element_upgrade_reaction(HTML::CustomElementDefinition& custom_element_definition)
+{
+    // 1. Add a new upgrade reaction to element's custom element reaction queue, with custom element definition definition.
+    m_custom_element_reaction_queue.append(CustomElementUpgradeReaction { .custom_element_definition = custom_element_definition });
+
+    // 2. Enqueue an element on the appropriate element queue given element.
+    enqueue_an_element_on_the_appropriate_element_queue();
+}
+
+void Element::enqueue_a_custom_element_callback_reaction(FlyString const& callback_name, JS::MarkedVector<JS::Value> arguments)
+{
+    // 1. Let definition be element's custom element definition.
+    auto& definition = m_custom_element_definition;
+
+    // 2. Let callback be the value of the entry in definition's lifecycle callbacks with key callbackName.
+    auto callback_iterator = definition->lifecycle_callbacks().find(callback_name);
+
+    // 3. If callback is null, then return.
+    if (callback_iterator == definition->lifecycle_callbacks().end())
+        return;
+
+    if (callback_iterator->value.is_null())
+        return;
+
+    // 4. If callbackName is "attributeChangedCallback", then:
+    if (callback_name == HTML::CustomElementReactionNames::attributeChangedCallback) {
+        // 1. Let attributeName be the first element of args.
+        VERIFY(!arguments.is_empty());
+        auto& attribute_name_value = arguments.first();
+        VERIFY(attribute_name_value.is_string());
+        auto attribute_name = attribute_name_value.as_string().utf8_string().release_allocated_value_but_fixme_should_propagate_errors();
+
+        // 2. If definition's observed attributes does not contain attributeName, then return.
+        if (!definition->observed_attributes().contains_slow(attribute_name))
+            return;
+    }
+
+    // 5. Add a new callback reaction to element's custom element reaction queue, with callback function callback and arguments args.
+    m_custom_element_reaction_queue.append(CustomElementCallbackReaction { .callback = callback_iterator->value, .arguments = move(arguments) });
+
+    // 6. Enqueue an element on the appropriate element queue given element.
+    enqueue_an_element_on_the_appropriate_element_queue();
+}
+
+// https://html.spec.whatwg.org/multipage/custom-elements.html#concept-upgrade-an-element
+JS::ThrowCompletionOr<void> Element::upgrade_element(JS::NonnullGCPtr<HTML::CustomElementDefinition> custom_element_definition)
+{
+    auto& realm = this->realm();
+    auto& vm = this->vm();
+
+    // 1. If element's custom element state is not "undefined" or "uncustomized", then return.
+    if (m_custom_element_state != CustomElementState::Undefined && m_custom_element_state != CustomElementState::Uncustomized)
+        return {};
+
+    // 2. Set element's custom element definition to definition.
+    m_custom_element_definition = custom_element_definition;
+
+    // 3. Set element's custom element state to "failed".
+    m_custom_element_state = CustomElementState::Failed;
+
+    // 4. For each attribute in element's attribute list, in order, enqueue a custom element callback reaction with element, callback name "attributeChangedCallback",
+    //    and an argument list containing attribute's local name, null, attribute's value, and attribute's namespace.
+    for (size_t attribute_index = 0; attribute_index < m_attributes->length(); ++attribute_index) {
+        auto const* attribute = m_attributes->item(attribute_index);
+        VERIFY(attribute);
+
+        JS::MarkedVector<JS::Value> arguments { vm.heap() };
+
+        arguments.append(JS::PrimitiveString::create(vm, attribute->local_name()));
+        arguments.append(JS::js_null());
+        arguments.append(JS::PrimitiveString::create(vm, attribute->value()));
+        arguments.append(JS::PrimitiveString::create(vm, attribute->namespace_uri()));
+
+        enqueue_a_custom_element_callback_reaction(HTML::CustomElementReactionNames::attributeChangedCallback, move(arguments));
+    }
+
+    // 5. If element is connected, then enqueue a custom element callback reaction with element, callback name "connectedCallback", and an empty argument list.
+    if (is_connected()) {
+        JS::MarkedVector<JS::Value> empty_arguments { vm.heap() };
+        enqueue_a_custom_element_callback_reaction(HTML::CustomElementReactionNames::connectedCallback, move(empty_arguments));
+    }
+
+    // 6. Add element to the end of definition's construction stack.
+    custom_element_definition->construction_stack().append(JS::make_handle(this));
+
+    // 7. Let C be definition's constructor.
+    auto& constructor = custom_element_definition->constructor();
+
+    // 8. Run the following substeps while catching any exceptions:
+    auto attempt_to_construct_custom_element = [&]() -> JS::ThrowCompletionOr<void> {
+        // 1. If definition's disable shadow is true and element's shadow root is non-null, then throw a "NotSupportedError" DOMException.
+        if (custom_element_definition->disable_shadow() && shadow_root())
+            return JS::throw_completion(WebIDL::NotSupportedError::create(realm, "Custom element definition disables shadow DOM and the custom element has a shadow root"sv));
+
+        // 2. Set element's custom element state to "precustomized".
+        m_custom_element_state = CustomElementState::Precustomized;
+
+        // 3. Let constructResult be the result of constructing C, with no arguments.
+        auto construct_result_optional = TRY(WebIDL::construct(constructor));
+        VERIFY(construct_result_optional.has_value());
+        auto construct_result = construct_result_optional.release_value();
+
+        // 4. If SameValue(constructResult, element) is false, then throw a TypeError.
+        if (!JS::same_value(construct_result, this))
+            return vm.throw_completion<JS::TypeError>("Constructing the custom element returned a different element from the custom element"sv);
+
+        return {};
+    };
+
+    auto maybe_exception = attempt_to_construct_custom_element();
+
+    // Then, perform the following substep, regardless of whether the above steps threw an exception or not:
+    // 1. Remove the last entry from the end of definition's construction stack.
+    (void)custom_element_definition->construction_stack().take_last();
+
+    // Finally, if the above steps threw an exception, then:
+    if (maybe_exception.is_throw_completion()) {
+        // 1. Set element's custom element definition to null.
+        m_custom_element_definition = nullptr;
+
+        // 2. Empty element's custom element reaction queue.
+        m_custom_element_reaction_queue.clear();
+
+        // 3. Rethrow the exception (thus terminating this algorithm).
+        return maybe_exception.release_error();
+    }
+
+    // FIXME: 9. If element is a form-associated custom element, then:
+    //           1. Reset the form owner of element. If element is associated with a form element, then enqueue a custom element callback reaction with element, callback name "formAssociatedCallback", and « the associated form ».
+    //           2. If element is disabled, then enqueue a custom element callback reaction with element, callback name "formDisabledCallback" and « true ».
+
+    // 10. Set element's custom element state to "custom".
+    m_custom_element_state = CustomElementState::Custom;
+
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/custom-elements.html#concept-try-upgrade
+void Element::try_to_upgrade()
+{
+    // 1. Let definition be the result of looking up a custom element definition given element's node document, element's namespace, element's local name, and element's is value.
+    auto definition = document().lookup_custom_element_definition(namespace_(), local_name(), m_is_value);
+
+    // 2. If definition is not null, then enqueue a custom element upgrade reaction given element and definition.
+    if (definition)
+        enqueue_a_custom_element_upgrade_reaction(*definition);
+}
+
+// https://dom.spec.whatwg.org/#concept-element-defined
+bool Element::is_defined() const
+{
+    // An element whose custom element state is "uncustomized" or "custom" is said to be defined.
+    return m_custom_element_state == CustomElementState::Uncustomized || m_custom_element_state == CustomElementState::Custom;
+}
+
+// https://dom.spec.whatwg.org/#concept-element-custom
+bool Element::is_custom() const
+{
+    // An element whose custom element state is "custom" is said to be custom.
+    return m_custom_element_state == CustomElementState::Custom;
+}
+
+// https://html.spec.whatwg.org/multipage/dom.html#html-element-constructors
+void Element::setup_custom_element_from_constructor(HTML::CustomElementDefinition& custom_element_definition, Optional<String> const& is_value)
+{
+    // 7.6. Set element's custom element state to "custom".
+    m_custom_element_state = CustomElementState::Custom;
+
+    // 7.7. Set element's custom element definition to definition.
+    m_custom_element_definition = custom_element_definition;
+
+    // 7.8. Set element's is value to is value.
+    m_is_value = is_value;
+}
+
+void Element::set_prefix(DeprecatedFlyString const& value)
+{
+    m_qualified_name.set_prefix(value);
 }
 
 }

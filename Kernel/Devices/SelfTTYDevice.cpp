@@ -19,14 +19,14 @@ UNMAP_AFTER_INIT NonnullLockRefPtr<SelfTTYDevice> SelfTTYDevice::must_create()
     return self_tty_device_or_error.release_value();
 }
 
-ErrorOr<NonnullLockRefPtr<OpenFileDescription>> SelfTTYDevice::open(int options)
+ErrorOr<NonnullRefPtr<OpenFileDescription>> SelfTTYDevice::open(int options)
 {
     // Note: If for some odd reason we try to open this device (early on boot?)
     // while there's no current Process assigned, don't fail and return an error.
     if (!Process::has_current())
         return Error::from_errno(ESRCH);
     auto& current_process = Process::current();
-    LockRefPtr<TTY> tty = current_process.tty();
+    auto tty = current_process.tty();
     if (!tty)
         return Error::from_errno(ENXIO);
     auto description = TRY(OpenFileDescription::try_create(*tty));

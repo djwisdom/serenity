@@ -7,6 +7,7 @@
 #include "ChessEngine.h"
 #include "MCTSTree.h"
 #include <AK/Random.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/ElapsedTimer.h>
 
 using namespace Chess::UCI;
@@ -60,4 +61,16 @@ void ChessEngine::handle_go(GoCommand const& command)
     send_command(BestMoveCommand(best_move));
 
     m_last_tree = move(best_node);
+}
+
+void ChessEngine::handle_quit()
+{
+    if (on_quit)
+        on_quit(ESUCCESS);
+}
+
+void ChessEngine::handle_unexpected_eof()
+{
+    if (on_quit)
+        on_quit(EPIPE);
 }

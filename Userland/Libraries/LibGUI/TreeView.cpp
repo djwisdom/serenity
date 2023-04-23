@@ -42,8 +42,8 @@ TreeView::TreeView()
     set_background_role(ColorRole::Base);
     set_foreground_role(ColorRole::BaseText);
     set_column_headers_visible(false);
-    m_expand_bitmap = Gfx::Bitmap::try_load_from_file("/res/icons/serenity/treeview-expand.png"sv).release_value_but_fixme_should_propagate_errors();
-    m_collapse_bitmap = Gfx::Bitmap::try_load_from_file("/res/icons/serenity/treeview-collapse.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_expand_bitmap = Gfx::Bitmap::load_from_file("/res/icons/serenity/treeview-expand.png"sv).release_value_but_fixme_should_propagate_errors();
+    m_collapse_bitmap = Gfx::Bitmap::load_from_file("/res/icons/serenity/treeview-collapse.png"sv).release_value_but_fixme_should_propagate_errors();
 }
 
 ModelIndex TreeView::index_at_event_position(Gfx::IntPoint a_position, bool& is_toggle) const
@@ -188,7 +188,7 @@ void TreeView::traverse_in_paint_order(Callback callback) const
             auto node_text = index.data().to_deprecated_string();
             Gfx::IntRect rect = {
                 x_offset, y_offset,
-                icon_size() + icon_spacing() + text_padding() + font_for_index(index)->width(node_text) + text_padding(), row_height()
+                static_cast<int>(ceilf(icon_size() + icon_spacing() + text_padding() + font_for_index(index)->width(node_text) + text_padding())), row_height()
             };
             Gfx::IntRect toggle_rect;
             if (row_count_at_index > 0) {
@@ -325,6 +325,7 @@ void TreeView::paint_event(PaintEvent& event)
                 int indent_width = indent_width_in_pixels() * indent_level;
 
                 Gfx::IntRect icon_rect = { rect.x(), rect.y(), icon_size(), icon_size() };
+                icon_rect.center_vertically_within(rect);
                 Gfx::IntRect background_rect = {
                     icon_rect.right() + 1 + icon_spacing(), rect.y(),
                     min(rect.width(), column_width - indent_width) - icon_size() - icon_spacing(), rect.height()
@@ -775,6 +776,7 @@ Gfx::IntRect TreeView::content_rect(ModelIndex const& index) const
     traverse_in_paint_order([&](ModelIndex const& current_index, Gfx::IntRect const& rect, Gfx::IntRect const&, int) {
         if (index == current_index) {
             found_rect = rect;
+            found_rect.translate_by(0, column_header().height());
             return IterationDecision::Break;
         }
         return IterationDecision::Continue;

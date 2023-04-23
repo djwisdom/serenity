@@ -15,6 +15,9 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
+            const excludedBotIds = [
+              49699333,  // dependabot[bot]
+            ];
             const rules = [
               {
                 pattern: /^[^\r]*$/,
@@ -62,7 +65,10 @@ jobs:
             const commits = await github.paginate(opts);
 
             const errors = [];
-            for (const { sha, commit: { message } } of commits) {
+            for (const { sha, commit: { message }, author } of commits) {
+              if (author !== null && excludedBotIds.includes(author.id)) {
+                continue;
+              }
               const commitErrors = [];
               for (const { pattern, error } of rules) {
                 if (!pattern.test(message)) {
@@ -83,6 +89,6 @@ jobs:
         if: ${{ failure() && !github.event.pull_request.draft }}
         uses: IdanHo/comment-on-pr@5f51df338210754f519f721f8320d8f72525a4d0
         env:
-          GITHUB_TOKEN: ${{ secrets.BUGGIEBOT }}
+          GITHUB_TOKEN: ${{ secrets.BUGGIEBOT_TOKEN }}
         with:
           msg: "Hello!\n\nOne or more of the commit messages in this PR do not match the SerenityOS [code submission policy](https://github.com/SerenityOS/serenity/blob/master/CONTRIBUTING.md#code-submission-policy), please check the `lint_commits` CI job for more details on which commits were flagged and why.\nPlease do not close this PR and open another, instead modify your commit message(s) with [git commit --amend](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/changing-a-commit-message) and force push those changes to update this PR."

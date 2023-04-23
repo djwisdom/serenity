@@ -7,7 +7,7 @@
 
 #include <AK/Assertions.h>
 #include <AK/Types.h>
-#include <LibCore/File.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibTest/TestCase.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define EXPECT_ERROR_2(err, syscall, arg1, arg2)                                                                                   \
@@ -216,11 +217,11 @@ TEST_CASE(unlink_symlink)
         perror("symlink");
     }
 
-    auto target_or_error = Core::File::read_link("/tmp/linky");
+    auto target_or_error = FileSystem::read_link("/tmp/linky"sv);
     EXPECT(!target_or_error.is_error());
 
     auto target = target_or_error.release_value();
-    EXPECT_EQ(target, "/proc/2/foo");
+    EXPECT_EQ(target.bytes_as_string_view(), "/proc/2/foo"sv);
 
     rc = unlink("/tmp/linky");
     EXPECT(rc >= 0);
@@ -314,6 +315,88 @@ TEST_CASE(tmpfs_massive_file)
     rc = close(fd);
     EXPECT_EQ(rc, 0);
     rc = unlink("/tmp/x");
+    EXPECT_EQ(rc, 0);
+}
+
+TEST_CASE(rmdir_dot)
+{
+    int rc = mkdir("/home/anon/rmdir-test-1", 0700);
+    EXPECT_EQ(rc, 0);
+
+    rc = rmdir("/home/anon/rmdir-test-1/.");
+    EXPECT_NE(rc, 0);
+    EXPECT_EQ(errno, EINVAL);
+
+    rc = chdir("/home/anon/rmdir-test-1");
+    EXPECT_EQ(rc, 0);
+
+    rc = rmdir(".");
+    VERIFY(rc != 0);
+    EXPECT_EQ(errno, EINVAL);
+
+    rc = rmdir("/home/anon/rmdir-test-1");
+    EXPECT_EQ(rc, 0);
+}
+
+TEST_CASE(rmdir_dot_dot)
+{
+    int rc = mkdir("/home/anon/rmdir-test-2", 0700);
+    EXPECT_EQ(rc, 0);
+
+    rc = mkdir("/home/anon/rmdir-test-2/foo", 0700);
+    EXPECT_EQ(rc, 0);
+
+    rc = rmdir("/home/anon/rmdir-test-2/foo/..");
+    EXPECT_NE(rc, 0);
+    EXPECT_EQ(errno, ENOTEMPTY);
+
+    rc = rmdir("/home/anon/rmdir-test-2/foo");
+    EXPECT_EQ(rc, 0);
+
+    rc = rmdir("/home/anon/rmdir-test-2");
+    EXPECT_EQ(rc, 0);
+}
+
+TEST_CASE(rmdir_someone_elses_directory_in_my_sticky_directory)
+{
+    // NOTE: This test only works when run as root, since it has to chown a directory to someone else.
+    if (getuid() != 0)
+        return;
+
+    // Create /tmp/sticky-dir a sticky directory owned by 12345:12345
+    // Then, create /tmp/sticky-dir/notmine, a normal directory owned by 23456:23456
+    // Then, fork and seteuid to 12345, and try to rmdir the "notmine" directory. This should succeed.
+    // In the parent, waitpid on the child, and finally rmdir /tmp/sticky-dir
+
+    int rc = mkdir("/tmp/sticky-dir", 01777);
+    EXPECT_EQ(rc, 0);
+
+    rc = chown("/tmp/sticky-dir", 12345, 12345);
+    EXPECT_EQ(rc, 0);
+
+    rc = mkdir("/tmp/sticky-dir/notmine", 0700);
+    EXPECT_EQ(rc, 0);
+
+    rc = chown("/tmp/sticky-dir/notmine", 23456, 23456);
+    EXPECT_EQ(rc, 0);
+
+    int pid = fork();
+    EXPECT(pid >= 0);
+
+    if (pid == 0) {
+        // We are in the child.
+        rc = seteuid(12345);
+        EXPECT_EQ(rc, 0);
+
+        rc = rmdir("/tmp/sticky-dir/notmine");
+        EXPECT_EQ(rc, 0);
+        _exit(0);
+    }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    rc = rmdir("/tmp/sticky-dir");
     EXPECT_EQ(rc, 0);
 }
 

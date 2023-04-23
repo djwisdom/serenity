@@ -9,18 +9,18 @@
 #include "Debugger/Debugger.h"
 #include "EditorWrapper.h"
 #include "HackStudio.h"
-#include "Language.h"
 #include <AK/ByteBuffer.h>
 #include <AK/Debug.h>
 #include <AK/JsonParser.h>
 #include <AK/LexicalPath.h>
+#include <LibCMake/CMakeCache/SyntaxHighlighter.h>
+#include <LibCMake/SyntaxHighlighter.h>
 #include <LibConfig/Client.h>
 #include <LibCore/DirIterator.h>
-#include <LibCore/File.h>
-#include <LibCore/Stream.h>
 #include <LibCore/Timer.h>
 #include <LibCpp/SemanticSyntaxHighlighter.h>
 #include <LibCpp/SyntaxHighlighter.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/GML/AutocompleteProvider.h>
@@ -35,6 +35,7 @@
 #include <LibJS/SyntaxHighlighter.h>
 #include <LibMarkdown/Document.h>
 #include <LibSQL/AST/SyntaxHighlighter.h>
+#include <LibSyntax/Language.h>
 #include <LibWeb/CSS/SyntaxHighlighter/SyntaxHighlighter.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/HTMLHeadElement.h>
@@ -81,6 +82,42 @@ Editor::Editor()
     add_custom_context_menu_action(*m_move_execution_to_line_action);
 
     set_gutter_visible(true);
+    on_gutter_click = [&](auto line, auto) {
+        add_breakpoint(line).release_value_but_fixme_should_propagate_errors();
+    };
+
+    m_git_diff_indicator_id = register_gutter_indicator(
+        [&](auto& painter, Gfx::IntRect rect, size_t line) {
+            auto diff_type = code_document().line_difference(line);
+            switch (diff_type) {
+            case CodeDocument::DiffType::AddedLine:
+                painter.draw_text(rect, "+"sv, font(), Gfx::TextAlignment::Center);
+                break;
+            case CodeDocument::DiffType::ModifiedLine:
+                painter.draw_text(rect, "!"sv, font(), Gfx::TextAlignment::Center);
+                break;
+            case CodeDocument::DiffType::DeletedLinesBefore:
+                painter.draw_text(rect, "-"sv, font(), Gfx::TextAlignment::Center);
+                break;
+            case CodeDocument::DiffType::None:
+                VERIFY_NOT_REACHED();
+            }
+        }).release_value_but_fixme_should_propagate_errors();
+
+    m_breakpoint_indicator_id = register_gutter_indicator(
+        [&](auto& painter, Gfx::IntRect rect, size_t) {
+            auto const& icon = breakpoint_icon_bitmap();
+            painter.draw_scaled_bitmap(rect, icon, icon.rect());
+        },
+        [&](size_t line_index, auto) {
+            remove_breakpoint(line_index);
+        }).release_value_but_fixme_should_propagate_errors();
+
+    m_execution_indicator_id = register_gutter_indicator(
+        [&](auto& painter, Gfx::IntRect rect, size_t) {
+            auto const& icon = current_position_icon_bitmap();
+            painter.draw_scaled_bitmap(rect, icon, icon.rect());
+        }).release_value_but_fixme_should_propagate_errors();
 
     if (Config::read_string("HackStudio"sv, "Global"sv, "DocumentationSearchPaths"sv).is_empty()) {
         Config::write_string("HackStudio"sv, "Global"sv, "DocumentationSearchPaths"sv, "[\"/usr/share/man/man2\", \"/usr/share/man/man3\"]"sv);
@@ -94,7 +131,7 @@ ErrorOr<void> Editor::initialize_tooltip_window()
         s_tooltip_window->set_window_type(GUI::WindowType::Tooltip);
     }
     if (s_tooltip_page_view.is_null()) {
-        s_tooltip_page_view = TRY(s_tooltip_window->try_set_main_widget<WebView::OutOfProcessWebView>());
+        s_tooltip_page_view = TRY(s_tooltip_window->set_main_widget<WebView::OutOfProcessWebView>());
     }
     return {};
 }
@@ -122,7 +159,7 @@ void Editor::focusout_event(GUI::FocusEvent& event)
 
 Gfx::IntRect Editor::gutter_icon_rect(size_t line_number) const
 {
-    return gutter_content_rect(line_number).translated(ruler_width() + gutter_width() + frame_thickness(), -vertical_scrollbar().value());
+    return gutter_content_rect(line_number).translated(frame_thickness(), 0);
 }
 
 void Editor::paint_event(GUI::PaintEvent& event)
@@ -139,48 +176,6 @@ void Editor::paint_event(GUI::PaintEvent& event)
         if (horizontal_scrollbar().is_visible())
             rect.set_height(rect.height() - horizontal_scrollbar().height());
         painter.draw_rect(rect, palette().selection());
-    }
-
-    if (gutter_visible()) {
-        size_t first_visible_line = text_position_at(event.rect().top_left()).line();
-        size_t last_visible_line = text_position_at(event.rect().bottom_right()).line();
-
-        for (size_t line : breakpoint_lines()) {
-            if (line < first_visible_line || line > last_visible_line) {
-                continue;
-            }
-            auto const& icon = breakpoint_icon_bitmap();
-            painter.blit(gutter_icon_rect(line).top_left(), icon, icon.rect());
-        }
-        if (execution_position().has_value()) {
-            auto const& icon = current_position_icon_bitmap();
-            painter.blit(gutter_icon_rect(execution_position().value()).top_left(), icon, icon.rect());
-        }
-
-        if (wrapper().git_repo()) {
-            for (auto& hunk : wrapper().hunks()) {
-                auto start_line = hunk.target_start_line;
-                auto finish_line = start_line + hunk.added_lines.size();
-
-                auto additions = hunk.added_lines.size();
-                auto deletions = hunk.removed_lines.size();
-
-                for (size_t line_offset = 0; line_offset < additions; line_offset++) {
-                    auto line = start_line + line_offset;
-                    if (line < first_visible_line || line > last_visible_line) {
-                        continue;
-                    }
-                    auto sign = (line_offset < deletions) ? "!"sv : "+"sv;
-                    painter.draw_text(gutter_icon_rect(line), sign, font(), Gfx::TextAlignment::Center);
-                }
-                if (additions < deletions) {
-                    auto deletions_line = min(finish_line, line_count() - 1);
-                    if (deletions_line <= last_visible_line) {
-                        painter.draw_text(gutter_icon_rect(deletions_line), "-"sv, font(), Gfx::TextAlignment::Center);
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -232,7 +227,7 @@ void Editor::show_documentation_tooltip_if_available(DeprecatedString const& hov
     }
 
     dbgln_if(EDITOR_DEBUG, "opening {}", it->value);
-    auto file_or_error = Core::Stream::File::open(it->value, Core::Stream::OpenMode::Read);
+    auto file_or_error = Core::File::open(it->value, Core::File::OpenMode::Read);
     if (file_or_error.is_error()) {
         dbgln("Failed to open {}, {}", it->value, file_or_error.error());
         return;
@@ -291,8 +286,8 @@ void Editor::mousemove_event(GUI::MouseEvent& event)
     for (auto& span : document().spans()) {
         bool is_clickable = (highlighter->is_navigatable(span.data) || highlighter->is_identifier(span.data));
         if (span.range.contains(m_previous_text_position) && !span.range.contains(text_position)) {
-            if (is_clickable && span.attributes.underline) {
-                span.attributes.underline = false;
+            if (is_clickable && span.attributes.underline_style.has_value()) {
+                span.attributes.underline_style.clear();
                 wrapper().editor().update();
             }
         }
@@ -303,9 +298,12 @@ void Editor::mousemove_event(GUI::MouseEvent& event)
 
             if (is_clickable) {
                 is_over_clickable = true;
-                bool was_underlined = span.attributes.underline;
-                span.attributes.underline = event.modifiers() & Mod_Ctrl;
-                if (span.attributes.underline != was_underlined) {
+                bool was_underlined = span.attributes.underline_style.has_value();
+                bool now_underlined = event.modifiers() & Mod_Ctrl;
+                span.attributes.underline_style.clear();
+                if (now_underlined)
+                    span.attributes.underline_style = Gfx::TextAttributes::UnderlineStyle::Solid;
+                if (now_underlined != was_underlined) {
                     wrapper().editor().update();
                 }
             }
@@ -340,16 +338,6 @@ void Editor::mousedown_event(GUI::MouseEvent& event)
     }
 
     auto text_position = text_position_at(event.position());
-    auto ruler_line_rect = ruler_content_rect(text_position.line());
-    if (event.button() == GUI::MouseButton::Primary && event.position().x() < ruler_line_rect.width()) {
-        if (!breakpoint_lines().contains_slow(text_position.line())) {
-            breakpoint_lines().append(text_position.line());
-            Debugger::the().on_breakpoint_change(wrapper().filename_title(), text_position.line(), BreakpointChange::Added);
-        } else {
-            breakpoint_lines().remove_first_matching([&](size_t line) { return line == text_position.line(); });
-            Debugger::the().on_breakpoint_change(wrapper().filename_title(), text_position.line(), BreakpointChange::Removed);
-        }
-    }
 
     if (!(event.modifiers() & Mod_Ctrl)) {
         GUI::TextEditor::mousedown_event(event);
@@ -396,7 +384,7 @@ void Editor::drop_event(GUI::DropEvent& event)
             return;
         }
         set_current_editor_wrapper(static_cast<EditorWrapper*>(parent()));
-        open_file(urls.first().path());
+        open_file(urls.first().serialize_path());
     }
 }
 
@@ -420,7 +408,7 @@ static HashMap<DeprecatedString, DeprecatedString>& include_paths()
         Core::DirIterator it(recursive.value_or(base), Core::DirIterator::Flags::SkipDots);
         while (it.has_next()) {
             auto path = it.next_full_path();
-            if (!Core::File::is_directory(path)) {
+            if (!FileSystem::is_directory(path)) {
                 auto key = path.substring(base.length() + 1, path.length() - base.length() - 1);
                 dbgln_if(EDITOR_DEBUG, "Adding header \"{}\" in path \"{}\"", key, path);
                 paths.set(key, path);
@@ -453,9 +441,11 @@ void Editor::navigate_to_include_if_available(DeprecatedString path)
 
 void Editor::set_execution_position(size_t line_number)
 {
+    if (execution_position().has_value())
+        remove_gutter_indicator(m_execution_indicator_id, execution_position().value());
+    add_gutter_indicator(m_execution_indicator_id, line_number);
     code_document().set_execution_position(line_number);
     scroll_position_into_view({ line_number, 0 });
-    update(gutter_icon_rect(line_number));
 }
 
 void Editor::clear_execution_position()
@@ -465,18 +455,19 @@ void Editor::clear_execution_position()
     }
     size_t previous_position = execution_position().value();
     code_document().clear_execution_position();
+    remove_gutter_indicator(m_execution_indicator_id, previous_position);
     update(gutter_icon_rect(previous_position));
 }
 
 Gfx::Bitmap const& Editor::breakpoint_icon_bitmap()
 {
-    static auto bitmap = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/breakpoint.png"sv).release_value_but_fixme_should_propagate_errors();
+    static auto bitmap = Gfx::Bitmap::load_from_file("/res/icons/16x16/breakpoint.png"sv).release_value_but_fixme_should_propagate_errors();
     return *bitmap;
 }
 
 Gfx::Bitmap const& Editor::current_position_icon_bitmap()
 {
-    static auto bitmap = Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-forward.png"sv).release_value_but_fixme_should_propagate_errors();
+    static auto bitmap = Gfx::Bitmap::load_from_file("/res/icons/16x16/go-forward.png"sv).release_value_but_fixme_should_propagate_errors();
     return *bitmap;
 }
 
@@ -628,38 +619,50 @@ void Editor::set_cursor(const GUI::TextPosition& a_position)
 
 void Editor::set_syntax_highlighter_for(CodeDocument const& document)
 {
-    switch (document.language()) {
-    case Language::Cpp:
+    if (!document.language().has_value()) {
+        set_syntax_highlighter({});
+        force_rehighlight();
+        return;
+    }
+
+    switch (document.language().value()) {
+    case Syntax::Language::Cpp:
         if (m_use_semantic_syntax_highlighting) {
             set_syntax_highlighter(make<Cpp::SemanticSyntaxHighlighter>());
             on_token_info_timer_tick();
             m_tokens_info_timer->restart();
-        } else
+        } else {
             set_syntax_highlighter(make<Cpp::SyntaxHighlighter>());
-
+        }
         break;
-    case Language::CSS:
+    case Syntax::Language::CMake:
+        set_syntax_highlighter(make<CMake::SyntaxHighlighter>());
+        break;
+    case Syntax::Language::CMakeCache:
+        set_syntax_highlighter(make<CMake::Cache::SyntaxHighlighter>());
+        break;
+    case Syntax::Language::CSS:
         set_syntax_highlighter(make<Web::CSS::SyntaxHighlighter>());
         break;
-    case Language::GitCommit:
+    case Syntax::Language::GitCommit:
         set_syntax_highlighter(make<GUI::GitCommitSyntaxHighlighter>());
         break;
-    case Language::GML:
+    case Syntax::Language::GML:
         set_syntax_highlighter(make<GUI::GML::SyntaxHighlighter>());
         break;
-    case Language::HTML:
+    case Syntax::Language::HTML:
         set_syntax_highlighter(make<Web::HTML::SyntaxHighlighter>());
         break;
-    case Language::JavaScript:
+    case Syntax::Language::JavaScript:
         set_syntax_highlighter(make<JS::SyntaxHighlighter>());
         break;
-    case Language::Ini:
+    case Syntax::Language::INI:
         set_syntax_highlighter(make<GUI::IniSyntaxHighlighter>());
         break;
-    case Language::Shell:
+    case Syntax::Language::Shell:
         set_syntax_highlighter(make<Shell::SyntaxHighlighter>());
         break;
-    case Language::SQL:
+    case Syntax::Language::SQL:
         set_syntax_highlighter(make<SQL::AST::SyntaxHighlighter>());
         break;
     default:
@@ -671,11 +674,9 @@ void Editor::set_syntax_highlighter_for(CodeDocument const& document)
 
 void Editor::set_autocomplete_provider_for(CodeDocument const& document)
 {
-    switch (document.language()) {
-    case Language::GML:
+    if (document.language() == Syntax::Language::GML) {
         set_autocomplete_provider(make<GUI::GML::AutocompleteProvider>());
-        break;
-    default:
+    } else {
         set_autocomplete_provider({});
     }
 }
@@ -685,10 +686,10 @@ void Editor::set_language_client_for(CodeDocument const& document)
     if (m_language_client && m_language_client->language() == document.language())
         return;
 
-    if (document.language() == Language::Cpp)
+    if (document.language() == Syntax::Language::Cpp)
         m_language_client = get_language_client<LanguageClients::Cpp::ConnectionToServer>(project().root_path());
 
-    if (document.language() == Language::Shell)
+    if (document.language() == Syntax::Language::Shell)
         m_language_client = get_language_client<LanguageClients::Shell::ConnectionToServer>(project().root_path());
 
     if (m_language_client) {
@@ -737,7 +738,7 @@ void Editor::handle_function_parameters_hint_request()
         }
         html.append("<style>body { background-color: #dac7b5; }</style>"sv);
 
-        s_tooltip_page_view->load_html(html.build(), {});
+        s_tooltip_page_view->load_html(html.to_deprecated_string(), {});
 
         auto cursor_rect = current_editor().cursor_content_rect().location().translated(screen_relative_rect().location());
 
@@ -786,7 +787,7 @@ void Editor::create_tokens_info_timer()
     m_tokens_info_timer = Core::Timer::create_repeating((int)token_info_timer_interval_ms, [this] {
         on_token_info_timer_tick();
         m_tokens_info_timer->stop();
-    });
+    }).release_value_but_fixme_should_propagate_errors();
     m_tokens_info_timer->start();
 }
 
@@ -794,6 +795,61 @@ void Editor::set_semantic_syntax_highlighting(bool value)
 {
     m_use_semantic_syntax_highlighting = value;
     set_syntax_highlighter_for(code_document());
+}
+
+ErrorOr<void> Editor::add_breakpoint(size_t line_number)
+{
+    if (!breakpoint_lines().contains_slow(line_number)) {
+        add_gutter_indicator(m_breakpoint_indicator_id, line_number);
+        TRY(breakpoint_lines().try_append(line_number));
+        Debugger::the().on_breakpoint_change(wrapper().filename_title(), line_number, BreakpointChange::Added);
+    }
+
+    return {};
+}
+
+void Editor::remove_breakpoint(size_t line_number)
+{
+    remove_gutter_indicator(m_breakpoint_indicator_id, line_number);
+    breakpoint_lines().remove_first_matching([&](size_t line) { return line == line_number; });
+    Debugger::the().on_breakpoint_change(wrapper().filename_title(), line_number, BreakpointChange::Removed);
+}
+
+ErrorOr<void> Editor::update_git_diff_indicators()
+{
+    clear_gutter_indicators(m_git_diff_indicator_id);
+
+    if (!wrapper().git_repo())
+        return {};
+
+    Vector<CodeDocument::DiffType> line_differences;
+    TRY(line_differences.try_ensure_capacity(document().line_count()));
+    for (auto i = 0u; i < document().line_count(); ++i)
+        line_differences.unchecked_append(CodeDocument::DiffType::None);
+
+    for (auto& hunk : wrapper().hunks()) {
+        auto start_line = hunk.target_start_line;
+        auto finish_line = start_line + hunk.added_lines.size();
+
+        auto additions = hunk.added_lines.size();
+        auto deletions = hunk.removed_lines.size();
+
+        for (size_t line_offset = 0; line_offset < additions; line_offset++) {
+            auto line = start_line + line_offset;
+            auto difference = (line_offset < deletions) ? CodeDocument::DiffType::ModifiedLine : CodeDocument::DiffType::AddedLine;
+            line_differences[line] = difference;
+            add_gutter_indicator(m_git_diff_indicator_id, line);
+        }
+        if (additions < deletions) {
+            auto deletions_line = min(finish_line, line_count() - 1);
+            line_differences[deletions_line] = CodeDocument::DiffType::DeletedLinesBefore;
+            add_gutter_indicator(m_git_diff_indicator_id, deletions_line);
+        }
+    }
+    code_document().set_line_differences({}, move(line_differences));
+    update();
+
+    return {};
 }
 
 }

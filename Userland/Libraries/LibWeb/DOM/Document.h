@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
+#include <AK/DeprecatedFlyString.h>
 #include <AK/DeprecatedString.h>
-#include <AK/FlyString.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/OwnPtr.h>
 #include <AK/URL.h>
 #include <AK/Vector.h>
@@ -70,6 +70,14 @@ struct DocumentUnloadTimingInfo {
     double unload_event_end_time { 0 };
 };
 
+struct ElementCreationOptions {
+    DeprecatedString is;
+};
+
+enum class PolicyControlledFeature {
+    Autoplay,
+};
+
 class Document
     : public ParentNode
     , public NonElementParentNode<Document>
@@ -82,14 +90,13 @@ public:
         HTML
     };
 
-    static JS::NonnullGCPtr<Document> create_and_initialize(Type, DeprecatedString content_type, HTML::NavigationParams);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<Document>> create_and_initialize(Type, DeprecatedString content_type, HTML::NavigationParams);
 
-    static JS::NonnullGCPtr<Document> create(JS::Realm&, AK::URL const& url = "about:blank"sv);
-    static JS::NonnullGCPtr<Document> construct_impl(JS::Realm&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<Document>> create(JS::Realm&, AK::URL const& url = "about:blank"sv);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<Document>> construct_impl(JS::Realm&);
     virtual ~Document() override;
 
-    // https://w3c.github.io/selection-api/#dom-document-getselection
-    JS::GCPtr<Selection::Selection> get_selection();
+    JS::GCPtr<Selection::Selection> get_selection() const;
 
     size_t next_layout_node_serial_id(Badge<Layout::Node>) { return m_next_layout_node_serial_id++; }
     size_t layout_node_count() const { return m_next_layout_node_serial_id; }
@@ -106,7 +113,7 @@ public:
     AK::URL base_url() const;
 
     void update_base_element(Badge<HTML::HTMLBaseElement>);
-    JS::GCPtr<HTML::HTMLBaseElement> first_base_element_with_href_in_tree_order() const;
+    JS::GCPtr<HTML::HTMLBaseElement const> first_base_element_with_href_in_tree_order() const;
 
     DeprecatedString url_string() const { return m_url.to_deprecated_string(); }
     DeprecatedString document_uri() const { return m_url.to_deprecated_string(); }
@@ -127,7 +134,7 @@ public:
 
     CSS::StyleSheetList* style_sheets_for_bindings() { return &style_sheets(); }
 
-    virtual FlyString node_name() const override { return "#document"; }
+    virtual DeprecatedFlyString node_name() const override { return "#document"; }
 
     void set_hovered_node(Node*);
     Node* hovered_node() { return m_hovered_node.ptr(); }
@@ -196,14 +203,14 @@ public:
 
     virtual bool is_child_allowed(Node const&) const override;
 
-    Layout::InitialContainingBlock const* layout_node() const;
-    Layout::InitialContainingBlock* layout_node();
+    Layout::Viewport const* layout_node() const;
+    Layout::Viewport* layout_node();
 
     void schedule_style_update();
     void schedule_layout_update();
 
     JS::NonnullGCPtr<HTMLCollection> get_elements_by_name(DeprecatedString const&);
-    JS::NonnullGCPtr<HTMLCollection> get_elements_by_class_name(FlyString const&);
+    JS::NonnullGCPtr<HTMLCollection> get_elements_by_class_name(DeprecatedFlyString const&);
 
     JS::NonnullGCPtr<HTMLCollection> applets();
     JS::NonnullGCPtr<HTMLCollection> anchors();
@@ -222,12 +229,15 @@ public:
 
     JS::Value run_javascript(StringView source, StringView filename = "(unknown)"sv);
 
-    WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> create_element(FlyString const& local_name);
-    WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> create_element_ns(DeprecatedString const& namespace_, DeprecatedString const& qualified_name);
+    WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> create_element(DeprecatedString const& local_name, Variant<DeprecatedString, ElementCreationOptions> const& options);
+    WebIDL::ExceptionOr<JS::NonnullGCPtr<Element>> create_element_ns(DeprecatedString const& namespace_, DeprecatedString const& qualified_name, Variant<DeprecatedString, ElementCreationOptions> const& options);
     JS::NonnullGCPtr<DocumentFragment> create_document_fragment();
     JS::NonnullGCPtr<Text> create_text_node(DeprecatedString const& data);
     JS::NonnullGCPtr<Comment> create_comment(DeprecatedString const& data);
     WebIDL::ExceptionOr<JS::NonnullGCPtr<ProcessingInstruction>> create_processing_instruction(DeprecatedString const& target, DeprecatedString const& data);
+
+    WebIDL::ExceptionOr<JS::NonnullGCPtr<Attr>> create_attribute(DeprecatedString const& local_name);
+    WebIDL::ExceptionOr<JS::NonnullGCPtr<Attr>> create_attribute_ns(DeprecatedString const& namespace_, DeprecatedString const& qualified_name);
 
     WebIDL::ExceptionOr<JS::NonnullGCPtr<Event>> create_event(DeprecatedString const& interface);
     JS::NonnullGCPtr<Range> create_range();
@@ -285,6 +295,7 @@ public:
     JS::NonnullGCPtr<Document> appropriate_template_contents_owner_document();
 
     DeprecatedString ready_state() const;
+    HTML::DocumentReadyState readiness() const { return m_readiness; };
     void update_readiness(HTML::DocumentReadyState);
 
     HTML::Window& window() const { return const_cast<HTML::Window&>(*m_window); }
@@ -338,8 +349,9 @@ public:
     bool is_active() const;
 
     JS::NonnullGCPtr<HTML::History> history();
+    JS::NonnullGCPtr<HTML::History> history() const;
 
-    Bindings::LocationObject* location();
+    WebIDL::ExceptionOr<JS::GCPtr<HTML::Location>> location();
 
     size_t number_of_things_delaying_the_load_event() { return m_number_of_things_delaying_the_load_event; }
     void increment_number_of_things_delaying_the_load_event(Badge<DocumentLoadEventDelayer>);
@@ -371,8 +383,8 @@ public:
     static bool is_valid_name(DeprecatedString const&);
 
     struct PrefixAndTagName {
-        FlyString prefix;
-        FlyString tag_name;
+        DeprecatedFlyString prefix;
+        DeprecatedFlyString tag_name;
     };
     static WebIDL::ExceptionOr<PrefixAndTagName> validate_qualified_name(JS::Realm&, DeprecatedString const& qualified_name);
 
@@ -394,6 +406,11 @@ public:
 
     bool has_active_favicon() const { return m_active_favicon; }
     void check_favicon_after_loading_link_resource();
+
+    JS::GCPtr<HTML::CustomElementDefinition> lookup_custom_element_definition(DeprecatedFlyString const& namespace_, DeprecatedFlyString const& local_name, Optional<String> const& is) const;
+
+    void increment_throw_on_dynamic_markup_insertion_counter(Badge<HTML::HTMLParser>);
+    void decrement_throw_on_dynamic_markup_insertion_counter(Badge<HTML::HTMLParser>);
 
     // https://html.spec.whatwg.org/multipage/dom.html#is-initial-about:blank
     bool is_initial_about_blank() const { return m_is_initial_about_blank; }
@@ -443,16 +460,21 @@ public:
     DocumentUnloadTimingInfo const& previous_document_unload_timing() const { return m_previous_document_unload_timing; }
     void set_previous_document_unload_timing(DocumentUnloadTimingInfo const& previous_document_unload_timing) { m_previous_document_unload_timing = previous_document_unload_timing; }
 
+    bool is_allowed_to_use_feature(PolicyControlledFeature) const;
+
     void did_stop_being_active_document_in_browsing_context(Badge<HTML::BrowsingContext>);
 
     bool query_command_supported(DeprecatedString const&) const;
 
+    DeprecatedString dump_accessibility_tree_as_json();
+
 protected:
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-private:
     Document(JS::Realm&, AK::URL const&);
 
+private:
     // ^HTML::GlobalEventHandlers
     virtual EventTarget& global_event_handlers_to_event_target(FlyString const&) final { return *this; }
 
@@ -474,7 +496,7 @@ private:
 
     JS::GCPtr<HTML::Window> m_window;
 
-    JS::GCPtr<Layout::InitialContainingBlock> m_layout_root;
+    JS::GCPtr<Layout::Viewport> m_layout_root;
 
     Optional<Color> m_link_color;
     Optional<Color> m_active_link_color;
@@ -560,7 +582,7 @@ private:
 
     bool m_needs_full_style_update { false };
 
-    HashTable<NodeIterator*> m_node_iterators;
+    HashTable<JS::GCPtr<NodeIterator>> m_node_iterators;
 
     // https://html.spec.whatwg.org/multipage/dom.html#is-initial-about:blank
     bool m_is_initial_about_blank { false };
@@ -608,7 +630,10 @@ private:
     JS::GCPtr<Selection::Selection> m_selection;
 
     // NOTE: This is a cache to make finding the first <base href> element O(1).
-    JS::GCPtr<HTML::HTMLBaseElement> m_first_base_element_with_href_in_tree_order;
+    JS::GCPtr<HTML::HTMLBaseElement const> m_first_base_element_with_href_in_tree_order;
 };
+
+template<>
+inline bool Node::fast_is<Document>() const { return is_document(); }
 
 }

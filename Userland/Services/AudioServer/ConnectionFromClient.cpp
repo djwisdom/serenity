@@ -15,14 +15,14 @@ static HashMap<int, RefPtr<ConnectionFromClient>> s_connections;
 
 void ConnectionFromClient::for_each(Function<void(ConnectionFromClient&)> callback)
 {
-    NonnullRefPtrVector<ConnectionFromClient> connections;
+    Vector<NonnullRefPtr<ConnectionFromClient>> connections;
     for (auto& it : s_connections)
         connections.append(*it.value);
     for (auto& connection : connections)
         callback(connection);
 }
 
-ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSocket> client_socket, int client_id, Mixer& mixer)
+ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<Core::LocalSocket> client_socket, int client_id, Mixer& mixer)
     : IPC::ConnectionFromClient<AudioClientEndpoint, AudioServerEndpoint>(*this, move(client_socket), client_id)
     , m_mixer(mixer)
 {

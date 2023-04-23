@@ -27,8 +27,9 @@ void GMLPreviewWidget::load_gml(DeprecatedString const& gml)
         return;
     }
 
-    load_from_gml(gml, [](DeprecatedString const& name) -> RefPtr<Core::Object> {
-        return GUI::Label::construct(DeprecatedString::formatted("{} is not registered as a GML element!", name));
+    // FIXME: Parsing errors happen while the user is typing. What should we do about them?
+    (void)load_from_gml(gml, [](DeprecatedString const& name) -> ErrorOr<NonnullRefPtr<Core::Object>> {
+        return GUI::Label::try_create(DeprecatedString::formatted("{} is not registered as a GML element!", name));
     });
 
     if (children().is_empty()) {

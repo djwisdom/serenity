@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/NonnullRefPtrVector.h>
 #include <Kernel/Arch/SafeMem.h>
 #include <Kernel/Arch/SmapDisabler.h>
 #include <Kernel/Debug.h>
@@ -92,7 +91,7 @@ ErrorOr<NonnullLockRefPtr<AnonymousVMObject>> AnonymousVMObject::try_create_phys
 {
     auto contiguous_physical_pages = TRY(MM.allocate_contiguous_physical_pages(size));
 
-    auto new_physical_pages = TRY(FixedArray<RefPtr<PhysicalPage>>::try_create(contiguous_physical_pages.span()));
+    auto new_physical_pages = TRY(FixedArray<RefPtr<PhysicalPage>>::create(contiguous_physical_pages.span()));
 
     return adopt_nonnull_lock_ref_or_enomem(new (nothrow) AnonymousVMObject(move(new_physical_pages)));
 }
@@ -113,7 +112,7 @@ ErrorOr<NonnullLockRefPtr<AnonymousVMObject>> AnonymousVMObject::try_create_purg
 
 ErrorOr<NonnullLockRefPtr<AnonymousVMObject>> AnonymousVMObject::try_create_with_physical_pages(Span<NonnullRefPtr<PhysicalPage>> physical_pages)
 {
-    auto new_physical_pages = TRY(FixedArray<RefPtr<PhysicalPage>>::try_create(physical_pages));
+    auto new_physical_pages = TRY(FixedArray<RefPtr<PhysicalPage>>::create(physical_pages));
     return adopt_nonnull_lock_ref_or_enomem(new (nothrow) AnonymousVMObject(move(new_physical_pages)));
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,6 +14,7 @@
 #include <AK/RefPtr.h>
 #include <AK/Userspace.h>
 #include <AK/Variant.h>
+#include <Kernel/API/POSIX/select.h>
 #include <Kernel/API/POSIX/sys/resource.h>
 #include <Kernel/API/Syscall.h>
 #include <Kernel/Assertions.h>
@@ -27,18 +28,15 @@
 #include <Kernel/Jail.h>
 #include <Kernel/Library/LockWeakPtr.h>
 #include <Kernel/Library/LockWeakable.h>
-#include <Kernel/Library/NonnullLockRefPtrVector.h>
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/Locking/MutexProtected.h>
 #include <Kernel/Memory/AddressSpace.h>
 #include <Kernel/PerformanceEventBuffer.h>
-#include <Kernel/ProcessExposed.h>
 #include <Kernel/ProcessGroup.h>
 #include <Kernel/StdLib.h>
 #include <Kernel/Thread.h>
 #include <Kernel/UnixTypes.h>
 #include <LibC/elf.h>
-#include <LibC/signal_numbers.h>
 
 namespace Kernel {
 
@@ -106,6 +104,8 @@ static_assert(sizeof(GlobalFutexKey) == (sizeof(FlatPtr) * 2));
 
 struct LoadResult;
 
+class ProcessList;
+
 class Process final
     : public ListedRefCounted<Process, LockType::Spinlock>
     , public LockWeakable<Process> {
@@ -114,10 +114,12 @@ class Process final
     public:
         ProcessID pid { 0 };
         ProcessID ppid { 0 };
-        SessionID sid { 0 };
         // FIXME: This should be a NonnullRefPtr
         RefPtr<Credentials> credentials;
+        RefPtr<ProcessGroup> process_group;
+        RefPtr<TTY> tty;
         bool dumpable { false };
+        bool executable_is_setid { false };
         Atomic<bool> has_promises { false };
         Atomic<u32> promises { 0 };
         Atomic<bool> has_execpromises { false };
@@ -159,16 +161,14 @@ public:
     };
 
 public:
-    class ProcessProcFSTraits;
-
-    inline static Process& current()
+    static Process& current()
     {
         auto* current_thread = Processor::current_thread();
         VERIFY(current_thread);
         return current_thread->process();
     }
 
-    inline static bool has_current()
+    static bool has_current()
     {
         return Processor::current_thread() != nullptr;
     }
@@ -186,20 +186,27 @@ public:
         Yes
     };
 
+    struct ProcessAndFirstThread {
+        NonnullRefPtr<Process> process;
+        NonnullRefPtr<Thread> first_thread;
+    };
+
     template<typename EntryFunction>
-    static LockRefPtr<Process> create_kernel_process(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, EntryFunction entry, u32 affinity = THREAD_AFFINITY_DEFAULT, RegisterProcess do_register = RegisterProcess::Yes)
+    static ErrorOr<ProcessAndFirstThread> create_kernel_process(NonnullOwnPtr<KString> name, EntryFunction entry, u32 affinity = THREAD_AFFINITY_DEFAULT, RegisterProcess do_register = RegisterProcess::Yes)
     {
         auto* entry_func = new EntryFunction(move(entry));
-        return create_kernel_process(first_thread, move(name), &Process::kernel_process_trampoline<EntryFunction>, entry_func, affinity, do_register);
+        return create_kernel_process(move(name), &Process::kernel_process_trampoline<EntryFunction>, entry_func, affinity, do_register);
     }
 
-    static LockRefPtr<Process> create_kernel_process(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, void (*entry)(void*), void* entry_data = nullptr, u32 affinity = THREAD_AFFINITY_DEFAULT, RegisterProcess do_register = RegisterProcess::Yes);
-    static ErrorOr<NonnullLockRefPtr<Process>> try_create_user_process(LockRefPtr<Thread>& first_thread, StringView path, UserID, GroupID, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment, TTY*);
+    static ErrorOr<ProcessAndFirstThread> create_kernel_process(NonnullOwnPtr<KString> name, void (*entry)(void*), void* entry_data = nullptr, u32 affinity = THREAD_AFFINITY_DEFAULT, RegisterProcess do_register = RegisterProcess::Yes);
+    static ErrorOr<ProcessAndFirstThread> create_user_process(StringView path, UserID, GroupID, Vector<NonnullOwnPtr<KString>> arguments, Vector<NonnullOwnPtr<KString>> environment, RefPtr<TTY>);
     static void register_new(Process&);
 
     ~Process();
 
-    LockRefPtr<Thread> create_kernel_thread(void (*entry)(void*), void* entry_data, u32 priority, NonnullOwnPtr<KString> name, u32 affinity = THREAD_AFFINITY_DEFAULT, bool joinable = true);
+    virtual void remove_from_secondary_lists();
+
+    ErrorOr<NonnullRefPtr<Thread>> create_kernel_thread(void (*entry)(void*), void* entry_data, u32 priority, NonnullOwnPtr<KString> name, u32 affinity = THREAD_AFFINITY_DEFAULT, bool joinable = true);
 
     bool is_profiling() const { return m_profiling; }
     void set_profiling(bool profiling) { m_profiling = profiling; }
@@ -216,28 +223,35 @@ public:
     bool is_kernel_process() const { return m_is_kernel_process; }
     bool is_user_process() const { return !m_is_kernel_process; }
 
-    static LockRefPtr<Process> from_pid_in_same_jail(ProcessID);
-    static LockRefPtr<Process> from_pid_ignoring_jails(ProcessID);
+    static RefPtr<Process> from_pid_in_same_jail(ProcessID);
+    static RefPtr<Process> from_pid_ignoring_jails(ProcessID);
     static SessionID get_sid_from_pgid(ProcessGroupID pgid);
 
-    StringView name() const { return m_name->view(); }
+    SpinlockProtected<NonnullOwnPtr<KString>, LockRank::None> const& name() const;
+    void set_name(NonnullOwnPtr<KString>);
+
     ProcessID pid() const
     {
         return with_protected_data([](auto& protected_data) { return protected_data.pid; });
     }
-    SessionID sid() const
-    {
-        return with_protected_data([](auto& protected_data) { return protected_data.sid; });
-    }
+    SessionID sid() const { return credentials()->sid(); }
     bool is_session_leader() const { return sid().value() == pid().value(); }
-    ProcessGroupID pgid() const { return m_pg ? m_pg->pgid() : 0; }
+    ProcessGroupID pgid() const
+    {
+        return with_protected_data([](auto& protected_data) { return protected_data.process_group ? protected_data.process_group->pgid() : 0; });
+    }
     bool is_group_leader() const { return pgid().value() == pid().value(); }
     ProcessID ppid() const
     {
         return with_protected_data([](auto& protected_data) { return protected_data.ppid; });
     }
 
-    SpinlockProtected<RefPtr<Jail>>& jail() { return m_attached_jail; }
+    SpinlockProtected<RefPtr<Jail>, LockRank::Process> const& jail() { return m_attached_jail; }
+
+    bool is_currently_in_jail() const
+    {
+        return m_attached_jail.with([&](auto& jail) -> bool { return !jail.is_null(); });
+    }
 
     NonnullRefPtr<Credentials> credentials() const;
 
@@ -245,7 +259,6 @@ public:
     {
         return with_protected_data([](auto& protected_data) { return protected_data.dumpable; });
     }
-    void set_dumpable(bool);
 
     mode_t umask() const
     {
@@ -287,9 +300,7 @@ public:
     ErrorOr<FlatPtr> sys$emuctl();
     ErrorOr<FlatPtr> sys$yield();
     ErrorOr<FlatPtr> sys$sync();
-    ErrorOr<FlatPtr> sys$beep();
-    ErrorOr<FlatPtr> sys$get_process_name(Userspace<char*> buffer, size_t buffer_size);
-    ErrorOr<FlatPtr> sys$set_process_name(Userspace<char const*> user_name, size_t user_name_length);
+    ErrorOr<FlatPtr> sys$beep(int tone);
     ErrorOr<FlatPtr> sys$create_inode_watcher(u32 flags);
     ErrorOr<FlatPtr> sys$inode_watcher_add_watch(Userspace<Syscall::SC_inode_watcher_add_watch_params const*> user_params);
     ErrorOr<FlatPtr> sys$inode_watcher_remove_watch(int fd, int wd);
@@ -323,6 +334,7 @@ public:
     ErrorOr<FlatPtr> sys$annotate_mapping(Userspace<void*>, int flags);
     ErrorOr<FlatPtr> sys$lseek(int fd, Userspace<off_t*>, int whence);
     ErrorOr<FlatPtr> sys$ftruncate(int fd, Userspace<off_t const*>);
+    ErrorOr<FlatPtr> sys$futimens(Userspace<Syscall::SC_futimens_params const*>);
     ErrorOr<FlatPtr> sys$posix_fallocate(int fd, Userspace<off_t const*>, Userspace<off_t const*>);
     ErrorOr<FlatPtr> sys$kill(pid_t pid_or_pgid, int sig);
     [[noreturn]] void sys$exit(int status);
@@ -435,30 +447,34 @@ public:
     ErrorOr<FlatPtr> sys$disown(ProcessID);
     ErrorOr<FlatPtr> sys$allocate_tls(Userspace<char const*> initial_data, size_t);
     ErrorOr<FlatPtr> sys$prctl(int option, FlatPtr arg1, FlatPtr arg2);
-    ErrorOr<FlatPtr> sys$set_coredump_metadata(Userspace<Syscall::SC_set_coredump_metadata_params const*>);
     ErrorOr<FlatPtr> sys$anon_create(size_t, int options);
     ErrorOr<FlatPtr> sys$statvfs(Userspace<Syscall::SC_statvfs_params const*> user_params);
     ErrorOr<FlatPtr> sys$fstatvfs(int fd, statvfs* buf);
     ErrorOr<FlatPtr> sys$map_time_page();
     ErrorOr<FlatPtr> sys$jail_create(Userspace<Syscall::SC_jail_create_params*> user_params);
     ErrorOr<FlatPtr> sys$jail_attach(Userspace<Syscall::SC_jail_attach_params const*> user_params);
+    ErrorOr<FlatPtr> sys$get_root_session_id(pid_t force_sid);
 
-    template<bool sockname, typename Params>
+    enum SockOrPeerName {
+        SockName,
+        PeerName,
+    };
+    template<SockOrPeerName, typename Params>
     ErrorOr<void> get_sock_or_peer_name(Params const&);
 
     static void initialize();
 
-    [[noreturn]] void crash(int signal, FlatPtr ip, bool out_of_memory = false);
+    [[noreturn]] void crash(int signal, Optional<RegisterState const&> regs, bool out_of_memory = false);
     [[nodiscard]] siginfo_t wait_info() const;
 
-    const TTY* tty() const { return m_tty; }
-    void set_tty(TTY*);
+    RefPtr<TTY> tty();
+    RefPtr<TTY const> tty() const;
+    void set_tty(RefPtr<TTY>);
 
-    u32 m_ticks_in_user { 0 };
-    u32 m_ticks_in_kernel { 0 };
-
-    u32 m_ticks_in_user_for_dead_children { 0 };
-    u32 m_ticks_in_kernel_for_dead_children { 0 };
+    clock_t m_ticks_in_user { 0 };
+    clock_t m_ticks_in_kernel { 0 };
+    clock_t m_ticks_in_user_for_dead_children { 0 };
+    clock_t m_ticks_in_kernel_for_dead_children { 0 };
 
     NonnullRefPtr<Custody> current_directory();
     RefPtr<Custody> executable();
@@ -467,12 +483,12 @@ public:
     static constexpr size_t max_arguments_size = Thread::default_userspace_stack_size / 8;
     static constexpr size_t max_environment_size = Thread::default_userspace_stack_size / 8;
     static constexpr size_t max_auxiliary_size = Thread::default_userspace_stack_size / 8;
-    NonnullOwnPtrVector<KString> const& arguments() const { return m_arguments; };
-    NonnullOwnPtrVector<KString> const& environment() const { return m_environment; };
+    Vector<NonnullOwnPtr<KString>> const& arguments() const { return m_arguments; };
+    Vector<NonnullOwnPtr<KString>> const& environment() const { return m_environment; };
 
-    ErrorOr<void> exec(NonnullOwnPtr<KString> path, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment, Thread*& new_main_thread, u32& prev_flags, int recursion_depth = 0);
+    ErrorOr<void> exec(NonnullOwnPtr<KString> path, Vector<NonnullOwnPtr<KString>> arguments, Vector<NonnullOwnPtr<KString>> environment, Thread*& new_main_thread, InterruptsState& previous_interrupts_state, int recursion_depth = 0);
 
-    ErrorOr<LoadResult> load(NonnullLockRefPtr<OpenFileDescription> main_program_description, LockRefPtr<OpenFileDescription> interpreter_description, const ElfW(Ehdr) & main_program_header);
+    ErrorOr<LoadResult> load(Memory::AddressSpace& new_space, NonnullRefPtr<OpenFileDescription> main_program_description, RefPtr<OpenFileDescription> interpreter_description, const ElfW(Ehdr) & main_program_header);
 
     void terminate_due_to_signal(u8 signal);
     ErrorOr<void> send_signal(u8 signal, Process* sender);
@@ -562,13 +578,13 @@ public:
     ErrorOr<void> set_coredump_property(NonnullOwnPtr<KString> key, NonnullOwnPtr<KString> value);
     ErrorOr<void> try_set_coredump_property(StringView key, StringView value);
 
-    NonnullLockRefPtrVector<Thread> const& threads_for_coredump(Badge<Coredump>) const { return m_threads_for_coredump; }
+    Vector<NonnullRefPtr<Thread>> const& threads_for_coredump(Badge<Coredump>) const { return m_threads_for_coredump; }
 
     PerformanceEventBuffer* perf_events() { return m_perf_event_buffer; }
     PerformanceEventBuffer const* perf_events() const { return m_perf_event_buffer; }
 
-    SpinlockProtected<OwnPtr<Memory::AddressSpace>>& address_space() { return m_space; }
-    SpinlockProtected<OwnPtr<Memory::AddressSpace>> const& address_space() const { return m_space; }
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>, LockRank::None>& address_space() { return m_space; }
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>, LockRank::None> const& address_space() const { return m_space; }
 
     VirtualAddress signal_trampoline() const
     {
@@ -590,9 +606,9 @@ private:
     bool add_thread(Thread&);
     bool remove_thread(Thread&);
 
-    Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials>, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, TTY* tty, UnveilNode unveil_tree, UnveilNode exec_unveil_tree);
-    static ErrorOr<NonnullLockRefPtr<Process>> try_create(LockRefPtr<Thread>& first_thread, NonnullOwnPtr<KString> name, UserID, GroupID, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory = nullptr, RefPtr<Custody> executable = nullptr, TTY* = nullptr, Process* fork_parent = nullptr);
-    ErrorOr<void> attach_resources(NonnullOwnPtr<Memory::AddressSpace>&&, LockRefPtr<Thread>& first_thread, Process* fork_parent);
+    Process(NonnullOwnPtr<KString> name, NonnullRefPtr<Credentials>, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, RefPtr<TTY> tty, UnveilNode unveil_tree, UnveilNode exec_unveil_tree);
+    static ErrorOr<ProcessAndFirstThread> create(NonnullOwnPtr<KString> name, UserID, GroupID, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory = nullptr, RefPtr<Custody> executable = nullptr, RefPtr<TTY> = nullptr, Process* fork_parent = nullptr);
+    ErrorOr<NonnullRefPtr<Thread>> attach_resources(NonnullOwnPtr<Memory::AddressSpace>&&, Process* fork_parent);
     static ProcessID allocate_pid();
 
     void kill_threads_except_self();
@@ -602,19 +618,19 @@ private:
     bool create_perf_events_buffer_if_needed();
     void delete_perf_events_buffer();
 
-    ErrorOr<void> do_exec(NonnullLockRefPtr<OpenFileDescription> main_program_description, NonnullOwnPtrVector<KString> arguments, NonnullOwnPtrVector<KString> environment, LockRefPtr<OpenFileDescription> interpreter_description, Thread*& new_main_thread, u32& prev_flags, const ElfW(Ehdr) & main_program_header);
+    ErrorOr<void> do_exec(NonnullRefPtr<OpenFileDescription> main_program_description, Vector<NonnullOwnPtr<KString>> arguments, Vector<NonnullOwnPtr<KString>> environment, RefPtr<OpenFileDescription> interpreter_description, Thread*& new_main_thread, InterruptsState& previous_interrupts_state, const ElfW(Ehdr) & main_program_header);
     ErrorOr<FlatPtr> do_write(OpenFileDescription&, UserOrKernelBuffer const&, size_t, Optional<off_t> = {});
 
     ErrorOr<FlatPtr> do_statvfs(FileSystem const& path, Custody const*, statvfs* buf);
 
-    ErrorOr<LockRefPtr<OpenFileDescription>> find_elf_interpreter_for_executable(StringView path, ElfW(Ehdr) const& main_executable_header, size_t main_executable_header_size, size_t file_size);
+    ErrorOr<RefPtr<OpenFileDescription>> find_elf_interpreter_for_executable(StringView path, ElfW(Ehdr) const& main_executable_header, size_t main_executable_header_size, size_t file_size);
 
     ErrorOr<void> do_kill(Process&, int signal);
     ErrorOr<void> do_killpg(ProcessGroupID pgrp, int signal);
     ErrorOr<void> do_killall(int signal);
     ErrorOr<void> do_killself(int signal);
 
-    ErrorOr<siginfo_t> do_waitid(Variant<Empty, NonnullLockRefPtr<Process>, NonnullLockRefPtr<ProcessGroup>> waitee, int options);
+    ErrorOr<siginfo_t> do_waitid(Variant<Empty, NonnullRefPtr<Process>, NonnullRefPtr<ProcessGroup>> waitee, int options);
 
     static ErrorOr<NonnullOwnPtr<KString>> get_syscall_path_argument(Userspace<char const*> user_path, size_t path_length);
     static ErrorOr<NonnullOwnPtr<KString>> get_syscall_path_argument(Syscall::StringArgument const&);
@@ -631,7 +647,8 @@ private:
     ErrorOr<FlatPtr> read_impl(int fd, Userspace<u8*> buffer, size_t size);
 
 public:
-    NonnullLockRefPtr<ProcessProcFSTraits> procfs_traits() const { return *m_procfs_traits; }
+    ErrorOr<void> traverse_as_directory(FileSystemID, Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)> callback) const;
+    ErrorOr<NonnullRefPtr<Inode>> lookup_as_directory(ProcFS&, StringView name) const;
     ErrorOr<void> procfs_get_fds_stats(KBufferBuilder& builder) const;
     ErrorOr<void> procfs_get_perf_events(KBufferBuilder& builder) const;
     ErrorOr<void> procfs_get_unveil_stats(KBufferBuilder& builder) const;
@@ -643,13 +660,13 @@ public:
     mode_t binary_link_required_mode() const;
     ErrorOr<void> procfs_get_thread_stack(ThreadID thread_id, KBufferBuilder& builder) const;
     ErrorOr<void> traverse_stacks_directory(FileSystemID, Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)> callback) const;
-    ErrorOr<NonnullLockRefPtr<Inode>> lookup_stacks_directory(ProcFS const&, StringView name) const;
+    ErrorOr<NonnullRefPtr<Inode>> lookup_stacks_directory(ProcFS&, StringView name) const;
     ErrorOr<size_t> procfs_get_file_description_link(unsigned fd, KBufferBuilder& builder) const;
     ErrorOr<void> traverse_file_descriptions_directory(FileSystemID, Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)> callback) const;
-    ErrorOr<NonnullLockRefPtr<Inode>> lookup_file_descriptions_directory(ProcFS const&, StringView name) const;
-    ErrorOr<NonnullLockRefPtr<Inode>> lookup_children_directory(ProcFS const&, StringView name) const;
+    ErrorOr<NonnullRefPtr<Inode>> lookup_file_descriptions_directory(ProcFS&, StringView name) const;
+    ErrorOr<NonnullRefPtr<Inode>> lookup_children_directory(ProcFS&, StringView name) const;
     ErrorOr<void> traverse_children_directory(FileSystemID, Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)> callback) const;
-    ErrorOr<size_t> procfs_get_child_proccess_link(ProcessID child_pid, KBufferBuilder& builder) const;
+    ErrorOr<size_t> procfs_get_child_process_link(ProcessID child_pid, KBufferBuilder& builder) const;
 
 private:
     inline PerformanceEventBuffer* current_perf_events_buffer()
@@ -661,15 +678,11 @@ private:
         return nullptr;
     }
 
-    IntrusiveListNode<Process> m_list_node;
+    SpinlockProtected<NonnullOwnPtr<KString>, LockRank::None> m_name;
 
-    NonnullOwnPtr<KString> m_name;
+    SpinlockProtected<OwnPtr<Memory::AddressSpace>, LockRank::None> m_space;
 
-    SpinlockProtected<OwnPtr<Memory::AddressSpace>> m_space;
-
-    LockRefPtr<ProcessGroup> m_pg;
-
-    RecursiveSpinlock mutable m_protected_data_lock;
+    RecursiveSpinlock<LockRank::None> mutable m_protected_data_lock;
     AtomicEdgeAction<u32> m_protected_data_refs;
     void protect_data();
     void unprotect_data();
@@ -700,10 +713,10 @@ public:
         void set_flags(u32 flags) { m_flags = flags; }
 
         void clear();
-        void set(NonnullLockRefPtr<OpenFileDescription>&&, u32 flags = 0);
+        void set(NonnullRefPtr<OpenFileDescription>, u32 flags = 0);
 
     private:
-        LockRefPtr<OpenFileDescription> m_description;
+        RefPtr<OpenFileDescription> m_description;
         bool m_is_allocated { false };
         u32 m_flags { 0 };
     };
@@ -754,7 +767,7 @@ public:
             m_fds_metadatas.clear();
         }
 
-        ErrorOr<NonnullLockRefPtr<OpenFileDescription>> open_file_description(int fd) const;
+        ErrorOr<NonnullRefPtr<OpenFileDescription>> open_file_description(int fd) const;
 
     private:
         static constexpr size_t s_max_open_file_descriptors { FD_SETSIZE };
@@ -801,41 +814,15 @@ public:
         OpenFileDescriptionAndFlags* m_description { nullptr };
     };
 
-    class ProcessProcFSTraits : public ProcFSExposedComponent {
-    public:
-        static ErrorOr<NonnullLockRefPtr<ProcessProcFSTraits>> try_create(Badge<Process>, LockWeakPtr<Process> process)
-        {
-            return adopt_nonnull_lock_ref_or_enomem(new (nothrow) ProcessProcFSTraits(move(process)));
-        }
-
-        virtual InodeIndex component_index() const override;
-        virtual ErrorOr<NonnullLockRefPtr<Inode>> to_inode(ProcFS const& procfs_instance) const override;
-        virtual ErrorOr<void> traverse_as_directory(FileSystemID, Function<ErrorOr<void>(FileSystem::DirectoryEntryView const&)>) const override;
-        virtual mode_t required_mode() const override { return 0555; }
-
-        virtual UserID owner_user() const override;
-        virtual GroupID owner_group() const override;
-
-    private:
-        explicit ProcessProcFSTraits(LockWeakPtr<Process> process)
-            : m_process(move(process))
-        {
-        }
-
-        // NOTE: We need to weakly hold on to the process, because otherwise
-        //       we would be creating a reference cycle.
-        LockWeakPtr<Process> m_process;
-    };
-
     MutexProtected<OpenFileDescriptions>& fds() { return m_fds; }
     MutexProtected<OpenFileDescriptions> const& fds() const { return m_fds; }
 
-    ErrorOr<NonnullLockRefPtr<OpenFileDescription>> open_file_description(int fd)
+    ErrorOr<NonnullRefPtr<OpenFileDescription>> open_file_description(int fd)
     {
         return m_fds.with_shared([fd](auto& fds) { return fds.open_file_description(fd); });
     }
 
-    ErrorOr<NonnullLockRefPtr<OpenFileDescription>> open_file_description(int fd) const
+    ErrorOr<NonnullRefPtr<OpenFileDescription>> open_file_description(int fd) const
     {
         return m_fds.with_shared([fd](auto& fds) { return fds.open_file_description(fd); });
     }
@@ -848,12 +835,12 @@ public:
 private:
     ErrorOr<NonnullRefPtr<Custody>> custody_for_dirfd(int dirfd);
 
-    SpinlockProtected<Thread::ListInProcess>& thread_list() { return m_thread_list; }
-    SpinlockProtected<Thread::ListInProcess> const& thread_list() const { return m_thread_list; }
+    SpinlockProtected<Thread::ListInProcess, LockRank::None>& thread_list() { return m_thread_list; }
+    SpinlockProtected<Thread::ListInProcess, LockRank::None> const& thread_list() const { return m_thread_list; }
 
     ErrorOr<NonnullRefPtr<Thread>> get_thread_from_pid_or_tid(pid_t pid_or_tid, Syscall::SchedulerParametersMode mode);
 
-    SpinlockProtected<Thread::ListInProcess> m_thread_list { LockRank::None };
+    SpinlockProtected<Thread::ListInProcess, LockRank::None> m_thread_list {};
 
     MutexProtected<OpenFileDescriptions> m_fds;
 
@@ -863,19 +850,25 @@ private:
     Atomic<bool, AK::MemoryOrder::memory_order_relaxed> m_is_stopped { false };
     bool m_should_generate_coredump { false };
 
-    SpinlockProtected<RefPtr<Custody>> m_executable;
+    SpinlockProtected<RefPtr<Custody>, LockRank::None> m_executable;
 
-    SpinlockProtected<RefPtr<Custody>> m_current_directory;
+    SpinlockProtected<RefPtr<Custody>, LockRank::None> m_current_directory;
 
-    NonnullOwnPtrVector<KString> m_arguments;
-    NonnullOwnPtrVector<KString> m_environment;
-
-    LockRefPtr<TTY> m_tty;
+    Vector<NonnullOwnPtr<KString>> m_arguments;
+    Vector<NonnullOwnPtr<KString>> m_environment;
 
     LockWeakPtr<Memory::Region> m_master_tls_region;
 
-    IntrusiveListNode<Process> m_jail_list_node;
-    SpinlockProtected<RefPtr<Jail>> m_attached_jail { LockRank::Process };
+    IntrusiveListNode<Process> m_jail_process_list_node;
+    IntrusiveListNode<Process> m_all_processes_list_node;
+
+public:
+    using AllProcessesList = IntrusiveListRelaxedConst<&Process::m_all_processes_list_node>;
+    using JailProcessList = IntrusiveListRelaxedConst<&Process::m_jail_process_list_node>;
+
+private:
+    SpinlockProtected<RefPtr<ProcessList>, LockRank::None> m_jail_process_list;
+    SpinlockProtected<RefPtr<Jail>, LockRank::Process> m_attached_jail {};
 
     size_t m_master_tls_size { 0 };
     size_t m_master_tls_alignment { 0 };
@@ -883,10 +876,10 @@ private:
     Mutex m_big_lock { "Process"sv, Mutex::MutexBehavior::BigLock };
     Mutex m_ptrace_lock { "ptrace"sv };
 
-    LockRefPtr<Timer> m_alarm_timer;
+    SpinlockProtected<RefPtr<Timer>, LockRank::None> m_alarm_timer;
 
-    SpinlockProtected<UnveilData> m_unveil_data;
-    SpinlockProtected<UnveilData> m_exec_unveil_data;
+    SpinlockProtected<UnveilData, LockRank::None> m_unveil_data;
+    SpinlockProtected<UnveilData, LockRank::None> m_exec_unveil_data;
 
     OwnPtr<PerformanceEventBuffer> m_perf_event_buffer;
 
@@ -902,10 +895,9 @@ private:
         OwnPtr<KString> value;
     };
 
-    SpinlockProtected<Array<CoredumpProperty, 4>> m_coredump_properties { LockRank::None };
-    NonnullLockRefPtrVector<Thread> m_threads_for_coredump;
+    SpinlockProtected<Array<CoredumpProperty, 4>, LockRank::None> m_coredump_properties {};
+    Vector<NonnullRefPtr<Thread>> m_threads_for_coredump;
 
-    mutable LockRefPtr<ProcessProcFSTraits> m_procfs_traits;
     struct SignalActionData {
         VirtualAddress handler_or_sigaction;
         int flags { 0 };
@@ -918,8 +910,18 @@ private:
     u8 m_protected_values_padding[PAGE_SIZE - sizeof(ProtectedValues)];
 
 public:
-    using List = IntrusiveListRelaxedConst<&Process::m_list_node>;
-    static SpinlockProtected<Process::List>& all_instances();
+    static SpinlockProtected<Process::AllProcessesList, LockRank::None>& all_instances();
+};
+
+class ProcessList : public RefCounted<ProcessList> {
+public:
+    static ErrorOr<NonnullRefPtr<ProcessList>> create();
+    SpinlockProtected<Process::JailProcessList, LockRank::None>& attached_processes() { return m_attached_processes; }
+    SpinlockProtected<Process::JailProcessList, LockRank::None> const& attached_processes() const { return m_attached_processes; }
+
+private:
+    ProcessList() = default;
+    SpinlockProtected<Process::JailProcessList, LockRank::None> m_attached_processes;
 };
 
 // Note: Process object should be 2 pages of 4096 bytes each.
@@ -928,7 +930,7 @@ public:
 // The second page is being used exclusively for write-protected values.
 static_assert(AssertSize<Process, (PAGE_SIZE * 2)>());
 
-extern RecursiveSpinlock g_profiling_lock;
+extern RecursiveSpinlock<LockRank::None> g_profiling_lock;
 
 template<IteratorFunction<Thread&> Callback>
 inline IterationDecision Process::for_each_thread(Callback callback)
@@ -1011,7 +1013,7 @@ inline ProcessID Thread::pid() const
 #define VERIFY_NO_PROCESS_BIG_LOCK(process) \
     VERIFY(!process->big_lock().is_exclusively_locked_by_current_thread())
 
-inline static ErrorOr<NonnullOwnPtr<KString>> try_copy_kstring_from_user(Kernel::Syscall::StringArgument const& string)
+inline ErrorOr<NonnullOwnPtr<KString>> try_copy_kstring_from_user(Kernel::Syscall::StringArgument const& string)
 {
     Userspace<char const*> characters((FlatPtr)string.characters);
     return try_copy_kstring_from_user(characters, string.length);
@@ -1021,7 +1023,9 @@ template<>
 struct AK::Formatter<Kernel::Process> : AK::Formatter<FormatString> {
     ErrorOr<void> format(FormatBuilder& builder, Kernel::Process const& value)
     {
-        return AK::Formatter<FormatString>::format(builder, "{}({})"sv, value.name(), value.pid().value());
+        return value.name().with([&](auto& process_name) {
+            return AK::Formatter<FormatString>::format(builder, "{}({})"sv, process_name->view(), value.pid().value());
+        });
     }
 };
 

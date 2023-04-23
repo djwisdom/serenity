@@ -1,19 +1,23 @@
 /*
  * Copyright (c) 2020, Srimanta Barua <srimanta.barua1@gmail.com>
- * Copyright (c) 2021-2022, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021-2023, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2022, Jelle Raaijmakers <jelle@gmta.nl>
+ * Copyright (c) 2023, Lukas Affolter <git@lukasach.dev>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/BinarySearch.h>
 #include <AK/Checked.h>
+#include <AK/Debug.h>
+#include <AK/MemoryStream.h>
 #include <AK/Try.h>
 #include <LibCore/MappedFile.h>
 #include <LibGfx/Font/OpenType/Cmap.h>
 #include <LibGfx/Font/OpenType/Font.h>
 #include <LibGfx/Font/OpenType/Glyf.h>
 #include <LibGfx/Font/OpenType/Tables.h>
+#include <LibGfx/ImageFormats/PNGLoader.h>
 #include <LibTextCodec/Decoder.h>
 #include <math.h>
 #include <sys/mman.h>
@@ -180,7 +184,7 @@ ErrorOr<Kern> Kern::from_slice(ReadonlyBytes slice)
         return Error::from_string_literal("Kern table does not contain any subtables");
 
     // Read all subtable offsets
-    auto subtable_offsets = TRY(FixedArray<size_t>::try_create(number_of_subtables));
+    auto subtable_offsets = TRY(FixedArray<size_t>::create(number_of_subtables));
     size_t offset = sizeof(Header);
     for (size_t i = 0; i < number_of_subtables; ++i) {
         if (slice.size() < offset + sizeof(SubtableHeader))
@@ -203,7 +207,7 @@ i16 Kern::get_glyph_kerning(u16 left_glyph_id, u16 right_glyph_id) const
         auto const& subtable_header = *bit_cast<SubtableHeader const*>(subtable_slice.data());
 
         auto version = subtable_header.version;
-        auto length = subtable_header.version;
+        auto length = subtable_header.length;
         auto coverage = subtable_header.coverage;
 
         if (version != 0) {
@@ -274,7 +278,7 @@ Optional<i16> Kern::read_glyph_kerning_format0(ReadonlyBytes slice, u16 left_gly
         return {};
 
     // FIXME: implement a possibly slightly more efficient binary search using the parameters above
-    Span<Format0Pair const> pairs { bit_cast<Format0Pair const*>(slice.slice(sizeof(Format0)).data()), number_of_pairs };
+    ReadonlySpan<Format0Pair> pairs { bit_cast<Format0Pair const*>(slice.slice(sizeof(Format0)).data()), number_of_pairs };
 
     // The left and right halves of the kerning pair make an unsigned 32-bit number, which is then used to order the kerning pairs numerically.
     auto needle = (static_cast<u32>(left_glyph_id) << 16u) | static_cast<u32>(right_glyph_id);
@@ -321,8 +325,8 @@ DeprecatedString Name::string_for_id(NameId id) const
     auto const offset = name_record.string_offset;
 
     if (platform_id == to_underlying(Platform::Windows)) {
-        static auto& decoder = *TextCodec::decoder_for("utf-16be");
-        return decoder.to_utf8(StringView { (char const*)m_slice.offset_pointer(storage_offset + offset), length });
+        static auto& decoder = *TextCodec::decoder_for("utf-16be"sv);
+        return decoder.to_utf8(StringView { (char const*)m_slice.offset_pointer(storage_offset + offset), length }).release_value_but_fixme_should_propagate_errors().to_deprecated_string();
     }
 
     return DeprecatedString((char const*)m_slice.offset_pointer(storage_offset + offset), length);
@@ -396,6 +400,8 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
     Optional<ReadonlyBytes> opt_glyf_slice = {};
     Optional<ReadonlyBytes> opt_os2_slice = {};
     Optional<ReadonlyBytes> opt_kern_slice = {};
+    Optional<ReadonlyBytes> opt_fpgm_slice = {};
+    Optional<ReadonlyBytes> opt_prep_slice = {};
 
     Optional<Head> opt_head = {};
     Optional<Name> opt_name = {};
@@ -403,9 +409,13 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
     Optional<Maxp> opt_maxp = {};
     Optional<Hmtx> opt_hmtx = {};
     Optional<Cmap> opt_cmap = {};
-    Optional<Loca> opt_loca = {};
     Optional<OS2> opt_os2 = {};
     Optional<Kern> opt_kern = {};
+    Optional<Fpgm> opt_fpgm = {};
+    Optional<Prep> opt_prep = {};
+    Optional<CBLC> cblc;
+    Optional<CBDT> cbdt;
+    Optional<GPOS> gpos;
 
     auto num_tables = be_u16(buffer.offset_pointer(offset + (u32)Offsets::NumTables));
     if (buffer.size() < offset + (u32)Sizes::OffsetTable + num_tables * (u32)Sizes::TableRecord)
@@ -446,6 +456,16 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
             opt_os2_slice = buffer_here;
         } else if (tag == tag_from_str("kern")) {
             opt_kern_slice = buffer_here;
+        } else if (tag == tag_from_str("fpgm")) {
+            opt_fpgm_slice = buffer_here;
+        } else if (tag == tag_from_str("prep")) {
+            opt_prep_slice = buffer_here;
+        } else if (tag == tag_from_str("CBLC")) {
+            cblc = TRY(CBLC::from_slice(buffer_here));
+        } else if (tag == tag_from_str("CBDT")) {
+            cbdt = TRY(CBDT::from_slice(buffer_here));
+        } else if (tag == tag_from_str("GPOS")) {
+            gpos = TRY(GPOS::from_slice(buffer_here));
         }
     }
 
@@ -473,13 +493,17 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
         return Error::from_string_literal("Could not load Cmap");
     auto cmap = opt_cmap.value();
 
-    if (!opt_loca_slice.has_value() || !(opt_loca = Loca::from_slice(opt_loca_slice.value(), maxp.num_glyphs(), head.index_to_loc_format())).has_value())
-        return Error::from_string_literal("Could not load Loca");
-    auto loca = opt_loca.value();
+    Optional<Loca> loca;
+    if (opt_loca_slice.has_value()) {
+        loca = Loca::from_slice(opt_loca_slice.value(), maxp.num_glyphs(), head.index_to_loc_format());
+        if (!loca.has_value())
+            return Error::from_string_literal("Could not load Loca");
+    }
 
-    if (!opt_glyf_slice.has_value())
-        return Error::from_string_literal("Could not load Glyf");
-    auto glyf = Glyf(opt_glyf_slice.value());
+    Optional<Glyf> glyf;
+    if (opt_glyf_slice.has_value()) {
+        glyf = Glyf(opt_glyf_slice.value());
+    }
 
     Optional<OS2> os2;
     if (opt_os2_slice.has_value())
@@ -488,6 +512,14 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
     Optional<Kern> kern {};
     if (opt_kern_slice.has_value())
         kern = TRY(Kern::from_slice(opt_kern_slice.value()));
+
+    Optional<Fpgm> fpgm;
+    if (opt_fpgm_slice.has_value())
+        fpgm = Fpgm(opt_fpgm_slice.value());
+
+    Optional<Prep> prep;
+    if (opt_prep_slice.has_value())
+        prep = Prep(opt_prep_slice.value());
 
     // Select cmap table. FIXME: Do this better. Right now, just looks for platform "Windows"
     // and corresponding encoding "Unicode full repertoire", or failing that, "Unicode BMP"
@@ -501,6 +533,9 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
         if (!platform.has_value())
             return Error::from_string_literal("Invalid Platform ID");
 
+        /* NOTE: The encoding records are sorted first by platform ID, then by encoding ID.
+           This means that the Windows platform will take precedence over Macintosh, which is
+           usually what we want here. */
         if (platform.value() == Cmap::Subtable::Platform::Windows) {
             if (subtable.encoding_id() == (u16)Cmap::Subtable::WindowsEncoding::UnicodeFullRepertoire) {
                 cmap.set_active_index(i);
@@ -510,65 +545,191 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
                 cmap.set_active_index(i);
                 break;
             }
+        } else if (platform.value() == Cmap::Subtable::Platform::Macintosh) {
+            cmap.set_active_index(i);
         }
     }
 
-    return adopt_ref(*new Font(move(buffer), move(head), move(name), move(hhea), move(maxp), move(hmtx), move(cmap), move(loca), move(glyf), move(os2), move(kern)));
+    return adopt_ref(*new Font(
+        move(buffer),
+        move(head),
+        move(name),
+        move(hhea),
+        move(maxp),
+        move(hmtx),
+        move(cmap),
+        move(loca),
+        move(glyf),
+        move(os2),
+        move(kern),
+        move(fpgm),
+        move(prep),
+        move(cblc),
+        move(cbdt),
+        move(gpos)));
 }
 
 Gfx::ScaledFontMetrics Font::metrics([[maybe_unused]] float x_scale, float y_scale) const
 {
-    auto ascender = m_hhea.ascender() * y_scale;
-    auto descender = m_hhea.descender() * y_scale;
-    auto line_gap = m_hhea.line_gap() * y_scale;
+    i16 raw_ascender;
+    i16 raw_descender;
+    i16 raw_line_gap;
+
+    if (m_os2.has_value() && m_os2->use_typographic_metrics()) {
+        raw_ascender = m_os2->typographic_ascender();
+        raw_descender = m_os2->typographic_descender();
+        raw_line_gap = m_os2->typographic_line_gap();
+    } else {
+        raw_ascender = m_hhea.ascender();
+        raw_descender = m_hhea.descender();
+        raw_line_gap = m_hhea.line_gap();
+    }
 
     return Gfx::ScaledFontMetrics {
-        .ascender = ascender,
-        .descender = descender,
-        .line_gap = line_gap,
+        .ascender = static_cast<float>(raw_ascender) * y_scale,
+        .descender = -static_cast<float>(raw_descender) * y_scale,
+        .line_gap = static_cast<float>(raw_line_gap) * y_scale,
     };
 }
 
-// FIXME: "loca" and "glyf" are not available for CFF fonts.
-Gfx::ScaledGlyphMetrics Font::glyph_metrics(u32 glyph_id, float x_scale, float y_scale) const
+Font::EmbeddedBitmapData Font::embedded_bitmap_data_for_glyph(u32 glyph_id) const
 {
+    if (!has_color_bitmaps())
+        return Empty {};
+
+    u16 first_glyph_index {};
+    u16 last_glyph_index {};
+    auto maybe_index_subtable = m_cblc->index_subtable_for_glyph_id(glyph_id, first_glyph_index, last_glyph_index);
+    if (!maybe_index_subtable.has_value())
+        return Empty {};
+
+    auto const& index_subtable = maybe_index_subtable.value();
+    auto const& bitmap_size = m_cblc->bitmap_size_for_glyph_id(glyph_id).value();
+
+    if (index_subtable.index_format == 1) {
+        auto const& index_subtable1 = *bit_cast<EBLC::IndexSubTable1 const*>(&index_subtable);
+        size_t size_of_array = (last_glyph_index - first_glyph_index + 1) + 1;
+        auto sbit_offsets = ReadonlySpan<Offset32> { index_subtable1.sbit_offsets, size_of_array };
+        auto sbit_offset = sbit_offsets[glyph_id - first_glyph_index];
+        size_t glyph_data_offset = sbit_offset + index_subtable.image_data_offset;
+
+        if (index_subtable.image_format == 17) {
+            return EmbeddedBitmapWithFormat17 {
+                .bitmap_size = bitmap_size,
+                .format17 = *bit_cast<CBDT::Format17 const*>(m_cbdt->bytes().slice(glyph_data_offset, size_of_array).data()),
+            };
+        }
+        dbgln("FIXME: Implement OpenType embedded bitmap image format {}", index_subtable.image_format);
+    } else {
+        dbgln("FIXME: Implement OpenType embedded bitmap index format {}", index_subtable.index_format);
+    }
+
+    return Empty {};
+}
+
+Gfx::ScaledGlyphMetrics Font::glyph_metrics(u32 glyph_id, float x_scale, float y_scale, float point_width, float point_height) const
+{
+    auto embedded_bitmap_metrics = embedded_bitmap_data_for_glyph(glyph_id).visit(
+        [&](EmbeddedBitmapWithFormat17 const& data) -> Optional<Gfx::ScaledGlyphMetrics> {
+            // FIXME: This is a pretty ugly hack to work out new scale factors based on the relationship between
+            //        the pixels-per-em values and the font point size. It appears that bitmaps are not in the same
+            //        coordinate space as the head table's "units per em" value.
+            //        There's definitely some cleaner way to do this.
+            float x_scale = (point_width * 1.3333333f) / static_cast<float>(data.bitmap_size.ppem_x);
+            float y_scale = (point_height * 1.3333333f) / static_cast<float>(data.bitmap_size.ppem_y);
+
+            return Gfx::ScaledGlyphMetrics {
+                .ascender = static_cast<float>(data.bitmap_size.hori.ascender) * y_scale,
+                .descender = static_cast<float>(data.bitmap_size.hori.descender) * y_scale,
+                .advance_width = static_cast<float>(data.format17.glyph_metrics.advance) * x_scale,
+                .left_side_bearing = static_cast<float>(data.format17.glyph_metrics.bearing_x) * x_scale,
+            };
+        },
+        [&](Empty) -> Optional<Gfx::ScaledGlyphMetrics> {
+            // Unsupported format or no embedded bitmap for this glyph ID.
+            return {};
+        });
+
+    if (embedded_bitmap_metrics.has_value()) {
+        return embedded_bitmap_metrics.release_value();
+    }
+
+    if (!m_loca.has_value() || !m_glyf.has_value()) {
+        return Gfx::ScaledGlyphMetrics {};
+    }
+
     if (glyph_id >= glyph_count()) {
         glyph_id = 0;
     }
     auto horizontal_metrics = m_hmtx.get_glyph_horizontal_metrics(glyph_id);
-    auto glyph_offset = m_loca.get_glyph_offset(glyph_id);
-    auto glyph = m_glyf.glyph(glyph_offset);
-    int ascender = glyph.ascender();
-    int descender = glyph.descender();
+    auto glyph_offset = m_loca->get_glyph_offset(glyph_id);
+    auto glyph = m_glyf->glyph(glyph_offset);
+    if (!glyph.has_value())
+        return {};
     return Gfx::ScaledGlyphMetrics {
-        .ascender = (int)roundf(ascender * y_scale),
-        .descender = (int)roundf(descender * y_scale),
-        .advance_width = (int)roundf(horizontal_metrics.advance_width * x_scale),
-        .left_side_bearing = (int)roundf(horizontal_metrics.left_side_bearing * x_scale),
+        .ascender = static_cast<float>(glyph->ascender()) * y_scale,
+        .descender = static_cast<float>(glyph->descender()) * y_scale,
+        .advance_width = static_cast<float>(horizontal_metrics.advance_width) * x_scale,
+        .left_side_bearing = static_cast<float>(horizontal_metrics.left_side_bearing) * x_scale,
     };
 }
 
 float Font::glyphs_horizontal_kerning(u32 left_glyph_id, u32 right_glyph_id, float x_scale) const
 {
-    if (!m_kern.has_value())
-        return 0.f;
-    return m_kern->get_glyph_kerning(left_glyph_id, right_glyph_id) * x_scale;
+    if (m_gpos.has_value()) {
+        auto kerning = m_gpos->glyph_kerning(left_glyph_id, right_glyph_id);
+        if (kerning.has_value())
+            return kerning.value() * x_scale;
+    }
+
+    if (m_kern.has_value())
+        return m_kern->get_glyph_kerning(left_glyph_id, right_glyph_id) * x_scale;
+
+    return 0.0f;
 }
 
-// FIXME: "loca" and "glyf" are not available for CFF fonts.
-RefPtr<Gfx::Bitmap> Font::rasterize_glyph(u32 glyph_id, float x_scale, float y_scale) const
+RefPtr<Gfx::Bitmap> Font::rasterize_glyph(u32 glyph_id, float x_scale, float y_scale, Gfx::GlyphSubpixelOffset subpixel_offset) const
 {
+    if (auto bitmap = color_bitmap(glyph_id)) {
+        return bitmap;
+    }
+
+    if (!m_loca.has_value() || !m_glyf.has_value()) {
+        return nullptr;
+    }
+
     if (glyph_id >= glyph_count()) {
         glyph_id = 0;
     }
-    auto glyph_offset = m_loca.get_glyph_offset(glyph_id);
-    auto glyph = m_glyf.glyph(glyph_offset);
-    return glyph.rasterize(m_hhea.ascender(), m_hhea.descender(), x_scale, y_scale, [&](u16 glyph_id) {
+
+    auto glyph_offset0 = m_loca->get_glyph_offset(glyph_id);
+    auto glyph_offset1 = m_loca->get_glyph_offset(glyph_id + 1);
+
+    // If a glyph has no outline, then loca[n] = loca [n+1].
+    if (glyph_offset0 == glyph_offset1)
+        return nullptr;
+
+    auto glyph = m_glyf->glyph(glyph_offset0);
+    if (!glyph.has_value())
+        return nullptr;
+
+    i16 ascender = 0;
+    i16 descender = 0;
+
+    if (m_os2.has_value() && m_os2->use_typographic_metrics()) {
+        ascender = m_os2->typographic_ascender();
+        descender = m_os2->typographic_descender();
+    } else {
+        ascender = m_hhea.ascender();
+        descender = m_hhea.descender();
+    }
+
+    return glyph->rasterize(ascender, descender, x_scale, y_scale, subpixel_offset, [&](u16 glyph_id) {
         if (glyph_id >= glyph_count()) {
             glyph_id = 0;
         }
-        auto glyph_offset = m_loca.get_glyph_offset(glyph_id);
-        return m_glyf.glyph(glyph_offset);
+        auto glyph_offset = m_loca->get_glyph_offset(glyph_id);
+        return m_glyf->glyph(glyph_offset);
     });
 }
 
@@ -609,6 +770,15 @@ u16 Font::weight() const
     return 400;
 }
 
+u16 Font::width() const
+{
+    if (m_os2.has_value()) {
+        return m_os2->width_class();
+    }
+
+    return Gfx::FontWidth::Normal;
+}
+
 u8 Font::slope() const
 {
     // https://docs.microsoft.com/en-us/typography/opentype/spec/os2
@@ -631,12 +801,17 @@ bool Font::is_fixed_width() const
 {
     // FIXME: Read this information from the font file itself.
     // FIXME: Although, it appears some application do similar hacks
-    return glyph_metrics(glyph_id_for_code_point('.'), 1, 1).advance_width == glyph_metrics(glyph_id_for_code_point('X'), 1, 1).advance_width;
+    return glyph_metrics(glyph_id_for_code_point('.'), 1, 1, 1, 1).advance_width == glyph_metrics(glyph_id_for_code_point('X'), 1, 1, 1, 1).advance_width;
 }
 
 u16 OS2::weight_class() const
 {
     return header().us_weight_class;
+}
+
+u16 OS2::width_class() const
+{
+    return header().us_width_class;
 }
 
 u16 OS2::selection() const
@@ -657,6 +832,419 @@ i16 OS2::typographic_descender() const
 i16 OS2::typographic_line_gap() const
 {
     return header().s_typo_line_gap;
+}
+
+bool OS2::use_typographic_metrics() const
+{
+    return header().fs_selection & 0x80;
+}
+
+Optional<ReadonlyBytes> Font::font_program() const
+{
+    if (m_fpgm.has_value())
+        return m_fpgm->program_data();
+    return {};
+}
+
+Optional<ReadonlyBytes> Font::control_value_program() const
+{
+    if (m_prep.has_value())
+        return m_prep->program_data();
+    return {};
+}
+
+Optional<ReadonlyBytes> Font::glyph_program(u32 glyph_id) const
+{
+    if (!m_loca.has_value() || !m_glyf.has_value()) {
+        return {};
+    }
+
+    auto glyph_offset = m_loca->get_glyph_offset(glyph_id);
+    auto glyph = m_glyf->glyph(glyph_offset);
+    if (!glyph.has_value())
+        return {};
+    return glyph->program();
+}
+
+u32 Font::glyph_id_for_code_point(u32 code_point) const
+{
+    return glyph_page(code_point / GlyphPage::glyphs_per_page).glyph_ids[code_point % GlyphPage::glyphs_per_page];
+}
+
+Font::GlyphPage const& Font::glyph_page(size_t page_index) const
+{
+    if (page_index == 0) {
+        if (!m_glyph_page_zero) {
+            m_glyph_page_zero = make<GlyphPage>();
+            populate_glyph_page(*m_glyph_page_zero, 0);
+        }
+        return *m_glyph_page_zero;
+    }
+    if (auto it = m_glyph_pages.find(page_index); it != m_glyph_pages.end()) {
+        return *it->value;
+    }
+
+    auto glyph_page = make<GlyphPage>();
+    populate_glyph_page(*glyph_page, page_index);
+    auto const* glyph_page_ptr = glyph_page.ptr();
+    m_glyph_pages.set(page_index, move(glyph_page));
+    return *glyph_page_ptr;
+}
+
+void Font::populate_glyph_page(GlyphPage& glyph_page, size_t page_index) const
+{
+    u32 first_code_point = page_index * GlyphPage::glyphs_per_page;
+    for (size_t i = 0; i < GlyphPage::glyphs_per_page; ++i) {
+        u32 code_point = first_code_point + i;
+        glyph_page.glyph_ids[i] = m_cmap.glyph_id_for_code_point(code_point);
+    }
+}
+
+ErrorOr<CBLC> CBLC::from_slice(ReadonlyBytes slice)
+{
+    if (slice.size() < sizeof(CblcHeader))
+        return Error::from_string_literal("CBLC table too small");
+    auto const& header = *bit_cast<CblcHeader const*>(slice.data());
+
+    size_t num_sizes = header.num_sizes;
+    Checked<size_t> size_used_by_bitmap_sizes = num_sizes;
+    size_used_by_bitmap_sizes *= sizeof(BitmapSize);
+    if (size_used_by_bitmap_sizes.has_overflow())
+        return Error::from_string_literal("Integer overflow in CBLC table");
+
+    Checked<size_t> total_size = sizeof(CblcHeader);
+    total_size += size_used_by_bitmap_sizes;
+    if (total_size.has_overflow())
+        return Error::from_string_literal("Integer overflow in CBLC table");
+
+    if (slice.size() < total_size)
+        return Error::from_string_literal("CBLC table too small");
+
+    return CBLC { slice };
+}
+
+Optional<CBLC::BitmapSize const&> CBLC::bitmap_size_for_glyph_id(u32 glyph_id) const
+{
+    for (auto const& bitmap_size : this->bitmap_sizes()) {
+        if (glyph_id >= bitmap_size.start_glyph_index && glyph_id <= bitmap_size.end_glyph_index) {
+            return bitmap_size;
+        }
+    }
+    return {};
+}
+
+ErrorOr<CBDT> CBDT::from_slice(ReadonlyBytes slice)
+{
+    if (slice.size() < sizeof(CbdtHeader))
+        return Error::from_string_literal("CBDT table too small");
+    return CBDT { slice };
+}
+
+bool Font::has_color_bitmaps() const
+{
+    return m_cblc.has_value() && m_cbdt.has_value();
+}
+
+Optional<EBLC::IndexSubHeader const&> CBLC::index_subtable_for_glyph_id(u32 glyph_id, u16& first_glyph_index, u16& last_glyph_index) const
+{
+    auto maybe_bitmap_size = bitmap_size_for_glyph_id(glyph_id);
+    if (!maybe_bitmap_size.has_value()) {
+        return {};
+    }
+    auto const& bitmap_size = maybe_bitmap_size.value();
+
+    Checked<size_t> required_size = static_cast<u32>(bitmap_size.index_subtable_array_offset);
+    required_size += bitmap_size.index_tables_size;
+
+    if (m_slice.size() < required_size) {
+        dbgln("CBLC index subtable array goes out of bounds");
+        return {};
+    }
+
+    auto index_subtables_slice = m_slice.slice(bitmap_size.index_subtable_array_offset, bitmap_size.index_tables_size);
+    ReadonlySpan<EBLC::IndexSubTableArray> index_subtable_arrays {
+        bit_cast<EBLC::IndexSubTableArray const*>(index_subtables_slice.data()), bitmap_size.number_of_index_subtables
+    };
+
+    EBLC::IndexSubTableArray const* index_subtable_array = nullptr;
+    for (auto const& array : index_subtable_arrays) {
+        if (glyph_id >= array.first_glyph_index && glyph_id <= array.last_glyph_index)
+            index_subtable_array = &array;
+    }
+    if (!index_subtable_array) {
+        return {};
+    }
+
+    auto index_subtable_slice = m_slice.slice(bitmap_size.index_subtable_array_offset + index_subtable_array->additional_offset_to_index_subtable);
+    first_glyph_index = index_subtable_array->first_glyph_index;
+    last_glyph_index = index_subtable_array->last_glyph_index;
+    return *bit_cast<EBLC::IndexSubHeader const*>(index_subtable_slice.data());
+}
+
+RefPtr<Gfx::Bitmap> Font::color_bitmap(u32 glyph_id) const
+{
+    return embedded_bitmap_data_for_glyph(glyph_id).visit(
+        [&](EmbeddedBitmapWithFormat17 const& data) -> RefPtr<Gfx::Bitmap> {
+            auto data_slice = ReadonlyBytes { data.format17.data, static_cast<u32>(data.format17.data_len) };
+            auto decoder = Gfx::PNGImageDecoderPlugin::create(data_slice).release_value_but_fixme_should_propagate_errors();
+            auto frame = decoder->frame(0);
+            if (frame.is_error()) {
+                dbgln("PNG decode failed");
+                return nullptr;
+            }
+            return frame.value().image;
+        },
+        [&](Empty) -> RefPtr<Gfx::Bitmap> {
+            // Unsupported format or no image for this glyph ID.
+            return nullptr;
+        });
+}
+
+Optional<i16> GPOS::glyph_kerning(u16 left_glyph_id, u16 right_glyph_id) const
+{
+    auto read_value_record = [&](u16 value_format, FixedMemoryStream& stream) -> ValueRecord {
+        ValueRecord value_record;
+        if (value_format & static_cast<i16>(ValueFormat::X_PLACEMENT))
+            value_record.x_placement = stream.read_value<BigEndian<i16>>().release_value_but_fixme_should_propagate_errors();
+        if (value_format & static_cast<i16>(ValueFormat::Y_PLACEMENT))
+            value_record.y_placement = stream.read_value<BigEndian<i16>>().release_value_but_fixme_should_propagate_errors();
+        if (value_format & static_cast<i16>(ValueFormat::X_ADVANCE))
+            value_record.x_advance = stream.read_value<BigEndian<i16>>().release_value_but_fixme_should_propagate_errors();
+        if (value_format & static_cast<i16>(ValueFormat::Y_ADVANCE))
+            value_record.y_advance = stream.read_value<BigEndian<i16>>().release_value_but_fixme_should_propagate_errors();
+        if (value_format & static_cast<i16>(ValueFormat::X_PLACEMENT_DEVICE))
+            value_record.x_placement_device_offset = stream.read_value<Offset16>().release_value_but_fixme_should_propagate_errors();
+        if (value_format & static_cast<i16>(ValueFormat::Y_PLACEMENT_DEVICE))
+            value_record.y_placement_device_offset = stream.read_value<Offset16>().release_value_but_fixme_should_propagate_errors();
+        if (value_format & static_cast<i16>(ValueFormat::X_ADVANCE_DEVICE))
+            value_record.x_advance_device_offset = stream.read_value<Offset16>().release_value_but_fixme_should_propagate_errors();
+        if (value_format & static_cast<i16>(ValueFormat::Y_ADVANCE_DEVICE))
+            value_record.y_advance_device_offset = stream.read_value<Offset16>().release_value_but_fixme_should_propagate_errors();
+        return value_record;
+    };
+
+    auto const& header = this->header();
+    dbgln_if(OPENTYPE_GPOS_DEBUG, "GPOS header:");
+    dbgln_if(OPENTYPE_GPOS_DEBUG, "   Version: {}.{}", header.major_version, header.minor_version);
+    dbgln_if(OPENTYPE_GPOS_DEBUG, "   Feature list offset: {}", header.feature_list_offset);
+
+    // FIXME: Make sure everything is bounds-checked appropriately.
+
+    auto feature_list_slice = m_slice.slice(header.feature_list_offset);
+    if (feature_list_slice.size() < sizeof(FeatureList)) {
+        dbgln_if(OPENTYPE_GPOS_DEBUG, "GPOS table feature list slice is too small");
+        return {};
+    }
+    auto const& feature_list = *bit_cast<FeatureList const*>(feature_list_slice.data());
+
+    auto lookup_list_slice = m_slice.slice(header.lookup_list_offset);
+    if (lookup_list_slice.size() < sizeof(LookupList)) {
+        dbgln_if(OPENTYPE_GPOS_DEBUG, "GPOS table lookup list slice is too small");
+        return {};
+    }
+    auto const& lookup_list = *bit_cast<LookupList const*>(lookup_list_slice.data());
+
+    Optional<Offset16> kern_feature_offset;
+    for (size_t i = 0; i < feature_list.feature_count; ++i) {
+        auto const& feature_record = feature_list.feature_records[i];
+        if (feature_record.feature_tag == tag_from_str("kern")) {
+            kern_feature_offset = feature_record.feature_offset;
+            break;
+        }
+    }
+
+    if (!kern_feature_offset.has_value()) {
+        dbgln_if(OPENTYPE_GPOS_DEBUG, "No 'kern' feature found in GPOS table");
+        return {};
+    }
+
+    auto feature_slice = feature_list_slice.slice(kern_feature_offset.value());
+    auto const& feature = *bit_cast<Feature const*>(feature_slice.data());
+
+    dbgln_if(OPENTYPE_GPOS_DEBUG, "Feature:");
+    dbgln_if(OPENTYPE_GPOS_DEBUG, "   featureParamsOffset: {}", feature.feature_params_offset);
+    dbgln_if(OPENTYPE_GPOS_DEBUG, "   lookupIndexCount: {}", feature.lookup_index_count);
+
+    for (size_t i = 0; i < feature.lookup_index_count; ++i) {
+        auto lookup_index = feature.lookup_list_indices[i];
+        dbgln_if(OPENTYPE_GPOS_DEBUG, "Lookup index: {}", lookup_index);
+        auto lookup_slice = lookup_list_slice.slice(lookup_list.lookup_offsets[lookup_index]);
+        auto const& lookup = *bit_cast<Lookup const*>(lookup_slice.data());
+
+        dbgln_if(OPENTYPE_GPOS_DEBUG, "Lookup:");
+        dbgln_if(OPENTYPE_GPOS_DEBUG, "  lookupType: {}", lookup.lookup_type);
+        dbgln_if(OPENTYPE_GPOS_DEBUG, "  lookupFlag: {}", lookup.lookup_flag);
+        dbgln_if(OPENTYPE_GPOS_DEBUG, "  subtableCount: {}", lookup.subtable_count);
+
+        // NOTE: We only support lookup type 2 (Pair adjustment) at the moment.
+        if (lookup.lookup_type != 2) {
+            dbgln_if(OPENTYPE_GPOS_DEBUG, "FIXME: Implement GPOS lookup type {}", lookup.lookup_type);
+            continue;
+        }
+
+        for (size_t j = 0; j < lookup.subtable_count; ++j) {
+            auto pair_pos_format_offset = lookup.subtable_offsets[j];
+            auto pair_pos_format_slice = lookup_slice.slice(pair_pos_format_offset);
+
+            auto const& pair_pos_format = *bit_cast<BigEndian<u16> const*>(pair_pos_format_slice.data());
+
+            dbgln_if(OPENTYPE_GPOS_DEBUG, "PairPosFormat{}", pair_pos_format);
+
+            if (pair_pos_format == 1) {
+                auto const& pair_pos_format1 = *bit_cast<GPOS::PairPosFormat1 const*>(pair_pos_format_slice.data());
+
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   posFormat: {}", pair_pos_format1.pos_format);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   valueFormat1: {}", pair_pos_format1.value_format1);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   valueFormat2: {}", pair_pos_format1.value_format2);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   pairSetCount: {}", pair_pos_format1.pair_set_count);
+
+                auto get_coverage_index = [&](u16 glyph_id, Offset16 coverage_format_offset) -> Optional<u16> {
+                    auto coverage_format_slice = pair_pos_format_slice.slice(coverage_format_offset);
+                    auto const& coverage_format = *bit_cast<BigEndian<u16> const*>(coverage_format_slice.data());
+
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "Coverage table format: {}", coverage_format);
+
+                    if (coverage_format == 1) {
+                        auto const& coverage_format1 = *bit_cast<CoverageFormat1 const*>(coverage_format_slice.data());
+
+                        for (size_t k = 0; k < coverage_format1.glyph_count; ++k)
+                            if (coverage_format1.glyph_array[k] == glyph_id)
+                                return k;
+
+                        dbgln_if(OPENTYPE_GPOS_DEBUG, "Glyph ID {} not covered", glyph_id);
+                        return {};
+                    }
+
+                    else if (coverage_format == 2) {
+                        auto const& coverage_format2 = *bit_cast<CoverageFormat2 const*>(coverage_format_slice.data());
+
+                        for (size_t k = 0; k < coverage_format2.range_count; ++k) {
+                            auto range_record = coverage_format2.range_records[k];
+                            if ((range_record.start_glyph_id <= glyph_id) && (glyph_id <= range_record.end_glyph_id))
+                                return range_record.start_coverage_index + glyph_id - range_record.start_glyph_id;
+                        }
+                        dbgln_if(OPENTYPE_GPOS_DEBUG, "Glyph ID {} not covered", glyph_id);
+                        return {};
+                    }
+
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "No valid coverage table for format {}", coverage_format);
+                    return {};
+                };
+
+                auto coverage_index = get_coverage_index(left_glyph_id, pair_pos_format1.coverage_offset);
+
+                if (!coverage_index.has_value()) {
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "Glyph ID not covered by table");
+                    continue;
+                }
+
+                size_t value1_size = popcount(static_cast<u32>(pair_pos_format1.value_format1 & 0xff)) * sizeof(u16);
+                size_t value2_size = popcount(static_cast<u32>(pair_pos_format1.value_format2 & 0xff)) * sizeof(u16);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "ValueSizes: {}, {}", value1_size, value2_size);
+
+                // Manually iterate over the PairSet table, as the size of each PairValueRecord is not known at compile time.
+                auto pair_set_offset = pair_pos_format1.pair_set_offsets[coverage_index.value()];
+                auto pair_set_slice = pair_pos_format_slice.slice(pair_set_offset);
+
+                FixedMemoryStream stream(pair_set_slice);
+
+                auto pair_value_count = stream.read_value<BigEndian<u16>>().release_value_but_fixme_should_propagate_errors();
+
+                bool found_matching_glyph = false;
+                for (size_t k = 0; k < pair_value_count; ++k) {
+                    auto second_glyph = stream.read_value<BigEndian<u16>>().release_value_but_fixme_should_propagate_errors();
+
+                    if (right_glyph_id == second_glyph) {
+                        dbgln_if(OPENTYPE_GPOS_DEBUG, "Found matching second glyph {}", second_glyph);
+                        found_matching_glyph = true;
+                        break;
+                    }
+
+                    (void)stream.discard(value1_size + value2_size).release_value_but_fixme_should_propagate_errors();
+                }
+
+                if (!found_matching_glyph) {
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "Did not find second glyph matching {}", right_glyph_id);
+                    continue;
+                }
+
+                [[maybe_unused]] auto value_record1 = read_value_record(pair_pos_format1.value_format1, stream);
+                [[maybe_unused]] auto value_record2 = read_value_record(pair_pos_format1.value_format2, stream);
+
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "Returning x advance {}", value_record1.x_advance);
+                return value_record1.x_advance;
+            }
+
+            else if (pair_pos_format == 2) {
+                auto const& pair_pos_format2 = *bit_cast<GPOS::PairPosFormat2 const*>(pair_pos_format_slice.data());
+
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   posFormat: {}", pair_pos_format2.pos_format);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   valueFormat1: {}", pair_pos_format2.value_format1);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   valueFormat2: {}", pair_pos_format2.value_format2);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   class1Count: {}", pair_pos_format2.class1_count);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "   class2Count: {}", pair_pos_format2.class2_count);
+
+                auto get_class = [&](u16 glyph_id, Offset16 glyph_def_offset) -> Optional<u16> {
+                    auto class_def_format_slice = pair_pos_format_slice.slice(glyph_def_offset);
+
+                    auto const& class_def_format = *bit_cast<BigEndian<u16> const*>(class_def_format_slice.data());
+                    if (class_def_format == 1) {
+                        dbgln_if(OPENTYPE_GPOS_DEBUG, "FIXME: Implement ClassDefFormat1");
+                        return {};
+                    }
+
+                    auto const& class_def_format2 = *bit_cast<ClassDefFormat2 const*>(class_def_format_slice.data());
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "ClassDefFormat2:");
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "  classFormat: {}", class_def_format2.class_format);
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "  classRangeCount: {}", class_def_format2.class_range_count);
+
+                    for (size_t i = 0; i < class_def_format2.class_range_count; ++i) {
+                        auto const& range = class_def_format2.class_range_records[i];
+                        if (glyph_id >= range.start_glyph_id && glyph_id <= range.end_glyph_id) {
+                            dbgln_if(OPENTYPE_GPOS_DEBUG, "Found class {} for glyph ID {}", range.class_, glyph_id);
+                            return range.class_;
+                        }
+                    }
+
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "No class found for glyph {}", glyph_id);
+                    return {};
+                };
+
+                auto left_class = get_class(left_glyph_id, pair_pos_format2.class_def1_offset);
+                auto right_class = get_class(right_glyph_id, pair_pos_format2.class_def2_offset);
+
+                if (!left_class.has_value() || !right_class.has_value()) {
+                    dbgln_if(OPENTYPE_GPOS_DEBUG, "Need glyph class for both sides");
+                    continue;
+                }
+
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "Classes: {}, {}", left_class.value(), right_class.value());
+
+                size_t value1_size = popcount(static_cast<u32>(pair_pos_format2.value_format1 & 0xff)) * sizeof(u16);
+                size_t value2_size = popcount(static_cast<u32>(pair_pos_format2.value_format2 & 0xff)) * sizeof(u16);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "ValueSizes: {}, {}", value1_size, value2_size);
+                size_t class2_record_size = value1_size + value2_size;
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "Class2RecordSize: {}", class2_record_size);
+                size_t class1_record_size = pair_pos_format2.class2_count * class2_record_size;
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "Class1RecordSize: {}", class1_record_size);
+                size_t item_offset = (left_class.value() * class1_record_size) + (right_class.value() * class2_record_size);
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "Item offset: {}", item_offset);
+
+                auto item_slice = pair_pos_format_slice.slice(sizeof(PairPosFormat2) + item_offset);
+                FixedMemoryStream stream(item_slice);
+
+                [[maybe_unused]] auto value_record1 = read_value_record(pair_pos_format2.value_format1, stream);
+                [[maybe_unused]] auto value_record2 = read_value_record(pair_pos_format2.value_format2, stream);
+
+                dbgln_if(OPENTYPE_GPOS_DEBUG, "Returning x advance {}", value_record1.x_advance);
+                return value_record1.x_advance;
+            }
+        }
+    }
+
+    (void)left_glyph_id;
+    (void)right_glyph_id;
+    return {};
 }
 
 }

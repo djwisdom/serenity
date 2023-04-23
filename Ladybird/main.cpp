@@ -5,21 +5,23 @@
  */
 
 #include "BrowserWindow.h"
+#include "HelperProcess.h"
 #include "Settings.h"
 #include "Utilities.h"
+#include "WebContentView.h"
+#include <AK/OwnPtr.h>
 #include <Browser/CookieJar.h>
 #include <Browser/Database.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/EventLoop.h>
-#include <LibCore/File.h>
-#include <LibCore/Stream.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibMain/Main.h>
 #include <LibSQL/SQLClient.h>
 #include <QApplication>
 
-Browser::Settings* s_settings;
+AK::OwnPtr<Browser::Settings> s_settings;
 
 static ErrorOr<void> handle_attached_debugger()
 {
@@ -28,8 +30,8 @@ static ErrorOr<void> handle_attached_debugger()
     // incorrectly forwards the signal to us even when it's set to
     // "nopass". See https://sourceware.org/bugzilla/show_bug.cgi?id=9425
     // for details.
-    auto unbuffered_status_file = TRY(Core::Stream::File::open("/proc/self/status"sv, Core::Stream::OpenMode::Read));
-    auto status_file = TRY(Core::Stream::BufferedFile::create(move(unbuffered_status_file)));
+    auto unbuffered_status_file = TRY(Core::File::open("/proc/self/status"sv, Core::File::OpenMode::Read));
+    auto status_file = TRY(Core::BufferedFile::create(move(unbuffered_status_file)));
     auto buffer = TRY(ByteBuffer::create_uninitialized(4096));
     while (TRY(status_file->can_read_line())) {
         auto line = TRY(status_file->read_line(buffer));
@@ -55,9 +57,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     TRY(handle_attached_debugger());
 
-    auto sql_client = TRY(SQL::SQLClient::launch_server_and_create_client("./SQLServer/SQLServer"sv));
-    auto database = TRY(Browser::Database::create(move(sql_client)));
-
     QApplication app(arguments.argc, arguments.argv);
 
     platform_init();
@@ -68,29 +67,48 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     StringView raw_url;
     StringView webdriver_content_ipc_path;
+    bool enable_callgrind_profiling = false;
+    bool disable_sql_database = false;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("The Ladybird web browser :^)");
     args_parser.add_positional_argument(raw_url, "URL to open", "url", Core::ArgsParser::Required::No);
     args_parser.add_option(webdriver_content_ipc_path, "Path to WebDriver IPC for WebContent", "webdriver-content-path", 0, "path");
+    args_parser.add_option(enable_callgrind_profiling, "Enable Callgrind profiling", "enable-callgrind-profiling", 'P');
+    args_parser.add_option(disable_sql_database, "Disable SQL database", "disable-sql-database", 0);
     args_parser.parse(arguments);
 
-    auto cookie_jar = TRY(Browser::CookieJar::create(*database));
+    auto get_formatted_url = [&](StringView const& raw_url) -> ErrorOr<URL> {
+        URL url = raw_url;
+        if (FileSystem::exists(raw_url))
+            url = URL::create_with_file_scheme(TRY(FileSystem::real_path(raw_url)).to_deprecated_string());
+        else if (!url.is_valid())
+            url = DeprecatedString::formatted("http://{}", raw_url);
+        return url;
+    };
 
-    BrowserWindow window(cookie_jar, webdriver_content_ipc_path);
-    s_settings = new Browser::Settings(&window);
+    RefPtr<Browser::Database> database;
+
+    if (!disable_sql_database) {
+        auto sql_server_paths = TRY(get_paths_for_helper_process("SQLServer"sv));
+        auto sql_client = TRY(SQL::SQLClient::launch_server_and_create_client(move(sql_server_paths)));
+        database = TRY(Browser::Database::create(move(sql_client)));
+    }
+
+    auto cookie_jar = database ? TRY(Browser::CookieJar::create(*database)) : Browser::CookieJar::create();
+
+    s_settings = adopt_own_if_nonnull(new Browser::Settings());
+    BrowserWindow window(cookie_jar, webdriver_content_ipc_path, enable_callgrind_profiling ? WebView::EnableCallgrindProfiling::Yes : WebView::EnableCallgrindProfiling::No);
     window.setWindowTitle("Ladybird");
     window.resize(800, 600);
     window.show();
 
-    URL url = raw_url;
-    if (Core::File::exists(raw_url))
-        url = URL::create_with_file_scheme(Core::File::real_path_for(raw_url));
-    else if (!url.is_valid())
-        url = DeprecatedString::formatted("http://{}", raw_url);
-
-    if (url.is_valid())
+    if (auto url = TRY(get_formatted_url(raw_url)); url.is_valid()) {
         window.view().load(url);
+    } else if (!s_settings->homepage().isEmpty()) {
+        auto home_url = TRY(ak_string_from_qstring(s_settings->homepage()));
+        window.view().load(TRY(get_formatted_url(home_url.bytes_as_string_view())));
+    }
 
     return app.exec();
 }

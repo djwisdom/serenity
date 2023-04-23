@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <LibWeb/ARIA/Roles.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
 
@@ -41,8 +42,15 @@ public:
     // https://html.spec.whatwg.org/multipage/forms.html#category-label
     virtual bool is_labelable() const override { return true; }
 
+    virtual void reset_algorithm() override;
+
+    // https://www.w3.org/TR/html-aria/#el-output
+    virtual Optional<ARIA::Role> default_role() const override { return ARIA::Role::status; }
+
 private:
     HTMLOutputElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
 };
 
 }

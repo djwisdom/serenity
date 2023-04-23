@@ -13,16 +13,24 @@
 
 namespace Web::DOM {
 
-JS::NonnullGCPtr<NamedNodeMap> NamedNodeMap::create(Element& element)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<NamedNodeMap>> NamedNodeMap::create(Element& element)
 {
     auto& realm = element.realm();
-    return realm.heap().allocate<NamedNodeMap>(realm, element);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<NamedNodeMap>(realm, element));
 }
 
 NamedNodeMap::NamedNodeMap(Element& element)
-    : Bindings::LegacyPlatformObject(Bindings::cached_web_prototype(element.realm(), "NamedNodeMap"))
+    : Bindings::LegacyPlatformObject(element.realm())
     , m_element(element)
 {
+}
+
+JS::ThrowCompletionOr<void> NamedNodeMap::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::NamedNodeMapPrototype>(realm, "NamedNodeMap"));
+
+    return {};
 }
 
 void NamedNodeMap::visit_edges(Cell::Visitor& visitor)
@@ -87,13 +95,13 @@ Attr const* NamedNodeMap::get_named_item_ns(StringView namespace_, StringView lo
 }
 
 // https://dom.spec.whatwg.org/#dom-namednodemap-setnameditem
-WebIDL::ExceptionOr<Attr const*> NamedNodeMap::set_named_item(Attr& attribute)
+WebIDL::ExceptionOr<JS::GCPtr<Attr>> NamedNodeMap::set_named_item(Attr& attribute)
 {
     return set_attribute(attribute);
 }
 
 // https://dom.spec.whatwg.org/#dom-namednodemap-setnameditemns
-WebIDL::ExceptionOr<Attr const*> NamedNodeMap::set_named_item_ns(Attr& attribute)
+WebIDL::ExceptionOr<JS::GCPtr<Attr>> NamedNodeMap::set_named_item_ns(Attr& attribute)
 {
     return set_attribute(attribute);
 }
@@ -145,7 +153,7 @@ Attr const* NamedNodeMap::get_attribute(StringView qualified_name, size_t* item_
     // 2. Return the first attribute in element’s attribute list whose qualified name is qualifiedName; otherwise null.
     for (auto const& attribute : m_attributes) {
         if (compare_as_lowercase) {
-            if (attribute->name().equals_ignoring_case(qualified_name))
+            if (attribute->name().equals_ignoring_ascii_case(qualified_name))
                 return attribute.ptr();
         } else {
             if (attribute->name() == qualified_name)
@@ -187,7 +195,7 @@ Attr const* NamedNodeMap::get_attribute_ns(StringView namespace_, StringView loc
 }
 
 // https://dom.spec.whatwg.org/#concept-element-attributes-set
-WebIDL::ExceptionOr<Attr const*> NamedNodeMap::set_attribute(Attr& attribute)
+WebIDL::ExceptionOr<JS::GCPtr<Attr>> NamedNodeMap::set_attribute(Attr& attribute)
 {
     // 1. If attr’s element is neither null nor element, throw an "InUseAttributeError" DOMException.
     if ((attribute.owner_element() != nullptr) && (attribute.owner_element() != &associated_element()))
@@ -293,7 +301,7 @@ Attr const* NamedNodeMap::remove_attribute_ns(StringView namespace_, StringView 
     return attribute;
 }
 
-JS::Value NamedNodeMap::item_value(size_t index) const
+WebIDL::ExceptionOr<JS::Value> NamedNodeMap::item_value(size_t index) const
 {
     auto const* node = item(index);
     if (!node)
@@ -301,7 +309,7 @@ JS::Value NamedNodeMap::item_value(size_t index) const
     return node;
 }
 
-JS::Value NamedNodeMap::named_item_value(FlyString const& name) const
+WebIDL::ExceptionOr<JS::Value> NamedNodeMap::named_item_value(DeprecatedFlyString const& name) const
 {
     auto const* node = get_named_item(name);
     if (!node)

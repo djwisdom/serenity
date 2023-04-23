@@ -52,16 +52,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_double_buffering_enabled(false);
     window->set_title("Game Of Life");
 
-    auto main_widget = TRY(window->try_set_main_widget<GUI::Widget>());
-    main_widget->load_from_gml(game_of_life_gml);
+    auto main_widget = TRY(window->set_main_widget<GUI::Widget>());
+    TRY(main_widget->load_from_gml(game_of_life_gml));
     main_widget->set_fill_with_background_color(true);
 
     auto& main_toolbar = *main_widget->find_descendant_of_type_named<GUI::Toolbar>("toolbar");
     main_toolbar.layout()->set_margins({ 0, 6 });
 
     auto& board_widget_container = *main_widget->find_descendant_of_type_named<GUI::Widget>("board_widget_container");
-    auto board_layout = TRY(board_widget_container.try_set_layout<GUI::VerticalBoxLayout>());
-    board_layout->set_spacing(0);
+    TRY(board_widget_container.try_set_layout<GUI::VerticalBoxLayout>(GUI::Margins {}, 0));
     auto board_widget = TRY(board_widget_container.try_add<BoardWidget>(board_rows, board_columns));
     board_widget->randomize_cells();
 
@@ -91,8 +90,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     interval_spinbox.set_value(150);
 
-    auto paused_icon = TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/pause.png"sv));
-    auto play_icon = TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/play.png"sv));
+    auto paused_icon = TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/pause.png"sv));
+    auto play_icon = TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/play.png"sv));
 
     auto toggle_running_action = GUI::Action::create("&Toggle Running", { Mod_None, Key_Return }, *play_icon, [&](GUI::Action&) {
         board_widget->set_running(!board_widget->is_running());
@@ -101,33 +100,33 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     toggle_running_action->set_checkable(true);
     auto toggle_running_toolbar_button = TRY(main_toolbar.try_add_action(toggle_running_action));
 
-    auto run_one_generation_action = GUI::Action::create("Run &Next Generation", { Mod_Ctrl, Key_Equal }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/go-forward.png"sv)), [&](const GUI::Action&) {
+    auto run_one_generation_action = GUI::Action::create("Run &Next Generation", { Mod_Ctrl, Key_Equal }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/go-forward.png"sv)), [&](const GUI::Action&) {
         statusbar.set_text(click_tip);
         board_widget->run_generation();
     });
     (void)TRY(main_toolbar.try_add_action(run_one_generation_action));
 
-    auto clear_board_action = GUI::Action::create("&Clear board", { Mod_Ctrl, Key_N }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/delete.png"sv)), [&](auto&) {
+    auto clear_board_action = GUI::Action::create("&Clear board", { Mod_Ctrl, Key_N }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/delete.png"sv)), [&](auto&) {
         statusbar.set_text(click_tip);
         board_widget->clear_cells();
         board_widget->update();
     });
     (void)TRY(main_toolbar.try_add_action(clear_board_action));
 
-    auto randomize_cells_action = GUI::Action::create("&Randomize board", { Mod_Ctrl, Key_R }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png"sv)), [&](auto&) {
+    auto randomize_cells_action = GUI::Action::create("&Randomize board", { Mod_Ctrl, Key_R }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/reload.png"sv)), [&](auto&) {
         statusbar.set_text(click_tip);
         board_widget->randomize_cells();
         board_widget->update();
     });
     (void)TRY(main_toolbar.try_add_action(randomize_cells_action));
 
-    auto rotate_pattern_action = GUI::Action::create("&Rotate pattern", { 0, Key_R }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/redo.png"sv)), [&](auto&) {
+    auto rotate_pattern_action = GUI::Action::create("&Rotate pattern", { 0, Key_R }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/redo.png"sv)), [&](auto&) {
         board_widget->selected_pattern()->rotate_clockwise();
     });
     rotate_pattern_action->set_enabled(false);
     (void)TRY(main_toolbar.try_add_action(rotate_pattern_action));
 
-    auto game_menu = TRY(window->try_add_menu("&Game"));
+    auto game_menu = TRY(window->try_add_menu("&Game"_short_string));
 
     TRY(game_menu->try_add_action(clear_board_action));
     TRY(game_menu->try_add_action(randomize_cells_action));
@@ -139,7 +138,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         GUI::Application::the()->quit();
     })));
 
-    auto help_menu = TRY(window->try_add_menu("&Help"));
+    auto help_menu = TRY(window->try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man6/GameOfLife.md"), "/bin/Help");

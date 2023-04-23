@@ -9,14 +9,13 @@
 #include "GraphWidget.h"
 #include <AK/JsonObject.h>
 #include <AK/NumberFormat.h>
-#include <LibCore/File.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/Object.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Label.h>
 #include <LibGUI/Painter.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/StylePainter.h>
-#include <stdlib.h>
 
 REGISTER_WIDGET(SystemMonitor, MemoryStatsWidget)
 
@@ -40,13 +39,11 @@ MemoryStatsWidget::MemoryStatsWidget(GraphWidget* graph)
     VERIFY(!s_the);
     s_the = this;
 
-    REGISTER_STRING_PROPERTY("memory_graph", graph_widget_name, set_graph_widget_via_name);
+    REGISTER_DEPRECATED_STRING_PROPERTY("memory_graph", graph_widget_name, set_graph_widget_via_name);
 
     set_fixed_height(110);
 
-    set_layout<GUI::VerticalBoxLayout>();
-    layout()->set_margins({ 8, 0, 0 });
-    layout()->set_spacing(3);
+    set_layout<GUI::VerticalBoxLayout>(GUI::Margins { 8, 0, 0 }, 3);
 
     auto build_widgets_for_label = [this](DeprecatedString const& description) -> RefPtr<GUI::Label> {
         auto& container = add<GUI::Widget>();
@@ -105,7 +102,7 @@ static inline u64 page_count_to_bytes(size_t count)
 
 void MemoryStatsWidget::refresh()
 {
-    auto proc_memstat = Core::File::construct("/sys/kernel/memstat");
+    auto proc_memstat = Core::DeprecatedFile::construct("/sys/kernel/memstat");
     if (!proc_memstat->open(Core::OpenMode::ReadOnly))
         VERIFY_NOT_REACHED();
 
@@ -113,14 +110,14 @@ void MemoryStatsWidget::refresh()
     auto json_result = JsonValue::from_string(file_contents).release_value_but_fixme_should_propagate_errors();
     auto const& json = json_result.as_object();
 
-    u32 kmalloc_allocated = json.get("kmalloc_allocated"sv).to_u32();
-    u32 kmalloc_available = json.get("kmalloc_available"sv).to_u32();
-    u64 physical_allocated = json.get("physical_allocated"sv).to_u64();
-    u64 physical_available = json.get("physical_available"sv).to_u64();
-    u64 physical_committed = json.get("physical_committed"sv).to_u64();
-    u64 physical_uncommitted = json.get("physical_uncommitted"sv).to_u64();
-    u32 kmalloc_call_count = json.get("kmalloc_call_count"sv).to_u32();
-    u32 kfree_call_count = json.get("kfree_call_count"sv).to_u32();
+    u32 kmalloc_allocated = json.get_u32("kmalloc_allocated"sv).value_or(0);
+    u32 kmalloc_available = json.get_u32("kmalloc_available"sv).value_or(0);
+    u64 physical_allocated = json.get_u64("physical_allocated"sv).value_or(0);
+    u64 physical_available = json.get_u64("physical_available"sv).value_or(0);
+    u64 physical_committed = json.get_u64("physical_committed"sv).value_or(0);
+    u64 physical_uncommitted = json.get_u64("physical_uncommitted"sv).value_or(0);
+    u32 kmalloc_call_count = json.get_u32("kmalloc_call_count"sv).value_or(0);
+    u32 kfree_call_count = json.get_u32("kfree_call_count"sv).value_or(0);
 
     u64 kmalloc_bytes_total = kmalloc_allocated + kmalloc_available;
     u64 physical_pages_total = physical_allocated + physical_available;

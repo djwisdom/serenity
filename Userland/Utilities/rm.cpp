@@ -7,8 +7,8 @@
 #include <AK/StringBuilder.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -32,7 +32,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     if (!force && paths.is_empty()) {
-        args_parser.print_usage(stderr, arguments.argv[0]);
+        args_parser.print_usage(stderr, arguments.strings[0]);
         return 1;
     }
 
@@ -43,10 +43,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             continue;
         }
 
-        auto result = Core::File::remove(path, recursive ? Core::File::RecursionMode::Allowed : Core::File::RecursionMode::Disallowed);
+        auto result = FileSystem::remove(path, recursive ? FileSystem::RecursionMode::Allowed : FileSystem::RecursionMode::Disallowed);
 
         if (result.is_error()) {
-            auto error = result.error();
+            auto error = result.release_error();
 
             if (force && error.is_errno() && error.code() == ENOENT)
                 continue;

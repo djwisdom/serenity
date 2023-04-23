@@ -7,7 +7,7 @@
 #include "SpreadsheetWidget.h"
 #include "CellSyntaxHighlighter.h"
 #include "HelpWindow.h"
-#include "LibFileSystemAccessClient/Client.h"
+#include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/Application.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
@@ -27,11 +27,11 @@
 
 namespace Spreadsheet {
 
-SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVector<Sheet>&& sheets, bool should_add_sheet_if_empty)
+SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, Vector<NonnullRefPtr<Sheet>>&& sheets, bool should_add_sheet_if_empty)
     : m_workbook(make<Workbook>(move(sheets), parent_window))
 {
     set_fill_with_background_color(true);
-    set_layout<GUI::VerticalBoxLayout>().set_margins(2);
+    set_layout<GUI::VerticalBoxLayout>(2);
 
     auto& toolbar_container = add<GUI::ToolbarContainer>();
     auto& toolbar = toolbar_container.add<GUI::Toolbar>();
@@ -39,13 +39,13 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
     auto& container = add<GUI::VerticalSplitter>();
 
     auto& top_bar = container.add<GUI::Frame>();
-    top_bar.set_layout<GUI::HorizontalBoxLayout>().set_spacing(1);
+    top_bar.set_layout<GUI::HorizontalBoxLayout>(GUI::Margins {}, 1);
     top_bar.set_preferred_height(26);
     auto& current_cell_label = top_bar.add<GUI::Label>("");
     current_cell_label.set_fixed_width(50);
 
-    auto& help_button = top_bar.add<GUI::Button>("");
-    help_button.set_icon(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-help.png"sv).release_value_but_fixme_should_propagate_errors());
+    auto& help_button = top_bar.add<GUI::Button>();
+    help_button.set_icon(Gfx::Bitmap::load_from_file("/res/icons/16x16/app-help.png"sv).release_value_but_fixme_should_propagate_errors());
     help_button.set_tooltip("Functions Help");
     help_button.set_fixed_size(20, 20);
     help_button.on_click = [&](auto) {
@@ -81,11 +81,11 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
     m_inline_documentation_window->set_rect(m_cell_value_editor->rect().translated(0, m_cell_value_editor->height() + 7).inflated(6, 6));
     m_inline_documentation_window->set_window_type(GUI::WindowType::Tooltip);
     m_inline_documentation_window->set_resizable(false);
-    auto& inline_widget = m_inline_documentation_window->set_main_widget<GUI::Frame>();
-    inline_widget.set_fill_with_background_color(true);
-    inline_widget.set_layout<GUI::VerticalBoxLayout>().set_margins(4);
-    inline_widget.set_frame_shape(Gfx::FrameShape::Box);
-    m_inline_documentation_label = inline_widget.add<GUI::Label>();
+    auto inline_widget = m_inline_documentation_window->set_main_widget<GUI::Frame>().release_value_but_fixme_should_propagate_errors();
+    inline_widget->set_fill_with_background_color(true);
+    inline_widget->set_layout<GUI::VerticalBoxLayout>(4);
+    inline_widget->set_frame_shape(Gfx::FrameShape::Box);
+    m_inline_documentation_label = inline_widget->add<GUI::Label>();
     m_inline_documentation_label->set_fill_with_background_color(true);
     m_inline_documentation_label->set_autosize(false);
     m_inline_documentation_label->set_text_alignment(Gfx::TextAlignment::CenterLeft);
@@ -100,18 +100,19 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
         auto* sheet_ptr = m_tab_context_menu_sheet_view->sheet_if_available();
         VERIFY(sheet_ptr); // How did we get here without a sheet?
         auto& sheet = *sheet_ptr;
-        DeprecatedString new_name;
-        if (GUI::InputBox::show(window(), new_name, DeprecatedString::formatted("New name for '{}'", sheet.name()), "Rename sheet"sv) == GUI::Dialog::ExecResult::OK) {
+        String new_name = String::from_deprecated_string(sheet.name()).release_value_but_fixme_should_propagate_errors();
+        if (GUI::InputBox::show(window(), new_name, {}, "Rename sheet"sv, GUI::InputType::NonemptyText, "Name"sv) == GUI::Dialog::ExecResult::OK) {
             sheet.set_name(new_name);
             sheet.update();
             m_tab_widget->set_tab_title(static_cast<GUI::Widget&>(*m_tab_context_menu_sheet_view), new_name);
         }
     });
     m_tab_context_menu->add_action(*m_rename_action);
-    m_tab_context_menu->add_action(GUI::Action::create("Add new sheet...", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/new-tab.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
-        DeprecatedString name;
-        if (GUI::InputBox::show(window(), name, "Name for new sheet"sv, "Create sheet"sv) == GUI::Dialog::ExecResult::OK) {
-            NonnullRefPtrVector<Sheet> new_sheets;
+    m_tab_context_menu->add_action(GUI::Action::create("Add new sheet...", Gfx::Bitmap::load_from_file("/res/icons/16x16/new-tab.png"sv).release_value_but_fixme_should_propagate_errors(), [this](auto&) {
+        String name;
+        auto icon = Gfx::Bitmap::load_from_file("/res/icons/32x32/filetype-spreadsheet.png"sv).release_value_but_fixme_should_propagate_errors();
+        if (GUI::InputBox::show(window(), name, "Enter a name:"sv, "New sheet"sv, GUI::InputType::NonemptyText, {}, move(icon)) == GUI::Dialog::ExecResult::OK) {
+            Vector<NonnullRefPtr<Sheet>> new_sheets;
             new_sheets.append(m_workbook->add_sheet(name));
             setup_tabs(move(new_sheets));
         }
@@ -119,7 +120,7 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
 
     setup_tabs(m_workbook->sheets());
 
-    m_new_action = GUI::Action::create("Add New Sheet", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/new-tab.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+    m_new_action = GUI::Action::create("Add New Sheet", Gfx::Bitmap::load_from_file("/res/icons/16x16/new-tab.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
         add_sheet();
     });
 
@@ -127,18 +128,18 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
         if (!request_close())
             return;
 
-        auto response = FileSystemAccessClient::Client::the().try_open_file(window());
+        auto response = FileSystemAccessClient::Client::the().open_file(window());
         if (response.is_error())
             return;
-        load_file(*response.value());
+        load_file(response.value().filename(), response.value().stream());
     });
 
     m_import_action = GUI::Action::create("Import sheets...", [&](auto&) {
-        auto response = FileSystemAccessClient::Client::the().try_open_file(window());
+        auto response = FileSystemAccessClient::Client::the().open_file(window());
         if (response.is_error())
             return;
 
-        import_sheets(*response.value());
+        import_sheets(response.value().filename(), response.value().stream());
     });
 
     m_save_action = GUI::CommonActions::make_save_action([&](auto&) {
@@ -147,18 +148,18 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
             return;
         }
 
-        auto response = FileSystemAccessClient::Client::the().try_request_file(window(), current_filename(), Core::OpenMode::WriteOnly);
+        auto response = FileSystemAccessClient::Client::the().request_file(window(), current_filename(), Core::File::OpenMode::Write);
         if (response.is_error())
             return;
-        save(*response.value());
+        save(response.value().filename(), response.value().stream());
     });
 
     m_save_as_action = GUI::CommonActions::make_save_as_action([&](auto&) {
         DeprecatedString name = "workbook";
-        auto response = FileSystemAccessClient::Client::the().try_save_file_deprecated(window(), name, "sheets");
+        auto response = FileSystemAccessClient::Client::the().save_file(window(), name, "sheets");
         if (response.is_error())
             return;
-        save(*response.value());
+        save(response.value().filename(), response.value().stream());
         update_window_title();
     });
 
@@ -252,13 +253,13 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
     m_redo_action->set_enabled(false);
 
     m_change_background_color_action = GUI::Action::create(
-        "&Change Background Color", { Mod_Ctrl, Key_B }, Gfx::Bitmap::try_load_from_file("/res/icons/pixelpaint/bucket.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+        "&Change Background Color", { Mod_Ctrl, Key_B }, Gfx::Bitmap::load_from_file("/res/icons/pixelpaint/bucket.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
             change_cell_static_color_format(Spreadsheet::FormatType::Background);
         },
         window());
 
     m_change_foreground_color_action = GUI::Action::create(
-        "&Change Foreground Color", { Mod_Ctrl, Key_T }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/text-color.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+        "&Change Foreground Color", { Mod_Ctrl, Key_T }, Gfx::Bitmap::load_from_file("/res/icons/16x16/text-color.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
             change_cell_static_color_format(Spreadsheet::FormatType::Foreground);
         },
         window());
@@ -267,7 +268,7 @@ SpreadsheetWidget::SpreadsheetWidget(GUI::Window& parent_window, NonnullRefPtrVe
     m_change_foreground_color_action->set_enabled(false);
 
     m_functions_help_action = GUI::Action::create(
-        "&Functions Help", Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-help.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
+        "&Functions Help", Gfx::Bitmap::load_from_file("/res/icons/16x16/app-help.png"sv).release_value_but_fixme_should_propagate_errors(), [&](auto&) {
             if (auto* worksheet_ptr = current_worksheet_if_available()) {
                 auto docs = worksheet_ptr->gather_documentation();
                 auto help_window = Spreadsheet::HelpWindow::the(window());
@@ -330,10 +331,10 @@ void SpreadsheetWidget::clipboard_content_did_change(DeprecatedString const& mim
         m_paste_action->set_enabled(!sheet->selected_cells().is_empty() && mime_type.starts_with("text/"sv));
 }
 
-void SpreadsheetWidget::setup_tabs(NonnullRefPtrVector<Sheet> new_sheets)
+void SpreadsheetWidget::setup_tabs(Vector<NonnullRefPtr<Sheet>> new_sheets)
 {
     for (auto& sheet : new_sheets) {
-        auto& new_view = m_tab_widget->add_tab<SpreadsheetView>(sheet.name(), sheet);
+        auto& new_view = m_tab_widget->add_tab<SpreadsheetView>(String::from_deprecated_string(sheet->name()).release_value_but_fixme_should_propagate_errors(), sheet);
         new_view.model()->on_cell_data_change = [&](auto& cell, auto& previous_data) {
             undo_stack().push(make<CellsUndoCommand>(cell, previous_data));
             window()->set_modified(true);
@@ -493,20 +494,21 @@ void SpreadsheetWidget::change_cell_static_color_format(Spreadsheet::FormatType 
     }
 }
 
-void SpreadsheetWidget::save(Core::File& file)
+void SpreadsheetWidget::save(String const& filename, Core::File& file)
 {
-    auto result = m_workbook->write_to_file(file);
+    auto result = m_workbook->write_to_file(filename, file);
     if (result.is_error()) {
-        GUI::MessageBox::show_error(window(), result.error());
+        GUI::MessageBox::show_error(window(), DeprecatedString::formatted("Cannot save file: {}", result.error()));
         return;
     }
     undo_stack().set_current_unmodified();
     window()->set_modified(false);
+    GUI::Application::the()->set_most_recently_open_file(filename);
 }
 
-void SpreadsheetWidget::load_file(Core::File& file)
+void SpreadsheetWidget::load_file(String const& filename, Core::File& file)
 {
-    auto result = m_workbook->open_file(file);
+    auto result = m_workbook->open_file(filename, file);
     if (result.is_error()) {
         GUI::MessageBox::show_error(window(), result.error());
         return;
@@ -521,11 +523,12 @@ void SpreadsheetWidget::load_file(Core::File& file)
 
     setup_tabs(m_workbook->sheets());
     update_window_title();
+    GUI::Application::the()->set_most_recently_open_file(filename);
 }
 
-void SpreadsheetWidget::import_sheets(Core::File& file)
+void SpreadsheetWidget::import_sheets(String const& filename, Core::File& file)
 {
-    auto result = m_workbook->import_file(file);
+    auto result = m_workbook->import_file(filename, file);
     if (result.is_error()) {
         GUI::MessageBox::show_error(window(), result.error());
         return;
@@ -570,7 +573,7 @@ void SpreadsheetWidget::add_sheet()
     name.append("Sheet"sv);
     name.appendff(" {}", m_workbook->sheets().size() + 1);
 
-    NonnullRefPtrVector<Sheet> new_sheets;
+    Vector<NonnullRefPtr<Sheet>> new_sheets;
     new_sheets.append(m_workbook->add_sheet(name.string_view()));
     setup_tabs(move(new_sheets));
 }
@@ -579,7 +582,7 @@ void SpreadsheetWidget::add_sheet(NonnullRefPtr<Sheet>&& sheet)
 {
     VERIFY(m_workbook == &sheet->workbook());
 
-    NonnullRefPtrVector<Sheet> new_sheets;
+    Vector<NonnullRefPtr<Sheet>> new_sheets;
     new_sheets.append(move(sheet));
     m_workbook->sheets().extend(new_sheets);
     setup_tabs(new_sheets);
@@ -644,30 +647,42 @@ void SpreadsheetWidget::clipboard_action(bool is_cut)
     GUI::Clipboard::the().set_data(text_builder.string_view().bytes(), "text/plain", move(metadata));
 }
 
-void SpreadsheetWidget::initialize_menubar(GUI::Window& window)
+ErrorOr<void> SpreadsheetWidget::initialize_menubar(GUI::Window& window)
 {
-    auto& file_menu = window.add_menu("&File");
-    file_menu.add_action(*m_new_action);
-    file_menu.add_action(*m_open_action);
-    file_menu.add_action(*m_save_action);
-    file_menu.add_action(*m_save_as_action);
-    file_menu.add_separator();
-    file_menu.add_action(*m_import_action);
-    file_menu.add_separator();
-    file_menu.add_action(*m_quit_action);
+    auto file_menu = TRY(window.try_add_menu("&File"_short_string));
+    TRY(file_menu->try_add_action(*m_new_action));
+    TRY(file_menu->try_add_action(*m_open_action));
+    TRY(file_menu->try_add_action(*m_save_action));
+    TRY(file_menu->try_add_action(*m_save_as_action));
+    TRY(file_menu->try_add_separator());
+    TRY(file_menu->try_add_action(*m_import_action));
+    TRY(file_menu->try_add_separator());
+    TRY(file_menu->add_recent_files_list([&](auto& action) {
+        if (!request_close())
+            return;
 
-    auto& edit_menu = window.add_menu("&Edit");
-    edit_menu.add_action(*m_undo_action);
-    edit_menu.add_action(*m_redo_action);
-    edit_menu.add_separator();
-    edit_menu.add_action(*m_cut_action);
-    edit_menu.add_action(*m_copy_action);
-    edit_menu.add_action(*m_paste_action);
-    edit_menu.add_action(*m_insert_emoji_action);
+        auto response = FileSystemAccessClient::Client::the().request_file_read_only_approved(&window, action.text());
+        if (response.is_error())
+            return;
+        load_file(response.value().filename(), response.value().stream());
+    }));
+    TRY(file_menu->try_add_action(*m_quit_action));
 
-    auto& help_menu = window.add_menu("&Help");
-    help_menu.add_action(*m_search_action);
-    help_menu.add_action(*m_functions_help_action);
-    help_menu.add_action(*m_about_action);
+    auto edit_menu = TRY(window.try_add_menu("&Edit"_short_string));
+    TRY(edit_menu->try_add_action(*m_undo_action));
+    TRY(edit_menu->try_add_action(*m_redo_action));
+    TRY(edit_menu->try_add_separator());
+    TRY(edit_menu->try_add_action(*m_cut_action));
+    TRY(edit_menu->try_add_action(*m_copy_action));
+    TRY(edit_menu->try_add_action(*m_paste_action));
+    TRY(edit_menu->try_add_action(*m_insert_emoji_action));
+
+    auto help_menu = TRY(window.try_add_menu("&Help"_short_string));
+    TRY(help_menu->try_add_action(*m_search_action));
+    TRY(help_menu->try_add_action(*m_functions_help_action));
+    TRY(help_menu->try_add_action(*m_about_action));
+
+    return {};
 }
+
 }

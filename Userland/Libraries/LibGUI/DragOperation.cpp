@@ -30,7 +30,7 @@ DragOperation::Outcome DragOperation::exec()
     Gfx::ShareableBitmap drag_bitmap;
     if (m_mime_data->has_format("image/x-raw-bitmap")) {
         auto data = m_mime_data->data("image/x-raw-bitmap");
-        auto bitmap = Gfx::Bitmap::try_create_from_serialized_byte_buffer(move(data)).release_value_but_fixme_should_propagate_errors();
+        auto bitmap = Gfx::Bitmap::create_from_serialized_byte_buffer(move(data)).release_value_but_fixme_should_propagate_errors();
         drag_bitmap = bitmap->to_shareable_bitmap();
     }
 
@@ -84,7 +84,7 @@ void DragOperation::set_bitmap(Gfx::Bitmap const* bitmap)
     if (!m_mime_data)
         m_mime_data = Core::MimeData::construct();
     if (bitmap)
-        m_mime_data->set_data("image/x-raw-bitmap", bitmap->serialize_to_byte_buffer());
+        m_mime_data->set_data("image/x-raw-bitmap", bitmap->serialize_to_byte_buffer().release_value_but_fixme_should_propagate_errors());
 }
 void DragOperation::set_data(DeprecatedString const& data_type, DeprecatedString const& data)
 {

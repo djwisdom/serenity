@@ -52,20 +52,34 @@ inline void replace_in_ordered_set(Vector<DeprecatedString>& set, StringView ite
 
 namespace Web::DOM {
 
-DOMTokenList* DOMTokenList::create(Element const& associated_element, FlyString associated_attribute)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<DOMTokenList>> DOMTokenList::create(Element& associated_element, DeprecatedFlyString associated_attribute)
 {
     auto& realm = associated_element.realm();
-    return realm.heap().allocate<DOMTokenList>(realm, associated_element, move(associated_attribute));
+    return MUST_OR_THROW_OOM(realm.heap().allocate<DOMTokenList>(realm, associated_element, move(associated_attribute)));
 }
 
 // https://dom.spec.whatwg.org/#ref-for-domtokenlist%E2%91%A0%E2%91%A2
-DOMTokenList::DOMTokenList(Element const& associated_element, FlyString associated_attribute)
-    : Bindings::LegacyPlatformObject(Bindings::cached_web_prototype(associated_element.realm(), "DOMTokenList"))
+DOMTokenList::DOMTokenList(Element& associated_element, DeprecatedFlyString associated_attribute)
+    : Bindings::LegacyPlatformObject(associated_element.realm())
     , m_associated_element(associated_element)
     , m_associated_attribute(move(associated_attribute))
 {
     auto value = associated_element.get_attribute(m_associated_attribute);
     associated_attribute_changed(value);
+}
+
+JS::ThrowCompletionOr<void> DOMTokenList::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::DOMTokenListPrototype>(realm, "DOMTokenList"));
+
+    return {};
+}
+
+void DOMTokenList::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_associated_element);
 }
 
 // https://dom.spec.whatwg.org/#ref-for-domtokenlist%E2%91%A0%E2%91%A1
@@ -202,10 +216,7 @@ WebIDL::ExceptionOr<bool> DOMTokenList::supports([[maybe_unused]] StringView tok
     // FIXME: Implement this fully when any use case defines supported tokens.
 
     // 1. If the associated attribute’s local name does not define supported tokens, throw a TypeError.
-    return WebIDL::SimpleException {
-        WebIDL::SimpleExceptionType::TypeError,
-        DeprecatedString::formatted("Attribute {} does not define any supported tokens", m_associated_attribute)
-    };
+    return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, String::formatted("Attribute {} does not define any supported tokens", m_associated_attribute).release_value_but_fixme_should_propagate_errors() };
 
     // 2. Let lowercase token be a copy of token, in ASCII lowercase.
     // 3. If lowercase token is present in supported tokens, return true.
@@ -217,7 +228,7 @@ DeprecatedString DOMTokenList::value() const
 {
     StringBuilder builder;
     builder.join(' ', m_token_set);
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 // https://dom.spec.whatwg.org/#ref-for-concept-element-attributes-set-value%E2%91%A2
@@ -254,7 +265,7 @@ void DOMTokenList::run_update_steps()
     MUST(associated_element->set_attribute(m_associated_attribute, value()));
 }
 
-JS::Value DOMTokenList::item_value(size_t index) const
+WebIDL::ExceptionOr<JS::Value> DOMTokenList::item_value(size_t index) const
 {
     auto const& string = item(index);
     if (string.is_null())

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2020, Emanuele Torre <torreemanuele6@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -13,15 +13,15 @@
 namespace JS {
 
 ConsoleObject::ConsoleObject(Realm& realm)
-    : Object(ConstructWithPrototypeTag::Tag, *realm.intrinsics().object_prototype())
+    : Object(ConstructWithPrototypeTag::Tag, realm.intrinsics().object_prototype())
     , m_console(make<Console>(realm))
 {
 }
 
-void ConsoleObject::initialize(Realm& realm)
+ThrowCompletionOr<void> ConsoleObject::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
     u8 attr = Attribute::Writable | Attribute::Enumerable | Attribute::Configurable;
     define_native_function(realm, vm.names.log, log, 0, attr);
     define_native_function(realm, vm.names.debug, debug, 0, attr);
@@ -39,6 +39,8 @@ void ConsoleObject::initialize(Realm& realm)
     define_native_function(realm, vm.names.time, time, 0, attr);
     define_native_function(realm, vm.names.timeLog, time_log, 0, attr);
     define_native_function(realm, vm.names.timeEnd, time_end, 0, attr);
+
+    return {};
 }
 
 // 1.1.6. log(...data), https://console.spec.whatwg.org/#log

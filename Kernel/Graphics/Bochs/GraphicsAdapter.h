@@ -24,8 +24,10 @@ class BochsGraphicsAdapter final : public GenericGraphicsAdapter
     friend class GraphicsManagement;
 
 public:
-    static NonnullLockRefPtr<BochsGraphicsAdapter> initialize(PCI::DeviceIdentifier const&);
+    static ErrorOr<bool> probe(PCI::DeviceIdentifier const&);
+    static ErrorOr<NonnullLockRefPtr<GenericGraphicsAdapter>> create(PCI::DeviceIdentifier const&);
     virtual ~BochsGraphicsAdapter() = default;
+    virtual StringView device_name() const override { return "BochsGraphicsAdapter"sv; }
 
 private:
     ErrorOr<void> initialize_adapter(PCI::DeviceIdentifier const&);

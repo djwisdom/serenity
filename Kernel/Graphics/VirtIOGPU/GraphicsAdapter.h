@@ -37,9 +37,12 @@ class VirtIOGraphicsAdapter final
     friend class VirtIOGPU3DDevice;
 
 public:
-    static NonnullLockRefPtr<VirtIOGraphicsAdapter> initialize(PCI::DeviceIdentifier const&);
+    static ErrorOr<bool> probe(PCI::DeviceIdentifier const&);
+    static ErrorOr<NonnullLockRefPtr<GenericGraphicsAdapter>> create(PCI::DeviceIdentifier const&);
 
     virtual void initialize() override;
+
+    virtual StringView device_name() const override { return "VirtIOGraphicsAdapter"sv; }
 
     ErrorOr<void> mode_set_resolution(Badge<VirtIODisplayConnector>, VirtIODisplayConnector&, size_t width, size_t height);
     void set_dirty_displayed_rect(Badge<VirtIODisplayConnector>, VirtIODisplayConnector&, Graphics::VirtIOGPU::Protocol::Rect const& dirty_rect, bool main_buffer);
@@ -112,11 +115,11 @@ private:
     VirtIO::Configuration const* m_device_configuration { nullptr };
     // Note: Resource ID 0 is invalid, and we must not allocate 0 as the first resource ID.
     Atomic<u32> m_resource_id_counter { 1 };
-    SpinlockProtected<Bitmap> m_active_context_ids { LockRank::None };
+    SpinlockProtected<Bitmap, LockRank::None> m_active_context_ids {};
     LockRefPtr<VirtIOGPU3DDevice> m_3d_device;
     bool m_has_virgl_support { false };
 
-    Spinlock m_operation_lock { LockRank::None };
+    Spinlock<LockRank::None> m_operation_lock {};
     NonnullOwnPtr<Memory::Region> m_scratch_space;
 };
 }

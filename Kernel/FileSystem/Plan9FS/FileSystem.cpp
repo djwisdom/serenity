@@ -10,9 +10,9 @@
 
 namespace Kernel {
 
-ErrorOr<NonnullLockRefPtr<FileSystem>> Plan9FS::try_create(OpenFileDescription& file_description)
+ErrorOr<NonnullRefPtr<FileSystem>> Plan9FS::try_create(OpenFileDescription& file_description)
 {
-    return TRY(adopt_nonnull_lock_ref_or_enomem(new (nothrow) Plan9FS(file_description)));
+    return TRY(adopt_nonnull_ref_or_enomem(new (nothrow) Plan9FS(file_description)));
 }
 
 Plan9FS::Plan9FS(OpenFileDescription& file_description)
@@ -334,7 +334,7 @@ void Plan9FS::thread_main()
             MutexLocker locker(m_lock);
 
             for (auto& it : m_completions) {
-                it.value->result = result;
+                it.value->result = Error::copy(result.error());
                 it.value->completed = true;
             }
             m_completions.clear();
@@ -353,10 +353,11 @@ void Plan9FS::ensure_thread()
         auto process_name = KString::try_create("Plan9FS"sv);
         if (process_name.is_error())
             TODO();
-        (void)Process::create_kernel_process(m_thread, process_name.release_value(), [&]() {
+        auto [_, thread] = Process::create_kernel_process(process_name.release_value(), [&]() {
             thread_main();
             m_thread_running.store(false, AK::MemoryOrder::memory_order_release);
-        });
+        }).release_value_but_fixme_should_propagate_errors();
+        m_thread = move(thread);
     }
 }
 

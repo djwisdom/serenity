@@ -26,8 +26,11 @@ class VMWareGraphicsAdapter final
     friend class GraphicsManagement;
 
 public:
-    static LockRefPtr<VMWareGraphicsAdapter> try_initialize(PCI::DeviceIdentifier const&);
+    static ErrorOr<bool> probe(PCI::DeviceIdentifier const&);
+    static ErrorOr<NonnullLockRefPtr<GenericGraphicsAdapter>> create(PCI::DeviceIdentifier const&);
     virtual ~VMWareGraphicsAdapter() = default;
+
+    virtual StringView device_name() const override { return "VMWareGraphicsAdapter"sv; }
 
     ErrorOr<void> modeset_primary_screen_resolution(Badge<VMWareDisplayConnector>, size_t width, size_t height);
     size_t primary_screen_width(Badge<VMWareDisplayConnector>) const;
@@ -51,8 +54,8 @@ private:
     Memory::TypedMapping<VMWareDisplayFIFORegisters volatile> m_fifo_registers;
     LockRefPtr<VMWareDisplayConnector> m_display_connector;
     mutable NonnullOwnPtr<IOWindow> m_registers_io_window;
-    mutable Spinlock m_io_access_lock { LockRank::None };
-    mutable RecursiveSpinlock m_operation_lock { LockRank::None };
+    mutable Spinlock<LockRank::None> m_io_access_lock {};
+    mutable RecursiveSpinlock<LockRank::None> m_operation_lock {};
 };
 
 }

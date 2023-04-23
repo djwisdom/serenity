@@ -37,7 +37,7 @@ public:
         Closed = 3,
     };
 
-    static WebIDL::ExceptionOr<JS::NonnullGCPtr<WebSocket>> construct_impl(JS::Realm&, DeprecatedString const& url);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<WebSocket>> construct_impl(JS::Realm&, DeprecatedString const& url, Optional<Variant<DeprecatedString, Vector<DeprecatedString>>> const& protocols);
 
     virtual ~WebSocket() override;
 
@@ -58,7 +58,7 @@ public:
     void set_binary_type(DeprecatedString const& type) { m_binary_type = type; };
 
     WebIDL::ExceptionOr<void> close(Optional<u16> code, Optional<DeprecatedString> reason);
-    WebIDL::ExceptionOr<void> send(DeprecatedString const& data);
+    WebIDL::ExceptionOr<void> send(Variant<JS::Handle<JS::Object>, JS::Handle<FileAPI::Blob>, DeprecatedString> const& data);
 
 private:
     void on_open();
@@ -66,8 +66,9 @@ private:
     void on_error();
     void on_close(u16 code, DeprecatedString reason, bool was_clean);
 
-    WebSocket(HTML::Window&, AK::URL&);
+    WebSocket(HTML::Window&, AK::URL&, Vector<DeprecatedString> const& protocols);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     JS::NonnullGCPtr<HTML::Window> m_window;
@@ -98,6 +99,7 @@ public:
     };
 
     virtual Web::WebSockets::WebSocket::ReadyState ready_state() = 0;
+    virtual DeprecatedString subprotocol_in_use() = 0;
 
     virtual void send(ByteBuffer binary_or_text_message, bool is_text) = 0;
     virtual void send(StringView text_message) = 0;
@@ -119,7 +121,7 @@ public:
     static void initialize(RefPtr<WebSocketClientManager>);
     static WebSocketClientManager& the();
 
-    virtual RefPtr<WebSocketClientSocket> connect(AK::URL const&, DeprecatedString const& origin) = 0;
+    virtual RefPtr<WebSocketClientSocket> connect(AK::URL const&, DeprecatedString const& origin, Vector<DeprecatedString> const& protocols) = 0;
 
 protected:
     explicit WebSocketClientManager();

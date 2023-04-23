@@ -8,7 +8,6 @@
 #pragma once
 
 #include <AK/HashMap.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <LibCore/DateTime.h>
 #include <LibCore/FileWatcher.h>
 #include <LibGUI/Model.h>
@@ -70,6 +69,8 @@ public:
         int error() const { return m_error; }
         char const* error_string() const { return strerror(m_error); }
 
+        bool can_delete_or_move() const;
+
         DeprecatedString full_path() const;
 
     private:
@@ -83,7 +84,8 @@ public:
         FileSystemModel& m_model;
 
         Node* m_parent { nullptr };
-        NonnullOwnPtrVector<Node> m_children;
+        Vector<NonnullOwnPtr<Node>> m_children;
+        mutable Optional<bool> m_can_delete_or_move;
         bool m_has_traversed { false };
 
         bool m_selected { false };
@@ -146,6 +148,9 @@ public:
     bool should_show_dotfiles() const { return m_should_show_dotfiles; }
     void set_should_show_dotfiles(bool);
 
+    Optional<Vector<DeprecatedString>> allowed_file_extensions() const { return m_allowed_file_extensions; }
+    void set_allowed_file_extensions(Optional<Vector<DeprecatedString>> const& allowed_file_extensions);
+
 private:
     FileSystemModel(DeprecatedString root_path, Mode);
 
@@ -168,6 +173,8 @@ private:
 
     unsigned m_thumbnail_progress { 0 };
     unsigned m_thumbnail_progress_total { 0 };
+
+    Optional<Vector<DeprecatedString>> m_allowed_file_extensions;
 
     bool m_should_show_dotfiles { false };
 

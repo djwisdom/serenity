@@ -9,9 +9,23 @@
 #include "CardGame.h"
 #include <LibCards/CardPainter.h>
 #include <LibConfig/Client.h>
+#include <LibGUI/Action.h>
+#include <LibGUI/Process.h>
+#include <LibGUI/Window.h>
 #include <LibGfx/Palette.h>
 
 namespace Cards {
+
+ErrorOr<NonnullRefPtr<GUI::Action>> make_cards_settings_action(GUI::Window* parent)
+{
+    auto action = GUI::Action::create(
+        "&Cards Settings", {}, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/games.png"sv)), [parent](auto&) {
+            GUI::Process::spawn_or_show_error(parent, "/bin/GamesSettings"sv, Array { "--open-tab", "cards" });
+        },
+        parent);
+    action->set_status_tip("Open the Game Settings for Cards");
+    return action;
+}
 
 CardGame::CardGame()
 {
@@ -19,16 +33,11 @@ CardGame::CardGame()
     set_background_color(background_color.value_or(Color::from_rgb(0x008000)));
 }
 
-void CardGame::add_stack(NonnullRefPtr<CardStack> stack)
-{
-    m_stacks.append(move(stack));
-}
-
 void CardGame::mark_intersecting_stacks_dirty(Cards::Card const& intersecting_card)
 {
     for (auto& stack : stacks()) {
-        if (intersecting_card.rect().intersects(stack.bounding_box()))
-            update(stack.bounding_box());
+        if (intersecting_card.rect().intersects(stack->bounding_box()))
+            update(stack->bounding_box());
     }
 
     update(intersecting_card.rect());
@@ -40,30 +49,31 @@ Gfx::IntRect CardGame::moving_cards_bounds() const
         return {};
 
     // Note: This assumes that the cards are arranged in a line.
-    return m_moving_cards.first().rect().united(m_moving_cards.last().rect());
+    return m_moving_cards.first()->rect().united(m_moving_cards.last()->rect());
 }
 
-void CardGame::pick_up_cards_from_stack(Cards::CardStack& stack, Gfx::IntPoint click_location, CardStack::MovementRule movement_rule)
+ErrorOr<void> CardGame::pick_up_cards_from_stack(Cards::CardStack& stack, Gfx::IntPoint click_location, CardStack::MovementRule movement_rule)
 {
-    stack.add_all_grabbed_cards(click_location, m_moving_cards, movement_rule);
+    TRY(stack.add_all_grabbed_cards(click_location, m_moving_cards, movement_rule));
     m_moving_cards_source_stack = stack;
+    return {};
 }
 
-RefPtr<CardStack> CardGame::find_stack_to_drop_on(CardStack::MovementRule movement_rule) const
+RefPtr<CardStack> CardGame::find_stack_to_drop_on(CardStack::MovementRule movement_rule)
 {
     auto bounds_to_check = moving_cards_bounds();
 
     RefPtr<CardStack> closest_stack;
     float closest_distance = FLT_MAX;
 
-    for (auto const& stack : stacks()) {
+    for (auto& stack : stacks()) {
         if (stack == moving_cards_source_stack())
             continue;
 
-        if (stack.bounding_box().intersects(bounds_to_check)
-            && stack.is_allowed_to_push(moving_cards().at(0), moving_cards().size(), movement_rule)) {
+        if (stack->bounding_box().intersects(bounds_to_check)
+            && stack->is_allowed_to_push(moving_cards().at(0), moving_cards().size(), movement_rule)) {
 
-            auto distance = bounds_to_check.center().distance_from(stack.bounding_box().center());
+            auto distance = bounds_to_check.center().distance_from(stack->bounding_box().center());
             if (distance < closest_distance) {
                 closest_stack = stack;
                 closest_distance = distance;
@@ -74,17 +84,19 @@ RefPtr<CardStack> CardGame::find_stack_to_drop_on(CardStack::MovementRule moveme
     return closest_stack;
 }
 
-void CardGame::drop_cards_on_stack(Cards::CardStack& stack, CardStack::MovementRule movement_rule)
+ErrorOr<void> CardGame::drop_cards_on_stack(Cards::CardStack& stack, CardStack::MovementRule movement_rule)
 {
     VERIFY(stack.is_allowed_to_push(m_moving_cards.at(0), m_moving_cards.size(), movement_rule));
     for (auto& to_intersect : moving_cards()) {
         mark_intersecting_stacks_dirty(to_intersect);
-        stack.push(to_intersect);
+        TRY(stack.push(to_intersect));
         (void)moving_cards_source_stack()->pop();
     }
 
     update(moving_cards_source_stack()->bounding_box());
     update(stack.bounding_box());
+
+    return {};
 }
 
 void CardGame::clear_moving_cards()
@@ -126,5 +138,26 @@ void CardGame::set_background_color(Gfx::Color color)
     auto new_palette = palette();
     new_palette.set_color(Gfx::ColorRole::Background, color);
     set_palette(new_palette);
+
+    CardPainter::the().set_background_color(color);
 }
+
+void CardGame::preview_card(CardStack& stack, Gfx::IntPoint click_location)
+{
+    if (!stack.preview_card(click_location))
+        return;
+
+    m_previewed_card_stack = stack;
+    update(stack.bounding_box());
+}
+
+void CardGame::clear_card_preview()
+{
+    VERIFY(m_previewed_card_stack);
+
+    update(m_previewed_card_stack->bounding_box());
+    m_previewed_card_stack->clear_card_preview();
+    m_previewed_card_stack = nullptr;
+}
+
 }

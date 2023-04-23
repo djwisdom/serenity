@@ -7,10 +7,9 @@
 #pragma once
 
 #include <AK/ByteBuffer.h>
+#include <AK/DeprecatedFlyString.h>
 #include <AK/DeprecatedString.h>
-#include <AK/FlyString.h>
 #include <AK/HashMap.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/OwnPtr.h>
 #include <AK/Time.h>
 #include <AK/Utf8View.h>
@@ -77,24 +76,24 @@ public:
 
         CodingIndependentCodePoints to_cicp() const
         {
-            Video::ColorRange color_range;
+            Video::VideoFullRangeFlag video_full_range_flag;
             switch (range) {
             case ColorRange::Full:
-                color_range = Video::ColorRange::Full;
+                video_full_range_flag = Video::VideoFullRangeFlag::Full;
                 break;
             case ColorRange::Broadcast:
-                color_range = Video::ColorRange::Studio;
+                video_full_range_flag = Video::VideoFullRangeFlag::Studio;
                 break;
             case ColorRange::Unspecified:
             case ColorRange::UseCICP:
                 // FIXME: Figure out what UseCICP should do here. Matroska specification did not
                 //        seem to explain in the 'colour' section. When this is fixed, change
                 //        replace_code_points_if_specified to match.
-                color_range = Video::ColorRange::Unspecified;
+                video_full_range_flag = Video::VideoFullRangeFlag::Unspecified;
                 break;
             }
 
-            return { color_primaries, transfer_characteristics, matrix_coefficients, color_range };
+            return { color_primaries, transfer_characteristics, matrix_coefficients, video_full_range_flag };
         }
     };
 
@@ -116,10 +115,10 @@ public:
     void set_track_uid(u64 track_uid) { m_track_uid = track_uid; }
     TrackType track_type() const { return m_track_type; }
     void set_track_type(TrackType track_type) { m_track_type = track_type; }
-    FlyString language() const { return m_language; }
-    void set_language(FlyString const& language) { m_language = language; }
-    FlyString codec_id() const { return m_codec_id; }
-    void set_codec_id(FlyString const& codec_id) { m_codec_id = codec_id; }
+    DeprecatedFlyString language() const { return m_language; }
+    void set_language(DeprecatedFlyString const& language) { m_language = language; }
+    DeprecatedFlyString codec_id() const { return m_codec_id; }
+    void set_codec_id(DeprecatedFlyString const& codec_id) { m_codec_id = codec_id; }
     double timestamp_scale() const { return m_timestamp_scale; }
     void set_timestamp_scale(double timestamp_scale) { m_timestamp_scale = timestamp_scale; }
     u64 codec_delay() const { return m_codec_delay; }
@@ -145,8 +144,8 @@ private:
     u64 m_track_number { 0 };
     u64 m_track_uid { 0 };
     TrackType m_track_type { Invalid };
-    FlyString m_language = "eng";
-    FlyString m_codec_id;
+    DeprecatedFlyString m_language = "eng";
+    DeprecatedFlyString m_codec_id;
     double m_timestamp_scale { 1 };
     u64 m_codec_delay { 0 };
     u64 m_timestamp_offset { 0 };

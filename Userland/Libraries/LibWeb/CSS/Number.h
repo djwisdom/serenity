@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <AK/DeprecatedString.h>
+#include <AK/String.h>
 #include <AK/Types.h>
 #include <math.h>
 
@@ -31,6 +31,7 @@ public:
     {
     }
 
+    Type type() const { return m_type; }
     float value() const { return m_value; }
     i64 integer_value() const
     {
@@ -69,11 +70,11 @@ public:
         return { Type::Number, m_value / other.m_value };
     }
 
-    DeprecatedString to_deprecated_string() const
+    ErrorOr<String> to_string() const
     {
         if (m_type == Type::IntegerWithExplicitSign)
-            return DeprecatedString::formatted("{:+}", m_value);
-        return DeprecatedString::number(m_value);
+            return String::formatted("{:+}", m_value);
+        return String::number(m_value);
     }
 
     bool operator==(Number const& other) const
@@ -91,6 +92,6 @@ template<>
 struct AK::Formatter<Web::CSS::Number> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Web::CSS::Number const& number)
     {
-        return Formatter<StringView>::format(builder, number.to_deprecated_string());
+        return Formatter<StringView>::format(builder, TRY(number.to_string()));
     }
 };

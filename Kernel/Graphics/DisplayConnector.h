@@ -7,9 +7,9 @@
 #pragma once
 
 #include <AK/Types.h>
+#include <Kernel/API/Ioctl.h>
 #include <Kernel/Devices/CharacterDevice.h>
 #include <Kernel/Memory/SharedFramebufferVMObject.h>
-#include <LibC/sys/ioctl_numbers.h>
 #include <LibEDID/EDID.h>
 
 namespace Kernel {
@@ -103,7 +103,7 @@ public:
     Memory::Region const& framebuffer_region() const { return *m_framebuffer_region; }
 
 protected:
-    void set_edid_bytes(Array<u8, 128> const& edid_bytes);
+    void set_edid_bytes(Array<u8, 128> const& edid_bytes, bool might_be_invalid = false);
 
     DisplayConnector(PhysicalAddress framebuffer_address, size_t framebuffer_resource_size, bool enable_write_combine_optimization);
     DisplayConnector(size_t framebuffer_resource_size, bool enable_write_combine_optimization);
@@ -114,14 +114,14 @@ protected:
 
     ErrorOr<void> initialize_edid_for_generic_monitor(Optional<Array<u8, 3>> manufacturer_id_string);
 
-    mutable Spinlock m_control_lock { LockRank::None };
+    mutable Spinlock<LockRank::None> m_control_lock {};
     mutable Mutex m_flushing_lock;
 
     bool m_console_mode { false };
 
     bool m_vertical_offsetted { false };
 
-    mutable Spinlock m_modeset_lock { LockRank::None };
+    mutable Spinlock<LockRank::None> m_modeset_lock {};
     ModeSetting m_current_mode_setting {};
 
     Optional<EDID::Parser> m_edid_parser;
@@ -146,7 +146,9 @@ private:
     DisplayConnector(DisplayConnector&&) = delete;
 
     virtual void will_be_destroyed() override;
-    virtual void after_inserting() override;
+    virtual ErrorOr<void> after_inserting() override;
+
+    ErrorOr<void> allocate_framebuffer_resources(size_t rounded_size);
 
     ErrorOr<bool> ioctl_requires_ownership(unsigned request) const;
 
@@ -159,13 +161,13 @@ private:
 
 protected:
     Optional<PhysicalAddress> const m_framebuffer_address;
-    size_t const m_framebuffer_resource_size;
+    size_t m_framebuffer_resource_size;
 
 private:
     LockRefPtr<Memory::SharedFramebufferVMObject> m_shared_framebuffer_vmobject;
 
     LockWeakPtr<Process> m_responsible_process;
-    Spinlock m_responsible_process_lock { LockRank::None };
+    Spinlock<LockRank::None> m_responsible_process_lock {};
 
     IntrusiveListNode<DisplayConnector, LockRefPtr<DisplayConnector>> m_list_node;
 };

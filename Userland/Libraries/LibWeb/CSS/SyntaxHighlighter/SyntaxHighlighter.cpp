@@ -25,6 +25,8 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
     dbgln_if(SYNTAX_HIGHLIGHTING_DEBUG, "(CSS::SyntaxHighlighter) starting rehighlight");
     auto text = m_client->get_text();
 
+    Vector<Parser::Token> folding_region_start_tokens;
+    Vector<GUI::TextDocumentFoldingRegion> folding_regions;
     Vector<GUI::TextDocumentSpan> spans;
 
     auto highlight = [&](auto start_line, auto start_column, auto end_line, auto end_column, Gfx::TextAttributes attributes, CSS::Parser::Token::Type type) {
@@ -43,11 +45,22 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
             false);
     };
 
-    CSS::Parser::Tokenizer tokenizer { text, "utf-8" };
-    auto tokens = tokenizer.parse();
+    auto tokens = CSS::Parser::Tokenizer::tokenize(text, "utf-8"sv).release_value_but_fixme_should_propagate_errors();
     for (auto const& token : tokens) {
         if (token.is(Parser::Token::Type::EndOfFile))
             break;
+
+        if (token.is(Parser::Token::Type::OpenCurly)) {
+            folding_region_start_tokens.append(token);
+        } else if (token.is(Parser::Token::Type::CloseCurly)) {
+            if (!folding_region_start_tokens.is_empty()) {
+                auto start_token = folding_region_start_tokens.take_last();
+                GUI::TextDocumentFoldingRegion folding_region;
+                folding_region.range.set_start({ start_token.end_position().line, start_token.end_position().column });
+                folding_region.range.set_end({ token.start_position().line, token.start_position().column });
+                folding_regions.append(move(folding_region));
+            }
+        }
 
         switch (token.type()) {
         case Parser::Token::Type::Ident:
@@ -118,7 +131,7 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
         case Parser::Token::Type::BadUrl:
         case Parser::Token::Type::BadString:
             // FIXME: Error highlighting color in palette?
-            highlight(token.start_position().line, token.start_position().column, token.end_position().line, token.end_position().column, { Color(Color::NamedColor::Red), {}, false, true }, token.type());
+            highlight(token.start_position().line, token.start_position().column, token.end_position().line, token.end_position().column, { Color(Color::NamedColor::Red), {}, true }, token.type());
             break;
 
         case Parser::Token::Type::EndOfFile:
@@ -135,6 +148,7 @@ void SyntaxHighlighter::rehighlight(Palette const& palette)
     }
 
     m_client->do_set_spans(move(spans));
+    m_client->do_set_folding_regions(move(folding_regions));
     m_has_brace_buddies = false;
     highlight_matching_token_pair();
     m_client->do_update();

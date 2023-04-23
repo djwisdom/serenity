@@ -2798,9 +2798,9 @@ HTMLTokenizer::HTMLTokenizer()
 
 HTMLTokenizer::HTMLTokenizer(StringView input, DeprecatedString const& encoding)
 {
-    auto* decoder = TextCodec::decoder_for(encoding);
-    VERIFY(decoder);
-    m_decoded_input = decoder->to_utf8(input);
+    auto decoder = TextCodec::decoder_for(encoding);
+    VERIFY(decoder.has_value());
+    m_decoded_input = decoder->to_utf8(input).release_value_but_fixme_should_propagate_errors().to_deprecated_string();
     m_utf8_view = Utf8View(m_decoded_input);
     m_utf8_iterator = m_utf8_view.begin();
     m_prev_utf8_iterator = m_utf8_view.begin();
@@ -2816,7 +2816,7 @@ void HTMLTokenizer::insert_input_at_insertion_point(DeprecatedString const& inpu
     builder.append(m_decoded_input.substring(0, m_insertion_point.position));
     builder.append(input);
     builder.append(m_decoded_input.substring(m_insertion_point.position));
-    m_decoded_input = builder.build();
+    m_decoded_input = builder.to_deprecated_string();
 
     m_utf8_view = Utf8View(m_decoded_input);
     m_utf8_iterator = m_utf8_view.iterator_at_byte_offset(utf8_iterator_byte_offset);

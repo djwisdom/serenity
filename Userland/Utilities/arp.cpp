@@ -5,14 +5,13 @@
  */
 
 #include <AK/Assertions.h>
-#include <AK/DeprecatedString.h>
 #include <AK/IPv4Address.h>
 #include <AK/JsonObject.h>
 #include <AK/MACAddress.h>
 #include <AK/QuickSort.h>
 #include <AK/Types.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibMain/Main.h>
 #include <arpa/inet.h>
@@ -28,9 +27,6 @@
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     TRY(Core::System::pledge("stdio rpath tty inet unix"));
-    TRY(Core::System::unveil("/sys/kernel/net/arp", "r"));
-    TRY(Core::System::unveil("/tmp/portal/lookup", "rw"));
-    TRY(Core::System::unveil(nullptr, nullptr));
 
     static bool flag_set;
     static bool flag_delete;
@@ -47,16 +43,22 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_positional_argument(value_hw_address, "Hardware address", "hwaddress", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
+    TRY(Core::System::unveil("/sys/kernel/net/arp", "r"));
+    if (!flag_numeric)
+        TRY(Core::System::unveil("/tmp/portal/lookup", "rw"));
+
+    TRY(Core::System::unveil(nullptr, nullptr));
+
     enum class Alignment {
         Left,
         Right
     };
 
     struct Column {
-        DeprecatedString title;
+        StringView title;
         Alignment alignment { Alignment::Left };
         int width { 0 };
-        DeprecatedString buffer;
+        StringView buffer;
     };
 
     Vector<Column> columns;
@@ -69,8 +71,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return columns.size() - 1;
     };
 
-    proto_address_column = add_column("Address", Alignment::Left, 15);
-    hw_address_column = add_column("HWaddress", Alignment::Left, 15);
+    proto_address_column = add_column("Address"sv, Alignment::Left, 15);
+    hw_address_column = add_column("HWaddress"sv, Alignment::Left, 15);
 
     auto print_column = [](auto& column, auto& string) {
         if (!column.width) {
@@ -89,19 +91,19 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     outln();
 
     if (!flag_set && !flag_delete) {
-        auto file = TRY(Core::Stream::File::open("/sys/kernel/net/arp"sv, Core::Stream::OpenMode::Read));
+        auto file = TRY(Core::File::open("/sys/kernel/net/arp"sv, Core::File::OpenMode::Read));
         auto file_contents = TRY(file->read_until_eof());
         auto json = TRY(JsonValue::from_string(file_contents));
 
         Vector<JsonValue> sorted_regions = json.as_array().values();
         quick_sort(sorted_regions, [](auto& a, auto& b) {
-            return a.as_object().get("ip_address"sv).to_deprecated_string() < b.as_object().get("ip_address"sv).to_deprecated_string();
+            return a.as_object().get_deprecated_string("ip_address"sv).value_or({}) < b.as_object().get_deprecated_string("ip_address"sv).value_or({});
         });
 
         for (auto& value : sorted_regions) {
             auto& if_object = value.as_object();
 
-            auto ip_address = if_object.get("ip_address"sv).to_deprecated_string();
+            auto ip_address = if_object.get_deprecated_string("ip_address"sv).value_or({});
 
             if (!flag_numeric) {
                 auto from_string = IPv4Address::from_string(ip_address);
@@ -114,7 +116,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 }
             }
 
-            auto mac_address = if_object.get("mac_address"sv).to_deprecated_string();
+            auto mac_address = if_object.get_deprecated_string("mac_address"sv).value_or({});
 
             if (proto_address_column != -1)
                 columns[proto_address_column].buffer = ip_address;

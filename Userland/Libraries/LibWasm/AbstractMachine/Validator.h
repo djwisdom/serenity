@@ -6,9 +6,11 @@
 
 #pragma once
 
+#include <AK/Debug.h>
 #include <AK/HashTable.h>
 #include <AK/SourceLocation.h>
 #include <AK/Tuple.h>
+#include <AK/Vector.h>
 #include <LibWasm/Forward.h>
 #include <LibWasm/Types.h>
 
@@ -240,7 +242,6 @@ public:
     ErrorOr<void, ValidationError> validate_instruction(Instruction const&, Stack& stack, bool& is_constant);
 
     // Types
-    bool type_is_subtype_of(ValueType const& candidate_subtype, ValueType const& candidate_supertype);
     ErrorOr<void, ValidationError> validate(Limits const&, size_t k); // n <= 2^k-1 && m? <= 2^k-1
     ErrorOr<FunctionType, ValidationError> validate(BlockType const&);
     ErrorOr<void, ValidationError> validate(FunctionType const&) { return {}; }

@@ -43,7 +43,7 @@ static DeprecatedString show(ByteBuffer const& buf)
             builder.append('_');
     }
     builder.append(')');
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 template<typename TArg>
@@ -59,7 +59,7 @@ static bool test_single(Testcase<TArg> const& testcase)
 
     // Setup
     ByteBuffer actual = ByteBuffer::create_uninitialized(SANDBOX_CANARY_SIZE + testcase.dest_n + SANDBOX_CANARY_SIZE).release_value();
-    fill_with_random(actual.data(), actual.size());
+    fill_with_random(actual);
     ByteBuffer expected = actual;
     VERIFY(actual.offset_pointer(0) != expected.offset_pointer(0));
     actual.overwrite(SANDBOX_CANARY_SIZE, testcase.dest, testcase.dest_n);
@@ -324,4 +324,12 @@ TEST_CASE(truncation)
     EXPECT(test_single<unsigned long long int>({ LITERAL("xxxxxxxxxxxxxxxxxxxxxxx"), "|%llu|", ULLONG_MAX, 22, LITERAL("|18446744073709551615|\0") }));
     EXPECT(test_single<unsigned long long int>({ LITERAL("xxxxxxxxxxxxxxxxxxx"), "|%llx|", ULLONG_MAX, 18, LITERAL("|ffffffffffffffff|\0") }));
     EXPECT(test_single<unsigned long long int>({ LITERAL("xxxxxxxxxxxxxxxxxxx"), "|%llX|", ULLONG_MAX, 18, LITERAL("|FFFFFFFFFFFFFFFF|\0") }));
+}
+
+TEST_CASE(g_format)
+{
+    EXPECT(test_single<double>({ LITERAL("xxxx"), "|%g|", 0.0, 3, LITERAL("|0|\0") }));
+    EXPECT(test_single<double>({ LITERAL("xxxx"), "|%g|", 1.0, 3, LITERAL("|1|\0") }));
+    EXPECT(test_single<double>({ LITERAL("xxxxxx"), "|%g|", 1.1, 5, LITERAL("|1.1|\0") }));
+    EXPECT(test_single<double>({ LITERAL("xxxxxxxx"), "|%g|", -1.12, 7, LITERAL("|-1.12|\0") }));
 }

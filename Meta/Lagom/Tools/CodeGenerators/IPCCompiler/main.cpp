@@ -10,7 +10,7 @@
 #include <AK/HashMap.h>
 #include <AK/SourceGenerator.h>
 #include <AK/StringBuilder.h>
-#include <LibCore/Stream.h>
+#include <LibCore/File.h>
 #include <LibMain/Main.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -69,7 +69,7 @@ static bool is_primitive_type(DeprecatedString const& type)
 static bool is_simple_type(DeprecatedString const& type)
 {
     // Small types that it makes sense just to pass by value.
-    return type.is_one_of("Gfx::Color", "Gfx::IntPoint", "Gfx::FloatPoint", "Gfx::IntSize", "Gfx::FloatSize");
+    return type.is_one_of("Gfx::Color", "Gfx::IntPoint", "Gfx::FloatPoint", "Gfx::IntSize", "Gfx::FloatSize", "Core::File::OpenMode");
 }
 
 static bool is_primitive_or_simple_type(DeprecatedString const& type)
@@ -105,7 +105,7 @@ Vector<Endpoint> parse(ByteBuffer const& file_contents)
     auto consume_whitespace = [&lexer] {
         lexer.ignore_while([](char ch) { return isspace(ch); });
         if (lexer.peek() == '/' && lexer.peek(1) == '/')
-            lexer.ignore_until([](char ch) { return ch == '\n'; });
+            lexer.ignore_until('\n');
     };
 
     auto parse_parameter = [&](Vector<Parameter>& storage) {
@@ -293,21 +293,6 @@ DeprecatedString constructor_for_message(DeprecatedString const& name, Vector<Pa
     return builder.to_deprecated_string();
 }
 
-static void append_handle_stream_error(SourceGenerator& generator, StringView error_message)
-{
-    if constexpr (GENERATE_DEBUG) {
-        generator.set("error_message"sv, error_message);
-        generator.append(R"~~~(
-        if (stream.handle_any_error()) {
-            dbgln("@error_message@");
-            return Error::from_string_literal("@error_message@");
-        })~~~");
-    } else {
-        generator.append(R"~~~(
-        TRY(stream.try_handle_any_error());)~~~");
-    }
-}
-
 void do_message(SourceGenerator message_generator, DeprecatedString const& name, Vector<Parameter> const& parameters, DeprecatedString const& response_type = {})
 {
     auto pascal_name = pascal_case(name);
@@ -353,7 +338,7 @@ public:)~~~");
     static i32 static_message_id() { return (int)MessageID::@message.pascal_name@; }
     virtual const char* message_name() const override { return "@endpoint.name@::@message.pascal_name@"; }
 
-    static ErrorOr<NonnullOwnPtr<@message.pascal_name@>> decode(InputMemoryStream& stream, Core::Stream::LocalSocket& socket)
+    static ErrorOr<NonnullOwnPtr<@message.pascal_name@>> decode(Stream& stream, Core::LocalSocket& socket)
     {
         IPC::Decoder decoder { stream, socket };)~~~");
 
@@ -386,8 +371,7 @@ public:)~~~");
             builder.append(", "sv);
     }
 
-    message_generator.set("message.constructor_call_parameters", builder.build());
-    append_handle_stream_error(message_generator, "Failed to read the message"sv);
+    message_generator.set("message.constructor_call_parameters", builder.to_deprecated_string());
     message_generator.appendln(R"~~~(
         return make<@message.pascal_name@>(@message.constructor_call_parameters@);
     })~~~");
@@ -395,21 +379,21 @@ public:)~~~");
     message_generator.appendln(R"~~~(
     virtual bool valid() const override { return m_ipc_message_valid; }
 
-    virtual IPC::MessageBuffer encode() const override
+    virtual ErrorOr<IPC::MessageBuffer> encode() const override
     {
         VERIFY(valid());
 
         IPC::MessageBuffer buffer;
         IPC::Encoder stream(buffer);
-        stream << endpoint_magic();
-        stream << (int)MessageID::@message.pascal_name@;)~~~");
+        TRY(stream.encode(endpoint_magic()));
+        TRY(stream.encode((int)MessageID::@message.pascal_name@));)~~~");
 
     for (auto const& parameter : parameters) {
         auto parameter_generator = message_generator.fork();
 
         parameter_generator.set("parameter.name", parameter.name);
         parameter_generator.appendln(R"~~~(
-        stream << m_@parameter.name@;)~~~");
+        TRY(stream.encode(m_@parameter.name@));)~~~");
     }
 
     message_generator.appendln(R"~~~(
@@ -600,12 +584,10 @@ public:
 
     static u32 static_magic() { return @endpoint.magic@; }
 
-    static ErrorOr<NonnullOwnPtr<IPC::Message>> decode_message(ReadonlyBytes buffer, [[maybe_unused]] Core::Stream::LocalSocket& socket)
+    static ErrorOr<NonnullOwnPtr<IPC::Message>> decode_message(ReadonlyBytes buffer, [[maybe_unused]] Core::LocalSocket& socket)
     {
-        InputMemoryStream stream { buffer };
-        u32 message_endpoint_magic = 0;
-        stream >> message_endpoint_magic;)~~~");
-    append_handle_stream_error(generator, "Failed to read message endpoint magic"sv);
+        FixedMemoryStream stream { buffer };
+        auto message_endpoint_magic = TRY(stream.read_value<u32>());)~~~");
     generator.append(R"~~~(
 
         if (message_endpoint_magic != @endpoint.magic@) {)~~~");
@@ -617,9 +599,7 @@ public:
             return Error::from_string_literal("Endpoint magic number mismatch, not my message!");
         }
 
-        i32 message_id = 0;
-        stream >> message_id;)~~~");
-    append_handle_stream_error(generator, "Failed to read message ID"sv);
+        auto message_id = TRY(stream.read_value<i32>());)~~~");
     generator.appendln(R"~~~(
 
         switch (message_id) {)~~~");
@@ -665,7 +645,7 @@ public:
     virtual u32 magic() const override { return @endpoint.magic@; }
     virtual DeprecatedString name() const override { return "@endpoint.name@"; }
 
-    virtual OwnPtr<IPC::MessageBuffer> handle(const IPC::Message& message) override
+    virtual ErrorOr<OwnPtr<IPC::MessageBuffer>> handle(const IPC::Message& message) override
     {
         switch (message.message_id()) {)~~~");
     for (auto const& message : endpoint.messages) {
@@ -694,20 +674,20 @@ public:
             [[maybe_unused]] auto& request = static_cast<const Messages::@endpoint.name@::@message.pascal_name@&>(message);
             @handler_name@(@arguments@);
             auto response = Messages::@endpoint.name@::@message.response_type@ { };
-            return make<IPC::MessageBuffer>(response.encode());)~~~");
+            return make<IPC::MessageBuffer>(TRY(response.encode()));)~~~");
                 } else {
                     message_generator.appendln(R"~~~(
             [[maybe_unused]] auto& request = static_cast<const Messages::@endpoint.name@::@message.pascal_name@&>(message);
             auto response = @handler_name@(@arguments@);
             if (!response.valid())
-                return {};
-            return make<IPC::MessageBuffer>(response.encode());)~~~");
+                return Error::from_string_literal("Failed to handle @endpoint.name@::@message.pascal_name@ message");
+            return make<IPC::MessageBuffer>(TRY(response.encode()));)~~~");
                 }
             } else {
                 message_generator.appendln(R"~~~(
             [[maybe_unused]] auto& request = static_cast<const Messages::@endpoint.name@::@message.pascal_name@&>(message);
             @handler_name@(@arguments@);
-            return {};)~~~");
+            return nullptr;)~~~");
             }
             message_generator.appendln(R"~~~(
         })~~~");
@@ -716,7 +696,7 @@ public:
     }
     generator.appendln(R"~~~(
         default:
-            return {};
+            return Error::from_string_literal("Unknown message ID for @endpoint.name@ endpoint");
         }
     })~~~");
 
@@ -787,8 +767,8 @@ void build(StringBuilder& builder, Vector<Endpoint> const& endpoints)
         }
     }
 
-    generator.appendln(R"~~~(#include <AK/MemoryStream.h>
-#include <AK/Error.h>
+    generator.appendln(R"~~~(#include <AK/Error.h>
+#include <AK/MemoryStream.h>
 #include <AK/OwnPtr.h>
 #include <AK/Result.h>
 #include <AK/Utf8View.h>
@@ -816,7 +796,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 1;
     }
 
-    auto file = TRY(Core::Stream::File::open(arguments.strings[1], Core::Stream::OpenMode::Read));
+    auto file = TRY(Core::File::open(arguments.strings[1], Core::File::OpenMode::Read));
 
     auto file_contents = TRY(file->read_until_eof());
 

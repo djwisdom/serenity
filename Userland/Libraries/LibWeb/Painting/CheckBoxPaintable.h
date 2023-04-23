@@ -12,13 +12,15 @@
 namespace Web::Painting {
 
 class CheckBoxPaintable final : public LabelablePaintable {
-public:
-    static NonnullRefPtr<CheckBoxPaintable> create(Layout::CheckBox const&);
+    JS_CELL(CheckBoxPaintable, LabelablePaintable);
 
-    virtual void paint(PaintContext&, PaintPhase) const override;
+public:
+    static JS::NonnullGCPtr<CheckBoxPaintable> create(Layout::CheckBox const&);
 
     Layout::CheckBox const& layout_box() const;
     Layout::CheckBox& layout_box();
+
+    virtual void paint(PaintContext&, PaintPhase) const override;
 
 private:
     CheckBoxPaintable(Layout::CheckBox const&);

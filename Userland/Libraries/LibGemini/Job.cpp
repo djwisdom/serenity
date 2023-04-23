@@ -5,23 +5,25 @@
  */
 
 #include <AK/Debug.h>
-#include <LibCore/Stream.h>
+#include <AK/Error.h>
+#include <AK/String.h>
+#include <AK/Utf8View.h>
 #include <LibGemini/GeminiResponse.h>
 #include <LibGemini/Job.h>
 #include <unistd.h>
 
 namespace Gemini {
 
-Job::Job(GeminiRequest const& request, Core::Stream::Stream& output_stream)
+Job::Job(GeminiRequest const& request, Stream& output_stream)
     : Core::NetworkJob(output_stream)
     , m_request(request)
 {
 }
 
-void Job::start(Core::Stream::Socket& socket)
+void Job::start(Core::Socket& socket)
 {
     VERIFY(!m_socket);
-    m_socket = verify_cast<Core::Stream::BufferedSocketBase>(&socket);
+    m_socket = verify_cast<Core::BufferedSocketBase>(&socket);
     on_socket_connected();
 }
 
@@ -53,19 +55,18 @@ bool Job::can_read_line() const
     return MUST(m_socket->can_read_line());
 }
 
-DeprecatedString Job::read_line(size_t size)
+ErrorOr<String> Job::read_line(size_t size)
 {
-    ByteBuffer buffer = ByteBuffer::create_uninitialized(size).release_value_but_fixme_should_propagate_errors();
-    auto bytes_read = MUST(m_socket->read_until(buffer, "\r\n"sv));
-    return DeprecatedString::copy(bytes_read);
+    ByteBuffer buffer = TRY(ByteBuffer::create_uninitialized(size));
+    auto bytes_read = TRY(m_socket->read_until(buffer, "\r\n"sv));
+    return String::from_utf8(StringView { bytes_read.data(), bytes_read.size() });
 }
 
-ByteBuffer Job::receive(size_t size)
+ErrorOr<ByteBuffer> Job::receive(size_t size)
 {
-    ByteBuffer buffer = ByteBuffer::create_uninitialized(size).release_value_but_fixme_should_propagate_errors();
-    auto nread = MUST(m_socket->read(buffer)).size();
-    // FIXME: Propagate errors.
-    return MUST(buffer.slice(0, nread));
+    ByteBuffer buffer = TRY(ByteBuffer::create_uninitialized(size));
+    auto nread = TRY(m_socket->read_some(buffer)).size();
+    return buffer.slice(0, nread);
 }
 
 bool Job::can_read() const
@@ -75,7 +76,7 @@ bool Job::can_read() const
 
 bool Job::write(ReadonlyBytes bytes)
 {
-    return !m_socket->write_entire_buffer(bytes).is_error();
+    return !m_socket->write_until_depleted(bytes).is_error();
 }
 
 void Job::flush_received_buffers()
@@ -110,7 +111,7 @@ void Job::flush_received_buffers()
 
 void Job::on_socket_connected()
 {
-    auto raw_request = m_request.to_raw_request();
+    auto raw_request = m_request.to_raw_request().release_value_but_fixme_should_propagate_errors();
 
     if constexpr (JOB_DEBUG) {
         dbgln("Job: raw_request:");
@@ -123,31 +124,71 @@ void Job::on_socket_connected()
     register_on_ready_to_read([this] {
         if (is_cancelled())
             return;
+        if (m_state == State::Failed)
+            return;
+
+        // https://gemini.circumlunar.space/docs/specification.gmi
 
         if (m_state == State::InStatus) {
             if (!can_read_line())
                 return;
 
-            auto line = read_line(PAGE_SIZE);
-            if (line.is_null()) {
-                dbgln("Job: Expected status line");
+            auto line_or_error = read_line(PAGE_SIZE);
+            if (line_or_error.is_error()) {
+                dbgln("Job: Error getting status line {}", line_or_error.error());
+                m_state = State::Failed;
                 return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::TransmissionFailed); });
             }
 
-            auto parts = line.split_limit(' ', 2);
-            if (parts.size() != 2) {
-                dbgln("Job: Expected 2-part status line, got '{}'", line);
+            auto line = line_or_error.release_value();
+            auto view = line.bytes_as_string_view();
+
+            auto first_code_point = line.code_points().begin().peek();
+            if (!first_code_point.has_value()) {
+                dbgln("Job: empty status line");
+                m_state = State::Failed;
                 return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::ProtocolFailed); });
             }
 
-            auto status = parts[0].to_uint();
+            if (first_code_point.release_value() == 0xFEFF) {
+                dbgln("Job: Byte order mark as first character of status line");
+                m_state = State::Failed;
+                return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::ProtocolFailed); });
+            }
+
+            auto maybe_space_index = view.find(' ');
+            if (!maybe_space_index.has_value()) {
+                dbgln("Job: Expected 2-part status line, got '{}'", line);
+                m_state = State::Failed;
+                return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::ProtocolFailed); });
+            }
+
+            auto space_index = maybe_space_index.release_value();
+            auto first_part = view.substring_view(0, space_index);
+            auto second_part = view.substring_view(space_index + 1);
+
+            auto status = first_part.to_uint();
             if (!status.has_value()) {
                 dbgln("Job: Expected numeric status code");
+                m_state = State::Failed;
                 return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::ProtocolFailed); });
             }
 
-            m_status = status.value();
-            m_meta = parts[1];
+            auto meta_first_code_point = Utf8View(second_part).begin().peek();
+            if (meta_first_code_point.release_value() == 0xFEFF) {
+                dbgln("Job: Byte order mark as first character of meta");
+                m_state = State::Failed;
+                return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::ProtocolFailed); });
+            }
+
+            if (second_part.length() > 1024) {
+                dbgln("Job: Meta too long");
+                m_state = State::Failed;
+                return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::ProtocolFailed); });
+            }
+
+            m_status = status.release_value();
+            m_meta = second_part;
 
             if (m_status >= 10 && m_status < 20) {
                 m_state = State::Finished;
@@ -163,6 +204,7 @@ void Job::on_socket_connected()
                 m_state = State::InBody;
             } else {
                 dbgln("Job: Expected status between 10 and 69; instead got {}", m_status);
+                m_state = State::Failed;
                 return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::ProtocolFailed); });
             }
 
@@ -177,7 +219,14 @@ void Job::on_socket_connected()
         while (MUST(m_socket->can_read_without_blocking())) {
             auto read_size = 64 * KiB;
 
-            auto payload = receive(read_size);
+            auto payload_or_error = receive(read_size);
+            if (payload_or_error.is_error()) {
+                dbgln("Job: Error in receive {}", payload_or_error.error());
+                m_state = State::Failed;
+                return deferred_invoke([this] { did_fail(Core::NetworkJob::Error::TransmissionFailed); });
+            }
+            auto payload = payload_or_error.release_value();
+
             if (payload.is_empty()) {
                 if (m_socket->is_eof()) {
                     finish_up();
@@ -222,5 +271,13 @@ void Job::finish_up()
     deferred_invoke([this, response] {
         did_finish(move(response));
     });
+}
+
+ErrorOr<size_t> Job::response_length() const
+{
+    if (m_state != State::Finished)
+        return AK::Error::from_string_literal("Gemini response has not finished");
+
+    return m_received_size;
 }
 }

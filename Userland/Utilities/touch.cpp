@@ -5,12 +5,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/CharacterTypes.h>
 #include <AK/CheckedFormatString.h>
 #include <AK/GenericLexer.h>
 #include <AK/Time.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <LibTimeZone/TimeZone.h>
 #include <ctype.h>
@@ -31,7 +32,7 @@ template<typename... Parameters>
     exit(1);
 }
 
-inline static bool validate_timestamp(unsigned year, unsigned month, unsigned day, unsigned hour, unsigned minute, unsigned second)
+inline bool validate_timestamp(unsigned year, unsigned month, unsigned day, unsigned hour, unsigned minute, unsigned second)
 {
     return (year >= 1970) && (month >= 1 && month <= 12) && (day >= 1 && day <= static_cast<unsigned>(days_in_month(year, month))) && (hour <= 23) && (minute <= 59) && (second <= 59);
 }
@@ -60,7 +61,7 @@ static void parse_time(StringView input_time, timespec& atime, timespec& mtime)
             err("invalid time format '{}'", input_time);
     };
 
-    while (!lexer.is_eof() && lexer.next_is(isdigit))
+    while (!lexer.is_eof() && lexer.next_is(is_ascii_digit))
         lex_number();
     if (parameters.size() > 6)
         err("invalid time format '{}' -- too many parameters", input_time);
@@ -131,7 +132,7 @@ static void parse_datetime(StringView input_datetime, timespec& atime, timespec&
     millisecond = 0;
     if (!lexer.is_eof()) {
         if (lexer.consume_specific(',') || lexer.consume_specific('.')) {
-            auto fractional_second = lexer.consume_while(isdigit);
+            auto fractional_second = lexer.consume_while(is_ascii_digit);
             if (fractional_second.is_empty())
                 err("invalid datetime format '{}' -- expected floating seconds", input_datetime);
             for (u8 i = 0; i < 3 && i < fractional_second.length(); ++i) {
@@ -239,7 +240,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         atime.tv_nsec = UTIME_OMIT;
 
     for (auto path : paths) {
-        if (Core::File::exists(path)) {
+        if (FileSystem::exists(path)) {
             if (utimensat(AT_FDCWD, path.characters(), times, 0) == -1)
                 err("failed to touch '{}': {}", path, strerror(errno));
         } else if (!no_create_file) {

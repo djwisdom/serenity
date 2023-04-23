@@ -21,6 +21,7 @@ public:
     virtual ~CalculatorWidget() override = default;
     DeprecatedString get_entry();
     void set_entry(Crypto::BigFraction);
+    void set_typed_entry(Crypto::BigFraction);
 
     void shrink(unsigned);
     unsigned rounding_length() const;
@@ -33,7 +34,6 @@ private:
     void add_operation_button(GUI::Button&, Calculator::Operation);
     void add_digit_button(GUI::Button&, int digit);
 
-    void mimic_pressed_button(RefPtr<GUI::Button>);
     void perform_operation(Calculator::Operation operation);
     void update_display();
 

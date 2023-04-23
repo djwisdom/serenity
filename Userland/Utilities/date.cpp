@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/DeprecatedString.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DateTime.h>
 #include <LibCore/System.h>
@@ -19,7 +18,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     bool print_iso_8601 = false;
     bool print_rfc_3339 = false;
     bool print_rfc_5322 = false;
-    char const* set_date = nullptr;
+    StringView set_date;
     StringView format_string;
 
     Core::ArgsParser args_parser;
@@ -31,8 +30,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_positional_argument(format_string, "Custom format to print the date in", "format-string", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
-    if (set_date != nullptr) {
-        auto number = DeprecatedString(set_date).to_uint();
+    if (!set_date.is_empty()) {
+        auto number = set_date.to_uint();
 
         if (!number.has_value()) {
             warnln("date: Invalid timestamp value");

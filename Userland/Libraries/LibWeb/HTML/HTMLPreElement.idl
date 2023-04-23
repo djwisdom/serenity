@@ -4,6 +4,7 @@
 [Exposed=Window]
 interface HTMLPreElement : HTMLElement {
 
-
+    [HTMLConstructor] constructor();
+    // FIXME: [CEReactions, Reflect] attribute long width;
 
 };

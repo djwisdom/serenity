@@ -9,12 +9,12 @@
 #include <AK/Platform.h>
 #include <AK/StringBuilder.h>
 #include <AK/Types.h>
-#include <LibCore/File.h>
 #include <LibCore/MappedFile.h>
 #include <LibCoredump/Backtrace.h>
 #include <LibCoredump/Reader.h>
 #include <LibELF/Core.h>
 #include <LibELF/Image.h>
+#include <LibFileSystem/FileSystem.h>
 
 namespace Coredump {
 
@@ -26,7 +26,7 @@ ELFObjectInfo const* Backtrace::object_info_for_region(Reader const& coredump, M
     if (maybe_ptr.has_value())
         return *maybe_ptr;
 
-    if (!Core::File::exists(path))
+    if (!FileSystem::exists(path))
         return nullptr;
 
     auto file_or_error = Core::MappedFile::map(path);
@@ -44,10 +44,7 @@ ELFObjectInfo const* Backtrace::object_info_for_region(Reader const& coredump, M
 Backtrace::Backtrace(Reader const& coredump, const ELF::Core::ThreadInfo& thread_info, Function<void(size_t, size_t)> on_progress)
     : m_thread_info(move(thread_info))
 {
-#if ARCH(I386)
-    auto start_bp = m_thread_info.regs.ebp;
-    auto start_ip = m_thread_info.regs.eip;
-#elif ARCH(X86_64)
+#if ARCH(X86_64)
     auto start_bp = m_thread_info.regs.rbp;
     auto start_ip = m_thread_info.regs.rip;
 #elif ARCH(AARCH64)
@@ -124,7 +121,7 @@ void Backtrace::add_entry(Reader const& coredump, FlatPtr ip)
     }
 
     auto function_name = object_info->debug_info->elf().symbolicate(ip - region->region_start);
-    auto source_position = object_info->debug_info->get_source_position_with_inlines(ip - region->region_start);
+    auto source_position = object_info->debug_info->get_source_position_with_inlines(ip - region->region_start).release_value_but_fixme_should_propagate_errors();
     m_entries.append({ ip, object_name, function_name, source_position });
 }
 
@@ -134,7 +131,7 @@ DeprecatedString Backtrace::Entry::to_deprecated_string(bool color) const
     builder.appendff("{:p}: ", eip);
     if (object_name.is_empty()) {
         builder.append("???"sv);
-        return builder.build();
+        return builder.to_deprecated_string();
     }
     builder.appendff("[{}] {}", object_name, function_name.is_empty() ? "???" : function_name);
     builder.append(" ("sv);
@@ -161,7 +158,7 @@ DeprecatedString Backtrace::Entry::to_deprecated_string(bool color) const
 
     builder.append(')');
 
-    return builder.build();
+    return builder.to_deprecated_string();
 }
 
 }

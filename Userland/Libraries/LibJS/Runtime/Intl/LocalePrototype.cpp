@@ -15,13 +15,13 @@ namespace JS::Intl {
 
 // 14.3 Properties of the Intl.Locale Prototype Object, https://tc39.es/ecma402/#sec-properties-of-intl-locale-prototype-object
 LocalePrototype::LocalePrototype(Realm& realm)
-    : PrototypeObject(*realm.intrinsics().object_prototype())
+    : PrototypeObject(realm.intrinsics().object_prototype())
 {
 }
 
-void LocalePrototype::initialize(Realm& realm)
+ThrowCompletionOr<void> LocalePrototype::initialize(Realm& realm)
 {
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Base::initialize(realm));
 
     auto& vm = this->vm();
 
@@ -31,7 +31,7 @@ void LocalePrototype::initialize(Realm& realm)
     define_native_function(realm, vm.names.toString, to_string, 0, attr);
 
     // 14.3.2 Intl.Locale.prototype[ @@toStringTag ], https://tc39.es/ecma402/#sec-Intl.Locale.prototype-@@tostringtag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Intl.Locale"), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), MUST_OR_THROW_OOM(PrimitiveString::create(vm, "Intl.Locale"sv)), Attribute::Configurable);
 
     define_native_accessor(realm, vm.names.baseName, base_name, {}, Attribute::Configurable);
     define_native_accessor(realm, vm.names.calendar, calendar, {}, Attribute::Configurable);
@@ -50,6 +50,8 @@ void LocalePrototype::initialize(Realm& realm)
     define_native_accessor(realm, vm.names.timeZones, time_zones, {}, Attribute::Configurable);
     define_native_accessor(realm, vm.names.textInfo, text_info, {}, Attribute::Configurable);
     define_native_accessor(realm, vm.names.weekInfo, week_info, {}, Attribute::Configurable);
+
+    return {};
 }
 
 // 14.3.3 Intl.Locale.prototype.maximize ( ), https://tc39.es/ecma402/#sec-Intl.Locale.prototype.maximize
@@ -59,17 +61,17 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::maximize)
 
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
-    auto locale = ::Locale::parse_unicode_locale_id(locale_object->locale());
+    auto locale = TRY_OR_THROW_OOM(vm, ::Locale::parse_unicode_locale_id(locale_object->locale()));
     VERIFY(locale.has_value());
 
     // 3. Let maximal be the result of the Add Likely Subtags algorithm applied to loc.[[Locale]]. If an error is signaled, set maximal to loc.[[Locale]].
-    if (auto maximal = ::Locale::add_likely_subtags(locale->language_id); maximal.has_value())
+    if (auto maximal = TRY_OR_THROW_OOM(vm, ::Locale::add_likely_subtags(locale->language_id)); maximal.has_value())
         locale->language_id = maximal.release_value();
 
     // 4. Return ! Construct(%Locale%, maximal).
-    return Locale::create(realm, *locale);
+    return MUST_OR_THROW_OOM(Locale::create(realm, locale.release_value()));
 }
 
 // 14.3.4 Intl.Locale.prototype.minimize ( ), https://tc39.es/ecma402/#sec-Intl.Locale.prototype.minimize
@@ -79,17 +81,17 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::minimize)
 
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
-    auto locale = ::Locale::parse_unicode_locale_id(locale_object->locale());
+    auto locale = TRY_OR_THROW_OOM(vm, ::Locale::parse_unicode_locale_id(locale_object->locale()));
     VERIFY(locale.has_value());
 
     // 3. Let minimal be the result of the Remove Likely Subtags algorithm applied to loc.[[Locale]]. If an error is signaled, set minimal to loc.[[Locale]].
-    if (auto minimal = ::Locale::remove_likely_subtags(locale->language_id); minimal.has_value())
+    if (auto minimal = TRY_OR_THROW_OOM(vm, ::Locale::remove_likely_subtags(locale->language_id)); minimal.has_value())
         locale->language_id = minimal.release_value();
 
     // 4. Return ! Construct(%Locale%, minimal).
-    return Locale::create(realm, *locale);
+    return MUST_OR_THROW_OOM(Locale::create(realm, locale.release_value()));
 }
 
 // 14.3.5 Intl.Locale.prototype.toString ( ), https://tc39.es/ecma402/#sec-Intl.Locale.prototype.toString
@@ -97,7 +99,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::to_string)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Return loc.[[Locale]].
     return PrimitiveString::create(vm, locale_object->locale());
@@ -108,14 +110,14 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::base_name)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
-    auto locale = ::Locale::parse_unicode_locale_id(locale_object->locale());
+    auto locale = TRY_OR_THROW_OOM(vm, ::Locale::parse_unicode_locale_id(locale_object->locale()));
     VERIFY(locale.has_value());
 
     // 4. Return the substring of locale corresponding to the unicode_language_id production.
-    return PrimitiveString::create(vm, locale->language_id.to_deprecated_string());
+    return PrimitiveString::create(vm, TRY_OR_THROW_OOM(vm, locale->language_id.to_string()));
 }
 
 #define JS_ENUMERATE_LOCALE_KEYWORD_PROPERTIES \
@@ -133,7 +135,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::base_name)
 #define __JS_ENUMERATE(keyword)                                       \
     JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::keyword)               \
     {                                                                 \
-        auto* locale_object = TRY(typed_this_object(vm));             \
+        auto locale_object = TRY(typed_this_object(vm));              \
         if (!locale_object->has_##keyword())                          \
             return js_undefined();                                    \
         return PrimitiveString::create(vm, locale_object->keyword()); \
@@ -146,7 +148,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::numeric)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Return loc.[[Numeric]].
     return Value(locale_object->numeric());
@@ -157,16 +159,16 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::language)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
-    auto locale = ::Locale::parse_unicode_locale_id(locale_object->locale());
+    auto locale = TRY_OR_THROW_OOM(vm, ::Locale::parse_unicode_locale_id(locale_object->locale()));
 
     // 4. Assert: locale matches the unicode_locale_id production.
     VERIFY(locale.has_value());
 
     // 5. Return the substring of locale corresponding to the unicode_language_subtag production of the unicode_language_id.
-    return PrimitiveString::create(vm, *locale->language_id.language);
+    return PrimitiveString::create(vm, locale->language_id.language.release_value());
 }
 
 // 14.3.14 get Intl.Locale.prototype.script, https://tc39.es/ecma402/#sec-Intl.Locale.prototype.script
@@ -174,10 +176,10 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::script)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
-    auto locale = ::Locale::parse_unicode_locale_id(locale_object->locale());
+    auto locale = TRY_OR_THROW_OOM(vm, ::Locale::parse_unicode_locale_id(locale_object->locale()));
 
     // 4. Assert: locale matches the unicode_locale_id production.
     VERIFY(locale.has_value());
@@ -187,7 +189,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::script)
         return js_undefined();
 
     // 6. Return the substring of locale corresponding to the unicode_script_subtag production of the unicode_language_id.
-    return PrimitiveString::create(vm, *locale->language_id.script);
+    return PrimitiveString::create(vm, locale->language_id.script.release_value());
 }
 
 // 14.3.15 get Intl.Locale.prototype.region, https://tc39.es/ecma402/#sec-Intl.Locale.prototype.region
@@ -195,10 +197,10 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::region)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
-    auto locale = ::Locale::parse_unicode_locale_id(locale_object->locale());
+    auto locale = TRY_OR_THROW_OOM(vm, ::Locale::parse_unicode_locale_id(locale_object->locale()));
 
     // 4. Assert: locale matches the unicode_locale_id production.
     VERIFY(locale.has_value());
@@ -208,7 +210,7 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::region)
         return js_undefined();
 
     // 6. Return the substring of locale corresponding to the unicode_region_subtag production of the unicode_language_id.
-    return PrimitiveString::create(vm, *locale->language_id.region);
+    return PrimitiveString::create(vm, locale->language_id.region.release_value());
 }
 
 #define JS_ENUMERATE_LOCALE_INFO_PROPERTIES \
@@ -221,11 +223,11 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::region)
 // 1.4.17 get Intl.Locale.prototype.collations, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.collations
 // 1.4.18 get Intl.Locale.prototype.hourCycles, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.hourCycles
 // 1.4.19 get Intl.Locale.prototype.numberingSystems, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.numberingSystems
-#define __JS_ENUMERATE(keyword)                           \
-    JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::keyword)   \
-    {                                                     \
-        auto* locale_object = TRY(typed_this_object(vm)); \
-        return keyword##_of_locale(vm, *locale_object);   \
+#define __JS_ENUMERATE(keyword)                                           \
+    JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::keyword)                   \
+    {                                                                     \
+        auto locale_object = TRY(typed_this_object(vm));                  \
+        return MUST_OR_THROW_OOM(keyword##_of_locale(vm, locale_object)); \
     }
 JS_ENUMERATE_LOCALE_INFO_PROPERTIES
 #undef __JS_ENUMERATE
@@ -235,17 +237,17 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::time_zones)
 {
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Let locale be loc.[[Locale]].
-    auto locale = ::Locale::parse_unicode_locale_id(locale_object->locale());
+    auto locale = TRY_OR_THROW_OOM(vm, ::Locale::parse_unicode_locale_id(locale_object->locale()));
 
     // 4. If the unicode_language_id production of locale does not contain the ["-" unicode_region_subtag] sequence, return undefined.
     if (!locale.has_value() || !locale->language_id.region.has_value())
         return js_undefined();
 
     // 5. Return ! TimeZonesOfLocale(loc).
-    return time_zones_of_locale(vm, locale->language_id.region.value());
+    return MUST_OR_THROW_OOM(time_zones_of_locale(vm, locale->language_id.region.value()));
 }
 
 // 1.4.21 get Intl.Locale.prototype.textInfo, https://tc39.es/proposal-intl-locale-info/#sec-Intl.Locale.prototype.textInfo
@@ -255,16 +257,16 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::text_info)
 
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Let info be ! ObjectCreate(%Object.prototype%).
     auto info = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 4. Let dir be ! CharacterDirectionOfLocale(loc).
-    auto direction = character_direction_of_locale(*locale_object);
+    auto direction = MUST_OR_THROW_OOM(character_direction_of_locale(vm, locale_object));
 
     // 5. Perform ! CreateDataPropertyOrThrow(info, "direction", dir).
-    MUST(info->create_data_property_or_throw(vm.names.direction, PrimitiveString::create(vm, direction)));
+    MUST(info->create_data_property_or_throw(vm.names.direction, MUST_OR_THROW_OOM(PrimitiveString::create(vm, direction))));
 
     // 6. Return info.
     return info;
@@ -277,13 +279,13 @@ JS_DEFINE_NATIVE_FUNCTION(LocalePrototype::week_info)
 
     // 1. Let loc be the this value.
     // 2. Perform ? RequireInternalSlot(loc, [[InitializedLocale]]).
-    [[maybe_unused]] auto* locale_object = TRY(typed_this_object(vm));
+    auto locale_object = TRY(typed_this_object(vm));
 
     // 3. Let info be ! ObjectCreate(%Object.prototype%).
     auto info = Object::create(realm, realm.intrinsics().object_prototype());
 
     // 4. Let wi be ! WeekInfoOfLocale(loc).
-    auto week_info = week_info_of_locale(*locale_object);
+    auto week_info = MUST_OR_THROW_OOM(week_info_of_locale(vm, locale_object));
 
     // 5. Let we be ! CreateArrayFromList( wi.[[Weekend]] ).
     auto weekend = Array::create_from<u8>(realm, week_info.weekend, [](auto day) { return Value(day); });

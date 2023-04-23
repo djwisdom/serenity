@@ -5,7 +5,6 @@
  */
 
 #include <AK/DeprecatedString.h>
-#include <AK/StdLibExtras.h>
 #include <AK/Vector.h>
 #include <LibGfx/Line.h>
 #include <LibGfx/Rect.h>
@@ -31,10 +30,11 @@ DeprecatedString FloatRect::to_deprecated_string() const
 namespace IPC {
 
 template<>
-bool encode(Encoder& encoder, Gfx::IntRect const& rect)
+ErrorOr<void> encode(Encoder& encoder, Gfx::IntRect const& rect)
 {
-    encoder << rect.location() << rect.size();
-    return true;
+    TRY(encoder.encode(rect.location()));
+    TRY(encoder.encode(rect.size()));
+    return {};
 }
 
 template<>

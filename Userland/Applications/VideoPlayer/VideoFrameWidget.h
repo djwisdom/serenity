@@ -20,31 +20,32 @@ enum class VideoSizingMode : u8 {
     Sentinel
 };
 
-class VideoFrameWidget : public GUI::Frame {
+class VideoFrameWidget final : public GUI::Frame {
     C_OBJECT(VideoFrameWidget)
 public:
     virtual ~VideoFrameWidget() override = default;
 
     void set_bitmap(Gfx::Bitmap const*);
-    Gfx::Bitmap* bitmap() { return m_bitmap.ptr(); }
     Gfx::Bitmap const* bitmap() const { return m_bitmap.ptr(); }
 
-    void set_sizing_mode(VideoSizingMode value) { m_sizing_mode = value; }
+    void set_sizing_mode(VideoSizingMode value);
     VideoSizingMode sizing_mode() const { return m_sizing_mode; }
 
     void set_auto_resize(bool value);
     bool auto_resize() const { return m_auto_resize; }
 
     Function<void()> on_click;
+    Function<void()> on_doubleclick;
 
 protected:
     explicit VideoFrameWidget();
 
     virtual void mousedown_event(GUI::MouseEvent&) override;
+    virtual void doubleclick_event(GUI::MouseEvent&) override;
     virtual void paint_event(GUI::PaintEvent&) override;
 
 private:
-    RefPtr<Gfx::Bitmap> m_bitmap;
+    RefPtr<Gfx::Bitmap const> m_bitmap;
     VideoSizingMode m_sizing_mode { VideoSizingMode::Fit };
     bool m_auto_resize { false };
 };

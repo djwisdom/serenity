@@ -72,31 +72,35 @@ struct PropertyGroup {
 };
 
 struct PropertyTab {
-    DeprecatedString title;
+    StringView title;
     Vector<PropertyGroup> property_groups;
 };
 
 class MainWidget final : public GUI::Widget {
-    C_OBJECT(MainWidget);
+    C_OBJECT_ABSTRACT(MainWidget);
 
 public:
+    static ErrorOr<NonnullRefPtr<MainWidget>> try_create();
     virtual ~MainWidget() override = default;
 
     ErrorOr<void> initialize_menubar(GUI::Window&);
     GUI::Window::CloseRequestDecision request_close();
     void update_title();
-    ErrorOr<void> load_from_file(Core::File&);
+    ErrorOr<void> load_from_file(String const& filename, NonnullOwnPtr<Core::File> file);
 
 private:
-    MainWidget();
+    explicit MainWidget(NonnullRefPtr<AlignmentModel>);
 
-    void save_to_file(Core::File&);
+    virtual void drag_enter_event(GUI::DragEvent&) override;
+    virtual void drop_event(GUI::DropEvent&) override;
+
+    void save_to_file(String const& filename, NonnullOwnPtr<Core::File> file);
     ErrorOr<Core::AnonymousBuffer> encode();
     void set_path(DeprecatedString);
 
     void build_override_controls();
 
-    void add_property_tab(PropertyTab const&);
+    ErrorOr<void> add_property_tab(PropertyTab const&);
     void set_alignment(Gfx::AlignmentRole, Gfx::TextAlignment);
     void set_color(Gfx::ColorRole, Gfx::Color);
     void set_flag(Gfx::FlagRole, bool);

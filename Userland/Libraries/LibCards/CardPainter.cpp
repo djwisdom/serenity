@@ -102,6 +102,21 @@ NonnullRefPtr<Gfx::Bitmap> CardPainter::card_back()
     return *m_card_back;
 }
 
+NonnullRefPtr<Gfx::Bitmap> CardPainter::card_front_highlighted(Suit suit, Rank rank)
+{
+    auto suit_id = to_underlying(suit);
+    auto rank_id = to_underlying(rank);
+
+    auto& existing_bitmap = m_cards_highlighted[suit_id][rank_id];
+    if (!existing_bitmap.is_null())
+        return *existing_bitmap;
+
+    m_cards_highlighted[suit_id][rank_id] = create_card_bitmap();
+    paint_highlighted_card(*m_cards_highlighted[suit_id][rank_id], card_front(suit, rank));
+
+    return *m_cards_highlighted[suit_id][rank_id];
+}
+
 NonnullRefPtr<Gfx::Bitmap> CardPainter::card_front_inverted(Suit suit, Rank rank)
 {
     auto suit_id = to_underlying(suit);
@@ -140,9 +155,20 @@ void CardPainter::set_background_image_path(DeprecatedString path)
         paint_inverted_card(*m_card_back_inverted, *m_card_back);
 }
 
+void CardPainter::set_background_color(Color background_color)
+{
+    m_background_color = background_color;
+
+    // Clear any cached card bitmaps that depend on the background color.
+    for (auto& suit_array : m_cards_highlighted) {
+        for (auto& rank_array : suit_array)
+            rank_array = nullptr;
+    }
+}
+
 NonnullRefPtr<Gfx::Bitmap> CardPainter::create_card_bitmap()
 {
-    return Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRA8888, { Card::width, Card::height }).release_value_but_fixme_should_propagate_errors();
+    return Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { Card::width, Card::height }).release_value_but_fixme_should_propagate_errors();
 }
 
 void CardPainter::paint_card_front(Gfx::Bitmap& bitmap, Cards::Suit suit, Cards::Rank rank)
@@ -175,7 +201,7 @@ void CardPainter::paint_card_front(Gfx::Bitmap& bitmap, Cards::Suit suit, Cards:
     paint_rect.set_height(paint_rect.height() / 2);
     paint_rect.shrink(10, 6);
 
-    auto text_rect = Gfx::IntRect { 4, 6, font.width("10"sv), font.glyph_height() };
+    auto text_rect = Gfx::IntRect { 4, 6, font.width_rounded_up("10"sv), font.pixel_size_rounded_up() };
     painter.draw_text(text_rect, card_rank_label(rank), font, Gfx::TextAlignment::Center, suit_color);
 
     painter.draw_bitmap(
@@ -199,7 +225,7 @@ void CardPainter::paint_card_back(Gfx::Bitmap& bitmap)
     auto inner_paint_rect = paint_rect.shrunken(2, 2);
     painter.fill_rect_with_rounded_corners(inner_paint_rect, Color::White, Card::card_radius - 1);
 
-    auto image = Gfx::Bitmap::try_load_from_file(m_background_image_path).release_value_but_fixme_should_propagate_errors();
+    auto image = Gfx::Bitmap::load_from_file(m_background_image_path).release_value_but_fixme_should_propagate_errors();
     painter.blit({ (bitmap.width() - image->width()) / 2, (bitmap.height() - image->height()) / 2 }, image, image->rect());
 }
 
@@ -207,9 +233,23 @@ void CardPainter::paint_inverted_card(Gfx::Bitmap& bitmap, Gfx::Bitmap const& so
 {
     Gfx::Painter painter { bitmap };
     painter.clear_rect(bitmap.rect(), Gfx::Color::Transparent);
-    painter.blit_filtered({ 0, 0 }, source_to_invert, source_to_invert.rect(), [&](Color color) {
+    painter.blit_filtered(Gfx::IntPoint {}, source_to_invert, source_to_invert.rect(), [&](Color color) {
         return color.inverted();
     });
+}
+
+void CardPainter::paint_highlighted_card(Gfx::Bitmap& bitmap, Gfx::Bitmap const& source_to_highlight)
+{
+    Gfx::Painter painter { bitmap };
+    auto paint_rect = source_to_highlight.rect();
+    auto background_complement = m_background_color.xored(Color::White);
+
+    painter.fill_rect_with_rounded_corners(paint_rect, Color::Black, Card::card_radius);
+    paint_rect.shrink(2, 2);
+    painter.fill_rect_with_rounded_corners(paint_rect, background_complement, Card::card_radius - 1);
+    paint_rect.shrink(4, 4);
+    painter.fill_rect_with_rounded_corners(paint_rect, Color::White, Card::card_radius - 1);
+    painter.blit({ 4, 4 }, source_to_highlight, source_to_highlight.rect().shrunken(8, 8));
 }
 
 }

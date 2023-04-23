@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/CharacterTypes.h>
 #include <AK/DeprecatedString.h>
 #include <AK/LexicalPath.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/File.h>
 #include <LibCore/MappedFile.h>
 #include <LibCore/System.h>
 #include <LibELF/DynamicLoader.h>
@@ -187,30 +187,7 @@ static char const* object_symbol_binding_to_string(ElfW(Word) type)
 static char const* object_relocation_type_to_string(ElfW(Word) type)
 {
     switch (type) {
-#if ARCH(I386)
-    case R_386_NONE:
-        return "R_386_NONE";
-    case R_386_32:
-        return "R_386_32";
-    case R_386_PC32:
-        return "R_386_PC32";
-    case R_386_GOT32:
-        return "R_386_GOT32";
-    case R_386_PLT32:
-        return "R_386_PLT32";
-    case R_386_COPY:
-        return "R_386_COPY";
-    case R_386_GLOB_DAT:
-        return "R_386_GLOB_DAT";
-    case R_386_JMP_SLOT:
-        return "R_386_JMP_SLOT";
-    case R_386_RELATIVE:
-        return "R_386_RELATIVE";
-    case R_386_TLS_TPOFF:
-        return "R_386_TLS_TPOFF";
-    case R_386_TLS_TPOFF32:
-        return "R_386_TLS_TPOFF32";
-#else
+#if ARCH(X86_64)
     case R_X86_64_NONE:
         return "R_X86_64_NONE";
     case R_X86_64_64:
@@ -231,7 +208,7 @@ static char const* object_relocation_type_to_string(ElfW(Word) type)
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-    TRY(Core::System::pledge("stdio rpath"));
+    TRY(Core::System::pledge("stdio rpath map_fixed"));
 
     DeprecatedString path {};
     static bool display_all = false;
@@ -266,7 +243,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     if (arguments.argc < 3) {
-        args_parser.print_usage(stderr, arguments.argv[0]);
+        args_parser.print_usage(stderr, arguments.strings[0]);
         return Error::from_errno(EINVAL);
     }
 
@@ -362,7 +339,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
         out("  Magic:                             ");
         for (char i : StringView { header.e_ident, sizeof(header.e_ident) }) {
-            if (isprint(i)) {
+            if (is_ascii_printable(i)) {
                 out("{:c} ", i);
             } else {
                 out("{:02x} ", i);
@@ -386,11 +363,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         outln();
     }
 
-#if ARCH(I386)
-    auto addr_padding = "";
-#else
     auto addr_padding = "        ";
-#endif
 
     if (display_section_headers) {
         if (!display_all) {

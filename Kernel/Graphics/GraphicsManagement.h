@@ -9,8 +9,8 @@
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Platform.h>
 #include <AK/Types.h>
-#if ARCH(I386) || ARCH(X86_64)
-#    include <Kernel/Arch/x86/VGA/IOArbiter.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/VGA/IOArbiter.h>
 #endif
 #include <Kernel/Bus/PCI/Definitions.h>
 #include <Kernel/Graphics/Console/Console.h>
@@ -19,7 +19,6 @@
 #include <Kernel/Graphics/GenericGraphicsAdapter.h>
 #include <Kernel/Graphics/VirtIOGPU/GraphicsAdapter.h>
 #include <Kernel/Library/NonnullLockRefPtr.h>
-#include <Kernel/Library/NonnullLockRefPtrVector.h>
 #include <Kernel/Memory/Region.h>
 
 namespace Kernel {
@@ -50,11 +49,11 @@ public:
 private:
     void enable_vga_text_mode_console_cursor();
 
-    bool determine_and_initialize_graphics_device(PCI::DeviceIdentifier const&);
+    ErrorOr<void> determine_and_initialize_graphics_device(PCI::DeviceIdentifier const&);
 
     void initialize_preset_resolution_generic_display_connector();
 
-    NonnullLockRefPtrVector<GenericGraphicsAdapter> m_graphics_devices;
+    Vector<NonnullLockRefPtr<GenericGraphicsAdapter>> m_graphics_devices;
     LockRefPtr<Graphics::Console> m_console;
 
     // Note: This is only used when booting with kernel commandline that includes "graphics_subsystem_mode=limited"
@@ -64,8 +63,8 @@ private:
 
     unsigned m_current_minor_number { 0 };
 
-    SpinlockProtected<IntrusiveList<&DisplayConnector::m_list_node>> m_display_connector_nodes { LockRank::None };
-#if ARCH(I386) || ARCH(X86_64)
+    SpinlockProtected<IntrusiveList<&DisplayConnector::m_list_node>, LockRank::None> m_display_connector_nodes {};
+#if ARCH(X86_64)
     OwnPtr<VGAIOArbiter> m_vga_arbiter;
 #endif
 };

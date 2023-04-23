@@ -13,16 +13,23 @@
 
 namespace Web::CSS {
 
-JS::NonnullGCPtr<Screen> Screen::create(HTML::Window& window)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<Screen>> Screen::create(HTML::Window& window)
 {
-    return window.heap().allocate<Screen>(window.realm(), window);
+    return MUST_OR_THROW_OOM(window.heap().allocate<Screen>(window.realm(), window));
 }
 
 Screen::Screen(HTML::Window& window)
     : PlatformObject(window.realm())
     , m_window(window)
 {
-    set_prototype(&Bindings::ensure_web_prototype<Bindings::ScreenPrototype>(window.realm(), "Screen"));
+}
+
+JS::ThrowCompletionOr<void> Screen::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::ScreenPrototype>(realm, "Screen"));
+
+    return {};
 }
 
 void Screen::visit_edges(Cell::Visitor& visitor)

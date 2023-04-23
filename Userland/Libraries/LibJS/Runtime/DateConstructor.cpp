@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2020, Nico Weber <thakis@chromium.org>
  * Copyright (c) 2021, Petróczi Zoltán <petroczizoltan@tutanota.com>
  * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
@@ -147,10 +147,12 @@ static double parse_simplified_iso8601(DeprecatedString const& iso_8601)
     return time_clip(time_ms);
 }
 
-static constexpr AK::Array<StringView, 3> extra_formats = {
+static constexpr AK::Array<StringView, 5> extra_formats = {
     "%a %b %e %T %z %Y"sv,
     "%m/%e/%Y"sv,
     "%m/%e/%Y %R %z"sv,
+    "%Y/%m/%e %R"sv,
+    "%Y-%m-%e %R"sv,
 };
 
 static double parse_date_string(DeprecatedString const& date_string)
@@ -163,6 +165,7 @@ static double parse_date_string(DeprecatedString const& date_string)
     // Parse formats of this type: "Wed Apr 17 23:08:53 +0000 2019"
     // And: "4/17/2019"
     // And: "12/05/2022 10:00 -0800"
+    // And: "2014/11/14 13:05" or "2014-11-14 13:05"
     // FIXME: Exactly what timezone and which additional formats we should support is unclear.
     //        Both Chrome and Firefox seem to support "4/17/2019 11:08 PM +0000" with most parts
     //        being optional, however this is not clearly documented anywhere.
@@ -176,14 +179,14 @@ static double parse_date_string(DeprecatedString const& date_string)
 }
 
 DateConstructor::DateConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.Date.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.Date.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void DateConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> DateConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     // 21.4.3.3 Date.prototype, https://tc39.es/ecma262/#sec-date.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().date_prototype(), 0);
@@ -194,6 +197,8 @@ void DateConstructor::initialize(Realm& realm)
     define_native_function(realm, vm.names.UTC, utc, 7, attr);
 
     define_direct_property(vm.names.length, Value(7), Attribute::Configurable);
+
+    return {};
 }
 
 // 21.4.2.1 Date ( ...values ), https://tc39.es/ecma262/#sec-date
@@ -241,7 +246,7 @@ ThrowCompletionOr<NonnullGCPtr<Object>> DateConstructor::construct(FunctionObjec
             if (primitive.is_string()) {
                 // 1. Assert: The next step never returns an abrupt completion because Type(v) is String.
                 // 2. Let tv be the result of parsing v as a date, in exactly the same manner as for the parse method (21.4.3.2).
-                time_value = parse_date_string(primitive.as_string().deprecated_string());
+                time_value = parse_date_string(TRY(primitive.as_string().deprecated_string()));
             }
             // iii. Else,
             else {
@@ -316,7 +321,7 @@ JS_DEFINE_NATIVE_FUNCTION(DateConstructor::parse)
     if (!vm.argument_count())
         return js_nan();
 
-    auto date_string = TRY(vm.argument(0).to_string(vm));
+    auto date_string = TRY(vm.argument(0).to_deprecated_string(vm));
 
     return Value(parse_date_string(date_string));
 }

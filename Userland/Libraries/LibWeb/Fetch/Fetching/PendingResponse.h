@@ -8,6 +8,7 @@
 
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibJS/Heap/GCPtr.h>
 #include <LibJS/SafeFunction.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
 
@@ -34,7 +35,7 @@ private:
 
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    void run_callback() const;
+    void run_callback();
 
     Callback m_callback;
     JS::NonnullGCPtr<Infrastructure::Request> m_request;

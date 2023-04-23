@@ -15,8 +15,8 @@ public:
     CloneTool() = default;
     virtual ~CloneTool() override = default;
 
-    virtual GUI::Widget* get_properties_widget() override;
-    virtual Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap>> cursor() override;
+    virtual ErrorOr<GUI::Widget*> get_properties_widget() override;
+    virtual Variant<Gfx::StandardCursor, NonnullRefPtr<Gfx::Bitmap const>> cursor() override;
 
     virtual bool is_overriding_alt() override { return true; }
 
@@ -32,6 +32,8 @@ protected:
 
 private:
     virtual StringView tool_name() const override { return "Clone Tool"sv; }
+    Optional<Gfx::IntRect> sample_marker_rect();
+    void update_sample_marker(Optional<Gfx::IntRect> old_rect);
 
     RefPtr<GUI::Widget> m_properties_widget;
 

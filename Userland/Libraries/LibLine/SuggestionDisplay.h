@@ -6,11 +6,9 @@
 
 #pragma once
 
-#include <AK/DeprecatedString.h>
 #include <AK/Forward.h>
 #include <LibLine/StringMetrics.h>
 #include <LibLine/SuggestionManager.h>
-#include <stdlib.h>
 
 namespace Line {
 
@@ -19,20 +17,22 @@ class Editor;
 class SuggestionDisplay {
 public:
     virtual ~SuggestionDisplay() = default;
-    virtual void display(SuggestionManager const&) = 0;
-    virtual bool cleanup() = 0;
+    virtual ErrorOr<void> display(SuggestionManager const&) = 0;
+    virtual ErrorOr<bool> cleanup() = 0;
     virtual void finish() = 0;
     virtual void set_initial_prompt_lines(size_t) = 0;
 
-    void redisplay(SuggestionManager const& manager, size_t lines, size_t columns)
+    ErrorOr<void> redisplay(SuggestionManager const& manager, size_t lines, size_t columns)
     {
         if (m_is_showing_suggestions) {
-            cleanup();
+            TRY(cleanup());
             set_vt_size(lines, columns);
-            display(manager);
+            TRY(display(manager));
         } else {
             set_vt_size(lines, columns);
         }
+
+        return {};
     }
 
     virtual void set_vt_size(size_t lines, size_t columns) = 0;
@@ -63,8 +63,8 @@ public:
     {
     }
     virtual ~XtermSuggestionDisplay() override = default;
-    virtual void display(SuggestionManager const&) override;
-    virtual bool cleanup() override;
+    virtual ErrorOr<void> display(SuggestionManager const&) override;
+    virtual ErrorOr<bool> cleanup() override;
     virtual void finish() override
     {
         m_pages.clear();

@@ -9,7 +9,7 @@
 
 namespace ImageDecoderClient {
 
-Client::Client(NonnullOwnPtr<Core::Stream::LocalSocket> socket)
+Client::Client(NonnullOwnPtr<Core::LocalSocket> socket)
     : IPC::ConnectionToServer<ImageDecoderClientEndpoint, ImageDecoderServerEndpoint>(*this, move(socket))
 {
 }
@@ -20,7 +20,7 @@ void Client::die()
         on_death();
 }
 
-Optional<DecodedImage> Client::decode_image(ReadonlyBytes encoded_data)
+Optional<DecodedImage> Client::decode_image(ReadonlyBytes encoded_data, Optional<DeprecatedString> mime_type)
 {
     if (encoded_data.is_empty())
         return {};
@@ -33,7 +33,7 @@ Optional<DecodedImage> Client::decode_image(ReadonlyBytes encoded_data)
     auto encoded_buffer = encoded_buffer_or_error.release_value();
 
     memcpy(encoded_buffer.data<void>(), encoded_data.data(), encoded_data.size());
-    auto response_or_error = try_decode_image(move(encoded_buffer));
+    auto response_or_error = try_decode_image(move(encoded_buffer), mime_type);
 
     if (response_or_error.is_error()) {
         dbgln("ImageDecoder died heroically");
@@ -49,9 +49,10 @@ Optional<DecodedImage> Client::decode_image(ReadonlyBytes encoded_data)
     image.is_animated = response.is_animated();
     image.loop_count = response.loop_count();
     image.frames.resize(response.bitmaps().size());
+    auto bitmaps = response.take_bitmaps();
     for (size_t i = 0; i < image.frames.size(); ++i) {
         auto& frame = image.frames[i];
-        frame.bitmap = response.bitmaps()[i].bitmap();
+        frame.bitmap = bitmaps[i].bitmap();
         frame.duration = response.durations()[i];
     }
     return image;

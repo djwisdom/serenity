@@ -60,7 +60,12 @@ bool write_block(int fd, int seed, off_t block, AK::ByteBuffer& buffer)
 
 int main(int argc, char** argv)
 {
-    char const* target = nullptr;
+    Vector<StringView> arguments;
+    arguments.ensure_capacity(argc);
+    for (auto i = 0; i < argc; ++i)
+        arguments.append({ argv[i], strlen(argv[i]) });
+
+    DeprecatedString target;
     int min_block_offset = 0;
     int block_length = 2048;
     int block_size = 512;
@@ -82,7 +87,7 @@ int main(int argc, char** argv)
     args_parser.add_option(stop_mode, "Stop after first error", "abort-on-error", 'a');
     args_parser.add_option(uninitialized_mode, "Don't pre-initialize block range", "uninitialized", 'u');
     args_parser.add_positional_argument(target, "Target device/file path", "target");
-    args_parser.parse(argc, argv);
+    args_parser.parse(arguments);
 
     auto buffer_result = AK::ByteBuffer::create_zeroed(block_size);
     if (buffer_result.is_error()) {
@@ -91,7 +96,7 @@ int main(int argc, char** argv)
     }
     auto buffer = buffer_result.release_value();
 
-    int fd = open(target, O_CREAT | O_RDWR, 0666);
+    int fd = open(target.characters(), O_CREAT | O_RDWR, 0666);
     if (fd < 0) {
         perror("Couldn't create target file");
         return EXIT_FAILURE;

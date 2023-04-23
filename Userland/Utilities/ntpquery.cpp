@@ -107,7 +107,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     // Leap seconds smearing NTP servers:
     // - time.facebook.com , https://engineering.fb.com/production-engineering/ntp-service/ , sine-smears over 18 hours
     // - time.google.com , https://developers.google.com/time/smear , linear-smears over 24 hours
-    char const* host = "time.google.com";
+    DeprecatedString host = "time.google.com"sv;
     Core::ArgsParser args_parser;
     args_parser.add_option(adjust_time, "Gradually adjust system time (requires root)", "adjust", 'a');
     args_parser.add_option(set_time, "Immediately set system time (requires root)", "set", 's');
@@ -128,7 +128,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         TRY(Core::System::pledge("stdio inet unix rpath"));
     }
 
-    auto* hostent = gethostbyname(host);
+    auto* hostent = gethostbyname(host.characters());
     if (!hostent) {
         warnln("Lookup failed for '{}'", host);
         return 1;
@@ -306,7 +306,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     outln("Offset: {}", offset_s);
 
     if (adjust_time) {
-        long delta_us = static_cast<long>(round(offset_s * 1'000'000));
+        long delta_us = lround(offset_s * 1'000'000);
         timeval delta_timeval;
         delta_timeval.tv_sec = delta_us / 1'000'000;
         delta_timeval.tv_usec = delta_us % 1'000'000;

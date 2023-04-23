@@ -1,12 +1,15 @@
 /*
  * Copyright (c) 2020, Srimanta Barua <srimanta.barua1@gmail.com>
  * Copyright (c) 2022, Jelle Raaijmakers <jelle@gmta.nl>
+ * Copyright (c) 2023, Lukas Affolter <git@lukasach.dev>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
+#include "AK/Endian.h"
+#include "AK/Forward.h"
 #include <AK/DeprecatedString.h>
 #include <AK/Error.h>
 #include <AK/FixedArray.h>
@@ -37,6 +40,7 @@ using FWord = BigEndian<i16>;
 using UFWord = BigEndian<u16>;
 using Tag = BigEndian<u32>;
 using Offset16 = BigEndian<u16>;
+using Offset32 = BigEndian<u32>;
 
 // https://learn.microsoft.com/en-us/typography/opentype/spec/head
 // head: Font Header Table
@@ -171,6 +175,36 @@ struct GlyphHorizontalMetrics {
     i16 left_side_bearing;
 };
 
+// https://learn.microsoft.com/en-us/typography/opentype/spec/fpgm
+// fpgm: Font Program
+struct Fpgm {
+public:
+    explicit Fpgm(ReadonlyBytes slice)
+        : m_slice(slice)
+    {
+    }
+
+    ReadonlyBytes program_data() const { return m_slice; }
+
+private:
+    ReadonlyBytes m_slice;
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/prep
+// prep: Control Value Program
+struct Prep {
+public:
+    explicit Prep(ReadonlyBytes slice)
+        : m_slice(slice)
+    {
+    }
+
+    ReadonlyBytes program_data() const { return m_slice; }
+
+private:
+    ReadonlyBytes m_slice;
+};
+
 // https://learn.microsoft.com/en-us/typography/opentype/spec/hmtx
 // hmtx: Horizontal Metrics Table
 class Hmtx {
@@ -201,10 +235,13 @@ private:
 class OS2 {
 public:
     u16 weight_class() const;
+    u16 width_class() const;
     u16 selection() const;
     i16 typographic_ascender() const;
     i16 typographic_descender() const;
     i16 typographic_line_gap() const;
+
+    bool use_typographic_metrics() const;
 
     explicit OS2(ReadonlyBytes slice)
         : m_slice(slice)
@@ -366,4 +403,276 @@ private:
     FixedArray<size_t> m_subtable_offsets;
 };
 
+// https://learn.microsoft.com/en-us/typography/opentype/spec/eblc
+// EBLC — Embedded Bitmap Location Table
+class EBLC {
+public:
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/eblc#sbitlinemetrics-record
+    struct SbitLineMetrics {
+        i8 ascender {};
+        i8 descender {};
+        u8 width_max {};
+        i8 caret_slope_numerator {};
+        i8 caret_slope_denominator {};
+        i8 caret_offset {};
+        i8 min_origin_sb {};
+        i8 min_advance_sb {};
+        i8 max_before_bl {};
+        i8 min_after_bl {};
+        i8 pad1 {};
+        i8 pad2 {};
+    };
+
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/eblc#indexsubtablearray
+    struct IndexSubTableArray {
+        BigEndian<u16> first_glyph_index;
+        BigEndian<u16> last_glyph_index;
+        Offset32 additional_offset_to_index_subtable;
+    };
+
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/eblc#indexsubheader
+    struct IndexSubHeader {
+        BigEndian<u16> index_format;
+        BigEndian<u16> image_format;
+        Offset32 image_data_offset;
+    };
+
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/eblc#indexsubtable1-variable-metrics-glyphs-with-4-byte-offsets
+    // IndexSubTable1: variable-metrics glyphs with 4-byte offsets
+    struct IndexSubTable1 {
+        IndexSubHeader header;
+        Offset32 sbit_offsets[];
+    };
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/cblc
+// CBLC — Color Bitmap Location Table
+class CBLC {
+public:
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/cblc#bitmapsize-record
+    struct BitmapSize {
+        Offset32 index_subtable_array_offset;
+        BigEndian<u32> index_tables_size;
+        BigEndian<u32> number_of_index_subtables;
+        BigEndian<u32> color_ref;
+        EBLC::SbitLineMetrics hori;
+        EBLC::SbitLineMetrics vert;
+        BigEndian<u16> start_glyph_index;
+        BigEndian<u16> end_glyph_index;
+        u8 ppem_x {};
+        u8 ppem_y {};
+        u8 bit_depth {};
+        i8 flags {};
+    };
+
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/cblc#cblcheader
+    struct CblcHeader {
+        BigEndian<u16> major_version;
+        BigEndian<u16> minor_version;
+        BigEndian<u32> num_sizes;
+        BitmapSize bitmap_sizes[];
+    };
+
+    CblcHeader const& header() const { return *bit_cast<CblcHeader const*>(m_slice.data()); }
+    ReadonlySpan<BitmapSize> bitmap_sizes() const { return { header().bitmap_sizes, header().num_sizes }; }
+    Optional<BitmapSize const&> bitmap_size_for_glyph_id(u32 glyph_id) const;
+
+    static ErrorOr<CBLC> from_slice(ReadonlyBytes);
+    ReadonlyBytes bytes() const { return m_slice; }
+
+    Optional<EBLC::IndexSubHeader const&> index_subtable_for_glyph_id(u32 glyph_id, u16& first_glyph_index, u16& last_glyph_index) const;
+
+private:
+    explicit CBLC(ReadonlyBytes slice)
+        : m_slice(slice)
+    {
+    }
+
+    ReadonlyBytes m_slice;
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/ebdt
+// EBDT — Embedded Bitmap Data Table
+class EBDT {
+public:
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/ebdt#smallglyphmetrics
+    struct SmallGlyphMetrics {
+        u8 height {};
+        u8 width {};
+        i8 bearing_x {};
+        i8 bearing_y {};
+        u8 advance {};
+    };
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/cbdt
+// CBDT — Color Bitmap Data Table
+class CBDT {
+public:
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/cbdt#table-structure
+    struct CbdtHeader {
+        BigEndian<u16> major_version;
+        BigEndian<u16> minor_version;
+    };
+
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/cbdt#format-17-small-metrics-png-image-data
+    struct Format17 {
+        EBDT::SmallGlyphMetrics glyph_metrics;
+        BigEndian<u32> data_len;
+        u8 data[];
+    };
+
+    static ErrorOr<CBDT> from_slice(ReadonlyBytes);
+    ReadonlyBytes bytes() const { return m_slice; }
+
+    CbdtHeader const& header() const { return *bit_cast<CbdtHeader const*>(m_slice.data()); }
+
+private:
+    explicit CBDT(ReadonlyBytes slice)
+        : m_slice(slice)
+    {
+    }
+
+    ReadonlyBytes m_slice;
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#feature-list-table
+struct FeatureRecord {
+    Tag feature_tag;
+    Offset16 feature_offset;
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#feature-list-table
+struct FeatureList {
+    BigEndian<u16> feature_count;
+    FeatureRecord feature_records[];
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#feature-table
+struct Feature {
+    Offset16 feature_params_offset;
+    BigEndian<u16> lookup_index_count;
+    BigEndian<u16> lookup_list_indices[];
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#lookup-table
+struct Lookup {
+    BigEndian<u16> lookup_type;
+    BigEndian<u16> lookup_flag;
+    BigEndian<u16> subtable_count;
+    Offset16 subtable_offsets[];
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#lookup-list-table
+struct LookupList {
+    BigEndian<u16> lookup_count;
+    Offset16 lookup_offsets[];
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#coverage-format-1
+struct CoverageFormat1 {
+    BigEndian<u16> coverage_format;
+    BigEndian<u16> glyph_count;
+    BigEndian<u16> glyph_array[];
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#coverage-format-2
+struct RangeRecord {
+    BigEndian<u16> start_glyph_id;
+    BigEndian<u16> end_glyph_id;
+    BigEndian<u16> start_coverage_index;
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#coverage-format-2
+struct CoverageFormat2 {
+    BigEndian<u16> coverage_format;
+    BigEndian<u16> range_count;
+    RangeRecord range_records[];
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#class-definition-table-format-2
+struct ClassRangeRecord {
+    BigEndian<u16> start_glyph_id;
+    BigEndian<u16> end_glyph_id;
+    BigEndian<u16> class_;
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2#class-definition-table-format-2
+struct ClassDefFormat2 {
+    BigEndian<u16> class_format;
+    BigEndian<u16> class_range_count;
+    ClassRangeRecord class_range_records[];
+};
+
+// https://learn.microsoft.com/en-us/typography/opentype/spec/gpos#gpos-header
+class GPOS {
+public:
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/gpos#gpos-header
+    struct GPOSHeader {
+        BigEndian<u16> major_version;
+        BigEndian<u16> minor_version;
+        Offset16 script_list_offset;
+        Offset16 feature_list_offset;
+        Offset16 lookup_list_offset;
+    };
+
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/gpos#pair-adjustment-positioning-format-1-adjustments-for-glyph-pairs
+    struct PairPosFormat1 {
+        BigEndian<u16> pos_format;
+        Offset16 coverage_offset;
+        BigEndian<u16> value_format1;
+        BigEndian<u16> value_format2;
+        BigEndian<u16> pair_set_count;
+        Offset16 pair_set_offsets[];
+    };
+
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/gpos#value-record
+    struct ValueRecord {
+        BigEndian<i16> x_placement;
+        BigEndian<i16> y_placement;
+        BigEndian<i16> x_advance;
+        BigEndian<i16> y_advance;
+        Offset16 x_placement_device_offset;
+        Offset16 y_placement_device_offset;
+        Offset16 x_advance_device_offset;
+        Offset16 y_advance_device_offset;
+    };
+
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/gpos#pair-adjustment-positioning-format-2-class-pair-adjustment
+    struct PairPosFormat2 {
+        BigEndian<u16> pos_format;
+        Offset16 coverage_offset;
+        BigEndian<u16> value_format1;
+        BigEndian<u16> value_format2;
+        Offset16 class_def1_offset;
+        Offset16 class_def2_offset;
+        BigEndian<u16> class1_count;
+        BigEndian<u16> class2_count;
+    };
+
+    enum class ValueFormat : u16 {
+        X_PLACEMENT = 0x0001,
+        Y_PLACEMENT = 0x0002,
+        X_ADVANCE = 0x0004,
+        Y_ADVANCE = 0x0008,
+        X_PLACEMENT_DEVICE = 0x0010,
+        Y_PLACEMENT_DEVICE = 0x0020,
+        X_ADVANCE_DEVICE = 0x0040,
+        Y_ADVANCE_DEVICE = 0x0080,
+    };
+
+    GPOSHeader const& header() const { return *bit_cast<GPOSHeader const*>(m_slice.data()); }
+
+    Optional<i16> glyph_kerning(u16 left_glyph_id, u16 right_glyph_id) const;
+
+    static ErrorOr<GPOS> from_slice(ReadonlyBytes slice) { return GPOS { slice }; }
+
+private:
+    GPOS(ReadonlyBytes slice)
+        : m_slice(slice)
+    {
+    }
+
+    ReadonlyBytes m_slice;
+};
 }

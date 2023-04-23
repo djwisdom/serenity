@@ -24,28 +24,33 @@ namespace HackStudio {
 
 ErrorOr<void> DebugInfoWidget::init_toolbar()
 {
-    m_continue_action = GUI::Action::create("Continue", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/debug-continue.png"sv)), [](auto&) {
+    m_continue_action = GUI::Action::create("Continue", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/debug-continue.png"sv)), [](auto&) {
         Debugger::the().set_requested_debugger_action(Debugger::DebuggerAction::Continue);
     });
 
-    m_singlestep_action = GUI::Action::create("Step Over", { Mod_None, Key_F10 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/debug-step-over.png"sv)), [](auto&) {
+    m_singlestep_action = GUI::Action::create("Step Over", { Mod_None, Key_F10 }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/debug-step-over.png"sv)), [](auto&) {
         Debugger::the().set_requested_debugger_action(Debugger::DebuggerAction::SourceStepOver);
     });
 
-    m_step_in_action = GUI::Action::create("Step In", { Mod_None, Key_F11 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/debug-step-in.png"sv)), [](auto&) {
+    m_step_in_action = GUI::Action::create("Step In", { Mod_None, Key_F11 }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/debug-step-in.png"sv)), [](auto&) {
         Debugger::the().set_requested_debugger_action(Debugger::DebuggerAction::SourceSingleStep);
     });
 
-    m_step_out_action = GUI::Action::create("Step Out", { Mod_Shift, Key_F11 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/debug-step-out.png"sv)), [](auto&) {
+    m_step_out_action = GUI::Action::create("Step Out", { Mod_Shift, Key_F11 }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/debug-step-out.png"sv)), [](auto&) {
         Debugger::the().set_requested_debugger_action(Debugger::DebuggerAction::SourceStepOut);
+    });
+
+    m_pause_action = GUI::Action::create("Pause", {}, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/debug-pause.png"sv)), [](auto&) {
+        Debugger::the().stop_debuggee();
     });
 
     m_toolbar->add_action(*m_continue_action);
     m_toolbar->add_action(*m_singlestep_action);
     m_toolbar->add_action(*m_step_in_action);
     m_toolbar->add_action(*m_step_out_action);
+    m_toolbar->add_action(*m_pause_action);
 
-    set_debug_actions_enabled(false);
+    set_debug_actions_enabled(false, {});
 
     return {};
 }
@@ -116,7 +121,7 @@ RefPtr<GUI::Menu> DebugInfoWidget::get_context_menu_for_variable(const GUI::Mode
     auto* variable = static_cast<Debug::DebugInfo::VariableInfo const*>(index.internal_data());
     if (does_variable_support_writing(variable)) {
         context_menu->add_action(GUI::Action::create("Change value", [&](auto&) {
-            DeprecatedString value;
+            String value;
             if (GUI::InputBox::show(window(), value, "Enter new value:"sv, "Set variable value"sv) == GUI::InputBox::ExecResult::OK) {
                 auto& model = static_cast<VariablesModel&>(*m_variables_view->model());
                 model.set_variable_value(index, value, window());
@@ -143,7 +148,7 @@ RefPtr<GUI::Menu> DebugInfoWidget::get_context_menu_for_variable(const GUI::Mode
 NonnullRefPtr<GUI::Widget> DebugInfoWidget::build_variables_tab()
 {
     auto variables_widget = GUI::Widget::construct();
-    variables_widget->set_title("Variables");
+    variables_widget->set_title("Variables"_string.release_value_but_fixme_should_propagate_errors());
     variables_widget->set_layout<GUI::HorizontalBoxLayout>();
 
     m_variables_view = variables_widget->add<GUI::TreeView>();
@@ -160,7 +165,7 @@ NonnullRefPtr<GUI::Widget> DebugInfoWidget::build_variables_tab()
 NonnullRefPtr<GUI::Widget> DebugInfoWidget::build_registers_tab()
 {
     auto registers_widget = GUI::Widget::construct();
-    registers_widget->set_title("Registers");
+    registers_widget->set_title("Registers"_string.release_value_but_fixme_should_propagate_errors());
     registers_widget->set_layout<GUI::HorizontalBoxLayout>();
 
     m_registers_view = registers_widget->add<GUI::TableView>();
@@ -193,12 +198,22 @@ void DebugInfoWidget::program_stopped()
     m_registers_view->set_model({});
 }
 
-void DebugInfoWidget::set_debug_actions_enabled(bool enabled)
+void DebugInfoWidget::set_debug_actions_enabled(bool enabled, Optional<DebugActionsState> state)
 {
-    m_continue_action->set_enabled(enabled);
-    m_singlestep_action->set_enabled(enabled);
-    m_step_in_action->set_enabled(enabled);
-    m_step_out_action->set_enabled(enabled);
+    if (!enabled) {
+        m_continue_action->set_enabled(false);
+        m_singlestep_action->set_enabled(false);
+        m_step_in_action->set_enabled(false);
+        m_step_out_action->set_enabled(false);
+        m_pause_action->set_enabled(false);
+        return;
+    }
+
+    m_continue_action->set_enabled(state == DebugActionsState::DebuggeeStopped);
+    m_singlestep_action->set_enabled(state == DebugActionsState::DebuggeeStopped);
+    m_step_in_action->set_enabled(state == DebugActionsState::DebuggeeStopped);
+    m_step_out_action->set_enabled(state == DebugActionsState::DebuggeeStopped);
+    m_pause_action->set_enabled(state == DebugActionsState::DebuggeeRunning);
 }
 
 }

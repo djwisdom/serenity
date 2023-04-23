@@ -19,8 +19,9 @@
 #include <AK/URL.h>
 #include <AK/Vector.h>
 #include <LibCore/ArgsParser.h>
+#include <LibCore/DeprecatedFile.h>
 #include <LibCore/File.h>
-#include <LibCore/Stream.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibMain/Main.h>
 #include <LibMarkdown/Document.h>
 #include <LibMarkdown/Visitor.h>
@@ -112,7 +113,7 @@ public:
     StringCollector() = default;
     virtual ~StringCollector() = default;
 
-    DeprecatedString build() { return m_builder.build(); }
+    DeprecatedString build() { return m_builder.to_deprecated_string(); }
 
     static DeprecatedString from(Markdown::Heading const& heading)
     {
@@ -191,24 +192,40 @@ RecursionDecision MarkdownLinkage::visit(Markdown::Text::LinkNode const& link_no
                 m_has_invalid_link = true;
                 return RecursionDecision::Recurse;
             }
-            if (url.paths().size() < 2) {
+            if (url.path_segment_count() < 2) {
                 warnln("help://man URL is missing section or page: {}", href);
                 m_has_invalid_link = true;
                 return RecursionDecision::Recurse;
             }
-            auto file = DeprecatedString::formatted("../man{}/{}.md", url.paths()[0], url.paths()[1]);
+
+            // Remove leading '/' from the path.
+            auto file = DeprecatedString::formatted("{}/Base/usr/share/man/man{}.md", m_serenity_source_directory, url.serialize_path().substring(1));
 
             m_file_links.append({ file, DeprecatedString(), StringCollector::from(*link_node.text) });
             return RecursionDecision::Recurse;
         }
         if (url.scheme() == "file") {
-            // TODO: Check more possible links other than icons.
-            if (url.path().starts_with("/res/icons/"sv)) {
-                auto file = DeprecatedString::formatted("{}/Base{}", m_serenity_source_directory, url.path());
-                m_file_links.append({ file, DeprecatedString(), StringCollector::from(*link_node.text) });
+            auto file_path = url.serialize_path();
+            if (file_path.contains("man"sv) && file_path.ends_with(".md"sv)) {
+                warnln("Inter-manpage link without the help:// scheme: {}\nPlease use help URLs of the form 'help://man/<section>/<subsection...>/<page>'", href);
+                m_has_invalid_link = true;
                 return RecursionDecision::Recurse;
             }
-            outln("Not checking local link {}", href);
+            // TODO: Check more possible links other than icons.
+            if (file_path.starts_with("/res/icons/"sv)) {
+                auto file = DeprecatedString::formatted("{}/Base{}", m_serenity_source_directory, file_path);
+                m_file_links.append({ file, DeprecatedString(), StringCollector::from(*link_node.text) });
+            } else if (file_path.starts_with("/bin"sv)) {
+                StringBuilder builder;
+                link_node.text->render_to_html(builder);
+                auto link_text = builder.string_view();
+                if (link_text != "Open"sv) {
+                    warnln("Binary link named '{}' is not allowed, binary links must be called 'Open'. Linked binary: {}", link_text, href);
+                    m_has_invalid_link = true;
+                }
+            } else {
+                outln("Not checking local link {}", href);
+            }
             return RecursionDecision::Recurse;
         }
     }
@@ -234,7 +251,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     outln("Reading and parsing Markdown files ...");
     HashMap<DeprecatedString, MarkdownLinkage> files;
     for (auto path : file_paths) {
-        auto file_or_error = Core::Stream::File::open(path, Core::Stream::OpenMode::Read);
+        auto file_or_error = Core::File::open(path, Core::File::OpenMode::Read);
         if (file_or_error.is_error()) {
             warnln("Failed to open {}: {}", path, file_or_error.error());
             // Since this should never happen anyway, fail early.
@@ -257,7 +274,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             // Since this should never happen anyway, fail early.
             return 1;
         }
-        files.set(Core::File::real_path_for(path), MarkdownLinkage::analyze(*document));
+        files.set(Core::DeprecatedFile::real_path_for(path), MarkdownLinkage::analyze(*document));
     }
 
     outln("Checking links ...");
@@ -278,7 +295,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             } else {
                 pointee_file = LexicalPath::absolute_path(file_dir, file_link.file_path);
             }
-            if (!Core::File::exists(pointee_file) && !is_missing_file_acceptable(pointee_file)) {
+            if (!FileSystem::exists(pointee_file) && !is_missing_file_acceptable(pointee_file)) {
                 outln("File '{}' points to '{}' (label '{}'), but '{}' does not exist!",
                     file_item.key, file_link.file_path, file_link.label, pointee_file);
                 any_problems = true;

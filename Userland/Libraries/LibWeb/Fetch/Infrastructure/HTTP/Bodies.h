@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -11,9 +11,12 @@
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
 #include <AK/Variant.h>
+#include <LibJS/Heap/GCPtr.h>
 #include <LibJS/Heap/Handle.h>
+#include <LibWeb/Fetch/Infrastructure/Task.h>
 #include <LibWeb/FileAPI/Blob.h>
 #include <LibWeb/Streams/ReadableStream.h>
+#include <LibWeb/WebIDL/Promise.h>
 
 namespace Web::Fetch::Infrastructure {
 
@@ -21,6 +24,8 @@ namespace Web::Fetch::Infrastructure {
 class Body final {
 public:
     using SourceType = Variant<Empty, ByteBuffer, JS::Handle<FileAPI::Blob>>;
+    using ProcessBodyCallback = JS::SafeFunction<void(ByteBuffer)>;
+    using ProcessBodyErrorCallback = JS::SafeFunction<void(JS::Object&)>;
 
     explicit Body(JS::Handle<Streams::ReadableStream>);
     Body(JS::Handle<Streams::ReadableStream>, SourceType, Optional<u64>);
@@ -29,9 +34,9 @@ public:
     [[nodiscard]] SourceType const& source() const { return m_source; }
     [[nodiscard]] Optional<u64> const& length() const { return m_length; }
 
-    [[nodiscard]] WebIDL::ExceptionOr<Body> clone() const;
+    WebIDL::ExceptionOr<Body> clone(JS::Realm&) const;
 
-    [[nodiscard]] JS::NonnullGCPtr<JS::PromiseCapability> fully_read_as_promise() const;
+    WebIDL::ExceptionOr<void> fully_read(JS::Realm&, ProcessBodyCallback process_body, ProcessBodyErrorCallback process_body_error, TaskDestination task_destination) const;
 
 private:
     // https://fetch.spec.whatwg.org/#concept-body-stream

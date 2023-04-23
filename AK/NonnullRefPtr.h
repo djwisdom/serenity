@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -94,8 +94,8 @@ public:
 
     ALWAYS_INLINE ~NonnullRefPtr()
     {
-        unref_if_not_null(m_ptr);
-        m_ptr = nullptr;
+        auto* ptr = exchange(m_ptr, nullptr);
+        unref_if_not_null(ptr);
 #ifdef SANITIZE_PTRS
         m_ptr = reinterpret_cast<T*>(explode_byte(NONNULLREFPTR_SCRUB_BYTE));
 #endif
@@ -226,6 +226,28 @@ inline NonnullRefPtr<T> adopt_ref(T& object)
     return NonnullRefPtr<T>(NonnullRefPtr<T>::Adopt, object);
 }
 
+// Use like `adopt_nonnull_own_or_enomem(new (nothrow) T(args...))`.
+template<typename T>
+inline ErrorOr<NonnullRefPtr<T>> adopt_nonnull_ref_or_enomem(T* object)
+{
+    if (!object)
+        return Error::from_errno(ENOMEM);
+    return NonnullRefPtr<T>(NonnullRefPtr<T>::Adopt, *object);
+}
+
+template<typename T, class... Args>
+requires(IsConstructible<T, Args...>) inline ErrorOr<NonnullRefPtr<T>> try_make_ref_counted(Args&&... args)
+{
+    return adopt_nonnull_ref_or_enomem(new (nothrow) T(forward<Args>(args)...));
+}
+
+// FIXME: Remove once P0960R3 is available in Clang.
+template<typename T, class... Args>
+inline ErrorOr<NonnullRefPtr<T>> try_make_ref_counted(Args&&... args)
+{
+    return adopt_nonnull_ref_or_enomem(new (nothrow) T { forward<Args>(args)... });
+}
+
 template<Formattable T>
 struct Formatter<NonnullRefPtr<T>> : Formatter<T> {
     ErrorOr<void> format(FormatBuilder& builder, NonnullRefPtr<T> const& value)
@@ -274,7 +296,9 @@ struct Traits<NonnullRefPtr<T>> : public GenericTraits<NonnullRefPtr<T>> {
 }
 
 #if USING_AK_GLOBALLY
+using AK::adopt_nonnull_ref_or_enomem;
 using AK::adopt_ref;
 using AK::make_ref_counted;
 using AK::NonnullRefPtr;
+using AK::try_make_ref_counted;
 #endif

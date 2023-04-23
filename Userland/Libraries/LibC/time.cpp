@@ -5,7 +5,6 @@
  */
 
 #include <AK/DateConstants.h>
-#include <AK/DeprecatedString.h>
 #include <AK/StringBuilder.h>
 #include <AK/Time.h>
 #include <Kernel/API/TimePage.h>
@@ -15,7 +14,6 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <sys/times.h>
@@ -214,6 +212,7 @@ struct tm* localtime_r(time_t const* t, struct tm* tm)
 
 time_t timegm(struct tm* tm)
 {
+    tm->tm_isdst = 0;
     return tm_to_time(tm, { __utc, __builtin_strlen(__utc) });
 }
 
@@ -390,7 +389,7 @@ size_t strftime(char* destination, size_t max_size, char const* format, const st
             return 0;
     }
 
-    auto str = builder.build();
+    auto str = builder.to_deprecated_string();
     bool fits = str.copy_characters_to_buffer(destination, max_size);
     return fits ? str.length() : 0;
 }

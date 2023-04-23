@@ -49,7 +49,7 @@ public:
         requires(IsBaseOf<Node, NodeType>)
         {
             auto node = adopt_ref(*new NodeType(move(text), move(icon), this, forward<Args>(args)...));
-            m_child_nodes.append(*static_cast<Node const*>(node.ptr()));
+            m_child_nodes.append(*static_cast<Node*>(node.ptr()));
             return node;
         }
 
@@ -59,25 +59,25 @@ public:
         Node const* parent_node() const { return m_parent_node; }
         Node* parent_node() { return m_parent_node; }
 
-        NonnullRefPtrVector<Node> const& child_nodes() const { return m_child_nodes; }
-        NonnullRefPtrVector<Node>& child_nodes() { return m_child_nodes; }
+        Vector<NonnullRefPtr<Node>> const& child_nodes() const { return m_child_nodes; }
+        Vector<NonnullRefPtr<Node>>& child_nodes() { return m_child_nodes; }
 
     private:
         DeprecatedString m_text;
         Optional<Icon> m_icon;
         WeakPtr<Node> m_parent_node;
-        NonnullRefPtrVector<Node> m_child_nodes;
+        Vector<NonnullRefPtr<Node>> m_child_nodes;
     };
 
-    NonnullRefPtrVector<Node> const& nodes() const { return m_nodes; }
-    NonnullRefPtrVector<Node>& nodes() { return m_nodes; }
+    Vector<NonnullRefPtr<Node>> const& nodes() const { return m_nodes; }
+    Vector<NonnullRefPtr<Node>>& nodes() { return m_nodes; }
 
     template<typename NodeType = Node, typename... Args>
     NonnullRefPtr<NodeType> add_node(DeprecatedString text, Optional<Icon> icon, Args&&... args)
     requires(IsBaseOf<Node, NodeType>)
     {
         auto node = adopt_ref(*new NodeType(move(text), move(icon), nullptr, forward<Args>(args)...));
-        m_nodes.append(*static_cast<Node const*>(node.ptr()));
+        m_nodes.append(*static_cast<Node*>(node.ptr()));
         return node;
     }
 
@@ -86,7 +86,7 @@ public:
 private:
     TreeViewModel() = default;
 
-    NonnullRefPtrVector<Node> m_nodes;
+    Vector<NonnullRefPtr<Node>> m_nodes;
 };
 
 }

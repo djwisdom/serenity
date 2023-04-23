@@ -10,31 +10,18 @@
 #include <AK/ByteReader.h>
 #include <AK/Endian.h>
 #include <AK/Types.h>
+#include <LibTLS/Extensions.h>
 
 namespace TLS {
 
-enum class MessageType : u8 {
-    ChangeCipher = 0x14,
-    Alert = 0x15,
-    Handshake = 0x16,
-    ApplicationData = 0x17,
-};
-
-enum class Version : u16 {
-    V10 = 0x0301,
-    V11 = 0x0302,
-    V12 = 0x0303,
-    V13 = 0x0304
-};
-
 class PacketBuilder {
 public:
-    PacketBuilder(MessageType type, u16 version, size_t size_hint = 0xfdf)
-        : PacketBuilder(type, (Version)version, size_hint)
+    PacketBuilder(ContentType type, u16 version, size_t size_hint = 0xfdf)
+        : PacketBuilder(type, (ProtocolVersion)version, size_hint)
     {
     }
 
-    PacketBuilder(MessageType type, Version version, size_t size_hint = 0xfdf)
+    PacketBuilder(ContentType type, ProtocolVersion version, size_t size_hint = 0xfdf)
     {
         // FIXME: Handle possible OOM situation.
         m_packet_data = ByteBuffer::create_uninitialized(size_hint + 16).release_value_but_fixme_should_propagate_errors();

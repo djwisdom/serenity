@@ -5,7 +5,6 @@
  */
 
 #include <AK/BuiltinWrappers.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <Kernel/Assertions.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalRegion.h>
@@ -47,7 +46,7 @@ void PhysicalRegion::initialize_zones()
         while (remaining_pages >= pages_per_zone) {
             m_zones.append(adopt_nonnull_own_or_enomem(new (nothrow) PhysicalZone(base_address, pages_per_zone)).release_value_but_fixme_should_propagate_errors());
             base_address = base_address.offset(pages_per_zone * PAGE_SIZE);
-            m_usable_zones.append(m_zones.last());
+            m_usable_zones.append(*m_zones.last());
             remaining_pages -= pages_per_zone;
             ++zone_count;
         }
@@ -75,7 +74,7 @@ OwnPtr<PhysicalRegion> PhysicalRegion::try_take_pages_from_beginning(size_t page
     return try_create(taken_lower, taken_upper);
 }
 
-NonnullRefPtrVector<PhysicalPage> PhysicalRegion::take_contiguous_free_pages(size_t count)
+Vector<NonnullRefPtr<PhysicalPage>> PhysicalRegion::take_contiguous_free_pages(size_t count)
 {
     auto rounded_page_count = next_power_of_two(count);
     auto order = count_trailing_zeroes(rounded_page_count);
@@ -95,7 +94,7 @@ NonnullRefPtrVector<PhysicalPage> PhysicalRegion::take_contiguous_free_pages(siz
     if (!page_base.has_value())
         return {};
 
-    NonnullRefPtrVector<PhysicalPage> physical_pages;
+    Vector<NonnullRefPtr<PhysicalPage>> physical_pages;
     physical_pages.ensure_capacity(count);
 
     for (size_t i = 0; i < count; ++i)
@@ -132,10 +131,10 @@ void PhysicalRegion::return_page(PhysicalAddress paddr)
         zone_index = m_large_zones + (paddr.get() - small_zone_base) / small_zone_size;
 
     auto& zone = m_zones[zone_index];
-    VERIFY(zone.contains(paddr));
-    zone.deallocate_block(paddr, 0);
-    if (m_full_zones.contains(zone))
-        m_usable_zones.append(zone);
+    VERIFY(zone->contains(paddr));
+    zone->deallocate_block(paddr, 0);
+    if (m_full_zones.contains(*zone))
+        m_usable_zones.append(*zone);
 }
 
 }

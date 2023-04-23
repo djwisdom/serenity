@@ -5,34 +5,31 @@
  */
 
 #include <AK/LexicalPath.h>
-#include <LibCore/DirIterator.h>
-#include <LibCore/Stream.h>
+#include <LibCore/Directory.h>
+#include <LibCore/File.h>
 #include <LibCpp/Parser.h>
 #include <LibTest/TestCase.h>
 
-constexpr char TESTS_ROOT_DIR[] = "/home/anon/Tests/cpp-tests/preprocessor";
+constexpr StringView TESTS_ROOT_DIR = "/home/anon/Tests/cpp-tests/preprocessor"sv;
 
 static DeprecatedString read_all(DeprecatedString const& path)
 {
-    auto file = MUST(Core::Stream::File::open(path, Core::Stream::OpenMode::Read));
+    auto file = MUST(Core::File::open(path, Core::File::OpenMode::Read));
     auto file_size = MUST(file->size());
     auto content = MUST(ByteBuffer::create_uninitialized(file_size));
-    MUST(file->read_entire_buffer(content.bytes()));
+    MUST(file->read_until_filled(content.bytes()));
     return DeprecatedString { content.bytes() };
 }
 
 TEST_CASE(test_regression)
 {
-    Core::DirIterator directory_iterator(TESTS_ROOT_DIR, Core::DirIterator::Flags::SkipDots);
-
-    while (directory_iterator.has_next()) {
-        auto file_path = directory_iterator.next_full_path();
-
-        auto path = LexicalPath { file_path };
+    MUST(Core::Directory::for_each_entry(TESTS_ROOT_DIR, Core::DirIterator::Flags::SkipDots, [](auto const& entry, auto const& directory) -> ErrorOr<IterationDecision> {
+        auto path = LexicalPath::join(directory.path().string(), entry.name);
         if (!path.has_extension(".cpp"sv))
-            continue;
+            return IterationDecision::Continue;
 
         outln("Checking {}...", path.basename());
+        auto file_path = path.string();
 
         auto ast_file_path = DeprecatedString::formatted("{}.txt", file_path.substring(0, file_path.length() - sizeof(".cpp") + 1));
 
@@ -49,5 +46,6 @@ TEST_CASE(test_regression)
         for (size_t i = 0; i < tokens.size(); ++i) {
             EXPECT_EQ(tokens[i].to_deprecated_string(), target_lines[i]);
         }
-    }
+        return IterationDecision::Continue;
+    }));
 }

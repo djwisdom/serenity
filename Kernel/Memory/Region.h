@@ -13,6 +13,7 @@
 #include <Kernel/Forward.h>
 #include <Kernel/KString.h>
 #include <Kernel/Library/LockWeakable.h>
+#include <Kernel/Locking/LockRank.h>
 #include <Kernel/Memory/PageFaultResponse.h>
 #include <Kernel/Memory/VirtualRange.h>
 #include <Kernel/Sections.h>
@@ -192,7 +193,7 @@ public:
     void set_page_directory(PageDirectory&);
     ErrorOr<void> map(PageDirectory&, ShouldFlushTLB = ShouldFlushTLB::Yes);
     void unmap(ShouldFlushTLB = ShouldFlushTLB::Yes);
-    void unmap_with_locks_held(ShouldFlushTLB, SpinlockLocker<RecursiveSpinlock>& pd_locker);
+    void unmap_with_locks_held(ShouldFlushTLB, SpinlockLocker<RecursiveSpinlock<LockRank::None>>& pd_locker);
 
     void remap();
 
@@ -205,6 +206,9 @@ public:
 
     [[nodiscard]] bool mmapped_from_readable() const { return m_mmapped_from_readable; }
     [[nodiscard]] bool mmapped_from_writable() const { return m_mmapped_from_writable; }
+
+    void start_handling_page_fault(Badge<MemoryManager>) { m_in_progress_page_faults++; };
+    void finish_handling_page_fault(Badge<MemoryManager>) { m_in_progress_page_faults--; };
 
 private:
     Region();
@@ -233,6 +237,7 @@ private:
     size_t m_offset_in_vmobject { 0 };
     LockRefPtr<VMObject> m_vmobject;
     OwnPtr<KString> m_name;
+    Atomic<u32> m_in_progress_page_faults;
     u8 m_access { Region::None };
     bool m_shared : 1 { false };
     bool m_cacheable : 1 { false };

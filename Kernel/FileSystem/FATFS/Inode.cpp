@@ -11,10 +11,10 @@
 
 namespace Kernel {
 
-ErrorOr<NonnullLockRefPtr<FATInode>> FATInode::create(FATFS& fs, FATEntry entry, Vector<FATLongFileNameEntry> const& lfn_entries)
+ErrorOr<NonnullRefPtr<FATInode>> FATInode::create(FATFS& fs, FATEntry entry, Vector<FATLongFileNameEntry> const& lfn_entries)
 {
     auto filename = TRY(compute_filename(entry, lfn_entries));
-    return adopt_nonnull_lock_ref_or_enomem(new (nothrow) FATInode(fs, entry, move(filename)));
+    return adopt_nonnull_ref_or_enomem(new (nothrow) FATInode(fs, entry, move(filename)));
 }
 
 FATInode::FATInode(FATFS& fs, FATEntry entry, NonnullOwnPtr<KString> filename)
@@ -31,9 +31,9 @@ FATInode::FATInode(FATFS& fs, FATEntry entry, NonnullOwnPtr<KString> filename)
         .uid = 0,
         .gid = 0,
         .link_count = 0,
-        .atime = fat_date_time(m_entry.last_accessed_date, { 0 }),
-        .ctime = fat_date_time(m_entry.creation_date, m_entry.creation_time),
-        .mtime = fat_date_time(m_entry.modification_date, m_entry.modification_time),
+        .atime = time_from_packed_dos(m_entry.last_accessed_date, { 0 }),
+        .ctime = time_from_packed_dos(m_entry.creation_date, m_entry.creation_time),
+        .mtime = time_from_packed_dos(m_entry.modification_date, m_entry.modification_time),
         .dtime = {},
         .block_count = 0,
         .block_size = 0,
@@ -108,7 +108,7 @@ ErrorOr<void> FATInode::replace_child(StringView, Inode&)
     return Error::from_errno(EROFS);
 }
 
-ErrorOr<LockRefPtr<FATInode>> FATInode::traverse(Function<ErrorOr<bool>(LockRefPtr<FATInode>)> callback)
+ErrorOr<RefPtr<FATInode>> FATInode::traverse(Function<ErrorOr<bool>(RefPtr<FATInode>)> callback)
 {
     VERIFY(has_flag(m_entry.attributes, FATAttributes::Directory));
 
@@ -167,24 +167,29 @@ ErrorOr<NonnullOwnPtr<KString>> FATInode::compute_filename(FATEntry& entry, Vect
             filename.append(lfn_entry.characters3[1]);
         }
 
-        return TRY(KString::try_create(byte_terminated_string(filename.string_view(), lfn_entry_text_termination)));
+        // Long Filenames have two terminators:
+        // 1. Completely unused "entries" (the `characterN` fields of
+        //    `lfn_entry`) are filled with 0xFF (`lfn_entry_unused_byte`).
+        // 2. Partially used entries (within `characterN`) are null-padded.
+        //
+        // `filename` is truncated first to eliminate unused entries, and
+        // then further truncated to remove any existing null padding characters.
+        //
+        // Page 8 of the Long Filename Specification
+        // (http://www.osdever.net/documents/LongFileName.pdf)
+        // details this encoding ("If the long name does not fill...").
+        return TRY(KString::try_create(
+            byte_terminated_string(
+                byte_terminated_string(filename.string_view(), lfn_entry_unused_byte), lfn_entry_character_termination)));
     }
 
     VERIFY_NOT_REACHED();
 }
 
-Time FATInode::fat_date_time(FATPackedDate date, FATPackedTime time)
-{
-    if (date.value == 0)
-        return Time();
-
-    return Time::from_timestamp(first_fat_year + date.year, date.month, date.day, time.hour, time.minute, time.second * 2, 0);
-}
-
 StringView FATInode::byte_terminated_string(StringView string, u8 fill_byte)
 {
     if (auto index = string.find_last_not(fill_byte); index.has_value())
-        return string.substring_view(0, index.value());
+        return string.substring_view(0, index.value() + 1);
     return string;
 }
 
@@ -196,6 +201,9 @@ u32 FATInode::first_cluster() const
 ErrorOr<size_t> FATInode::read_bytes_locked(off_t offset, size_t size, UserOrKernelBuffer& buffer, OpenFileDescription*) const
 {
     dbgln_if(FAT_DEBUG, "FATFS: Reading inode {}: size: {} offset: {}", identifier().index(), size, offset);
+    VERIFY(offset >= 0);
+    if (offset >= m_metadata.size)
+        return 0;
 
     // FIXME: Read only the needed blocks instead of the whole file
     auto blocks = TRY(const_cast<FATInode&>(*this).read_block_list());
@@ -225,7 +233,7 @@ ErrorOr<void> FATInode::traverse_as_directory(Function<ErrorOr<void>(FileSystem:
     return {};
 }
 
-ErrorOr<NonnullLockRefPtr<Inode>> FATInode::lookup(StringView name)
+ErrorOr<NonnullRefPtr<Inode>> FATInode::lookup(StringView name)
 {
     MutexLocker locker(m_inode_lock);
 
@@ -237,8 +245,7 @@ ErrorOr<NonnullLockRefPtr<Inode>> FATInode::lookup(StringView name)
 
     if (inode.is_null())
         return ENOENT;
-    else
-        return inode.release_nonnull();
+    return inode.release_nonnull();
 }
 
 ErrorOr<size_t> FATInode::write_bytes_locked(off_t, size_t, UserOrKernelBuffer const&, OpenFileDescription*)
@@ -246,7 +253,7 @@ ErrorOr<size_t> FATInode::write_bytes_locked(off_t, size_t, UserOrKernelBuffer c
     return EROFS;
 }
 
-ErrorOr<NonnullLockRefPtr<Inode>> FATInode::create_child(StringView, mode_t, dev_t, UserID, GroupID)
+ErrorOr<NonnullRefPtr<Inode>> FATInode::create_child(StringView, mode_t, dev_t, UserID, GroupID)
 {
     return EROFS;
 }

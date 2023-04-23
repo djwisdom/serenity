@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -12,19 +12,21 @@ namespace JS {
 
 // 3.2 The ShadowRealm Constructor, https://tc39.es/proposal-shadowrealm/#sec-shadowrealm-constructor
 ShadowRealmConstructor::ShadowRealmConstructor(Realm& realm)
-    : NativeFunction(realm.vm().names.ShadowRealm.as_string(), *realm.intrinsics().function_prototype())
+    : NativeFunction(realm.vm().names.ShadowRealm.as_string(), realm.intrinsics().function_prototype())
 {
 }
 
-void ShadowRealmConstructor::initialize(Realm& realm)
+ThrowCompletionOr<void> ShadowRealmConstructor::initialize(Realm& realm)
 {
     auto& vm = this->vm();
-    NativeFunction::initialize(realm);
+    MUST_OR_THROW_OOM(NativeFunction::initialize(realm));
 
     // 3.3.1 ShadowRealm.prototype, https://tc39.es/proposal-shadowrealm/#sec-shadowrealm.prototype
     define_direct_property(vm.names.prototype, realm.intrinsics().shadow_realm_prototype(), 0);
 
     define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
+
+    return {};
 }
 
 // 3.2.1 ShadowRealm ( ), https://tc39.es/proposal-shadowrealm/#sec-shadowrealm
@@ -42,7 +44,7 @@ ThrowCompletionOr<NonnullGCPtr<Object>> ShadowRealmConstructor::construct(Functi
     auto& vm = this->vm();
 
     // 3. Let realmRec be CreateRealm().
-    auto realm = Realm::create(vm);
+    auto realm = MUST_OR_THROW_OOM(Realm::create(vm));
 
     // 5. Let context be a new execution context.
     auto context = ExecutionContext { vm.heap() };
@@ -68,7 +70,7 @@ ThrowCompletionOr<NonnullGCPtr<Object>> ShadowRealmConstructor::construct(Functi
     auto& global_object = set_default_global_bindings(object->shadow_realm());
 
     // FIXME: 12. Perform ? HostInitializeShadowRealm(O.[[ShadowRealm]]).
-    global_object.initialize(object->shadow_realm());
+    MUST_OR_THROW_OOM(global_object.initialize(object->shadow_realm()));
 
     // 13. Return O.
     return object;

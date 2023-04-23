@@ -47,25 +47,20 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto window = TRY(GUI::Window::try_create());
     window->set_resizable(false);
     window->set_title("Minesweeper");
-    window->resize(139, 177);
+    window->set_auto_shrink(true);
 
-    auto widget = TRY(window->try_set_main_widget<GUI::Widget>());
-    widget->load_from_gml(minesweeper_window_gml);
+    auto widget = TRY(window->set_main_widget<GUI::Widget>());
+    TRY(widget->load_from_gml(minesweeper_window_gml));
 
-    auto& separator = *widget->find_descendant_of_type_named<GUI::HorizontalSeparator>("separator");
-    auto& container = *widget->find_descendant_of_type_named<GUI::Widget>("container");
     auto& flag_label = *widget->find_descendant_of_type_named<GUI::Label>("flag_label");
     auto& time_label = *widget->find_descendant_of_type_named<GUI::Label>("time_label");
     auto& face_button = *widget->find_descendant_of_type_named<GUI::Button>("face_button");
-    auto field = TRY(Field::create(flag_label, time_label, face_button, [&](auto size) {
-        size.set_height(size.height() + separator.height() + container.height());
-        window->resize(size);
-    }));
+    auto field = TRY(Field::create(flag_label, time_label, face_button));
     TRY(widget->try_add_child(field));
 
-    auto game_menu = TRY(window->try_add_menu("&Game"));
+    auto game_menu = TRY(window->try_add_menu("&Game"_short_string));
 
-    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/reload.png"sv)), [&](auto&) {
+    TRY(game_menu->try_add_action(GUI::Action::create("&New Game", { Mod_None, Key_F2 }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/reload.png"sv)), [&](auto&) {
         field->reset();
     })));
 
@@ -83,7 +78,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         GUI::Application::the()->quit();
     })));
 
-    auto difficulty_menu = TRY(window->try_add_menu("&Difficulty"));
+    auto difficulty_menu = TRY(window->try_add_menu(TRY("&Difficulty"_string)));
     GUI::ActionGroup difficulty_actions;
     difficulty_actions.set_exclusive(true);
 
@@ -123,7 +118,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(difficulty_menu->try_add_action(action));
     difficulty_actions.add_action(action);
 
-    auto help_menu = TRY(window->try_add_menu("&Help"));
+    auto help_menu = TRY(window->try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man6/Minesweeper.md"), "/bin/Help");

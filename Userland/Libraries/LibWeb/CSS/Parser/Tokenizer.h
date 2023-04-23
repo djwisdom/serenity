@@ -1,12 +1,12 @@
 /*
  * Copyright (c) 2020-2021, the SerenityOS developers.
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/DeprecatedString.h>
 #include <AK/Optional.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
@@ -58,15 +58,19 @@ public:
 };
 
 class Tokenizer {
-
 public:
-    explicit Tokenizer(StringView input, DeprecatedString const& encoding);
-
-    [[nodiscard]] Vector<Token> parse();
+    static ErrorOr<Vector<Token>> tokenize(StringView input, StringView encoding);
 
     [[nodiscard]] static Token create_eof_token();
 
 private:
+    explicit Tokenizer(String decoded_input);
+
+    [[nodiscard]] ErrorOr<Vector<Token>> tokenize();
+
+    size_t current_byte_offset() const;
+    ErrorOr<String> input_since(size_t offset) const;
+
     [[nodiscard]] u32 next_code_point();
     [[nodiscard]] u32 peek_code_point(size_t offset = 0) const;
     [[nodiscard]] U32Twin peek_twin() const;
@@ -76,17 +80,17 @@ private:
     [[nodiscard]] U32Triplet start_of_input_stream_triplet();
 
     [[nodiscard]] static Token create_new_token(Token::Type);
-    [[nodiscard]] static Token create_value_token(Token::Type, DeprecatedString value);
-    [[nodiscard]] static Token create_value_token(Token::Type, u32 value);
-    [[nodiscard]] Token consume_a_token();
-    [[nodiscard]] Token consume_string_token(u32 ending_code_point);
-    [[nodiscard]] Token consume_a_numeric_token();
-    [[nodiscard]] Token consume_an_ident_like_token();
+    [[nodiscard]] static Token create_value_token(Token::Type, FlyString&& value, String&& representation);
+    [[nodiscard]] static Token create_value_token(Token::Type, u32 value, String&& representation);
+    [[nodiscard]] ErrorOr<Token> consume_a_token();
+    [[nodiscard]] ErrorOr<Token> consume_string_token(u32 ending_code_point);
+    [[nodiscard]] ErrorOr<Token> consume_a_numeric_token();
+    [[nodiscard]] ErrorOr<Token> consume_an_ident_like_token();
     [[nodiscard]] Number consume_a_number();
     [[nodiscard]] float convert_a_string_to_a_number(StringView);
-    [[nodiscard]] DeprecatedString consume_an_ident_sequence();
+    [[nodiscard]] ErrorOr<FlyString> consume_an_ident_sequence();
     [[nodiscard]] u32 consume_escaped_code_point();
-    [[nodiscard]] Token consume_a_url_token();
+    [[nodiscard]] ErrorOr<Token> consume_a_url_token();
     void consume_the_remnants_of_a_bad_url();
     void consume_comments();
     void consume_as_much_whitespace_as_possible();
@@ -95,7 +99,7 @@ private:
     [[nodiscard]] static bool would_start_an_ident_sequence(U32Triplet);
     [[nodiscard]] static bool would_start_a_number(U32Triplet);
 
-    DeprecatedString m_decoded_input;
+    String m_decoded_input;
     Utf8View m_utf8_view;
     AK::Utf8CodePointIterator m_utf8_iterator;
     AK::Utf8CodePointIterator m_prev_utf8_iterator;

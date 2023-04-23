@@ -8,15 +8,14 @@
 #include <AK/Singleton.h>
 #include <AK/StdLibExtras.h>
 #include <AK/Time.h>
-
-#if ARCH(I386) || ARCH(X86_64)
-#    include <Kernel/Arch/x86/Time/APICTimer.h>
-#    include <Kernel/Arch/x86/Time/HPET.h>
-#    include <Kernel/Arch/x86/Time/HPETComparator.h>
-#    include <Kernel/Arch/x86/Time/PIT.h>
-#    include <Kernel/Arch/x86/Time/RTC.h>
-#    include <Kernel/Arch/x86/common/Interrupts/APIC.h>
-#    include <Kernel/Arch/x86/common/RTC.h>
+#if ARCH(X86_64)
+#    include <Kernel/Arch/x86_64/Interrupts/APIC.h>
+#    include <Kernel/Arch/x86_64/RTC.h>
+#    include <Kernel/Arch/x86_64/Time/APICTimer.h>
+#    include <Kernel/Arch/x86_64/Time/HPET.h>
+#    include <Kernel/Arch/x86_64/Time/HPETComparator.h>
+#    include <Kernel/Arch/x86_64/Time/PIT.h>
+#    include <Kernel/Arch/x86_64/Time/RTC.h>
 #elif ARCH(AARCH64)
 #    include <Kernel/Arch/aarch64/RPi/Timer.h>
 #else
@@ -125,7 +124,7 @@ Time TimeManagement::monotonic_time(TimePrecision precision) const
         ticks = m_ticks_this_second;
 
         if (do_query) {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
             // We may have to do this over again if the timer interrupt fires
             // while we're trying to query the information. In that case, our
             // seconds and ticks became invalid, producing an incorrect time.
@@ -176,7 +175,7 @@ UNMAP_AFTER_INIT void TimeManagement::initialize([[maybe_unused]] u32 cpu)
     //       the TimeManagement class is completely initialized.
     InterruptDisabler disabler;
 
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     if (cpu == 0) {
         VERIFY(!s_the.is_initialized());
         s_the.ensure_instance();
@@ -229,19 +228,26 @@ time_t TimeManagement::ticks_per_second() const
 
 Time TimeManagement::boot_time()
 {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     return RTC::boot_time();
 #elif ARCH(AARCH64)
-    TODO_AARCH64();
+    // FIXME: Return correct boot time
+    return Time::from_seconds(0);
 #else
 #    error Unknown architecture
 #endif
 }
 
+Time TimeManagement::clock_resolution() const
+{
+    long nanoseconds_per_tick = 1'000'000'000 / m_time_keeper_timer->ticks_per_second();
+    return Time::from_nanoseconds(nanoseconds_per_tick);
+}
+
 UNMAP_AFTER_INIT TimeManagement::TimeManagement()
     : m_time_page_region(MM.allocate_kernel_region(PAGE_SIZE, "Time page"sv, Memory::Region::Access::ReadWrite, AllocationStrategy::AllocateNow).release_value_but_fixme_should_propagate_errors())
 {
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
     bool probe_non_legacy_hardware_timers = !(kernel_command_line().is_legacy_time_enabled());
     if (ACPI::is_enabled()) {
         if (!ACPI::Parser::the()->x86_specific_flags().cmos_rtc_not_present) {
@@ -280,10 +286,10 @@ UNMAP_AFTER_INIT Vector<HardwareTimerBase*> TimeManagement::scan_and_initialize_
     dbgln("Time: Scanning for periodic timers");
     Vector<HardwareTimerBase*> timers;
     for (auto& hardware_timer : m_hardware_timers) {
-        if (hardware_timer.is_periodic_capable()) {
-            timers.append(&hardware_timer);
+        if (hardware_timer->is_periodic_capable()) {
+            timers.append(hardware_timer);
             if (should_enable)
-                hardware_timer.set_periodic();
+                hardware_timer->set_periodic();
         }
     }
     return timers;
@@ -294,8 +300,8 @@ UNMAP_AFTER_INIT Vector<HardwareTimerBase*> TimeManagement::scan_for_non_periodi
     dbgln("Time: Scanning for non-periodic timers");
     Vector<HardwareTimerBase*> timers;
     for (auto& hardware_timer : m_hardware_timers) {
-        if (!hardware_timer.is_periodic_capable())
-            timers.append(&hardware_timer);
+        if (!hardware_timer->is_periodic_capable())
+            timers.append(hardware_timer);
     }
     return timers;
 }
@@ -312,7 +318,7 @@ bool TimeManagement::is_hpet_periodic_mode_allowed()
     }
 }
 
-#if ARCH(I386) || ARCH(X86_64)
+#if ARCH(X86_64)
 UNMAP_AFTER_INIT bool TimeManagement::probe_and_set_x86_non_legacy_hardware_timers()
 {
     if (!ACPI::is_enabled())

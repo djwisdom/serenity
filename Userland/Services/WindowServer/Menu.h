@@ -7,7 +7,6 @@
 #pragma once
 
 #include <AK/DeprecatedString.h>
-#include <AK/NonnullOwnPtrVector.h>
 #include <AK/WeakPtr.h>
 #include <LibCore/Object.h>
 #include <LibGfx/Font/Font.h>
@@ -40,8 +39,8 @@ public:
 
     bool is_empty() const { return m_items.is_empty(); }
     size_t item_count() const { return m_items.size(); }
-    MenuItem const& item(size_t index) const { return m_items.at(index); }
-    MenuItem& item(size_t index) { return m_items.at(index); }
+    MenuItem const& item(size_t index) const { return *m_items.at(index); }
+    MenuItem& item(size_t index) { return *m_items.at(index); }
 
     MenuItem* item_by_identifier(unsigned identifier)
     {
@@ -59,13 +58,14 @@ public:
     void update_alt_shortcuts_for_items();
     void add_item(NonnullOwnPtr<MenuItem>);
 
-    DeprecatedString const& name() const { return m_name; }
+    String const& name() const { return m_name; }
+    void set_name(String);
 
     template<typename Callback>
     IterationDecision for_each_item(Callback callback)
     {
         for (auto& item : m_items) {
-            IterationDecision decision = callback(item);
+            IterationDecision decision = callback(*item);
             if (decision != IterationDecision::Continue)
                 return decision;
         }
@@ -138,7 +138,7 @@ public:
     Vector<size_t> const* items_with_alt_shortcut(u32 alt_shortcut) const;
 
 private:
-    Menu(ConnectionFromClient*, int menu_id, DeprecatedString name);
+    Menu(ConnectionFromClient*, int menu_id, String name);
 
     virtual void event(Core::Event&) override;
 
@@ -155,11 +155,11 @@ private:
 
     ConnectionFromClient* m_client { nullptr };
     int m_menu_id { 0 };
-    DeprecatedString m_name;
+    String m_name;
     u32 m_alt_shortcut_character { 0 };
     Gfx::IntRect m_rect_in_window_menubar;
     Gfx::IntPoint m_unadjusted_position;
-    NonnullOwnPtrVector<MenuItem> m_items;
+    Vector<NonnullOwnPtr<MenuItem>> m_items;
     RefPtr<Window> m_menu_window;
 
     WeakPtr<Window> m_window_menu_of;

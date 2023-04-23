@@ -30,7 +30,7 @@ struct Rectangle {
 
 struct Page {
     NonnullRefPtr<DictObject> resources;
-    NonnullRefPtr<Object> contents;
+    RefPtr<Object> contents;
     Rectangle media_box;
     Rectangle crop_box;
     float user_unit;
@@ -51,12 +51,12 @@ struct Destination {
 
     Type type;
     Optional<u32> page;
-    Vector<float> parameters;
+    Vector<Optional<float>> parameters;
 };
 
 struct OutlineItem final : public RefCounted<OutlineItem> {
     RefPtr<OutlineItem> parent;
-    NonnullRefPtrVector<OutlineItem> children;
+    Vector<NonnullRefPtr<OutlineItem>> children;
     DeprecatedString title;
     i32 count { 0 };
     Destination dest;
@@ -70,7 +70,7 @@ struct OutlineItem final : public RefCounted<OutlineItem> {
 };
 
 struct OutlineDict final : public RefCounted<OutlineDict> {
-    NonnullRefPtrVector<OutlineItem> children;
+    Vector<NonnullRefPtr<OutlineItem>> children;
     u32 count { 0 };
 
     OutlineDict() = default;
@@ -116,21 +116,13 @@ public:
     template<IsValueType T>
     PDFErrorOr<UnwrappedValueType<T>> resolve_to(Value const& value)
     {
-        auto resolved = TRY(resolve(value));
-
-        if constexpr (IsSame<T, bool>)
-            return resolved.get<bool>();
-        else if constexpr (IsSame<T, int>)
-            return resolved.get<int>();
-        else if constexpr (IsSame<T, float>)
-            return resolved.get<float>();
-        else if constexpr (IsSame<T, Object>)
-            return resolved.get<NonnullRefPtr<Object>>();
-        else if constexpr (IsObject<T>)
-            return resolved.get<NonnullRefPtr<Object>>()->cast<T>();
-
-        VERIFY_NOT_REACHED();
+        return cast_to<T>(TRY(resolve(value)));
     }
+
+    /// Whether this Document is reasdy to resolve references, which is usually
+    /// true, except just before the XRef table is parsed (and while the linearization
+    /// dict is being read).
+    bool can_resolve_refefences() { return m_parser->can_resolve_references(); }
 
 private:
     explicit Document(NonnullRefPtr<DocumentParser> const& parser);
@@ -146,11 +138,17 @@ private:
 
     PDFErrorOr<void> build_outline();
     PDFErrorOr<NonnullRefPtr<OutlineItem>> build_outline_item(NonnullRefPtr<DictObject> const& outline_item_dict, HashMap<u32, u32> const&);
-    PDFErrorOr<NonnullRefPtrVector<OutlineItem>> build_outline_item_chain(Value const& first_ref, HashMap<u32, u32> const&);
+    PDFErrorOr<Vector<NonnullRefPtr<OutlineItem>>> build_outline_item_chain(Value const& first_ref, HashMap<u32, u32> const&);
 
     PDFErrorOr<Destination> create_destination_from_parameters(NonnullRefPtr<ArrayObject>, HashMap<u32, u32> const&);
+    PDFErrorOr<Destination> create_destination_from_dictionary_entry(NonnullRefPtr<Object> const& entry, HashMap<u32, u32> const& page_number_by_index_ref);
 
-    PDFErrorOr<NonnullRefPtr<Object>> get_inheritable_object(FlyString const& name, NonnullRefPtr<DictObject>);
+    PDFErrorOr<Optional<NonnullRefPtr<Object>>> get_inheritable_object(DeprecatedFlyString const& name, NonnullRefPtr<DictObject>);
+    PDFErrorOr<Optional<Value>> get_inheritable_value(DeprecatedFlyString const& name, NonnullRefPtr<DictObject>);
+
+    PDFErrorOr<NonnullRefPtr<Object>> find_in_name_tree(NonnullRefPtr<DictObject> root, DeprecatedFlyString name);
+    PDFErrorOr<NonnullRefPtr<Object>> find_in_name_tree_nodes(NonnullRefPtr<ArrayObject> siblings, DeprecatedFlyString name);
+    PDFErrorOr<NonnullRefPtr<Object>> find_in_key_value_array(NonnullRefPtr<ArrayObject> key_value_array, DeprecatedFlyString name);
 
     NonnullRefPtr<DocumentParser> m_parser;
     RefPtr<DictObject> m_catalog;
@@ -227,16 +225,22 @@ struct Formatter<PDF::Destination> : Formatter<FormatString> {
         }
 
         StringBuilder param_builder;
-        TRY(Formatter<FormatString>::format(builder, "{{ type={} page="sv, type_str));
-        if (destination.page.has_value())
-            TRY(builder.put_literal("{}"sv));
+        builder.builder().appendff("{{ type={} page="sv, type_str);
+        if (!destination.page.has_value())
+            TRY(builder.put_literal("{{}}"sv));
         else
             TRY(builder.put_u64(destination.page.value()));
-        for (auto& param : destination.parameters) {
-            TRY(builder.put_f64(double(param)));
-            TRY(builder.put_literal(" "sv));
+        if (!destination.parameters.is_empty()) {
+            TRY(builder.put_literal(" parameters="sv));
+            for (auto const& param : destination.parameters) {
+                if (param.has_value())
+                    TRY(builder.put_f64(double(param.value())));
+                else
+                    TRY(builder.put_literal("{{}}"sv));
+                TRY(builder.put_literal(" "sv));
+            }
         }
-        return builder.put_literal("}}"sv);
+        return builder.put_literal(" }}"sv);
     }
 };
 
@@ -255,7 +259,7 @@ struct Formatter<PDF::OutlineDict> : Formatter<FormatString> {
         StringBuilder child_builder;
         child_builder.append('[');
         for (auto& child : dict.children)
-            child_builder.appendff("{}\n", child.to_deprecated_string(2));
+            child_builder.appendff("{}\n", child->to_deprecated_string(2));
         child_builder.append("  ]"sv);
 
         return Formatter<FormatString>::format(builder,

@@ -6,6 +6,8 @@
 
 #include <AK/Singleton.h>
 #include <AK/StringBuilder.h>
+#include <AK/StringView.h>
+#include <Kernel/API/Ioctl.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Debug.h>
 #include <Kernel/FileSystem/OpenFileDescription.h>
@@ -22,7 +24,6 @@
 #include <Kernel/Net/UDPSocket.h>
 #include <Kernel/Process.h>
 #include <Kernel/UnixTypes.h>
-#include <LibC/sys/ioctl_numbers.h>
 
 namespace Kernel {
 
@@ -40,7 +41,7 @@ ErrorOr<NonnullOwnPtr<DoubleBuffer>> IPv4Socket::try_create_receive_buffer()
     return DoubleBuffer::try_create("IPv4Socket: Receive buffer"sv, 256 * KiB);
 }
 
-ErrorOr<NonnullLockRefPtr<Socket>> IPv4Socket::create(int type, int protocol)
+ErrorOr<NonnullRefPtr<Socket>> IPv4Socket::create(int type, int protocol)
 {
     auto receive_buffer = TRY(IPv4Socket::try_create_receive_buffer());
 
@@ -49,7 +50,7 @@ ErrorOr<NonnullLockRefPtr<Socket>> IPv4Socket::create(int type, int protocol)
     if (type == SOCK_DGRAM)
         return TRY(UDPSocket::try_create(protocol, move(receive_buffer)));
     if (type == SOCK_RAW) {
-        auto raw_socket = adopt_lock_ref_if_nonnull(new (nothrow) IPv4Socket(type, protocol, move(receive_buffer), {}));
+        auto raw_socket = adopt_ref_if_nonnull(new (nothrow) IPv4Socket(type, protocol, move(receive_buffer), {}));
         if (raw_socket)
             return raw_socket.release_nonnull();
         return ENOMEM;
@@ -211,7 +212,8 @@ ErrorOr<size_t> IPv4Socket::sendto(OpenFileDescription&, UserOrKernelBuffer cons
         return set_so_error(EPIPE);
 
     auto allow_using_gateway = ((flags & MSG_DONTROUTE) || m_routing_disabled) ? AllowUsingGateway::No : AllowUsingGateway::Yes;
-    auto routing_decision = route_to(m_peer_address, m_local_address, bound_interface(), allow_using_gateway);
+    auto adapter = bound_interface().with([](auto& bound_device) -> RefPtr<NetworkAdapter> { return bound_device; });
+    auto routing_decision = route_to(m_peer_address, m_local_address, adapter, allow_using_gateway);
     if (routing_decision.is_zero())
         return set_so_error(EHOSTUNREACH);
 
@@ -403,7 +405,7 @@ ErrorOr<size_t> IPv4Socket::recvfrom(OpenFileDescription& description, UserOrKer
             nreceived = receive_packet_buffered(description, offset_buffer, offset_buffer_length, flags, user_addr, user_addr_length, packet_timestamp, blocking);
 
         if (nreceived.is_error())
-            total_nreceived = nreceived;
+            total_nreceived = move(nreceived);
         else
             total_nreceived.value() += nreceived.value();
     } while ((flags & MSG_WAITALL) && !total_nreceived.is_error() && total_nreceived.value() < buffer_length);
@@ -480,9 +482,9 @@ ErrorOr<NonnullOwnPtr<KString>> IPv4Socket::pseudo_path(OpenFileDescription cons
     StringBuilder builder;
     TRY(builder.try_append("socket:"sv));
 
-    TRY(builder.try_appendff("{}:{}", m_local_address.to_string(), m_local_port));
+    TRY(builder.try_appendff("{}:{}", TRY(m_local_address.to_string()), m_local_port));
     if (m_role == Role::Accepted || m_role == Role::Connected)
-        TRY(builder.try_appendff(" / {}:{}", m_peer_address.to_string(), m_peer_port));
+        TRY(builder.try_appendff(" / {}:{}", TRY(m_peer_address.to_string()), m_peer_port));
 
     switch (m_role) {
     case Role::Listener:
@@ -693,9 +695,54 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
         ifreq ifr;
         TRY(copy_from_user(&ifr, user_ifr));
 
+        if (request == SIOCGIFNAME) {
+            // NOTE: Network devices are 1-indexed since index 0 denotes an invalid device
+            if (ifr.ifr_index == 0)
+                return EINVAL;
+
+            size_t index = 1;
+            Optional<StringView> result {};
+
+            NetworkingManagement::the().for_each([&ifr, &index, &result](auto& adapter) {
+                if (index == ifr.ifr_index)
+                    result = adapter.name();
+                ++index;
+            });
+
+            if (result.has_value()) {
+                auto name = result.release_value();
+                auto succ = name.copy_characters_to_buffer(ifr.ifr_name, IFNAMSIZ);
+                if (!succ) {
+                    return EFAULT;
+                }
+                return copy_to_user(user_ifr, &ifr);
+            }
+
+            return ENODEV;
+        }
+
         char namebuf[IFNAMSIZ + 1];
         memcpy(namebuf, ifr.ifr_name, IFNAMSIZ);
         namebuf[sizeof(namebuf) - 1] = '\0';
+
+        if (request == SIOCGIFINDEX) {
+            StringView name { namebuf, strlen(namebuf) };
+            size_t index = 1;
+            Optional<size_t> result {};
+
+            NetworkingManagement::the().for_each([&name, &index, &result](auto& adapter) {
+                if (adapter.name() == name)
+                    result = index;
+                ++index;
+            });
+
+            if (result.has_value()) {
+                ifr.ifr_index = result.release_value();
+                return copy_to_user(user_ifr, &ifr);
+            }
+
+            return ENODEV;
+        }
 
         auto adapter = NetworkingManagement::the().lookup_by_name({ namebuf, strlen(namebuf) });
         if (!adapter)
@@ -740,7 +787,16 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
 
         case SIOCGIFHWADDR: {
             auto mac_address = adapter->mac_address();
-            ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER; // FIXME: Query the underlying network interface for it's type
+            switch (adapter->adapter_type()) {
+            case NetworkAdapter::Type::Loopback:
+                ifr.ifr_hwaddr.sa_family = ARPHRD_LOOPBACK;
+                break;
+            case NetworkAdapter::Type::Ethernet:
+                ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
             mac_address.copy_to(Bytes { ifr.ifr_hwaddr.sa_data, sizeof(ifr.ifr_hwaddr.sa_data) });
             return copy_to_user(user_ifr, &ifr);
         }
@@ -791,6 +847,8 @@ ErrorOr<void> IPv4Socket::ioctl(OpenFileDescription&, unsigned request, Userspac
     case SIOCGIFMTU:
     case SIOCGIFFLAGS:
     case SIOCGIFCONF:
+    case SIOCGIFNAME:
+    case SIOCGIFINDEX:
         return ioctl_interface();
 
     case SIOCADDRT:

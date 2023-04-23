@@ -29,6 +29,7 @@
 #include <LibWeb/Layout/SVGBox.h>
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Painting/PaintableBox.h>
+#include <LibWeb/Painting/TextPaintable.h>
 #include <stdio.h>
 
 namespace Web {
@@ -63,8 +64,10 @@ void dump_tree(StringBuilder& builder, DOM::Node const& node)
         builder.appendff("{}\n", node.node_name());
     }
     ++indent;
-    if (is<DOM::Element>(node) && verify_cast<DOM::Element>(node).shadow_root()) {
-        dump_tree(builder, *verify_cast<DOM::Element>(node).shadow_root());
+    if (is<DOM::Element>(node)) {
+        if (auto* shadow_root = static_cast<DOM::Element const&>(node).shadow_root_internal()) {
+            dump_tree(builder, *shadow_root);
+        }
     }
     if (is<DOM::ParentNode>(node)) {
         if (!is<HTML::HTMLTemplateElement>(node)) {
@@ -92,7 +95,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
     for (size_t i = 0; i < indent; ++i)
         builder.append("  "sv);
 
-    FlyString tag_name;
+    DeprecatedFlyString tag_name;
     if (layout_node.is_anonymous())
         tag_name = "(anonymous)";
     else if (is<DOM::Element>(layout_node.dom_node()))
@@ -121,7 +124,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
     StringView svg_box_color_on = ""sv;
     StringView positioned_color_on = ""sv;
     StringView floating_color_on = ""sv;
-    StringView inline_block_color_on = ""sv;
+    StringView inline_color_on = ""sv;
     StringView line_box_color_on = ""sv;
     StringView fragment_color_on = ""sv;
     StringView flex_color_on = ""sv;
@@ -133,7 +136,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
         svg_box_color_on = "\033[31m"sv;
         positioned_color_on = "\033[31;1m"sv;
         floating_color_on = "\033[32;1m"sv;
-        inline_block_color_on = "\033[36;1m"sv;
+        inline_color_on = "\033[36;1m"sv;
         line_box_color_on = "\033[34;1m"sv;
         fragment_color_on = "\033[35;1m"sv;
         flex_color_on = "\033[34;1m"sv;
@@ -149,8 +152,6 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
             nonbox_color_on,
             identifier,
             color_off);
-        if (interactive)
-            builder.appendff(" @{:p}", &layout_node);
         builder.append("\n"sv);
     } else {
         auto& box = verify_cast<Layout::Box>(layout_node);
@@ -165,12 +166,12 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
             color_off,
             identifier.characters());
 
-        if (auto const* paint_box = box.paint_box()) {
+        if (auto const* paintable_box = box.paintable_box()) {
             builder.appendff("at ({},{}) content-size {}x{}",
-                paint_box->absolute_x(),
-                paint_box->absolute_y(),
-                paint_box->content_width(),
-                paint_box->content_height());
+                paintable_box->absolute_x(),
+                paintable_box->absolute_y(),
+                paintable_box->content_width(),
+                paintable_box->content_height());
         }
 
         if (box.is_positioned())
@@ -178,7 +179,9 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
         if (box.is_floating())
             builder.appendff(" {}floating{}", floating_color_on, color_off);
         if (box.is_inline_block())
-            builder.appendff(" {}inline-block{}", inline_block_color_on, color_off);
+            builder.appendff(" {}inline-block{}", inline_color_on, color_off);
+        if (box.is_inline_table())
+            builder.appendff(" {}inline-table{}", inline_color_on, color_off);
         if (box.display().is_flex_inside()) {
             StringView direction;
             switch (box.computed_values().flex_direction()) {
@@ -206,7 +209,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
                 box.box_model().margin.left,
                 box.box_model().border.left,
                 box.box_model().padding.left,
-                box.paint_box() ? box.paint_box()->content_width() : 0,
+                box.paintable_box() ? box.paintable_box()->content_width() : 0,
                 box.box_model().padding.right,
                 box.box_model().border.right,
                 box.box_model().margin.right);
@@ -216,7 +219,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
                 box.box_model().margin.top,
                 box.box_model().border.top,
                 box.box_model().padding.top,
-                box.paint_box() ? box.paint_box()->content_height() : 0,
+                box.paintable_box() ? box.paintable_box()->content_height() : 0,
                 box.box_model().padding.bottom,
                 box.box_model().border.bottom,
                 box.box_model().margin.bottom);
@@ -238,8 +241,8 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
 
     if (is<Layout::BlockContainer>(layout_node) && static_cast<Layout::BlockContainer const&>(layout_node).children_are_inline()) {
         auto& block = static_cast<Layout::BlockContainer const&>(layout_node);
-        for (size_t line_box_index = 0; block.paint_box() && line_box_index < block.paint_box()->line_boxes().size(); ++line_box_index) {
-            auto& line_box = block.paint_box()->line_boxes()[line_box_index];
+        for (size_t line_box_index = 0; block.paintable_with_lines() && line_box_index < block.paintable_with_lines()->line_boxes().size(); ++line_box_index) {
+            auto& line_box = block.paintable_with_lines()->line_boxes()[line_box_index];
             for (size_t i = 0; i < indent; ++i)
                 builder.append("  "sv);
             builder.appendff("  {}line {}{} width: {}, height: {}, bottom: {}, baseline: {}\n",
@@ -259,8 +262,6 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
                     fragment_index,
                     color_off,
                     fragment.layout_node().class_name());
-                if (interactive)
-                    builder.appendff("@{:p}, ", &fragment.layout_node());
                 builder.appendff("start: {}, length: {}, rect: {}\n",
                     fragment.start(),
                     fragment.length(),
@@ -283,7 +284,7 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
         };
         Vector<NameAndValue> properties;
         verify_cast<DOM::Element>(*layout_node.dom_node()).computed_css_values()->for_each_property([&](auto property_id, auto& value) {
-            properties.append({ CSS::string_from_property_id(property_id), value.to_deprecated_string() });
+            properties.append({ CSS::string_from_property_id(property_id), value.to_string().release_value_but_fixme_should_propagate_errors().to_deprecated_string() });
         });
         quick_sort(properties, [](auto& a, auto& b) { return a.name < b.name; });
 
@@ -440,6 +441,9 @@ void dump_selector(StringBuilder& builder, CSS::Selector const& selector)
                 case CSS::Selector::SimpleSelector::PseudoClass::Type::Checked:
                     pseudo_class_description = "Checked";
                     break;
+                case CSS::Selector::SimpleSelector::PseudoClass::Type::Indeterminate:
+                    pseudo_class_description = "Indeterminate";
+                    break;
                 case CSS::Selector::SimpleSelector::PseudoClass::Type::Not:
                     pseudo_class_description = "Not";
                     break;
@@ -451,6 +455,12 @@ void dump_selector(StringBuilder& builder, CSS::Selector const& selector)
                     break;
                 case CSS::Selector::SimpleSelector::PseudoClass::Type::Lang:
                     pseudo_class_description = "Lang";
+                    break;
+                case CSS::Selector::SimpleSelector::PseudoClass::Type::Scope:
+                    pseudo_class_description = "Scope";
+                    break;
+                case CSS::Selector::SimpleSelector::PseudoClass::Type::Defined:
+                    pseudo_class_description = "Defined";
                     break;
                 }
 
@@ -554,14 +564,15 @@ void dump_selector(StringBuilder& builder, CSS::Selector const& selector)
     }
 }
 
-void dump_rule(CSS::CSSRule const& rule)
+ErrorOr<void> dump_rule(CSS::CSSRule const& rule)
 {
     StringBuilder builder;
-    dump_rule(builder, rule);
+    TRY(dump_rule(builder, rule));
     dbgln("{}", builder.string_view());
+    return {};
 }
 
-void dump_rule(StringBuilder& builder, CSS::CSSRule const& rule, int indent_levels)
+ErrorOr<void> dump_rule(StringBuilder& builder, CSS::CSSRule const& rule, int indent_levels)
 {
     indent(builder, indent_levels);
     builder.appendff("{}:\n", rule.class_name());
@@ -574,15 +585,16 @@ void dump_rule(StringBuilder& builder, CSS::CSSRule const& rule, int indent_leve
         dump_import_rule(builder, verify_cast<CSS::CSSImportRule const>(rule), indent_levels);
         break;
     case CSS::CSSRule::Type::Media:
-        dump_media_rule(builder, verify_cast<CSS::CSSMediaRule const>(rule), indent_levels);
+        TRY(dump_media_rule(builder, verify_cast<CSS::CSSMediaRule const>(rule), indent_levels));
         break;
     case CSS::CSSRule::Type::Style:
-        dump_style_rule(builder, verify_cast<CSS::CSSStyleRule const>(rule), indent_levels);
+        TRY(dump_style_rule(builder, verify_cast<CSS::CSSStyleRule const>(rule), indent_levels));
         break;
     case CSS::CSSRule::Type::Supports:
-        dump_supports_rule(builder, verify_cast<CSS::CSSSupportsRule const>(rule), indent_levels);
+        TRY(dump_supports_rule(builder, verify_cast<CSS::CSSSupportsRule const>(rule), indent_levels));
         break;
     }
+    return {};
 }
 
 void dump_font_face_rule(StringBuilder& builder, CSS::CSSFontFaceRule const& rule, int indent_levels)
@@ -595,14 +607,14 @@ void dump_font_face_rule(StringBuilder& builder, CSS::CSSFontFaceRule const& rul
     builder.append("sources:\n"sv);
     for (auto const& source : font_face.sources()) {
         indent(builder, indent_levels + 2);
-        builder.appendff("url={}, format={}\n", source.url, source.format.value_or("???"));
+        builder.appendff("url={}, format={}\n", source.url, source.format.value_or("???"_short_string));
     }
 
     indent(builder, indent_levels + 1);
     builder.append("unicode-ranges:\n"sv);
     for (auto const& unicode_range : font_face.unicode_ranges()) {
         indent(builder, indent_levels + 2);
-        builder.appendff("{}\n", unicode_range.to_deprecated_string());
+        builder.appendff("{}\n", unicode_range.to_string().release_value_but_fixme_should_propagate_errors());
     }
 }
 
@@ -612,27 +624,27 @@ void dump_import_rule(StringBuilder& builder, CSS::CSSImportRule const& rule, in
     builder.appendff("  Document URL: {}\n", rule.url());
 }
 
-void dump_media_rule(StringBuilder& builder, CSS::CSSMediaRule const& media, int indent_levels)
+ErrorOr<void> dump_media_rule(StringBuilder& builder, CSS::CSSMediaRule const& media, int indent_levels)
 {
     indent(builder, indent_levels);
     builder.appendff("  Media: {}\n  Rules ({}):\n", media.condition_text(), media.css_rules().length());
 
-    for (auto& rule : media.css_rules()) {
-        dump_rule(builder, rule, indent_levels + 1);
-    }
+    for (auto& rule : media.css_rules())
+        TRY(dump_rule(builder, rule, indent_levels + 1));
+    return {};
 }
 
-void dump_supports_rule(StringBuilder& builder, CSS::CSSSupportsRule const& supports, int indent_levels)
+ErrorOr<void> dump_supports_rule(StringBuilder& builder, CSS::CSSSupportsRule const& supports, int indent_levels)
 {
     indent(builder, indent_levels);
     builder.appendff("  Supports: {}\n  Rules ({}):\n", supports.condition_text(), supports.css_rules().length());
 
-    for (auto& rule : supports.css_rules()) {
-        dump_rule(builder, rule, indent_levels + 1);
-    }
+    for (auto& rule : supports.css_rules())
+        TRY(dump_rule(builder, rule, indent_levels + 1));
+    return {};
 }
 
-void dump_style_rule(StringBuilder& builder, CSS::CSSStyleRule const& rule, int indent_levels)
+ErrorOr<void> dump_style_rule(StringBuilder& builder, CSS::CSSStyleRule const& rule, int indent_levels)
 {
     for (auto& selector : rule.selectors()) {
         dump_selector(builder, selector);
@@ -642,35 +654,84 @@ void dump_style_rule(StringBuilder& builder, CSS::CSSStyleRule const& rule, int 
     auto& style_declaration = verify_cast<CSS::PropertyOwningCSSStyleDeclaration>(rule.declaration());
     for (auto& property : style_declaration.properties()) {
         indent(builder, indent_levels);
-        builder.appendff("    {}: '{}'", CSS::string_from_property_id(property.property_id), property.value->to_deprecated_string());
+        builder.appendff("    {}: '{}'", CSS::string_from_property_id(property.property_id), TRY(property.value->to_string()));
         if (property.important == CSS::Important::Yes)
             builder.append(" \033[31;1m!important\033[0m"sv);
         builder.append('\n');
     }
     for (auto& property : style_declaration.custom_properties()) {
         indent(builder, indent_levels);
-        builder.appendff("    {}: '{}'", property.key, property.value.value->to_deprecated_string());
+        builder.appendff("    {}: '{}'", property.key, TRY(property.value.value->to_string()));
         if (property.value.important == CSS::Important::Yes)
             builder.append(" \033[31;1m!important\033[0m"sv);
         builder.append('\n');
     }
+    return {};
 }
 
-void dump_sheet(CSS::StyleSheet const& sheet)
+ErrorOr<void> dump_sheet(CSS::StyleSheet const& sheet)
 {
     StringBuilder builder;
-    dump_sheet(builder, sheet);
+    TRY(dump_sheet(builder, sheet));
     dbgln("{}", builder.string_view());
+    return {};
 }
 
-void dump_sheet(StringBuilder& builder, CSS::StyleSheet const& sheet)
+ErrorOr<void> dump_sheet(StringBuilder& builder, CSS::StyleSheet const& sheet)
 {
     auto& css_stylesheet = verify_cast<CSS::CSSStyleSheet>(sheet);
 
     builder.appendff("CSSStyleSheet{{{}}}: {} rule(s)\n", &sheet, css_stylesheet.rules().length());
 
-    for (auto& rule : css_stylesheet.rules()) {
-        dump_rule(builder, rule);
+    for (auto& rule : css_stylesheet.rules())
+        TRY(dump_rule(builder, rule));
+    return {};
+}
+
+void dump_tree(Painting::Paintable const& paintable)
+{
+    StringBuilder builder;
+    dump_tree(builder, paintable, true);
+    dbgln("{}", builder.string_view());
+}
+
+void dump_tree(StringBuilder& builder, Painting::Paintable const& paintable, bool colorize, int indent)
+{
+    for (int i = 0; i < indent; ++i)
+        builder.append("  "sv);
+
+    StringView paintable_with_lines_color_on = ""sv;
+    StringView paintable_box_color_on = ""sv;
+    StringView text_paintable_color_on = ""sv;
+    StringView paintable_color_on = ""sv;
+    StringView color_off = ""sv;
+
+    if (colorize) {
+        paintable_with_lines_color_on = "\033[34m"sv;
+        paintable_box_color_on = "\033[33m"sv;
+        text_paintable_color_on = "\033[35m"sv;
+        paintable_color_on = "\033[32m"sv;
+        color_off = "\033[0m"sv;
+    }
+
+    if (is<Painting::PaintableWithLines>(paintable))
+        builder.append(paintable_with_lines_color_on);
+    else if (is<Painting::PaintableBox>(paintable))
+        builder.append(paintable_box_color_on);
+    else if (is<Painting::TextPaintable>(paintable))
+        builder.append(text_paintable_color_on);
+    else
+        builder.append(paintable_color_on);
+
+    builder.appendff("{}{} ({})", paintable.class_name(), color_off, paintable.layout_node().debug_description());
+
+    if (paintable.layout_node().is_box()) {
+        auto const& paintable_box = static_cast<Painting::PaintableBox const&>(paintable);
+        builder.appendff(" {}", paintable_box.absolute_border_box_rect());
+    }
+    builder.append("\n"sv);
+    for (auto const* child = paintable.first_child(); child; child = child->next_sibling()) {
+        dump_tree(builder, *child, colorize, indent + 1);
     }
 }
 

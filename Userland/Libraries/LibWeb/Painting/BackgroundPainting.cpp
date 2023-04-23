@@ -8,8 +8,8 @@
 
 #include <LibGfx/AntiAliasingPainter.h>
 #include <LibGfx/Painter.h>
-#include <LibWeb/Layout/InitialContainingBlock.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BackgroundPainting.h>
 #include <LibWeb/Painting/BorderRadiusCornerClipper.h>
 #include <LibWeb/Painting/GradientPainting.h>
@@ -128,7 +128,7 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
         // Attachment and Origin
         switch (layer.attachment) {
         case CSS::BackgroundAttachment::Fixed:
-            background_positioning_area = layout_node.root().browsing_context().viewport_rect().to_type<CSSPixels>();
+            background_positioning_area = layout_node.root().browsing_context().viewport_rect();
             break;
         case CSS::BackgroundAttachment::Local:
         case CSS::BackgroundAttachment::Scroll:
@@ -307,17 +307,17 @@ void paint_background(PaintContext& context, Layout::NodeWithStyleAndBoxModelMet
         CSSPixels image_y = image_rect.y();
         Optional<DevicePixelRect> last_image_device_rect;
 
-        image.resolve_for_size(layout_node, image_rect.size().to_type<float>());
+        image.resolve_for_size(layout_node, image_rect.size());
 
-        while (image_y < css_clip_rect.bottom()) {
+        while (image_y <= css_clip_rect.bottom()) {
             image_rect.set_y(image_y);
 
             auto image_x = initial_image_x;
-            while (image_x < css_clip_rect.right()) {
+            while (image_x <= css_clip_rect.right()) {
                 image_rect.set_x(image_x);
                 auto image_device_rect = context.rounded_device_rect(image_rect);
                 if (image_device_rect != last_image_device_rect && image_device_rect.intersects(context.device_viewport_rect()))
-                    image.paint(context, image_device_rect.to_type<int>(), image_rendering);
+                    image.paint(context, image_device_rect, image_rendering);
                 last_image_device_rect = image_device_rect;
                 if (!repeat_x)
                     break;

@@ -73,8 +73,7 @@ private:
 
 ThreadStackWidget::ThreadStackWidget()
 {
-    set_layout<GUI::VerticalBoxLayout>();
-    layout()->set_margins(4);
+    set_layout<GUI::VerticalBoxLayout>(4);
     m_stack_table = add<GUI::TableView>();
     m_stack_table->set_model(adopt_ref(*new ThreadStackModel()));
 }
@@ -82,8 +81,10 @@ ThreadStackWidget::ThreadStackWidget()
 void ThreadStackWidget::show_event(GUI::ShowEvent&)
 {
     refresh();
-    if (!m_timer)
+    if (!m_timer) {
         m_timer = add<Core::Timer>(1000, [this] { refresh(); });
+        m_timer->start();
+    }
 }
 
 void ThreadStackWidget::hide_event(GUI::HideEvent&)

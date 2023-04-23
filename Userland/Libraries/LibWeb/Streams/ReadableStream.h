@@ -13,6 +13,13 @@
 
 namespace Web::Streams {
 
+// FIXME: Variant<DefaultReader, ByteStreamReader>
+// https://streams.spec.whatwg.org/#typedefdef-readablestreamreader
+using ReadableStreamReader = JS::GCPtr<ReadableStreamDefaultReader>;
+
+// https://streams.spec.whatwg.org/#typedefdef-readablestreamcontroller
+using ReadableStreamController = Variant<JS::NonnullGCPtr<ReadableStreamDefaultController>, JS::NonnullGCPtr<ReadableByteStreamController>>;
+
 // https://streams.spec.whatwg.org/#readablestream
 class ReadableStream final : public Bindings::PlatformObject {
     WEB_PLATFORM_OBJECT(ReadableStream, Bindings::PlatformObject);
@@ -24,28 +31,43 @@ public:
         Errored,
     };
 
-    static WebIDL::ExceptionOr<JS::NonnullGCPtr<ReadableStream>> construct_impl(JS::Realm&);
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<ReadableStream>> construct_impl(JS::Realm&, Optional<JS::Handle<JS::Object>> const& underlying_source);
 
     virtual ~ReadableStream() override;
 
-    JS::GCPtr<JS::Object> controller() const { return m_controller; }
-    JS::GCPtr<JS::Object> reader() const { return m_reader; }
+    bool locked();
+    WebIDL::ExceptionOr<JS::GCPtr<JS::Object>> cancel(JS::Value view);
+    WebIDL::ExceptionOr<ReadableStreamReader> get_reader();
+
+    Optional<ReadableStreamController>& controller() { return m_controller; }
+    void set_controller(Optional<ReadableStreamController> value) { m_controller = move(value); }
+
     JS::Value stored_error() const { return m_stored_error; }
+    void set_stored_error(JS::Value value) { m_stored_error = value; }
+
+    ReadableStreamReader reader() const { return m_reader; }
+    void set_reader(ReadableStreamReader value) { m_reader = value; }
+
+    bool is_disturbed() const;
+    void set_disturbed(bool value) { m_disturbed = value; }
 
     bool is_readable() const;
     bool is_closed() const;
     bool is_errored() const;
     bool is_locked() const;
-    bool is_disturbed() const;
+
+    State state() const { return m_state; }
+    void set_state(State value) { m_state = value; }
 
 private:
     explicit ReadableStream(JS::Realm&);
 
+    virtual JS::ThrowCompletionOr<void> initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
     // https://streams.spec.whatwg.org/#readablestream-controller
     // A ReadableStreamDefaultController or ReadableByteStreamController created with the ability to control the state and queue of this stream
-    JS::GCPtr<JS::Object> m_controller;
+    Optional<ReadableStreamController> m_controller;
 
     // https://streams.spec.whatwg.org/#readablestream-detached
     // A boolean flag set to true when the stream is transferred
@@ -57,7 +79,7 @@ private:
 
     // https://streams.spec.whatwg.org/#readablestream-reader
     // A ReadableStreamDefaultReader or ReadableStreamBYOBReader instance, if the stream is locked to a reader, or undefined if it is not
-    JS::GCPtr<JS::Object> m_reader;
+    ReadableStreamReader m_reader;
 
     // https://streams.spec.whatwg.org/#readablestream-state
     // A string containing the stream’s current state, used internally; one of "readable", "closed", or "errored"

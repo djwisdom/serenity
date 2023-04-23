@@ -21,7 +21,7 @@ class FATFS final : public BlockBasedFileSystem {
     friend FATInode;
 
 public:
-    static ErrorOr<NonnullLockRefPtr<FileSystem>> try_create(OpenFileDescription&);
+    static ErrorOr<NonnullRefPtr<FileSystem>> try_create(OpenFileDescription&);
 
     virtual ~FATFS() override = default;
     virtual StringView class_name() const override { return "FATFS"sv; }
@@ -45,9 +45,9 @@ private:
 
     BlockBasedFileSystem::BlockIndex first_block_of_cluster(u32 cluster) const;
 
-    OwnPtr<KBuffer> m_boot_record;
-    LockRefPtr<FATInode> m_root_inode;
-    u32 m_first_data_sector;
+    OwnPtr<KBuffer> m_boot_record {};
+    RefPtr<FATInode> m_root_inode;
+    u32 m_first_data_sector { 0 };
 };
 
 }

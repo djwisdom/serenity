@@ -7,8 +7,7 @@
 
 #pragma once
 
-#include <AK/DeprecatedString.h>
-#include <AK/FlyString.h>
+#include <AK/DeprecatedFlyString.h>
 #include <AK/HashMap.h>
 #include <AK/Weakable.h>
 #include <LibJS/Forward.h>
@@ -54,7 +53,7 @@ public:
             nullptr));
 
         // NOTE: These are not in the spec.
-        static FlyString global_execution_context_name = "(global execution context)";
+        static DeprecatedFlyString global_execution_context_name = "(global execution context)";
         interpreter->m_global_execution_context->function_name = global_execution_context_name;
 
         interpreter->m_realm = make_handle(realm);

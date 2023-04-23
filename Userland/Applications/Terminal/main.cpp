@@ -11,9 +11,9 @@
 #include <LibConfig/Listener.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/DirIterator.h>
-#include <LibCore/File.h>
 #include <LibCore/System.h>
 #include <LibDesktop/Launcher.h>
+#include <LibFileSystem/FileSystem.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/ActionGroup.h>
 #include <LibGUI/Application.h>
@@ -72,19 +72,15 @@ public:
     {
         VERIFY(domain == "Terminal");
 
-        if (group == "Window") {
-            if (key == "Bell") {
-                auto bell_mode = VT::TerminalWidget::BellMode::Visible;
-                if (value == "AudibleBeep")
-                    bell_mode = VT::TerminalWidget::BellMode::AudibleBeep;
-                if (value == "Visible")
-                    bell_mode = VT::TerminalWidget::BellMode::Visible;
-                if (value == "Disabled")
-                    bell_mode = VT::TerminalWidget::BellMode::Disabled;
-                m_parent_terminal.set_bell_mode(bell_mode);
-            } else if (key == "ColorScheme") {
-                m_parent_terminal.set_color_scheme(value);
-            }
+        if (group == "Window" && key == "Bell") {
+            auto bell_mode = VT::TerminalWidget::BellMode::Visible;
+            if (value == "AudibleBeep")
+                bell_mode = VT::TerminalWidget::BellMode::AudibleBeep;
+            if (value == "Visible")
+                bell_mode = VT::TerminalWidget::BellMode::Visible;
+            if (value == "Disabled")
+                bell_mode = VT::TerminalWidget::BellMode::Disabled;
+            m_parent_terminal.set_bell_mode(bell_mode);
         } else if (group == "Text" && key == "Font") {
             auto font = Gfx::FontDatabase::the().get_by_name(value);
             if (font.is_null())
@@ -163,7 +159,7 @@ static ErrorOr<void> run_command(DeprecatedString command, bool keep_open)
         arguments.append("-c"sv);
         arguments.append(command);
     }
-    auto env = TRY(FixedArray<StringView>::try_create({ "TERM=xterm"sv, "PAGER=more"sv, "PATH="sv DEFAULT_PATH_SV }));
+    auto env = TRY(FixedArray<StringView>::create({ "TERM=xterm"sv, "PAGER=more"sv, "PATH="sv DEFAULT_PATH_SV }));
     TRY(Core::System::exec(shell, arguments, Core::System::SearchInPath::No, env.span()));
     VERIFY_NOT_REACHED();
 }
@@ -176,15 +172,13 @@ static ErrorOr<NonnullRefPtr<GUI::Window>> create_find_window(VT::TerminalWidget
     window->set_resizable(false);
     window->resize(300, 90);
 
-    auto main_widget = TRY(window->try_set_main_widget<GUI::Widget>());
+    auto main_widget = TRY(window->set_main_widget<GUI::Widget>());
     main_widget->set_fill_with_background_color(true);
     main_widget->set_background_role(ColorRole::Button);
-    (void)TRY(main_widget->try_set_layout<GUI::VerticalBoxLayout>());
-    main_widget->layout()->set_margins(4);
+    TRY(main_widget->try_set_layout<GUI::VerticalBoxLayout>(4));
 
     auto find = TRY(main_widget->try_add<GUI::Widget>());
-    (void)TRY(find->try_set_layout<GUI::HorizontalBoxLayout>());
-    find->layout()->set_margins(4);
+    TRY(find->try_set_layout<GUI::HorizontalBoxLayout>(4));
     find->set_fixed_height(30);
 
     auto find_textbox = TRY(find->try_add<GUI::TextBox>());
@@ -194,10 +188,10 @@ static ErrorOr<NonnullRefPtr<GUI::Window>> create_find_window(VT::TerminalWidget
         find_textbox->set_text(terminal.selected_text().replace("\n"sv, " "sv, ReplaceMode::All));
     auto find_backwards = TRY(find->try_add<GUI::Button>());
     find_backwards->set_fixed_width(25);
-    find_backwards->set_icon(TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/upward-triangle.png"sv)));
+    find_backwards->set_icon(TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/upward-triangle.png"sv)));
     auto find_forwards = TRY(find->try_add<GUI::Button>());
     find_forwards->set_fixed_width(25);
-    find_forwards->set_icon(TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/downward-triangle.png"sv)));
+    find_forwards->set_icon(TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/downward-triangle.png"sv)));
 
     find_textbox->on_return_pressed = [find_backwards] {
         find_backwards->click();
@@ -207,8 +201,8 @@ static ErrorOr<NonnullRefPtr<GUI::Window>> create_find_window(VT::TerminalWidget
         find_forwards->click();
     };
 
-    auto match_case = TRY(main_widget->try_add<GUI::CheckBox>("Case sensitive"));
-    auto wrap_around = TRY(main_widget->try_add<GUI::CheckBox>("Wrap around"));
+    auto match_case = TRY(main_widget->try_add<GUI::CheckBox>(TRY("Case sensitive"_string)));
+    auto wrap_around = TRY(main_widget->try_add<GUI::CheckBox>(TRY("Wrap around"_string)));
 
     find_backwards->on_click = [&terminal, find_textbox, match_case, wrap_around](auto) {
         auto needle = find_textbox->text();
@@ -257,7 +251,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     Config::pledge_domain("Terminal");
 
-    char const* command_to_execute = nullptr;
+    StringView command_to_execute;
     bool keep_open = false;
 
     Core::ArgsParser args_parser;
@@ -266,7 +260,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     args_parser.parse(arguments);
 
-    if (keep_open && !command_to_execute) {
+    if (keep_open && command_to_execute.is_empty()) {
         warnln("Option -k can only be used in combination with -e.");
         return 1;
     }
@@ -279,7 +273,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     }
     if (shell_pid == 0) {
         close(ptm_fd);
-        if (command_to_execute)
+        if (!command_to_execute.is_empty())
             TRY(run_command(command_to_execute, keep_open));
         else
             TRY(run_command(Config::read_string("Terminal"sv, "Startup"sv, "Command"sv, ""sv), false));
@@ -295,7 +289,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_title("Terminal");
     window->set_obey_widget_min_size(false);
 
-    auto terminal = TRY(window->try_set_main_widget<VT::TerminalWidget>(ptm_fd, true));
+    auto terminal = TRY(window->set_main_widget<VT::TerminalWidget>(ptm_fd, true));
     terminal->on_command_exit = [&] {
         app->quit(0);
     };
@@ -339,7 +333,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto show_scroll_bar = Config::read_bool("Terminal"sv, "Terminal"sv, "ShowScrollBar"sv, true);
     terminal->set_show_scrollbar(show_scroll_bar);
 
-    auto open_settings_action = GUI::Action::create("Terminal &Settings", TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/settings.png"sv)),
+    auto open_settings_action = GUI::Action::create("Terminal &Settings", TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/settings.png"sv)),
         [&](auto&) {
             GUI::Process::spawn_or_show_error(window, "/bin/TerminalSettings"sv);
         });
@@ -347,8 +341,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(terminal->context_menu().try_add_separator());
     TRY(terminal->context_menu().try_add_action(open_settings_action));
 
-    auto file_menu = TRY(window->try_add_menu("&File"));
-    TRY(file_menu->try_add_action(GUI::Action::create("Open New &Terminal", { Mod_Ctrl | Mod_Shift, Key_N }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/app-terminal.png"sv)), [&](auto&) {
+    auto file_menu = TRY(window->try_add_menu("&File"_short_string));
+    TRY(file_menu->try_add_action(GUI::Action::create("Open New &Terminal", { Mod_Ctrl | Mod_Shift, Key_N }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/app-terminal.png"sv)), [&](auto&) {
         GUI::Process::spawn_or_show_error(window, "/bin/Terminal"sv);
     })));
 
@@ -394,23 +388,41 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             GUI::Application::the()->quit();
     })));
 
-    auto edit_menu = TRY(window->try_add_menu("&Edit"));
+    auto edit_menu = TRY(window->try_add_menu("&Edit"_short_string));
     TRY(edit_menu->try_add_action(terminal->copy_action()));
     TRY(edit_menu->try_add_action(terminal->paste_action()));
     TRY(edit_menu->try_add_separator());
-    TRY(edit_menu->try_add_action(GUI::Action::create("&Find...", { Mod_Ctrl | Mod_Shift, Key_F }, TRY(Gfx::Bitmap::try_load_from_file("/res/icons/16x16/find.png"sv)),
+    TRY(edit_menu->try_add_action(GUI::Action::create("&Find...", { Mod_Ctrl | Mod_Shift, Key_F }, TRY(Gfx::Bitmap::load_from_file("/res/icons/16x16/find.png"sv)),
         [&](auto&) {
             find_window->show();
             find_window->move_to_front();
         })));
 
-    auto view_menu = TRY(window->try_add_menu("&View"));
+    auto view_menu = TRY(window->try_add_menu("&View"_short_string));
     TRY(view_menu->try_add_action(GUI::CommonActions::make_fullscreen_action([&](auto&) {
         window->set_fullscreen(!window->is_fullscreen());
     })));
     TRY(view_menu->try_add_action(terminal->clear_including_history_action()));
 
-    auto help_menu = TRY(window->try_add_menu("&Help"));
+    auto adjust_font_size = [&](float adjustment) {
+        auto& font = terminal->font();
+        auto new_size = max(5, font.presentation_size() + adjustment);
+        if (auto new_font = Gfx::FontDatabase::the().get(font.family(), new_size, font.weight(), font.width(), font.slope())) {
+            terminal->set_font_and_resize_to_fit(*new_font);
+            terminal->apply_size_increments_to_window(*window);
+            window->resize(terminal->size());
+        }
+    };
+
+    TRY(view_menu->try_add_separator());
+    TRY(view_menu->try_add_action(GUI::CommonActions::make_zoom_in_action([&](auto&) {
+        adjust_font_size(1);
+    })));
+    TRY(view_menu->try_add_action(GUI::CommonActions::make_zoom_out_action([&](auto&) {
+        adjust_font_size(-1);
+    })));
+
+    auto help_menu = TRY(window->try_add_menu("&Help"_short_string));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_command_palette_action(window)));
     TRY(help_menu->try_add_action(GUI::CommonActions::make_help_action([](auto&) {
         Desktop::Launcher::open(URL::create_with_file_scheme("/usr/share/man/man1/Terminal.md"), "/bin/Help");
@@ -427,7 +439,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         terminal->set_logical_focus(!is_preempted);
     };
 
-    TRY(Core::System::unveil("/sys/kernel/processes", "r"));
     TRY(Core::System::unveil("/res", "r"));
     TRY(Core::System::unveil("/bin", "r"));
     TRY(Core::System::unveil("/proc", "r"));
@@ -439,9 +450,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(Core::System::unveil("/tmp/session/%sid/portal/config", "rw"));
     TRY(Core::System::unveil(nullptr, nullptr));
 
-    auto modified_state_check_timer = Core::Timer::create_repeating(500, [&] {
+    auto modified_state_check_timer = TRY(Core::Timer::create_repeating(500, [&] {
         window->set_modified(tty_has_foreground_process() || shell_child_process_count() > 0);
-    });
+    }));
 
     listener.on_confirm_close_changed = [&](bool confirm_close) {
         if (confirm_close) {

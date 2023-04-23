@@ -7,9 +7,7 @@
 #pragma once
 
 #include "Forward.h"
-#include <AK/DeprecatedString.h>
 #include <AK/Forward.h>
-#include <AK/NonnullRefPtrVector.h>
 #include <AK/Vector.h>
 #include <LibCore/ElapsedTimer.h>
 
@@ -29,7 +27,7 @@ private:
 
 class SavedFileDescriptors {
 public:
-    SavedFileDescriptors(NonnullRefPtrVector<AST::Rewiring> const&);
+    SavedFileDescriptors(Vector<NonnullRefPtr<AST::Rewiring>> const&);
     ~SavedFileDescriptors();
 
 private:

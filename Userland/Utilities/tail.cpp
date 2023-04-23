@@ -6,37 +6,36 @@
 
 #include <LibCore/ArgsParser.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/File.h>
 #include <LibCore/FileWatcher.h>
-#include <LibCore/Stream.h>
 #include <LibCore/System.h>
 
 #define DEFAULT_LINE_COUNT 10
 
-static ErrorOr<void> tail_from_pos(Core::Stream::File& file, off_t startline)
+static ErrorOr<void> tail_from_pos(Core::File& file, off_t startline)
 {
-    TRY(file.seek(startline + 1, Core::Stream::SeekMode::SetPosition));
+    TRY(file.seek(startline + 1, SeekMode::SetPosition));
     auto buffer = TRY(file.read_until_eof());
     out("{}", StringView { buffer });
     return {};
 }
 
-static ErrorOr<off_t> find_seek_pos(Core::Stream::File& file, int wanted_lines)
+static ErrorOr<off_t> find_seek_pos(Core::File& file, int wanted_lines)
 {
     // Rather than reading the whole file, start at the end and work backwards,
     // stopping when we've found the number of lines we want.
-    off_t pos = TRY(file.seek(0, Core::Stream::SeekMode::FromEndPosition));
+    off_t pos = TRY(file.seek(0, SeekMode::FromEndPosition));
 
     off_t end = pos;
     int lines = 0;
 
     for (; pos >= 0; pos--) {
-        TRY(file.seek(pos, Core::Stream::SeekMode::SetPosition));
+        TRY(file.seek(pos, SeekMode::SetPosition));
 
         if (file.is_eof())
             break;
-        Array<u8, 1> buffer;
-        auto ch = TRY(file.read(buffer));
-        if (*ch.data() == '\n' && (end - pos) > 1) {
+        auto ch = TRY(file.read_value<u8>());
+        if (ch == '\n' && (end - pos) > 1) {
             lines++;
             if (lines == wanted_lines)
                 break;
@@ -61,7 +60,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     args_parser.add_positional_argument(file, "File path", "file", Core::ArgsParser::Required::No);
     args_parser.parse(arguments);
 
-    auto f = TRY(Core::Stream::File::open_file_or_standard_stream(file, Core::Stream::OpenMode::Read));
+    auto f = TRY(Core::File::open_file_or_standard_stream(file, Core::File::OpenMode::Read));
     if (!follow)
         TRY(Core::System::pledge("stdio"));
 
@@ -86,7 +85,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 line.append(ch);
                 if (ch == '\n') {
                     if (wanted_line_count > line_count || line_index >= line_count - wanted_line_count)
-                        out("{}", line.build());
+                        out("{}", line.to_deprecated_string());
                     line_index++;
                     line.clear();
                 }
@@ -102,7 +101,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     TRY(tail_from_pos(*f, pos));
 
     if (follow) {
-        TRY(f->seek(0, Core::Stream::SeekMode::FromEndPosition));
+        TRY(f->seek(0, SeekMode::FromEndPosition));
 
         Core::EventLoop event_loop;
         auto watcher = TRY(Core::FileWatcher::create());
@@ -110,7 +109,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
             if (event.type == Core::FileWatcherEvent::Type::ContentModified) {
                 auto buffer_or_error = f->read_until_eof();
                 if (buffer_or_error.is_error()) {
-                    auto error = buffer_or_error.error();
+                    auto error = buffer_or_error.release_error();
                     warnln(error.string_literal());
                     event_loop.quit(error.code());
                     return;
@@ -118,9 +117,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 auto bytes = buffer_or_error.value().bytes();
                 out("{}", StringView { bytes });
 
-                auto potential_error = f->seek(0, Core::Stream::SeekMode::FromEndPosition);
+                auto potential_error = f->seek(0, SeekMode::FromEndPosition);
                 if (potential_error.is_error()) {
-                    auto error = potential_error.error();
+                    auto error = potential_error.release_error();
                     warnln(error.string_literal());
                     event_loop.quit(error.code());
                     return;

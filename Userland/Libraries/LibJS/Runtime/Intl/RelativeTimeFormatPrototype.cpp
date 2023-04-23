@@ -12,23 +12,25 @@ namespace JS::Intl {
 
 // 17.3 Properties of the Intl.RelativeTimeFormat Prototype Object, https://tc39.es/ecma402/#sec-properties-of-intl-relativetimeformat-prototype-object
 RelativeTimeFormatPrototype::RelativeTimeFormatPrototype(Realm& realm)
-    : PrototypeObject(*realm.intrinsics().object_prototype())
+    : PrototypeObject(realm.intrinsics().object_prototype())
 {
 }
 
-void RelativeTimeFormatPrototype::initialize(Realm& realm)
+ThrowCompletionOr<void> RelativeTimeFormatPrototype::initialize(Realm& realm)
 {
-    Object::initialize(realm);
+    MUST_OR_THROW_OOM(Object::initialize(realm));
 
     auto& vm = this->vm();
 
     // 17.3.2 Intl.RelativeTimeFormat.prototype[ @@toStringTag ], https://tc39.es/ecma402/#sec-Intl.RelativeTimeFormat.prototype-toStringTag
-    define_direct_property(*vm.well_known_symbol_to_string_tag(), PrimitiveString::create(vm, "Intl.RelativeTimeFormat"sv), Attribute::Configurable);
+    define_direct_property(vm.well_known_symbol_to_string_tag(), MUST_OR_THROW_OOM(PrimitiveString::create(vm, "Intl.RelativeTimeFormat"sv)), Attribute::Configurable);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, vm.names.format, format, 2, attr);
     define_native_function(realm, vm.names.formatToParts, format_to_parts, 2, attr);
     define_native_function(realm, vm.names.resolvedOptions, resolved_options, 0, attr);
+
+    return {};
 }
 
 // 17.3.3 Intl.RelativeTimeFormat.prototype.format ( value, unit ), https://tc39.es/ecma402/#sec-Intl.RelativeTimeFormat.prototype.format
@@ -36,7 +38,7 @@ JS_DEFINE_NATIVE_FUNCTION(RelativeTimeFormatPrototype::format)
 {
     // 1. Let relativeTimeFormat be the this value.
     // 2. Perform ? RequireInternalSlot(relativeTimeFormat, [[InitializedRelativeTimeFormat]]).
-    auto* relative_time_format = TRY(typed_this_object(vm));
+    auto relative_time_format = TRY(typed_this_object(vm));
 
     // 3. Let value be ? ToNumber(value).
     auto value = TRY(vm.argument(0).to_number(vm));
@@ -45,7 +47,7 @@ JS_DEFINE_NATIVE_FUNCTION(RelativeTimeFormatPrototype::format)
     auto unit = TRY(vm.argument(1).to_string(vm));
 
     // 5. Return ? FormatRelativeTime(relativeTimeFormat, value, unit).
-    auto formatted = TRY(format_relative_time(vm, *relative_time_format, value.as_double(), unit));
+    auto formatted = TRY(format_relative_time(vm, relative_time_format, value.as_double(), unit.bytes_as_string_view()));
     return PrimitiveString::create(vm, move(formatted));
 }
 
@@ -54,7 +56,7 @@ JS_DEFINE_NATIVE_FUNCTION(RelativeTimeFormatPrototype::format_to_parts)
 {
     // 1. Let relativeTimeFormat be the this value.
     // 2. Perform ? RequireInternalSlot(relativeTimeFormat, [[InitializedRelativeTimeFormat]]).
-    auto* relative_time_format = TRY(typed_this_object(vm));
+    auto relative_time_format = TRY(typed_this_object(vm));
 
     // 3. Let value be ? ToNumber(value).
     auto value = TRY(vm.argument(0).to_number(vm));
@@ -63,7 +65,7 @@ JS_DEFINE_NATIVE_FUNCTION(RelativeTimeFormatPrototype::format_to_parts)
     auto unit = TRY(vm.argument(1).to_string(vm));
 
     // 5. Return ? FormatRelativeTimeToParts(relativeTimeFormat, value, unit).
-    return TRY(format_relative_time_to_parts(vm, *relative_time_format, value.as_double(), unit));
+    return TRY(format_relative_time_to_parts(vm, relative_time_format, value.as_double(), unit.bytes_as_string_view()));
 }
 
 // 17.3.5 Intl.RelativeTimeFormat.prototype.resolvedOptions ( ), https://tc39.es/ecma402/#sec-intl.relativetimeformat.prototype.resolvedoptions
@@ -73,7 +75,7 @@ JS_DEFINE_NATIVE_FUNCTION(RelativeTimeFormatPrototype::resolved_options)
 
     // 1. Let relativeTimeFormat be the this value.
     // 2. Perform ? RequireInternalSlot(relativeTimeFormat, [[InitializedRelativeTimeFormat]]).
-    auto* relative_time_format = TRY(typed_this_object(vm));
+    auto relative_time_format = TRY(typed_this_object(vm));
 
     // 3. Let options be OrdinaryObjectCreate(%Object.prototype%).
     auto options = Object::create(realm, realm.intrinsics().object_prototype());
@@ -84,8 +86,8 @@ JS_DEFINE_NATIVE_FUNCTION(RelativeTimeFormatPrototype::resolved_options)
     //     c. Assert: v is not undefined.
     //     d. Perform ! CreateDataPropertyOrThrow(options, p, v).
     MUST(options->create_data_property_or_throw(vm.names.locale, PrimitiveString::create(vm, relative_time_format->locale())));
-    MUST(options->create_data_property_or_throw(vm.names.style, PrimitiveString::create(vm, relative_time_format->style_string())));
-    MUST(options->create_data_property_or_throw(vm.names.numeric, PrimitiveString::create(vm, relative_time_format->numeric_string())));
+    MUST(options->create_data_property_or_throw(vm.names.style, MUST_OR_THROW_OOM(PrimitiveString::create(vm, relative_time_format->style_string()))));
+    MUST(options->create_data_property_or_throw(vm.names.numeric, MUST_OR_THROW_OOM(PrimitiveString::create(vm, relative_time_format->numeric_string()))));
     MUST(options->create_data_property_or_throw(vm.names.numberingSystem, PrimitiveString::create(vm, relative_time_format->numbering_system())));
 
     // 5. Return options.

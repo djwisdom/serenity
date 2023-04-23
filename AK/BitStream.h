@@ -1,123 +1,98 @@
 /*
- * Copyright (c) 2020, the SerenityOS developers.
- * Copyright (c) 2021, Idan Horowitz <idan.horowitz@serenityos.org>
+ * Copyright (c) 2021, kleines Filmröllchen <filmroellchen@serenityos.org>.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
-#include <AK/Optional.h>
+#include <AK/ByteBuffer.h>
+#include <AK/MaybeOwned.h>
+#include <AK/NumericLimits.h>
+#include <AK/OwnPtr.h>
 #include <AK/Stream.h>
 
 namespace AK {
 
-// Obsoleted by LibCore/{Big, Little}EndianInputBitStream.
-class InputBitStream final : public InputStream {
+/// A stream wrapper class that allows you to read arbitrary amounts of bits
+/// in big-endian order from another stream.
+class BigEndianInputBitStream : public Stream {
 public:
-    explicit InputBitStream(InputStream& stream)
-        : m_stream(stream)
+    explicit BigEndianInputBitStream(MaybeOwned<Stream> stream)
+        : m_stream(move(stream))
     {
     }
 
-    size_t read(Bytes bytes) override
+    // ^Stream
+    virtual ErrorOr<Bytes> read_some(Bytes bytes) override
     {
-        if (has_any_error())
-            return 0;
-
-        size_t nread = 0;
-        if (bytes.size() >= 1) {
-            if (m_next_byte.has_value()) {
-                bytes[0] = m_next_byte.value();
-                m_next_byte.clear();
-
-                ++nread;
-            }
+        if (m_current_byte.has_value() && is_aligned_to_byte_boundary()) {
+            bytes[0] = m_current_byte.release_value();
+            // FIXME: This accidentally slices off the first byte of the returned span.
+            return m_stream->read_some(bytes.slice(1));
         }
-
-        return nread + m_stream.read(bytes.slice(nread));
+        align_to_byte_boundary();
+        return m_stream->read_some(bytes);
+    }
+    virtual ErrorOr<size_t> write_some(ReadonlyBytes bytes) override { return m_stream->write_some(bytes); }
+    virtual bool is_eof() const override { return m_stream->is_eof() && !m_current_byte.has_value(); }
+    virtual bool is_open() const override { return m_stream->is_open(); }
+    virtual void close() override
+    {
+        m_stream->close();
+        align_to_byte_boundary();
     }
 
-    bool read_or_error(Bytes bytes) override
+    ErrorOr<bool> read_bit()
     {
-        if (read(bytes) != bytes.size()) {
-            set_fatal_error();
-            return false;
+        return read_bits<bool>(1);
+    }
+
+    /// Depending on the number of bits to read, the return type can be chosen appropriately.
+    /// This avoids a bunch of static_cast<>'s for the user.
+    // TODO: Support u128, u256 etc. as well: The concepts would be quite complex.
+    template<Unsigned T = u64>
+    ErrorOr<T> read_bits(size_t count)
+    {
+        if constexpr (IsSame<bool, T>) {
+            VERIFY(count == 1);
         }
-
-        return true;
-    }
-
-    [[nodiscard]] bool unreliable_eof() const override { return !m_next_byte.has_value() && m_stream.unreliable_eof(); }
-
-    bool discard_or_error(size_t count) override
-    {
-        if (count >= 1) {
-            if (m_next_byte.has_value()) {
-                m_next_byte.clear();
-                --count;
-            }
-        }
-
-        return m_stream.discard_or_error(count);
-    }
-
-    u64 read_bits(size_t count)
-    {
-        u64 result = 0;
+        T result = 0;
 
         size_t nread = 0;
         while (nread < count) {
-            if (m_stream.has_any_error()) {
-                set_fatal_error();
-                return 0;
-            }
-
-            if (m_next_byte.has_value()) {
-                auto const bit = (m_next_byte.value() >> m_bit_offset) & 1;
-                result |= bit << nread;
-                ++nread;
-
-                if (m_bit_offset++ == 7)
-                    m_next_byte.clear();
-            } else {
-                m_stream >> m_next_byte;
-                m_bit_offset = 0;
-            }
-        }
-
-        return result;
-    }
-
-    u64 read_bits_big_endian(size_t count)
-    {
-        u64 result = 0;
-
-        size_t nread = 0;
-        while (nread < count) {
-            if (m_stream.has_any_error()) {
-                set_fatal_error();
-                return 0;
-            }
-
-            if (m_next_byte.has_value()) {
-                // read an entire byte
-                if (((count - nread) >= 8) && m_bit_offset == 0) {
-                    // shift existing bytes over
-                    result <<= 8;
-                    result |= m_next_byte.value();
-                    nread += 8;
-                    m_next_byte.clear();
+            if (m_current_byte.has_value()) {
+                if constexpr (!IsSame<bool, T> && !IsSame<u8, T>) {
+                    // read as many bytes as possible directly
+                    if (((count - nread) >= 8) && is_aligned_to_byte_boundary()) {
+                        // shift existing data over
+                        result <<= 8;
+                        result |= m_current_byte.value();
+                        nread += 8;
+                        m_current_byte.clear();
+                    } else {
+                        auto const bit = (m_current_byte.value() >> (7 - m_bit_offset)) & 1;
+                        result <<= 1;
+                        result |= bit;
+                        ++nread;
+                        if (m_bit_offset++ == 7)
+                            m_current_byte.clear();
+                    }
                 } else {
-                    auto const bit = (m_next_byte.value() >> (7 - m_bit_offset)) & 1;
-                    result <<= 1;
-                    result |= bit;
+                    // Always take this branch for booleans or u8: there's no purpose in reading more than a single bit
+                    auto const bit = (m_current_byte.value() >> (7 - m_bit_offset)) & 1;
+                    if constexpr (IsSame<bool, T>)
+                        result = bit;
+                    else {
+                        result <<= 1;
+                        result |= bit;
+                    }
                     ++nread;
                     if (m_bit_offset++ == 7)
-                        m_next_byte.clear();
+                        m_current_byte.clear();
                 }
             } else {
-                m_stream >> m_next_byte;
+                m_current_byte = TRY(m_stream->read_value<u8>());
                 m_bit_offset = 0;
             }
         }
@@ -125,121 +100,337 @@ public:
         return result;
     }
 
-    bool read_bit() { return static_cast<bool>(read_bits(1)); }
-
-    bool read_bit_big_endian() { return static_cast<bool>(read_bits_big_endian(1)); }
-
+    /// Discards any sub-byte stream positioning the input stream may be keeping track of.
+    /// Non-bitwise reads will implicitly call this.
     void align_to_byte_boundary()
     {
-        if (m_next_byte.has_value())
-            m_next_byte.clear();
+        m_current_byte.clear();
+        m_bit_offset = 0;
     }
 
-    bool handle_any_error() override
+    /// Whether we are (accidentally or intentionally) at a byte boundary right now.
+    ALWAYS_INLINE bool is_aligned_to_byte_boundary() const { return m_bit_offset == 0; }
+
+private:
+    Optional<u8> m_current_byte;
+    size_t m_bit_offset { 0 };
+    MaybeOwned<Stream> m_stream;
+};
+
+class LittleEndianBitStream : public Stream {
+protected:
+    using BufferType = u64;
+
+    static constexpr size_t bits_per_byte = 8u;
+    static constexpr size_t bit_buffer_size = sizeof(BufferType) * bits_per_byte;
+
+    explicit LittleEndianBitStream(MaybeOwned<Stream> stream)
+        : m_stream(move(stream))
     {
-        bool handled_errors = m_stream.handle_any_error();
-        return Stream::handle_any_error() || handled_errors;
+    }
+
+    template<Unsigned T>
+    static constexpr T lsb_mask(T bits)
+    {
+        constexpr auto max = NumericLimits<T>::max();
+        constexpr auto digits = NumericLimits<T>::digits();
+
+        return bits == 0 ? 0 : max >> (digits - bits);
+    }
+
+    ALWAYS_INLINE BufferType lsb_aligned_buffer() const
+    {
+        return m_bit_offset == bit_buffer_size ? 0 : m_bit_buffer >> m_bit_offset;
+    }
+
+    ALWAYS_INLINE bool is_aligned_to_byte_boundary() const { return m_bit_count % bits_per_byte == 0; }
+
+    MaybeOwned<Stream> m_stream;
+
+    BufferType m_bit_buffer { 0 };
+    u8 m_bit_offset { 0 };
+    u8 m_bit_count { 0 };
+};
+
+/// A stream wrapper class that allows you to read arbitrary amounts of bits
+/// in little-endian order from another stream.
+class LittleEndianInputBitStream : public LittleEndianBitStream {
+public:
+    explicit LittleEndianInputBitStream(MaybeOwned<Stream> stream)
+        : LittleEndianBitStream(move(stream))
+    {
+    }
+
+    // ^Stream
+    virtual ErrorOr<Bytes> read_some(Bytes bytes) override
+    {
+        align_to_byte_boundary();
+
+        size_t bytes_read = 0;
+        auto buffer = bytes;
+
+        if (m_bit_count > 0) {
+            auto bits_to_read = min(buffer.size() * bits_per_byte, m_bit_count);
+            auto result = TRY(read_bits(bits_to_read));
+
+            bytes_read = bits_to_read / bits_per_byte;
+            buffer.overwrite(0, &result, bytes_read);
+
+            buffer = buffer.slice(bytes_read);
+        }
+
+        buffer = TRY(m_stream->read_some(buffer));
+        bytes_read += buffer.size();
+
+        return bytes.trim(bytes_read);
+    }
+
+    virtual ErrorOr<size_t> write_some(ReadonlyBytes bytes) override { return m_stream->write_some(bytes); }
+    virtual bool is_eof() const override { return m_stream->is_eof() && m_bit_count == 0; }
+    virtual bool is_open() const override { return m_stream->is_open(); }
+    virtual void close() override
+    {
+        m_stream->close();
+        align_to_byte_boundary();
+    }
+
+    ErrorOr<bool> read_bit()
+    {
+        return read_bits<bool>(1);
+    }
+
+    /// Depending on the number of bits to read, the return type can be chosen appropriately.
+    /// This avoids a bunch of static_cast<>'s for the user.
+    // TODO: Support u128, u256 etc. as well: The concepts would be quite complex.
+    template<Unsigned T = u64>
+    ErrorOr<T> read_bits(size_t count)
+    {
+        auto result = TRY(peek_bits<T>(count));
+        discard_previously_peeked_bits(count);
+
+        return result;
+    }
+
+    template<Unsigned T = u64>
+    ErrorOr<T> peek_bits(size_t count)
+    {
+        if (count > m_bit_count)
+            TRY(refill_buffer_from_stream());
+
+        return lsb_aligned_buffer() & lsb_mask<T>(min(count, m_bit_count));
+    }
+
+    ALWAYS_INLINE void discard_previously_peeked_bits(u8 count)
+    {
+        m_bit_offset += count;
+        m_bit_count -= count;
+    }
+
+    /// Discards any sub-byte stream positioning the input stream may be keeping track of.
+    /// Non-bitwise reads will implicitly call this.
+    u8 align_to_byte_boundary()
+    {
+        u8 remaining_bits = 0;
+
+        m_bit_buffer = lsb_aligned_buffer();
+        m_bit_offset = 0;
+
+        if (auto offset = m_bit_count % bits_per_byte; offset != 0) {
+            remaining_bits = m_bit_buffer & lsb_mask<u8>(offset);
+            discard_previously_peeked_bits(offset);
+        }
+
+        return remaining_bits;
     }
 
 private:
-    Optional<u8> m_next_byte;
-    size_t m_bit_offset { 0 };
-    InputStream& m_stream;
+    ErrorOr<void> refill_buffer_from_stream()
+    {
+        size_t bits_to_read = bit_buffer_size - m_bit_count;
+        size_t bytes_to_read = bits_to_read / bits_per_byte;
+
+        BufferType buffer = 0;
+        auto bytes = TRY(m_stream->read_some({ &buffer, bytes_to_read }));
+
+        m_bit_buffer = (buffer << m_bit_count) | lsb_aligned_buffer();
+        m_bit_count += bytes.size() * bits_per_byte;
+        m_bit_offset = 0;
+
+        return {};
+    }
 };
 
-class OutputBitStream final : public OutputStream {
+/// A stream wrapper class that allows you to write arbitrary amounts of bits
+/// in big-endian order to another stream.
+class BigEndianOutputBitStream : public Stream {
 public:
-    explicit OutputBitStream(OutputStream& stream)
-        : m_stream(stream)
+    explicit BigEndianOutputBitStream(MaybeOwned<Stream> stream)
+        : m_stream(move(stream))
     {
     }
 
-    // WARNING: write aligns to the next byte boundary before writing, if unaligned writes are needed this should be rewritten
-    size_t write(ReadonlyBytes bytes) override
+    virtual ErrorOr<Bytes> read_some(Bytes) override
     {
-        if (has_any_error())
-            return 0;
-        align_to_byte_boundary();
-        if (has_fatal_error()) // if align_to_byte_boundary failed
-            return 0;
-        return m_stream.write(bytes);
+        return Error::from_errno(EBADF);
     }
 
-    bool write_or_error(ReadonlyBytes bytes) override
+    virtual ErrorOr<size_t> write_some(ReadonlyBytes bytes) override
     {
-        if (write(bytes) < bytes.size()) {
-            set_fatal_error();
-            return false;
+        VERIFY(m_bit_offset == 0);
+        return m_stream->write_some(bytes);
+    }
+
+    template<Unsigned T>
+    ErrorOr<void> write_bits(T value, size_t bit_count)
+    {
+        VERIFY(m_bit_offset <= 7);
+
+        while (bit_count > 0) {
+            u8 next_bit = (value >> (bit_count - 1)) & 1;
+            bit_count--;
+
+            m_current_byte <<= 1;
+            m_current_byte |= next_bit;
+            m_bit_offset++;
+
+            if (m_bit_offset > 7) {
+                TRY(m_stream->write_value(m_current_byte));
+                m_bit_offset = 0;
+                m_current_byte = 0;
+            }
         }
+
+        return {};
+    }
+
+    virtual bool is_eof() const override
+    {
         return true;
     }
 
-    void write_bits(u32 bits, size_t count)
+    virtual bool is_open() const override
     {
-        VERIFY(count <= 32);
-
-        if (count == 32 && !m_next_byte.has_value()) { // fast path for aligned 32 bit writes
-            m_stream << bits;
-            return;
-        }
-
-        size_t n_written = 0;
-        while (n_written < count) {
-            if (m_stream.has_any_error()) {
-                set_fatal_error();
-                return;
-            }
-
-            if (m_next_byte.has_value()) {
-                m_next_byte.value() |= ((bits >> n_written) & 1) << m_bit_offset;
-                ++n_written;
-
-                if (m_bit_offset++ == 7) {
-                    m_stream << m_next_byte.value();
-                    m_next_byte.clear();
-                }
-            } else if (count - n_written >= 16) { // fast path for aligned 16 bit writes
-                m_stream << (u16)((bits >> n_written) & 0xFFFF);
-                n_written += 16;
-            } else if (count - n_written >= 8) { // fast path for aligned 8 bit writes
-                m_stream << (u8)((bits >> n_written) & 0xFF);
-                n_written += 8;
-            } else {
-                m_bit_offset = 0;
-                m_next_byte = 0;
-            }
-        }
+        return m_stream->is_open();
     }
 
-    void write_bit(bool bit)
+    virtual void close() override
     {
-        write_bits(bit, 1);
     }
 
-    void align_to_byte_boundary()
-    {
-        if (m_next_byte.has_value()) {
-            if (!m_stream.write_or_error(ReadonlyBytes { &m_next_byte.value(), 1 })) {
-                set_fatal_error();
-            }
-            m_next_byte.clear();
-        }
-    }
-
-    [[nodiscard]] size_t bit_offset() const
+    size_t bit_offset() const
     {
         return m_bit_offset;
     }
 
+    ErrorOr<void> align_to_byte_boundary()
+    {
+        if (m_bit_offset == 0)
+            return {};
+
+        TRY(write_bits(0u, 8 - m_bit_offset));
+        VERIFY(m_bit_offset == 0);
+        return {};
+    }
+
 private:
-    Optional<u8> m_next_byte;
+    MaybeOwned<Stream> m_stream;
+    u8 m_current_byte { 0 };
     size_t m_bit_offset { 0 };
-    OutputStream& m_stream;
+};
+
+/// A stream wrapper class that allows you to write arbitrary amounts of bits
+/// in little-endian order to another stream.
+class LittleEndianOutputBitStream : public LittleEndianBitStream {
+public:
+    explicit LittleEndianOutputBitStream(MaybeOwned<Stream> stream)
+        : LittleEndianBitStream(move(stream))
+    {
+    }
+
+    virtual ErrorOr<Bytes> read_some(Bytes) override
+    {
+        return Error::from_errno(EBADF);
+    }
+
+    virtual ErrorOr<size_t> write_some(ReadonlyBytes bytes) override
+    {
+        VERIFY(is_aligned_to_byte_boundary());
+
+        if (m_bit_count > 0)
+            TRY(flush_buffer_to_stream());
+
+        return m_stream->write_some(bytes);
+    }
+
+    template<Unsigned T>
+    ErrorOr<void> write_bits(T value, size_t count)
+    {
+        if (m_bit_count == bit_buffer_size) {
+            TRY(flush_buffer_to_stream());
+        } else if (auto remaining = bit_buffer_size - m_bit_count; count >= remaining) {
+            m_bit_buffer |= (static_cast<BufferType>(value) & lsb_mask<BufferType>(remaining)) << m_bit_count;
+            m_bit_count = bit_buffer_size;
+
+            if (remaining != sizeof(value) * bits_per_byte)
+                value >>= remaining;
+            count -= remaining;
+
+            TRY(flush_buffer_to_stream());
+        }
+
+        if (count == 0)
+            return {};
+
+        m_bit_buffer |= static_cast<BufferType>(value) << m_bit_count;
+        m_bit_count += count;
+
+        return {};
+    }
+
+    ALWAYS_INLINE ErrorOr<void> flush_buffer_to_stream()
+    {
+        auto bytes_to_write = m_bit_count / bits_per_byte;
+        TRY(m_stream->write_until_depleted({ &m_bit_buffer, bytes_to_write }));
+
+        if (m_bit_count == bit_buffer_size) {
+            m_bit_buffer = 0;
+            m_bit_count = 0;
+        } else {
+            auto bits_written = bytes_to_write * bits_per_byte;
+
+            m_bit_buffer >>= bits_written;
+            m_bit_count -= bits_written;
+        }
+
+        return {};
+    }
+
+    virtual bool is_eof() const override
+    {
+        return true;
+    }
+
+    virtual bool is_open() const override
+    {
+        return m_stream->is_open();
+    }
+
+    virtual void close() override
+    {
+    }
+
+    size_t bit_offset() const
+    {
+        return m_bit_count;
+    }
+
+    ErrorOr<void> align_to_byte_boundary()
+    {
+        if (auto offset = m_bit_count % bits_per_byte; offset != 0)
+            TRY(write_bits<u8>(0u, bits_per_byte - offset));
+
+        return {};
+    }
 };
 
 }
-
-#if USING_AK_GLOBALLY
-using AK::InputBitStream;
-using AK::OutputBitStream;
-#endif

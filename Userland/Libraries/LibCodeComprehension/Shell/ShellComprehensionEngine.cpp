@@ -78,10 +78,11 @@ Vector<DeprecatedString> const& ShellComprehensionEngine::DocumentData::sourced_
                         auto& filename = entries[1];
                         if (filename->would_execute())
                             return;
-                        auto name_list = const_cast<::Shell::AST::Node*>(filename.ptr())->run(nullptr)->resolve_as_list(nullptr);
+                        auto name_list_node = const_cast<::Shell::AST::Node*>(filename.ptr())->run(nullptr).release_value_but_fixme_should_propagate_errors();
+                        auto name_list = name_list_node->resolve_as_list(nullptr).release_value_but_fixme_should_propagate_errors();
                         StringBuilder builder;
                         builder.join(' ', name_list);
-                        sourced_files.set(builder.build());
+                        sourced_files.set(builder.to_deprecated_string());
                     }
                 }
             }
@@ -107,7 +108,7 @@ NonnullRefPtr<::Shell::AST::Node> ShellComprehensionEngine::DocumentData::parse(
     if (auto node = parser.parse())
         return node.release_nonnull();
 
-    return ::Shell::AST::make_ref_counted<::Shell::AST::SyntaxError>(::Shell::AST::Position {}, "Unable to parse file");
+    return ::Shell::AST::make_ref_counted<::Shell::AST::SyntaxError>(::Shell::AST::Position {}, "Unable to parse file"_string.release_value_but_fixme_should_propagate_errors());
 }
 
 size_t ShellComprehensionEngine::resolve(ShellComprehensionEngine::DocumentData const& document, const GUI::TextPosition& position)
@@ -146,7 +147,7 @@ Vector<CodeComprehension::AutocompleteResultEntry> ShellComprehensionEngine::get
         return {};
     }
 
-    auto completions = const_cast<::Shell::AST::Node*>(document.node.ptr())->complete_for_editor(shell(), offset_in_file, hit_test);
+    auto completions = const_cast<::Shell::AST::Node*>(document.node.ptr())->complete_for_editor(shell(), offset_in_file, hit_test).release_value_but_fixme_should_propagate_errors();
     Vector<CodeComprehension::AutocompleteResultEntry> entries;
     for (auto& completion : completions)
         entries.append({ completion.text_string, completion.input_offset });
@@ -180,11 +181,11 @@ Optional<CodeComprehension::ProjectLocation> ShellComprehensionEngine::find_decl
         return {};
     }
 
-    auto name = static_ptr_cast<::Shell::AST::BarewordLiteral>(result.matching_node)->text();
+    auto name = static_ptr_cast<::Shell::AST::BarewordLiteral const>(result.matching_node)->text();
     auto& declarations = all_declarations();
     for (auto& entry : declarations) {
         for (auto& declaration : entry.value) {
-            if (declaration.name == name)
+            if (declaration.name.view() == name)
                 return declaration.position;
         }
     }
@@ -209,7 +210,7 @@ void ShellComprehensionEngine::update_declared_symbols(DocumentData const& docum
 
                 DeprecatedString name;
                 if (literal->is_bareword())
-                    name = static_ptr_cast<::Shell::AST::BarewordLiteral>(literal)->text();
+                    name = static_ptr_cast<::Shell::AST::BarewordLiteral const>(literal)->text().to_deprecated_string();
 
                 if (!name.is_empty()) {
                     dbgln("Found variable {}", name);
@@ -222,7 +223,7 @@ void ShellComprehensionEngine::update_declared_symbols(DocumentData const& docum
         void visit(::Shell::AST::FunctionDeclaration const* node) override
         {
             dbgln("Found function {}", node->name().name);
-            declarations.append({ node->name().name, { filename, node->position().start_line.line_number, node->position().start_line.line_column }, CodeComprehension::DeclarationType::Function, {} });
+            declarations.append({ node->name().name.to_deprecated_string(), { filename, node->position().start_line.line_number, node->position().start_line.line_column }, CodeComprehension::DeclarationType::Function, {} });
         }
 
         DeprecatedString const& filename;

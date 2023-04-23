@@ -45,7 +45,7 @@ ConnectionFromClient* ConnectionFromClient::from_client_id(int client_id)
     return (*it).value.ptr();
 }
 
-ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<Core::Stream::LocalSocket> client_socket, int client_id)
+ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<Core::LocalSocket> client_socket, int client_id)
     : IPC::ConnectionFromClient<WindowClientEndpoint, WindowServerEndpoint>(*this, move(client_socket), client_id)
 {
     if (!s_connections)
@@ -90,10 +90,31 @@ void ConnectionFromClient::notify_about_new_screen_rects()
     async_screen_rects_changed(Screen::rects(), Screen::main().index(), wm.window_stack_rows(), wm.window_stack_columns());
 }
 
-void ConnectionFromClient::create_menu(i32 menu_id, DeprecatedString const& menu_title)
+void ConnectionFromClient::create_menu(i32 menu_id, String const& name)
 {
-    auto menu = Menu::construct(this, menu_id, menu_title);
+    auto menu = Menu::construct(this, menu_id, name);
     m_menus.set(menu_id, move(menu));
+}
+
+void ConnectionFromClient::set_menu_name(i32 menu_id, String const& name)
+{
+    auto it = m_menus.find(menu_id);
+    if (it == m_menus.end()) {
+        did_misbehave("DestroyMenu: Bad menu ID");
+        return;
+    }
+    auto& menu = *it->value;
+    menu.set_name(name);
+    for (auto& it : m_windows) {
+        auto& window = *it.value;
+        window.menubar().for_each_menu([&](Menu& other_menu) {
+            if (&menu == &other_menu) {
+                window.invalidate_menubar();
+                return IterationDecision::Break;
+            }
+            return IterationDecision::Continue;
+        });
+    }
 }
 
 void ConnectionFromClient::destroy_menu(i32 menu_id)
@@ -154,7 +175,7 @@ void ConnectionFromClient::popup_menu(i32 menu_id, Gfx::IntPoint screen_position
         return;
     }
     auto& menu = *(*it).value;
-    if (!button_rect.is_null())
+    if (!button_rect.is_empty())
         menu.open_button_menu(position, button_rect);
     else
         menu.popup(position);
@@ -240,7 +261,7 @@ void ConnectionFromClient::flash_menubar_menu(i32 window_id, i32 menu_id)
                 return;
             weak_window->menubar().flash_menu(nullptr);
             weak_window->frame().invalidate_menubar();
-        });
+        }).release_value_but_fixme_should_propagate_errors();
         m_flashed_menu_timer->start();
     } else if (m_flashed_menu_timer) {
         m_flashed_menu_timer->restart();
@@ -500,6 +521,7 @@ static Gfx::IntSize calculate_minimum_size_for_window(Window const& window)
     //       because we want to always keep their title buttons accessible.
     if (window.type() == WindowType::Normal) {
         auto palette = WindowManager::the().palette();
+        auto& title_font = Gfx::FontDatabase::the().window_title_font();
 
         int required_width = 0;
         // Padding on left and right of window title content.
@@ -514,8 +536,11 @@ static Gfx::IntSize calculate_minimum_size_for_window(Window const& window)
         // Maximize button
         if (window.is_resizable())
             required_width += palette.window_title_button_width();
+        // Title text and drop shadow
+        else
+            required_width += title_font.width_rounded_up(window.title()) + 4;
         // Minimize button
-        if (window.is_minimizable())
+        if (window.is_minimizable() && !window.is_modal())
             required_width += palette.window_title_button_width();
 
         return { required_width, 0 };
@@ -654,7 +679,7 @@ void ConnectionFromClient::create_window(i32 window_id, Gfx::IntRect const& rect
     window->set_alpha_hit_threshold(alpha_hit_threshold);
     window->set_size_increment(size_increment);
     window->set_base_size(base_size);
-    if (resize_aspect_ratio.has_value() && !resize_aspect_ratio.value().is_null())
+    if (resize_aspect_ratio.has_value() && !resize_aspect_ratio.value().is_empty())
         window->set_resize_aspect_ratio(resize_aspect_ratio);
     window->invalidate(true, true);
     if (window->type() == WindowType::Applet)
@@ -733,7 +758,7 @@ void ConnectionFromClient::did_finish_painting(i32 window_id, Vector<Gfx::IntRec
 
 void ConnectionFromClient::set_window_backing_store(i32 window_id, [[maybe_unused]] i32 bpp,
     [[maybe_unused]] i32 pitch, IPC::File const& anon_file, i32 serial, bool has_alpha_channel,
-    Gfx::IntSize size, bool flush_immediately)
+    Gfx::IntSize size, Gfx::IntSize visible_size, bool flush_immediately)
 {
     auto it = m_windows.find(window_id);
     if (it == m_windows.end()) {
@@ -750,7 +775,7 @@ void ConnectionFromClient::set_window_backing_store(i32 window_id, [[maybe_unuse
             did_misbehave("SetWindowBackingStore: Failed to create anonymous buffer for window backing store");
             return;
         }
-        auto backing_store_or_error = Gfx::Bitmap::try_create_with_anonymous_buffer(
+        auto backing_store_or_error = Gfx::Bitmap::create_with_anonymous_buffer(
             has_alpha_channel ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888,
             buffer_or_error.release_value(),
             size,
@@ -761,6 +786,7 @@ void ConnectionFromClient::set_window_backing_store(i32 window_id, [[maybe_unuse
         }
         window.set_backing_store(backing_store_or_error.release_value(), serial);
     }
+    window.set_backing_store_visible_size(visible_size);
 
     if (flush_immediately)
         window.invalidate(false);
@@ -864,17 +890,15 @@ void ConnectionFromClient::set_accepts_drag(bool accepts)
     wm.set_accepts_drag(accepts);
 }
 
-Messages::WindowServer::SetSystemThemeResponse ConnectionFromClient::set_system_theme(DeprecatedString const& theme_path, DeprecatedString const& theme_name, bool keep_desktop_background)
+Messages::WindowServer::SetSystemThemeResponse ConnectionFromClient::set_system_theme(DeprecatedString const& theme_path, DeprecatedString const& theme_name, bool keep_desktop_background, Optional<DeprecatedString> const& color_scheme_path)
 {
-    bool success = WindowManager::the().update_theme(theme_path, theme_name, keep_desktop_background);
+    bool success = WindowManager::the().update_theme(theme_path, theme_name, keep_desktop_background, color_scheme_path);
     return success;
 }
 
 Messages::WindowServer::GetSystemThemeResponse ConnectionFromClient::get_system_theme()
 {
-    auto wm_config = Core::ConfigFile::open("/etc/WindowServer.ini").release_value_but_fixme_should_propagate_errors();
-    auto name = wm_config->read_entry("Theme", "Name");
-    return name;
+    return g_config->read_entry("Theme", "Name");
 }
 
 Messages::WindowServer::SetSystemThemeOverrideResponse ConnectionFromClient::set_system_theme_override(Core::AnonymousBuffer const& theme_override)
@@ -896,6 +920,11 @@ void ConnectionFromClient::clear_system_theme_override()
 Messages::WindowServer::IsSystemThemeOverriddenResponse ConnectionFromClient::is_system_theme_overridden()
 {
     return WindowManager::the().is_theme_overridden();
+}
+
+Messages::WindowServer::GetPreferredColorSchemeResponse ConnectionFromClient::get_preferred_color_scheme()
+{
+    return WindowManager::the().get_preferred_color_scheme();
 }
 
 void ConnectionFromClient::apply_cursor_theme(DeprecatedString const& name)
@@ -925,9 +954,7 @@ Messages::WindowServer::GetCursorHighlightColorResponse ConnectionFromClient::ge
 
 Messages::WindowServer::GetCursorThemeResponse ConnectionFromClient::get_cursor_theme()
 {
-    auto config = Core::ConfigFile::open("/etc/WindowServer.ini").release_value_but_fixme_should_propagate_errors();
-    auto name = config->read_entry("Mouse", "CursorTheme");
-    return name;
+    return g_config->read_entry("Mouse", "CursorTheme");
 }
 
 Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_fonts(DeprecatedString const& default_font_query, DeprecatedString const& fixed_width_font_query, DeprecatedString const& window_title_font_query)
@@ -950,21 +977,16 @@ Messages::WindowServer::SetSystemFontsResponse ConnectionFromClient::set_system_
 
     WindowManager::the().invalidate_after_theme_or_font_change();
 
-    auto wm_config_or_error = Core::ConfigFile::open("/etc/WindowServer.ini", Core::ConfigFile::AllowWriting::Yes);
-    if (wm_config_or_error.is_error()) {
-        dbgln("Unable to open WindowServer.ini to set system fonts: {}", wm_config_or_error.error());
-        return false;
-    }
-    auto wm_config = wm_config_or_error.release_value();
-    wm_config->write_entry("Fonts", "Default", default_font_query);
-    wm_config->write_entry("Fonts", "FixedWidth", fixed_width_font_query);
-    wm_config->write_entry("Fonts", "WindowTitle", window_title_font_query);
-    return true;
+    g_config->write_entry("Fonts", "Default", default_font_query);
+    g_config->write_entry("Fonts", "FixedWidth", fixed_width_font_query);
+    g_config->write_entry("Fonts", "WindowTitle", window_title_font_query);
+
+    return !g_config->sync().is_error();
 }
 
-void ConnectionFromClient::set_system_effects(Vector<bool> const& effects, u8 geometry)
+void ConnectionFromClient::set_system_effects(Vector<bool> const& effects, u8 geometry, u8 tile_window)
 {
-    WindowManager::the().apply_system_effects(effects, static_cast<ShowGeometry>(geometry));
+    WindowManager::the().apply_system_effects(effects, static_cast<ShowGeometry>(geometry), static_cast<TileWindow>(tile_window));
     ConnectionFromClient::for_each_client([&](auto& client) {
         client.async_update_system_effects(effects);
     });
@@ -1143,7 +1165,7 @@ void ConnectionFromClient::may_have_become_unresponsive()
     async_ping();
     m_ping_timer = Core::Timer::create_single_shot(1000, [this] {
         set_unresponsive(true);
-    });
+    }).release_value_but_fixme_should_propagate_errors();
     m_ping_timer->start();
 }
 
@@ -1173,7 +1195,7 @@ Messages::WindowServer::GetScreenBitmapResponse ConnectionFromClient::get_screen
     }
     // TODO: Mixed scale setups at what scale? Lowest? Highest? Configurable?
     auto bitmap_size = rect.value_or(Screen::bounding_rect()).size();
-    if (auto bitmap_or_error = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, bitmap_size, 1); !bitmap_or_error.is_error()) {
+    if (auto bitmap_or_error = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRx8888, bitmap_size, 1); !bitmap_or_error.is_error()) {
         auto bitmap = bitmap_or_error.release_value_but_fixme_should_propagate_errors();
         Gfx::Painter painter(*bitmap);
         Screen::for_each([&](auto& screen) {
@@ -1225,7 +1247,7 @@ Messages::WindowServer::GetScreenBitmapAroundLocationResponse ConnectionFromClie
         return bitmap_or_error.release_value()->to_shareable_bitmap();
     }
 
-    if (auto bitmap_or_error = Gfx::Bitmap::try_create(Gfx::BitmapFormat::BGRx8888, rect.size(), 1); !bitmap_or_error.is_error()) {
+    if (auto bitmap_or_error = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRx8888, rect.size(), 1); !bitmap_or_error.is_error()) {
         auto bitmap = bitmap_or_error.release_value_but_fixme_should_propagate_errors();
         auto bounding_screen_src_rect = Screen::bounding_rect().intersected(rect);
         Gfx::Painter painter(*bitmap);

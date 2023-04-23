@@ -15,19 +15,14 @@
 
 namespace Kernel {
 
-UNMAP_AFTER_INIT NonnullLockRefPtr<IDEController> IDEController::initialize()
+ErrorOr<void> IDEController::reset()
 {
-    return adopt_lock_ref(*new IDEController());
+    return Error::from_errno(ENOTIMPL);
 }
 
-bool IDEController::reset()
+ErrorOr<void> IDEController::shutdown()
 {
-    TODO();
-}
-
-bool IDEController::shutdown()
-{
-    TODO();
+    return Error::from_errno(ENOTIMPL);
 }
 
 size_t IDEController::devices_count() const
@@ -46,13 +41,13 @@ void IDEController::start_request(ATADevice const& device, AsyncBlockDeviceReque
     VERIFY(address.subport < 2);
     switch (address.port) {
     case 0: {
-        auto result = m_channels[0].start_request(device, request);
+        auto result = m_channels[0]->start_request(device, request);
         // FIXME: Propagate errors properly
         VERIFY(!result.is_error());
         return;
     }
     case 1: {
-        auto result = m_channels[1].start_request(device, request);
+        auto result = m_channels[1]->start_request(device, request);
         // FIXME: Propagate errors properly
         VERIFY(!result.is_error());
         return;
@@ -73,20 +68,20 @@ LockRefPtr<StorageDevice> IDEController::device_by_channel_and_position(u32 inde
 {
     switch (index) {
     case 0:
-        return m_channels[0].connected_device(0);
+        return m_channels[0]->connected_device(0);
     case 1:
-        return m_channels[0].connected_device(1);
+        return m_channels[0]->connected_device(1);
     case 2:
-        return m_channels[1].connected_device(0);
+        return m_channels[1]->connected_device(0);
     case 3:
-        return m_channels[1].connected_device(1);
+        return m_channels[1]->connected_device(1);
     }
     VERIFY_NOT_REACHED();
 }
 
 LockRefPtr<StorageDevice> IDEController::device(u32 index) const
 {
-    NonnullLockRefPtrVector<StorageDevice> connected_devices;
+    Vector<NonnullLockRefPtr<StorageDevice>> connected_devices;
     for (size_t index = 0; index < 4; index++) {
         auto checked_device = device_by_channel_and_position(index);
         if (checked_device.is_null())

@@ -11,8 +11,8 @@
 #include <LibCore/ArgsParser.h>
 #include <LibMain/Main.h>
 
-ErrorOr<void> generate_header_file(JsonArray& identifier_data, Core::Stream::File& file);
-ErrorOr<void> generate_implementation_file(JsonArray& identifier_data, Core::Stream::File& file);
+ErrorOr<void> generate_header_file(JsonArray& identifier_data, Core::File& file);
+ErrorOr<void> generate_implementation_file(JsonArray& identifier_data, Core::File& file);
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
@@ -30,8 +30,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     VERIFY(json.is_array());
     auto identifier_data = json.as_array();
 
-    auto generated_header_file = TRY(Core::Stream::File::open(generated_header_path, Core::Stream::OpenMode::Write));
-    auto generated_implementation_file = TRY(Core::Stream::File::open(generated_implementation_path, Core::Stream::OpenMode::Write));
+    auto generated_header_file = TRY(Core::File::open(generated_header_path, Core::File::OpenMode::Write));
+    auto generated_implementation_file = TRY(Core::File::open(generated_implementation_path, Core::File::OpenMode::Write));
 
     TRY(generate_header_file(identifier_data, *generated_header_file));
     TRY(generate_implementation_file(identifier_data, *generated_implementation_file));
@@ -39,7 +39,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     return 0;
 }
 
-ErrorOr<void> generate_header_file(JsonArray& identifier_data, Core::Stream::File& file)
+ErrorOr<void> generate_header_file(JsonArray& identifier_data, Core::File& file)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
@@ -68,29 +68,29 @@ enum class ValueID {
 };
 
 ValueID value_id_from_string(StringView);
-const char* string_from_value_id(ValueID);
+StringView string_from_value_id(ValueID);
 
 }
 
 )~~~");
 
-    TRY(file.write(generator.as_string_view().bytes()));
+    TRY(file.write_until_depleted(generator.as_string_view().bytes()));
     return {};
 }
 
-ErrorOr<void> generate_implementation_file(JsonArray& identifier_data, Core::Stream::File& file)
+ErrorOr<void> generate_implementation_file(JsonArray& identifier_data, Core::File& file)
 {
     StringBuilder builder;
     SourceGenerator generator { builder };
 
     generator.append(R"~~~(
 #include <AK/Assertions.h>
+#include <AK/HashMap.h>
 #include <LibWeb/CSS/ValueID.h>
 
 namespace Web::CSS {
 
-ValueID value_id_from_string(StringView string)
-{
+HashMap<StringView, ValueID, AK::CaseInsensitiveASCIIStringViewTraits> g_stringview_to_value_id_map {
 )~~~");
 
     identifier_data.for_each([&](auto& name) {
@@ -98,16 +98,20 @@ ValueID value_id_from_string(StringView string)
         member_generator.set("name", name.to_deprecated_string());
         member_generator.set("name:titlecase", title_casify(name.to_deprecated_string()));
         member_generator.append(R"~~~(
-    if (string.equals_ignoring_case("@name@"sv))
-        return ValueID::@name:titlecase@;
+    {"@name@"sv, ValueID::@name:titlecase@},
 )~~~");
     });
 
     generator.append(R"~~~(
-    return ValueID::Invalid;
+};
+
+ValueID value_id_from_string(StringView string)
+{
+    auto maybe_value_id = g_stringview_to_value_id_map.get(string);
+    return maybe_value_id.value_or(ValueID::Invalid);
 }
 
-const char* string_from_value_id(ValueID value_id) {
+StringView string_from_value_id(ValueID value_id) {
     switch (value_id) {
 )~~~");
 
@@ -117,19 +121,19 @@ const char* string_from_value_id(ValueID value_id) {
         member_generator.set("name:titlecase", title_casify(name.to_deprecated_string()));
         member_generator.append(R"~~~(
     case ValueID::@name:titlecase@:
-        return "@name@";
+        return "@name@"sv;
         )~~~");
     });
 
     generator.append(R"~~~(
     default:
-        return "(invalid CSS::ValueID)";
+        return "(invalid CSS::ValueID)"sv;
     }
 }
 
 } // namespace Web::CSS
 )~~~");
 
-    TRY(file.write(generator.as_string_view().bytes()));
+    TRY(file.write_until_depleted(generator.as_string_view().bytes()));
     return {};
 }

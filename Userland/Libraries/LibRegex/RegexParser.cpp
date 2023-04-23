@@ -9,6 +9,7 @@
 #include "RegexDebug.h"
 #include <AK/AnyOf.h>
 #include <AK/CharacterTypes.h>
+#include <AK/Debug.h>
 #include <AK/DeprecatedString.h>
 #include <AK/GenericLexer.h>
 #include <AK/ScopeGuard.h>
@@ -597,7 +598,7 @@ ALWAYS_INLINE bool PosixExtendedParser::parse_repetition_symbol(ByteCode& byteco
             number_builder.append(consume().value());
         }
 
-        auto maybe_minimum = number_builder.build().to_uint();
+        auto maybe_minimum = number_builder.to_deprecated_string().to_uint();
         if (!maybe_minimum.has_value())
             return set_error(Error::InvalidBraceContent);
 
@@ -626,7 +627,7 @@ ALWAYS_INLINE bool PosixExtendedParser::parse_repetition_symbol(ByteCode& byteco
             number_builder.append(consume().value());
         }
         if (!number_builder.is_empty()) {
-            auto value = number_builder.build().to_uint();
+            auto value = number_builder.to_deprecated_string().to_uint();
             if (!value.has_value() || minimum > value.value() || *value > s_maximum_repetition_count)
                 return set_error(Error::InvalidBraceContent);
 
@@ -2426,7 +2427,7 @@ bool ECMA262Parser::parse_unicode_property_escape(PropertyEscape& property, bool
         [](Empty&) -> bool { VERIFY_NOT_REACHED(); });
 }
 
-FlyString ECMA262Parser::read_capture_group_specifier(bool take_starting_angle_bracket)
+DeprecatedFlyString ECMA262Parser::read_capture_group_specifier(bool take_starting_angle_bracket)
 {
     static auto id_start_category = Unicode::property_from_string("ID_Start"sv);
     static auto id_continue_category = Unicode::property_from_string("ID_Continue"sv);
@@ -2529,7 +2530,7 @@ FlyString ECMA262Parser::read_capture_group_specifier(bool take_starting_angle_b
         builder.append_code_point(code_point);
     }
 
-    FlyString name = builder.build();
+    DeprecatedFlyString name = builder.to_deprecated_string();
     if (!hit_end || name.is_empty())
         set_error(Error::InvalidNameForCaptureGroup);
 
@@ -2694,17 +2695,22 @@ size_t ECMA262Parser::ensure_total_number_of_capturing_parenthesis()
     while (!lexer.is_eof()) {
         switch (lexer.peek()) {
         case '\\':
-            lexer.consume(2);
+            lexer.consume(min(lexer.tell_remaining(), 2));
             continue;
         case '[':
             while (!lexer.is_eof()) {
                 if (lexer.consume_specific('\\')) {
+                    if (lexer.is_eof())
+                        break;
                     lexer.consume();
                     continue;
                 }
                 if (lexer.consume_specific(']')) {
                     break;
                 }
+
+                if (lexer.is_eof())
+                    break;
                 lexer.consume();
             }
             break;

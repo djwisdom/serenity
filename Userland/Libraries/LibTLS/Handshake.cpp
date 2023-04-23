@@ -18,13 +18,13 @@ namespace TLS {
 
 ByteBuffer TLSv12::build_hello()
 {
-    fill_with_random(&m_context.local_random, 32);
+    fill_with_random(m_context.local_random);
 
     auto packet_version = (u16)m_context.options.version;
     auto version = (u16)m_context.options.version;
-    PacketBuilder builder { MessageType::Handshake, packet_version };
+    PacketBuilder builder { ContentType::HANDSHAKE, packet_version };
 
-    builder.append((u8)ClientHello);
+    builder.append(to_underlying(HandshakeType::CLIENT_HELLO));
 
     // hello length (for later)
     u8 dummy[3] = {};
@@ -90,7 +90,7 @@ ByteBuffer TLSv12::build_hello()
 
     if (sni_length) {
         // SNI extension
-        builder.append((u16)HandshakeExtension::ServerName);
+        builder.append((u16)ExtensionType::SERVER_NAME);
         // extension length
         builder.append((u16)(sni_length + 5));
         // SNI length
@@ -103,7 +103,7 @@ ByteBuffer TLSv12::build_hello()
     }
 
     // signature_algorithms extension
-    builder.append((u16)HandshakeExtension::SignatureAlgorithms);
+    builder.append((u16)ExtensionType::SIGNATURE_ALGORITHMS);
     // Extension length
     builder.append((u16)(2 + 2 * m_context.options.supported_signature_algorithms.size()));
     // Vector count
@@ -116,14 +116,14 @@ ByteBuffer TLSv12::build_hello()
 
     if (supports_elliptic_curves) {
         // elliptic_curves extension
-        builder.append((u16)HandshakeExtension::EllipticCurves);
+        builder.append((u16)ExtensionType::SUPPORTED_GROUPS);
         builder.append((u16)(2 + elliptic_curves_length));
         builder.append((u16)elliptic_curves_length);
         for (auto& curve : m_context.options.elliptic_curves)
             builder.append((u16)curve);
 
         // ec_point_formats extension
-        builder.append((u16)HandshakeExtension::ECPointFormats);
+        builder.append((u16)ExtensionType::EC_POINT_FORMATS);
         builder.append((u16)(1 + supported_ec_point_formats_length));
         builder.append((u8)supported_ec_point_formats_length);
         for (auto& format : m_context.options.supported_ec_point_formats)
@@ -152,7 +152,7 @@ ByteBuffer TLSv12::build_hello()
 
 ByteBuffer TLSv12::build_change_cipher_spec()
 {
-    PacketBuilder builder { MessageType::ChangeCipher, m_context.options.version, 64 };
+    PacketBuilder builder { ContentType::CHANGE_CIPHER_SPEC, m_context.options.version, 64 };
     builder.append((u8)1);
     auto packet = builder.build();
     update_packet(packet);
@@ -162,8 +162,8 @@ ByteBuffer TLSv12::build_change_cipher_spec()
 
 ByteBuffer TLSv12::build_handshake_finished()
 {
-    PacketBuilder builder { MessageType::Handshake, m_context.options.version, 12 + 64 };
-    builder.append((u8)HandshakeType::Finished);
+    PacketBuilder builder { ContentType::HANDSHAKE, m_context.options.version, 12 + 64 };
+    builder.append((u8)HandshakeType::FINISHED);
 
     // RFC 5246 section 7.4.9: "In previous versions of TLS, the verify_data was always 12 octets
     //                          long.  In the current version of TLS, it depends on the cipher
@@ -250,7 +250,7 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
         ssize_t payload_res = 0;
         if (buffer_length < 1)
             return (i8)Error::NeedMoreData;
-        auto type = buffer[0];
+        auto type = static_cast<HandshakeType>(buffer[0]);
         auto write_packets { WritePacketStage::Initial };
         size_t payload_size = buffer[1] * 0x10000 + buffer[2] * 0x100 + buffer[3] + 3;
         dbgln_if(TLS_DEBUG, "payload size: {} buffer length: {}", payload_size, buffer_length);
@@ -258,7 +258,7 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
             return (i8)Error::NeedMoreData;
 
         switch (type) {
-        case HelloRequest:
+        case HandshakeType::HELLO_REQUEST_RESERVED:
             if (m_context.handshake_messages[0] >= 1) {
                 dbgln("unexpected hello request message");
                 payload_res = (i8)Error::UnexpectedMessage;
@@ -274,14 +274,14 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
                 payload_res = (i8)Error::UnexpectedMessage;
             }
             break;
-        case ClientHello:
+        case HandshakeType::CLIENT_HELLO:
             // FIXME: We only support client mode right now
             if (m_context.is_server) {
                 VERIFY_NOT_REACHED();
             }
             payload_res = (i8)Error::UnexpectedMessage;
             break;
-        case ServerHello:
+        case HandshakeType::SERVER_HELLO:
             if (m_context.handshake_messages[2] >= 1) {
                 dbgln("unexpected server hello message");
                 payload_res = (i8)Error::UnexpectedMessage;
@@ -295,11 +295,11 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
             }
             payload_res = handle_server_hello(buffer.slice(1, payload_size), write_packets);
             break;
-        case HelloVerifyRequest:
+        case HandshakeType::HELLO_VERIFY_REQUEST_RESERVED:
             dbgln("unsupported: DTLS");
             payload_res = (i8)Error::UnexpectedMessage;
             break;
-        case CertificateMessage:
+        case HandshakeType::CERTIFICATE:
             if (m_context.handshake_messages[4] >= 1) {
                 dbgln("unexpected certificate message");
                 payload_res = (i8)Error::UnexpectedMessage;
@@ -317,7 +317,7 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
                 payload_res = (i8)Error::UnexpectedMessage;
             }
             break;
-        case ServerKeyExchange:
+        case HandshakeType::SERVER_KEY_EXCHANGE_RESERVED:
             if (m_context.handshake_messages[5] >= 1) {
                 dbgln("unexpected server key exchange message");
                 payload_res = (i8)Error::UnexpectedMessage;
@@ -332,7 +332,7 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
                 payload_res = handle_server_key_exchange(buffer.slice(1, payload_size));
             }
             break;
-        case CertificateRequest:
+        case HandshakeType::CERTIFICATE_REQUEST:
             if (m_context.handshake_messages[6] >= 1) {
                 dbgln("unexpected certificate request message");
                 payload_res = (i8)Error::UnexpectedMessage;
@@ -351,7 +351,7 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
                 m_context.client_verified = VerificationNeeded;
             }
             break;
-        case ServerHelloDone:
+        case HandshakeType::SERVER_HELLO_DONE_RESERVED:
             if (m_context.handshake_messages[7] >= 1) {
                 dbgln("unexpected server hello done message");
                 payload_res = (i8)Error::UnexpectedMessage;
@@ -368,7 +368,7 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
                     write_packets = WritePacketStage::ClientHandshake;
             }
             break;
-        case CertificateVerify:
+        case HandshakeType::CERTIFICATE_VERIFY:
             if (m_context.handshake_messages[8] >= 1) {
                 dbgln("unexpected certificate verify message");
                 payload_res = (i8)Error::UnexpectedMessage;
@@ -382,7 +382,7 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
                 payload_res = (i8)Error::UnexpectedMessage;
             }
             break;
-        case ClientKeyExchange:
+        case HandshakeType::CLIENT_KEY_EXCHANGE_RESERVED:
             if (m_context.handshake_messages[9] >= 1) {
                 dbgln("unexpected client key exchange message");
                 payload_res = (i8)Error::UnexpectedMessage;
@@ -397,7 +397,7 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
                 payload_res = (i8)Error::UnexpectedMessage;
             }
             break;
-        case Finished:
+        case HandshakeType::FINISHED:
             m_context.cached_handshake.clear();
             if (m_context.handshake_messages[10] >= 1) {
                 dbgln("unexpected finished message");
@@ -412,11 +412,11 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
             }
             break;
         default:
-            dbgln("message type not understood: {}", type);
+            dbgln("message type not understood: {}", enum_to_string(type));
             return (i8)Error::NotUnderstood;
         }
 
-        if (type != HelloRequest) {
+        if (type != HandshakeType::HELLO_REQUEST_RESERVED) {
             update_hash(buffer.slice(0, payload_size + 1), 0);
         }
 
@@ -424,58 +424,58 @@ ssize_t TLSv12::handle_handshake_payload(ReadonlyBytes vbuffer)
         if (payload_res < 0) {
             switch ((Error)payload_res) {
             case Error::UnexpectedMessage: {
-                auto packet = build_alert(true, (u8)AlertDescription::UnexpectedMessage);
+                auto packet = build_alert(true, (u8)AlertDescription::UNEXPECTED_MESSAGE);
                 write_packet(packet);
                 break;
             }
             case Error::CompressionNotSupported: {
-                auto packet = build_alert(true, (u8)AlertDescription::DecompressionFailure);
+                auto packet = build_alert(true, (u8)AlertDescription::DECOMPRESSION_FAILURE_RESERVED);
                 write_packet(packet);
                 break;
             }
             case Error::BrokenPacket: {
-                auto packet = build_alert(true, (u8)AlertDescription::DecodeError);
+                auto packet = build_alert(true, (u8)AlertDescription::DECODE_ERROR);
                 write_packet(packet);
                 break;
             }
             case Error::NotVerified: {
-                auto packet = build_alert(true, (u8)AlertDescription::BadRecordMAC);
+                auto packet = build_alert(true, (u8)AlertDescription::BAD_RECORD_MAC);
                 write_packet(packet);
                 break;
             }
             case Error::BadCertificate: {
-                auto packet = build_alert(true, (u8)AlertDescription::BadCertificate);
+                auto packet = build_alert(true, (u8)AlertDescription::BAD_CERTIFICATE);
                 write_packet(packet);
                 break;
             }
             case Error::UnsupportedCertificate: {
-                auto packet = build_alert(true, (u8)AlertDescription::UnsupportedCertificate);
+                auto packet = build_alert(true, (u8)AlertDescription::UNSUPPORTED_CERTIFICATE);
                 write_packet(packet);
                 break;
             }
             case Error::NoCommonCipher: {
-                auto packet = build_alert(true, (u8)AlertDescription::InsufficientSecurity);
+                auto packet = build_alert(true, (u8)AlertDescription::INSUFFICIENT_SECURITY);
                 write_packet(packet);
                 break;
             }
             case Error::NotUnderstood:
             case Error::OutOfMemory: {
-                auto packet = build_alert(true, (u8)AlertDescription::InternalError);
+                auto packet = build_alert(true, (u8)AlertDescription::INTERNAL_ERROR);
                 write_packet(packet);
                 break;
             }
             case Error::NoRenegotiation: {
-                auto packet = build_alert(true, (u8)AlertDescription::NoRenegotiation);
+                auto packet = build_alert(true, (u8)AlertDescription::NO_RENEGOTIATION_RESERVED);
                 write_packet(packet);
                 break;
             }
             case Error::DecryptionFailed: {
-                auto packet = build_alert(true, (u8)AlertDescription::DecryptionFailed);
+                auto packet = build_alert(true, (u8)AlertDescription::DECRYPTION_FAILED_RESERVED);
                 write_packet(packet);
                 break;
             }
             case Error::NotSafe: {
-                auto packet = build_alert(true, (u8)AlertDescription::DecryptError);
+                auto packet = build_alert(true, (u8)AlertDescription::DECRYPT_ERROR);
                 write_packet(packet);
                 break;
             }

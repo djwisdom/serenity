@@ -11,20 +11,27 @@
 namespace Web::ResizeObserver {
 
 // https://drafts.csswg.org/resize-observer/#dom-resizeobserver-resizeobserver
-JS::NonnullGCPtr<ResizeObserver> ResizeObserver::construct_impl(JS::Realm& realm, WebIDL::CallbackType* callback)
+WebIDL::ExceptionOr<JS::NonnullGCPtr<ResizeObserver>> ResizeObserver::construct_impl(JS::Realm& realm, WebIDL::CallbackType* callback)
 {
     // FIXME: Implement
     (void)callback;
-    return realm.heap().allocate<ResizeObserver>(realm, realm);
+    return MUST_OR_THROW_OOM(realm.heap().allocate<ResizeObserver>(realm, realm));
 }
 
 ResizeObserver::ResizeObserver(JS::Realm& realm)
     : PlatformObject(realm)
 {
-    set_prototype(&Bindings::cached_web_prototype(realm, "ResizeObserver"));
 }
 
 ResizeObserver::~ResizeObserver() = default;
+
+JS::ThrowCompletionOr<void> ResizeObserver::initialize(JS::Realm& realm)
+{
+    MUST_OR_THROW_OOM(Base::initialize(realm));
+    set_prototype(&Bindings::ensure_web_prototype<Bindings::ResizeObserverPrototype>(realm, "ResizeObserver"));
+
+    return {};
+}
 
 // https://drafts.csswg.org/resize-observer/#dom-resizeobserver-observe
 void ResizeObserver::observe(DOM::Element& target, ResizeObserverOptions options)

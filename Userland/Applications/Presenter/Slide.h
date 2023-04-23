@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022, kleines Filmröllchen <filmroellchen@serenityos.org>
+ * Copyright (c) 2023, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,23 +10,21 @@
 #include "SlideObject.h"
 #include <AK/DeprecatedString.h>
 #include <AK/Forward.h>
-#include <AK/NonnullOwnPtrVector.h>
-#include <LibGfx/Forward.h>
 
 // A single slide of a presentation.
 class Slide final {
 public:
-    static ErrorOr<Slide> parse_slide(JsonObject const& slide_json, NonnullRefPtr<GUI::Window> window);
+    static ErrorOr<Slide> parse_slide(JsonObject const& slide_json, unsigned slide_index);
 
-    // FIXME: shouldn't be hard-coded to 1.
-    unsigned frame_count() const { return 1; }
+    unsigned frame_count() const { return m_frame_count; }
     StringView title() const { return m_title; }
 
-    void paint(Gfx::Painter&, unsigned current_frame, Gfx::FloatSize display_scale) const;
+    ErrorOr<HTMLElement> render(Presentation const&) const;
 
 private:
-    Slide(NonnullRefPtrVector<SlideObject> slide_objects, DeprecatedString title);
+    Slide(unsigned frame_count, Vector<NonnullRefPtr<SlideObject>> slide_objects, DeprecatedString title);
 
-    NonnullRefPtrVector<SlideObject> m_slide_objects;
+    unsigned m_frame_count;
+    Vector<NonnullRefPtr<SlideObject>> m_slide_objects;
     DeprecatedString m_title;
 };

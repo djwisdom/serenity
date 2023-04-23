@@ -9,6 +9,7 @@
 #include <AK/DeprecatedString.h>
 #include <AK/HashMap.h>
 #include <AK/OwnPtr.h>
+#include <AK/String.h>
 
 TEST_CASE(construct)
 {
@@ -105,6 +106,14 @@ TEST_CASE(case_insensitive)
     EXPECT_EQ(DeprecatedString("nickserv").to_lowercase(), DeprecatedString("NickServ").to_lowercase());
     EXPECT_EQ(casemap.set("nickserv", 3), AK::HashSetResult::InsertedNewEntry);
     EXPECT_EQ(casemap.set("NickServ", 3), AK::HashSetResult::ReplacedExistingEntry);
+    EXPECT_EQ(casemap.size(), 1u);
+}
+
+TEST_CASE(case_insensitive_stringview)
+{
+    HashMap<StringView, int, CaseInsensitiveASCIIStringViewTraits> casemap;
+    EXPECT_EQ(casemap.set("nickserv"sv, 3), AK::HashSetResult::InsertedNewEntry);
+    EXPECT_EQ(casemap.set("NickServ"sv, 3), AK::HashSetResult::ReplacedExistingEntry);
     EXPECT_EQ(casemap.size(), 1u);
 }
 
@@ -210,4 +219,35 @@ TEST_CASE(in_place_rehashing_ordered_loop_bug)
     map.remove("yt.innertube::nextId");
     map.set("yt.innertube::nextId", "");
     VERIFY(map.keys().size() == 2);
+}
+
+TEST_CASE(take)
+{
+    HashMap<String, int> map;
+
+    EXPECT(!map.take("foo"sv).has_value());
+    EXPECT(!map.take("bar"sv).has_value());
+    EXPECT(!map.take("baz"_short_string).has_value());
+
+    map.set("foo"_short_string, 1);
+    map.set("bar"_short_string, 2);
+    map.set("baz"_short_string, 3);
+
+    auto foo = map.take("foo"sv);
+    EXPECT_EQ(foo, 1);
+
+    foo = map.take("foo"sv);
+    EXPECT(!foo.has_value());
+
+    auto bar = map.take("bar"sv);
+    EXPECT_EQ(bar, 2);
+
+    bar = map.take("bar"sv);
+    EXPECT(!bar.has_value());
+
+    auto baz = map.take("baz"_short_string);
+    EXPECT_EQ(baz, 3);
+
+    baz = map.take("baz"_short_string);
+    EXPECT(!baz.has_value());
 }
