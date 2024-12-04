@@ -5,6 +5,10 @@ useconfigure=true
 files=(
     "http://gondor.apana.org.au/~herbert/dash/files/dash-${version}.tar.gz#3c663919dc5c66ec991da14c7cf7e0be8ad00f3db73986a987c118862b5f6071"
 )
+launcher_name='Dash'
+launcher_category='&Utilities'
+launcher_command='/usr/local/bin/dash'
+launcher_run_in_terminal='true'
 
 configure() {
     host_env
@@ -29,4 +33,15 @@ build() {
 
 install() {
     run sh -c "cd target-build && make DESTDIR="${SERENITY_INSTALL_ROOT}" ${installopts[@]} install"
+}
+
+post_installi() {
+    cat << 'EOF' > "${SERENITY_INSTALL_ROOT}/home/anon/.profile"
+export PS1='[dash] \$ '
+export PS2='> '
+export PS3='+ '
+export LANG='C.UTF-8'
+export SHELL='/usr/local/bin/dash'
+echo "SerenityOS [Version 1.0-dev]\n(c) the SerenityOS developers, 2018-2024\n"
+EOF
 }
