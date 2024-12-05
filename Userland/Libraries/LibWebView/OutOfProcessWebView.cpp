@@ -60,6 +60,10 @@ OutOfProcessWebView::OutOfProcessWebView()
         finish_handling_key_event(event);
     };
 
+    on_finish_handling_drag_event = [this](auto const& event) {
+        finish_handling_drag_event(event);
+    };
+
     on_request_worker_agent = []() {
         auto worker_client = MUST(Web::HTML::WebWorkerClient::try_create());
         return worker_client->dup_socket();
@@ -282,17 +286,143 @@ void OutOfProcessWebView::hide_event(GUI::HideEvent&)
     set_system_visibility_state(false);
 }
 
+void OutOfProcessWebView::drag_enter_event(GUI::DragEvent& event)
+{
+    if (!event.mime_data().has_urls())
+        return;
+
+    enqueue_native_event(Web::DragEvent::Type::DragStart, event);
+    event.accept();
+}
+
+void OutOfProcessWebView::drag_move_event(GUI::DragEvent& event)
+{
+    enqueue_native_event(Web::DragEvent::Type::DragMove, event);
+    event.accept();
+}
+
+void OutOfProcessWebView::drag_leave_event(GUI::Event&)
+{
+    Web::DragEvent event {};
+    event.type = Web::DragEvent::Type::DragEnd;
+
+    enqueue_input_event(move(event));
+}
+
+void OutOfProcessWebView::drop_event(GUI::DropEvent& event)
+{
+    enqueue_native_event(Web::DragEvent::Type::Drop, event);
+    event.accept();
+}
+
+static constexpr Web::UIEvents::MouseButton web_button_from_gui_button(GUI::MouseButton button)
+{
+    switch (button) {
+    case GUI::MouseButton::None:
+        return Web::UIEvents::MouseButton::None;
+    case GUI::MouseButton::Primary:
+        return Web::UIEvents::MouseButton::Primary;
+    case GUI::MouseButton::Secondary:
+        return Web::UIEvents::MouseButton::Secondary;
+    case GUI::MouseButton::Middle:
+        return Web::UIEvents::MouseButton::Middle;
+    case GUI::MouseButton::Backward:
+        return Web::UIEvents::MouseButton::Backward;
+    case GUI::MouseButton::Forward:
+        return Web::UIEvents::MouseButton::Forward;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static constexpr Web::UIEvents::MouseButton web_buttons_from_gui_buttons(unsigned buttons)
+{
+    auto result = Web::UIEvents::MouseButton::None;
+
+    if ((buttons & GUI::MouseButton::Primary) != 0)
+        result |= Web::UIEvents::MouseButton::Primary;
+    if ((buttons & GUI::MouseButton::Secondary) != 0)
+        result |= Web::UIEvents::MouseButton::Secondary;
+    if ((buttons & GUI::MouseButton::Middle) != 0)
+        result |= Web::UIEvents::MouseButton::Middle;
+    if ((buttons & GUI::MouseButton::Backward) != 0)
+        result |= Web::UIEvents::MouseButton::Backward;
+    if ((buttons & GUI::MouseButton::Forward) != 0)
+        result |= Web::UIEvents::MouseButton::Forward;
+
+    return result;
+}
+
+static constexpr Web::UIEvents::KeyModifier web_modifiers_from_gui_modifiers(unsigned modifiers)
+{
+    static_assert(IsSame<KeyModifier, Web::UIEvents::KeyModifier>);
+    return static_cast<Web::UIEvents::KeyModifier>(modifiers);
+}
+
 void OutOfProcessWebView::enqueue_native_event(Web::MouseEvent::Type type, GUI::MouseEvent const& event)
 {
     auto position = to_content_position(event.position()).to_type<Web::DevicePixels>();
     auto screen_position = (event.position() + (window()->position() + relative_position())).to_type<Web::DevicePixels>();
+
+    auto button = web_button_from_gui_button(event.button());
+    auto buttons = web_buttons_from_gui_buttons(event.buttons());
+    auto modifiers = web_modifiers_from_gui_modifiers(event.modifiers());
 
     // FIXME: This wheel delta step size multiplier is used to remain the old scroll behaviour, in future use system step size.
     static constexpr int SCROLL_STEP_SIZE = 24;
     auto wheel_delta_x = event.wheel_delta_x() * SCROLL_STEP_SIZE;
     auto wheel_delta_y = event.wheel_delta_y() * SCROLL_STEP_SIZE;
 
-    enqueue_input_event(Web::MouseEvent { type, position, screen_position, static_cast<Web::UIEvents::MouseButton>(to_underlying(event.button())), static_cast<Web::UIEvents::MouseButton>(event.buttons()), static_cast<KeyModifier>(event.modifiers()), wheel_delta_x, wheel_delta_y, nullptr });
+    enqueue_input_event(Web::MouseEvent { type, position, screen_position, button, buttons, modifiers, wheel_delta_x, wheel_delta_y, nullptr });
+}
+
+struct DragData : Web::ChromeInputData {
+    explicit DragData(GUI::DropEvent const& event)
+        : event(make<GUI::DropEvent>(event))
+    {
+    }
+
+    NonnullOwnPtr<GUI::DropEvent> event;
+};
+
+void OutOfProcessWebView::enqueue_native_event(Web::DragEvent::Type type, GUI::DropEvent const& event)
+{
+    auto position = to_content_position(event.position()).to_type<Web::DevicePixels>();
+    auto screen_position = (event.position() + (window()->position() + relative_position())).to_type<Web::DevicePixels>();
+
+    auto button = web_button_from_gui_button(event.button());
+    auto buttons = web_buttons_from_gui_buttons(event.buttons());
+    auto modifiers = web_modifiers_from_gui_modifiers(event.modifiers());
+
+    Vector<Web::HTML::SelectedFile> files;
+    OwnPtr<DragData> chrome_data;
+
+    if (type == Web::DragEvent::Type::DragStart) {
+        VERIFY(event.mime_data().has_urls());
+
+        for (auto const& url : event.mime_data().urls()) {
+            auto file_path = URL::percent_decode(url.serialize_path());
+
+            if (auto file = Web::HTML::SelectedFile::from_file_path(file_path); file.is_error())
+                warnln("Unable to open file {} for drag-and-drop: {}", file_path, file.error());
+            else
+                files.append(file.release_value());
+        }
+    } else if (type == Web::DragEvent::Type::Drop) {
+        chrome_data = make<DragData>(event);
+    } else {
+        VERIFY(type == Web::DragEvent::Type::DragMove);
+    }
+
+    enqueue_input_event(Web::DragEvent { type, position, screen_position, button, buttons, modifiers, move(files), move(chrome_data) });
+}
+
+void OutOfProcessWebView::finish_handling_drag_event(Web::DragEvent const& event)
+{
+    if (event.type != Web::DragEvent::Type::Drop)
+        return;
+
+    // FIXME: Implement opening the event URLs in the Browser.
+    [[maybe_unused]] auto const& chrome_data = verify_cast<DragData>(*event.chrome_data);
 }
 
 struct KeyData : Web::ChromeInputData {
